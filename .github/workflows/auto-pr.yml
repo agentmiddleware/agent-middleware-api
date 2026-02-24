@@ -38,7 +38,11 @@ jobs:
           import os
           import json
 
-          api_url = os.environ.get('API_URL') or 'http://localhost:8000'
+          api_url = os.environ.get('API_URL')
+          if not api_url:
+              print('API_URL not configured. Skipping anomaly check.')
+              exit(0)
+
           api_key = os.environ.get('API_KEY') or 'dev-key'
 
           headers = {'X-API-Key': api_key}
