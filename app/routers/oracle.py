@@ -14,7 +14,6 @@ from ..core.dependencies import get_agent_oracle
 from ..services.oracle import AgentOracle
 from ..schemas.oracle import (
     CrawlTargetRequest,
-    CrawlTargetResponse,
     IndexedAPI,
     IndexedAPIListResponse,
     CompatibilityTier,

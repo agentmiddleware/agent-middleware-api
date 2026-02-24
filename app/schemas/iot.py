@@ -3,7 +3,7 @@ Schemas for the IoT Protocol Bridge service.
 All models are Pydantic v2 for automatic OpenAPI generation.
 """
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 from datetime import datetime
 import re

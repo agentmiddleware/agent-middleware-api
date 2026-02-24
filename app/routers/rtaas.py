@@ -8,7 +8,6 @@ Agents hire our Red Team swarm to attack *their* endpoints.
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
 
 from ..core.auth import verify_api_key
 from ..core.dependencies import get_rtaas_engine

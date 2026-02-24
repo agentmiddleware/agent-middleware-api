@@ -38,8 +38,8 @@ jobs:
           import os
           import json
 
-          api_url = os.environ.get('API_URL', 'http://localhost:8000')
-          api_key = os.environ.get('API_KEY', 'dev-key')
+          api_url = os.environ.get('API_URL') or 'http://localhost:8000'
+          api_key = os.environ.get('API_KEY') or 'dev-key'
 
           headers = {'X-API-Key': api_key}
 

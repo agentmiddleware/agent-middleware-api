@@ -94,7 +94,7 @@ def main():
         print("[Auto-PR] GitHub Actions output set: has_fix=true")
 
     # Print summary
-    print(f"\n--- Fix Summary ---")
+    print("\n--- Fix Summary ---")
     print(f"Anomaly: {anomaly['summary']}")
     print(f"Severity: {anomaly['severity']}")
     print(f"Files: {', '.join(fix_data.get('files_changed', []))}")

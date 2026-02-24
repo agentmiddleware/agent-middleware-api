@@ -18,20 +18,16 @@ Production wiring:
 - Webhook sink for billing alerts forwarding
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
-from ..schemas.billing import ServiceCategory
 from ..schemas.content_factory import (
     ContentFormat,
     ContentHook,
     HookType,
     CaptionStyle,
 )
-from ..schemas.oracle import DirectoryType
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +321,6 @@ class LaunchSequence:
             )
             agent_wallet_ids.append(agent_wallet.wallet_id)
 
-        total_agent_credits = config.agent_budget_credits * len(config.agent_ids)
 
         return FundReceipt(
             sponsor_wallet_id=sponsor.wallet_id,

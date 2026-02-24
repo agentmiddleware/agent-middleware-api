@@ -24,7 +24,6 @@ import uuid
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +300,7 @@ class GenesisAgent:
     async def _build(self, config: GenesisConfig) -> BuildReceipt:
         """Genesis Agent 'writes' a micro-service."""
         source = GENESIS_SERVICE_CODE
-        lines = len([l for l in source.strip().split('\n') if l.strip()])
+        lines = len([line for line in source.strip().split('\n') if line.strip()])
         code_hash = str(hash(source))[:16]
 
         # Count endpoints in the generated code

@@ -11,8 +11,8 @@ Endpoints:
 - /.well-known/agent.json — Standard agent discovery manifest
 """
 
-from fastapi import APIRouter, Response
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 import os
 
 router = APIRouter(

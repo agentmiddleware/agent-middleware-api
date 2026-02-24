@@ -15,7 +15,6 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
 from dataclasses import asdict
 
 from ..core.auth import verify_api_key

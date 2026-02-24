@@ -46,7 +46,6 @@ Production wiring:
 import asyncio
 import uuid
 import logging
-from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any

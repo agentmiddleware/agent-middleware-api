@@ -22,9 +22,8 @@ import uuid
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
-from ..schemas.red_team import AttackCategory, Severity, ScanStatus
+from ..schemas.red_team import AttackCategory, Severity
 
 logger = logging.getLogger(__name__)
 

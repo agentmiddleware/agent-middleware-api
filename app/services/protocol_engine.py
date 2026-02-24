@@ -21,10 +21,8 @@ Production wiring:
 import uuid
 import logging
 import re
-import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +94,6 @@ class CodeParser:
                 summary_match = self.SUMMARY_RE.search(context_block)
                 desc_match = self.DESC_RE.search(context_block)
                 resp_match = self.RESPONSE_RE.search(context_block)
-                func_match = self.FUNC_RE.search(context_block)
 
                 endpoints.append(ParsedEndpoint(
                     method=method,
@@ -151,7 +148,7 @@ class LlmTxtGenerator:
             lines.append("")
 
         lines.append("## Authentication")
-        lines.append(f"All endpoints require an API key in the X-API-Key header.")
+        lines.append("All endpoints require an API key in the X-API-Key header.")
         lines.append("")
         lines.append("## Rate Limits")
         lines.append("120 requests per minute per API key.")

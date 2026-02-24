@@ -21,15 +21,13 @@ import asyncio
 import uuid
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 
 from ..schemas.red_team import (
     AttackCategory,
     Severity,
     ScanStatus,
-    RemediationStatus,
     Vulnerability,
     ScanReport,
 )

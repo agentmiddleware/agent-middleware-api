@@ -23,22 +23,18 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import Any
 
 from ..schemas.content_factory import (
     ContentFormat,
     ContentStatus,
     GeneratedContent,
-    EngagementMetricType,
     PlatformAnalytics,
     ScheduleRecommendation,
     ContentHook,
-    HookType,
     CaptionStyle,
     CampaignHookResult,
     LiveCampaignResponse,
 )
-from ..schemas.media import Platform
 
 logger = logging.getLogger(__name__)
 
@@ -456,7 +452,7 @@ class FormatAdapter:
             pipeline_id=pipeline.pipeline_id,
             format=ContentFormat.DEBATE_CLIP,
             title=f"{pipeline.title} — Debate Clip",
-            description=f"Side-by-side contrast clip with animated captions",
+            description="Side-by-side contrast clip with animated captions",
             download_url=f"/v1/factory/content/{content_id}/download",
             thumbnail_url=f"/v1/factory/content/{content_id}/thumbnail",
             duration_seconds=hook.end_seconds - hook.start_seconds if hook else 45.0,

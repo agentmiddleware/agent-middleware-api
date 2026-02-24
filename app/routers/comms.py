@@ -10,14 +10,14 @@ This is the nervous system of swarm intelligence.
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from datetime import datetime, timezone
+from datetime import datetime
 
 from ..core.auth import verify_api_key
+from ..core.dependencies import get_agent_comms
 from ..services.agent_comms import (
     AgentComms,
     MessageType,
     MessagePriority,
-    DeliveryStatus,
 )
 
 router = APIRouter(
@@ -28,8 +28,6 @@ router = APIRouter(
         403: {"description": "Invalid API key"},
     },
 )
-
-from ..core.dependencies import get_agent_comms
 
 
 # --- Request/Response Schemas ---

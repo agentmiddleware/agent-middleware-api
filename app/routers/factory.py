@@ -9,8 +9,7 @@ Week 6+: Live Campaign Mode — hook-based 1-to-20 multiplication
 with 9:16 vertical rendering and animated captions.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.auth import verify_api_key
 from ..core.dependencies import get_content_factory

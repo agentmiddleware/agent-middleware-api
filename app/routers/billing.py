@@ -25,7 +25,6 @@ from ..schemas.billing import (
     WalletListResponse,
     WalletType,
     LedgerResponse,
-    LedgerAction,
     TopUpRequest,
     TopUpResponse,
     InsufficientFundsResponse,

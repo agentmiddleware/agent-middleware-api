@@ -12,12 +12,10 @@ Four validation domains:
 Returns a PreflightReport with per-check pass/fail and an overall GO/NO-GO.
 """
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 from ..core.config import get_settings
 

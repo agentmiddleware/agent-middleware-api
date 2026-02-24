@@ -12,7 +12,7 @@ Billing model: Per-action micro-metering, not monthly SaaS subscriptions.
 Agents transact at superhuman speed — the ledger must keep up.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from enum import Enum
 from datetime import datetime
 import re

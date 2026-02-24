@@ -9,7 +9,6 @@ anomaly detection and auto-PR generation.
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
 
 from ..core.auth import verify_api_key
 from ..core.dependencies import get_telemetry_scope

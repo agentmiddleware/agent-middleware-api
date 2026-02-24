@@ -6,7 +6,6 @@ Wired to ProtocolBridge service via FastAPI dependency injection.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from datetime import datetime, timezone
 
 from ..core.auth import verify_api_key
 from ..core.dependencies import get_iot_bridge

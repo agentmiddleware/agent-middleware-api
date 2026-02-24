@@ -14,7 +14,6 @@ Endpoints:
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
 from dataclasses import asdict
 
 from ..core.auth import verify_api_key
@@ -154,7 +153,7 @@ async def get_economics(
 async def get_security(
     engine: DashboardEngine = Depends(get_dashboard_engine),
 ):
-    return SecurityResponse(**asdict(snap := await engine._build_security()))
+    return SecurityResponse(**asdict(await engine._build_security()))
 
 
 @router.get(

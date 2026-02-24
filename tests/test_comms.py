@@ -145,7 +145,7 @@ async def test_handoff_no_agent_found(client, api_headers):
 @pytest.mark.anyio
 async def test_handoff_with_matching_agent(client, api_headers):
     # Register specialist
-    specialist = await client.post(
+    await client.post(
         "/v1/comms/agents",
         json={"name": "transcriber", "capabilities": ["transcription"]},
         headers=api_headers,

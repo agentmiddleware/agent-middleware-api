@@ -17,9 +17,8 @@ import asyncio
 import uuid
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import Any
 
 from ..core.durable_state import get_durable_state
 from ..schemas.telemetry import (
@@ -408,7 +407,7 @@ class AutoPRGenerator:
         Returns diff, files_changed, test results, and optionally a PR URL.
         """
         # Build context for the LLM
-        context = self._build_context(anomaly, related_events)
+        _context = self._build_context(anomaly, related_events)
 
         # In production: call LLM API to generate fix
         # For now, return a structured placeholder
@@ -424,7 +423,7 @@ class AutoPRGenerator:
         }
 
         if not dry_run and self.git_remote:
-            branch = f"{self.branch_prefix}{anomaly.anomaly_id}"
+            _branch = f"{self.branch_prefix}{anomaly.anomaly_id}"
             # Production: git checkout -b, apply diff, commit, push, create PR
             result["pr_url"] = f"{self.git_remote}/pull/auto-{uuid.uuid4().hex[:6]}"
             result["status"] = "pr_created"

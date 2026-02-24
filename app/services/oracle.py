@@ -22,9 +22,7 @@ import uuid
 import logging
 import hashlib
 from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import datetime, timezone
 
 from ..schemas.oracle import (
     OracleStatus,
@@ -473,7 +471,7 @@ class AgentOracle:
     async def compute_visibility(self) -> VisibilityScore:
         """Compute our overall visibility score across agent networks."""
         stats = await self.store.get_stats()
-        registrations = await self.store.get_registrations()
+        await self.store.get_registrations()
         indexed_apis = await self.store.list_indexed()
 
         # Compute compatibility distribution

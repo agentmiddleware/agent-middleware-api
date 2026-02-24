@@ -5,10 +5,9 @@ Headless puzzle environments for testing agent-built tools'
 ability to generalize and adapt without human instruction.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
 
 from ..core.auth import verify_api_key
 from ..core.dependencies import get_sandbox_engine

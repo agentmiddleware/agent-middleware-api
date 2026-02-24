@@ -12,7 +12,6 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
 
 from ..core.auth import verify_api_key
 from ..core.dependencies import get_launch_sequence, get_genesis_agent
@@ -322,7 +321,8 @@ async def execute_genesis(
     report = await genesis.execute(config)
 
     from dataclasses import asdict
-    to_dict = lambda obj: asdict(obj) if obj else None
+    def to_dict(obj):
+        return asdict(obj) if obj else None
 
     return GenesisResponse(
         genesis_id=report.genesis_id,

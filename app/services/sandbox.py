@@ -29,7 +29,6 @@ Production wiring:
 
 import uuid
 import random
-import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -114,8 +113,8 @@ class PatternEnvironmentGenerator:
             rule_type = rng.choice(["rotate", "mirror", "increment", "color_swap"])
             rules.append(f"Transform input grid by applying: {rule_type}")
         else:
-            rules.append(f"Apply two-step transform: rotate then invert")
-            rules.append(f"Odd rows are shifted right by 1")
+            rules.append("Apply two-step transform: rotate then invert")
+            rules.append("Odd rows are shifted right by 1")
 
         # Generate example pairs
         input_grid = [[rng.randint(0, 5) for _ in range(size)] for _ in range(size)]
@@ -158,7 +157,7 @@ class NavigationEnvironmentGenerator:
         goal = rng.choice(nodes[1:])  # Never start at goal
         rules = [
             f"Navigate from node 0 to node {goal}",
-            f"Some edges have hidden costs (discovered on traversal)",
+            "Some edges have hidden costs (discovered on traversal)",
         ]
 
         state = EnvironmentState(
@@ -230,7 +229,7 @@ class AdversarialEnvironmentGenerator:
     """Generate adversarial environments that try to confuse agents."""
 
     def generate(self, difficulty: Difficulty, seed: int) -> SandboxEnvironment:
-        rng = random.Random(seed)
+        _rng = random.Random(seed)
 
         trap_count = {"easy": 1, "medium": 3, "hard": 5, "extreme": 8}[difficulty.value]
 
