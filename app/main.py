@@ -22,9 +22,27 @@ from .core.durable_state import close_durable_state, get_durable_state
 from .core.rate_limiter import RateLimitMiddleware
 from .db.database import init_db, close_db
 from .routers import (
-    iot, telemetry, media, comms, docs, factory, red_team, oracle,
-    billing, launch, protocol, rtaas, sandbox, telemetry_scope,
-    dashboard, broadcast, ai, webhooks, mcp, kyc, api_keys,
+    iot,
+    telemetry,
+    media,
+    comms,
+    docs,
+    factory,
+    red_team,
+    oracle,
+    billing,
+    launch,
+    protocol,
+    rtaas,
+    sandbox,
+    telemetry_scope,
+    dashboard,
+    broadcast,
+    ai,
+    webhooks,
+    mcp,
+    kyc,
+    api_keys,
 )
 
 settings = get_settings()
@@ -71,7 +89,10 @@ app = FastAPI(
         "All endpoints require an API key passed via the `X-API-Key` header.\n\n"
         "### For Agents\n\n"
         "This API is designed for programmatic consumption. See `/llm.txt` for "
-        "LLM-optimized documentation and `/openapi.json` for the full spec."
+        "LLM-optimized documentation and `/openapi.json` for the full spec.\n\n"
+        "### v0.2.0\n\n"
+        "✅ Now MCP-native with discoverable monetized tools, dry-run sandboxing, "
+        "KYC gating, and automatic key rotation."
     ),
     docs_url="/docs",
     redoc_url="/redoc",
@@ -130,6 +151,7 @@ app.include_router(api_keys.router)
 
 # --- Discovery & Health Endpoints ---
 
+
 @app.get(
     "/",
     tags=["Discovery"],
@@ -152,8 +174,7 @@ async def root():
             "iot_bridge": {
                 "base_path": "/v1/iot",
                 "description": (
-                    "Secure protocol translation for IoT devices "
-                    "with topic-level ACLs."
+                    "Secure protocol translation for IoT devices with topic-level ACLs."
                 ),
                 "endpoints": [
                     "POST /v1/iot/devices",
@@ -182,8 +203,7 @@ async def root():
             "media_engine": {
                 "base_path": "/v1/media",
                 "description": (
-                    "Video-to-viral-clip pipeline with cross-platform "
-                    "distribution."
+                    "Video-to-viral-clip pipeline with cross-platform distribution."
                 ),
                 "endpoints": [
                     "POST /v1/media/videos",
@@ -405,8 +425,7 @@ async def root():
             "method": "api_key",
             "header": "X-API-Key",
             "description": (
-                "Pass your API key in the X-API-Key header "
-                "on every request."
+                "Pass your API key in the X-API-Key header on every request."
             ),
         },
         "rate_limits": {

@@ -5,9 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-04-16
+## [v0.2.0] - 2026-04-16
 
-### Added
+### 🚀 Major Features
+
+- **MCP Server Generator** — `@mcp_tool` decorator, unified ServiceRegistry, dynamic MCP proxy (`/.well-known/mcp/tools.json` + JSON-RPC), standalone CLI generator
+- **Dry-Run Sandbox / Shadow Ledger** — Stateful Redis-backed cost simulation with `async with b2a.simulate_session() as sim:`
+- **Stripe Identity KYC** — Human sponsor verification before fiat top-ups
+- **API Key Rotation** — Automatic on velocity freeze + grace period + webhooks
+- **Agent Intelligence Layer** — Full `/v1/ai` (decide/heal/query/memory/learn) with multi-provider support
+
+### Additional Features
+
+- PostgreSQL Ledger with ACID Transactions (`app/services/agent_money.py`)
 
 - **PostgreSQL Ledger with ACID Transactions** (`app/services/agent_money.py`)
   - Complete rewrite replacing in-memory `WalletStore` with SQLModel + PostgreSQL

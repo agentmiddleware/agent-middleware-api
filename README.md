@@ -2,6 +2,13 @@
 
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
 [![Auto PR](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue)
+![Tests](https://img.shields.io/badge/Tests-263%20passing-brightgreen)
+![MCP](https://img.shields.io/badge/MCP-Native-orange)
+![Docker](https://img.shields.io/badge/Docker-Ready-blue)
+![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
 
 **The FastAPI control plane for agent-native infrastructure.**
 
