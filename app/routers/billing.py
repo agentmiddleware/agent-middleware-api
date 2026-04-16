@@ -10,6 +10,7 @@ This is how the API generates revenue autonomously.
 
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from ..core.auth import verify_api_key
 from ..core.dependencies import get_agent_money
@@ -21,6 +22,7 @@ from ..services.agent_money import (
 )
 from ..services.velocity_monitor import WalletFrozenError
 from ..services.stripe_integration import get_stripe_integration
+from ..services.shadow_ledger import get_shadow_ledger
 from ..schemas.billing import (
     CreateSponsorWalletRequest,
     CreateAgentWalletRequest,
@@ -605,3 +607,247 @@ async def get_velocity_status(
 
     monitor = get_velocity_monitor()
     return await monitor.get_velocity_status(wallet_id)
+
+
+# --- Dry-Run Sandbox Endpoints ---
+
+class CreateDryRunSessionRequest(BaseModel):
+    """Start a dry-run session for simulating billing operations."""
+    wallet_id: str = Field(..., description="Wallet to simulate charges against")
+
+
+class DryRunSessionResponse(BaseModel):
+    """Response when creating a dry-run session."""
+    session_id: str
+    wallet_id: str
+    real_balance: float
+    virtual_balance: float
+    created_at: str
+    expires_in_seconds: int = 900
+
+
+class SimulatedChargeRequest(BaseModel):
+    """Simulate a charge without affecting real balance."""
+    wallet_id: str = Field(..., description="Wallet being simulated")
+    service: ServiceCategory = Field(..., description="Service category to simulate")
+    units: float = Field(default=1.0, description="Number of units")
+    description: str | None = Field(None, description="Optional description")
+    dry_run_session_id: str | None = Field(None, description="Session ID for session-based simulation")
+
+
+class SimulatedChargeResponse(BaseModel):
+    """Result of a simulated charge."""
+    dry_run: bool = True
+    session_id: str
+    wallet_id: str
+    service_category: str
+    units: float
+    credits_would_charge: float
+    simulated_balance_before: float
+    simulated_balance_after: float
+    would_succeed: bool
+    reason: str | None = None
+
+
+@router.post(
+    "/dry-run/session",
+    response_model=DryRunSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Start a dry-run session",
+    description=(
+        "Create a new dry-run session for simulating billing operations. "
+        "All charges simulated within this session use a virtual balance "
+        "derived from the wallet's real balance minus simulated charges. "
+        "Sessions expire after 15 minutes.\n\n"
+        "Use this to:\n"
+        "- Test if a multi-step workflow fits within your budget\n"
+        "- Estimate total cost before committing to execution\n"
+        "- Plan complex agent workflows safely"
+    ),
+)
+async def create_dry_run_session(
+    request: CreateDryRunSessionRequest,
+    api_key: str = Depends(verify_api_key),
+    money: AgentMoney = Depends(get_agent_money),
+):
+    """Start a new dry-run session for the specified wallet."""
+    wallet = await money.get_wallet(request.wallet_id)
+    if not wallet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "wallet_not_found", "message": f"Wallet {request.wallet_id} not found"},
+        )
+
+    shadow_ledger = get_shadow_ledger()
+    session = await shadow_ledger.create_session(
+        wallet_id=request.wallet_id,
+        real_balance=Decimal(str(wallet.balance)),
+    )
+
+    return DryRunSessionResponse(
+        session_id=session.session_id,
+        wallet_id=session.wallet_id,
+        real_balance=float(session.real_balance),
+        virtual_balance=float(session.virtual_balance),
+        created_at=session.created_at.isoformat(),
+        expires_in_seconds=900,
+    )
+
+
+@router.get(
+    "/dry-run/session/{session_id}",
+    summary="Get dry-run session status",
+    description="Retrieve current state of a dry-run session.",
+)
+async def get_dry_run_session(
+    session_id: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """Get the current state of a dry-run session."""
+    shadow_ledger = get_shadow_ledger()
+    session = await shadow_ledger.get_session(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+        )
+
+    return {
+        "session_id": session.session_id,
+        "wallet_id": session.wallet_id,
+        "real_balance": float(session.real_balance),
+        "virtual_balance": float(session.virtual_balance),
+        "total_simulated": float(session.total_simulated),
+        "charge_count": len(session.simulated_charges),
+        "charges": [
+            {
+                "charge_id": c.charge_id,
+                "service_category": c.service_category,
+                "units": c.units,
+                "credits": float(c.credits),
+                "description": c.description,
+            }
+            for c in session.simulated_charges
+        ],
+        "created_at": session.created_at.isoformat(),
+    }
+
+
+@router.delete(
+    "/dry-run/session/{session_id}",
+    summary="End a dry-run session",
+    description=(
+        "End a dry-run session and get a summary of all simulated charges. "
+        "This does NOT affect the real wallet - it's purely informational."
+    ),
+)
+async def end_dry_run_session(
+    session_id: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """End a dry-run session and return summary."""
+    shadow_ledger = get_shadow_ledger()
+    summary = await shadow_ledger.end_session(session_id)
+
+    if not summary:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+        )
+
+    return {
+        "session_id": summary.session_id,
+        "wallet_id": summary.wallet_id,
+        "created_at": summary.created_at.isoformat(),
+        "ended_at": summary.ended_at.isoformat(),
+        "total_simulated_credits": float(summary.total_simulated_credits),
+        "charge_count": summary.charge_count,
+        "real_balance": float(summary.real_balance),
+        "virtual_balance_after": float(summary.virtual_balance_after),
+        "charges": summary.simulated_charges,
+    }
+
+
+@router.post(
+    "/dry-run/charge",
+    response_model=SimulatedChargeResponse,
+    summary="Simulate a charge",
+    description=(
+        "Simulate a charge without affecting real balance or triggering velocity monitoring. "
+        "Returns cost estimate and virtual balance impact.\n\n"
+        "Options:\n"
+        "- Use session_id for multi-step simulation (tracks cumulative cost)\n"
+        "- Omit session_id for single-shot estimation"
+    ),
+)
+async def simulate_charge(
+    request: SimulatedChargeRequest,
+    api_key: str = Depends(verify_api_key),
+    money: AgentMoney = Depends(get_agent_money),
+):
+    """Simulate a charge operation."""
+    session_id = request.dry_run_session_id
+
+    if session_id:
+        shadow_ledger = get_shadow_ledger()
+        result = await shadow_ledger.simulate_charge(
+            session_id=session_id,
+            service_category=request.service,
+            units=request.units,
+            description=request.description or "",
+        )
+        return SimulatedChargeResponse(
+            dry_run=True,
+            session_id=result.session_id,
+            wallet_id=result.wallet_id,
+            service_category=result.service_category,
+            units=result.units,
+            credits_would_charge=float(result.credits_would_charge),
+            simulated_balance_before=result.simulated_balance_before,
+            simulated_balance_after=result.simulated_balance_after,
+            would_succeed=result.would_succeed,
+            reason=result.reason,
+        )
+
+    wallet = await money.get_wallet(request.wallet_id)
+    if not wallet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "wallet_not_found", "message": f"Wallet {request.wallet_id} not found"},
+        )
+
+    result = await money.charge(
+        wallet_id=request.wallet_id,
+        service_category=request.service,
+        units=Decimal(str(request.units)),
+        description=request.description or "",
+        dry_run=True,
+        dry_run_session_id=None,
+    )
+
+    if hasattr(result, "credits_would_charge"):
+        return SimulatedChargeResponse(
+            dry_run=True,
+            session_id=getattr(result, "session_id", ""),
+            wallet_id=getattr(result, "wallet_id", request.wallet_id),
+            service_category=getattr(result, "service_category", request.service.value),
+            units=getattr(result, "units", request.units),
+            credits_would_charge=float(getattr(result, "credits_would_charge", Decimal("0"))),
+            simulated_balance_before=float(getattr(result, "simulated_balance_before", wallet.balance)),
+            simulated_balance_after=float(getattr(result, "simulated_balance_after", wallet.balance)),
+            would_succeed=getattr(result, "would_succeed", True),
+            reason=getattr(result, "reason", None),
+        )
+
+    return SimulatedChargeResponse(
+        dry_run=True,
+        session_id="",
+        wallet_id=request.wallet_id,
+        service_category=request.service.value,
+        units=request.units,
+        credits_would_charge=float(wallet.balance),
+        simulated_balance_before=float(wallet.balance),
+        simulated_balance_after=float(wallet.balance),
+        would_succeed=True,
+    )

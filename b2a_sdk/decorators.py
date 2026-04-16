@@ -12,6 +12,7 @@ Both decorators use asyncio.create_task for non-blocking execution.
 """
 
 import asyncio
+import contextvars
 import functools
 import inspect
 import time
@@ -19,12 +20,16 @@ import traceback
 from collections.abc import Callable
 from typing import ParamSpec, TypeVar, get_type_hints
 
-from .client import B2AClient
+from .client import B2AClient, DryRunSimulation
 
 P = ParamSpec("P")
 T = TypeVar("T")
 
 _registration_callbacks: list[Callable] = []
+
+_dry_run_context: contextvars.ContextVar[DryRunSimulation | None] = contextvars.ContextVar(
+    "dry_run_context", default=None
+)
 
 
 def register_mcp_tool_callback(callback: Callable) -> None:
@@ -238,6 +243,9 @@ def billable(
     If the wallet has insufficient funds, InsufficientFundsError is raised
     and the function never executes.
 
+    When called within a `simulate_session()` context, the charge is
+    simulated without affecting real balance or triggering velocity monitoring.
+
     Usage:
         b2a = B2AClient(api_key="agt-xyz123")
 
@@ -245,6 +253,11 @@ def billable(
         async def generate_video(url: str):
             # This only runs if wallet has 5+ credits
             pass
+
+        # Or with simulation:
+        async with b2a.simulate_session(wallet_id="agt-123") as sim:
+            await generate_video(url)  # Simulated charge
+            print(f"Simulated cost: {sim.total_cost}")
 
     Args:
         client: B2AClient instance for billing
@@ -262,6 +275,19 @@ def billable(
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @functools.wraps(func)
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            sim = _dry_run_context.get()
+
+            if sim is not None and sim._active:
+                result = await client.simulate_charge(
+                    wallet_id=wallet_id,
+                    service_category=service_category,
+                    units=units,
+                    session_id=sim.session_id,
+                    description=request_path or f"{func.__module__}.{func.__name__}",
+                )
+                sim.add_charge_result(result)
+                return await func(*args, **kwargs)
+
             await client.charge(
                 wallet_id=wallet_id,
                 service_category=service_category,

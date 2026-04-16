@@ -52,6 +52,7 @@ from ..db.converters import (
     billing_alert_model_to_schema,
 )
 from ..services.velocity_monitor import get_velocity_monitor, WalletFrozenError
+from ..services.shadow_ledger import get_shadow_ledger, SimulatedChargeResult
 from ..schemas.billing import (
     WalletType,
     WalletStatus,
@@ -566,6 +567,58 @@ class AgentMoney:
                 ],
             }
 
+    async def _dry_run_charge(
+        self,
+        wallet_id: str,
+        service_category: ServiceCategory,
+        units: Decimal,
+        charge_amount: Decimal,
+        description: str,
+        session_id: str | None,
+    ) -> SimulatedChargeResult:
+        """
+        Simulate a charge without affecting real balance or velocity.
+
+        This is a dry-run operation that:
+        - Does NOT record to the real ledger
+        - Does NOT trigger velocity monitoring
+        - Returns cost estimate with virtual balance impact
+
+        If session_id is provided, uses the shadow ledger for stateful tracking.
+        If session_id is None, returns a single-shot estimate based on real balance.
+        """
+        if session_id:
+            shadow_ledger = get_shadow_ledger()
+            try:
+                result = await shadow_ledger.simulate_charge(
+                    session_id=session_id,
+                    service_category=service_category,
+                    units=float(units),
+                    description=description,
+                )
+                return result
+            except ValueError as e:
+                if "Session not found" in str(e):
+                    raise ValueError(f"Dry-run session not found: {session_id}")
+                raise
+
+        wallet = await self.get_wallet(wallet_id)
+        if not wallet:
+            raise WalletNotFoundError(wallet_id)
+
+        return SimulatedChargeResult(
+            session_id=session_id or "",
+            wallet_id=wallet_id,
+            service_category=service_category.value,
+            units=float(units),
+            credits_would_charge=charge_amount,
+            simulated_balance_before=float(wallet.balance),
+            simulated_balance_after=float(wallet.balance) - float(charge_amount),
+            would_succeed=wallet.balance >= charge_amount,
+            reason=None if wallet.balance >= charge_amount else "insufficient_simulated_funds",
+            dry_run=True,
+        )
+
     # --- Micro-Metering & Charging ---
 
     async def charge(
@@ -575,12 +628,17 @@ class AgentMoney:
         units: Decimal = Decimal("1"),
         request_path: str | None = None,
         description: str = "",
-    ) -> LedgerEntry | InsufficientFundsResponse:
+        dry_run: bool = False,
+        dry_run_session_id: str | None = None,
+    ) -> LedgerEntry | InsufficientFundsResponse | SimulatedChargeResult:
         """
         Charge an agent wallet for API usage with ACID transaction.
 
         Uses SELECT ... FOR UPDATE to lock the wallet row during the transaction.
         Also checks spend velocity and auto-freezes on anomalous patterns.
+
+        If dry_run=True, simulates the charge without affecting real balance
+        or triggering velocity monitoring. Uses the shadow ledger for tracking.
         """
         pricing = DEFAULT_PRICING.get(service_category)
         if not pricing:
@@ -588,6 +646,17 @@ class AgentMoney:
 
         unit_name, credits_per_unit, _ = pricing
         charge_amount = units * credits_per_unit
+
+        if dry_run:
+            return await self._dry_run_charge(
+                wallet_id=wallet_id,
+                service_category=service_category,
+                units=units,
+                charge_amount=charge_amount,
+                description=description or f"{units} × {unit_name}",
+                session_id=dry_run_session_id,
+            )
+
         compute_cost = units * COMPUTE_COSTS.get(service_category, Decimal("0"))
         margin = charge_amount - compute_cost
 
