@@ -506,6 +506,77 @@ python my_server.py
 
 ---
 
+## Agentic Web Interface (AWI) — Phase 7
+
+**Based on arXiv:2506.10953v1 — "Build the web for agents, not agents for the web"** ([Lù et al., 2025, CC BY 4.0](https://arxiv.org/abs/2506.10953))
+
+We believe agents should not be forced to adapt to human-designed UIs and DOM trees. Instead, we provide a full **Agentic Web Interface (AWI)** layer that implements the paper's six guiding principles:
+
+- **Stateful sessions** (`awi_session.py`)
+- **13 standardized higher-level actions** (`awi_action_vocab.py`)
+- **Progressive representations** (summary, embedding, low-res, etc.)
+- **Agentic task queues** with concurrency limits and human pause/steer
+- Human-centric intervention endpoint (`/v1/awi/intervene`)
+
+This makes our middleware the first open-source **MCP + AWI control plane** — websites can expose an AWI that our platform consumes, while agents get a clean, safe, standardized interface.
+
+### Create an AWI Session
+
+```bash
+# Create a stateful AWI session
+curl -X POST http://localhost:8000/v1/awi/sessions \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"target_url": "https://example.com", "max_steps": 100}'
+```
+
+### Execute Standardized Actions
+
+```bash
+# Execute a higher-level action
+curl -X POST http://localhost:8000/v1/awi/execute \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "awi-abc123",
+    "action": "search_and_sort",
+    "parameters": {"query": "laptops", "sort_by": "price"}
+  }'
+```
+
+### Request Progressive Representations
+
+```bash
+# Get exactly what you need
+curl -X POST http://localhost:8000/v1/awi/represent \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "awi-abc123",
+    "representation_type": "summary"
+  }'
+```
+
+### Human Pause/Steer
+
+```bash
+# Pause session for human review
+curl -X POST http://localhost:8000/v1/awi/intervene \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "awi-abc123", "action": "pause", "reason": "Review needed"}'
+
+# Resume after review
+curl -X POST http://localhost:8000/v1/awi/intervene \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "awi-abc123", "action": "resume"}'
+```
+
+**Endpoints:** `/v1/awi/sessions`, `/v1/awi/execute`, `/v1/awi/represent`, `/v1/awi/intervene`, `/v1/awi/queue/status`, `/v1/awi/vocabulary`
+
+---
+
 ## Deployment (Railway + PostgreSQL)
 
 This repository is deployment-ready for Railway via `Dockerfile` + `railway.json`.

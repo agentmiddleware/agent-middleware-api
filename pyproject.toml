@@ -1,6 +1,6 @@
 [project]
 name = "agent-native-middleware"
-version = "0.1.0"
+version = "0.3.0"
 description = "Headless middleware API for the Business-to-Agent (B2A) economy"
 requires-python = ">=3.11"
 

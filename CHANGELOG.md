@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.0] - 2026-04-16
+
+### ✨ Major Features — Agentic Web Interface (AWI)
+
+**Implements arXiv:2506.10953v1 "Build the web for agents, not agents for the web"**
+
+- Full **Agentic Web Interface** layer (stateful AWI sessions, higher-level actions, progressive representations)
+- Standardized action vocabulary (13 high-level actions: `search_and_sort`, `add_to_cart`, etc.)
+- Progressive information transfer engine (`awi_representation.py`)
+- Agentic task queues with concurrency limits and safety controls
+- Human-in-the-loop intervention (`/v1/awi/intervene`)
+- Full integration with existing MCP proxy, Behavioral Sandbox, and `/v1/ai` intelligence layer
+- Behavioral Sandbox Engine (Phase 6) for real tool execution in isolated environments
+
+**Tests:** +22 new AWI tests (total 302 passing)
+
+**Next:** Phase 8 — External AWI Adoption Kit for website owners.
+
+---
+
 ## [v0.2.0] - 2026-04-16
 
 ### 🚀 Major Features
