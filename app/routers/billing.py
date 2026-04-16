@@ -451,7 +451,7 @@ async def prepare_top_up(
                     "wallet_id": wallet_id,
                     "kyc_status": kyc_status["kyc_status"],
                     "message": f"KYC verification required. Current status: {kyc_status['kyc_status']}",
-                    "verification_url": f"/v1/kyc/sessions",
+                    "verification_url": "/v1/kyc/sessions",
                 },
             )
 
