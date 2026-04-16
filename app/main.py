@@ -22,7 +22,7 @@ from .core.rate_limiter import RateLimitMiddleware
 from .routers import (
     iot, telemetry, media, comms, docs, factory, red_team, oracle,
     billing, launch, protocol, rtaas, sandbox, telemetry_scope,
-    dashboard, broadcast,
+    dashboard, broadcast, ai,
 )
 
 settings = get_settings()
@@ -105,6 +105,7 @@ app.include_router(sandbox.router)
 app.include_router(telemetry_scope.router)
 app.include_router(dashboard.router)
 app.include_router(broadcast.router)
+app.include_router(ai.router)
 app.include_router(docs.router)
 
 

@@ -1,11 +1,11 @@
 # Agent Middleware API
 
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
-[![Auto PR](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml)
+[![Auto PR](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
 
 **The FastAPI control plane for agent-native infrastructure.**
 
-**Agent Middleware API** is a production-ready FastAPI service that provides durable state, billing, telemetry, secure tool execution, and IoT connectivity for autonomous agents.
+**Agent Middleware API** is a production-ready FastAPI service that provides durable state, billing, telemetry, secure tool execution, IoT connectivity, and **AI-powered agent intelligence** for autonomous agents.
 
 It lets agents:
 
@@ -14,6 +14,10 @@ It lets agents:
 * Bill and track usage
 * Emit telemetry and anomaly alerts
 * Execute secure external actions
+* **Make autonomous decisions with AI reasoning**
+* **Self-heal by diagnosing and fixing issues**
+* **Answer natural language queries**
+* **Remember and learn from experiences**
 
 Deploy in minutes via Docker or Railway.
 
@@ -21,13 +25,14 @@ Deploy in minutes via Docker or Railway.
 
 ## Architecture Overview
 
-| Domain        | Endpoint Prefix | Durable | Rate Limited | Auth Required |
-|---------------|----------------|----------|--------------|---------------|
-| Billing       | `/v1/billing`   | Yes      | Yes          | Yes           |
-| Telemetry     | `/v1/telemetry` | Yes      | Yes          | Yes           |
-| Comms         | `/v1/comms`     | Yes      | Yes          | Yes           |
-| IoT Bridge    | `/v1/iot`       | Optional | Yes          | Yes           |
-| Security      | `/v1/security`  | Partial  | Yes          | Yes           |
+| Domain              | Endpoint Prefix | Durable | Rate Limited | Auth Required |
+|---------------------|----------------|---------|--------------|---------------|
+| Billing             | `/v1/billing`  | Yes     | Yes          | Yes           |
+| Telemetry           | `/v1/telemetry`| Yes     | Yes          | Yes           |
+| Comms               | `/v1/comms`    | Yes     | Yes          | Yes           |
+| IoT Bridge          | `/v1/iot`      | Optional| Yes          | Yes           |
+| Security            | `/v1/security` | Partial | Yes          | Yes           |
+| **Agent Intelligence** | `/v1/ai`   | Yes     | Yes          | Yes           |
 
 *(Additional modules include programmatic media, content factory, agent oracle, and protocol generation)*
 
@@ -54,6 +59,77 @@ curl -X POST http://localhost:8000/v1/telemetry \
   -H "X-API-Key: test-key" \
   -H "Content-Type: application/json" \
   -d '{"event":"agent_started","agent_id":"demo"}'
+```
+
+---
+
+## AI Agent Intelligence (`/v1/ai`)
+
+Powered by LLM integration (OpenAI, Azure OpenAI, Anthropic, Ollama), agents can:
+
+### Autonomous Decision-Making
+```bash
+curl -X POST http://localhost:8000/v1/ai/decide \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "agent-001",
+    "context": {"tasks": ["process_data", "send_report"], "load": 0.8},
+    "options": ["process_data", "send_report", "wait"]
+  }'
+```
+
+### Self-Healing
+```bash
+curl -X POST http://localhost:8000/v1/ai/heal \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "issue": "Service returning 500 errors",
+    "context": {"error_log": "Connection refused to database"}
+  }'
+```
+
+### Natural Language Queries
+```bash
+curl -X POST http://localhost:8000/v1/ai/query \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the current system health?"}'
+```
+
+### Agent Memory & Learning
+```bash
+# Store a memory
+curl -X POST http://localhost:8000/v1/ai/memory \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "agent-001", "key": "preference", "value": "dark_mode"}'
+
+# Learn from experience
+curl -X POST http://localhost:8000/v1/ai/learn \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "agent-001", "experience": {"action": "retry", "outcome": "success"}}'
+```
+
+### Configure LLM Provider
+
+```bash
+# OpenAI
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4o
+
+# Azure OpenAI
+LLM_PROVIDER=azure
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+
+# Ollama (local)
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
 ```
 
 ---
