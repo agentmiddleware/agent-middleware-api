@@ -3,6 +3,7 @@ Central configuration for the Agent-Native Middleware API.
 All settings are loaded from environment variables for zero-GUI deployment.
 """
 
+from decimal import Decimal
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -30,10 +31,35 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     REDIS_URL: str = ""
 
+    # --- Database Pool Settings ---
+    # Used for SQLModel/SQLAlchemy async sessions
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+
     # --- Authentication ---
     API_KEY_HEADER: str = "X-API-Key"
     # Comma-separated list of valid API keys (use a secrets manager in production)
     VALID_API_KEYS: str = ""
+
+    # --- Stripe Payment Processing ---
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+
+    # --- Credit Exchange Rate ---
+    # 1000 credits = $1.00 USD (1 credit = $0.001)
+    EXCHANGE_RATE: Decimal = Decimal("1000.0")
+
+    # --- Notification Service ---
+    RESEND_API_KEY: str = ""
+    SLACK_WEBHOOK_URL: str = ""
+    ALERT_FROM_EMAIL: str = "alerts@b2a.dev"
+
+    # --- Velocity Monitoring ---
+    VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")
+    VELOCITY_DAILY_LIMIT: Decimal = Decimal("10000.0")
+    VELOCITY_ALERT_THRESHOLD: int = 2
+    VELOCITY_FREEZE_THRESHOLD: int = 3
 
     # --- IoT Protocol Bridge ---
     MQTT_BROKER_URL: str = "mqtt://localhost:1883"

@@ -21,6 +21,12 @@ python-multipart>=0.0.9 # File upload support
 python-dotenv>=1.0.0    # .env file loading
 redis>=5.2.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.30.0         # PostgreSQL-backed runtime persistence
+stripe>=6.0.0           # Stripe payment processing
+
+# --- Database ---
+sqlmodel>=0.0.14        # SQLAlchemy + Pydantic hybrid ORM
+alembic>=1.13.0        # Database migrations
+aiosqlite>=0.20.0      # Async SQLite driver for testing
 
 # --- Development ---
 pytest>=8.3.0
