@@ -35,6 +35,7 @@ from .routers import (
     protocol,
     rtaas,
     sandbox,
+    sandbox_behavioral,
     telemetry_scope,
     dashboard,
     broadcast,
@@ -138,6 +139,7 @@ app.include_router(launch.router)
 app.include_router(protocol.router)
 app.include_router(rtaas.router)
 app.include_router(sandbox.router)
+app.include_router(sandbox_behavioral.router)
 app.include_router(telemetry_scope.router)
 app.include_router(dashboard.router)
 app.include_router(broadcast.router)
