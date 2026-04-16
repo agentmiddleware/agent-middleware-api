@@ -301,6 +301,76 @@ See [`b2a_sdk/README.md`](./b2a_sdk/README.md) for full documentation.
 
 ---
 
+## MCP Server (`/mcp`)
+
+Model Context Protocol (MCP) enables agents to discover and call your billable services. Tools are automatically exposed with their schemas and pricing.
+
+### Discover Available Tools
+
+```bash
+# Fetch MCP tools manifest
+curl http://localhost:8000/mcp/tools.json
+
+# List tools via CLI
+cd b2a_sdk && pip install -e . && python -m b2a_sdk.mcp list
+```
+
+### Call Tools via JSON-RPC
+
+```bash
+# List tools
+curl -X POST http://localhost:8000/mcp/messages \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 1}'
+
+# Call a tool
+curl -X POST http://localhost:8000/mcp/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "my-service",
+      "arguments": {"input": "value"},
+      "mcpContext": {"wallet_id": "agent-001"}
+    },
+    "id": 2
+  }'
+```
+
+### Create MCP Tools with `@mcp_tool`
+
+```python
+from b2a_sdk.decorators import mcp_tool
+
+@mcp_tool(
+    service_id="video-generator",
+    name="Video Generator",
+    description="Generate videos from URLs",
+    category="content_factory",
+    credits_per_unit=50.0,
+    unit_name="video",
+)
+async def generate_video(url: str, style: str = "cinematic") -> dict:
+    """Your tool implementation here."""
+    return {"video_url": f"{url}.mp4"}
+```
+
+### Generate Standalone MCP Server
+
+```bash
+# Generate a standalone Python MCP server
+cd b2a_sdk && pip install -e . && pip install mcp httpx
+python -m b2a_sdk.mcp standalone --output my_server.py
+
+# Run it
+export B2A_API_KEY=your-key
+export B2A_WALLET_ID=your-wallet
+python my_server.py
+```
+
+---
+
 ## Deployment (Railway + PostgreSQL)
 
 This repository is deployment-ready for Railway via `Dockerfile` + `railway.json`.
@@ -396,7 +466,10 @@ Current durable service stores:
 - [x] Service marketplace
 - [x] Spend velocity monitoring with auto-freeze
 - [x] Python SDK (`b2a-sdk`)
-- [ ] MCP Server Generator for agent tool exposure
+- [x] MCP Server Generator for agent tool exposure
+- [ ] Stripe Identity (KYC) for sponsor verification
+- [ ] Sandbox engine wired to billing
+- [ ] Automated API key rotation for wallets
 - [ ] Add comprehensive agent interaction examples and recipes
 - [ ] Multi-tenant hardening validations
 - [ ] Add SQLite backend support for simpler edge deployments
