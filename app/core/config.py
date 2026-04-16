@@ -55,6 +55,21 @@ class Settings(BaseSettings):
     # --- Rate Limiting ---
     RATE_LIMIT_PER_MINUTE: int = 120
 
+    # --- LLM / AI Agent Intelligence ---
+    # Provider: openai, azure, anthropic, ollama
+    LLM_PROVIDER: str = "openai"
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "gpt-4o"
+    LLM_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_MAX_TOKENS: int = 4096
+    LLM_TEMPERATURE: float = 0.7
+    # Azure OpenAI specific
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_DEPLOYMENT: str = ""
+    # Ollama (local) specific
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
