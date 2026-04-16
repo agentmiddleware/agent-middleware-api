@@ -72,6 +72,7 @@ class AlertType(str, Enum):
     ANOMALOUS_SPEND = "anomalous_spend"
     KYC_PENDING = "kyc_pending"
     KYC_REJECTED = "kyc_rejected"
+    SUSPICIOUS_ACTIVITY = "suspicious_activity"
 
 
 class KYCStatus(str, Enum):
@@ -80,6 +81,20 @@ class KYCStatus(str, Enum):
     VERIFIED = "verified"
     REJECTED = "rejected"
     EXPIRED = "expired"
+
+
+class APIKeyStatus(str, Enum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+    SUSPENDED = "suspended"
+
+
+class RotationType(str, Enum):
+    MANUAL = "manual"
+    AUTOMATIC = "automatic"
+    EMERGENCY = "emergency"
+    SCHEDULED = "scheduled"
 
 
 class AlertSeverity(str, Enum):
@@ -422,3 +437,114 @@ class KYCVerificationDetails(BaseModel):
     rejection_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class CreateAPIKeyRequest(BaseModel):
+    """Request to create a new API key for a wallet."""
+    wallet_id: str = Field(..., description="Wallet ID to create key for.")
+    key_name: str = Field(
+        default="default",
+        max_length=50,
+        description="Human-readable name for this key.",
+    )
+    expires_in_days: int | None = Field(
+        default=None,
+        gt=0,
+        description="Optional expiration in days. None = no expiration.",
+    )
+    max_uses: int | None = Field(
+        default=None,
+        gt=0,
+        description="Optional max uses. None = unlimited.",
+    )
+
+
+class APIKeyResponse(BaseModel):
+    """API key response with masked key for display."""
+    key_id: str
+    wallet_id: str
+    key_prefix: str
+    masked_key: str
+    status: APIKeyStatus
+    key_name: str = "default"
+    rotation_count: int = 0
+    last_used_at: datetime | None = None
+    created_at: datetime
+    expires_at: datetime | None = None
+
+
+class APIKeyWithSecret(BaseModel):
+    """API key response including the actual key (only shown once)."""
+    key_id: str
+    wallet_id: str
+    api_key: str
+    key_prefix: str
+    status: APIKeyStatus
+    key_name: str = "default"
+    created_at: datetime
+    expires_at: datetime | None = None
+    warning: str = "Store this key securely. It will not be shown again."
+
+
+class RotateAPIKeyRequest(BaseModel):
+    """Request to rotate an API key."""
+    wallet_id: str = Field(..., description="Wallet ID owning the key.")
+    key_id: str | None = Field(
+        default=None,
+        description="Specific key ID to rotate. None = create new key only.",
+    )
+    revoke_old: bool = Field(
+        default=False,
+        description="Whether to revoke the old key after rotation.",
+    )
+    reason: str = Field(
+        default="manual_rotation",
+        max_length=255,
+        description="Reason for rotation.",
+    )
+
+
+class RotationResponse(BaseModel):
+    """Response after key rotation."""
+    rotation_id: str
+    wallet_id: str
+    old_key_id: str | None = None
+    new_key: APIKeyWithSecret | None = None
+    rotation_type: RotationType
+    revoked_keys: list[str] = []
+    created_at: datetime
+
+
+class APIKeyListResponse(BaseModel):
+    """List of API keys for a wallet."""
+    wallet_id: str
+    keys: list[APIKeyResponse]
+    total_active: int
+    total_revoked: int
+
+
+class KeyRotationLogEntry(BaseModel):
+    """Audit log entry for key rotation."""
+    log_id: str
+    key_id: str
+    wallet_id: str
+    rotation_type: RotationType
+    old_key_id: str | None = None
+    new_key_id: str | None = None
+    trigger_reason: str
+    triggered_by: str
+    created_at: datetime
+
+
+class EmergencyKeyRevocationRequest(BaseModel):
+    """Request to immediately revoke all keys for a wallet."""
+    wallet_id: str = Field(..., description="Wallet ID to revoke keys for.")
+    reason: str = Field(
+        default="security_incident",
+        max_length=255,
+        description="Reason for emergency revocation.",
+    )
+    create_new_key: bool = Field(
+        default=True,
+        description="Whether to create a new emergency key.",
+    )

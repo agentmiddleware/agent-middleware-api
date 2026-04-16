@@ -199,6 +199,39 @@ curl -X POST http://localhost:8000/v1/billing/wallets/agent-001/unfreeze \
   -H "X-API-Key: your-key"
 ```
 
+### API Key Management (`/v1/api-keys`)
+
+Secure API key rotation for wallet authentication.
+
+```bash
+# Create a new API key
+curl -X POST http://localhost:8000/v1/api-keys \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_id": "agent-001", "key_name": "production"}'
+
+# List API keys for a wallet
+curl http://localhost:8000/v1/api-keys/agent-001 \
+  -H "X-API-Key: your-key"
+
+# Rotate an API key
+curl -X POST http://localhost:8000/v1/api-keys/rotate \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_id": "agent-001", "key_id": "key_abc123", "revoke_old": true}'
+
+# Emergency revocation (compromised wallet)
+curl -X POST http://localhost:8000/v1/api-keys/emergency-revoke \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_id": "agent-001", "reason": "security_incident"}'
+
+# Get rotation audit logs
+curl http://localhost:8000/v1/api-keys/agent-001/logs \
+  -H "X-API-Key: your-key"
+```
+```
+
 ### Configure Stripe & Notifications
 
 ```bash
@@ -557,8 +590,8 @@ Current durable service stores:
 - [x] Python SDK (`b2a-sdk`)
 - [x] MCP Server Generator for agent tool exposure
 - [x] Stripe Identity (KYC) for sponsor verification
+- [x] Automated API key rotation for wallets
 - [ ] Sandbox engine wired to billing
-- [ ] Automated API key rotation for wallets
 - [ ] Add comprehensive agent interaction examples and recipes
 - [ ] Multi-tenant hardening validations
 - [ ] Add SQLite backend support for simpler edge deployments

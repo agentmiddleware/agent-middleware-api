@@ -217,3 +217,67 @@ class KYCVerificationModel(SQLModel, table=True):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class APIKeyModel(SQLModel, table=True):
+    """
+    API key registry for wallet authentication and key rotation.
+
+    Supports multiple keys per wallet with rotation tracking.
+    Keys can be rotated manually or automatically on suspicious activity.
+    """
+    __tablename__ = "api_keys"
+
+    key_id: str = Field(primary_key=True, max_length=50)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+
+    key_hash: str = Field(max_length=64, index=True)
+    key_prefix: str = Field(max_length=8)
+
+    status: str = Field(default="active", max_length=20)
+
+    rotation_count: int = Field(default=0)
+    last_rotated_at: Optional[datetime] = Field(default=None)
+
+    last_used_at: Optional[datetime] = Field(default=None)
+    last_used_ip: Optional[str] = Field(default=None, max_length=45)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    expires_at: Optional[datetime] = Field(default=None)
+
+    revoked_at: Optional[datetime] = Field(default=None)
+    revoke_reason: Optional[str] = Field(default=None, max_length=255)
+
+    metadata_json: Optional[str] = Field(default=None)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class KeyRotationLogModel(SQLModel, table=True):
+    """
+    Audit log for API key rotations.
+
+    Tracks rotation history for security auditing and compliance.
+    """
+    __tablename__ = "key_rotation_logs"
+
+    log_id: str = Field(primary_key=True, max_length=50)
+    key_id: str = Field(max_length=50, index=True)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+
+    rotation_type: str = Field(max_length=30)
+
+    old_key_id: Optional[str] = Field(default=None, max_length=50)
+    new_key_id: Optional[str] = Field(default=None, max_length=50)
+
+    trigger_reason: str = Field(max_length=255)
+    triggered_by: str = Field(max_length=50)
+
+    ip_address: Optional[str] = Field(default=None, max_length=45)
+    user_agent: Optional[str] = Field(default=None, max_length=500)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True

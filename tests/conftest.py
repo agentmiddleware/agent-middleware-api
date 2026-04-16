@@ -48,6 +48,8 @@ async def clean_database():
         await session.execute(text("DELETE FROM wallets"))
         await session.execute(text("DELETE FROM daily_balance_snapshots"))
         await session.execute(text("DELETE FROM kyc_verifications"))
+        await session.execute(text("DELETE FROM api_keys"))
+        await session.execute(text("DELETE FROM key_rotation_logs"))
         await session.execute(text("DELETE FROM service_registry"))
         await session.commit()
 

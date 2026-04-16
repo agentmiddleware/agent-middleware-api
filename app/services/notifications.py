@@ -350,6 +350,30 @@ This is an automated notification from the Agent-Native Middleware Platform.
         except Exception as e:
             logger.error(f"Failed to send email to {to}: {e}")
 
+    async def send_security_alert(
+        self,
+        wallet_id: str,
+        alert_type: str,
+        message: str,
+    ) -> None:
+        """
+        Send security alerts for suspicious activity or key management events.
+
+        Args:
+            wallet_id: The wallet affected
+            alert_type: Type of security alert
+            message: Alert message
+        """
+        subject = f"[SECURITY] {alert_type.replace('_', ' ').title()} for Wallet {wallet_id}"
+
+        if self._slack_webhook_url:
+            await self._send_slack_alert(
+                title=subject,
+                message=message,
+                wallet_id=wallet_id,
+                urgency="critical" if alert_type == "emergency_key_revocation" else "high",
+            )
+
     async def close(self) -> None:
         """Close HTTP client on shutdown."""
         await self._http.aclose()
