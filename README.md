@@ -25,14 +25,15 @@ Deploy in minutes via Docker or Railway.
 
 ## Architecture Overview
 
-| Domain              | Endpoint Prefix | Durable | Rate Limited | Auth Required |
-|---------------------|----------------|---------|--------------|---------------|
-| Billing             | `/v1/billing`  | Yes     | Yes          | Yes           |
-| Telemetry           | `/v1/telemetry`| Yes     | Yes          | Yes           |
-| Comms               | `/v1/comms`    | Yes     | Yes          | Yes           |
-| IoT Bridge          | `/v1/iot`      | Optional| Yes          | Yes           |
-| Security            | `/v1/security` | Partial | Yes          | Yes           |
-| **Agent Intelligence** | `/v1/ai`   | Yes     | Yes          | Yes           |
+| Domain                   | Endpoint Prefix   | Durable | Rate Limited | Auth Required |
+|--------------------------|-------------------|---------|--------------|---------------|
+| Billing                  | `/v1/billing`     | Yes     | Yes          | Yes           |
+| Stripe Webhooks          | `/webhooks/stripe`| -       | -            | Yes           |
+| Telemetry                | `/v1/telemetry`   | Yes     | Yes          | Yes           |
+| Comms                    | `/v1/comms`       | Yes     | Yes          | Yes           |
+| IoT Bridge               | `/v1/iot`         | Optional| Yes          | Yes           |
+| Security                 | `/v1/security`    | Partial | Yes          | Yes           |
+| **Agent Intelligence**   | `/v1/ai`          | Yes     | Yes          | Yes           |
 
 *(Additional modules include programmatic media, content factory, agent oracle, and protocol generation)*
 
@@ -59,6 +60,133 @@ curl -X POST http://localhost:8000/v1/telemetry \
   -H "X-API-Key: test-key" \
   -H "Content-Type: application/json" \
   -d '{"event":"agent_started","agent_id":"demo"}'
+```
+
+---
+
+## Billing & Payments (`/v1/billing`)
+
+PostgreSQL-backed wallet system with ACID transactions, Stripe integration, and spend velocity monitoring.
+
+### Wallet Operations
+
+```bash
+# Create a wallet
+curl -X POST http://localhost:8000/v1/billing/wallets \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_id": "agent-001", "balance": 10000}'
+
+# Add credits to a wallet
+curl -X POST http://localhost:8000/v1/billing/wallets/agent-001/deposit \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 5000, "description": "Monthly allocation"}'
+
+# Check wallet balance
+curl http://localhost:8000/v1/billing/wallets/agent-001 \
+  -H "X-API-Key: your-key"
+```
+
+### Stripe Fiat Ingestion
+
+```bash
+# Prepare a Stripe payment (returns client_secret)
+curl -X POST http://localhost:8000/v1/billing/top-up/prepare \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_id": "agent-001", "amount": 5000}'
+
+# Stripe webhooks are handled automatically at POST /webhooks/stripe
+# Credits are allocated when payment_intent.succeeded events arrive
+```
+
+### Agent-to-Agent Transfers
+
+```bash
+# Transfer credits between wallets
+curl -X POST http://localhost:8000/v1/billing/transfer \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_wallet_id": "agent-001",
+    "to_wallet_id": "agent-002",
+    "amount": 1000,
+    "memo": "Payment for data processing"
+  }'
+
+# Create a child wallet with spend limits
+curl -X POST http://localhost:8000/v1/billing/wallets \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wallet_id": "task-agent-001",
+    "parent_wallet_id": "agent-001",
+    "max_spend": 500,
+    "task_description": "Data indexing",
+    "ttl_seconds": 3600
+  }'
+```
+
+### Service Marketplace
+
+```bash
+# Register a service
+curl -X POST http://localhost:8000/v1/billing/services \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "service_id": "data-indexer",
+    "name": "Data Indexing Service",
+    "description": "Fast vector indexing for documents",
+    "price_per_call": 50,
+    "provider_wallet_id": "provider-001"
+  }'
+
+# List available services
+curl http://localhost:8000/v1/billing/services \
+  -H "X-API-Key: your-key"
+
+# Invoke a service
+curl -X POST http://localhost:8000/v1/billing/services/data-indexer/invoke \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"caller_wallet_id": "agent-001", "input_data": {"documents": [...]}}'
+```
+
+### Spend Velocity Monitoring
+
+Wallets are automatically frozen if spending exceeds thresholds.
+
+```bash
+# Check velocity status
+curl http://localhost:8000/v1/billing/wallets/agent-001/velocity \
+  -H "X-API-Key: your-key"
+
+# Unfreeze a frozen wallet
+curl -X POST http://localhost:8000/v1/billing/wallets/agent-001/unfreeze \
+  -H "X-API-Key: your-key"
+```
+
+### Configure Stripe & Notifications
+
+```bash
+# Stripe
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+
+# Email alerts (Resend)
+RESEND_API_KEY=re_...
+ALERT_FROM_EMAIL=alerts@b2a.dev
+
+# Slack notifications
+SLACK_WEBHOOK_URL=https://hooks.slack.com/...
+
+# Velocity limits (credits)
+VELOCITY_HOURLY_LIMIT=1000.0
+VELOCITY_DAILY_LIMIT=10000.0
+VELOCITY_FREEZE_THRESHOLD=3
 ```
 
 ---
@@ -134,6 +262,45 @@ OLLAMA_MODEL=llama3
 
 ---
 
+## Python SDK (`b2a-sdk`)
+
+Agents can integrate using the `b2a-sdk` package for automatic usage tracking and billing.
+
+```bash
+cd b2a_sdk && pip install -e .
+```
+
+```python
+from b2a_sdk import B2AClient, monitored, billable, combined
+
+client = B2AClient(
+    api_url="http://localhost:8000",
+    api_key="your-key",
+    wallet_id="agent-001"
+)
+
+# Track function usage
+@monitored(event_name="data_processing")
+def process_data(data: list):
+    return [x * 2 for x in data]
+
+# Auto-deduct credits per call
+@billable(amount=10)
+def call_llm(prompt: str):
+    return f"Response to: {prompt}"
+
+# Chain operations with combined billing
+@combined(total_amount=100, step_amount=25)
+async def complex_task():
+    step1 = await client.emit_telemetry(...)
+    step2 = await client.get_balance(...)
+    return step1 + step2
+```
+
+See [`b2a_sdk/README.md`](./b2a_sdk/README.md) for full documentation.
+
+---
+
 ## Deployment (Railway + PostgreSQL)
 
 This repository is deployment-ready for Railway via `Dockerfile` + `railway.json`.
@@ -164,6 +331,15 @@ railway variables set VALID_API_KEYS=your-key-here,your-other-key
 railway variables set STATE_BACKEND=postgres
 railway variables set RATE_LIMIT_PER_MINUTE=120
 railway variables set CORS_ORIGINS=https://your-app.com
+
+# Stripe (optional - for fiat top-ups)
+railway variables set STRIPE_SECRET_KEY=sk_live_...
+railway variables set STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Velocity monitoring (optional)
+railway variables set VELOCITY_HOURLY_LIMIT=1000.0
+railway variables set VELOCITY_DAILY_LIMIT=10000.0
+railway variables set VELOCITY_FREEZE_THRESHOLD=3
 ```
 
 > **Note:** `DATABASE_URL` is automatically injected when you link the PostgreSQL database.
@@ -206,7 +382,7 @@ railway variables get DATABASE_URL
 > ⚠ **In production, set `STATE_BACKEND=postgres` to avoid non-durable operation.**
 
 Current durable service stores:
-- Billing (`wallets`, `ledger`, `alerts`)
+- Billing (`wallets`, `ledger`, `alerts`, `velocity_snapshots`, `services`)
 - Comms (`agent registry`, `inbox`, `outbox`)
 - Telemetry (`events`, `anomalies`)
 
@@ -214,10 +390,16 @@ Current durable service stores:
 
 ## Roadmap
 
+- [x] PostgreSQL ledger with ACID transactions
+- [x] Stripe fiat ingestion with webhooks
+- [x] Agent-to-agent transfers with child wallets
+- [x] Service marketplace
+- [x] Spend velocity monitoring with auto-freeze
+- [x] Python SDK (`b2a-sdk`)
+- [ ] MCP Server Generator for agent tool exposure
 - [ ] Add comprehensive agent interaction examples and recipes
 - [ ] Multi-tenant hardening validations
 - [ ] Add SQLite backend support for simpler edge deployments
-- [ ] Tag `v0.1.0` and publish release notes
 
 ---
 
@@ -236,7 +418,11 @@ Use `.env.example` as local template and `.env.production` as production referen
 
 **Run tests:**
 ```bash
+# API tests
 pytest -q
+
+# SDK tests
+cd b2a_sdk && pip install -e ".[dev]" && pytest -q
 ```
 *(CI runs on Python 3.11 and 3.12 via GitHub Actions)*
 
