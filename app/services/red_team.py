@@ -688,7 +688,7 @@ class RedTeamSwarm:
         for category in categories:
             library = ATTACK_LIBRARIES.get(category)
             if library:
-                category_vectors = library.generate_vectors()
+                category_vectors = library.generate_vectors()  # type: ignore[attr-defined]
                 # Filter by target services if applicable
                 for v in category_vectors:
                     service = self._endpoint_to_service(v.target_endpoint)
@@ -903,7 +903,7 @@ class RedTeamSwarm:
         return recs
 
     async def get_scan(self, scan_id: str) -> ScanReport | None:
-        return await self.store.get(scan_id)
+        return await self.store.get(scan_id)  # type: ignore[no-any-return]
 
     async def list_scans(self) -> list[ScanReport]:
-        return await self.store.list_all()
+        return await self.store.list_all()  # type: ignore[no-any-return]

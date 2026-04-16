@@ -298,7 +298,7 @@ class SandboxEngine:
 
         self._environments[env.env_id] = env
         logger.info(f"Created sandbox {env.env_id}: {env_type} / {difficulty}")
-        return env
+        return env  # type: ignore[no-any-return]
 
     async def submit_action(
         self,

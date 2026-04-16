@@ -384,7 +384,7 @@ class AgentComms:
         webhook_url: str | None = None,
         owner_key: str = "",
     ) -> RegisteredAgent:
-        return await self.registry.register(name, capabilities, webhook_url, owner_key)
+        return await self.registry.register(name, capabilities, webhook_url, owner_key)  # type: ignore[no-any-return]
 
     async def send_message(
         self,
@@ -408,7 +408,7 @@ class AgentComms:
             correlation_id=correlation_id or str(uuid.uuid4()),
             reply_to=reply_to,
         )
-        return await self.router.send(message)
+        return await self.router.send(message)  # type: ignore[no-any-return]
 
     async def request_handoff(
         self,

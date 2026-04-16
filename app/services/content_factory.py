@@ -221,7 +221,7 @@ class FormatAdapter:
         }
         if hook:
             metadata.update({
-                "hook_id": hook.hook_id,
+                "hook_id": hook.hook_id or "",
                 "hook_type": hook.hook_type.value,
                 "source_segment": f"{hook.start_seconds}s-{hook.end_seconds}s",
                 "transcript_snippet": hook.transcript_snippet[:200],
@@ -862,7 +862,7 @@ class ContentFactory:
         )
 
     async def get_content(self, content_id: str) -> GeneratedContent | None:
-        return await self.store.get_content(content_id)
+        return await self.store.get_content(content_id)  # type: ignore[no-any-return]
 
     async def list_pipeline_content(self, pipeline_id: str) -> list[GeneratedContent]:
-        return await self.store.list_by_pipeline(pipeline_id)
+        return await self.store.list_by_pipeline(pipeline_id)  # type: ignore[no-any-return]

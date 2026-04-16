@@ -442,7 +442,7 @@ class AgentOracle:
                 target["status"] = OracleStatus.INDEXED.value
                 target["api_id"] = indexed.api_id
 
-        return indexed
+        return indexed  # type: ignore[no-any-return]
 
     async def batch_crawl(self, urls: list[str]) -> list[IndexedAPI]:
         """Crawl multiple URLs concurrently."""

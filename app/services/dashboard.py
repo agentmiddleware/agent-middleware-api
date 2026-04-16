@@ -293,7 +293,7 @@ class DashboardEngine:
             posture.avg_security_score = round(sum(scores) / len(scores), 1) if scores else 0.0
 
         if category_counts:
-            posture.most_common_category = max(category_counts, key=category_counts.get)
+            posture.most_common_category = max(category_counts, key=lambda k: category_counts.get(k, 0))
 
         # Only keep latest 10 jobs
         posture.recent_jobs = posture.recent_jobs[:10]

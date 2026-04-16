@@ -12,6 +12,7 @@ Four service pillars:
 Zero GUI. Your customer is an autonomous agent.
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,7 +27,15 @@ from .routers import (
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_durable_state()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description=(
@@ -70,10 +79,11 @@ app = FastAPI(
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
 
-# CORS — wide open for agent consumption (tighten in production)
+# CORS — configurable via CORS_ORIGINS env var (comma-separated)
+cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -353,8 +363,3 @@ async def health_dependencies():
             "broker_url": settings.MQTT_BROKER_URL,
         },
     }
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await close_durable_state()

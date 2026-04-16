@@ -58,38 +58,53 @@ curl -X POST http://localhost:8000/v1/telemetry \
 
 ---
 
-## Deployment (Railway)
+## Deployment (Railway + PostgreSQL)
 
 This repository is deployment-ready for Railway via `Dockerfile` + `railway.json`.
 
-### 1. Create Service
+### 1. Create Services
 
 1. Create a Railway project from this repository.
-2. Use this repository root as the service root (contains `Dockerfile`).
+2. Add a PostgreSQL database:
+   - Dashboard → + New → Database → PostgreSQL
+   - Or CLI: `railway add -n agent-middleware-db`
+3. Link the database to your app in the Railway dashboard.
 
-CLI alternative:
+### 2. Deploy via CLI
+
 ```bash
 railway login
 railway init
 railway up
 ```
 
-### 2. Configure Environment Variables
+### 3. Configure Environment Variables
 
-Recommended baseline:
-- `DEBUG=false`
-- `VALID_API_KEYS=<comma-separated-keys>`
-- `RATE_LIMIT_PER_MINUTE=120`
-- `STATE_BACKEND=postgres` (Required for production durability)
-- `STATE_NAMESPACE=agent_middleware`
-- `DATABASE_URL=<Railway Postgres connection string>`
-- `REDIS_URL=<Railway Redis connection string>`
+Set these in Railway dashboard or via CLI:
 
-### 3. Verify Deployment
+```bash
+railway variables set DEBUG=false
+railway variables set VALID_API_KEYS=your-key-here,your-other-key
+railway variables set STATE_BACKEND=postgres
+railway variables set RATE_LIMIT_PER_MINUTE=120
+railway variables set CORS_ORIGINS=https://your-app.com
+```
+
+> **Note:** `DATABASE_URL` is automatically injected when you link the PostgreSQL database.
+
+### 4. Verify Deployment
 
 - `GET /health` returns `200`
 - `GET /health/dependencies` reports healthy state backend
 - `GET /docs` loads OpenAPI UI
+
+### PostgreSQL Connection String
+
+Railway automatically provides `DATABASE_URL` when you add the PostgreSQL addon. To get it manually:
+
+```bash
+railway variables get DATABASE_URL
+```
 
 ---
 
@@ -98,6 +113,7 @@ Recommended baseline:
 - API-key based authentication for protected endpoints
 - Per-key rate limiting (Redis-backed)
 - Durable audit logging (Postgres)
+- Configurable CORS (via `CORS_ORIGINS` env var)
 - Red-team endpoints (`/v1/security`, `/v1/rtaas`) for adversarial testing
 - Memory fallback disabled in production by default
 

@@ -257,40 +257,53 @@ class AnomalyDetector:
     async def analyze(self) -> list[AnomalyReport]:
         """
         Run all detection strategies and return new/updated anomalies.
+
         Call this periodically (e.g., every 60 seconds).
         """
         await self._hydrate_if_needed()
-        new_anomalies = []
+        reports: list[AnomalyReport] = []
 
         # Strategy 1: Error rate spike
-        error_anomaly = await self._detect_error_spike()
-        if error_anomaly:
-            new_anomalies.append(error_anomaly)
-
-        # Strategy 2: Source concentration
-        source_anomaly = await self._detect_source_concentration()
-        if source_anomaly:
-            new_anomalies.append(source_anomaly)
-
-        # Promote candidates to reports
-        for candidate in new_anomalies:
+        error_candidate = await self._detect_error_spike()
+        if error_candidate:
             anomaly_id = f"anom-{uuid.uuid4().hex[:8]}"
             report = AnomalyReport(
                 anomaly_id=anomaly_id,
-                severity=candidate.severity,
-                category=candidate.category,
-                summary=candidate.summary,
-                affected_endpoints=candidate.affected_endpoints,
-                event_count=len(candidate.event_ids),
-                first_seen=candidate.first_seen,
-                last_seen=candidate.last_seen,
+                severity=error_candidate.severity,
+                category=error_candidate.category,
+                summary=error_candidate.summary,
+                affected_endpoints=error_candidate.affected_endpoints,
+                event_count=len(error_candidate.event_ids),
+                first_seen=error_candidate.first_seen,
+                last_seen=error_candidate.last_seen,
             )
             async with self._lock:
                 self._anomalies[anomaly_id] = report
                 await self._persist_locked()
             logger.warning(f"Anomaly detected: [{report.severity}] {report.summary}")
+            reports.append(report)
 
-        return new_anomalies
+        # Strategy 2: Source concentration
+        source_candidate = await self._detect_source_concentration()
+        if source_candidate:
+            anomaly_id = f"anom-{uuid.uuid4().hex[:8]}"
+            report = AnomalyReport(
+                anomaly_id=anomaly_id,
+                severity=source_candidate.severity,
+                category=source_candidate.category,
+                summary=source_candidate.summary,
+                affected_endpoints=source_candidate.affected_endpoints,
+                event_count=len(source_candidate.event_ids),
+                first_seen=source_candidate.first_seen,
+                last_seen=source_candidate.last_seen,
+            )
+            async with self._lock:
+                self._anomalies[anomaly_id] = report
+                await self._persist_locked()
+            logger.warning(f"Anomaly detected: [{report.severity}] {report.summary}")
+            reports.append(report)
+
+        return reports
 
     async def get_anomalies(
         self,

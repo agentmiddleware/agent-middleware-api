@@ -103,11 +103,11 @@ class AnomalyReport(BaseModel):
     first_seen: datetime
     last_seen: datetime
     suggested_fix: str | None = Field(
-        None,
+        default=None,
         description="LLM-generated code fix suggestion in diff format.",
     )
     auto_pr_url: str | None = Field(
-        None,
+        default=None,
         description="URL of the auto-generated pull request, if AUTO_PR_ENABLED.",
     )
 

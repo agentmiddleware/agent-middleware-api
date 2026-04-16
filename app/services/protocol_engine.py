@@ -168,7 +168,7 @@ class OpenApiGenerator:
         base_url: str,
         endpoints: list[ParsedEndpoint],
     ) -> dict:
-        paths = {}
+        paths: dict = {}
         for ep in endpoints:
             path_key = ep.path
             if path_key not in paths:

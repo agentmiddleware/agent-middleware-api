@@ -64,10 +64,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install linters
-        run: pip install ruff
+        run: pip install ruff mypy
 
       - name: Run ruff
         run: ruff check app/ tests/
+
+      - name: Run mypy
+        run: mypy app/
 
   # --- Autonomous PR Pipeline ---
   # This job runs on a schedule and creates PRs automatically

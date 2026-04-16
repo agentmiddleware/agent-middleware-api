@@ -435,7 +435,7 @@ class MediaEngine:
         for clip in clips:
             self._clip_store[clip.clip_id] = clip
 
-        return clips
+        return clips  # type: ignore[no-any-return]
 
     async def distribute_clips(
         self,

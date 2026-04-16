@@ -891,7 +891,7 @@ class AgentMoney:
         logger.warning(f"Billing alert [{alert_type.value}]: {message}")
 
     async def get_alerts(self, wallet_id: str | None = None) -> list[BillingAlert]:
-        return await self.store.get_alerts(wallet_id)
+        return await self.store.get_alerts(wallet_id)  # type: ignore[no-any-return]
 
     # --- Helpers ---
 

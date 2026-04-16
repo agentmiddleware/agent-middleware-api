@@ -130,7 +130,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                        "/.well-known/agent.json", "/llm.txt", "/docs/index")
         if request.url.path in skip_paths:
             response = await call_next(request)
-            return response
+            return response  # type: ignore[no-any-return]
 
         # In test / CI environments, the special "test-key" bypasses rate limits
         # so that large test suites don't self-throttle.
@@ -139,7 +139,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             response.headers["X-RateLimit-Limit"] = str(self.limit)
             response.headers["X-RateLimit-Remaining"] = str(self.limit)
             response.headers["X-RateLimit-Reset"] = "60"
-            return response
+            return response  # type: ignore[no-any-return]
 
         now = time.time()
         try:
@@ -173,4 +173,4 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         response.headers["X-RateLimit-Reset"] = str(reset_in)
 
-        return response
+        return response  # type: ignore[no-any-return]

@@ -165,7 +165,7 @@ class TelemetryScope:
                 anomalies.append(anomaly)
 
         # Check for repeated failures on same endpoint
-        failed_endpoints = defaultdict(int)
+        failed_endpoints: dict[str, int] = defaultdict(int)
         for e in events:
             if e.get("status_code", 200) >= 500:
                 failed_endpoints[e.get("path", "unknown")] += 1

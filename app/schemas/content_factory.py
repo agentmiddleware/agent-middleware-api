@@ -76,7 +76,7 @@ class ContentHook(BaseModel):
     each hook produces multiple format-adapted content pieces.
     """
     hook_id: str | None = Field(
-        None,
+        default=None,
         description="Auto-assigned if omitted. Pass existing hook_id to reuse.",
     )
     title: str = Field(
@@ -280,7 +280,7 @@ class GeneratedContent(BaseModel):
     thumbnail_url: str | None = None
     duration_seconds: float | None = None
     dimensions: str | None = Field(
-        None,
+        default=None,
         description="WxH for image/video formats.",
         examples=["1080x1920"],
     )

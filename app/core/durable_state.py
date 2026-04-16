@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 def _json_default(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
-    if is_dataclass(value):
-        return asdict(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)  # type: ignore[arg-type]
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, (datetime, date, time)):
@@ -55,7 +55,7 @@ class DurableStateStore:
 
         self._init_lock = asyncio.Lock()
         self._initialized = False
-        self._backend = "memory"
+        self._backend: str = "memory"
         self._redis: redis.Redis | None = None
         self._pg_pool: asyncpg.Pool | None = None
 

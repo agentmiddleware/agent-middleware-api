@@ -195,10 +195,10 @@ class ChildWalletResponse(BaseModel):
     """Child wallet details with parent lineage."""
     wallet_id: str
     wallet_type: WalletType
-    parent_wallet_id: str
-    child_agent_id: str
+    parent_wallet_id: str | None = None
+    child_agent_id: str | None = None
     balance: float
-    max_spend: float
+    max_spend: float | None = None
     spent: float = 0.0
     task_description: str = ""
     ttl_seconds: int | None = None
@@ -271,15 +271,15 @@ class LedgerEntry(BaseModel):
     service_category: ServiceCategory | None = None
     description: str = ""
     request_path: str | None = Field(
-        None,
+        default=None,
         description="API path that triggered this charge (e.g., POST /v1/iot/devices).",
     )
     compute_cost: float | None = Field(
-        None,
+        default=None,
         description="Internal compute cost (for arbitrage margin calculation).",
     )
     margin: float | None = Field(
-        None,
+        default=None,
         description="Profit margin = charged amount - compute cost.",
     )
     timestamp: datetime
@@ -336,7 +336,7 @@ class TopUpResponse(BaseModel):
     )
     status: TopUpStatus
     payment_url: str | None = Field(
-        None,
+        default=None,
         description="URL for completing payment (if async checkout flow).",
     )
 

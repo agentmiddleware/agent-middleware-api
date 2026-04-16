@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # --- Server ---
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    CORS_ORIGINS: str = "*"
 
     # --- Durable Runtime State ---
     # Backends: auto, postgres, redis, memory
