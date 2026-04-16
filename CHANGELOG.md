@@ -51,6 +51,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `@combined` decorator for chained operations
   - Full type hints and documentation
 
+- **MCP Server Generator** (`app/services/service_registry.py`, `app/services/mcp_generator.py`, `app/routers/mcp.py`)
+  - Unified service registry for local (SDK) + persistent (DB) services
+  - `@mcp_tool` decorator for auto-registering Python functions as MCP tools
+  - Dynamic MCP proxy: `/.well-known/mcp/tools.json`, `/mcp/messages` JSON-RPC
+  - Standalone server generator: `python -m b2a_sdk.mcp standalone --output server.py`
+  - CLI tools: `generate`, `list`, `serve`, `standalone` subcommands
+  - Pydantic to MCP JSON Schema conversion
+
+- **Dry-Run Sandbox** (`app/services/shadow_ledger.py`, `b2a_sdk/`)
+  - Redis-backed shadow ledger with 15-minute TTL sessions
+  - Stateful cumulative simulation (balance tracking across charges)
+  - `async with b2a.simulate_session()` context manager
+  - `b2a.get_dry_run_estimate()` for single-shot cost checks
+  - Velocity isolation: dry runs never touch VelocityMonitor
+
 - **Database Migrations** (`migrations/versions/`)
   - `001_initial.py` - Core wallet/ledger schema
   - `002_stripe_fields.py` - Stripe payment tracking fields
@@ -72,3 +87,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Dependencies
 
 - Added `stripe>=6.0.0` for payment processing
+- Added `mcp>=1.0.0` for MCP Server SDK (optional)

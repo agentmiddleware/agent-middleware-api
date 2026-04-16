@@ -114,15 +114,46 @@ def extract_schema_from_callable(func: Callable) -> tuple[dict[str, Any] | None,
         return None, None
 
 
+def _service_to_mcp_tool(service: dict) -> dict:
+    """Convert a service record to MCP tool format."""
+    tool = {
+        "name": service["service_id"],
+        "description": service.get("description", ""),
+        "inputSchema": service.get("input_schema") or {"type": "object", "properties": {}},
+    }
+
+    annotations = {
+        "creditsPerCall": service.get("credits_per_unit", 1.0),
+        "unitName": service.get("unit_name", "call"),
+        "category": service.get("category", "custom"),
+    }
+
+    if service.get("owner_wallet_id"):
+        annotations["providerWallet"] = service["owner_wallet_id"]
+
+    if service.get("output_schema"):
+        annotations["hasOutputSchema"] = True
+
+    if not service.get("is_local", True):
+        annotations["external"] = True
+
+    tool["annotations"] = annotations
+
+    return tool
+
+
 class ServiceRegistry:
     """
-    Central registry for MCP-enabled services.
+    Unified registry for MCP-enabled services.
 
     Services can be registered with:
-    - A Pydantic input model
-    - A Pydantic output model
-    - Pricing information
-    - MCP-specific metadata
+    - @mcp_tool decorator (local, in-memory)
+    - API endpoint /v1/billing/services (persistent, DB)
+
+    The registry provides:
+    - Service discovery for MCP manifests
+    - Schema extraction and translation
+    - Unified query interface for billing engine
     """
 
     def __init__(self):
@@ -247,6 +278,13 @@ class ServiceRegistry:
         """Get the callable for a locally registered service."""
         return self._func_registry.get(service_id)
 
+    async def get(self, service_id: str) -> dict | None:
+        """Get a service from local or persistent registry."""
+        local = self.get_local(service_id)
+        if local:
+            return local
+        return await self.get_persistent(service_id)
+
     async def get_persistent(self, service_id: str) -> dict | None:
         """Get a persistently registered service from the database."""
         async with self._session_factory()() as session:
@@ -330,11 +368,32 @@ class ServiceRegistry:
 
             return results
 
-    async def list_all(self) -> list[dict]:
+    async def list_all(self, category: ServiceCategory | None = None) -> list[dict]:
         """List all services (local + persistent)."""
         local = await self.list_local()
-        persistent = await self.list_persistent()
-        return local + persistent
+        persistent = await self.list_persistent(category=category)
+
+        all_services = local + persistent
+        if category:
+            all_services = [s for s in all_services if s.get("category") == category.value]
+
+        return [s for s in all_services if s.get("is_active", True)]
+
+    async def get_pricing(self, service_id: str) -> tuple[float, str] | None:
+        """
+        Get pricing for a service. Used by billing engine.
+
+        Returns:
+            Tuple of (credits_per_unit, unit_name) or None if not found
+        """
+        service = await self.get(service_id)
+        if service:
+            return (service.get("credits_per_unit", 1.0), service.get("unit_name", "call"))
+        return None
+
+    def to_mcp_tool(self, service: dict) -> dict:
+        """Convert a service record to MCP tool format."""
+        return _service_to_mcp_tool(service)
 
     def unregister_local(self, service_id: str) -> bool:
         """Unregister a local service."""

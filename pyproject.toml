@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Headless middleware API for the Business-to-Agent (B2A) economy"
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.0.0"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

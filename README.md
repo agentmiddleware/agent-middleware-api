@@ -301,6 +301,61 @@ See [`b2a_sdk/README.md`](./b2a_sdk/README.md) for full documentation.
 
 ---
 
+## Safe Exploration (Dry-Run Sandbox)
+
+Agents can safely test billing operations without affecting real wallet balances or triggering velocity monitoring.
+
+### Session-Based Simulation
+
+```python
+from b2a_sdk import B2AClient
+from b2a_sdk.decorators import billable
+
+b2a = B2AClient(api_key="key", wallet_id="agent-001")
+
+@billable(b2a, wallet_id="agent-001", service_category="content_factory", units=10.0)
+async def generate_video(url: str):
+    return {"url": url}
+
+# Simulation - no real charges
+async with b2a.simulate_session(wallet_id="agent-001") as sim:
+    await generate_video("https://example.com/video.mp4")
+    print(f"Cost: {sim.total_cost}")  # 500 credits
+    print(f"Would succeed: {sim.would_succeed}")  # True
+
+# Real execution
+await generate_video("https://example.com/video.mp4")  # Real deduction
+```
+
+### Single-Shot Estimation
+
+```python
+# Quick price check without session overhead
+estimate = await b2a.get_dry_run_estimate(
+    "agent-001",
+    "content_factory",
+    units=10.0,
+)
+print(f"Would cost: {estimate['credits_would_charge']} credits")
+```
+
+### API Endpoints
+
+```bash
+# Start a simulation session (15 min TTL)
+POST /v1/billing/dry-run/session
+{"wallet_id": "agent-001"}
+
+# Simulate charges within session
+POST /v1/billing/dry-run/charge
+{"wallet_id": "agent-001", "service": "content_factory", "units": 10.0, "dry_run_session_id": "..."}
+
+# End session and get summary
+DELETE /v1/billing/dry-run/session/{session_id}
+```
+
+---
+
 ## MCP Server (`/mcp`)
 
 Model Context Protocol (MCP) enables agents to discover and call your billable services. Tools are automatically exposed with their schemas and pricing.

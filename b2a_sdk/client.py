@@ -432,6 +432,40 @@ class B2AClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_dry_run_estimate(
+        self,
+        wallet_id: str,
+        service_category: str,
+        units: float = 1.0,
+    ) -> dict[str, Any]:
+        """
+        Convenience method for single-shot cost estimation without session overhead.
+
+        Use this for quick price checks when you don't need cumulative tracking.
+
+        Args:
+            wallet_id: Wallet to check
+            service_category: Service category to estimate
+            units: Number of units
+
+        Returns:
+            Dict with credits_would_charge, would_succeed, etc.
+
+        Example:
+            estimate = await b2a.get_dry_run_estimate(
+                "agent-001",
+                "content_factory",
+                units=10.0,
+            )
+            print(f"Would cost: {estimate['credits_would_charge']} credits")
+        """
+        return await self.simulate_charge(
+            wallet_id=wallet_id,
+            service_category=service_category,
+            units=units,
+            session_id=None,
+        )
+
     async def close(self) -> None:
         """Close the underlying HTTP client."""
         await self._client.aclose()
