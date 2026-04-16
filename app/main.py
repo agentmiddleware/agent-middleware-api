@@ -44,6 +44,7 @@ from .routers import (
     mcp,
     kyc,
     api_keys,
+    awi,
 )
 
 settings = get_settings()
@@ -149,6 +150,7 @@ app.include_router(webhooks.router)
 app.include_router(mcp.router)
 app.include_router(kyc.router)
 app.include_router(api_keys.router)
+app.include_router(awi.router)
 
 
 # --- Discovery & Health Endpoints ---
