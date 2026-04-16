@@ -116,6 +116,29 @@ class SessionSummary:
     charge_count: int
 
 
+@dataclass
+class CommitResult:
+    """Result of committing a sandbox session to real billing."""
+    session_id: str
+    wallet_id: str
+    committed_charges: int
+    total_credits_deducted: Decimal
+    real_balance_before: Decimal
+    real_balance_after: Decimal
+    ledger_entries: list[dict]
+    success: bool
+    message: str
+
+
+@dataclass
+class RevertResult:
+    """Result of reverting a sandbox session."""
+    session_id: str
+    wallet_id: str
+    reverted: bool
+    message: str
+
+
 class ShadowLedger:
     """
     Redis-backed shadow ledger for dry-run billing simulations.
@@ -385,6 +408,163 @@ class ShadowLedger:
         )
 
         return summary
+
+    async def commit_session(
+        self,
+        session_id: str,
+        agent_money,
+    ) -> CommitResult:
+        """
+        Commit a sandbox session to real billing.
+
+        Applies all simulated charges to the real wallet via AgentMoney.
+        Uses the charge service for each simulated operation.
+
+        Args:
+            session_id: The dry-run session to commit
+            agent_money: AgentMoney service instance for billing
+
+        Returns:
+            CommitResult with applied charges and new balance
+        """
+        session = await self.get_session(session_id)
+        if not session:
+            return CommitResult(
+                session_id=session_id,
+                wallet_id="",
+                committed_charges=0,
+                total_credits_deducted=Decimal("0"),
+                real_balance_before=Decimal("0"),
+                real_balance_after=Decimal("0"),
+                ledger_entries=[],
+                success=False,
+                message="Session not found",
+            )
+
+        if not session.simulated_charges:
+            await self.end_session(session_id)
+            return CommitResult(
+                session_id=session_id,
+                wallet_id=session.wallet_id,
+                committed_charges=0,
+                total_credits_deducted=Decimal("0"),
+                real_balance_before=session.real_balance,
+                real_balance_after=session.real_balance,
+                ledger_entries=[],
+                success=True,
+                message="No charges to commit",
+            )
+
+        real_balance_before = session.real_balance
+        total_deducted = Decimal("0")
+        ledger_entries = []
+        committed_count = 0
+        errors = []
+
+        for charge in session.simulated_charges:
+            try:
+                from ..schemas.billing import ServiceCategory
+                category = ServiceCategory(charge.service_category)
+
+                result = await agent_money.charge(
+                    wallet_id=session.wallet_id,
+                    service_category=category,
+                    units=Decimal(str(charge.units)),
+                    description=f"[COMMITTED] {charge.description}",
+                    dry_run=False,
+                )
+
+                total_deducted += charge.credits
+                committed_count += 1
+
+                ledger_entries.append({
+                    "charge_id": charge.charge_id,
+                    "service_category": charge.service_category,
+                    "units": charge.units,
+                    "credits": float(charge.credits),
+                    "description": charge.description,
+                    "committed": True,
+                })
+
+            except Exception as e:
+                logger.error(f"Failed to commit charge {charge.charge_id}: {e}")
+                errors.append(f"{charge.service_category}: {str(e)}")
+
+                ledger_entries.append({
+                    "charge_id": charge.charge_id,
+                    "service_category": charge.service_category,
+                    "units": charge.units,
+                    "credits": float(charge.credits),
+                    "description": charge.description,
+                    "committed": False,
+                    "error": str(e),
+                })
+
+        wallet = await agent_money.get_wallet(session.wallet_id)
+        real_balance_after = wallet.balance if wallet else real_balance_before
+
+        await self.end_session(session_id)
+
+        success = committed_count == len(session.simulated_charges)
+        message = (
+            f"Committed {committed_count}/{len(session.simulated_charges)} charges. "
+            f"Deducted {total_deducted} credits."
+        )
+        if errors:
+            message += f" Errors: {'; '.join(errors[:3])}"
+
+        logger.info(f"Committed sandbox session {session_id}: {message}")
+
+        return CommitResult(
+            session_id=session_id,
+            wallet_id=session.wallet_id,
+            committed_charges=committed_count,
+            total_credits_deducted=total_deducted,
+            real_balance_before=real_balance_before,
+            real_balance_after=real_balance_after,
+            ledger_entries=ledger_entries,
+            success=success,
+            message=message,
+        )
+
+    async def revert_session(self, session_id: str) -> RevertResult:
+        """
+        Revert a sandbox session.
+
+        Simply discards the simulated charges without affecting real billing.
+        The session is cleaned up.
+
+        Args:
+            session_id: The dry-run session to revert
+
+        Returns:
+            RevertResult confirming the revert
+        """
+        session = await self.get_session(session_id)
+        if not session:
+            return RevertResult(
+                session_id=session_id,
+                wallet_id="",
+                reverted=False,
+                message="Session not found",
+            )
+
+        charge_count = len(session.simulated_charges)
+        total = session.total_simulated
+
+        await self.end_session(session_id)
+
+        logger.info(
+            f"Reverted sandbox session {session_id}: "
+            f"discarded {charge_count} charges ({total} credits)"
+        )
+
+        return RevertResult(
+            session_id=session_id,
+            wallet_id=session.wallet_id,
+            reverted=True,
+            message=f"Reverted {charge_count} simulated charges ({total} credits). No changes made to real wallet.",
+        )
 
     async def list_sessions(self, wallet_id: str) -> list[DryRunSession]:
         """List all active sessions for a wallet."""

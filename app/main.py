@@ -24,7 +24,7 @@ from .db.database import init_db, close_db
 from .routers import (
     iot, telemetry, media, comms, docs, factory, red_team, oracle,
     billing, launch, protocol, rtaas, sandbox, telemetry_scope,
-    dashboard, broadcast, ai, webhooks, mcp, kyc,
+    dashboard, broadcast, ai, webhooks, mcp, kyc, api_keys,
 )
 
 settings = get_settings()
@@ -125,6 +125,7 @@ app.include_router(docs.router)
 app.include_router(webhooks.router)
 app.include_router(mcp.router)
 app.include_router(kyc.router)
+app.include_router(api_keys.router)
 
 
 # --- Discovery & Health Endpoints ---

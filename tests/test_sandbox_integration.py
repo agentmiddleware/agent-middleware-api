@@ -351,3 +351,128 @@ class TestBillingRouterDryRun:
         assert data["session_id"] == session_id
         assert data["charge_count"] == 1
         assert data["total_simulated_credits"] == 2.0
+
+    @pytest.mark.anyio
+    async def test_commit_dry_run_session(self, client):
+        """POST /v1/billing/dry-run/session/{id}/commit commits charges to billing."""
+        wallet_resp = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={"sponsor_name": "Commit Test", "email": "commit@test.com", "initial_credits": 10000},
+            headers={"X-API-Key": "test-key"},
+        )
+        wallet_id = wallet_resp.json()["wallet_id"]
+
+        create_resp = await client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_id},
+            headers={"X-API-Key": "test-key"},
+        )
+        session_id = create_resp.json()["session_id"]
+
+        charge_resp = await client.post(
+            "/v1/billing/dry-run/charge",
+            json={
+                "wallet_id": wallet_id,
+                "service": "iot_bridge",
+                "units": 5.0,
+                "dry_run_session_id": session_id,
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        assert charge_resp.status_code == 200
+
+        commit_resp = await client.post(
+            f"/v1/billing/dry-run/session/{session_id}/commit",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert commit_resp.status_code == 200
+        data = commit_resp.json()
+        assert data["session_id"] == session_id
+        assert data["wallet_id"] == wallet_id
+        assert data["committed_charges"] == 1
+        assert data["total_credits_deducted"] == 10.0
+        assert data["success"] is True
+
+    @pytest.mark.anyio
+    async def test_revert_dry_run_session(self, client):
+        """POST /v1/billing/dry-run/session/{id}/revert discards charges."""
+        wallet_resp = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={"sponsor_name": "Revert Test", "email": "revert@test.com", "initial_credits": 10000},
+            headers={"X-API-Key": "test-key"},
+        )
+        wallet_id = wallet_resp.json()["wallet_id"]
+
+        create_resp = await client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_id},
+            headers={"X-API-Key": "test-key"},
+        )
+        session_id = create_resp.json()["session_id"]
+
+        charge_resp = await client.post(
+            "/v1/billing/dry-run/charge",
+            json={
+                "wallet_id": wallet_id,
+                "service": "iot_bridge",
+                "units": 5.0,
+                "dry_run_session_id": session_id,
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        assert charge_resp.status_code == 200
+
+        revert_resp = await client.post(
+            f"/v1/billing/dry-run/session/{session_id}/revert",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert revert_resp.status_code == 200
+        data = revert_resp.json()
+        assert data["session_id"] == session_id
+        assert data["wallet_id"] == wallet_id
+        assert data["reverted"] is True
+
+    @pytest.mark.anyio
+    async def test_commit_nonexistent_session_returns_404(self, client):
+        """Committing non-existent session returns 404."""
+        resp = await client.post(
+            "/v1/billing/dry-run/session/nonexistent-session/commit",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.anyio
+    async def test_revert_nonexistent_session_returns_404(self, client):
+        """Reverting non-existent session returns 404."""
+        resp = await client.post(
+            "/v1/billing/dry-run/session/nonexistent-session/revert",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.anyio
+    async def test_commit_empty_session(self, client):
+        """Committing session with no charges succeeds with message."""
+        wallet_resp = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={"sponsor_name": "Empty Commit", "email": "empty@test.com", "initial_credits": 10000},
+            headers={"X-API-Key": "test-key"},
+        )
+        wallet_id = wallet_resp.json()["wallet_id"]
+
+        create_resp = await client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_id},
+            headers={"X-API-Key": "test-key"},
+        )
+        session_id = create_resp.json()["session_id"]
+
+        commit_resp = await client.post(
+            f"/v1/billing/dry-run/session/{session_id}/commit",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert commit_resp.status_code == 200
+        data = commit_resp.json()
+        assert data["committed_charges"] == 0
+        assert data["success"] is True
+        assert "No charges to commit" in data["message"]

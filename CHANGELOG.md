@@ -77,20 +77,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `b2a.get_dry_run_estimate()` for single-shot cost checks
   - Velocity isolation: dry runs never touch VelocityMonitor
 
+- **API Key Rotation** (`app/services/api_key_service.py`, `app/routers/api_keys.py`)
+  - `POST /v1/api-keys` - Create new API key for wallet
+  - `GET /v1/api-keys/{wallet_id}` - List all keys for wallet
+  - `POST /v1/api-keys/rotate` - Rotate key with optional revocation
+  - `DELETE /v1/api-keys/{wallet_id}/{key_id}` - Revoke specific key
+  - `POST /v1/api-keys/emergency-revoke` - Emergency revocation for compromised wallets
+  - `GET /v1/api-keys/{wallet_id}/logs` - Rotation audit logs
+  - Keys stored hashed (SHA-256) with masked display
+  - Automatic rotation on suspicious activity
+  - Security alerts via Slack notifications
+
+- **Sandbox Engine Wired to Billing** (`app/services/shadow_ledger.py`, `app/routers/billing.py`)
+  - `POST /v1/billing/dry-run/session/{session_id}/commit` - Commit sandbox to real billing
+  - `POST /v1/billing/dry-run/session/{session_id}/revert` - Revert and discard sandbox
+  - Simulate operations in sandbox, then commit to apply charges
+  - Revert to cancel without affecting real wallet
+  - Full audit trail of committed vs reverted operations
+
 - **Database Migrations** (`migrations/versions/`)
   - `001_initial.py` - Core wallet/ledger schema
   - `002_stripe_fields.py` - Stripe payment tracking fields
   - `003_velocity_monitoring.py` - Velocity monitoring fields
   - `004_kyc_verification.py` - KYC verification tables
+  - `005_api_keys.py` - API key rotation tables
 
 ### Changed
 
 - **`app/core/config.py`** - Added Stripe, notification, velocity monitoring, and KYC settings
-- **`app/main.py`** - Added KYC router registration
-- **`app/schemas/billing.py`** - Added KYCStatus enum, KYC-related schemas, and wallet kyc_status field
-- **`app/db/models.py`** - Added KYCVerificationModel, wallet kyc_status and kyc_verified_at fields
+- **`app/main.py`** - Added KYC and API key routers
+- **`app/schemas/billing.py`** - Added KYCStatus, APIKeyStatus, RotationType, and sandbox schemas
+- **`app/db/models.py`** - Added KYCVerificationModel, APIKeyModel, KeyRotationLogModel
 - **`app/db/converters.py`** - Added kyc_status to wallet conversion
-- **`tests/conftest.py`** - Added kyc_verifications cleanup to test fixtures
+- **`app/services/shadow_ledger.py`** - Added commit_session and revert_session methods
+- **`app/routers/billing.py`** - Added commit/revert endpoints for sandbox sessions
+- **`tests/conftest.py`** - Added cleanup for API key tables
 
 ### Fixed
 

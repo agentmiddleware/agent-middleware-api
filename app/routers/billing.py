@@ -803,6 +803,85 @@ async def end_dry_run_session(
 
 
 @router.post(
+    "/dry-run/session/{session_id}/commit",
+    summary="Commit sandbox session to billing",
+    description=(
+        "Commit all simulated charges to real billing. "
+        "This applies all sandbox charges to the wallet's real balance. "
+        "Use this after reviewing the simulation results and deciding to proceed."
+    ),
+)
+async def commit_dry_run_session(
+    session_id: str,
+    api_key: str = Depends(verify_api_key),
+    money: AgentMoney = Depends(get_agent_money),
+):
+    """
+    Commit a sandbox session to real billing.
+
+    Applies all simulated charges to the real wallet.
+    The session is ended after committing.
+    """
+    shadow_ledger = get_shadow_ledger()
+    result = await shadow_ledger.commit_session(session_id, money)
+
+    if result.wallet_id == "":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+        )
+
+    return {
+        "session_id": result.session_id,
+        "wallet_id": result.wallet_id,
+        "committed_charges": result.committed_charges,
+        "total_credits_deducted": float(result.total_credits_deducted),
+        "real_balance_before": float(result.real_balance_before),
+        "real_balance_after": float(result.real_balance_after),
+        "ledger_entries": result.ledger_entries,
+        "success": result.success,
+        "message": result.message,
+    }
+
+
+@router.post(
+    "/dry-run/session/{session_id}/revert",
+    summary="Revert sandbox session",
+    description=(
+        "Revert a sandbox session and discard all simulated charges. "
+        "No changes are made to the real wallet. "
+        "This is useful when the simulation shows the operation would fail "
+        "or you're not ready to proceed."
+    ),
+)
+async def revert_dry_run_session(
+    session_id: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Revert a sandbox session.
+
+    Discards all simulated charges without affecting the real wallet.
+    The session is ended after reverting.
+    """
+    shadow_ledger = get_shadow_ledger()
+    result = await shadow_ledger.revert_session(session_id)
+
+    if not result.reverted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+        )
+
+    return {
+        "session_id": result.session_id,
+        "wallet_id": result.wallet_id,
+        "reverted": result.reverted,
+        "message": result.message,
+    }
+
+
+@router.post(
     "/dry-run/charge",
     response_model=SimulatedChargeResponse,
     summary="Simulate a charge",
