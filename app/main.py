@@ -15,23 +15,38 @@ Zero GUI. Your customer is an autonomous agent.
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
 from .core.rate_limiter import RateLimitMiddleware
+from .db.database import init_db, close_db
 from .routers import (
     iot, telemetry, media, comms, docs, factory, red_team, oracle,
     billing, launch, protocol, rtaas, sandbox, telemetry_scope,
-    dashboard, broadcast, ai,
+    dashboard, broadcast, ai, webhooks,
 )
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup: Initialize database if configured
+    if settings.DATABASE_URL:
+        try:
+            await init_db()
+            logger.info("Database initialized")
+        except Exception as e:
+            logger.warning(f"Database initialization failed: {e}")
+
     yield
+
+    # Shutdown: Close database connections
+    await close_db()
     await close_durable_state()
+    logger.info("Database connections closed")
 
 
 app = FastAPI(
@@ -107,6 +122,7 @@ app.include_router(dashboard.router)
 app.include_router(broadcast.router)
 app.include_router(ai.router)
 app.include_router(docs.router)
+app.include_router(webhooks.router)
 
 
 # --- Discovery & Health Endpoints ---

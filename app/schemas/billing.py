@@ -5,11 +5,9 @@ Two-tiered wallet system:
 - Human Sponsor Layer: Fiat ingestion via Stripe/payment rails → ecosystem credits
 - Agent Wallet Layer: Pre-paid, programmatic wallets for autonomous spending
 
-Agents can't hold credit cards, sign contracts, or pass 2FA.
-Every agent needs a human "liability sink" who provisions its budget.
-
-Billing model: Per-action micro-metering, not monthly SaaS subscriptions.
-Agents transact at superhuman speed — the ledger must keep up.
+IMPORTANT: While the API accepts/returns float for backward compatibility,
+the service layer uses Decimal for all monetary calculations to avoid
+floating-point precision errors (e.g., 0.1 + 0.2 ≠ 0.3 with floats).
 """
 
 from pydantic import BaseModel, Field
@@ -24,29 +22,27 @@ import re
 
 class WalletType(str, Enum):
     """Wallet types in the three-tier system."""
-    SPONSOR = "sponsor"     # Human-owned root account (the liability sink)
-    AGENT = "agent"         # Machine-owned pre-paid wallet
-    CHILD = "child"         # Sub-agent wallet spawned by an agent (spend-capped)
+    SPONSOR = "sponsor"
+    AGENT = "agent"
+    CHILD = "child"
 
 
 class WalletStatus(str, Enum):
     ACTIVE = "active"
-    SUSPENDED = "suspended"    # Insufficient funds
-    FROZEN = "frozen"          # Manual hold by sponsor
+    SUSPENDED = "suspended"
+    FROZEN = "frozen"
     CLOSED = "closed"
 
 
 class LedgerAction(str, Enum):
-    """Types of ledger entries."""
-    CREDIT = "credit"             # Funds added (top-up, sponsor provision)
-    DEBIT = "debit"               # Funds consumed (API usage)
-    TRANSFER = "transfer"         # Sponsor → agent wallet
-    REFUND = "refund"             # Reversed charge
-    ARBITRAGE_MARGIN = "arbitrage_margin"  # Profit booked on swarm routing
+    CREDIT = "credit"
+    DEBIT = "debit"
+    TRANSFER = "transfer"
+    REFUND = "refund"
+    ARBITRAGE_MARGIN = "arbitrage_margin"
 
 
 class ServiceCategory(str, Enum):
-    """Billable service categories mapped to our pillars."""
     IOT_BRIDGE = "iot_bridge"
     TELEMETRY_PM = "telemetry_pm"
     MEDIA_ENGINE = "media_engine"
@@ -75,6 +71,13 @@ class AlertType(str, Enum):
     ANOMALOUS_SPEND = "anomalous_spend"
 
 
+class AlertSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+
 # ---------------------------------------------------------------------------
 # Wallet Schemas
 # ---------------------------------------------------------------------------
@@ -99,7 +102,7 @@ class CreateSponsorWalletRequest(BaseModel):
     initial_credits: float = Field(
         default=0.0,
         ge=0,
-        description="Initial credit balance (in ecosystem credits). 1 credit ≈ $0.001 USD.",
+        description="Initial credit balance (in ecosystem credits).",
     )
     currency: str = Field(
         default="USD",
@@ -113,82 +116,24 @@ class CreateSponsorWalletRequest(BaseModel):
 
 class CreateAgentWalletRequest(BaseModel):
     """Provision a pre-paid agent wallet under a sponsor."""
-    sponsor_wallet_id: str = Field(
-        ...,
-        description="ID of the sponsor wallet funding this agent.",
-    )
-    agent_id: str = Field(
-        ...,
-        description="Agent ID from the comms registry (or external agent identifier).",
-    )
-    budget_credits: float = Field(
-        ...,
-        gt=0,
-        description="Credits to provision from the sponsor's balance.",
-        examples=[10000.0],
-    )
-    daily_limit: float | None = Field(
-        None,
-        ge=0,
-        description="Optional daily spend cap in credits. Null = unlimited.",
-    )
-    auto_refill: bool = Field(
-        default=False,
-        description="Auto-refill from sponsor when balance drops below threshold.",
-    )
-    auto_refill_threshold: float = Field(
-        default=100.0,
-        ge=0,
-        description="Refill trigger threshold (credits).",
-    )
-    auto_refill_amount: float = Field(
-        default=1000.0,
-        ge=0,
-        description="Amount to refill (credits).",
-    )
+    sponsor_wallet_id: str = Field(..., description="ID of the sponsor wallet funding this agent.")
+    agent_id: str = Field(..., description="Agent ID from the comms registry.")
+    budget_credits: float = Field(..., gt=0, description="Credits to provision from the sponsor's balance.")
+    daily_limit: float | None = Field(default=None, ge=0, description="Optional daily spend cap.")
+    auto_refill: bool = Field(default=False, description="Auto-refill from sponsor when balance drops below threshold.")
+    auto_refill_threshold: float = Field(default=100.0, ge=0, description="Refill trigger threshold.")
+    auto_refill_amount: float = Field(default=1000.0, ge=0, description="Amount to refill.")
 
 
 class CreateChildWalletRequest(BaseModel):
-    """Spawn a sub-agent child wallet from an agent wallet.
-
-    Enables hierarchical swarm budgeting: a master agent building a tool
-    spins up specialized sub-agents, each with a micro-budget and hard
-    spend cap. The child wallet draws from the parent agent's balance.
-    """
-    parent_wallet_id: str = Field(
-        ...,
-        description="ID of the parent agent wallet funding this child.",
-    )
-    child_agent_id: str = Field(
-        ...,
-        description="Identifier for the child sub-agent (e.g., 'code-writer-01').",
-    )
-    budget_credits: float = Field(
-        ...,
-        gt=0,
-        description="Credits to provision from parent's balance.",
-        examples=[2000.0],
-    )
-    max_spend: float = Field(
-        ...,
-        gt=0,
-        description="Hard lifetime spend cap in credits. Wallet freezes at this limit.",
-        examples=[2000.0],
-    )
-    task_description: str = Field(
-        default="",
-        description="What this child agent is supposed to accomplish.",
-        examples=["Write unit tests for the scraper module"],
-    )
-    ttl_seconds: int | None = Field(
-        None,
-        gt=0,
-        description="Time-to-live in seconds. Wallet auto-freezes after expiry.",
-    )
-    auto_reclaim: bool = Field(
-        default=True,
-        description="Reclaim unspent credits back to parent when child completes or expires.",
-    )
+    """Spawn a sub-agent child wallet from an agent wallet."""
+    parent_wallet_id: str = Field(..., description="ID of the parent agent wallet funding this child.")
+    child_agent_id: str = Field(..., description="Identifier for the child sub-agent.")
+    budget_credits: float = Field(..., gt=0, description="Credits to provision from parent's balance.")
+    max_spend: float = Field(..., gt=0, description="Hard lifetime spend cap in credits.")
+    task_description: str = Field(default="", description="What this child agent is supposed to accomplish.")
+    ttl_seconds: int | None = Field(default=None, gt=0, description="Time-to-live in seconds.")
+    auto_reclaim: bool = Field(default=True, description="Reclaim unspent credits when child completes.")
 
 
 class ChildWalletResponse(BaseModel):
@@ -216,7 +161,7 @@ class SwarmBudgetSummary(BaseModel):
     active_children: int
     completed_children: int
     frozen_children: int
-    children: list[ChildWalletResponse]
+    children: list["WalletResponse"]
 
 
 class ReclaimResponse(BaseModel):
@@ -232,16 +177,22 @@ class WalletResponse(BaseModel):
     """Wallet details."""
     wallet_id: str
     wallet_type: WalletType
-    owner_name: str
+    owner_name: str | None = None
+    email: str | None = None
     balance: float = Field(..., description="Current credit balance.")
     lifetime_credits: float = Field(..., description="Total credits ever deposited.")
     lifetime_debits: float = Field(..., description="Total credits ever consumed.")
     status: WalletStatus
     daily_limit: float | None = None
-    daily_spent: float = 0.0
+    auto_refill: bool = False
+    auto_refill_threshold: float | None = None
+    auto_refill_amount: float | None = None
     sponsor_wallet_id: str | None = None
     agent_id: str | None = None
-    auto_refill: bool = False
+    child_agent_id: str | None = None
+    max_spend: float | None = None
+    task_description: str | None = None
+    ttl_seconds: int | None = None
     created_at: datetime
     metadata: dict = Field(default_factory=dict)
 
@@ -260,28 +211,13 @@ class LedgerEntry(BaseModel):
     entry_id: str
     wallet_id: str
     action: LedgerAction
-    amount: float = Field(
-        ...,
-        description="Credit amount. Positive for credits/refunds, negative for debits.",
-    )
-    balance_after: float = Field(
-        ...,
-        description="Wallet balance after this transaction.",
-    )
+    amount: float = Field(..., description="Credit amount (positive=credit, negative=debit).")
+    balance_after: float = Field(..., description="Wallet balance after this transaction.")
     service_category: ServiceCategory | None = None
     description: str = ""
-    request_path: str | None = Field(
-        default=None,
-        description="API path that triggered this charge (e.g., POST /v1/iot/devices).",
-    )
-    compute_cost: float | None = Field(
-        default=None,
-        description="Internal compute cost (for arbitrage margin calculation).",
-    )
-    margin: float | None = Field(
-        default=None,
-        description="Profit margin = charged amount - compute cost.",
-    )
+    request_path: str | None = None
+    compute_cost: float | None = None
+    margin: float | None = None
     timestamp: datetime
     metadata: dict = Field(default_factory=dict)
 
@@ -291,8 +227,8 @@ class LedgerResponse(BaseModel):
     entries: list[LedgerEntry]
     total: int
     wallet_id: str
-    period_credits: float = Field(..., description="Total credits in this period.")
-    period_debits: float = Field(..., description="Total debits in this period.")
+    period_credits: float
+    period_debits: float
 
 
 # ---------------------------------------------------------------------------
@@ -301,24 +237,10 @@ class LedgerResponse(BaseModel):
 
 class TopUpRequest(BaseModel):
     """Request to add credits to a sponsor wallet via fiat payment."""
-    wallet_id: str = Field(
-        ...,
-        description="Sponsor wallet to top up.",
-    )
-    amount_fiat: float = Field(
-        ...,
-        gt=0,
-        description="Amount in fiat currency (e.g., USD).",
-        examples=[50.00],
-    )
-    payment_method: str = Field(
-        default="stripe",
-        description="Payment rail to use.",
-    )
-    payment_token: str | None = Field(
-        None,
-        description="Payment method token from the fiat provider (Stripe token, etc.).",
-    )
+    wallet_id: str = Field(..., description="Sponsor wallet to top up.")
+    amount_fiat: float = Field(..., gt=0, description="Amount in fiat currency (e.g., USD).")
+    payment_method: str = Field(default="stripe", description="Payment rail to use.")
+    payment_token: str | None = Field(default=None, description="Payment method token.")
 
 
 class TopUpResponse(BaseModel):
@@ -326,39 +248,21 @@ class TopUpResponse(BaseModel):
     top_up_id: str
     wallet_id: str
     amount_fiat: float
-    credits_added: float = Field(
-        ...,
-        description="Credits deposited (fiat × exchange rate).",
-    )
-    exchange_rate: float = Field(
-        ...,
-        description="Credits per fiat unit. Default: 1000 credits per $1 USD.",
-    )
+    credits_added: float
+    exchange_rate: float
     status: TopUpStatus
-    payment_url: str | None = Field(
-        default=None,
-        description="URL for completing payment (if async checkout flow).",
-    )
+    payment_url: str | None = None
 
 
 class InsufficientFundsResponse(BaseModel):
-    """Structured 402 Payment Required response for agents.
-
-    When an agent's wallet is empty, this tells the agent (or its sponsor)
-    exactly what happened and how to fix it programmatically.
-    """
+    """Structured 402 Payment Required response."""
     error: str = "insufficient_funds"
     wallet_id: str
     current_balance: float
     required_amount: float
     shortfall: float
-    top_up_url: str = Field(
-        ...,
-        description="Programmatic webhook the agent can forward to its sponsor.",
-    )
-    message: str = Field(
-        default="Wallet balance insufficient. Forward top_up_url to your sponsor for provisioning.",
-    )
+    top_up_url: str
+    message: str = "Wallet balance insufficient."
 
 
 # ---------------------------------------------------------------------------
@@ -368,25 +272,15 @@ class InsufficientFundsResponse(BaseModel):
 class ServicePricing(BaseModel):
     """Per-action pricing for a service category."""
     service_category: ServiceCategory
-    unit: str = Field(
-        ...,
-        description="Billing unit (e.g., 'request', 'ms', 'token', 'frame', 'byte').",
-    )
-    credits_per_unit: float = Field(
-        ...,
-        gt=0,
-        description="Cost in credits per unit.",
-    )
+    unit: str
+    credits_per_unit: float
     description: str = ""
 
 
 class PricingTableResponse(BaseModel):
     """Full pricing table for all services."""
     pricing: list[ServicePricing]
-    exchange_rate: float = Field(
-        ...,
-        description="Credits per $1 USD.",
-    )
+    exchange_rate: float
     last_updated: datetime
 
 
@@ -396,34 +290,13 @@ class PricingTableResponse(BaseModel):
 
 class ArbitrageReport(BaseModel):
     """Swarm arbitrage profitability report."""
-    period: str = Field(
-        ...,
-        description="Reporting period (e.g., '2026-02-22 to 2026-02-23').",
-    )
-    total_revenue: float = Field(
-        ...,
-        description="Total credits charged to agents.",
-    )
-    total_compute_cost: float = Field(
-        ...,
-        description="Total internal compute cost.",
-    )
-    gross_margin: float = Field(
-        ...,
-        description="Revenue - compute cost.",
-    )
-    margin_percentage: float = Field(
-        ...,
-        description="Gross margin as percentage of revenue.",
-    )
-    by_service: dict[str, dict] = Field(
-        default_factory=dict,
-        description="Margin breakdown per service category.",
-    )
-    top_profitable_actions: list[dict] = Field(
-        default_factory=list,
-        description="Highest-margin individual actions.",
-    )
+    period: str
+    total_revenue: float
+    total_compute_cost: float
+    gross_margin: float
+    margin_percentage: float
+    by_service: dict[str, dict] = Field(default_factory=dict)
+    top_profitable_actions: list[dict] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -436,13 +309,49 @@ class BillingAlert(BaseModel):
     alert_type: AlertType
     wallet_id: str
     message: str
-    threshold: float | None = None
-    current_value: float | None = None
-    timestamp: datetime
+    threshold_amount: float | None = None
+    current_balance: float | None = None
+    severity: AlertSeverity = AlertSeverity.INFO
     acknowledged: bool = False
+    created_at: datetime
 
 
 class AlertListResponse(BaseModel):
     alerts: list[BillingAlert]
     total: int
     unacknowledged: int
+
+
+class RegisterServiceRequest(BaseModel):
+    """Register a new billable service in the marketplace."""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(default="", max_length=1000)
+    category: ServiceCategory
+    credits_per_unit: float = Field(..., gt=0)
+    unit_name: str = Field(default="request", max_length=50)
+    mcp_manifest: dict | None = None
+
+
+class ServiceRegistration(BaseModel):
+    """A registered billable service in the marketplace."""
+    service_id: str
+    name: str
+    description: str
+    owner_wallet_id: str
+    category: ServiceCategory
+    credits_per_unit: float
+    unit_name: str
+    mcp_manifest: dict | None = None
+    is_active: bool
+    created_at: datetime
+
+
+class TransferResponse(BaseModel):
+    """Response for a wallet-to-wallet transfer."""
+    transfer_id: str
+    from_wallet_id: str
+    to_wallet_id: str
+    amount: float
+    from_balance_after: float
+    to_balance_after: float
+    status: str
