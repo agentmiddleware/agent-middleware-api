@@ -103,7 +103,9 @@ async def list_devices(
     "/devices/{device_id}",
     response_model=DeviceResponse,
     summary="Get device details",
-    description="Retrieve registration details and bridge endpoint for a specific device.",
+    description=(
+        "Retrieve registration details and bridge endpoint for a specific device."
+    ),
 )
 async def get_device(
     device_id: str,
@@ -113,7 +115,10 @@ async def get_device(
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "device_not_found", "message": f"Device '{device_id}' not found."},
+            detail={
+                "error": "device_not_found",
+                "message": f"Device '{device_id}' not found.",
+            },
         )
     return _device_to_response(device)
 
@@ -122,7 +127,9 @@ async def get_device(
     "/devices/{device_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Deregister a device",
-    description="Remove a device from the bridge. All pending messages will be dropped.",
+    description=(
+        "Remove a device from the bridge. All pending messages will be dropped."
+    ),
 )
 async def deregister_device(
     device_id: str,
@@ -132,7 +139,10 @@ async def deregister_device(
     if not removed:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "device_not_found", "message": f"Device '{device_id}' not found."},
+            detail={
+                "error": "device_not_found",
+                "message": f"Device '{device_id}' not found.",
+            },
         )
 
 

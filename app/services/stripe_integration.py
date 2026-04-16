@@ -192,7 +192,9 @@ class StripeIntegration:
             )
             entry = result.scalar_one_or_none()
             if not entry:
-                logger.warning(f"Cannot find ledger entry for refund {payment_intent_id}")
+                logger.warning(
+                    f"Cannot find ledger entry for refund {payment_intent_id}"
+                )
                 return
 
             refund_amount = Decimal(charge.get("amount", 0)) / Decimal("100")

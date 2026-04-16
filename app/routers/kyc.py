@@ -142,7 +142,10 @@ async def get_verification_details(
     if not result:
         raise HTTPException(
             status_code=404,
-            detail={"error": "verification_not_found", "message": f"Verification {verification_id} not found"},
+            detail={
+                "error": "verification_not_found",
+                "message": f"Verification {verification_id} not found",
+            },
         )
 
     return KYCVerificationDetails(

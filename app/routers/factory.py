@@ -70,7 +70,11 @@ async def create_pipeline(
     return ContentPipelineResponse(
         pipeline_id=pipeline.pipeline_id,
         title=pipeline.title,
-        source_type="clip" if pipeline.source_clip_id else "url" if pipeline.source_url else "none",
+        source_type=(
+            "clip" if pipeline.source_clip_id
+            else "url" if pipeline.source_url
+            else "none"
+        ),
         target_formats=pipeline.target_formats,
         status=pipeline.status,
         estimated_pieces=factory.estimate_pieces(pipeline.target_formats),
@@ -158,12 +162,13 @@ async def get_content(
     summary="Launch a live content campaign",
     description=(
         "The 'Big Red Button' — submit a source video URL and targeted hooks. "
-        "Each hook is a specific segment (e.g., 30-45s reaction clip, 60s explainer). "
-        "The factory applies the 1-to-N multiplication rule: each hook produces "
-        "multiple format-adapted pieces (short videos, quote cards, carousels, text posts) "
-        "all rendered in 9:16 vertical with animated captions. "
-        "Then the AlgorithmicScheduler staggers posts across platforms "
-        "(TikTok, YouTube Shorts, Instagram Reels) to maximize view velocity."
+        "Each hook is a specific segment (e.g., 30-45s reaction clip, 60s "
+        "explainer). The factory applies the 1-to-N multiplication rule: "
+        "each hook produces multiple format-adapted pieces (short videos, "
+        "quote cards, carousels, text posts) all rendered in 9:16 vertical "
+        "with animated captions. Then the AlgorithmicScheduler staggers posts "
+        "across platforms (TikTok, YouTube Shorts, Instagram Reels) to maximize "
+        "view velocity."
     ),
 )
 async def launch_campaign(

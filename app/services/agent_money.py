@@ -46,7 +46,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.durable_state import get_durable_state
 from ..core.config import get_settings
 from ..db.database import get_session_factory
-from ..db.models import WalletModel, LedgerEntryModel, BillingAlertModel, ServiceRegistryModel
+from ..db.models import (
+    WalletModel,
+    LedgerEntryModel,
+    BillingAlertModel,
+    ServiceRegistryModel,
+)
 from ..db.converters import (
     wallet_model_to_response,
     ledger_entry_model_to_schema,
@@ -84,18 +89,66 @@ logger = logging.getLogger(__name__)
 
 # Credits per unit for each service. 1000 credits ≈ $1 USD.
 DEFAULT_PRICING: dict[ServiceCategory, tuple[str, Decimal, str]] = {
-    ServiceCategory.IOT_BRIDGE: ("request", Decimal("2.0"), "Per IoT message bridged"),
-    ServiceCategory.TELEMETRY_PM: ("event", Decimal("1.0"), "Per telemetry event ingested"),
-    ServiceCategory.MEDIA_ENGINE: ("frame", Decimal("0.5"), "Per video frame processed"),
-    ServiceCategory.AGENT_COMMS: ("message", Decimal("1.5"), "Per agent message routed"),
-    ServiceCategory.CONTENT_FACTORY: ("piece", Decimal("50.0"), "Per content piece generated"),
-    ServiceCategory.RED_TEAM: ("scan", Decimal("100.0"), "Per security scan executed"),
-    ServiceCategory.ORACLE: ("crawl", Decimal("25.0"), "Per API crawled and indexed"),
-    ServiceCategory.PLATFORM_FEE: ("request", Decimal("0.1"), "Base platform fee per API call"),
-    ServiceCategory.SWARM_DELEGATION: ("child", Decimal("5.0"), "Per child wallet spawned"),
-    ServiceCategory.PROTOCOL_GEN: ("generation", Decimal("200.0"), "Per llm.txt + OpenAPI spec generated"),
-    ServiceCategory.SANDBOX: ("session", Decimal("150.0"), "Per sandbox environment session"),
-    ServiceCategory.RTAAS: ("scan", Decimal("100.0"), "Per external Red Team scan"),
+    ServiceCategory.IOT_BRIDGE: (
+        "request",
+        Decimal("2.0"),
+        "Per IoT message bridged",
+    ),
+    ServiceCategory.TELEMETRY_PM: (
+        "event",
+        Decimal("1.0"),
+        "Per telemetry event ingested",
+    ),
+    ServiceCategory.MEDIA_ENGINE: (
+        "frame",
+        Decimal("0.5"),
+        "Per video frame processed",
+    ),
+    ServiceCategory.AGENT_COMMS: (
+        "message",
+        Decimal("1.5"),
+        "Per agent message routed",
+    ),
+    ServiceCategory.CONTENT_FACTORY: (
+        "piece",
+        Decimal("50.0"),
+        "Per content piece generated",
+    ),
+    ServiceCategory.RED_TEAM: (
+        "scan",
+        Decimal("100.0"),
+        "Per security scan executed",
+    ),
+    ServiceCategory.ORACLE: (
+        "crawl",
+        Decimal("25.0"),
+        "Per API crawled and indexed",
+    ),
+    ServiceCategory.PLATFORM_FEE: (
+        "request",
+        Decimal("0.1"),
+        "Base platform fee per API call",
+    ),
+    ServiceCategory.SWARM_DELEGATION: (
+        "child",
+        Decimal("5.0"),
+        "Per child wallet spawned",
+    ),
+    ServiceCategory.PROTOCOL_GEN: (
+        "generation",
+        Decimal("200.0"),
+        "Per llm.txt + OpenAPI spec generated",
+    ),
+    ServiceCategory.SANDBOX: (
+        "session",
+        Decimal("150.0"),
+        "Per sandbox environment session",
+    ),
+    ServiceCategory.RTAAS: (
+        "scan",
+        Decimal("100.0"),
+        "Per external Red Team scan",
+    ),
 }
 
 # Internal compute costs (what it actually costs us to serve)
@@ -191,7 +244,9 @@ class AgentMoney:
         require_kyc: bool | None = None,
     ) -> WalletResponse:
         """Create a human sponsor (liability sink) root wallet."""
-        kyc_required = require_kyc if require_kyc is not None else settings.KYC_REQUIRED_FOR_TOPUP
+        kyc_required = (
+            require_kyc if require_kyc is not None else settings.KYC_REQUIRED_FOR_TOPUP
+        )
 
         async with self._session_factory()() as session:
             async with session.begin():
@@ -207,7 +262,10 @@ class AgentMoney:
                     currency=currency,
                     owner_key=owner_key,
                     metadata_json=_metadata_to_json(metadata),
-                    kyc_status=KYCStatus.PENDING.value if kyc_required else KYCStatus.NOT_REQUIRED.value,
+                    kyc_status=(
+                        KYCStatus.PENDING.value if kyc_required
+                        else KYCStatus.NOT_REQUIRED.value
+                    ),
                     status="pending_kyc" if kyc_required else "active",
                 )
                 session.add(wallet)
@@ -252,9 +310,15 @@ class AgentMoney:
                 if not sponsor:
                     raise WalletNotFoundError(sponsor_wallet_id)
                 if sponsor.wallet_type != WalletType.SPONSOR.value:
-                    raise ValueError("Can only provision agent wallets from sponsor wallets")
+                    raise ValueError(
+                        "Can only provision agent wallets from sponsor wallets"
+                    )
                 if sponsor.balance < budget_credits:
-                    raise InsufficientFundsError(sponsor_wallet_id, sponsor.balance, budget_credits)
+                    raise InsufficientFundsError(
+                        sponsor_wallet_id,
+                        sponsor.balance,
+                        budget_credits,
+                    )
 
                 # Deduct from sponsor
                 sponsor.balance -= budget_credits
@@ -285,7 +349,9 @@ class AgentMoney:
                     action=LedgerAction.TRANSFER.value,
                     amount=-budget_credits,
                     balance_after=sponsor.balance,
-                    description=f"Provision agent wallet {agent_wallet_id} for {agent_id}",
+                    description=(
+                        f"Provision agent wallet {agent_wallet_id} for {agent_id}"
+                    ),
                 ))
                 session.add(LedgerEntryModel(
                     entry_id=str(uuid.uuid4()),
@@ -297,7 +363,9 @@ class AgentMoney:
                 ))
 
             await session.commit()
-            logger.info(f"Created agent wallet {agent_wallet_id} with {budget_credits} credits")
+            logger.info(
+                f"Created agent wallet {agent_wallet_id} with {budget_credits} credits"
+            )
             return wallet_model_to_response(agent_wallet)
 
     # --- Child Wallet Management (Swarm Delegation) ---
@@ -326,10 +394,19 @@ class AgentMoney:
 
                 if not parent:
                     raise WalletNotFoundError(parent_wallet_id)
-                if parent.wallet_type not in (WalletType.AGENT.value, WalletType.CHILD.value):
-                    raise ValueError("Only agent or child wallets can spawn child wallets")
+                if parent.wallet_type not in (
+                        WalletType.AGENT.value,
+                        WalletType.CHILD.value,
+                    ):
+                    raise ValueError(
+                        "Only agent or child wallets can spawn child wallets"
+                    )
                 if parent.balance < budget_credits:
-                    raise InsufficientFundsError(parent_wallet_id, parent.balance, budget_credits)
+                    raise InsufficientFundsError(
+                        parent_wallet_id,
+                        parent.balance,
+                        budget_credits,
+                    )
 
                 # Deduct from parent
                 parent.balance -= budget_credits
@@ -359,7 +436,10 @@ class AgentMoney:
                     action=LedgerAction.TRANSFER.value,
                     amount=-budget_credits,
                     balance_after=parent.balance,
-                    description=f"Delegate to child wallet {child_wallet_id} ({child_agent_id})",
+                    description=(
+                        f"Delegate to child wallet {child_wallet_id} "
+                        f"({child_agent_id})"
+                    ),
                 ))
                 session.add(LedgerEntryModel(
                     entry_id=str(uuid.uuid4()),
@@ -483,7 +563,7 @@ class AgentMoney:
 
         async with self._session_factory()() as session:
             async with session.begin():
-                # Lock both wallets in consistent order (alphabetical) to prevent deadlocks
+                # Lock both wallets in consistent order to prevent deadlocks
                 wallet_ids = sorted([from_wallet_id, to_wallet_id])
 
                 result = await session.execute(
@@ -560,7 +640,9 @@ class AgentMoney:
 
             # Get children
             children_result = await session.execute(
-                select(WalletModel).where(WalletModel.parent_wallet_id == parent_wallet_id)
+                select(WalletModel).where(
+                    WalletModel.parent_wallet_id == parent_wallet_id
+                )
             )
             children = list(children_result.scalars().all())
 
@@ -635,7 +717,10 @@ class AgentMoney:
             simulated_balance_before=float(wallet.balance),
             simulated_balance_after=float(wallet.balance) - float(charge_amount),
             would_succeed=wallet.balance >= charge_amount,
-            reason=None if wallet.balance >= charge_amount else "insufficient_simulated_funds",
+            reason=(
+                None if wallet.balance >= charge_amount
+                else "insufficient_simulated_funds"
+            ),
             dry_run=True,
         )
 
@@ -681,7 +766,9 @@ class AgentMoney:
         margin = charge_amount - compute_cost
 
         velocity_monitor = get_velocity_monitor()
-        velocity_result = await velocity_monitor.check_and_record_charge(wallet_id, charge_amount)
+        velocity_result = (
+            await velocity_monitor.check_and_record_charge(wallet_id, charge_amount)
+        )
 
         if velocity_result.should_freeze:
             raise WalletFrozenError(wallet_id, velocity_result.reason)
@@ -703,7 +790,8 @@ class AgentMoney:
                 if wallet.wallet_type == WalletType.CHILD.value and wallet.max_spend:
                     new_debits = wallet.lifetime_debits + charge_amount
                     if new_debits > wallet.max_spend:
-                        shortfall = charge_amount - (wallet.max_spend - wallet.lifetime_debits)
+                        remaining = wallet.max_spend - wallet.lifetime_debits
+                        shortfall = charge_amount - remaining
                         return InsufficientFundsResponse(
                             wallet_id=wallet_id,
                             current_balance=wallet.balance,
@@ -721,7 +809,8 @@ class AgentMoney:
 
                 if wallet.daily_limit:
                     if wallet.daily_spent + charge_amount > wallet.daily_limit:
-                        shortfall = charge_amount - (wallet.daily_limit - wallet.daily_spent)
+                        remaining = wallet.daily_limit - wallet.daily_spent
+                        shortfall = charge_amount - remaining
                         return InsufficientFundsResponse(
                             wallet_id=wallet_id,
                             current_balance=wallet.balance,
@@ -755,7 +844,10 @@ class AgentMoney:
                     amount=-charge_amount,
                     balance_after=wallet.balance,
                     service_category=service_category.value,
-                    description=description or f"{units} × {unit_name} @ {credits_per_unit} credits",
+                    description=(
+                        description
+                        or f"{units} × {unit_name} @ {credits_per_unit} credits"
+                    ),
                     request_path=request_path,
                     compute_cost=compute_cost,
                     margin=margin,
@@ -769,7 +861,10 @@ class AgentMoney:
                         wallet_id=wallet_id,
                         alert_type=AlertType.LOW_BALANCE.value,
                         current_balance=wallet.balance,
-                        message=f"Wallet balance low: {wallet.balance} credits remaining.",
+                        message=(
+                            f"Wallet balance low: "
+                            f"{wallet.balance} credits remaining."
+                        ),
                         severity=AlertSeverity.WARNING.value,
                     )
                     session.add(alert)
@@ -801,8 +896,15 @@ class AgentMoney:
                 if wallet.wallet_type != WalletType.SPONSOR.value:
                     raise ValueError("Top-ups only allowed on sponsor wallets")
 
-                if settings.KYC_REQUIRED_FOR_TOPUP and wallet.kyc_status != KYCStatus.VERIFIED.value:
-                    raise KYCVerificationRequiredError(wallet_id, wallet.kyc_status or "unknown")
+                kyc_needed = (
+                    settings.KYC_REQUIRED_FOR_TOPUP
+                    and wallet.kyc_status != KYCStatus.VERIFIED.value
+                )
+                if kyc_needed:
+                    raise KYCVerificationRequiredError(
+                        wallet_id,
+                        wallet.kyc_status or "unknown",
+                    )
 
                 credits = amount_fiat * EXCHANGE_RATE
                 top_up_id = str(uuid.uuid4())[:12]
@@ -818,7 +920,10 @@ class AgentMoney:
                     amount=credits,
                     balance_after=wallet.balance,
                     description=f"Top-up: ${amount_fiat} → {credits} credits",
-                    metadata_json=f'{{"payment_method": "{payment_method}", "fiat_amount": "{amount_fiat}"}}',
+                    metadata_json=(
+                        f'{{"payment_method": "{payment_method}", '
+                        f'"fiat_amount": "{amount_fiat}"}}'
+                    ),
                 )
                 session.add(entry)
 
@@ -859,7 +964,12 @@ class AgentMoney:
 
                 cat = entry.service_category or "unknown"
                 if cat not in by_service:
-                    by_service[cat] = {"revenue": Decimal("0"), "cost": Decimal("0"), "margin": Decimal("0"), "transactions": 0}
+                    by_service[cat] = {
+                        "revenue": Decimal("0"),
+                        "cost": Decimal("0"),
+                        "margin": Decimal("0"),
+                        "transactions": 0,
+                    }
                 by_service[cat]["revenue"] += charge
                 by_service[cat]["cost"] += cost
                 by_service[cat]["margin"] += margin
@@ -868,18 +978,30 @@ class AgentMoney:
             # Compute percentages
             for cat_data in by_service.values():
                 rev = cat_data["revenue"]
-                cat_data["margin_pct"] = (cat_data["margin"] / rev * Decimal("100")) if rev > 0 else Decimal("0")
+                cat_data["margin_pct"] = (
+                    Decimal("100") * cat_data["margin"] / rev
+                ) if rev > 0 else Decimal("0")
 
             gross_margin = total_revenue - total_cost
-            margin_pct = (gross_margin / total_revenue * Decimal("100")) if total_revenue > 0 else Decimal("0")
+            margin_pct = (
+                Decimal("100") * gross_margin / total_revenue
+            ) if total_revenue > 0 else Decimal("0")
 
             # Top profitable actions
-            top_actions = sorted(entries, key=lambda e: e.margin or Decimal("0"), reverse=True)[:5]
+            top_actions = sorted(
+                entries,
+                key=lambda e: e.margin or Decimal("0"),
+                reverse=True,
+            )[:5]
 
             now = datetime.now(timezone.utc)
+            yesterday = (now - __import__("datetime").timedelta(days=1)).strftime(
+                "%Y-%m-%d"
+            )
+            today = now.strftime("%Y-%m-%d")
 
             return ArbitrageReport(
-                period=f"{(now.replace(hour=0, minute=0, second=0) - __import__('datetime').timedelta(days=1)).strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}",
+                period=f"{yesterday} to {today}",
                 total_revenue=total_revenue,
                 total_compute_cost=total_cost,
                 gross_margin=gross_margin,

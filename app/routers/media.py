@@ -58,7 +58,10 @@ async def upload_video(
 
     return VideoUploadResponse(
         video_id=video.video_id,
-        upload_url=None if request.source_url else f"/v1/media/videos/{video.video_id}/upload",
+        upload_url=(
+            None if request.source_url
+            else f"/v1/media/videos/{video.video_id}/upload"
+        ),
         status=video.status.value,
         estimated_processing_seconds=120 if request.source_url else None,
     )
@@ -77,7 +80,10 @@ async def get_video_status(
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "video_not_found", "message": f"Video '{video_id}' not found."},
+            detail={
+                "error": "video_not_found",
+                "message": f"Video '{video_id}' not found.",
+            },
         )
     return {
         "video_id": video.video_id,
@@ -104,7 +110,9 @@ async def get_video_status(
 )
 async def get_viral_hooks(
     video_id: str,
-    min_confidence: float = Query(0.0, ge=0.0, le=1.0, description="Minimum confidence threshold"),
+    min_confidence: float = Query(
+        0.0, ge=0.0, le=1.0, description="Minimum confidence threshold"
+    ),
     engine: MediaEngine = Depends(get_media_engine),
 ):
     video = await engine.video_store.get(video_id)

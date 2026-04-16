@@ -142,7 +142,9 @@ class AgentRegistry:
                     try:
                         loaded[agent_id] = self._agent_from_dict(record)
                     except Exception:
-                        logger.exception("Skipping corrupt comms agent record: %s", agent_id)
+                        logger.exception(
+                            "Skipping corrupt comms agent record: %s", agent_id
+                        )
                 self._agents = loaded
 
             self._hydrated = True
@@ -229,7 +231,9 @@ class MessageRouter:
         payload["message_type"] = MessageType(payload["message_type"])
         payload["priority"] = MessagePriority(payload["priority"])
         payload["delivery_status"] = DeliveryStatus(payload["delivery_status"])
-        payload["created_at"] = _parse_dt(payload.get("created_at")) or datetime.now(timezone.utc)
+        payload["created_at"] = (
+            _parse_dt(payload.get("created_at")) or datetime.now(timezone.utc)
+        )
         payload["expires_at"] = _parse_dt(payload.get("expires_at"))
         payload["delivered_at"] = _parse_dt(payload.get("delivered_at"))
         payload["acknowledged_at"] = _parse_dt(payload.get("acknowledged_at"))
@@ -254,7 +258,9 @@ class MessageRouter:
                         try:
                             loaded_messages.append(self._message_from_dict(record))
                         except Exception:
-                            logger.exception("Skipping corrupt inbox message for %s", agent_id)
+                            logger.exception(
+                                "Skipping corrupt inbox message for %s", agent_id
+                            )
                     loaded_inbox[agent_id] = loaded_messages
                 self._inbox = loaded_inbox
 
@@ -297,7 +303,10 @@ class MessageRouter:
         recipient = await self._registry.get(message.to_agent)
         if not recipient:
             message.delivery_status = DeliveryStatus.FAILED
-            logger.warning(f"Message {message.message_id} failed: recipient {message.to_agent} not found")
+            logger.warning(
+                f"Message {message.message_id} failed: recipient "
+                f"{message.to_agent} not found"
+            )
             return message
 
         # Add to recipient's inbox
@@ -356,10 +365,14 @@ class MessageRouter:
                     return True
         return False
 
-    async def _deliver_webhook(self, message: AgentMessage, recipient: RegisteredAgent) -> bool:
+    async def _deliver_webhook(
+        self, message: AgentMessage, recipient: RegisteredAgent
+    ) -> bool:
         """Deliver message via webhook. Production: use httpx with retry."""
-        # Stub: simulate webhook delivery
-        logger.info(f"Webhook delivery to {recipient.webhook_url} for {message.message_id}")
+        logger.info(
+            f"Webhook delivery to {recipient.webhook_url} for "
+            f"{message.message_id}"
+        )
         return True
 
 

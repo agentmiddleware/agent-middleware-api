@@ -63,7 +63,10 @@ async def crawl_target(
     if not result:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "crawl_failed", "message": f"Failed to crawl {request.url}"},
+            detail={
+                "error": "crawl_failed",
+                "message": f"Failed to crawl {request.url}",
+            },
         )
     return result
 
@@ -108,8 +111,12 @@ async def batch_crawl(
     ),
 )
 async def list_indexed(
-    tier: CompatibilityTier | None = Query(None, description="Filter by compatibility tier"),
-    directory_type: DirectoryType | None = Query(None, description="Filter by directory type"),
+    tier: CompatibilityTier | None = Query(
+        None, description="Filter by compatibility tier"
+    ),
+    directory_type: DirectoryType | None = Query(
+        None, description="Filter by directory type"
+    ),
     api_key: str = Depends(verify_api_key),
     oracle: AgentOracle = Depends(get_agent_oracle),
 ):

@@ -110,7 +110,10 @@ async def list_anomalies(
     "/anomalies/{anomaly_id}",
     response_model=AnomalyReport,
     summary="Get anomaly details",
-    description="Retrieve detailed information about a specific anomaly, including suggested fixes.",
+    description=(
+        "Retrieve detailed information about a specific anomaly, "
+        "including suggested fixes."
+    ),
 )
 async def get_anomaly(
     anomaly_id: str,
@@ -120,7 +123,10 @@ async def get_anomaly(
     if not anomaly:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "anomaly_not_found", "message": f"Anomaly '{anomaly_id}' not found."},
+            detail={
+                "error": "anomaly_not_found",
+                "message": f"Anomaly '{anomaly_id}' not found.",
+            },
         )
     return anomaly
 
@@ -144,7 +150,10 @@ async def generate_auto_pr(
     if not anomaly:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "anomaly_not_found", "message": f"Anomaly '{anomaly_id}' not found."},
+            detail={
+                "error": "anomaly_not_found",
+                "message": f"Anomaly '{anomaly_id}' not found.",
+            },
         )
 
     related = await pm.event_store.query(event_type=TelemetryEventType.ERROR, limit=20)

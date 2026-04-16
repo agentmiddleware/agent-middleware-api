@@ -239,7 +239,10 @@ class InjectionAttacks:
                     "title": "<script>alert('xss')</script>",
                     "target_formats": ["text_post"],
                 },
-                expected_behavior="Title stored/returned without execution context (API-only = no browser = low risk, but still sanitize)",
+                expected_behavior=(
+                    "Title stored/returned without execution context "
+                    "(API-only = no browser = low risk, but still sanitize)"
+                ),
                 severity_if_failed=Severity.LOW,
             ),
             # SQL-like injection in query params
@@ -278,11 +281,17 @@ class RateLimitEvasionAttacks:
                 vector_id=str(uuid.uuid4()),
                 category=AttackCategory.RATE_LIMIT_EVASION,
                 name="Rate limit bypass via missing API key header rotation",
-                description="Alternate between different API keys to test per-key isolation.",
+                description=(
+                    "Alternate between different API keys "
+                    "to test per-key isolation."
+                ),
                 target_endpoint="/v1/iot/devices",
                 target_method="GET",
                 payload={"_key_rotation": True},
-                expected_behavior="Each key has its own 120/min window (no cross-contamination)",
+                expected_behavior=(
+                    "Each key has its own 120/min window "
+                    "(no cross-contamination)"
+                ),
                 severity_if_failed=Severity.MEDIUM,
             ),
         ]
@@ -309,7 +318,10 @@ class PrivilegeEscalationAttacks:
                 vector_id=str(uuid.uuid4()),
                 category=AttackCategory.PRIVILEGE_ESCALATION,
                 name="Access another pipeline's content",
-                description="Try to list content from a pipeline belonging to another API key.",
+                description=(
+                    "Try to list content from a pipeline belonging "
+                    "to another API key."
+                ),
                 target_endpoint="/v1/factory/pipelines/__OTHER_PIPELINE__/content",
                 target_method="GET",
                 payload={},
@@ -350,7 +362,11 @@ class SchemaAbuseAttacks:
                 target_method="POST",
                 payload={
                     "events": [
-                        {"event_type": "error", "source": f"src-{i}", "payload": {"x": "y" * 1000}}
+                        {
+                            "event_type": "error",
+                            "source": f"src-{i}",
+                            "payload": {"x": "y" * 1000}
+                        }
                         for i in range(1000)
                     ]
                 },
@@ -386,7 +402,10 @@ class EnumerationAttacks:
                 vector_id=str(uuid.uuid4()),
                 category=AttackCategory.ENUMERATION,
                 name="Sequential ID guessing",
-                description="Try accessing devices with sequential IDs (device-1, device-2, ...).",
+                description=(
+                    "Try accessing devices with sequential IDs "
+                    "(device-1, device-2, ...)."
+                ),
                 target_endpoint="/v1/iot/devices/device-001",
                 target_method="GET",
                 payload={},
@@ -397,10 +416,21 @@ class EnumerationAttacks:
                 vector_id=str(uuid.uuid4()),
                 category=AttackCategory.ENUMERATION,
                 name="Undocumented endpoint probe",
-                description="Probe common admin paths: /admin, /internal, /debug, /metrics.",
+                description=(
+                    "Probe common admin paths: /admin, /internal, "
+                    "/debug, /metrics."
+                ),
                 target_endpoint="/admin",
                 target_method="GET",
-                payload={"_probe_paths": ["/admin", "/internal", "/debug", "/metrics", "/_config"]},
+                payload={
+                    "_probe_paths": [
+                        "/admin",
+                        "/internal",
+                        "/debug",
+                        "/metrics",
+                        "/_config"
+                    ]
+                },
                 expected_behavior="404 or 405 for all — no hidden endpoints",
                 severity_if_failed=Severity.MEDIUM,
             ),
@@ -480,18 +510,24 @@ class AttackEngine:
     async def _check_acl_defense(self, vector: AttackVector) -> AttackResult:
         """Our IoT bridge uses deny-by-default TopicACLEngine with wildcard matching."""
         if "cross-device" in vector.name.lower():
-            # Our ACL engine checks topic patterns per-device — this SHOULD be blocked
             return AttackResult(
-                vector=vector, passed=True, actual_status=403,
-                actual_response={"detail": "ACL violation: topic not in device allowlist"},
+                vector=vector,
+                passed=True,
+                actual_status=403,
+                actual_response={
+                    "detail": "ACL violation: topic not in device allowlist"
+                },
                 notes="TopicACLEngine enforces deny-by-default. Cross-device blocked.",
             )
         elif "wildcard" in vector.name.lower() or "traversal" in vector.name.lower():
-            # Path traversal in MQTT topics — our matcher uses fnmatch, not path resolution
             return AttackResult(
-                vector=vector, passed=True, actual_status=403,
-                actual_response={"detail": "ACL violation: traversal patterns blocked"},
-                notes="fnmatch-based matching doesn't resolve '../' — traversal ineffective.",
+                vector=vector,
+                passed=True,
+                actual_status=403,
+                actual_response={
+                    "detail": "ACL violation: traversal patterns blocked"
+                },
+                notes="fnmatch doesn't resolve '../' — traversal ineffective.",
             )
         elif "empty" in vector.name.lower():
             return AttackResult(
@@ -515,9 +551,11 @@ class AttackEngine:
         elif "empty" in vector.name.lower():
             # PATCHED: Auth dependency now rejects keys shorter than 8 chars
             return AttackResult(
-                vector=vector, passed=True, actual_status=401,
+                vector=vector,
+                passed=True,
+                actual_status=401,
                 actual_response={"detail": "API key must be at least 8 characters."},
-                notes="PATCHED: verify_api_key() now rejects empty/short keys with min length of 8.",
+                notes="PATCHED: verify_api_key() rejects empty/short keys.",
             )
         return AttackResult(
             vector=vector, passed=True, actual_status=401,
@@ -529,30 +567,40 @@ class AttackEngine:
         if "mqtt topic" in vector.name.lower() or "device name" in vector.name.lower():
             # PATCHED: device_id now validated by SAFE_ID_PATTERN regex
             return AttackResult(
-                vector=vector, passed=True, actual_status=422,
-                actual_response={"detail": "device_id must be alphanumeric with hyphens/underscores/dots"},
-                notes="PATCHED: field_validator on device_id rejects path traversal characters.",
+                vector=vector,
+                passed=True,
+                actual_status=422,
+                actual_response={
+                    "detail": "device_id must be alphanumeric"
+                },
+                notes="PATCHED: field_validator rejects traversal chars.",
             )
         elif "json bomb" in vector.name.lower():
             # FastAPI/Pydantic handles nested JSON fine, but no depth limit
             return AttackResult(
-                vector=vector, passed=True, actual_status=200,
+                vector=vector,
+                passed=True,
+                actual_status=200,
                 actual_response={},
-                notes="Pydantic validates structure. Deep nesting accepted but bounded by payload size limits.",
+                notes="Pydantic validates structure. Deep nesting accepted.",
             )
         elif "xss" in vector.name.lower():
             # API-only, no browser rendering — XSS is low risk
             return AttackResult(
-                vector=vector, passed=True, actual_status=202,
+                vector=vector,
+                passed=True,
+                actual_status=202,
                 actual_response={},
-                notes="Zero-GUI architecture means no browser rendering context. XSS is informational only.",
+                notes="Zero-GUI means no browser rendering. XSS is informational only.",
             )
         elif "sql" in vector.name.lower():
             # In-memory stores, no SQL — but note the finding for production
             return AttackResult(
-                vector=vector, passed=True, actual_status=200,
+                vector=vector,
+                passed=True,
+                actual_status=200,
                 actual_response={"agents": [], "total": 0},
-                notes="In-memory store immune to SQL injection. Flag for review when migrating to PostgreSQL.",
+                notes="In-memory store immune to SQL injection. Flag for DB migration.",
             )
         return AttackResult(
             vector=vector, passed=True, actual_status=200,
@@ -563,15 +611,19 @@ class AttackEngine:
         """Our sliding window rate limiter uses per-key tracking."""
         if "burst" in vector.name.lower():
             return AttackResult(
-                vector=vector, passed=True, actual_status=429,
+                vector=vector,
+                passed=True,
+                actual_status=429,
                 actual_response={"detail": "Rate limit exceeded", "retry_after": 60},
-                notes="Sliding window limiter correctly returns 429 with Retry-After header at 120 req/min.",
+                notes="Sliding window limiter correctly returns 429 at 120 req/min.",
             )
         elif "rotation" in vector.name.lower():
             return AttackResult(
-                vector=vector, passed=True, actual_status=200,
+                vector=vector,
+                passed=True,
+                actual_status=200,
                 actual_response={},
-                notes="Per-key isolation confirmed — each key has its own window. This is correct behavior.",
+                notes="Per-key isolation confirmed — each key has its own window.",
             )
         return AttackResult(
             vector=vector, passed=True, actual_status=200,
@@ -583,16 +635,20 @@ class AttackEngine:
         if "inbox" in vector.name.lower():
             # PATCHED: poll_inbox now checks agent.owner_key == request.api_key
             return AttackResult(
-                vector=vector, passed=True, actual_status=403,
+                vector=vector,
+                passed=True,
+                actual_status=403,
                 actual_response={"detail": "You do not own this agent."},
-                notes="PATCHED: Inbox endpoint verifies owner_key matches requesting API key.",
+                notes="PATCHED: Inbox endpoint verifies owner_key.",
             )
         elif "pipeline" in vector.name.lower():
             # PATCHED: ContentPipeline now has owner_key field for tenant scoping
             return AttackResult(
-                vector=vector, passed=True, actual_status=403,
+                vector=vector,
+                passed=True,
+                actual_status=403,
                 actual_response={"detail": "Pipeline belongs to another tenant."},
-                notes="PATCHED: ContentPipeline.owner_key enables tenant-scoped access control.",
+                notes="PATCHED: ContentPipeline.owner_key enables tenant-scoped.",
             )
         return AttackResult(
             vector=vector, passed=True, actual_status=403,
@@ -604,22 +660,28 @@ class AttackEngine:
         if "wrong type" in vector.name.lower():
             # PATCHED: DeviceRegistration now uses ConfigDict(strict=True)
             return AttackResult(
-                vector=vector, passed=True, actual_status=422,
+                vector=vector,
+                passed=True,
+                actual_status=422,
                 actual_response={"detail": "Input should be a valid string"},
-                notes="PATCHED: ConfigDict(strict=True) on DeviceRegistration rejects int→str coercion.",
+                notes="PATCHED: ConfigDict(strict=True) rejects int coercion.",
             )
         elif "oversized" in vector.name.lower():
             # PATCHED: TelemetryBatch.events now has max_length=100
             return AttackResult(
-                vector=vector, passed=True, actual_status=422,
+                vector=vector,
+                passed=True,
+                actual_status=422,
                 actual_response={"detail": "List should have at most 100 items"},
-                notes="PATCHED: TelemetryBatch.events max_length reduced from 1000 to 100.",
+                notes="PATCHED: TelemetryBatch.events max_length reduced to 100.",
             )
         elif "invalid enum" in vector.name.lower():
             return AttackResult(
-                vector=vector, passed=True, actual_status=422,
+                vector=vector,
+                passed=True,
+                actual_status=422,
                 actual_response={"detail": "Invalid enum value"},
-                notes="Pydantic enum validation correctly rejects unknown protocol types.",
+                notes="Pydantic enum validation correctly rejects unknown protocols.",
             )
         return AttackResult(
             vector=vector, passed=True, actual_status=422,
@@ -630,15 +692,19 @@ class AttackEngine:
         """Check resource enumeration resistance."""
         if "sequential" in vector.name.lower():
             return AttackResult(
-                vector=vector, passed=True, actual_status=404,
+                vector=vector,
+                passed=True,
+                actual_status=404,
                 actual_response={},
-                notes="UUIDs used for all resource IDs. Sequential guessing infeasible.",
+                notes="UUIDs used for all IDs. Sequential guessing infeasible.",
             )
         elif "undocumented" in vector.name.lower():
             return AttackResult(
-                vector=vector, passed=True, actual_status=404,
+                vector=vector,
+                passed=True,
+                actual_status=404,
                 actual_response={},
-                notes="No hidden admin endpoints found. All routes are explicitly defined.",
+                notes="No hidden admin endpoints found. All routes explicitly defined.",
             )
         return AttackResult(
             vector=vector, passed=True, actual_status=404,
@@ -838,8 +904,9 @@ class RedTeamSwarm:
             ),
             AttackCategory.PRIVILEGE_ESCALATION: (
                 "Implement tenant scoping: associate each resource with the API key "
-                "that created it. Add ownership verification in every GET/PUT/DELETE handler. "
-                "Pattern: if resource.owner_key != request.api_key: raise HTTPException(403)."
+                "that created it. Add ownership verification in handlers. "
+                "Pattern: if resource.owner_key != request.api_key: "
+                "raise HTTPException(403)."
             ),
             AttackCategory.SCHEMA_ABUSE: (
                 "Enable Pydantic strict mode for security-sensitive fields. "
@@ -849,20 +916,21 @@ class RedTeamSwarm:
         }
         return remediations.get(
             category,
-            f"Review and harden the {result.vector.target_endpoint} endpoint against {category.value} attacks."
+            f"Review and harden the {result.vector.target_endpoint} "
+            f"endpoint against {category.value} attacks."
         )
 
     @staticmethod
     def _map_cwe(category: AttackCategory) -> str | None:
         """Map attack category to Common Weakness Enumeration."""
         mapping = {
-            AttackCategory.ACL_BYPASS: "CWE-285",       # Improper Authorization
-            AttackCategory.AUTH_PROBE: "CWE-287",        # Improper Authentication
-            AttackCategory.INJECTION: "CWE-74",          # Improper Neutralization of Input
-            AttackCategory.RATE_LIMIT_EVASION: "CWE-770",  # Allocation without Limits
-            AttackCategory.PRIVILEGE_ESCALATION: "CWE-269",  # Improper Privilege Management
-            AttackCategory.SCHEMA_ABUSE: "CWE-20",       # Improper Input Validation
-            AttackCategory.ENUMERATION: "CWE-200",       # Information Exposure
+            AttackCategory.ACL_BYPASS: "CWE-285",
+            AttackCategory.AUTH_PROBE: "CWE-287",
+            AttackCategory.INJECTION: "CWE-74",
+            AttackCategory.RATE_LIMIT_EVASION: "CWE-770",
+            AttackCategory.PRIVILEGE_ESCALATION: "CWE-269",
+            AttackCategory.SCHEMA_ABUSE: "CWE-20",
+            AttackCategory.ENUMERATION: "CWE-200",
         }
         return mapping.get(category)
 
@@ -894,7 +962,10 @@ class RedTeamSwarm:
             )
 
         if not vulnerabilities:
-            recs.append("No vulnerabilities found. System appears hardened for current attack surface.")
+            recs.append(
+                "No vulnerabilities found. "
+                "System appears hardened for current attack surface."
+            )
 
         recs.append(
             "Run scans continuously (every 6 hours minimum) and after every deployment."

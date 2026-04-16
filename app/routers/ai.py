@@ -59,7 +59,9 @@ class HealResponse(BaseModel):
 class QueryRequest(BaseModel):
     """Natural language query about the system."""
     question: str = Field(..., description="The question to answer")
-    data_context: dict | None = Field(None, description="Optional data to query against")
+    data_context: dict | None = Field(
+        None, description="Optional data to query against"
+    )
 
 
 class QueryResponse(BaseModel):

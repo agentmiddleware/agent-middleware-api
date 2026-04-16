@@ -136,7 +136,10 @@ class CreateSponsorWalletRequest(BaseModel):
     )
     require_kyc: bool | None = Field(
         default=None,
-        description="Require KYC verification before allowing fiat top-ups. Defaults to system setting.",
+        description=(
+            "Require KYC verification before allowing fiat top-ups. "
+            "Defaults to system setting."
+        ),
     )
     metadata: dict = Field(
         default_factory=dict,
@@ -146,24 +149,73 @@ class CreateSponsorWalletRequest(BaseModel):
 
 class CreateAgentWalletRequest(BaseModel):
     """Provision a pre-paid agent wallet under a sponsor."""
-    sponsor_wallet_id: str = Field(..., description="ID of the sponsor wallet funding this agent.")
-    agent_id: str = Field(..., description="Agent ID from the comms registry.")
-    budget_credits: float = Field(..., gt=0, description="Credits to provision from the sponsor's balance.")
-    daily_limit: float | None = Field(default=None, ge=0, description="Optional daily spend cap.")
-    auto_refill: bool = Field(default=False, description="Auto-refill from sponsor when balance drops below threshold.")
-    auto_refill_threshold: float = Field(default=100.0, ge=0, description="Refill trigger threshold.")
-    auto_refill_amount: float = Field(default=1000.0, ge=0, description="Amount to refill.")
+    sponsor_wallet_id: str = Field(
+        ...,
+        description="ID of the sponsor wallet funding this agent.",
+    )
+    agent_id: str = Field(
+        ...,
+        description="Agent ID from the comms registry.",
+    )
+    budget_credits: float = Field(
+        ...,
+        gt=0,
+        description="Credits to provision from the sponsor's balance.",
+    )
+    daily_limit: float | None = Field(
+        default=None,
+        ge=0,
+        description="Optional daily spend cap.",
+    )
+    auto_refill: bool = Field(
+        default=False,
+        description="Auto-refill from sponsor when balance drops below threshold.",
+    )
+    auto_refill_threshold: float = Field(
+        default=100.0,
+        ge=0,
+        description="Refill trigger threshold.",
+    )
+    auto_refill_amount: float = Field(
+        default=1000.0,
+        ge=0,
+        description="Amount to refill.",
+    )
 
 
 class CreateChildWalletRequest(BaseModel):
     """Spawn a sub-agent child wallet from an agent wallet."""
-    parent_wallet_id: str = Field(..., description="ID of the parent agent wallet funding this child.")
-    child_agent_id: str = Field(..., description="Identifier for the child sub-agent.")
-    budget_credits: float = Field(..., gt=0, description="Credits to provision from parent's balance.")
-    max_spend: float = Field(..., gt=0, description="Hard lifetime spend cap in credits.")
-    task_description: str = Field(default="", description="What this child agent is supposed to accomplish.")
-    ttl_seconds: int | None = Field(default=None, gt=0, description="Time-to-live in seconds.")
-    auto_reclaim: bool = Field(default=True, description="Reclaim unspent credits when child completes.")
+    parent_wallet_id: str = Field(
+        ...,
+        description="ID of the parent agent wallet funding this child.",
+    )
+    child_agent_id: str = Field(
+        ...,
+        description="Identifier for the child sub-agent.",
+    )
+    budget_credits: float = Field(
+        ...,
+        gt=0,
+        description="Credits to provision from parent's balance.",
+    )
+    max_spend: float = Field(
+        ...,
+        gt=0,
+        description="Hard lifetime spend cap in credits.",
+    )
+    task_description: str = Field(
+        default="",
+        description="What this child agent is supposed to accomplish.",
+    )
+    ttl_seconds: int | None = Field(
+        default=None,
+        gt=0,
+        description="Time-to-live in seconds.",
+    )
+    auto_reclaim: bool = Field(
+        default=True,
+        description="Reclaim unspent credits when child completes.",
+    )
 
 
 class ChildWalletResponse(BaseModel):
@@ -242,8 +294,14 @@ class LedgerEntry(BaseModel):
     entry_id: str
     wallet_id: str
     action: LedgerAction
-    amount: float = Field(..., description="Credit amount (positive=credit, negative=debit).")
-    balance_after: float = Field(..., description="Wallet balance after this transaction.")
+    amount: float = Field(
+        ...,
+        description="Credit amount (positive=credit, negative=debit).",
+    )
+    balance_after: float = Field(
+        ...,
+        description="Wallet balance after this transaction.",
+    )
     service_category: ServiceCategory | None = None
     description: str = ""
     request_path: str | None = None
@@ -269,7 +327,11 @@ class LedgerResponse(BaseModel):
 class TopUpRequest(BaseModel):
     """Request to add credits to a sponsor wallet via fiat payment."""
     wallet_id: str = Field(..., description="Sponsor wallet to top up.")
-    amount_fiat: float = Field(..., gt=0, description="Amount in fiat currency (e.g., USD).")
+    amount_fiat: float = Field(
+        ...,
+        gt=0,
+        description="Amount in fiat currency (e.g., USD).",
+    )
     payment_method: str = Field(default="stripe", description="Payment rail to use.")
     payment_token: str | None = Field(default=None, description="Payment method token.")
 

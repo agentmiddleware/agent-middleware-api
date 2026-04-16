@@ -74,7 +74,11 @@ async def create_sponsor_wallet(
     api_key: str = Depends(verify_api_key),
     money: AgentMoney = Depends(get_agent_money),
 ):
-    initial = Decimal(str(request.initial_credits)) if request.initial_credits else Decimal("0")
+    initial = (
+        Decimal(str(request.initial_credits))
+        if request.initial_credits
+        else Decimal("0")
+    )
     return await money.create_sponsor_wallet(
         sponsor_name=request.sponsor_name,
         email=request.email,
@@ -108,7 +112,11 @@ async def create_agent_wallet(
             sponsor_wallet_id=request.sponsor_wallet_id,
             agent_id=request.agent_id,
             budget_credits=Decimal(str(request.budget_credits)),
-            daily_limit=Decimal(str(request.daily_limit)) if request.daily_limit else None,
+            daily_limit=(
+                Decimal(str(request.daily_limit))
+                if request.daily_limit
+                else None
+            ),
             auto_refill=request.auto_refill,
             auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),
             auto_refill_amount=Decimal(str(request.auto_refill_amount)),
@@ -121,7 +129,10 @@ async def create_agent_wallet(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "insufficient_funds",
-                "message": f"Insufficient funds in sponsor wallet: balance={e.current_balance}, required={e.required_amount}",
+                "message": (
+                    f"Insufficient funds in sponsor wallet: "
+                    f"balance={e.current_balance}, required={e.required_amount}"
+                ),
                 "wallet_id": e.wallet_id,
                 "current_balance": float(e.current_balance),
                 "required_amount": float(e.required_amount),
@@ -325,7 +336,10 @@ async def get_ledger(
 async def charge_wallet(
     wallet_id: str,
     service_category: ServiceCategory | None = None,
-    service: ServiceCategory | None = Query(None, description="Service category (alias for service_category)"),
+    service: ServiceCategory | None = Query(
+        None,
+        description="Service category (alias for service_category)",
+    ),
     units: float = Query(1.0, gt=0, description="Number of units consumed"),
     request_path: str | None = None,
     description: str | None = None,
@@ -336,7 +350,10 @@ async def charge_wallet(
     if not category:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "missing_service", "message": "service_category is required"},
+            detail={
+                "error": "missing_service",
+                "message": "service_category is required",
+            },
         )
     try:
         result = await money.charge(
@@ -358,7 +375,10 @@ async def charge_wallet(
                 "error": "wallet_frozen",
                 "wallet_id": e.wallet_id,
                 "reason": e.reason,
-                "message": "Wallet has been frozen due to anomalous spend velocity. Contact sponsor.",
+                "message": (
+                    "Wallet has been frozen due to anomalous spend velocity. "
+                    "Contact sponsor."
+                ),
             },
         )
 
@@ -450,7 +470,10 @@ async def prepare_top_up(
                     "error": "kyc_required",
                     "wallet_id": wallet_id,
                     "kyc_status": kyc_status["kyc_status"],
-                    "message": f"KYC verification required. Current status: {kyc_status['kyc_status']}",
+                    "message": (
+                        f"KYC verification required. "
+                        f"Current status: {kyc_status['kyc_status']}"
+                    ),
                     "verification_url": "/v1/kyc/sessions",
                 },
             )
@@ -483,7 +506,10 @@ async def transfer_wallets(
     to_wallet_id: str = Query(..., description="Destination wallet ID"),
     amount: float = Query(..., gt=0, description="Amount of credits to transfer"),
     description: str | None = Query(None, description="Optional transfer description"),
-    correlation_id: str | None = Query(None, description="Optional ID to link related transfers"),
+    correlation_id: str | None = Query(
+        None,
+        description="Optional ID to link related transfers",
+    ),
     api_key: str = Depends(verify_api_key),
     money: AgentMoney = Depends(get_agent_money),
 ):
@@ -579,7 +605,10 @@ async def get_alerts(
     response_model=ServiceRegistration,
     status_code=status.HTTP_201_CREATED,
     summary="Register a billable service",
-    description="Register a new service in the marketplace that agents can discover and pay for.",
+    description=(
+        "Register a new service in the marketplace that agents can discover "
+        "and pay for."
+    ),
 )
 async def register_service(
     request: RegisterServiceRequest,
@@ -665,7 +694,10 @@ class SimulatedChargeRequest(BaseModel):
     service: ServiceCategory = Field(..., description="Service category to simulate")
     units: float = Field(default=1.0, description="Number of units")
     description: str | None = Field(None, description="Optional description")
-    dry_run_session_id: str | None = Field(None, description="Session ID for session-based simulation")
+    dry_run_session_id: str | None = Field(
+        None,
+        description="Session ID for session-based simulation",
+    )
 
 
 class SimulatedChargeResponse(BaseModel):
@@ -708,7 +740,10 @@ async def create_dry_run_session(
     if not wallet:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "wallet_not_found", "message": f"Wallet {request.wallet_id} not found"},
+            detail={
+                "error": "wallet_not_found",
+                "message": f"Wallet {request.wallet_id} not found",
+            },
         )
 
     shadow_ledger = get_shadow_ledger()
@@ -743,7 +778,10 @@ async def get_dry_run_session(
     if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found",
+            },
         )
 
     return {
@@ -786,7 +824,10 @@ async def end_dry_run_session(
     if not summary:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found",
+            },
         )
 
     return {
@@ -828,7 +869,10 @@ async def commit_dry_run_session(
     if result.wallet_id == "":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found",
+            },
         )
 
     return {
@@ -870,7 +914,10 @@ async def revert_dry_run_session(
     if not result.reverted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "session_not_found", "message": f"Session {session_id} not found"},
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found",
+            },
         )
 
     return {
@@ -886,7 +933,8 @@ async def revert_dry_run_session(
     response_model=SimulatedChargeResponse,
     summary="Simulate a charge",
     description=(
-        "Simulate a charge without affecting real balance or triggering velocity monitoring. "
+        "Simulate a charge without affecting real balance or triggering "
+        "velocity monitoring. "
         "Returns cost estimate and virtual balance impact.\n\n"
         "Options:\n"
         "- Use session_id for multi-step simulation (tracks cumulative cost)\n"
@@ -926,7 +974,10 @@ async def simulate_charge(
     if not wallet:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "wallet_not_found", "message": f"Wallet {request.wallet_id} not found"},
+            detail={
+                "error": "wallet_not_found",
+                "message": f"Wallet {request.wallet_id} not found",
+            },
         )
 
     result = await money.charge(
@@ -945,9 +996,15 @@ async def simulate_charge(
             wallet_id=getattr(result, "wallet_id", request.wallet_id),
             service_category=getattr(result, "service_category", request.service.value),
             units=getattr(result, "units", request.units),
-            credits_would_charge=float(getattr(result, "credits_would_charge", Decimal("0"))),
-            simulated_balance_before=float(getattr(result, "simulated_balance_before", wallet.balance)),
-            simulated_balance_after=float(getattr(result, "simulated_balance_after", wallet.balance)),
+            credits_would_charge=float(
+                getattr(result, "credits_would_charge", Decimal("0"))
+            ),
+            simulated_balance_before=float(
+                getattr(result, "simulated_balance_before", wallet.balance)
+            ),
+            simulated_balance_after=float(
+                getattr(result, "simulated_balance_after", wallet.balance)
+            ),
             would_succeed=getattr(result, "would_succeed", True),
             reason=getattr(result, "reason", None),
         )

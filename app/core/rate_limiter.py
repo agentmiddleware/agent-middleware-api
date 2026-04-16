@@ -63,7 +63,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             except Exception:
                 if not self._redis_warned:
                     logger.exception(
-                        "Redis rate limiter unavailable; falling back to in-memory limiter."
+                        "Redis rate limiter unavailable; falling back "
+                        "to in-memory limiter."
                     )
                     self._redis_warned = True
                 self._redis = None
@@ -143,10 +144,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         now = time.time()
         try:
-            limited, remaining, reset_in = await self._check_limit_with_redis(api_key, now)
+            limited, remaining, reset_in = await self._check_limit_with_redis(
+                api_key, now
+            )
         except Exception:
-            logger.exception("Redis rate limiter failed; using in-memory rate limiter for this request.")
-            limited, remaining, reset_in = await self._check_limit_in_memory(api_key, now)
+            logger.exception(
+                "Redis rate limiter failed; using in-memory rate limiter "
+                "for this request."
+            )
+            limited, remaining, reset_in = await self._check_limit_in_memory(
+                api_key, now
+            )
 
         if limited:
             return JSONResponse(
@@ -154,7 +162,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 content={
                     "detail": {
                         "error": "rate_limited",
-                        "message": f"Rate limit exceeded. {self.limit} requests per minute allowed.",
+                        "message": (
+                            f"Rate limit exceeded. {self.limit} requests "
+                            "per minute allowed."
+                        ),
                         "retry_after_seconds": reset_in,
                     }
                 },

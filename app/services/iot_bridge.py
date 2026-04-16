@@ -144,7 +144,11 @@ class DeviceRegistry:
     async def get(self, device_id: str) -> RegisteredDevice | None:
         return self._devices.get(device_id)
 
-    async def list_all(self, page: int = 1, per_page: int = 50) -> tuple[list[RegisteredDevice], int]:
+    async def list_all(
+        self,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> tuple[list[RegisteredDevice], int]:
         devices = list(self._devices.values())
         total = len(devices)
         start = (page - 1) * per_page
@@ -215,8 +219,13 @@ class MQTTTranslator:
         else:
             payload_bytes = payload.encode()
 
-        # Production: await self._client.publish(topic, payload_bytes, qos=qos or self.default_qos)
-        logger.info(f"MQTT publish: {topic} ({len(payload_bytes)} bytes, qos={qos or self.default_qos})")
+        # Production: await self._client.publish(
+        #     topic, payload_bytes, qos=qos or self.default_qos
+        # )
+        logger.info(
+            f"MQTT publish: {topic} ({len(payload_bytes)} bytes, "
+            f"qos={qos or self.default_qos})"
+        )
 
         return {
             "ack": True,
@@ -298,7 +307,8 @@ class ProtocolBridge:
         if device.protocol == ProtocolType.MQTT:
             native_response = await self.mqtt.publish(topic, payload, qos, retain)
         elif device.protocol == ProtocolType.COAP:
-            native_response = await self.coap.put(topic, payload if isinstance(payload, dict) else {"data": payload})
+            payload_data = payload if isinstance(payload, dict) else {"data": payload}
+            native_response = await self.coap.put(topic, payload_data)
         else:
             # For protocols without a translator yet, log and simulate
             native_response = {"status": "simulated", "protocol": device.protocol.value}

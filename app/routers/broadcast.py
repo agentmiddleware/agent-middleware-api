@@ -4,7 +4,7 @@ Oracle Mass-Broadcast — Router
 Push published APIs into the agent discovery network.
 
 Endpoints:
-- POST /v1/broadcast                        — Broadcast a published API to agent directories
+- POST /v1/broadcast                        — Broadcast a published API
 - GET  /v1/broadcast/jobs                    — List all broadcast jobs
 - GET  /v1/broadcast/jobs/{job_id}           — Get broadcast job details
 - GET  /v1/broadcast/jobs/{job_id}/metrics   — Get discovery metrics
@@ -38,7 +38,8 @@ class BroadcastRequest(BaseModel):
     service_version: str = Field(default="1.0.0", description="API version.")
     base_url: str = Field(..., description="Production base URL of the API.")
     generation_id: str = Field(
-        ..., description="Protocol Engine generation ID (from POST /v1/protocol/generate)."
+        ...,
+        description="Protocol Engine generation ID (from POST /v1/protocol/generate).",
     )
     llm_txt: str | None = Field(None, description="Generated llm.txt content.")
     openapi_spec: dict | None = Field(None, description="Generated OpenAPI 3.1 spec.")
@@ -87,9 +88,12 @@ class BroadcastJobResponse(BaseModel):
 class DiscoveryEventRequest(BaseModel):
     """Simulate an inbound discovery event."""
     event_type: str = Field(
-        ..., description="Event type: impression, lookup, or integration."
+        ...,
+        description="Event type: impression, lookup, or integration.",
     )
-    source: str = Field(..., description="Source of the event (directory name or agent ID).")
+    source: str = Field(
+        ..., description="Source of the event (directory name or agent ID)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +226,9 @@ async def record_discovery_event(
     engine: OracleBroadcastEngine = Depends(get_broadcast_engine),
 ):
     if request.event_type not in ("impression", "lookup", "integration"):
-        raise HTTPException(400, "event_type must be impression, lookup, or integration")
+        raise HTTPException(
+            400, "event_type must be impression, lookup, or integration"
+        )
 
     metrics = await engine.simulate_discovery_event(
         job_id, request.event_type, request.source

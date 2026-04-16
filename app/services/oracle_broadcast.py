@@ -278,7 +278,9 @@ class OracleBroadcastEngine:
     ) -> DiscoveryMetrics:
         """Seed initial discovery metrics based on broadcast reach."""
         confirmed = job.directories_confirmed
-        hash_val = int(hashlib.md5(f"{service_name}:{base_url}".encode()).hexdigest()[:8], 16)
+        hash_val = int(
+            hashlib.md5(f"{service_name}:{base_url}".encode()).hexdigest()[:8], 16
+        )
 
         # Metrics scale with directory coverage
         metrics = DiscoveryMetrics(

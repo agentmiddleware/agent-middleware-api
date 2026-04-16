@@ -163,14 +163,18 @@ class VelocityMonitor:
                 wallet.hourly_reset_at = now
 
         if wallet.daily_reset_at is None:
-            wallet.daily_reset_at = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            wallet.daily_reset_at = now.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
         else:
             last_reset = wallet.daily_reset_at
             if last_reset.tzinfo is None:
                 last_reset = last_reset.replace(tzinfo=timezone.utc)
             if now - last_reset >= timedelta(days=1):
                 wallet.daily_spent = Decimal("0")
-                wallet.daily_reset_at = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                wallet.daily_reset_at = now.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
 
     def _check_limits(
         self,
@@ -185,7 +189,9 @@ class VelocityMonitor:
 
         if hourly_exceeded or daily_exceeded:
             exceeded_limit = "hourly" if hourly_exceeded else "daily"
-            current_spend = wallet.hourly_spent if hourly_exceeded else wallet.daily_spent
+            current_spend = (
+                wallet.hourly_spent if hourly_exceeded else wallet.daily_spent
+            )
             limit = hourly_limit if hourly_exceeded else daily_limit
 
             should_freeze = wallet.velocity_alerts_triggered >= self._freeze_threshold
@@ -242,13 +248,23 @@ class VelocityMonitor:
                 "wallet_id": wallet_id,
                 "hourly_spent": float(wallet.hourly_spent),
                 "hourly_limit": float(hourly_limit),
-                "hourly_pct": float(wallet.hourly_spent / hourly_limit * 100) if hourly_limit > 0 else 0,
+                "hourly_pct": (
+                    float(wallet.hourly_spent / hourly_limit * 100)
+                    if hourly_limit > 0
+                    else 0
+                ),
                 "daily_spent": float(wallet.daily_spent),
                 "daily_limit": float(daily_limit),
-                "daily_pct": float(wallet.daily_spent / daily_limit * 100) if daily_limit > 0 else 0,
+                "daily_pct": (
+                    float(wallet.daily_spent / daily_limit * 100)
+                    if daily_limit > 0
+                    else 0
+                ),
                 "velocity_alerts": wallet.velocity_alerts_triggered,
                 "status": wallet.status,
-                "last_charge_at": wallet.last_charge_at.isoformat() if wallet.last_charge_at else None,
+                "last_charge_at": (
+                    wallet.last_charge_at.isoformat() if wallet.last_charge_at else None
+                ),
             }
 
 

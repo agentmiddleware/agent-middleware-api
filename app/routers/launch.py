@@ -136,11 +136,13 @@ class LaunchResponse(BaseModel):
     summary="Execute Day 1 Launch Sequence",
     description=(
         "The ignition key. Executes all four launch phases in sequence:\n\n"
-        "1. **FUND** — Create sponsor wallet, inject seed capital, provision agent wallets\n"
-        "2. **INFILTRATE** — Crawl 6 major APIs, register in 4 agent directories\n"
-        "3. **IGNITE** — Launch B2A content campaign (3 hooks × N formats = 40+ pieces)\n"
-        "4. **ARM** — Activate Red Team perimeter scanning across all API paths\n\n"
-        "Returns a LaunchResponse (the system's birth certificate) with full metrics."
+        "1. **FUND** — Create sponsor wallet, inject seed capital, provision "
+        "agent wallets\n2. **INFILTRATE** — Crawl 6 major APIs, register in 4 agent "
+        "directories\n3. **IGNITE** — Launch B2A content campaign "
+        "(3 hooks × N formats = 40+ pieces)\n4. **ARM** — Activate Red Team "
+        "perimeter scanning across all API paths\n\n"
+        "Returns a LaunchResponse (the system's birth certificate) "
+        "with full metrics."
     ),
 )
 async def execute_launch(
@@ -255,12 +257,25 @@ async def run_preflight(request: PreflightRequest = PreflightRequest()):
 
 class GenesisRequest(BaseModel):
     """Configuration for the Genesis Agent Meta-Launch."""
-    sponsor_name: str = Field(default="Genesis Sponsor", description="Human sponsor name.")
-    sponsor_email: str = Field(default="genesis@b2a.dev", description="Sponsor email.")
-    seed_capital_usd: float = Field(default=100.0, description="Seed capital in USD.")
-    genesis_budget_credits: float = Field(default=50000.0, description="Genesis Agent budget (credits).")
-    genesis_max_spend: float = Field(default=50000.0, description="Hard lifetime spend cap (credits).")
-    target_service_name: str = Field(default="genesis-widget-api", description="Name of the micro-service the Genesis Agent will build.")
+    sponsor_name: str = Field(
+        default="Genesis Sponsor", description="Human sponsor name."
+    )
+    sponsor_email: str = Field(
+        default="genesis@b2a.dev", description="Sponsor email."
+    )
+    seed_capital_usd: float = Field(
+        default=100.0, description="Seed capital in USD."
+    )
+    genesis_budget_credits: float = Field(
+        default=50000.0, description="Genesis Agent budget (credits)."
+    )
+    genesis_max_spend: float = Field(
+        default=50000.0, description="Hard lifetime spend cap (credits)."
+    )
+    target_service_name: str = Field(
+        default="genesis-widget-api",
+        description="Name of the micro-service the Genesis Agent will build.",
+    )
 
 
 class GenesisPhaseDetail(BaseModel):
@@ -295,14 +310,16 @@ class GenesisResponse(BaseModel):
     status_code=201,
     summary="Meta-Launch: Spawn the Genesis Builder Agent",
     description=(
-        "The ultimate proof of infrastructure autonomy. Executes a 6-phase lifecycle:\n\n"
-        "1. **FUND** — Create sponsor wallet, spawn Genesis Builder child wallet with spend cap\n"
-        "2. **BUILD** — Genesis Agent writes a micro-service API\n"
-        "3. **SECURE** — RTaaS attacks the new service (thorough intensity)\n"
-        "4. **TEST** — Sandbox validates the agent's generalization ability\n"
-        "5. **PUBLISH** — Protocol Engine generates llm.txt + OpenAPI + agent.json\n"
-        "6. **MONITOR** — Telemetry Scope pipeline watches the new service\n\n"
-        "Returns a GenesisReport — proof that the infrastructure can self-replicate."
+        "The ultimate proof of infrastructure autonomy. Executes a "
+        "6-phase lifecycle:\n\n1. **FUND** — Create sponsor wallet, "
+        "spawn Genesis Builder child wallet with spend cap\n2. **BUILD** — Genesis "
+        "Agent writes a micro-service API\n3. **SECURE** — RTaaS attacks "
+        "the new service (thorough intensity)\n4. **TEST** — Sandbox "
+        "validates the agent's generalization ability\n5. **PUBLISH** — Protocol "
+        "Engine generates llm.txt + OpenAPI + agent.json\n6. **MONITOR** — Telemetry "
+        "Scope pipeline watches the new service\n\n"
+        "Returns a GenesisReport — proof that the infrastructure can "
+        "self-replicate."
     ),
 )
 async def execute_genesis(

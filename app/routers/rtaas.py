@@ -26,7 +26,9 @@ class RTaaSTargetSchema(BaseModel):
     """An external endpoint to attack."""
     url: str = Field(..., description="Full URL of the target endpoint.")
     method: str = Field(default="GET", description="HTTP method.")
-    auth_header: str | None = Field(None, description="Optional auth header value for authenticated endpoints.")
+    auth_header: str | None = Field(
+        None, description="Optional auth header value for authenticated endpoints."
+    )
     description: str = Field(default="", description="What this endpoint does.")
 
 

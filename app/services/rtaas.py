@@ -171,9 +171,14 @@ class RTaaSEngine:
                         severity=severity,
                         category=cat,
                         target_url=target.url,
-                        title=f"{cat.value.replace('_', ' ').title()} vulnerability detected",
+                        title=(
+                            f"{cat.value.replace('_', ' ').title()} "
+                            "vulnerability detected"
+                        ),
                         description=f"Potential {cat.value} issue at {target.url}",
-                        evidence=f"Simulated attack against {target.method} {target.url}",
+                        evidence=(
+                            f"Simulated attack against {target.method} {target.url}"
+                        ),
                         cwe_id=self._cwe_for_category(cat),
                         remediation=self._remediation_for_category(cat),
                     ))
@@ -216,15 +221,39 @@ class RTaaSEngine:
 
     def _remediation_for_category(self, cat: AttackCategory) -> str:
         mapping = {
-            AttackCategory.ACL_BYPASS: "Implement topic-level ACLs. Validate resource ownership per request.",
-            AttackCategory.AUTH_PROBE: "Enforce authentication on all endpoints. Validate API keys server-side.",
-            AttackCategory.INJECTION: "Sanitize all user inputs. Use parameterized queries.",
-            AttackCategory.RATE_LIMIT_EVASION: "Add sliding-window rate limiting per API key.",
-            AttackCategory.PRIVILEGE_ESCALATION: "Enforce principle of least privilege. Check role on every request.",
-            AttackCategory.SCHEMA_ABUSE: "Validate all input schemas strictly. Reject unexpected types.",
-            AttackCategory.ENUMERATION: "Use non-sequential IDs. Audit response payloads for data leaks.",
-            AttackCategory.REPLAY: "Add nonce or timestamp validation. Use short-lived tokens.",
-            AttackCategory.DOS_PATTERN: "Add request timeouts and resource limits. Cap expensive operations.",
+            AttackCategory.ACL_BYPASS: (
+                "Implement topic-level ACLs. Validate resource ownership "
+                "per request."
+            ),
+            AttackCategory.AUTH_PROBE: (
+                "Enforce authentication on all endpoints. Validate API keys "
+                "server-side."
+            ),
+            AttackCategory.INJECTION: (
+                "Sanitize all user inputs. Use parameterized queries."
+            ),
+            AttackCategory.RATE_LIMIT_EVASION: (
+                "Add sliding-window rate limiting per API key."
+            ),
+            AttackCategory.PRIVILEGE_ESCALATION: (
+                "Enforce principle of least privilege. Check role on every "
+                "request."
+            ),
+            AttackCategory.SCHEMA_ABUSE: (
+                "Validate all input schemas strictly. Reject unexpected "
+                "types."
+            ),
+            AttackCategory.ENUMERATION: (
+                "Use non-sequential IDs. Audit response payloads for data "
+                "leaks."
+            ),
+            AttackCategory.REPLAY: (
+                "Add nonce or timestamp validation. Use short-lived tokens."
+            ),
+            AttackCategory.DOS_PATTERN: (
+                "Add request timeouts and resource limits. Cap expensive "
+                "operations."
+            ),
         }
         return mapping.get(cat, "Review and harden the affected endpoint.")
 

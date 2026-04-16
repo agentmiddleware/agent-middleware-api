@@ -104,8 +104,9 @@ async def get_scan_report(
     response_model=VulnerabilityListResponse,
     summary="Get vulnerabilities from a scan",
     description=(
-        "Returns just the vulnerabilities from a scan, optionally filtered by severity. "
-        "Machine-readable format for the Autonomous PM to auto-generate fix PRs."
+        "Returns just the vulnerabilities from a scan, optionally filtered "
+        "by severity. Machine-readable format for the Autonomous PM "
+        "to auto-generate fix PRs."
     ),
 )
 async def get_vulnerabilities(

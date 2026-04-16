@@ -257,11 +257,15 @@ class FormatAdapter:
 
         metadata = {"brand_config": pipeline.brand_config, "variant": index + 1}
         if hook:
-            metadata.update({
-                "hook_id": hook.hook_id,
-                "pull_quote": hook.transcript_snippet[:140] if hook.transcript_snippet else "",
-                "talking_points": hook.talking_points[:3],
-            })
+            metadata.update(
+                {
+                    "hook_id": hook.hook_id,
+                    "pull_quote": (
+                        hook.transcript_snippet[:140] if hook.transcript_snippet else ""
+                    ),
+                    "talking_points": hook.talking_points[:3],
+                }
+            )
 
         return GeneratedContent(
             content_id=content_id,
@@ -381,7 +385,12 @@ class FormatAdapter:
             generated_at=datetime.now(timezone.utc),
             metadata={
                 "word_count": 250,
-                "seo_keywords": ["agent middleware", "b2a", "api automation", "ai agents"],
+                "seo_keywords": [
+                    "agent middleware",
+                    "b2a",
+                    "api automation",
+                    "ai agents",
+                ],
                 "hook_id": hook.hook_id if hook else None,
             },
         )
@@ -510,7 +519,9 @@ class AlgorithmicScheduler:
             "linkedin_video": {8: 0.9, 10: 1.0, 12: 0.8, 17: 0.7},
         }
 
-    async def ingest_analytics(self, metrics: list[PlatformAnalytics]) -> dict[str, int]:
+    async def ingest_analytics(
+        self, metrics: list[PlatformAnalytics]
+    ) -> dict[str, int]:
         """Ingest engagement metrics to improve scheduling model."""
         summary: dict[str, int] = defaultdict(int)
         async with self._lock:
@@ -559,7 +570,9 @@ class AlgorithmicScheduler:
                         platform=platform,
                         recommended_time=slot_time,
                         confidence=round(confidence, 2),
-                        reasoning=self._explain_recommendation(platform, slot_time, confidence),
+                        reasoning=self._explain_recommendation(
+                            platform, slot_time, confidence
+                        ),
                         estimated_views=self._estimate_views(platform, confidence),
                     ))
 
@@ -596,7 +609,9 @@ class AlgorithmicScheduler:
 
         return None
 
-    def _explain_recommendation(self, platform: str, time: datetime, confidence: float) -> str:
+    def _explain_recommendation(
+        self, platform: str, time: datetime, confidence: float
+    ) -> str:
         """Generate human/agent-readable explanation."""
         day_name = time.strftime("%A")
         hour = time.strftime("%I%p").lstrip("0")
@@ -705,11 +720,15 @@ class ContentFactory:
             return
 
         pipeline.status = "rendering"
-        logger.info(f"Pipeline {pipeline_id}: rendering {len(pipeline.target_formats)} formats")
+        logger.info(
+            f"Pipeline {pipeline_id}: rendering {len(pipeline.target_formats)} formats"
+        )
 
         try:
             tasks = []
-            multipliers = HOOK_FORMAT_MULTIPLIERS if pipeline.hook else FORMAT_MULTIPLIERS
+            multipliers = (
+                HOOK_FORMAT_MULTIPLIERS if pipeline.hook else FORMAT_MULTIPLIERS
+            )
 
             for fmt in pipeline.target_formats:
                 adapter = FORMAT_ADAPTERS.get(fmt)
@@ -832,7 +851,9 @@ class ContentFactory:
                     f"{recommendations[-1].recommended_time.strftime('%Y-%m-%d')}"
                     if recommendations else "none"
                 ),
-                "estimated_total_views": sum(r.estimated_views or 0 for r in recommendations),
+                "estimated_total_views": sum(
+                    r.estimated_views or 0 for r in recommendations
+                ),
                 "recommendations_preview": [
                     {
                         "content_id": r.content_id,

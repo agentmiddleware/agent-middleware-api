@@ -67,7 +67,8 @@ class KYCService:
         Args:
             wallet_id: The wallet requiring verification
             return_url: URL to redirect after verification completes
-            document_type: Type of document to verify (passport, driver_license, id_card)
+            document_type: Type of document to verify
+                (passport, driver_license, id_card)
 
         Returns:
             {
@@ -91,7 +92,8 @@ class KYCService:
 
             if wallet.wallet_type != "sponsor":
                 raise KYCNotRequiredError(
-                    f"KYC is only required for sponsor wallets, not {wallet.wallet_type}"
+                    f"KYC is only required for sponsor wallets, "
+                    f"not {wallet.wallet_type}"
                 )
 
             if wallet.kyc_status == KYCStatus.VERIFIED.value:
@@ -192,7 +194,8 @@ class KYCService:
 
             kyc_status = wallet.kyc_status or "not_required"
             requires_verification = (
-                wallet.wallet_type == "sponsor" and kyc_status not in ["verified", "not_required"]
+                wallet.wallet_type == "sponsor"
+                and kyc_status not in ["verified", "not_required"]
             )
 
             result = await session.execute(
@@ -207,10 +210,18 @@ class KYCService:
             return {
                 "wallet_id": wallet_id,
                 "kyc_status": kyc_status,
-                "verification_id": verification.verification_id if verification else None,
-                "stripe_session_id": verification.stripe_session_id if verification else None,
-                "last_verified_at": verification.last_verified_at if verification else None,
-                "rejection_reason": verification.rejection_reason if verification else None,
+                "verification_id": (
+                    verification.verification_id if verification else None
+                ),
+                "stripe_session_id": (
+                    verification.stripe_session_id if verification else None
+                ),
+                "last_verified_at": (
+                    verification.last_verified_at if verification else None
+                ),
+                "rejection_reason": (
+                    verification.rejection_reason if verification else None
+                ),
                 "requires_verification": requires_verification,
                 "message": message,
             }
@@ -270,8 +281,12 @@ class KYCService:
             return False
 
         handler_map = {
-            "identity.verification_session.verified": self._handle_verification_verified,
-            "identity.verification_session.requires_input": self._handle_requires_input,
+            "identity.verification_session.verified": (
+                self._handle_verification_verified
+            ),
+            "identity.verification_session.requires_input": (
+                self._handle_requires_input
+            ),
             "identity.verification_session.redacted": self._handle_redacted,
         }
 
@@ -344,7 +359,8 @@ class KYCService:
                 return
 
             logger.info(
-                f"KYC verification {verification.verification_id} requires additional input"
+                f"KYC verification {verification.verification_id} "
+                "requires additional input"
             )
 
     async def _handle_redacted(self, verification_session: dict) -> None:
@@ -434,9 +450,11 @@ class KYCService:
         messages = {
             "not_required": "KYC verification is not required for this wallet type.",
             "verified": "Identity verified. Fiat top-ups are enabled.",
-            "pending": "Verification in progress. Complete verification to enable top-ups.",
+            "pending": (
+                "Verification in progress. Complete verification to enable top-ups."
+            ),
             "rejected": "Verification rejected. Contact support for assistance.",
-            "expired": "Verification session expired. Please start a new verification.",
+            "expired": "Verification expired. Please start a new verification.",
         }
         return messages.get(kyc_status, "Unknown KYC status.")
 
