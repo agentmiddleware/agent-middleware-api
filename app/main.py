@@ -24,7 +24,7 @@ from .db.database import init_db, close_db
 from .routers import (
     iot, telemetry, media, comms, docs, factory, red_team, oracle,
     billing, launch, protocol, rtaas, sandbox, telemetry_scope,
-    dashboard, broadcast, ai, webhooks,
+    dashboard, broadcast, ai, webhooks, mcp, kyc,
 )
 
 settings = get_settings()
@@ -123,6 +123,8 @@ app.include_router(broadcast.router)
 app.include_router(ai.router)
 app.include_router(docs.router)
 app.include_router(webhooks.router)
+app.include_router(mcp.router)
+app.include_router(kyc.router)
 
 
 # --- Discovery & Health Endpoints ---
@@ -239,6 +241,18 @@ async def root():
                     "GET /v1/billing/pricing",
                     "GET /v1/billing/arbitrage",
                     "GET /v1/billing/alerts",
+                ],
+            },
+            "mcp_server": {
+                "base_path": "/mcp",
+                "description": "Model Context Protocol (MCP) server for B2A tool discovery and execution.",
+                "endpoints": [
+                    "GET /mcp/tools.json",
+                    "GET /.well-known/mcp/tools.json",
+                    "POST /mcp/messages",
+                    "GET /mcp/tools",
+                    "GET /mcp/tools/{service_id}",
+                    "POST /mcp/tools/{service_id}/invoke",
                 ],
             },
             "red_team_security": {

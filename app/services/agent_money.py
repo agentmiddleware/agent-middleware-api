@@ -44,6 +44,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.durable_state import get_durable_state
+from ..core.config import get_settings
 from ..db.database import get_session_factory
 from ..db.models import WalletModel, LedgerEntryModel, BillingAlertModel, ServiceRegistryModel
 from ..db.converters import (
@@ -52,6 +53,7 @@ from ..db.converters import (
     billing_alert_model_to_schema,
 )
 from ..services.velocity_monitor import get_velocity_monitor, WalletFrozenError
+from ..services.shadow_ledger import get_shadow_ledger, SimulatedChargeResult
 from ..schemas.billing import (
     WalletType,
     WalletStatus,
@@ -60,6 +62,7 @@ from ..schemas.billing import (
     TopUpStatus,
     AlertType,
     AlertSeverity,
+    KYCStatus,
     WalletResponse,
     LedgerEntry,
     TopUpResponse,
@@ -69,6 +72,8 @@ from ..schemas.billing import (
     BillingAlert,
     ServiceRegistration,
 )
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +139,17 @@ class WalletNotFoundError(Exception):
         super().__init__(f"Wallet not found: {wallet_id}")
 
 
+class KYCVerificationRequiredError(Exception):
+    """Raised when KYC verification is required but not completed."""
+    def __init__(self, wallet_id: str, kyc_status: str):
+        self.wallet_id = wallet_id
+        self.kyc_status = kyc_status
+        super().__init__(
+            f"KYC verification required for wallet {wallet_id}. "
+            f"Current status: {kyc_status}. Complete verification at /v1/kyc/sessions"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Agent Money Engine
 # ---------------------------------------------------------------------------
@@ -172,8 +188,11 @@ class AgentMoney:
         currency: str = "USD",
         metadata: dict | None = None,
         owner_key: str = "",
+        require_kyc: bool | None = None,
     ) -> WalletResponse:
         """Create a human sponsor (liability sink) root wallet."""
+        kyc_required = require_kyc if require_kyc is not None else settings.KYC_REQUIRED_FOR_TOPUP
+
         async with self._session_factory()() as session:
             async with session.begin():
                 wallet_id = f"spn-{uuid.uuid4().hex[:12]}"
@@ -188,6 +207,8 @@ class AgentMoney:
                     currency=currency,
                     owner_key=owner_key,
                     metadata_json=_metadata_to_json(metadata),
+                    kyc_status=KYCStatus.PENDING.value if kyc_required else KYCStatus.NOT_REQUIRED.value,
+                    status="pending_kyc" if kyc_required else "active",
                 )
                 session.add(wallet)
 
@@ -566,6 +587,58 @@ class AgentMoney:
                 ],
             }
 
+    async def _dry_run_charge(
+        self,
+        wallet_id: str,
+        service_category: ServiceCategory,
+        units: Decimal,
+        charge_amount: Decimal,
+        description: str,
+        session_id: str | None,
+    ) -> SimulatedChargeResult:
+        """
+        Simulate a charge without affecting real balance or velocity.
+
+        This is a dry-run operation that:
+        - Does NOT record to the real ledger
+        - Does NOT trigger velocity monitoring
+        - Returns cost estimate with virtual balance impact
+
+        If session_id is provided, uses the shadow ledger for stateful tracking.
+        If session_id is None, returns a single-shot estimate based on real balance.
+        """
+        if session_id:
+            shadow_ledger = get_shadow_ledger()
+            try:
+                result = await shadow_ledger.simulate_charge(
+                    session_id=session_id,
+                    service_category=service_category,
+                    units=float(units),
+                    description=description,
+                )
+                return result
+            except ValueError as e:
+                if "Session not found" in str(e):
+                    raise ValueError(f"Dry-run session not found: {session_id}")
+                raise
+
+        wallet = await self.get_wallet(wallet_id)
+        if not wallet:
+            raise WalletNotFoundError(wallet_id)
+
+        return SimulatedChargeResult(
+            session_id=session_id or "",
+            wallet_id=wallet_id,
+            service_category=service_category.value,
+            units=float(units),
+            credits_would_charge=charge_amount,
+            simulated_balance_before=float(wallet.balance),
+            simulated_balance_after=float(wallet.balance) - float(charge_amount),
+            would_succeed=wallet.balance >= charge_amount,
+            reason=None if wallet.balance >= charge_amount else "insufficient_simulated_funds",
+            dry_run=True,
+        )
+
     # --- Micro-Metering & Charging ---
 
     async def charge(
@@ -575,12 +648,17 @@ class AgentMoney:
         units: Decimal = Decimal("1"),
         request_path: str | None = None,
         description: str = "",
-    ) -> LedgerEntry | InsufficientFundsResponse:
+        dry_run: bool = False,
+        dry_run_session_id: str | None = None,
+    ) -> LedgerEntry | InsufficientFundsResponse | SimulatedChargeResult:
         """
         Charge an agent wallet for API usage with ACID transaction.
 
         Uses SELECT ... FOR UPDATE to lock the wallet row during the transaction.
         Also checks spend velocity and auto-freezes on anomalous patterns.
+
+        If dry_run=True, simulates the charge without affecting real balance
+        or triggering velocity monitoring. Uses the shadow ledger for tracking.
         """
         pricing = DEFAULT_PRICING.get(service_category)
         if not pricing:
@@ -588,6 +666,17 @@ class AgentMoney:
 
         unit_name, credits_per_unit, _ = pricing
         charge_amount = units * credits_per_unit
+
+        if dry_run:
+            return await self._dry_run_charge(
+                wallet_id=wallet_id,
+                service_category=service_category,
+                units=units,
+                charge_amount=charge_amount,
+                description=description or f"{units} × {unit_name}",
+                session_id=dry_run_session_id,
+            )
+
         compute_cost = units * COMPUTE_COSTS.get(service_category, Decimal("0"))
         margin = charge_amount - compute_cost
 
@@ -711,6 +800,9 @@ class AgentMoney:
                     raise WalletNotFoundError(wallet_id)
                 if wallet.wallet_type != WalletType.SPONSOR.value:
                     raise ValueError("Top-ups only allowed on sponsor wallets")
+
+                if settings.KYC_REQUIRED_FOR_TOPUP and wallet.kyc_status != KYCStatus.VERIFIED.value:
+                    raise KYCVerificationRequiredError(wallet_id, wallet.kyc_status or "unknown")
 
                 credits = amount_fiat * EXCHANGE_RATE
                 top_up_id = str(uuid.uuid4())[:12]

@@ -24,6 +24,7 @@ import uuid
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -240,10 +241,10 @@ class GenesisAgent:
             logger.info(f"[{genesis_id}] Phase 6/6 MONITOR complete — pipeline active")
 
             # Compute spend
-            genesis_wallet = await self.money.store.get_wallet(report.fund.genesis_wallet_id)
+            genesis_wallet = await self.money.get_wallet(report.fund.genesis_wallet_id)
             if genesis_wallet:
-                report.total_credits_spent = round(genesis_wallet.lifetime_debits, 2)
-                report.credits_remaining = round(genesis_wallet.balance, 2)
+                report.total_credits_spent = round(float(genesis_wallet.lifetime_debits), 2)
+                report.credits_remaining = round(float(genesis_wallet.balance), 2)
 
             report.status = "ALIVE"
             report.completed_at = datetime.now(timezone.utc)
@@ -260,8 +261,10 @@ class GenesisAgent:
 
     async def _fund(self, config: GenesisConfig) -> FundReceipt:
         """Create sponsor → agent → child wallet hierarchy for Genesis Builder."""
-        exchange_rate = 1000.0
-        seed_credits = config.seed_capital_usd * exchange_rate
+        exchange_rate = Decimal("1000.0")
+        seed_credits = Decimal(str(config.seed_capital_usd)) * exchange_rate
+        genesis_budget = Decimal(str(config.genesis_budget_credits))
+        genesis_max_spend = Decimal(str(config.genesis_max_spend))
 
         # Tier 1: Human sponsor puts up fiat-equivalent seed capital
         sponsor = await self.money.create_sponsor_wallet(
@@ -274,15 +277,15 @@ class GenesisAgent:
         agent = await self.money.create_agent_wallet(
             sponsor_wallet_id=sponsor.wallet_id,
             agent_id="genesis-orchestrator",
-            budget_credits=config.genesis_budget_credits,
+            budget_credits=genesis_budget,
         )
 
         # Tier 3: Child wallet (the actual builder) with hard spend cap
         genesis_child = await self.money.create_child_wallet(
             parent_wallet_id=agent.wallet_id,
             child_agent_id="genesis-builder-01",
-            budget_credits=config.genesis_budget_credits,
-            max_spend=config.genesis_max_spend,
+            budget_credits=genesis_budget,
+            max_spend=genesis_max_spend,
             task_description=config.genesis_task,
             auto_reclaim=True,
         )

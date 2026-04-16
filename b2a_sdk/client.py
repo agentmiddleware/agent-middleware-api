@@ -7,11 +7,90 @@ Provides wallet management, telemetry, and billing for agent swarms.
 """
 
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger("b2a_sdk")
+
+
+class DryRunSimulation:
+    """
+    Context manager for dry-run billing simulation.
+
+    Usage:
+        async with b2a.simulate_session(wallet_id) as sim:
+            # All charges inside use dry_run=True automatically
+            result1 = await some_billable_function(...)
+            result2 = await another_function(...)
+
+        print(f"Total simulated cost: {sim.total_cost}")
+        print(f"Would succeed: {sim.would_succeed}")
+    """
+
+    def __init__(
+        self,
+        client: "B2AClient",
+        wallet_id: str,
+        session_id: str | None = None,
+    ):
+        self._client = client
+        self.wallet_id = wallet_id
+        self.session_id = session_id
+        self._charges: list[dict] = []
+        self._total_cost = 0.0
+        self._would_succeed = True
+        self._active = False
+
+    @property
+    def total_cost(self) -> float:
+        """Total credits simulated."""
+        return self._total_cost
+
+    @property
+    def charge_count(self) -> int:
+        """Number of simulated charges."""
+        return len(self._charges)
+
+    @property
+    def would_succeed(self) -> bool:
+        """Whether all simulated charges would succeed."""
+        return self._would_succeed
+
+    @property
+    def charges(self) -> list[dict]:
+        """List of simulated charges."""
+        return self._charges.copy()
+
+    def add_charge_result(self, result: dict) -> None:
+        """Add a simulated charge result."""
+        if result.get("would_succeed", False):
+            self._charges.append(result)
+            self._total_cost += result.get("credits_would_charge", 0)
+        else:
+            self._would_succeed = False
+
+    async def end(self) -> dict:
+        """End the simulation session and get summary."""
+        if self.session_id:
+            try:
+                response = await self._client._client.delete(
+                    f"/v1/billing/dry-run/session/{self.session_id}"
+                )
+                if response.status_code == 200:
+                    return response.json()
+            except Exception as e:
+                logger.warning(f"Failed to end dry-run session: {e}")
+
+        return {
+            "session_id": self.session_id or "unknown",
+            "wallet_id": self.wallet_id,
+            "total_simulated_credits": self._total_cost,
+            "charge_count": self.charge_count,
+            "would_succeed": self._would_succeed,
+            "charges": self._charges,
+        }
 
 
 class B2AClient:
@@ -265,6 +344,127 @@ class B2AClient:
         response = await self._client.get("/health")
         response.raise_for_status()
         return response.json()
+
+    @asynccontextmanager
+    async def simulate_session(self, wallet_id: str):
+        """
+        Context manager for dry-run billing simulation.
+
+        All @billable decorated functions called within this context
+        will use dry_run=True and be tracked by the shadow ledger.
+
+        Usage:
+            async with b2a.simulate_session(wallet_id="agent-001") as sim:
+                # Simulate charges without real deductions
+                await generate_video(url)
+                await process_data(operation="transform", data="hello")
+
+            print(f"Total cost: {sim.total_cost}")
+            print(f"Would succeed: {sim.would_succeed}")
+
+        Args:
+            wallet_id: Wallet to simulate charges against
+
+        Yields:
+            DryRunSimulation object with tracking and summary methods
+        """
+        from .decorators import _dry_run_context
+
+        response = await self._client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_id},
+        )
+        response.raise_for_status()
+        session_data = response.json()
+        session_id = session_data.get("session_id")
+
+        sim = DryRunSimulation(
+            client=self,
+            wallet_id=wallet_id,
+            session_id=session_id,
+        )
+        sim._active = True
+
+        token = _dry_run_context.set(sim)
+
+        try:
+            yield sim
+        finally:
+            _dry_run_context.reset(token)
+            sim._active = False
+            await sim.end()
+
+    async def simulate_charge(
+        self,
+        wallet_id: str,
+        service_category: str,
+        units: float = 1.0,
+        session_id: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Simulate a charge without affecting real balance.
+
+        Args:
+            wallet_id: Wallet being simulated
+            service_category: Service category to simulate
+            units: Number of units
+            session_id: Optional session for cumulative tracking
+            description: Optional description
+
+        Returns:
+            SimulatedChargeResult with cost estimate
+        """
+        params = {
+            "wallet_id": wallet_id,
+            "service": service_category,
+            "units": units,
+        }
+        if session_id:
+            params["dry_run_session_id"] = session_id
+        if description:
+            params["description"] = description
+
+        response = await self._client.post(
+            "/v1/billing/dry-run/charge",
+            json=params,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_dry_run_estimate(
+        self,
+        wallet_id: str,
+        service_category: str,
+        units: float = 1.0,
+    ) -> dict[str, Any]:
+        """
+        Convenience method for single-shot cost estimation without session overhead.
+
+        Use this for quick price checks when you don't need cumulative tracking.
+
+        Args:
+            wallet_id: Wallet to check
+            service_category: Service category to estimate
+            units: Number of units
+
+        Returns:
+            Dict with credits_would_charge, would_succeed, etc.
+
+        Example:
+            estimate = await b2a.get_dry_run_estimate(
+                "agent-001",
+                "content_factory",
+                units=10.0,
+            )
+            print(f"Would cost: {estimate['credits_would_charge']} credits")
+        """
+        return await self.simulate_charge(
+            wallet_id=wallet_id,
+            service_category=service_category,
+            units=units,
+            session_id=None,
+        )
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
