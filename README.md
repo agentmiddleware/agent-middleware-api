@@ -101,6 +101,37 @@ curl -X POST http://localhost:8000/v1/billing/top-up/prepare \
 # Credits are allocated when payment_intent.succeeded events arrive
 ```
 
+### KYC Identity Verification (`/v1/kyc`)
+
+Require identity verification for sponsor wallets before allowing fiat top-ups.
+
+```bash
+# Create sponsor wallet with KYC required
+curl -X POST http://localhost:8000/v1/billing/wallets/sponsor \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sponsor_name": "Acme Corp",
+    "email": "billing@acme.com",
+    "initial_credits": 10000,
+    "require_kyc": true
+  }'
+
+# Check KYC status
+curl http://localhost:8000/v1/kyc/status/{wallet_id} \
+  -H "X-API-Key: your-key"
+
+# Create Stripe Identity verification session
+curl -X POST http://localhost:8000/v1/kyc/sessions \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wallet_id": "{wallet_id}",
+    "return_url": "https://yourapp.com/kyc-callback",
+    "document_type": "passport"
+  }'
+```
+
 ### Agent-to-Agent Transfers
 
 ```bash
@@ -187,6 +218,9 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/...
 VELOCITY_HOURLY_LIMIT=1000.0
 VELOCITY_DAILY_LIMIT=10000.0
 VELOCITY_FREEZE_THRESHOLD=3
+
+# KYC Verification
+KYC_REQUIRED_FOR_TOPUP=false  # Set to true to enforce KYC before fiat top-ups
 ```
 
 ---
@@ -522,7 +556,7 @@ Current durable service stores:
 - [x] Spend velocity monitoring with auto-freeze
 - [x] Python SDK (`b2a-sdk`)
 - [x] MCP Server Generator for agent tool exposure
-- [ ] Stripe Identity (KYC) for sponsor verification
+- [x] Stripe Identity (KYC) for sponsor verification
 - [ ] Sandbox engine wired to billing
 - [ ] Automated API key rotation for wallets
 - [ ] Add comprehensive agent interaction examples and recipes

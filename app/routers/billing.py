@@ -19,6 +19,7 @@ from ..services.agent_money import (
     EXCHANGE_RATE,
     InsufficientFundsError,
     WalletNotFoundError,
+    KYCVerificationRequiredError,
 )
 from ..services.velocity_monitor import WalletFrozenError
 from ..services.stripe_integration import get_stripe_integration
@@ -81,6 +82,7 @@ async def create_sponsor_wallet(
         currency=request.currency,
         metadata=request.metadata,
         owner_key=api_key,
+        require_kyc=request.require_kyc,
     )
 
 
@@ -383,6 +385,17 @@ async def top_up_wallet(
         )
     except WalletNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except KYCVerificationRequiredError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "kyc_required",
+                "wallet_id": e.wallet_id,
+                "kyc_status": e.kyc_status,
+                "message": str(e),
+                "verification_url": f"/v1/kyc/sessions?wallet_id={e.wallet_id}",
+            },
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -395,7 +408,8 @@ async def top_up_wallet(
     summary="Prepare a fiat top-up via Stripe",
     description=(
         "Create a Stripe PaymentIntent for fiat payment. "
-        "After payment succeeds, credits are minted automatically via webhook."
+        "After payment succeeds, credits are minted automatically via webhook. "
+        "Requires KYC verification if enabled for the wallet."
     ),
 )
 async def prepare_top_up(
@@ -422,6 +436,25 @@ async def prepare_top_up(
             "currency": str,
         }
     """
+    from ..core.config import get_settings
+    settings = get_settings()
+
+    if settings.KYC_REQUIRED_FOR_TOPUP:
+        from ..services.kyc_service import get_kyc_service
+        kyc_service = get_kyc_service()
+        kyc_status = await kyc_service.get_verification_status(wallet_id)
+        if kyc_status["kyc_status"] != "verified":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "kyc_required",
+                    "wallet_id": wallet_id,
+                    "kyc_status": kyc_status["kyc_status"],
+                    "message": f"KYC verification required. Current status: {kyc_status['kyc_status']}",
+                    "verification_url": f"/v1/kyc/sessions",
+                },
+            )
+
     stripe_integration = get_stripe_integration()
 
     try:

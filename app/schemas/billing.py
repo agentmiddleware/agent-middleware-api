@@ -32,6 +32,7 @@ class WalletStatus(str, Enum):
     SUSPENDED = "suspended"
     FROZEN = "frozen"
     CLOSED = "closed"
+    PENDING_KYC = "pending_kyc"
 
 
 class LedgerAction(str, Enum):
@@ -69,6 +70,16 @@ class AlertType(str, Enum):
     INSUFFICIENT_FUNDS = "insufficient_funds"
     BUDGET_EXCEEDED = "budget_exceeded"
     ANOMALOUS_SPEND = "anomalous_spend"
+    KYC_PENDING = "kyc_pending"
+    KYC_REJECTED = "kyc_rejected"
+
+
+class KYCStatus(str, Enum):
+    NOT_REQUIRED = "not_required"
+    PENDING = "pending"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
 
 
 class AlertSeverity(str, Enum):
@@ -107,6 +118,10 @@ class CreateSponsorWalletRequest(BaseModel):
     currency: str = Field(
         default="USD",
         description="Fiat currency for external payment rails.",
+    )
+    require_kyc: bool | None = Field(
+        default=None,
+        description="Require KYC verification before allowing fiat top-ups. Defaults to system setting.",
     )
     metadata: dict = Field(
         default_factory=dict,
@@ -183,6 +198,7 @@ class WalletResponse(BaseModel):
     lifetime_credits: float = Field(..., description="Total credits ever deposited.")
     lifetime_debits: float = Field(..., description="Total credits ever consumed.")
     status: WalletStatus
+    kyc_status: KYCStatus = Field(default=KYCStatus.NOT_REQUIRED)
     daily_limit: float | None = None
     auto_refill: bool = False
     auto_refill_threshold: float | None = None
@@ -355,3 +371,54 @@ class TransferResponse(BaseModel):
     from_balance_after: float
     to_balance_after: float
     status: str
+
+
+class CreateKYCSessionRequest(BaseModel):
+    """Request to create a KYC verification session."""
+    wallet_id: str = Field(..., description="Wallet ID requiring KYC verification.")
+    return_url: str = Field(
+        ...,
+        description="URL to redirect after verification completes.",
+        examples=["https://yourapp.com/kyc-callback"],
+    )
+    document_type: str = Field(
+        default="document",
+        description="Type of document to verify (passport, driver_license, id_card).",
+    )
+
+
+class KYCSessionResponse(BaseModel):
+    """Response with Stripe Identity session details."""
+    verification_id: str
+    wallet_id: str
+    session_id: str
+    session_url: str
+    status: KYCStatus
+    created_at: datetime
+    expires_at: datetime
+
+
+class KYCStatusResponse(BaseModel):
+    """Current KYC verification status for a wallet."""
+    wallet_id: str
+    kyc_status: KYCStatus
+    verification_id: str | None = None
+    stripe_session_id: str | None = None
+    last_verified_at: datetime | None = None
+    rejection_reason: str | None = None
+    requires_verification: bool = False
+    message: str = ""
+
+
+class KYCVerificationDetails(BaseModel):
+    """Detailed verification information."""
+    verification_id: str
+    wallet_id: str
+    status: KYCStatus
+    stripe_session_id: str | None = None
+    document_type: str | None = None
+    first_verified_at: datetime | None = None
+    last_verified_at: datetime | None = None
+    rejection_reason: str | None = None
+    created_at: datetime
+    updated_at: datetime

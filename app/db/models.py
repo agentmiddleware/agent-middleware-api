@@ -60,6 +60,8 @@ class WalletModel(SQLModel, table=True):
 
     # Status and metadata
     status: str = Field(default="active", max_length=20)
+    kyc_status: str = Field(default="not_required", max_length=30)
+    kyc_verified_at: Optional[datetime] = Field(default=None)
     metadata_json: Optional[str] = Field(default=None)
 
     # Timestamps
@@ -177,6 +179,40 @@ class ServiceRegistryModel(SQLModel, table=True):
     is_active: bool = Field(default=True)
     metadata_json: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class KYCVerificationModel(SQLModel, table=True):
+    """
+    KYC/Identity verification records for sponsor wallets.
+
+    Tracks Stripe Identity verification sessions and their status.
+    Only verified wallets can perform fiat top-ups.
+    """
+    __tablename__ = "kyc_verifications"
+
+    verification_id: str = Field(primary_key=True, max_length=100)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+
+    stripe_session_id: str = Field(max_length=100, unique=True, index=True)
+
+    status: str = Field(max_length=30, default="pending")
+
+    verification_type: str = Field(max_length=20, default="identity")
+
+    document_type: Optional[str] = Field(default=None, max_length=30)
+
+    first_verified_at: Optional[datetime] = Field(default=None)
+    last_verified_at: Optional[datetime] = Field(default=None)
+
+    rejection_reason: Optional[str] = Field(default=None, max_length=500)
+
+    metadata_json: Optional[str] = Field(default=None)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:

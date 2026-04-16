@@ -44,6 +44,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.durable_state import get_durable_state
+from ..core.config import get_settings
 from ..db.database import get_session_factory
 from ..db.models import WalletModel, LedgerEntryModel, BillingAlertModel, ServiceRegistryModel
 from ..db.converters import (
@@ -61,6 +62,7 @@ from ..schemas.billing import (
     TopUpStatus,
     AlertType,
     AlertSeverity,
+    KYCStatus,
     WalletResponse,
     LedgerEntry,
     TopUpResponse,
@@ -70,6 +72,8 @@ from ..schemas.billing import (
     BillingAlert,
     ServiceRegistration,
 )
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +139,17 @@ class WalletNotFoundError(Exception):
         super().__init__(f"Wallet not found: {wallet_id}")
 
 
+class KYCVerificationRequiredError(Exception):
+    """Raised when KYC verification is required but not completed."""
+    def __init__(self, wallet_id: str, kyc_status: str):
+        self.wallet_id = wallet_id
+        self.kyc_status = kyc_status
+        super().__init__(
+            f"KYC verification required for wallet {wallet_id}. "
+            f"Current status: {kyc_status}. Complete verification at /v1/kyc/sessions"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Agent Money Engine
 # ---------------------------------------------------------------------------
@@ -173,8 +188,11 @@ class AgentMoney:
         currency: str = "USD",
         metadata: dict | None = None,
         owner_key: str = "",
+        require_kyc: bool | None = None,
     ) -> WalletResponse:
         """Create a human sponsor (liability sink) root wallet."""
+        kyc_required = require_kyc if require_kyc is not None else settings.KYC_REQUIRED_FOR_TOPUP
+
         async with self._session_factory()() as session:
             async with session.begin():
                 wallet_id = f"spn-{uuid.uuid4().hex[:12]}"
@@ -189,6 +207,8 @@ class AgentMoney:
                     currency=currency,
                     owner_key=owner_key,
                     metadata_json=_metadata_to_json(metadata),
+                    kyc_status=KYCStatus.PENDING.value if kyc_required else KYCStatus.NOT_REQUIRED.value,
+                    status="pending_kyc" if kyc_required else "active",
                 )
                 session.add(wallet)
 
@@ -780,6 +800,9 @@ class AgentMoney:
                     raise WalletNotFoundError(wallet_id)
                 if wallet.wallet_type != WalletType.SPONSOR.value:
                     raise ValueError("Top-ups only allowed on sponsor wallets")
+
+                if settings.KYC_REQUIRED_FOR_TOPUP and wallet.kyc_status != KYCStatus.VERIFIED.value:
+                    raise KYCVerificationRequiredError(wallet_id, wallet.kyc_status or "unknown")
 
                 credits = amount_fiat * EXCHANGE_RATE
                 top_up_id = str(uuid.uuid4())[:12]

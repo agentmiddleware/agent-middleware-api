@@ -15,6 +15,7 @@ from ..schemas.billing import (
     BillingAlert,
     AlertType,
     AlertSeverity,
+    KYCStatus,
 )
 from .models import WalletModel, LedgerEntryModel, BillingAlertModel
 
@@ -29,6 +30,12 @@ def wallet_model_to_response(
             metadata = json.loads(wallet.metadata_json)
         except json.JSONDecodeError:
             pass
+
+    kyc_status_str = wallet.kyc_status or "not_required"
+    try:
+        kyc_status = KYCStatus(kyc_status_str)
+    except ValueError:
+        kyc_status = KYCStatus.NOT_REQUIRED
 
     return WalletResponse(
         wallet_id=wallet.wallet_id,
@@ -49,6 +56,7 @@ def wallet_model_to_response(
         auto_refill_threshold=wallet.auto_refill_threshold,
         auto_refill_amount=wallet.auto_refill_amount,
         status=WalletStatus(wallet.status),
+        kyc_status=kyc_status,
         created_at=wallet.created_at,
         metadata=metadata,
     )

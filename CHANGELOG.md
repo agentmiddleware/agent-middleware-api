@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Stripe webhook handler with hybrid idempotency (DB UNIQUE constraint + IntegrityError catch)
   - Automatic credit allocation on successful payment
 
+- **Stripe Identity KYC Verification** (`app/services/kyc_service.py`, `app/routers/kyc.py`)
+  - `/v1/kyc/sessions` - Create Stripe Identity verification session
+  - `/v1/kyc/status/{wallet_id}` - Check KYC verification status
+  - `/v1/kyc/verifications/{verification_id}` - Get verification details
+  - Sponsor wallets can require KYC before allowing fiat top-ups
+  - Wallet status changes to "pending_kyc" until verification completes
+  - Webhook handlers for Identity verification events
+  - KYC verification status enforced on top-up preparation
+  - Email/Slack notifications for KYC approval/rejection
+
 - **Agent Notifications** (`app/services/notifications.py`)
   - Email alerts via Resend API
   - Slack webhook notifications
@@ -43,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Webhook Router** (`app/routers/webhooks.py`)
   - `POST /webhooks/stripe` - Stripe event handler
   - `POST /webhooks/stripe/test` - Test webhook connectivity
+  - `POST /webhooks/stripe/identity` - Stripe Identity webhook handler
 
 - **Python SDK** (`b2a_sdk/`)
   - `B2AClient` async HTTP client for agent integration
@@ -70,13 +81,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `001_initial.py` - Core wallet/ledger schema
   - `002_stripe_fields.py` - Stripe payment tracking fields
   - `003_velocity_monitoring.py` - Velocity monitoring fields
+  - `004_kyc_verification.py` - KYC verification tables
 
 ### Changed
 
-- **`app/core/config.py`** - Added Stripe, notification, and velocity monitoring settings
-- **`app/main.py`** - Added DB lifecycle management, webhook router registration
-- **`app/schemas/billing.py`** - Added TransferResponse, RegisterServiceRequest, child wallet fields
-- **`tests/conftest.py`** - Added test fixtures for async DB sessions
+- **`app/core/config.py`** - Added Stripe, notification, velocity monitoring, and KYC settings
+- **`app/main.py`** - Added KYC router registration
+- **`app/schemas/billing.py`** - Added KYCStatus enum, KYC-related schemas, and wallet kyc_status field
+- **`app/db/models.py`** - Added KYCVerificationModel, wallet kyc_status and kyc_verified_at fields
+- **`app/db/converters.py`** - Added kyc_status to wallet conversion
+- **`tests/conftest.py`** - Added kyc_verifications cleanup to test fixtures
 
 ### Fixed
 

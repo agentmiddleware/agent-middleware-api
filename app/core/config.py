@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""
 
+    # --- KYC Verification ---
+    # Require KYC verification before allowing fiat top-ups (default: false for dev)
+    KYC_REQUIRED_FOR_TOPUP: bool = False
+
     # --- Credit Exchange Rate ---
     # 1000 credits = $1.00 USD (1 credit = $0.001)
     EXCHANGE_RATE: Decimal = Decimal("1000.0")
