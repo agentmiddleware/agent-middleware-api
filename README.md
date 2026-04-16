@@ -419,6 +419,12 @@ POST /v1/billing/dry-run/charge
 
 # End session and get summary
 DELETE /v1/billing/dry-run/session/{session_id}
+
+# Commit simulated charges to real billing
+POST /v1/billing/dry-run/session/{session_id}/commit
+
+# Revert (discard) simulated charges
+POST /v1/billing/dry-run/session/{session_id}/revert
 ```
 
 ---
@@ -591,7 +597,7 @@ Current durable service stores:
 - [x] MCP Server Generator for agent tool exposure
 - [x] Stripe Identity (KYC) for sponsor verification
 - [x] Automated API key rotation for wallets
-- [ ] Sandbox engine wired to billing
+- [x] Sandbox engine wired to billing
 - [ ] Add comprehensive agent interaction examples and recipes
 - [ ] Multi-tenant hardening validations
 - [ ] Add SQLite backend support for simpler edge deployments

@@ -88,6 +88,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic rotation on suspicious activity
   - Security alerts via Slack notifications
 
+- **Sandbox Engine Wired to Billing** (`app/services/shadow_ledger.py`, `app/routers/billing.py`)
+  - `POST /v1/billing/dry-run/session/{session_id}/commit` - Commit sandbox to real billing
+  - `POST /v1/billing/dry-run/session/{session_id}/revert` - Revert and discard sandbox
+  - Simulate operations in sandbox, then commit to apply charges
+  - Revert to cancel without affecting real wallet
+  - Full audit trail of committed vs reverted operations
+
 - **Database Migrations** (`migrations/versions/`)
   - `001_initial.py` - Core wallet/ledger schema
   - `002_stripe_fields.py` - Stripe payment tracking fields
@@ -98,11 +105,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`app/core/config.py`** - Added Stripe, notification, velocity monitoring, and KYC settings
-- **`app/main.py`** - Added KYC router registration
-- **`app/schemas/billing.py`** - Added KYCStatus enum, KYC-related schemas, and wallet kyc_status field
-- **`app/db/models.py`** - Added KYCVerificationModel, wallet kyc_status and kyc_verified_at fields
+- **`app/main.py`** - Added KYC and API key routers
+- **`app/schemas/billing.py`** - Added KYCStatus, APIKeyStatus, RotationType, and sandbox schemas
+- **`app/db/models.py`** - Added KYCVerificationModel, APIKeyModel, KeyRotationLogModel
 - **`app/db/converters.py`** - Added kyc_status to wallet conversion
-- **`tests/conftest.py`** - Added kyc_verifications cleanup to test fixtures
+- **`app/services/shadow_ledger.py`** - Added commit_session and revert_session methods
+- **`app/routers/billing.py`** - Added commit/revert endpoints for sandbox sessions
+- **`tests/conftest.py`** - Added cleanup for API key tables
 
 ### Fixed
 

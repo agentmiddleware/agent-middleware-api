@@ -548,3 +548,29 @@ class EmergencyKeyRevocationRequest(BaseModel):
         default=True,
         description="Whether to create a new emergency key.",
     )
+
+
+class SandboxCommitRequest(BaseModel):
+    """Request to commit a sandbox session to real billing."""
+    session_id: str = Field(..., description="Sandbox session ID to commit.")
+
+
+class SandboxCommitResponse(BaseModel):
+    """Response after committing a sandbox session."""
+    session_id: str
+    wallet_id: str
+    committed_charges: int
+    total_credits_deducted: float
+    real_balance_before: float
+    real_balance_after: float
+    ledger_entries: list[dict]
+    success: bool
+    message: str
+
+
+class SandboxRevertResponse(BaseModel):
+    """Response after reverting a sandbox session."""
+    session_id: str
+    wallet_id: str
+    reverted: bool
+    message: str
