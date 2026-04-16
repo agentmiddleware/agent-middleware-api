@@ -2,7 +2,8 @@
 MCP Server Generator
 ====================
 
-Generates MCP-compliant manifests and standalone Python servers from registered services.
+Generates MCP-compliant manifests and standalone Python servers from
+registered services.
 
 Supports two modes:
 1. Dynamic MCP Proxy: Live server mounted on FastAPI (zero infra for users)
@@ -84,7 +85,7 @@ class McpGenerator:
             "version": MCP_TOOLS_JSON_VERSION,
             "name": "B2A Service Marketplace",
             "description": "Billable AI agent services powered by the B2A economy. "
-                         "Each tool invocation deducts credits from the caller's wallet.",
+                "Each tool invocation deducts credits from the caller's wallet.",
             "tools": services,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -114,7 +115,7 @@ class McpGenerator:
             "version": MCP_TOOLS_JSON_VERSION,
             "name": "B2A Service Marketplace",
             "description": "Billable AI agent services powered by the B2A economy. "
-                         "Each tool invocation deducts credits from the caller's wallet.",
+                "Each tool invocation deducts credits from the caller's wallet.",
             "tools": services,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -124,7 +125,9 @@ class McpGenerator:
         tool = {
             "name": service["service_id"],
             "description": service.get("description", ""),
-            "inputSchema": service.get("input_schema", {"type": "object", "properties": {}}),
+            "inputSchema": service.get(
+                "input_schema", {"type": "object", "properties": {}}
+            ),
         }
 
         annotations = {
@@ -190,7 +193,8 @@ async def {name.replace("-", "_")}({",".join([""] + params_code)}) -> dict:
     """
     {service.get("description", "B2A service: " + name)}
     
-    Cost: {service.get("credits_per_unit", 1.0)} credits per {service.get("unit_name", "call")}
+    Cost: {service.get("credits_per_unit", 1.0)} credits per
+    {service.get("unit_name", "call")}
     Category: {service.get("category", "unknown")}
     """
     return await call_b2a_service(

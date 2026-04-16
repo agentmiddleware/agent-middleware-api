@@ -121,7 +121,8 @@ class DurableStateStore:
                     await self._redis.ping()
             except Exception:
                 logger.exception(
-                    "Failed to initialize durable state backend '%s'; falling back to in-memory.",
+                    "Failed to initialize durable state backend '%s'; falling "
+                    "back to in-memory.",
                     self._backend,
                 )
                 await self.close()
@@ -141,7 +142,8 @@ class DurableStateStore:
             assert self._pg_pool is not None
             async with self._pg_pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT payload FROM app_state_kv WHERE namespace = $1 AND state_key = $2",
+                    "SELECT payload FROM app_state_kv WHERE namespace = $1 "
+                    "AND state_key = $2",
                     self.namespace,
                     key,
                 )

@@ -63,10 +63,22 @@ class LaunchConfig:
         "https://api.cloudflare.com",
     ])
     registration_directories: list[dict] = field(default_factory=lambda: [
-        {"directory_url": "https://agentindex.dev/register", "directory_type": "agent_registry"},
-        {"directory_url": "https://agentprotocol.ai/registry", "directory_type": "well_known"},
-        {"directory_url": "https://mcphub.io/servers", "directory_type": "mcp_server"},
-        {"directory_url": "https://pluginstore.ai/register", "directory_type": "plugin_store"},
+        {
+            "directory_url": "https://agentindex.dev/register",
+            "directory_type": "agent_registry",
+        },
+        {
+            "directory_url": "https://agentprotocol.ai/registry",
+            "directory_type": "well_known",
+        },
+        {
+            "directory_url": "https://mcphub.io/servers",
+            "directory_type": "mcp_server",
+        },
+        {
+            "directory_url": "https://pluginstore.ai/register",
+            "directory_type": "plugin_store",
+        },
     ])
 
     # --- IGNITE ---
@@ -244,13 +256,17 @@ class LaunchSequence:
         fund_receipt = await self._fund(config)
         logger.info(f"  ✓ Sponsor wallet: {fund_receipt.sponsor_wallet_id}")
         logger.info(f"  ✓ Agent wallets: {len(fund_receipt.agent_wallet_ids)}")
-        logger.info(f"  ✓ Total credits seeded: {fund_receipt.total_credits_seeded:,.0f}")
+        logger.info(
+            f"  ✓ Total credits seeded: {fund_receipt.total_credits_seeded:,.0f}"
+        )
 
         # Phase 2: Infiltrate
         logger.info("[2/4] INFILTRATING AGENT NETWORKS...")
         infil_receipt = await self._infiltrate(config)
         logger.info(f"  ✓ APIs crawled: {infil_receipt.apis_crawled}")
-        logger.info(f"  ✓ Directories registered: {infil_receipt.directories_registered}")
+        logger.info(
+            f"  ✓ Directories registered: {infil_receipt.directories_registered}"
+        )
         logger.info(f"  ✓ Visibility score: {infil_receipt.visibility_score}/100")
 
         # Phase 3: Ignite

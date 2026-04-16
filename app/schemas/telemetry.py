@@ -86,7 +86,10 @@ class AnomalyReport(BaseModel):
     severity: Severity
     category: str = Field(
         ...,
-        description="Classification of the anomaly (e.g., 'error_spike', 'latency_regression', 'missing_feature').",
+        description=(
+            "Classification of the anomaly (e.g., 'error_spike', "
+            "'latency_regression', 'missing_feature')."
+        ),
     )
     summary: str = Field(
         ...,

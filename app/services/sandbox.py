@@ -120,7 +120,12 @@ class PatternEnvironmentGenerator:
         input_grid = [[rng.randint(0, 5) for _ in range(size)] for _ in range(size)]
 
         state = EnvironmentState(
-            max_steps={"easy": 20, "medium": 30, "hard": 50, "extreme": 100}[difficulty.value],
+            max_steps={
+                "easy": 20,
+                "medium": 30,
+                "hard": 50,
+                "extreme": 100,
+            }[difficulty.value],
             grid=input_grid,
             metadata={
                 "size": size,
@@ -133,7 +138,9 @@ class PatternEnvironmentGenerator:
             env_id=f"env-{uuid.uuid4().hex[:12]}",
             env_type=EnvironmentType.PATTERN,
             difficulty=difficulty,
-            description=f"Discover the hidden transformation rule. Grid size: {size}×{size}.",
+            description=(
+                f"Discover the hidden transformation rule. Grid size: {size}×{size}."
+            ),
             hidden_rules=rules,
             state=state,
         )
@@ -144,14 +151,21 @@ class NavigationEnvironmentGenerator:
 
     def generate(self, difficulty: Difficulty, seed: int) -> SandboxEnvironment:
         rng = random.Random(seed)
-        num_nodes = {"easy": 5, "medium": 10, "hard": 20, "extreme": 40}[difficulty.value]
+        num_nodes = {
+            "easy": 5,
+            "medium": 10,
+            "hard": 20,
+            "extreme": 40,
+        }[difficulty.value]
 
         # Build a random directed graph
         nodes = list(range(num_nodes))
         edges = {}
         for node in nodes:
             num_edges = rng.randint(1, min(3, num_nodes - 1))
-            targets = rng.sample([n for n in nodes if n != node], min(num_edges, len(nodes) - 1))
+            targets = rng.sample(
+                [n for n in nodes if n != node], min(num_edges, len(nodes) - 1)
+            )
             edges[node] = targets
 
         goal = rng.choice(nodes[1:])  # Never start at goal
@@ -175,7 +189,10 @@ class NavigationEnvironmentGenerator:
             env_id=f"env-{uuid.uuid4().hex[:12]}",
             env_type=EnvironmentType.NAVIGATION,
             difficulty=difficulty,
-            description=f"Navigate a {num_nodes}-node graph to reach the goal. Edges may have hidden costs.",
+            description=(
+                f"Navigate a {num_nodes}-node graph to reach the goal. "
+                "Edges may have hidden costs."
+            ),
             hidden_rules=rules,
             state=state,
         )
@@ -186,7 +203,12 @@ class ApiMockEnvironmentGenerator:
 
     def generate(self, difficulty: Difficulty, seed: int) -> SandboxEnvironment:
         rng = random.Random(seed)
-        num_endpoints = {"easy": 3, "medium": 6, "hard": 10, "extreme": 15}[difficulty.value]
+        num_endpoints = {
+            "easy": 3,
+            "medium": 6,
+            "hard": 10,
+            "extreme": 15,
+        }[difficulty.value]
 
         endpoints = []
         for i in range(num_endpoints):
@@ -199,10 +221,15 @@ class ApiMockEnvironmentGenerator:
 
         rules = [
             "API schema changes every 5 interactions",
-            f"Correct sequence: discover all {num_endpoints} endpoints, then call them in order",
+            (
+                f"Correct sequence: discover all {num_endpoints} endpoints, "
+                "then call them in order"
+            ),
         ]
         if difficulty in (Difficulty.HARD, Difficulty.EXTREME):
-            rules.append("Some endpoints return misleading 200 responses with wrong data")
+            rules.append(
+                "Some endpoints return misleading 200 responses with wrong data"
+            )
 
         state = EnvironmentState(
             max_steps=num_endpoints * 10,
@@ -219,7 +246,9 @@ class ApiMockEnvironmentGenerator:
             env_id=f"env-{uuid.uuid4().hex[:12]}",
             env_type=EnvironmentType.API_MOCK,
             difficulty=difficulty,
-            description=f"Interact with a mock API that has {num_endpoints} shifting endpoints.",
+            description=(
+                f"Interact with a mock API that has {num_endpoints} shifting endpoints."
+            ),
             hidden_rules=rules,
             state=state,
         )
@@ -253,7 +282,10 @@ class AdversarialEnvironmentGenerator:
             env_id=f"env-{uuid.uuid4().hex[:12]}",
             env_type=EnvironmentType.ADVERSARIAL,
             difficulty=difficulty,
-            description=f"Adversarial environment with {trap_count} deceptive traps. Think before you act.",
+            description=(
+                f"Adversarial environment with {trap_count} deceptive traps. "
+                "Think before you act."
+            ),
             hidden_rules=rules,
             state=state,
         )
@@ -359,7 +391,16 @@ class SandboxEngine:
                 # Check if agent guessed the transformation rule
                 guess = str(action_value).lower()
                 for rule in env.hidden_rules:
-                    if any(keyword in guess for keyword in ["rotate", "mirror", "increment", "invert", "shift"]):
+                    if any(
+                        keyword in guess
+                        for keyword in [
+                            "rotate",
+                            "mirror",
+                            "increment",
+                            "invert",
+                            "shift",
+                        ]
+                    ):
                         return 10.0, "Correct transformation detected!", True
                 return -1.0, "Incorrect transformation. Try another approach.", False
             return 0.5, "Observation recorded.", False
@@ -386,23 +427,31 @@ class SandboxEngine:
                 env.state.metadata["current_schema_version"] += 1
                 return 0, "API schema has changed! Re-discover endpoints.", False
             if action_type == "call_endpoint":
-                env.state.metadata["endpoints_discovered"] = env.state.metadata.get("endpoints_discovered", 0) + 1
+                env.state.metadata["endpoints_discovered"] = (
+                    env.state.metadata.get("endpoints_discovered", 0) + 1
+                )
                 total = env.state.metadata["num_endpoints"]
                 discovered = env.state.metadata["endpoints_discovered"]
                 if discovered >= total:
                     return 10.0, "All endpoints discovered and called!", True
-                return 1.0, f"Endpoint called successfully. {discovered}/{total} discovered.", False
+                return 1.0, (
+                    f"Endpoint called successfully. {discovered}/{total} discovered."
+                ), False
             return 0, "Try calling an endpoint.", False
 
         elif env.env_type == EnvironmentType.ADVERSARIAL:
             traps = env.state.metadata.get("traps_remaining", 0)
             if action_type == "choose" and action_value == "careful":
-                env.state.metadata["correct_actions"] = env.state.metadata.get("correct_actions", 0) + 1
+                env.state.metadata["correct_actions"] = (
+                    env.state.metadata.get("correct_actions", 0) + 1
+                )
                 if env.state.metadata["correct_actions"] >= traps + 3:
                     return 10.0, "Successfully navigated all traps!", True
                 return 1.0, "Correct choice. Stay vigilant.", False
             elif action_type == "choose":
-                env.state.metadata["traps_triggered"] = env.state.metadata.get("traps_triggered", 0) + 1
+                env.state.metadata["traps_triggered"] = (
+                    env.state.metadata.get("traps_triggered", 0) + 1
+                )
                 return -3.0, "TRAP! That was a deceptive option.", False
             return 0, "Make a choice.", False
 

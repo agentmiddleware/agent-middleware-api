@@ -113,7 +113,10 @@ class ContentHook(BaseModel):
             ContentFormat.TEXT_POST,
             ContentFormat.CAROUSEL,
         ],
-        description="Formats to generate from this hook. Defaults to the 4-format spread.",
+        description=(
+            "Formats to generate from this hook. Defaults to the "
+            "4-format spread."
+        ),
     )
 
     @field_validator("end_seconds")
@@ -224,7 +227,10 @@ class ContentPipelineRequest(BaseModel):
     """Submit a source asset for multi-format content generation."""
     source_clip_id: str | None = Field(
         None,
-        description="ID of an existing clip from the Media Engine. Mutually exclusive with source_url.",
+        description=(
+            "ID of an existing clip from the Media Engine. "
+            "Mutually exclusive with source_url."
+        ),
     )
     source_url: str | None = Field(
         None,
@@ -236,8 +242,15 @@ class ContentPipelineRequest(BaseModel):
         examples=["Q1 Product Launch Highlights"],
     )
     target_formats: list[ContentFormat] = Field(
-        default=[ContentFormat.SHORT_VIDEO, ContentFormat.STATIC_IMAGE, ContentFormat.TEXT_POST],
-        description="Output formats to generate. Each source becomes multiple format-adapted pieces.",
+        default=[
+            ContentFormat.SHORT_VIDEO,
+            ContentFormat.STATIC_IMAGE,
+            ContentFormat.TEXT_POST,
+        ],
+        description=(
+            "Output formats to generate. Each source becomes multiple "
+            "format-adapted pieces."
+        ),
     )
     brand_config: dict = Field(
         default_factory=dict,
@@ -252,7 +265,10 @@ class ContentPipelineRequest(BaseModel):
     language: str = Field(default="en")
     auto_schedule: bool = Field(
         default=True,
-        description="Automatically schedule distribution using the algorithmic scheduler.",
+        description=(
+            "Automatically schedule distribution using the algorithmic "
+            "scheduler."
+        ),
     )
 
 
@@ -314,7 +330,10 @@ class AnalyticsIngestRequest(BaseModel):
         ...,
         min_length=1,
         max_length=500,
-        description="Engagement metrics from platform APIs. The scheduler learns from this data.",
+        description=(
+            "Engagement metrics from platform APIs. The scheduler "
+            "learns from this data."
+        ),
     )
 
 
@@ -340,7 +359,10 @@ class ScheduleRecommendation(BaseModel):
     reasoning: str = Field(
         ...,
         description="Explanation of why this slot was chosen.",
-        examples=["Historical peak engagement for short_video on tiktok: Tuesdays 7-9pm UTC"],
+        examples=[
+            "Historical peak engagement for short_video on tiktok: "
+            "Tuesdays 7-9pm UTC"
+        ],
     )
     estimated_views: int | None = None
 

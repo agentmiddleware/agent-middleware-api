@@ -231,7 +231,11 @@ class DashboardEngine:
         for w in all_wallets:
             nodes[w.wallet_id] = WalletNode(
                 wallet_id=w.wallet_id,
-                wallet_type=w.wallet_type.value if hasattr(w.wallet_type, 'value') else str(w.wallet_type),
+                wallet_type=(
+                    w.wallet_type.value
+                    if hasattr(w.wallet_type, "value")
+                    else str(w.wallet_type)
+                ),
                 owner=w.owner_name,
                 balance=round(w.balance, 2),
                 lifetime_credits=round(w.lifetime_credits, 2),
@@ -245,7 +249,10 @@ class DashboardEngine:
         roots: list[WalletNode] = []
         for w in all_wallets:
             node = nodes[w.wallet_id]
-            parent_id = getattr(w, 'sponsor_wallet_id', None) or getattr(w, 'parent_wallet_id', None)
+            parent_id = (
+                getattr(w, "sponsor_wallet_id", None)
+                or getattr(w, "parent_wallet_id", None)
+            )
             if parent_id and parent_id in nodes:
                 nodes[parent_id].children.append(node)
             else:
@@ -275,7 +282,11 @@ class DashboardEngine:
                 else:
                     posture.low_count += 1
 
-                cat = vuln.category.value if hasattr(vuln.category, 'value') else str(vuln.category)
+                cat = (
+                    vuln.category.value
+                    if hasattr(vuln.category, "value")
+                    else str(vuln.category)
+                )
                 category_counts[cat] = category_counts.get(cat, 0) + 1
 
             posture.recent_jobs.append({
@@ -290,10 +301,14 @@ class DashboardEngine:
 
         if jobs:
             scores = [j.security_score for j in jobs if j.security_score is not None]
-            posture.avg_security_score = round(sum(scores) / len(scores), 1) if scores else 0.0
+            posture.avg_security_score = (
+                round(sum(scores) / len(scores), 1) if scores else 0.0
+            )
 
         if category_counts:
-            posture.most_common_category = max(category_counts, key=lambda k: category_counts.get(k, 0))
+            posture.most_common_category = max(
+                category_counts, key=lambda k: category_counts.get(k, 0)
+            )
 
         # Only keep latest 10 jobs
         posture.recent_jobs = posture.recent_jobs[:10]
@@ -346,7 +361,11 @@ class DashboardEngine:
         scores: list[float] = []
 
         for env in envs:
-            env_type = env.env_type.value if hasattr(env.env_type, 'value') else str(env.env_type)
+            env_type = (
+                env.env_type.value
+                if hasattr(env.env_type, "value")
+                else str(env.env_type)
+            )
             overview.by_type[env_type] = overview.by_type.get(env_type, 0) + 1
             overview.total_actions += env.state.step
 

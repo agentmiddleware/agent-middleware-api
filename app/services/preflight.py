@@ -157,7 +157,10 @@ class PreflightEngine:
                 passed=False,
                 severity="critical",
                 message="No API keys configured in VALID_API_KEYS.",
-                detail="Set VALID_API_KEYS in .env with production keys (comma-separated).",
+                detail=(
+                    "Set VALID_API_KEYS in .env with production keys "
+                    "(comma-separated)."
+                ),
             ))
             return results
 
@@ -168,7 +171,10 @@ class PreflightEngine:
                 passed=False,
                 severity="critical",
                 message=f"Found {len(placeholder_keys)} placeholder API key(s).",
-                detail=f"Keys like '{placeholder_keys[0][:8]}...' are not production-safe. Generate real keys.",
+                detail=(
+                    f"Keys like '{placeholder_keys[0][:8]}...' are not "
+                    "production-safe. Generate real keys."
+                ),
             ))
         else:
             results.append(CheckResult(
@@ -193,7 +199,10 @@ class PreflightEngine:
                 passed=False,
                 severity="warning",
                 message="No Stripe secret key provided.",
-                detail="Billing will use simulated mode. Set stripe_secret_key for live payments.",
+                detail=(
+                    "Billing will use simulated mode. "
+                    "Set stripe_secret_key for live payments."
+                ),
             ))
         elif _is_placeholder(stripe_key):
             results.append(CheckResult(
@@ -209,7 +218,10 @@ class PreflightEngine:
                 passed=False,
                 severity="warning",
                 message="Stripe key does not appear to be a live key.",
-                detail="Live keys start with sk_live_. Test keys (sk_test_) will not process real payments.",
+                detail=(
+                    "Live keys start with sk_live_. "
+                    "Test keys (sk_test_) will not process real payments."
+                ),
             ))
         else:
             results.append(CheckResult(
@@ -246,7 +258,10 @@ class PreflightEngine:
                 name="rate_limit_reasonable",
                 passed=False,
                 severity="warning",
-                message=f"Rate limit is very low ({self.settings.RATE_LIMIT_PER_MINUTE}/min).",
+                message=(
+                    f"Rate limit is very low "
+                    f"({self.settings.RATE_LIMIT_PER_MINUTE}/min)."
+                ),
                 detail="Agent consumers may hit 429s quickly. Consider >= 60/min.",
             ))
         else:
@@ -291,7 +306,10 @@ class PreflightEngine:
                 passed=False,
                 severity="warning",
                 message="BASE_URL does not use HTTPS.",
-                detail="Production APIs should use TLS. Agents may reject insecure endpoints.",
+                detail=(
+                    "Production APIs should use TLS. "
+                    "Agents may reject insecure endpoints."
+                ),
             ))
         else:
             results.append(CheckResult(
@@ -304,7 +322,7 @@ class PreflightEngine:
         return results
 
     def _check_manifest_urls(self, config: dict) -> list[CheckResult]:
-        """Verify that agent.json and llm.txt would resolve with the production domain."""
+        """Verify that agent.json and llm.txt resolve with the production domain."""
         results = []
         base_url = config.get("base_url", "https://api.yourdomain.com")
 
@@ -317,7 +335,10 @@ class PreflightEngine:
                 passed=False,
                 severity="critical",
                 message="Cannot validate manifests — BASE_URL is placeholder.",
-                detail=f"agent.json would serve at {agent_json_url} — unreachable with placeholder domain.",
+                detail=(
+                    f"agent.json would serve at {agent_json_url} — "
+                    "unreachable with placeholder domain."
+                ),
             ))
         else:
             results.append(CheckResult(
@@ -374,7 +395,10 @@ class PreflightEngine:
             passed=reachable >= 2,
             severity="warning" if reachable < 2 else "info",
             message=f"{reachable}/{len(directories)} directory targets validated.",
-            detail="Recommend at least 2 reachable directories for meaningful visibility.",
+            detail=(
+                "Recommend at least 2 reachable directories "
+                "for meaningful visibility."
+            ),
         ))
 
         return results
@@ -412,7 +436,10 @@ class PreflightEngine:
             name="crawl_targets_configured",
             passed=external_count >= 3,
             severity="warning" if external_count < 3 else "info",
-            message=f"{external_count}/{len(crawl_targets)} crawl targets are real external APIs.",
+            message=(
+                f"{external_count}/{len(crawl_targets)} crawl targets "
+                "are real external APIs."
+            ),
         ))
 
         return results
@@ -431,11 +458,17 @@ class PreflightEngine:
         verdict = "GO" if critical == 0 else "NO-GO"
 
         if verdict == "GO" and warnings > 0:
-            summary = f"CONDITIONAL GO — {warnings} warning(s) to address before full production."
+            summary = (
+                f"CONDITIONAL GO — {warnings} warning(s) "
+                "to address before full production."
+            )
         elif verdict == "GO":
             summary = "ALL CLEAR — System is production-ready. Turn the key."
         else:
-            summary = f"NO-GO — {critical} critical issue(s) must be resolved before launch."
+            summary = (
+                f"NO-GO — {critical} critical issue(s) "
+                "must be resolved before launch."
+            )
 
         check_dicts = [
             {

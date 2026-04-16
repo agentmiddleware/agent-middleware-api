@@ -39,7 +39,10 @@ router = APIRouter(
     response_model=APIKeyWithSecret,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new API key",
-    description="Create a new API key for a wallet. The key is only shown once - store it securely.",
+    description=(
+        "Create a new API key for a wallet. The key is only shown once "
+        "- store it securely."
+    ),
 )
 async def create_api_key(
     request: CreateAPIKeyRequest,
@@ -185,7 +188,9 @@ async def revoke_api_key(
 @router.post(
     "/emergency-revoke",
     summary="Emergency key revocation",
-    description="Immediately revoke ALL API keys for a wallet. Use for security incidents.",
+    description=(
+        "Immediately revoke ALL API keys for a wallet. Use for security incidents."
+    ),
 )
 async def emergency_revoke(
     request: EmergencyKeyRevocationRequest,

@@ -60,7 +60,9 @@ class VideoUploadResponse(BaseModel):
     video_id: str
     upload_url: str | None = Field(
         None,
-        description="Pre-signed URL for direct upload (if source_url was not provided).",
+        description=(
+            "Pre-signed URL for direct upload (if source_url was not provided)."
+        ),
     )
     status: str = Field(default="pending")
     estimated_processing_seconds: int | None = None
@@ -79,7 +81,10 @@ class ViralHook(BaseModel):
     )
     trigger_type: str = Field(
         ...,
-        description="What makes this moment engaging (e.g., 'emotional_peak', 'speech_pattern', 'visual_surprise').",
+        description=(
+            "What makes this moment engaging (e.g., 'emotional_peak', "
+            "'speech_pattern', 'visual_surprise')."
+        ),
     )
     transcript_snippet: str = Field(
         ...,
@@ -162,7 +167,10 @@ class DistributionRequest(BaseModel):
     )
     optimize_schedule: bool = Field(
         default=True,
-        description="Let the algorithm pick optimal posting windows based on engagement data.",
+        description=(
+            "Let the algorithm pick optimal posting windows based on "
+            "engagement data."
+        ),
     )
 
 

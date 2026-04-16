@@ -1,0 +1,8 @@
+[lint]
+select = ["E501"]
+ignore = [
+    "E501",  # GENESIS_SERVICE_CODE contains code strings that are parsed by regex
+]
+
+[lint.per-file-ignores]
+"app/services/genesis.py" = ["E501"]

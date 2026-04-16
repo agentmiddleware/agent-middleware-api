@@ -298,7 +298,10 @@ class APIKeyService:
         old_key_id = None
         now = datetime.now(timezone.utc)
         rotation_id = f"rot_{uuid4().hex[:12]}"
-        rotation_type = RotationType.MANUAL.value if triggered_by == "user" else RotationType.AUTOMATIC.value
+        rotation_type = (
+            RotationType.MANUAL.value if triggered_by == "user"
+            else RotationType.AUTOMATIC.value
+        )
 
         async with self._session_factory()() as session:
             if key_id:
@@ -477,7 +480,9 @@ class APIKeyService:
 
             new_key_data = None
             if create_new_key:
-                new_key_data = await self.create_key(wallet_id, key_name="emergency_key")
+                new_key_data = await self.create_key(
+                    wallet_id, key_name="emergency_key"
+                )
 
             await session.commit()
 

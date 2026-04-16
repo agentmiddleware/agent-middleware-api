@@ -118,7 +118,10 @@ class HookDetector:
         Analyze a video and return ranked viral hooks.
         """
         if not video.transcript:
-            logger.warning(f"No transcript for {video.video_id}, using duration-based detection")
+            logger.warning(
+                f"No transcript for {video.video_id}, "
+                "using duration-based detection"
+            )
 
         # Production: run ML pipeline
         # Stub: generate synthetic hooks for testing
@@ -275,7 +278,10 @@ class PlatformDistributor:
             scheduled_at=schedule_at,
         )
 
-        logger.info(f"Distributed {clip.clip_id} to {platform.value}: {result.platform_url}")
+        logger.info(
+            f"Distributed {clip.clip_id} to {platform.value}: "
+            f"{result.platform_url}"
+        )
         return result
 
     def _build_platform_url(self, platform: Platform, post_id: str) -> str:
@@ -364,7 +370,10 @@ class MediaEngine:
             title=title,
             source_url=source_url,
             language=language,
-            status=VideoStatus.PROCESSING if source_url else VideoStatus.AWAITING_UPLOAD,
+            status=(
+                VideoStatus.PROCESSING if source_url
+                else VideoStatus.AWAITING_UPLOAD
+            ),
             metadata=metadata or {},
             created_at=datetime.now(timezone.utc),
         )
@@ -398,7 +407,10 @@ class MediaEngine:
 
             # Done
             await self.video_store.update_status(video_id, VideoStatus.READY)
-            logger.info(f"Video {video_id} processed: {len(video.hooks)} hooks detected")
+            logger.info(
+                f"Video {video_id} processed: "
+                f"{len(video.hooks)} hooks detected"
+            )
 
         except Exception as e:
             await self.video_store.update_status(video_id, VideoStatus.FAILED)

@@ -144,11 +144,17 @@ async def root():
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "description": "Agent-native middleware for IoT bridging, autonomous code repair, programmatic media distribution, and agent-to-agent communications.",
+        "description": (
+            "Agent-native middleware for IoT bridging, autonomous code repair, "
+            "programmatic media distribution, and agent-to-agent communications."
+        ),
         "services": {
             "iot_bridge": {
                 "base_path": "/v1/iot",
-                "description": "Secure protocol translation for IoT devices with topic-level ACLs.",
+                "description": (
+                    "Secure protocol translation for IoT devices "
+                    "with topic-level ACLs."
+                ),
                 "endpoints": [
                     "POST /v1/iot/devices",
                     "GET /v1/iot/devices",
@@ -160,7 +166,10 @@ async def root():
             },
             "autonomous_pm": {
                 "base_path": "/v1/telemetry",
-                "description": "Telemetry ingestion, anomaly detection, and autonomous pull request generation.",
+                "description": (
+                    "Telemetry ingestion, anomaly detection, and autonomous "
+                    "pull request generation."
+                ),
                 "endpoints": [
                     "POST /v1/telemetry/events",
                     "POST /v1/telemetry/events/single",
@@ -172,7 +181,10 @@ async def root():
             },
             "media_engine": {
                 "base_path": "/v1/media",
-                "description": "Video-to-viral-clip pipeline with cross-platform distribution.",
+                "description": (
+                    "Video-to-viral-clip pipeline with cross-platform "
+                    "distribution."
+                ),
                 "endpoints": [
                     "POST /v1/media/videos",
                     "GET /v1/media/videos/{video_id}",
@@ -184,7 +196,10 @@ async def root():
             },
             "agent_comms": {
                 "base_path": "/v1/comms",
-                "description": "Agent-to-agent messaging, capability discovery, and swarm task handoffs.",
+                "description": (
+                    "Agent-to-agent messaging, capability discovery, and "
+                    "swarm task handoffs."
+                ),
                 "endpoints": [
                     "POST /v1/comms/agents",
                     "GET /v1/comms/agents",
@@ -196,7 +211,12 @@ async def root():
             },
             "content_factory": {
                 "base_path": "/v1/factory",
-                "description": "Multi-format content generation from single sources, with hook-based 1-to-20 multiplication, 9:16 vertical rendering, animated captions, and algorithmic posting schedule optimization.",
+                "description": (
+                    "Multi-format content generation from single sources, "
+                    "with hook-based 1-to-20 multiplication, 9:16 vertical "
+                    "rendering, animated captions, and algorithmic posting "
+                    "schedule optimization."
+                ),
                 "endpoints": [
                     "POST /v1/factory/pipelines",
                     "GET /v1/factory/pipelines/{pipeline_id}",
@@ -212,7 +232,11 @@ async def root():
             },
             "agent_oracle": {
                 "base_path": "/v1/oracle",
-                "description": "Agent network infiltration: crawl directories, index APIs, compute compatibility, register for inbound discovery traffic.",
+                "description": (
+                    "Agent network infiltration: crawl directories, index APIs, "
+                    "compute compatibility, register for inbound discovery "
+                    "traffic."
+                ),
                 "endpoints": [
                     "POST /v1/oracle/crawl",
                     "POST /v1/oracle/crawl/batch",
@@ -227,7 +251,11 @@ async def root():
             },
             "agent_billing": {
                 "base_path": "/v1/billing",
-                "description": "Two-tier wallet system with per-action micro-metering, fiat-to-credit conversion, and swarm arbitrage profit engine.",
+                "description": (
+                    "Two-tier wallet system with per-action micro-metering, "
+                    "fiat-to-credit conversion, and swarm arbitrage profit "
+                    "engine."
+                ),
                 "endpoints": [
                     "POST /v1/billing/wallets/sponsor",
                     "POST /v1/billing/wallets/agent",
@@ -246,7 +274,10 @@ async def root():
             },
             "mcp_server": {
                 "base_path": "/mcp",
-                "description": "Model Context Protocol (MCP) server for B2A tool discovery and execution.",
+                "description": (
+                    "Model Context Protocol (MCP) server for B2A tool "
+                    "discovery and execution."
+                ),
                 "endpoints": [
                     "GET /mcp/tools.json",
                     "GET /.well-known/mcp/tools.json",
@@ -258,7 +289,11 @@ async def root():
             },
             "red_team_security": {
                 "base_path": "/v1/security",
-                "description": "Autonomous penetration testing swarm. Continuously attacks all API endpoints to find vulnerabilities before external agents do.",
+                "description": (
+                    "Autonomous penetration testing swarm. Continuously attacks "
+                    "all API endpoints to find vulnerabilities before "
+                    "external agents do."
+                ),
                 "endpoints": [
                     "POST /v1/security/scans",
                     "GET /v1/security/scans",
@@ -269,7 +304,11 @@ async def root():
             },
             "launch_sequence": {
                 "base_path": "/v1/launch",
-                "description": "Day 1 production bootstrap. One POST funds wallets, infiltrates agent networks, ignites content campaigns, and arms the Red Team perimeter.",
+                "description": (
+                    "Day 1 production bootstrap. One POST funds wallets, "
+                    "infiltrates agent networks, ignites content campaigns, "
+                    "and arms the Red Team perimeter."
+                ),
                 "endpoints": [
                     "POST /v1/launch/preflight",
                     "POST /v1/launch",
@@ -279,7 +318,10 @@ async def root():
             },
             "protocol_engine": {
                 "base_path": "/v1/protocol",
-                "description": "Code-to-discovery pipeline. Feed raw API code, get llm.txt + OpenAPI spec + agent.json + Oracle registration.",
+                "description": (
+                    "Code-to-discovery pipeline. Feed raw API code, get "
+                    "llm.txt + OpenAPI spec + agent.json + Oracle registration."
+                ),
                 "endpoints": [
                     "POST /v1/protocol/generate",
                     "GET /v1/protocol/generations",
@@ -288,7 +330,10 @@ async def root():
             },
             "rtaas": {
                 "base_path": "/v1/rtaas",
-                "description": "Red-Team-as-a-Service. Hire our security swarm to attack YOUR endpoints before deployment.",
+                "description": (
+                    "Red-Team-as-a-Service. Hire our security swarm to "
+                    "attack YOUR endpoints before deployment."
+                ),
                 "endpoints": [
                     "POST /v1/rtaas/jobs",
                     "GET /v1/rtaas/jobs",
@@ -298,7 +343,10 @@ async def root():
             },
             "sandbox": {
                 "base_path": "/v1/sandbox",
-                "description": "Interactive testing sandboxes. Headless puzzle environments for testing agent generalization.",
+                "description": (
+                    "Interactive testing sandboxes. Headless puzzle "
+                    "environments for testing agent generalization."
+                ),
                 "endpoints": [
                     "POST /v1/sandbox/environments",
                     "POST /v1/sandbox/environments/{env_id}/actions",
@@ -309,7 +357,10 @@ async def root():
             },
             "telemetry_scope": {
                 "base_path": "/v1/telemetry-scope",
-                "description": "Multi-tenant autonomous PM. Scoped telemetry pipelines with anomaly detection and auto-PR generation.",
+                "description": (
+                    "Multi-tenant autonomous PM. Scoped telemetry "
+                    "pipelines with anomaly detection and auto-PR generation."
+                ),
                 "endpoints": [
                     "POST /v1/telemetry-scope/pipelines",
                     "POST /v1/telemetry-scope/pipelines/{pipeline_id}/events",
@@ -322,7 +373,10 @@ async def root():
             },
             "dashboard": {
                 "base_path": "/v1/dashboard",
-                "description": "Real-time platform monitoring. Full snapshot of economics, security, telemetry, and Genesis lifecycle.",
+                "description": (
+                    "Real-time platform monitoring. Full snapshot of "
+                    "economics, security, telemetry, and Genesis lifecycle."
+                ),
                 "endpoints": [
                     "GET /v1/dashboard",
                     "GET /v1/dashboard/economics",
@@ -333,7 +387,10 @@ async def root():
             },
             "oracle_broadcast": {
                 "base_path": "/v1/broadcast",
-                "description": "Push published APIs into agent directories. The network effects engine.",
+                "description": (
+                    "Push published APIs into agent directories. "
+                    "The network effects engine."
+                ),
                 "endpoints": [
                     "POST /v1/broadcast",
                     "GET /v1/broadcast/jobs",
@@ -347,11 +404,18 @@ async def root():
         "auth": {
             "method": "api_key",
             "header": "X-API-Key",
-            "description": "Pass your API key in the X-API-Key header on every request.",
+            "description": (
+                "Pass your API key in the X-API-Key header "
+                "on every request."
+            ),
         },
         "rate_limits": {
             "requests_per_minute": settings.RATE_LIMIT_PER_MINUTE,
-            "headers": ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
+            "headers": [
+                "X-RateLimit-Limit",
+                "X-RateLimit-Remaining",
+                "X-RateLimit-Reset",
+            ],
         },
         "docs": {
             "openapi": "/openapi.json",
@@ -367,7 +431,10 @@ async def root():
     "/health",
     tags=["Discovery"],
     summary="Health check",
-    description="Returns 200 if the API is running. Agents should poll this before routing traffic.",
+    description=(
+        "Returns 200 if the API is running. Agents should poll "
+        "this before routing traffic."
+    ),
 )
 async def health():
     return {

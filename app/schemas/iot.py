@@ -35,7 +35,10 @@ class DeviceRegistration(BaseModel):
 
     device_id: str = Field(
         ...,
-        description="Unique identifier for the device (e.g., MAC address or serial). Alphanumeric, hyphens, underscores, dots only.",
+        description=(
+            "Unique identifier for the device (e.g., MAC address or serial). "
+            "Alphanumeric, hyphens, underscores, dots only."
+        ),
         examples=["romo-vacuum-001"],
     )
 
@@ -49,8 +52,9 @@ class DeviceRegistration(BaseModel):
             )
         if not SAFE_ID_PATTERN.match(v):
             raise ValueError(
-                "device_id must be 1-128 characters, alphanumeric with hyphens/underscores/dots. "
-                "Path separators (/, \\, ..) are forbidden."
+                "device_id must be 1-128 characters, alphanumeric with "
+                "hyphens/underscores/dots. Path separators (/, \\, ..) are "
+                "forbidden."
             )
         return v
     protocol: ProtocolType = Field(
@@ -59,7 +63,9 @@ class DeviceRegistration(BaseModel):
     )
     broker_url: str | None = Field(
         None,
-        description="Override broker URL for this device. Uses system default if omitted.",
+        description=(
+            "Override broker URL for this device. Uses system default if omitted."
+        ),
         examples=["mqtt://192.168.1.50:1883"],
     )
     topic_acl: dict[str, ACLPermission] = Field(
@@ -87,8 +93,12 @@ class DeviceResponse(BaseModel):
     protocol: ProtocolType
     bridge_endpoint: str = Field(
         ...,
-        description="The unified REST endpoint to interact with this device via the bridge.",
-        examples=["https://api.yourdomain.com/v1/iot/devices/romo-vacuum-001/messages"],
+        description=(
+            "The unified REST endpoint to interact with this device via the bridge."
+        ),
+        examples=[
+            "https://api.yourdomain.com/v1/iot/devices/romo-vacuum-001/messages"
+        ],
     )
     topic_acl: dict[str, ACLPermission]
     status: str = Field(default="registered")
@@ -99,7 +109,10 @@ class BridgeMessage(BaseModel):
     """Send a message to a device through the protocol bridge."""
     topic: str = Field(
         ...,
-        description="The topic/channel to publish to. Must match an allowed ACL pattern. Path traversal sequences are rejected.",
+        description=(
+            "The topic/channel to publish to. Must match an allowed ACL "
+            "pattern. Path traversal sequences are rejected."
+        ),
         examples=["device/romo-vacuum-001/command"],
     )
 
@@ -121,7 +134,10 @@ class BridgeMessage(BaseModel):
         default=1,
         ge=0,
         le=2,
-        description="Quality of Service level (0=at most once, 1=at least once, 2=exactly once).",
+        description=(
+            "Quality of Service level (0=at most once, 1=at least once, "
+            "2=exactly once)."
+        ),
     )
     retain: bool = Field(
         default=False,

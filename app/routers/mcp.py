@@ -36,13 +36,17 @@ router = APIRouter(prefix="/mcp", tags=["MCP"])
 class McpContext(BaseModel):
     """MCP execution context passed in tool calls."""
     wallet_id: str = Field(..., description="Wallet to charge for this call")
-    request_path: str | None = Field(None, description="Optional request path for tracking")
+    request_path: str | None = Field(
+        None, description="Optional request path for tracking"
+    )
 
 
 class ToolCallRequest(BaseModel):
     """MCP tool call request (tools/call method)."""
     name: str = Field(..., description="Tool name (service_id)")
-    arguments: dict[str, Any] = Field(default_factory=dict, description="Tool arguments")
+    arguments: dict[str, Any] = Field(
+        default_factory=dict, description="Tool arguments"
+    )
     mcp_context: McpContext | None = Field(None, description="Billing context")
 
 
@@ -238,7 +242,9 @@ async def invoke_tool(
     if not service:
         service = await registry.get_persistent(service_id)
         if not service:
-            raise HTTPException(status_code=404, detail=f"Service not found: {service_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Service not found: {service_id}"
+            )
 
     mcp_context = request.mcp_context
     if not mcp_context:

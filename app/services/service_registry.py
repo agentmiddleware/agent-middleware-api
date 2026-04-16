@@ -46,7 +46,17 @@ def pydantic_to_mcp_schema(model: type[BaseModel] | None) -> dict[str, Any] | No
             "properties": schema.get("properties", {}),
             "required": schema.get("required", []),
             "additionalProperties": False,
-            **{k: v for k, v in schema.items() if k not in ("properties", "required", "title", "type")},
+            **{
+                k: v
+                for k, v in schema.items()
+                if k
+                not in (
+                    "properties",
+                    "required",
+                    "title",
+                    "type",
+                )
+            },
         }
 
     if hasattr(model, "schema"):
@@ -60,7 +70,9 @@ def pydantic_to_mcp_schema(model: type[BaseModel] | None) -> dict[str, Any] | No
     return None
 
 
-def extract_schema_from_callable(func: Callable) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def extract_schema_from_callable(
+    func: Callable,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """
     Extract input and output schemas from a callable's signature.
 
@@ -119,7 +131,8 @@ def _service_to_mcp_tool(service: dict) -> dict:
     tool = {
         "name": service["service_id"],
         "description": service.get("description", ""),
-        "inputSchema": service.get("input_schema") or {"type": "object", "properties": {}},
+        "inputSchema": service.get("input_schema")
+        or {"type": "object", "properties": {}},
     }
 
     annotations = {
@@ -375,7 +388,11 @@ class ServiceRegistry:
 
         all_services = local + persistent
         if category:
-            all_services = [s for s in all_services if s.get("category") == category.value]
+            all_services = [
+                s
+                for s in all_services
+                if s.get("category") == category.value
+            ]
 
         return [s for s in all_services if s.get("is_active", True)]
 
@@ -388,7 +405,10 @@ class ServiceRegistry:
         """
         service = await self.get(service_id)
         if service:
-            return (service.get("credits_per_unit", 1.0), service.get("unit_name", "call"))
+            return (
+                service.get("credits_per_unit", 1.0),
+                service.get("unit_name", "call"),
+            )
         return None
 
     def to_mcp_tool(self, service: dict) -> dict:

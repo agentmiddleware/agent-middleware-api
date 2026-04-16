@@ -60,7 +60,10 @@ class AgentRegistrationResponse(BaseModel):
     capabilities: list[str]
     api_key: str = Field(
         ...,
-        description="Agent-specific API key for sending/receiving messages. Store securely.",
+        description=(
+            "Agent-specific API key for sending/receiving messages. "
+            "Store securely."
+        ),
     )
     webhook_url: str | None
     status: str
@@ -122,7 +125,9 @@ class HandoffRequest(BaseModel):
     context: dict = Field(
         ...,
         description="Context for the handoff — what needs to be done and why.",
-        examples=[{"video_id": "abc-123", "language": "en", "reason": "hooks need transcript"}],
+        examples=[
+            {"video_id": "abc-123", "language": "en", "reason": "hooks need transcript"}
+        ],
     )
 
 
@@ -172,7 +177,10 @@ async def register_agent(
 @router.get(
     "/agents",
     summary="List registered agents",
-    description="List all agents in the communication network, optionally filtered by capability.",
+    description=(
+        "List all agents in the communication network, "
+        "optionally filtered by capability."
+    ),
 )
 async def list_agents(
     capability: str | None = Query(
@@ -303,7 +311,10 @@ async def acknowledge_message(
     if not acked:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "message_not_found", "message": f"Message '{message_id}' not found in inbox."},
+            detail={
+                "error": "message_not_found",
+                "message": f"Message '{message_id}' not found in inbox.",
+            },
         )
     return {"message_id": message_id, "status": "acknowledged"}
 

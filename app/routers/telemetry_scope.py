@@ -27,8 +27,12 @@ class CreatePipelineRequest(BaseModel):
     """Create a tenant-scoped telemetry pipeline."""
     tenant_id: str = Field(..., description="Your agent or wallet ID.")
     service_name: str = Field(..., description="Name of the tool being monitored.")
-    git_repo_url: str = Field(default="", description="Git repo for auto-PR generation.")
-    webhook_url: str = Field(default="", description="Webhook for anomaly notifications.")
+    git_repo_url: str = Field(
+        default="", description="Git repo for auto-PR generation."
+    )
+    webhook_url: str = Field(
+        default="", description="Webhook for anomaly notifications."
+    )
 
 
 class PipelineResponse(BaseModel):
@@ -143,7 +147,11 @@ async def get_anomalies(
 ):
     try:
         anomalies = await scope.get_anomalies(pipeline_id)
-        return {"pipeline_id": pipeline_id, "anomalies": anomalies, "total": len(anomalies)}
+        return {
+            "pipeline_id": pipeline_id,
+            "anomalies": anomalies,
+            "total": len(anomalies),
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

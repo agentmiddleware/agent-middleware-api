@@ -82,7 +82,10 @@ class LLMService:
         if provider == "azure":
             base = self.settings.AZURE_OPENAI_ENDPOINT.rstrip("/")
             deployment = self.settings.AZURE_OPENAI_DEPLOYMENT
-            return f"{base}/openai/deployments/{deployment}{endpoint}?api-version=2024-02-01"
+            return (
+                f"{base}/openai/deployments/{deployment}"
+                f"{endpoint}?api-version=2024-02-01"
+            )
 
         if provider == "anthropic":
             base = self.settings.LLM_BASE_URL.rstrip("/")
@@ -220,7 +223,9 @@ class LLMService:
         endpoint = self._build_endpoint()
         headers = self._build_headers()
 
-        logger.debug(f"LLM request to {endpoint}: {json.dumps(payload, indent=2)[:500]}")
+        logger.debug(
+            f"LLM request to {endpoint}: {json.dumps(payload, indent=2)[:500]}"
+        )
 
         try:
             response = await self.client.post(endpoint, headers=headers, json=payload)
@@ -268,7 +273,11 @@ class LLMService:
         messages = [
             {
                 "role": "user",
-                "content": f"Data:\n{data}\n\nTask: {instruction}\n\nRespond with valid JSON only.",
+                "content": (
+                f"Data:\n{data}\n\n"
+                f"Task: {instruction}\n\n"
+                "Respond with valid JSON only."
+            ),
             }
         ]
 

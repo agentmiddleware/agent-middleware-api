@@ -48,7 +48,10 @@ class GenerateRequest(BaseModel):
     )
     register_in_oracle: bool = Field(
         default=False,
-        description="Auto-register the generated service in the Agent Oracle directories.",
+        description=(
+            "Auto-register the generated service in the "
+            "Agent Oracle directories."
+        ),
     )
 
 
@@ -80,7 +83,8 @@ class GenerationListResponse(BaseModel):
     status_code=status.HTTP_201_CREATED,
     summary="Generate protocol package from source code",
     description=(
-        "Submit raw API source code and receive a complete agent-discoverable package:\n\n"
+        "Submit raw API source code and receive a complete "
+        "agent-discoverable package:\n\n"
         "1. **llm.txt** — LLM-optimized documentation\n"
         "2. **OpenAPI 3.1 spec** — Machine-readable API schema\n"
         "3. **agent.json** — Agent discovery manifest\n"

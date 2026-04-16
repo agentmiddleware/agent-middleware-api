@@ -103,7 +103,11 @@ class EventStore:
             ],
         )
 
-    async def ingest(self, events: list[TelemetryEvent], batch_id: str) -> tuple[int, list[dict]]:
+    async def ingest(
+        self,
+        events: list[TelemetryEvent],
+        batch_id: str,
+    ) -> tuple[int, list[dict]]:
         """Ingest a batch of events. Returns (ingested_count, errors)."""
         await self._hydrate_if_needed()
         ingested = 0
@@ -241,7 +245,10 @@ class AnomalyDetector:
                     try:
                         loaded[anomaly_id] = AnomalyReport.model_validate(record)
                     except Exception:
-                        logger.exception("Skipping corrupt telemetry anomaly: %s", anomaly_id)
+                        logger.exception(
+                            "Skipping corrupt telemetry anomaly: %s",
+                            anomaly_id,
+                        )
                 self._anomalies = loaded
 
             self._hydrated = True
@@ -345,14 +352,21 @@ class AnomalyDetector:
 
         recent_rate = len(recent_errors) / window.total_seconds()
         baseline_seconds = (baseline_window - window).total_seconds()
-        baseline_rate = len(baseline_errors) / baseline_seconds if baseline_seconds > 0 else 0
+        baseline_rate = (
+            len(baseline_errors) / baseline_seconds
+            if baseline_seconds > 0
+            else 0
+        )
 
         if baseline_rate > 0 and recent_rate > baseline_rate * 3:
             sources = set(se.event.source for se in recent_errors)
             return AnomalyCandidate(
                 category="error_spike",
                 severity=Severity.HIGH,
-                summary=f"Error rate spike: {recent_rate:.2f}/s vs baseline {baseline_rate:.2f}/s across {', '.join(sources)}",
+                summary=(
+                    f"Error rate spike: {recent_rate:.2f}/s vs baseline "
+                    f"{baseline_rate:.2f}/s across {', '.join(sources)}"
+                ),
                 affected_endpoints=list(sources),
                 event_ids=[se.event_id for se in recent_errors],
                 first_seen=recent_errors[-1].ingested_at,
@@ -381,9 +395,16 @@ class AnomalyDetector:
                 return AnomalyCandidate(
                     category="source_concentration",
                     severity=Severity.MEDIUM,
-                    summary=f"{count}/{total} errors ({count/total:.0%}) originate from '{source}'",
+                    summary=(
+                        f"{count}/{total} errors ({count/total:.0%}) "
+                        f"originate from '{source}'"
+                    ),
                     affected_endpoints=[source],
-                    event_ids=[se.event_id for se in recent_errors if se.event.source == source],
+                    event_ids=[
+                        se.event_id
+                        for se in recent_errors
+                        if se.event.source == source
+                    ],
                     first_seen=recent_errors[-1].ingested_at,
                     last_seen=recent_errors[0].ingested_at,
                 )
@@ -459,7 +480,9 @@ class AutoPRGenerator:
             "Sample events:",
         ]
         for se in events[:10]:
-            lines.append(f"  [{se.event.severity}] {se.event.source}: {se.event.message}")
+            lines.append(
+                f"  [{se.event.severity}] {se.event.source}: {se.event.message}"
+            )
             if se.event.stack_trace:
                 # Include first 5 lines of stack trace
                 trace_lines = se.event.stack_trace.strip().split("\n")[:5]
@@ -531,7 +554,9 @@ class AutonomousPM:
                 await asyncio.sleep(interval_seconds)
 
         self._analysis_task = asyncio.create_task(_loop())
-        logger.info(f"Background anomaly analysis started (interval={interval_seconds}s)")
+        logger.info(
+            f"Background anomaly analysis started (interval={interval_seconds}s)"
+        )
 
     async def stop_background_analysis(self):
         if self._analysis_task:

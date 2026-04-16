@@ -75,14 +75,19 @@ async def get_doc_index():
                 "title": "OpenAPI Specification",
                 "path": "/openapi.json",
                 "content_type": "application/json",
-                "summary": "Machine-readable OpenAPI 3.1 specification with all endpoints, schemas, and examples.",
+                "summary": (
+                    "Machine-readable OpenAPI 3.1 specification with all endpoints, "
+                    "schemas, and examples."
+                ),
             },
             {
                 "id": "interactive",
                 "title": "Interactive API Explorer",
                 "path": "/docs",
                 "content_type": "text/html",
-                "summary": "Swagger UI for testing endpoints (primarily for human developers).",
+                "summary": (
+                    "Swagger UI for testing endpoints (primarily for human developers)."
+                ),
             },
             {
                 "id": "redoc",
@@ -312,10 +317,10 @@ async def get_doc_index():
     "/.well-known/agent.json",
     summary="Agent discovery manifest",
     description=(
-        "Standard agent discovery manifest following the emerging .well-known/agent.json "
-        "convention. External agents fetch this to understand what this API does, "
-        "how to authenticate, and what capabilities are available — similar to "
-        "robots.txt but for AI agents."
+        "Standard agent discovery manifest following the emerging "
+        ".well-known/agent.json convention. External agents fetch this to understand "
+        "what this API does, how to authenticate, and what capabilities "
+        "are available — similar to robots.txt but for AI agents."
     ),
 )
 async def get_agent_manifest():
@@ -339,42 +344,69 @@ async def get_agent_manifest():
         "capabilities": [
             {
                 "name": "iot-protocol-bridging",
-                "description": "Securely bridge IoT protocols (MQTT, CoAP, Zigbee, etc.) to REST with topic-level ACLs.",
+                "description": (
+                    "Securely bridge IoT protocols (MQTT, CoAP, Zigbee, etc.) "
+                    "to REST with topic-level ACLs."
+                ),
                 "endpoint": "/v1/iot",
             },
             {
                 "name": "autonomous-code-repair",
-                "description": "Ingest telemetry, detect anomalies, and auto-generate pull requests to fix bugs.",
+                "description": (
+                    "Ingest telemetry, detect anomalies, and auto-generate pull "
+                    "requests to fix bugs."
+                ),
                 "endpoint": "/v1/telemetry",
             },
             {
                 "name": "programmatic-media-distribution",
-                "description": "Video-to-viral-clip pipeline with cross-platform distribution.",
+                "description": (
+                    "Video-to-viral-clip pipeline with cross-platform "
+                    "distribution."
+                ),
                 "endpoint": "/v1/media",
             },
             {
                 "name": "agent-to-agent-messaging",
-                "description": "Structured messaging, capability discovery, and task handoffs between agents.",
+                "description": (
+                    "Structured messaging, capability discovery, and "
+                    "task handoffs between agents."
+                ),
                 "endpoint": "/v1/comms",
             },
             {
                 "name": "content-factory-scheduling",
-                "description": "Hook-based 1-to-20 content multiplication with 9:16 vertical rendering, animated captions, live campaign orchestration, and engagement-optimized algorithmic scheduling.",
+                "description": (
+                    "Hook-based 1-to-20 content multiplication with 9:16 vertical "
+                    "rendering, animated captions, live campaign orchestration, "
+                    "and engagement-optimized algorithmic scheduling."
+                ),
                 "endpoint": "/v1/factory",
             },
             {
                 "name": "agent-oracle-infiltration",
-                "description": "Crawl agent directories, index external APIs, compute compatibility scores, and register for inbound discovery traffic across the agentic web.",
+                "description": (
+                    "Crawl agent directories, index external APIs, compute "
+                    "compatibility scores, and register for inbound discovery "
+                    "traffic across the agentic web."
+                ),
                 "endpoint": "/v1/oracle",
             },
             {
                 "name": "agent-financial-gateways",
-                "description": "Two-tier wallet system: human sponsors provision agent wallets, per-action micro-metering, fiat-to-credit conversion, and swarm arbitrage profit engine.",
+                "description": (
+                    "Two-tier wallet system: human sponsors provision agent "
+                    "wallets, per-action micro-metering, fiat-to-credit conversion, "
+                    "and swarm arbitrage profit engine."
+                ),
                 "endpoint": "/v1/billing",
             },
             {
                 "name": "red-team-security-swarm",
-                "description": "Autonomous penetration testing that continuously attacks all API endpoints to find vulnerabilities.",
+                "description": (
+                    "Autonomous penetration testing that continuously attacks all API "
+                    "endpoints to find vulnerabilities."
+                ),
                 "endpoint": "/v1/security",
             },
         ],

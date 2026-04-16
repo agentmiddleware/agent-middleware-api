@@ -30,7 +30,9 @@ class WalletModel(SQLModel, table=True):
     lifetime_debits: Decimal = Field(default=Decimal("0"), decimal_places=8)
 
     # Hierarchy fields (for agent/child wallets)
-    parent_wallet_id: Optional[str] = Field(default=None, foreign_key="wallets.wallet_id", index=True)
+    parent_wallet_id: Optional[str] = Field(
+        default=None, foreign_key="wallets.wallet_id", index=True
+    )
     agent_id: Optional[str] = Field(default=None, max_length=100, index=True)
 
     # Child wallet specific fields
@@ -170,7 +172,9 @@ class ServiceRegistryModel(SQLModel, table=True):
     service_id: str = Field(primary_key=True, max_length=100)
     name: str = Field(max_length=255)
     description: str = Field(default="", max_length=1000)
-    owner_wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    owner_wallet_id: str = Field(
+        max_length=50, foreign_key="wallets.wallet_id", index=True
+    )
     owner_key: str = Field(max_length=255, index=True)
     category: str = Field(max_length=50, index=True)
     credits_per_unit: Decimal = Field(decimal_places=8)

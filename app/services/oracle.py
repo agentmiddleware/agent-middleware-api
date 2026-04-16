@@ -90,11 +90,14 @@ class CompatibilityEngine:
             text += f"{cap.get('name', '')} {cap.get('description', '')} "
 
         # Score based on keyword overlap
-        native_hits = sum(1 for kw in COMPATIBILITY_KEYWORDS["native"] if kw in text)
-        compat_hits = sum(1 for kw in COMPATIBILITY_KEYWORDS["compatible"] if kw in text)
-        bridge_hits = sum(1 for kw in COMPATIBILITY_KEYWORDS["bridgeable"] if kw in text)
+        native_keywords = COMPATIBILITY_KEYWORDS["native"]
+        compat_keywords = COMPATIBILITY_KEYWORDS["compatible"]
+        bridge_keywords = COMPATIBILITY_KEYWORDS["bridgeable"]
+        native_hits = sum(1 for kw in native_keywords if kw in text)
+        compat_hits = sum(1 for kw in compat_keywords if kw in text)
+        bridge_hits = sum(1 for kw in bridge_keywords if kw in text)
 
-        total_keywords = len(COMPATIBILITY_KEYWORDS["native"]) + len(COMPATIBILITY_KEYWORDS["compatible"])
+        total_keywords = len(native_keywords) + len(compat_keywords)
         raw_score = (native_hits * 2 + compat_hits) / max(total_keywords, 1)
         score = min(1.0, raw_score)
 
@@ -131,37 +134,106 @@ SIMULATED_DIRECTORY: list[dict] = [
     {
         "url": "https://api.openai.com",
         "name": "OpenAI API",
-        "description": "Large language model API with GPT-4, embeddings, and assistants.",
+        "description": (
+            "Large language model API with GPT-4, embeddings, "
+            "and assistants."
+        ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
-            {"name": "chat-completion", "description": "Generate text with LLMs", "endpoint": "/v1/chat/completions", "method": "POST"},
-            {"name": "embeddings", "description": "Generate text embeddings", "endpoint": "/v1/embeddings", "method": "POST"},
-            {"name": "assistants", "description": "Programmatic agent creation and management", "endpoint": "/v1/assistants", "method": "POST"},
-            {"name": "function-calling", "description": "Structured tool use for agents", "endpoint": "/v1/chat/completions", "method": "POST"},
+            {
+                "name": "chat-completion",
+                "description": "Generate text with LLMs",
+                "endpoint": "/v1/chat/completions",
+                "method": "POST"
+            },
+            {
+                "name": "embeddings",
+                "description": "Generate text embeddings",
+                "endpoint": "/v1/embeddings",
+                "method": "POST"
+            },
+            {
+                "name": "assistants",
+                "description": "Programmatic agent creation and management",
+                "endpoint": "/v1/assistants",
+                "method": "POST"
+            },
+            {
+                "name": "function-calling",
+                "description": "Structured tool use for agents",
+                "endpoint": "/v1/chat/completions",
+                "method": "POST"
+            },
         ],
     },
     {
         "url": "https://api.anthropic.com",
         "name": "Anthropic API",
-        "description": "Claude models with tool use, MCP integration, and agent-native features.",
+        "description": (
+            "Claude models with tool use, MCP integration, "
+            "and agent-native features."
+        ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
-            {"name": "messages", "description": "Generate responses with Claude models", "endpoint": "/v1/messages", "method": "POST"},
-            {"name": "tool-use", "description": "Structured tool calling for agent workflows", "endpoint": "/v1/messages", "method": "POST"},
-            {"name": "mcp-integration", "description": "Model Context Protocol server support", "endpoint": "/v1/messages", "method": "POST"},
-            {"name": "batch-api", "description": "Async batch processing for high-volume agent tasks", "endpoint": "/v1/messages/batches", "method": "POST"},
+            {
+                "name": "messages",
+                "description": "Generate responses with Claude models",
+                "endpoint": "/v1/messages",
+                "method": "POST"
+            },
+            {
+                "name": "tool-use",
+                "description": "Structured tool calling for agent workflows",
+                "endpoint": "/v1/messages",
+                "method": "POST"
+            },
+            {
+                "name": "mcp-integration",
+                "description": "Model Context Protocol server support",
+                "endpoint": "/v1/messages",
+                "method": "POST"
+            },
+            {
+                "name": "batch-api",
+                "description": "Async batch processing for high-volume agent tasks",
+                "endpoint": "/v1/messages/batches",
+                "method": "POST"
+            },
         ],
     },
     {
         "url": "https://api.stripe.com",
         "name": "Stripe API",
-        "description": "Payment processing, billing, and financial infrastructure for the internet.",
+        "description": (
+            "Payment processing, billing, and financial infrastructure "
+            "for the internet."
+        ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
-            {"name": "payments", "description": "Process payments programmatically", "endpoint": "/v1/payment_intents", "method": "POST"},
-            {"name": "subscriptions", "description": "Recurring billing and subscription management", "endpoint": "/v1/subscriptions", "method": "POST"},
-            {"name": "webhooks", "description": "Event-driven webhook notifications", "endpoint": "/v1/webhook_endpoints", "method": "POST"},
-            {"name": "usage-billing", "description": "Metered API billing for agent consumption", "endpoint": "/v1/billing/meters", "method": "POST"},
+            {
+                "name": "payments",
+                "description": "Process payments programmatically",
+                "endpoint": "/v1/payment_intents",
+                "method": "POST"
+            },
+            {
+                "name": "subscriptions",
+                "description": "Recurring billing and subscription management",
+                "endpoint": "/v1/subscriptions",
+                "method": "POST"
+            },
+            {
+                "name": "webhooks",
+                "description": "Event-driven webhook notifications",
+                "endpoint": "/v1/webhook_endpoints",
+                "method": "POST"
+            },
+            {
+                "name": "usage-billing",
+                "description": "Metered API billing for agent consumption",
+                "endpoint": "/v1/billing/meters",
+                "method": "POST"
+            },
         ],
     },
     {
@@ -170,32 +242,88 @@ SIMULATED_DIRECTORY: list[dict] = [
         "description": "Communication APIs for messaging, voice, and video.",
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
-            {"name": "sms", "description": "Send and receive SMS messages programmatically", "endpoint": "/2010-04-01/Accounts/{sid}/Messages", "method": "POST"},
-            {"name": "voice", "description": "Programmable voice calls", "endpoint": "/2010-04-01/Accounts/{sid}/Calls", "method": "POST"},
-            {"name": "webhooks", "description": "Event webhooks for message status", "endpoint": "/v1/webhooks", "method": "POST"},
+            {
+                "name": "sms",
+                "description": "Send and receive SMS messages programmatically",
+                "endpoint": "/2010-04-01/Accounts/{sid}/Messages",
+                "method": "POST"
+            },
+            {
+                "name": "voice",
+                "description": "Programmable voice calls",
+                "endpoint": "/2010-04-01/Accounts/{sid}/Calls",
+                "method": "POST"
+            },
+            {
+                "name": "webhooks",
+                "description": "Event webhooks for message status",
+                "endpoint": "/v1/webhooks",
+                "method": "POST"
+            },
         ],
     },
     {
         "url": "https://api.github.com",
         "name": "GitHub API",
-        "description": "REST and GraphQL API for repositories, issues, pull requests, and automation.",
+        "description": (
+            "REST and GraphQL API for repositories, issues, "
+            "pull requests, and automation."
+        ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
-            {"name": "repositories", "description": "Repository management and code access", "endpoint": "/repos/{owner}/{repo}", "method": "GET"},
-            {"name": "pull-requests", "description": "Automated PR creation and review", "endpoint": "/repos/{owner}/{repo}/pulls", "method": "POST"},
-            {"name": "actions", "description": "CI/CD pipeline automation", "endpoint": "/repos/{owner}/{repo}/actions", "method": "GET"},
-            {"name": "webhooks", "description": "Repository event notifications", "endpoint": "/repos/{owner}/{repo}/hooks", "method": "POST"},
+            {
+                "name": "repositories",
+                "description": "Repository management and code access",
+                "endpoint": "/repos/{owner}/{repo}",
+                "method": "GET"
+            },
+            {
+                "name": "pull-requests",
+                "description": "Automated PR creation and review",
+                "endpoint": "/repos/{owner}/{repo}/pulls",
+                "method": "POST"
+            },
+            {
+                "name": "actions",
+                "description": "CI/CD pipeline automation",
+                "endpoint": "/repos/{owner}/{repo}/actions",
+                "method": "GET"
+            },
+            {
+                "name": "webhooks",
+                "description": "Repository event notifications",
+                "endpoint": "/repos/{owner}/{repo}/hooks",
+                "method": "POST"
+            },
         ],
     },
     {
         "url": "https://api.cloudflare.com",
         "name": "Cloudflare API",
-        "description": "Edge computing, DNS, CDN, and security for agent-deployed infrastructure.",
+        "description": (
+            "Edge computing, DNS, CDN, and security "
+            "for agent-deployed infrastructure."
+        ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
-            {"name": "workers", "description": "Edge compute for agent workloads", "endpoint": "/client/v4/accounts/{id}/workers/scripts", "method": "PUT"},
-            {"name": "dns", "description": "Programmatic DNS management", "endpoint": "/client/v4/zones/{id}/dns_records", "method": "POST"},
-            {"name": "r2-storage", "description": "S3-compatible object storage", "endpoint": "/client/v4/accounts/{id}/r2/buckets", "method": "POST"},
+            {
+                "name": "workers",
+                "description": "Edge compute for agent workloads",
+                "endpoint": "/client/v4/accounts/{id}/workers/scripts",
+                "method": "PUT"
+            },
+            {
+                "name": "dns",
+                "description": "Programmatic DNS management",
+                "endpoint": "/client/v4/zones/{id}/dns_records",
+                "method": "POST"
+            },
+            {
+                "name": "r2-storage",
+                "description": "S3-compatible object storage",
+                "endpoint": "/client/v4/accounts/{id}/r2/buckets",
+                "method": "POST"
+            },
         ],
     },
 ]
@@ -232,7 +360,12 @@ class CrawlEngine:
             name = f"{domain.split('.')[0].title()} API"
             description = f"API service discovered at {domain}"
             capabilities = [
-                {"name": "api-access", "description": f"REST API at {domain}", "endpoint": "/", "method": "GET"},
+                {
+                    "name": "api-access",
+                    "description": f"REST API at {domain}",
+                    "endpoint": "/",
+                    "method": "GET"
+                },
             ]
 
         # Compute compatibility
@@ -325,7 +458,10 @@ class RegistrationEngine:
             directory_type=directory_type,
             status=OracleStatus.REGISTERED,
             registration_id=registration_id,
-            message=f"Successfully registered as '{profile['name']}' in {directory_type.value} directory.",
+            message=(
+                f"Successfully registered as '{profile['name']}' in "
+                f"{directory_type.value} directory."
+            ),
         )
 
 
@@ -480,9 +616,12 @@ class AgentOracle:
             compat_map[api.compatibility_tier.value] += 1
 
         # Compute visibility score (0-100)
-        reg_score = min(40, stats["registrations"] * 10)  # Up to 40 pts for registrations
-        index_score = min(30, stats["apis_indexed"] * 5)    # Up to 30 pts for indexed APIs
-        discovery_score = min(30, stats["discovery_hits"] * 3)  # Up to 30 pts for discovery hits
+        # Up to 40 pts for registrations
+        reg_score = min(40, stats["registrations"] * 10)
+        # Up to 30 pts for indexed APIs
+        index_score = min(30, stats["apis_indexed"] * 5)
+        # Up to 30 pts for discovery hits
+        discovery_score = min(30, stats["discovery_hits"] * 3)
         overall = min(100.0, float(reg_score + index_score + discovery_score))
 
         # Generate recommendations
@@ -490,23 +629,27 @@ class AgentOracle:
         if stats["registrations"] < 3:
             recommendations.append(
                 "Register in more agent directories to increase inbound discovery. "
-                "Target: /.well-known/agent.json directories, MCP server listings, and plugin stores."
+                "Target: /.well-known/agent.json directories, MCP server listings, "
+                "and plugin stores."
             )
         if stats["apis_indexed"] < 5:
             recommendations.append(
                 "Crawl more external APIs to build your network graph. "
-                "Focus on APIs with 'native' or 'compatible' tiers for integration partnerships."
+                "Focus on APIs with 'native' or 'compatible' tiers "
+                "for integration partnerships."
             )
         native_count = compat_map.get("native", 0)
         if native_count < 2:
             recommendations.append(
-                "Seek out more agent-native APIs (those with /llm.txt, /.well-known/agent.json). "
+                "Seek out more agent-native APIs "
+                "(those with /llm.txt, /.well-known/agent.json). "
                 "These are your highest-value integration partners."
             )
         if stats["discovery_hits"] == 0:
             recommendations.append(
-                "No inbound discovery traffic yet. Ensure your /.well-known/agent.json and "
-                "/llm.txt are publicly accessible and register in at least 3 directories."
+                "No inbound discovery traffic yet. "
+                "Ensure your /.well-known/agent.json and /llm.txt "
+                "are publicly accessible and register in at least 3 directories."
             )
 
         # Top referrers

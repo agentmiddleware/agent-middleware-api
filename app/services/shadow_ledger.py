@@ -33,18 +33,66 @@ from ..schemas.billing import ServiceCategory
 logger = logging.getLogger(__name__)
 
 DEFAULT_PRICING: dict[ServiceCategory, tuple[str, Decimal, str]] = {
-    ServiceCategory.IOT_BRIDGE: ("request", Decimal("2.0"), "Per IoT message bridged"),
-    ServiceCategory.TELEMETRY_PM: ("event", Decimal("1.0"), "Per telemetry event ingested"),
-    ServiceCategory.MEDIA_ENGINE: ("frame", Decimal("0.5"), "Per video frame processed"),
-    ServiceCategory.AGENT_COMMS: ("message", Decimal("1.5"), "Per agent message routed"),
-    ServiceCategory.CONTENT_FACTORY: ("piece", Decimal("50.0"), "Per content piece generated"),
-    ServiceCategory.RED_TEAM: ("scan", Decimal("100.0"), "Per security scan executed"),
-    ServiceCategory.ORACLE: ("crawl", Decimal("25.0"), "Per API crawled and indexed"),
-    ServiceCategory.PLATFORM_FEE: ("request", Decimal("0.1"), "Base platform fee per API call"),
-    ServiceCategory.SWARM_DELEGATION: ("child", Decimal("5.0"), "Per child wallet spawned"),
-    ServiceCategory.PROTOCOL_GEN: ("generation", Decimal("200.0"), "Per llm.txt + OpenAPI spec generated"),
-    ServiceCategory.SANDBOX: ("session", Decimal("150.0"), "Per sandbox environment session"),
-    ServiceCategory.RTAAS: ("scan", Decimal("100.0"), "Per external Red Team scan"),
+    ServiceCategory.IOT_BRIDGE: (
+        "request",
+        Decimal("2.0"),
+        "Per IoT message bridged",
+    ),
+    ServiceCategory.TELEMETRY_PM: (
+        "event",
+        Decimal("1.0"),
+        "Per telemetry event ingested",
+    ),
+    ServiceCategory.MEDIA_ENGINE: (
+        "frame",
+        Decimal("0.5"),
+        "Per video frame processed",
+    ),
+    ServiceCategory.AGENT_COMMS: (
+        "message",
+        Decimal("1.5"),
+        "Per agent message routed",
+    ),
+    ServiceCategory.CONTENT_FACTORY: (
+        "piece",
+        Decimal("50.0"),
+        "Per content piece generated",
+    ),
+    ServiceCategory.RED_TEAM: (
+        "scan",
+        Decimal("100.0"),
+        "Per security scan executed",
+    ),
+    ServiceCategory.ORACLE: (
+        "crawl",
+        Decimal("25.0"),
+        "Per API crawled and indexed",
+    ),
+    ServiceCategory.PLATFORM_FEE: (
+        "request",
+        Decimal("0.1"),
+        "Base platform fee per API call",
+    ),
+    ServiceCategory.SWARM_DELEGATION: (
+        "child",
+        Decimal("5.0"),
+        "Per child wallet spawned",
+    ),
+    ServiceCategory.PROTOCOL_GEN: (
+        "generation",
+        Decimal("200.0"),
+        "Per llm.txt + OpenAPI spec generated",
+    ),
+    ServiceCategory.SANDBOX: (
+        "session",
+        Decimal("150.0"),
+        "Per sandbox environment session",
+    ),
+    ServiceCategory.RTAAS: (
+        "scan",
+        Decimal("100.0"),
+        "Per external Red Team scan",
+    ),
 }
 
 SESSION_TTL_SECONDS = 900  # 15 minutes
@@ -183,7 +231,10 @@ class ShadowLedger:
                 return self._redis
             except Exception as e:
                 if not self._warned:
-                    logger.warning(f"Redis unavailable for shadow ledger: {e}. Using in-memory store.")
+                    logger.warning(
+                        f"Redis unavailable for shadow ledger: {e}. "
+                        "Using in-memory store."
+                    )
                     self._warned = True
                 return None
 
@@ -238,14 +289,20 @@ class ShadowLedger:
                 SESSION_TTL_SECONDS,
                 str(real_balance),
             )
-            await redis_client.sadd(await self._wallet_sessions_key(wallet_id), session_id)
+            await redis_client.sadd(
+                await self._wallet_sessions_key(wallet_id),
+                session_id,
+            )
             logger.info(f"Created dry-run session {session_id} for wallet {wallet_id}")
         else:
             self._memory_store[session_id] = {
                 "session": session,
                 "balance": real_balance,
             }
-            logger.info(f"Created dry-run session {session_id} (in-memory) for wallet {wallet_id}")
+            logger.info(
+                f"Created dry-run session {session_id} "
+                f"(in-memory) for wallet {wallet_id}"
+            )
 
         return session
 
@@ -377,7 +434,10 @@ class ShadowLedger:
         if redis_client:
             await redis_client.delete(await self._session_key(session_id))
             await redis_client.delete(await self._balance_key(session_id))
-            await redis_client.srem(await self._wallet_sessions_key(session.wallet_id), session_id)
+            await redis_client.srem(
+                await self._wallet_sessions_key(session.wallet_id),
+                session_id,
+            )
         else:
             self._memory_store.pop(session_id, None)
 
@@ -404,7 +464,8 @@ class ShadowLedger:
 
         logger.info(
             f"Ended dry-run session {session_id}: "
-            f"{summary.charge_count} charges, {summary.total_simulated_credits} credits simulated"
+            f"{summary.charge_count} charges, "
+            f"{summary.total_simulated_credits} credits simulated"
         )
 
         return summary
@@ -563,7 +624,10 @@ class ShadowLedger:
             session_id=session_id,
             wallet_id=session.wallet_id,
             reverted=True,
-            message=f"Reverted {charge_count} simulated charges ({total} credits). No changes made to real wallet.",
+            message=(
+                f"Reverted {charge_count} simulated charges "
+                f"({total} credits). No changes made to real wallet."
+            ),
         )
 
     async def list_sessions(self, wallet_id: str) -> list[DryRunSession]:
@@ -571,7 +635,9 @@ class ShadowLedger:
         redis_client = await self._get_redis()
 
         if redis_client:
-            session_ids = await redis_client.smembers(await self._wallet_sessions_key(wallet_id))
+            session_ids = await redis_client.smembers(
+                await self._wallet_sessions_key(wallet_id)
+            )
             sessions = []
             for sid in session_ids:
                 session = await self.get_session(sid)

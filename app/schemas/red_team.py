@@ -14,15 +14,15 @@ from datetime import datetime
 
 class AttackCategory(str, Enum):
     """Categories of automated attack vectors."""
-    ACL_BYPASS = "acl_bypass"              # Topic-level ACL evasion (the DJI special)
-    AUTH_PROBE = "auth_probe"              # API key validation edge cases
-    INJECTION = "injection"                # Payload injection (JSON, MQTT topic strings)
-    RATE_LIMIT_EVASION = "rate_limit_evasion"  # Circumvent sliding window limiter
-    PRIVILEGE_ESCALATION = "privilege_escalation"  # Cross-device/cross-agent access
-    SCHEMA_ABUSE = "schema_abuse"          # Malformed payloads, type coercion attacks
-    ENUMERATION = "enumeration"            # Resource ID guessing, endpoint crawling
-    REPLAY = "replay"                      # Request replay and token reuse attacks
-    DOS_PATTERN = "dos_pattern"            # Denial of service via expensive operations
+    ACL_BYPASS = "acl_bypass"
+    AUTH_PROBE = "auth_probe"
+    INJECTION = "injection"
+    RATE_LIMIT_EVASION = "rate_limit_evasion"
+    PRIVILEGE_ESCALATION = "privilege_escalation"
+    SCHEMA_ABUSE = "schema_abuse"
+    ENUMERATION = "enumeration"
+    REPLAY = "replay"
+    DOS_PATTERN = "dos_pattern"
 
 
 class Severity(str, Enum):
@@ -58,7 +58,9 @@ class Vulnerability(BaseModel):
     title: str = Field(..., description="Short description of the finding.")
     description: str = Field(
         ...,
-        description="Detailed technical explanation including attack vector and impact.",
+        description=(
+            "Detailed technical explanation including attack vector and impact."
+        ),
     )
     endpoint: str = Field(..., description="The affected API path.")
     method: str = Field(..., description="HTTP method (GET, POST, etc.).")
@@ -73,7 +75,10 @@ class Vulnerability(BaseModel):
     remediation_status: RemediationStatus = RemediationStatus.OPEN
     cwe_id: str | None = Field(
         None,
-        description="Common Weakness Enumeration ID (e.g. CWE-285 for improper authorization).",
+        description=(
+            "Common Weakness Enumeration ID (e.g. CWE-285 for "
+            "improper authorization)."
+        ),
     )
     discovered_at: datetime
 
@@ -99,11 +104,17 @@ class ScanRequest(BaseModel):
     )
     intensity: str = Field(
         default="standard",
-        description="Scan intensity: 'quick' (surface-level), 'standard' (thorough), 'aggressive' (full fuzzing).",
+        description=(
+            "Scan intensity: 'quick' (surface-level), 'standard' (thorough), "
+            "'aggressive' (full fuzzing)."
+        ),
     )
     auto_remediate: bool = Field(
         default=False,
-        description="If true, the swarm will attempt to auto-generate patches for discovered vulnerabilities.",
+        description=(
+            "If true, the swarm will attempt to auto-generate patches for "
+            "discovered vulnerabilities."
+        ),
     )
 
 
