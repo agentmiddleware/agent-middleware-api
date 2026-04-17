@@ -235,3 +235,74 @@ def ensure_phase9_registered():
     if not _registered:
         register_phase9_tools()
         _registered = True
+
+
+_default_services_registered = False
+
+
+async def default_service_placeholder(**kwargs) -> dict[str, Any]:
+    """Placeholder for default services."""
+    return {"status": "service_available", "message": "This is a default MCP service"}
+
+
+def register_default_mcp_services():
+    """Register default MCP services for the marketplace."""
+    global _default_services_registered
+    if _default_services_registered:
+        return
+
+    registry = get_service_registry()
+
+    default_services = [
+        {
+            "service_id": "data-indexer",
+            "name": "Data Indexer",
+            "description": "Fast vector indexing for documents and content. Enables semantic search capabilities for AI agents.",
+            "category": ServiceCategory.PROTOCOL_GEN,
+            "credits_per_unit": 10.0,
+            "unit_name": "document",
+            "input_model": None,
+            "output_model": None,
+        },
+        {
+            "service_id": "content-generator",
+            "name": "Content Generator",
+            "description": "Generate marketing copy, product descriptions, and social media content using AI.",
+            "category": ServiceCategory.CONTENT_FACTORY,
+            "credits_per_unit": 25.0,
+            "unit_name": "piece",
+            "input_model": None,
+            "output_model": None,
+        },
+        {
+            "service_id": "telemetry-processor",
+            "name": "Telemetry Processor",
+            "description": "Process and analyze agent telemetry data for anomaly detection and monitoring.",
+            "category": ServiceCategory.TELEMETRY_PM,
+            "credits_per_unit": 5.0,
+            "unit_name": "event",
+            "input_model": None,
+            "output_model": None,
+        },
+        {
+            "service_id": "semantic-search",
+            "name": "Semantic Search",
+            "description": "Natural language search across indexed content using embeddings.",
+            "category": ServiceCategory.PROTOCOL_GEN,
+            "credits_per_unit": 15.0,
+            "unit_name": "query",
+            "input_model": None,
+            "output_model": None,
+        },
+    ]
+
+    for service_def in default_services:
+        try:
+            registry.register_local(func=default_service_placeholder, **service_def)
+            logger.info(f"Registered default MCP service: {service_def['service_id']}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to register default service {service_def['service_id']}: {e}"
+            )
+
+    _default_services_registered = True
