@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/Tests-263%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-317%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
@@ -506,6 +506,33 @@ python my_server.py
 
 ---
 
+## External AWI Adoption Kit — Phase 8
+
+**Turn any website into an agent-native platform in <30 minutes.**
+
+Website owners can now expose a full **Agentic Web Interface (AWI)** that works seamlessly with this middleware.
+
+### One-command adoption
+
+```bash
+pip install agent-middleware-awi
+python -m agent_middleware generate-awi --framework fastapi
+```
+
+The kit includes:
+
+- Automatic `/.well-known/awi.json` manifest generator
+- Python + TypeScript SDKs
+- FastAPI / Next.js reference templates
+- Zero-breaking-change adapter (AWI runs alongside your existing human UI)
+- Full security & task-queue integration
+
+**Documentation:** [docs/awi-adoption-guide.md](docs/awi-adoption-guide.md)
+
+This directly implements the vision from **arXiv:2506.10953v1** — we no longer force agents to fight human-designed interfaces.
+
+---
+
 ## Agentic Web Interface (AWI) — Phase 7
 
 **Based on arXiv:2506.10953v1 — "Build the web for agents, not agents for the web"** ([Lù et al., 2025, CC BY 4.0](https://arxiv.org/abs/2506.10953))
@@ -676,6 +703,8 @@ Current durable service stores:
 - [x] Stripe Identity (KYC) for sponsor verification
 - [x] Automated API key rotation for wallets
 - [x] Sandbox engine wired to billing
+- [x] Full Agentic Web Interface (AWI) control plane
+- [x] External AWI Adoption Kit (Python/TS SDKs, manifest generator, adapter)
 - [ ] Add comprehensive agent interaction examples and recipes
 - [ ] Multi-tenant hardening validations
 - [ ] Add SQLite backend support for simpler edge deployments
