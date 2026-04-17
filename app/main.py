@@ -45,6 +45,9 @@ from .routers import (
     kyc,
     api_keys,
     awi,
+    discover,
+    well_known,
+    static,
 )
 
 settings = get_settings()
@@ -151,6 +154,9 @@ app.include_router(mcp.router)
 app.include_router(kyc.router)
 app.include_router(api_keys.router)
 app.include_router(awi.router)
+app.include_router(discover.router)
+app.include_router(well_known.router)
+app.include_router(static.router)
 
 
 # --- Discovery & Health Endpoints ---

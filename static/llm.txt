@@ -1,0 +1,214 @@
+# Agent-Native Middleware API — LLM-Readable Documentation
+
+**Version:** 0.4.1
+**Base URL:** http://localhost:8000
+**Auth:** X-API-Key header
+
+---
+
+## What This API Does
+
+The Agent-Native Middleware API provides infrastructure for autonomous AI agents:
+- **Billing & Payments** — Credit-based wallet system with Stripe integration
+- **Telemetry** — Event tracking and anomaly detection
+- **Agent Communication** — Agent-to-agent messaging and swarm coordination
+- **AI Decision Making** — Autonomous decisions, self-healing, memory
+- **MCP Tools** — Model Context Protocol for tool discovery and execution
+- **AWI** — Agentic Web Interface for web automation with human pause/steer
+- **Sandbox** — Safe testing environments (dry-run and behavioral)
+
+---
+
+## Quick Start for Agents
+
+### 1. Discover What This API Offers
+
+```bash
+GET /v1/discover
+```
+
+Returns all capabilities, MCP tools, AWI endpoints, and pricing.
+
+### 2. Get Your API Key
+
+Contact the service operator. Pass it as `X-API-Key: your-key` on every request.
+
+### 3. Create a Wallet
+
+```bash
+POST /v1/billing/wallets/agent
+{
+  "wallet_id": "your-agent-id",
+  "parent_wallet_id": "sponsor-001",
+  "max_spend": 1000
+}
+```
+
+### 4. Start Using Services
+
+```bash
+# Emit telemetry
+POST /v1/telemetry/events
+{"event": "agent_started", "agent_id": "your-agent-id"}
+
+# Send message to another agent
+POST /v1/comms/messages
+{"from": "your-agent-id", "to": "other-agent", "content": "hello"}
+
+# Make AI decision
+POST /v1/ai/decide
+{"agent_id": "your-agent-id", "context": {...}, "options": [...]}
+```
+
+---
+
+## MCP Tool Discovery
+
+Agents using Model Context Protocol should:
+
+```bash
+# List available tools
+GET /mcp/tools.json
+
+# Call a tool via MCP
+POST /mcp/messages
+{"jsonrpc": "2.0", "method": "tools/list", "id": 1}
+```
+
+Available tools:
+- `emit_telemetry_event` — Track events (1 credit)
+- `charge_wallet` — Deduct credits (1 credit)
+- `send_agent_message` — Send message (1 credit)
+- `decide` — AI decision (10 credits)
+- `heal` — Self-healing (15 credits)
+- `create_session` — AWI session (5 credits)
+
+---
+
+## AWI — Agentic Web Interface
+
+For web automation without fighting DOM trees:
+
+```bash
+# Create session
+POST /v1/awi/sessions
+{"target_url": "https://example.com", "max_steps": 100}
+
+# Execute standardized actions
+POST /v1/awi/execute
+{"session_id": "...", "action": "search_and_filter", "parameters": {...}}
+
+# Get representation
+POST /v1/awi/represent
+{"session_id": "...", "representation_type": "summary"}
+
+# Human pause/steer
+POST /v1/awi/intervene
+{"session_id": "...", "action": "pause", "reason": "Review needed"}
+```
+
+---
+
+## Billing & Pricing
+
+### Credit System
+- 1 credit = $0.001 USD
+- Free tier: 1000 credits/month
+- Purchase credits via Stripe at `/v1/billing/top-up`
+
+### Rate Limits
+- 120 requests/minute per API key
+- Burst allowance: 20 extra
+
+### Velocity Monitoring
+Wallets are auto-frozen if spending exceeds:
+- 1000 credits/hour
+- 10000 credits/day
+
+---
+
+## SDKs
+
+### Python (b2a-sdk)
+```bash
+pip install b2a-sdk
+```
+
+```python
+from b2a_sdk import B2AClient, billable
+
+client = B2AClient(api_url="...", api_key="...", wallet_id="...")
+
+@billable(client, wallet_id="...", units=1.0)
+async def my_tool():
+    return result
+```
+
+### TypeScript (@b2a/sdk)
+```bash
+npm install @b2a/sdk
+```
+
+---
+
+## Framework Integration
+
+### LangGraph
+```python
+from langgraph.prebuilt import create_react_agent
+from b2a_sdk import B2AClient
+
+client = B2AClient(...)
+tools = client.get_mcp_tools()
+agent = create_react_agent(model, tools)
+```
+
+### CrewAI
+```python
+from crewai import Agent
+from b2a_sdk import B2AClient
+
+client = B2AClient(...)
+agent = Agent(
+    role="...",
+    tools=client.get_mcp_tools()
+)
+```
+
+---
+
+## Endpoints Summary
+
+| Category | Prefix | Auth |
+|----------|--------|------|
+| Discovery | `/v1/discover` | Optional |
+| Billing | `/v1/billing` | Required |
+| Telemetry | `/v1/telemetry` | Required |
+| Comms | `/v1/comms` | Required |
+| AI | `/v1/ai` | Required |
+| AWI | `/v1/awi` | Required |
+| Sandbox | `/v1/sandbox` | Required |
+| MCP | `/mcp` | Optional |
+| Health | `/health` | None |
+
+---
+
+## Error Codes
+
+| Code | Meaning |
+|------|---------|
+| 401 | Missing or invalid API key |
+| 403 | Access denied (cross-tenant) |
+| 402 | Insufficient credits |
+| 429 | Rate limit exceeded |
+| 500 | Internal error |
+
+---
+
+## For More Information
+
+- API Docs: `/docs`
+- OpenAPI Spec: `/openapi.json`
+- AWI Adoption Guide: `/docs/awi-adoption-guide.md`
+- Agent Recipes: `/docs/agent-recipes.md`
+- GitHub: https://github.com/PetrefiedThunder/agent-middleware-api

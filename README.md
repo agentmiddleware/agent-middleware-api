@@ -6,6 +6,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 ![Tests](https://img.shields.io/badge/Tests-339%20passing-brightgreen)
+![Phase](https://img.shields.io/badge/Phase-9%20Agent%20Discoverability-blue)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
@@ -574,6 +575,63 @@ This directly implements the vision from **arXiv:2506.10953v1** — we no longer
 
 ---
 
+## Agent Discoverability (Phase 9)
+
+**Making agents find and use this platform automatically.**
+
+### Discovery Endpoints
+
+Agents discover services through machine-readable endpoints:
+
+```bash
+# Main discovery manifest
+GET /v1/discover
+
+# Standard agent manifest
+GET /.well-known/agent.json
+
+# MCP tools manifest
+GET /mcp/tools.json
+
+# LLM-readable docs
+GET /llm.txt
+```
+
+### Framework Integrations
+
+Drop-in integrations for popular agent frameworks:
+
+| Framework | Package | Docs |
+|-----------|---------|------|
+| LangGraph | `agent_middleware` | [`README.langgraph.md`](framework_integrations/README.langgraph.md) |
+| CrewAI | `agent_middleware` | [`README.crewai.md`](framework_integrations/README.crewai.md) |
+| AutoGen | `agent_middleware` | [`README.autogen.md`](framework_integrations/README.autogen.md) |
+| LlamaIndex | `agent_middleware` | [`README.llamaindex.md`](framework_integrations/README.llamaindex.md) |
+
+```python
+# One-line integration
+from agent_middleware import B2AClient, get_langgraph_tools
+
+client = B2AClient(api_key="...", wallet_id="...")
+tools = get_langgraph_tools(client)  # Ready for LangGraph!
+
+agent = create_react_agent(model, tools)
+```
+
+### SDKs
+
+```bash
+# Python
+pip install agent-middleware-api
+
+# TypeScript
+npm install @b2a/sdk
+```
+
+See [`docs/agent-recipes.md`](docs/agent-recipes.md) for examples.
+
+---
+
 ## Agentic Web Interface (AWI) — Phase 7
 
 **Based on arXiv:2506.10953v1 — "Build the web for agents, not agents for the web"** ([Lù et al., 2025, CC BY 4.0](https://arxiv.org/abs/2506.10953))
@@ -762,6 +820,7 @@ Current durable service stores:
 - [x] Add comprehensive agent interaction examples and recipes
 - [x] Multi-tenant hardening validations
 - [x] Add SQLite backend support for simpler edge deployments
+- [x] Agent discoverability (discovery endpoints, framework integrations)
 
 ---
 
