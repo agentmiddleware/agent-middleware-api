@@ -1,0 +1,6 @@
+{
+  "name": "Agent Middleware API",
+  "description": "Open-source B2A control plane with MCP + Agentic Web Interface (AWI)",
+  "url": "https://api-service-production-433c.up.railway.app",
+  "repository": "https://github.com/PetrefiedThunder/agent-middleware-api"
+}
