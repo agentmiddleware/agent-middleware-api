@@ -1,6 +1,6 @@
 """
 Agent-Native Middleware API
-============================
+===========================
 Headless infrastructure for the Business-to-Agent (B2A) economy.
 
 Four service pillars:
@@ -12,10 +12,15 @@ Four service pillars:
 Zero GUI. Your customer is an autonomous agent.
 """
 
+import asyncio
+import logging
+import sys
+import time
 from contextlib import asynccontextmanager
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import logging
 
 from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
@@ -53,23 +58,46 @@ from .routers import (
 )
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
+
+# Try structured logging, fall back to standard logging
+try:
+    import structlog
+
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+        cache_logger_on_first_use=True,
+    )
+    logger = structlog.get_logger()
+    _USE_STRUCTLOG = True
+except ImportError:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        stream=sys.stdout,
+    )
+    logger = logging.getLogger(__name__)
+    _USE_STRUCTLOG = False
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Background cleanup task reference
-    cleanup_task = None
+    cleanup_task: asyncio.Task | None = None
+    startup_time = time.monotonic()
 
     async def periodic_cleanup():
         """Background task to cleanup expired entries from services."""
-        import asyncio
-
         while True:
             try:
                 await asyncio.sleep(300)  # Run every 5 minutes
 
-                # Cleanup WebAuthn challenges and verifications
                 from .services.webauthn_provider import get_webauthn_provider
 
                 webauthn = get_webauthn_provider()
@@ -79,59 +107,78 @@ async def lifespan(app: FastAPI):
                     or result["verifications_removed"] > 0
                 ):
                     logger.info(
-                        f"Cleanup: removed {result['challenges_removed']} challenges, "
-                        f"{result['verifications_removed']} verifications"
+                        "cleanup_completed",
+                        challenges_removed=result["challenges_removed"],
+                        verifications_removed=result["verifications_removed"],
                     )
 
-                # Cleanup expired AWI sessions
                 from .services.awi_session import get_awi_session_manager
 
                 session_mgr = get_awi_session_manager()
                 result = session_mgr.cleanup_expired()
                 if result["sessions_removed"] > 0:
                     logger.info(
-                        f"Cleanup: removed {result['sessions_removed']} expired sessions"
+                        "cleanup_completed",
+                        sessions_removed=result["sessions_removed"],
                     )
 
             except asyncio.CancelledError:
-                logger.info("Background cleanup task cancelled")
+                logger.info("cleanup_task_stopped")
                 break
             except Exception as e:
-                logger.warning(f"Background cleanup error: {e}")
-
-    # Start background cleanup task
-    import asyncio
+                logger.warning("cleanup_error", error=str(e))
 
     cleanup_task = asyncio.create_task(periodic_cleanup())
-    logger.info("Background cleanup task started (runs every 5 minutes)")
+    logger.info(
+        "app_startup",
+        phase="cleanup_task_started",
+        startup_time_s=time.monotonic() - startup_time,
+    )
 
-    # Startup: Initialize database if configured
+    startup_time = time.monotonic()
     if settings.DATABASE_URL:
         try:
             await init_db()
-            logger.info("Database initialized")
+            logger.info(
+                "app_startup",
+                phase="database_initialized",
+                startup_time_s=time.monotonic() - startup_time,
+            )
         except Exception as e:
-            logger.warning(f"Database initialization failed: {e}")
+            logger.warning("app_startup", phase="database_init_failed", error=str(e))
 
-    # Register Phase 9 MCP tools
+    startup_time = time.monotonic()
     ensure_phase9_registered()
-    logger.info("Phase 9 MCP tools registered")
+    logger.info(
+        "app_startup",
+        phase="phase9_tools_registered",
+        startup_time_s=time.monotonic() - startup_time,
+    )
+
+    logger.info("app_ready", version=settings.APP_VERSION)
 
     yield
 
-    # Shutdown: Cancel cleanup task
+    logger.info("app_shutdown", phase="starting")
+    shutdown_start = time.monotonic()
+
     if cleanup_task:
         cleanup_task.cancel()
         try:
             await cleanup_task
         except asyncio.CancelledError:
             pass
-        logger.info("Background cleanup task stopped")
+        logger.info("app_shutdown", phase="cleanup_task_stopped")
 
-    # Shutdown: Close database connections
     await close_db()
     await close_durable_state()
-    logger.info("Database connections closed")
+
+    await asyncio.sleep(2)  # Allow in-flight requests to drain
+    logger.info(
+        "app_shutdown",
+        phase="complete",
+        shutdown_duration_s=time.monotonic() - shutdown_start,
+    )
 
 
 app = FastAPI(
@@ -547,16 +594,48 @@ async def root():
 @app.get(
     "/health",
     tags=["Discovery"],
-    summary="Health check",
-    description=(
-        "Returns 200 if the API is running. Agents should poll "
-        "this before routing traffic."
-    ),
+    summary="Liveness check",
+    description="Returns 200 if the API is running. Use for Kubernetes livenessProbe.",
 )
 async def health():
     return {
         "status": "healthy",
         "version": settings.APP_VERSION,
+    }
+
+
+@app.get(
+    "/health/ready",
+    tags=["Discovery"],
+    summary="Readiness check",
+    description="Returns 200 if all dependencies are ready. Use for Kubernetes readinessProbe.",
+)
+async def health_ready():
+    checks: dict[str, dict[str, Any]] = {}
+    all_healthy = True
+
+    state_report = await get_durable_state().health_report()
+    checks["state_store"] = {
+        "status": "up" if state_report.get("ok", False) else "down",
+        "backend": state_report.get("backend", "unknown"),
+    }
+    if checks["state_store"]["status"] == "down":
+        all_healthy = False
+
+    checks["mqtt"] = {
+        "status": "up" if settings.MQTT_BROKER_URL else "not_configured",
+        "configured": bool(settings.MQTT_BROKER_URL),
+    }
+
+    if settings.DATABASE_URL:
+        checks["database"] = {"status": "up", "configured": True}
+    else:
+        checks["database"] = {"status": "not_configured", "configured": False}
+
+    return {
+        "status": "ready" if all_healthy else "not_ready",
+        "version": settings.APP_VERSION,
+        "checks": checks,
     }
 
 
