@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     WEBAUTHN_TIMEOUT_MS: int = 60000
     WEBAUTHN_CHALLENGE_EXPIRY: int = 300
     WEBAUTHN_VERIFICATION_VALIDITY: int = 300
+    WEBAUTHN_ALLOWED_ORIGINS: str = (
+        "https://localhost,http://localhost:8000"  # Comma-separated
+    )
 
     # --- Phase 9: Playwright Bridge ---
     PLAYWRIGHT_HEADLESS: bool = True

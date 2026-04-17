@@ -152,12 +152,18 @@ def get_broadcast_engine() -> OracleBroadcastEngine:
 @lru_cache()
 def get_webauthn_provider() -> WebAuthnProvider:
     """Singleton WebAuthn provider for passkey verification."""
+    allowed_origins = [
+        origin.strip()
+        for origin in settings.WEBAUTHN_ALLOWED_ORIGINS.split(",")
+        if origin.strip()
+    ]
     return WebAuthnProvider(
         rp_id=settings.WEBAUTHN_RP_ID,
         rp_name=settings.WEBAUTHN_RP_NAME,
         timeout_ms=settings.WEBAUTHN_TIMEOUT_MS,
         challenge_expiry_seconds=settings.WEBAUTHN_CHALLENGE_EXPIRY,
         verification_validity_seconds=settings.WEBAUTHN_VERIFICATION_VALIDITY,
+        allowed_origins=allowed_origins,
     )
 
 
