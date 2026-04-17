@@ -320,6 +320,9 @@ class AWIRAGEngine:
         """
         Semantic search over session memories.
 
+        Uses ChromaDB when available for persistent vector search,
+        falls back to in-memory similarity search.
+
         Args:
             query: Natural language query.
             session_type: Optional filter by session type.
@@ -332,6 +335,18 @@ class AWIRAGEngine:
         """
         query_embedding = await self._generate_embedding(query)
 
+        # Try ChromaDB first if available
+        if self._use_chroma and self._chroma_collection:
+            results = await self._search_chroma(query_embedding, session_type, top_k)
+            # Add raw_state if requested
+            if include_raw_state:
+                for r in results:
+                    memory = self._memories.get(r.memory_id)
+                    if memory:
+                        r.raw_state = memory.raw_state
+            return results
+
+        # Fallback to in-memory search
         candidate_ids = set(self._memories.keys())
 
         if session_type:
@@ -901,9 +916,102 @@ class AWIRAGEngine:
 
         return "generic"
 
+    def _build_searchable_text(self, memory: SessionMemory) -> str:
+        """Build searchable text from a memory for vector storage."""
+        parts = [
+            f"Session type: {memory.session_type}",
+            f"Intent: {memory.user_intent}",
+            f"Entities: {', '.join(memory.key_entities)}",
+            f"Actions: {' -> '.join(memory.action_sequence[:10])}",
+            f"Summary: {' | '.join(memory.page_summaries[:5])}",
+        ]
+        return " | ".join(filter(None, parts))
+
+    async def _search_chroma(
+        self,
+        query_embedding: list[float],
+        session_type: Optional[str] = None,
+        top_k: int = 5,
+    ) -> list[SearchResult]:
+        """Search using ChromaDB vector store."""
+        if not self._chroma_collection:
+            return []
+
+        import json
+
+        where_filter = {}
+        if session_type:
+            where_filter["session_type"] = session_type
+
+        results = self._chroma_collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            where=where_filter if where_filter else None,
+            include=["metadatas", "distances"],
+        )
+
+        search_results = []
+        for i, memory_id in enumerate(results["ids"][0]):
+            metadata = results["metadatas"][0][i]
+            distance = results["distances"][0][i]
+
+            similarity = max(0.0, 1.0 - distance / 2.0)
+
+            memory = self._memories.get(memory_id)
+            if not memory:
+                continue
+
+            memory.access_count += 1
+            memory.accessed_at = datetime.utcnow()
+
+            search_results.append(
+                SearchResult(
+                    memory_id=memory_id,
+                    session_id=metadata.get("session_id", ""),
+                    session_type=metadata.get("session_type", ""),
+                    user_intent=metadata.get("user_intent", ""),
+                    action_sequence=json.loads(metadata.get("action_sequence", "[]"))[
+                        :10
+                    ],
+                    key_entities=json.loads(metadata.get("key_entities", "[]"))[:20],
+                    similarity_score=round(similarity, 4),
+                    created_at=datetime.fromisoformat(
+                        metadata.get("created_at", datetime.utcnow().isoformat())
+                    ),
+                    accessed_at=memory.accessed_at,
+                    access_count=memory.access_count,
+                )
+            )
+
+        return search_results
+
     async def _index_to_chroma(self, memory: SessionMemory) -> None:
-        """Index a memory to ChromaDB."""
-        pass
+        """Index a memory to ChromaDB for persistent vector storage."""
+        if not self._chroma_collection:
+            return
+
+        import json
+
+        doc_text = self._build_searchable_text(memory)
+
+        metadata = {
+            "memory_id": memory.memory_id,
+            "session_id": memory.session_id,
+            "session_type": memory.session_type,
+            "user_intent": memory.user_intent,
+            "action_sequence": json.dumps(memory.action_sequence),
+            "key_entities": json.dumps(memory.key_entities),
+            "created_at": memory.created_at.isoformat(),
+        }
+
+        self._chroma_collection.upsert(
+            ids=[memory.memory_id],
+            embeddings=[memory.embedding],
+            documents=[doc_text],
+            metadatas=[metadata],
+        )
+
+        logger.debug(f"Indexed memory {memory.memory_id} to ChromaDB")
 
     async def init_chroma(self) -> bool:
         """

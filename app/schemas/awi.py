@@ -9,7 +9,7 @@ Provides stateful, standardized interfaces for web agents with:
 - Agentic task queues with concurrency limits and human pause/steer
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -104,6 +104,17 @@ class AWISession(BaseModel):
     human_pause_enabled: bool = True
     paused_by_human: bool = False
     pause_reason: str | None = None
+    timeout_seconds: int = 300  # Session timeout in seconds
+
+    @property
+    def expires_at(self) -> datetime:
+        """Calculate session expiration time."""
+        return self.updated_at + timedelta(seconds=self.timeout_seconds)
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if session has expired."""
+        return datetime.now(timezone.utc) > self.expires_at
 
 
 class AWIExecutionRequest(BaseModel):

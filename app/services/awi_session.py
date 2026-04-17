@@ -519,6 +519,40 @@ class AWISessionManager:
             "duration_ms": execution.duration_ms,
         }
 
+    def cleanup_expired(self) -> dict[str, int]:
+        """
+        Remove expired sessions and their associated state.
+
+        Returns:
+            Dict with count of removed sessions.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        expired_ids = [
+            sid for sid, session in self._sessions.items() if session.expires_at < now
+        ]
+
+        for session_id in expired_ids:
+            if session_id in self._dom_sessions:
+                import asyncio
+
+                asyncio.create_task(
+                    self._playwright_bridge.destroy_session(
+                        self._dom_sessions[session_id]
+                    )
+                )
+            del self._sessions[session_id]
+            if session_id in self._session_state:
+                del self._session_state[session_id]
+            if session_id in self._dom_sessions:
+                del self._dom_sessions[session_id]
+
+        if expired_ids:
+            logger.info(f"Cleaned up {len(expired_ids)} expired sessions")
+
+        return {"sessions_removed": len(expired_ids)}
+
 
 _awi_session_manager: AWISessionManager | None = None
 
