@@ -58,6 +58,53 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Background cleanup task reference
+    cleanup_task = None
+
+    async def periodic_cleanup():
+        """Background task to cleanup expired entries from services."""
+        import asyncio
+
+        while True:
+            try:
+                await asyncio.sleep(300)  # Run every 5 minutes
+
+                # Cleanup WebAuthn challenges and verifications
+                from .services.webauthn_provider import get_webauthn_provider
+
+                webauthn = get_webauthn_provider()
+                result = webauthn.cleanup_expired()
+                if (
+                    result["challenges_removed"] > 0
+                    or result["verifications_removed"] > 0
+                ):
+                    logger.info(
+                        f"Cleanup: removed {result['challenges_removed']} challenges, "
+                        f"{result['verifications_removed']} verifications"
+                    )
+
+                # Cleanup expired AWI sessions
+                from .services.awi_session import get_awi_session_manager
+
+                session_mgr = get_awi_session_manager()
+                result = session_mgr.cleanup_expired()
+                if result["sessions_removed"] > 0:
+                    logger.info(
+                        f"Cleanup: removed {result['sessions_removed']} expired sessions"
+                    )
+
+            except asyncio.CancelledError:
+                logger.info("Background cleanup task cancelled")
+                break
+            except Exception as e:
+                logger.warning(f"Background cleanup error: {e}")
+
+    # Start background cleanup task
+    import asyncio
+
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+    logger.info("Background cleanup task started (runs every 5 minutes)")
+
     # Startup: Initialize database if configured
     if settings.DATABASE_URL:
         try:
@@ -71,6 +118,15 @@ async def lifespan(app: FastAPI):
     logger.info("Phase 9 MCP tools registered")
 
     yield
+
+    # Shutdown: Cancel cleanup task
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Background cleanup task stopped")
 
     # Shutdown: Close database connections
     await close_db()

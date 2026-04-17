@@ -48,12 +48,24 @@ async def verify_api_key(
             },
         )
 
-    valid_keys = [
-        k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()
-    ]
+    valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
 
     if not valid_keys:
-        # No keys configured — development/open mode
+        # SECURITY FIX: Fail-safe for production.
+        # If VALID_API_KEYS is unset/empty AND we're not in dev mode,
+        # reject all requests. This prevents accidental open auth in production.
+        if not settings.DEBUG:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error": "auth_not_configured",
+                    "message": (
+                        "API keys not configured. Set VALID_API_KEYS environment variable "
+                        "or enable DEBUG=true for development."
+                    ),
+                },
+            )
+        # Development mode — accept any key ≥8 chars (for local testing)
         return stripped
 
     if stripped not in valid_keys:
