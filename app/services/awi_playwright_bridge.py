@@ -105,6 +105,10 @@ class BridgeSession:
     created_at: datetime = field(default_factory=datetime.utcnow)
     last_activity: datetime = field(default_factory=datetime.utcnow)
 
+    # Real Playwright objects (not dataclass fields, set at runtime)
+    _page: Optional["Page"] = field(default=None, repr=False)
+    _context: Optional["BrowserContext"] = field(default=None, repr=False)
+
 
 @dataclass
 class ExecutionResult:
@@ -1189,15 +1193,86 @@ class AWIPlaywrightBridge:
         selector: str,
     ) -> list[DOMElement]:
         """
-        Query elements using the configured automation mode.
+        Query elements using Playwright page.query_selector_all().
 
-        In production with Playwright:
-        elements = await page.query_selector_all(selector)
+        Args:
+            session: The browser session.
+            selector: CSS selector to query.
 
         Returns:
-            List of DOMElement objects (mock for now).
+            List of DOMElement objects populated from real DOM.
         """
-        return []
+        if not session._page:
+            return []
+
+        try:
+            elements = []
+            playwright_elements = await session._page.query_selector_all(selector)
+
+            for el in playwright_elements:
+                tag = await el.evaluate("el => el.tagName")
+                text_content = await el.inner_text()
+                bounding_box = await el.bounding_box()
+
+                attributes = {}
+                for attr in [
+                    "id",
+                    "name",
+                    "type",
+                    "href",
+                    "placeholder",
+                    "aria-label",
+                    "role",
+                    "class",
+                ]:
+                    try:
+                        val = await el.get_attribute(attr)
+                        if val:
+                            attributes[attr] = val
+                    except Exception:
+                        pass
+
+                is_visible = (
+                    bounding_box
+                    and bounding_box["width"] > 0
+                    and bounding_box["height"] > 0
+                )
+
+                css_selector = await el.evaluate("""
+                    el => {
+                        if (el.id) return '#' + el.id;
+                        const path = [];
+                        while (el.parentElement && path.length < 5) {
+                            let sibling = el, name = el.tagName.toLowerCase();
+                            while (sibling = sibling.previousElementSibling) {}
+                            path.unshift(name + (sibling ? '+' : ':first-child'));
+                            el = el.parentElement;
+                        }
+                        return path.join(' > ');
+                    }
+                """)
+
+                element = DOMElement(
+                    tag=tag.lower(),
+                    text_content=text_content or "",
+                    attributes=attributes,
+                    xpath="",  # Could add XPath generation if needed
+                    css_selector=css_selector,
+                    bounding_box=bounding_box,
+                    is_interactive=tag.lower()
+                    in ["button", "a", "input", "select", "textarea"],
+                    role=attributes.get("role"),
+                    label=attributes.get("aria-label") or text_content[:50]
+                    if text_content
+                    else None,
+                )
+                elements.append(element)
+
+            return elements
+
+        except Exception as e:
+            logger.warning(f"Element query failed for selector '{selector}': {e}")
+            return []
 
     def _build_selectors_from_pattern(self, pattern: dict[str, Any]) -> list[str]:
         """Build CSS selectors from semantic pattern."""
@@ -1379,12 +1454,33 @@ class AWIPlaywrightBridge:
         return "generic"
 
     async def _get_main_content(self, session: BridgeSession) -> str:
-        """Get main page content text."""
-        return ""
+        """Get main page content text using Playwright."""
+        if not session._page:
+            return ""
+
+        try:
+            content = await session._page.evaluate("""
+                () => {
+                    const main = document.querySelector('main, [role="main"], article, .content, #content');
+                    if (main) return main.innerText;
+                    return document.body.innerText.slice(0, 2000);  // Limit to 2000 chars
+                }
+            """)
+            return content or ""
+        except Exception as e:
+            logger.warning(f"Failed to get main content: {e}")
+            return ""
 
     async def _get_page_html(self, session: BridgeSession) -> str:
         """Get full page HTML."""
-        return ""
+        if not session._page:
+            return ""
+
+        try:
+            return await session._page.content()
+        except Exception as e:
+            logger.warning(f"Failed to get page HTML: {e}")
+            return ""
 
     async def _get_interactive_elements(self, session: BridgeSession) -> list[dict]:
         """Get all interactive elements."""
@@ -1410,24 +1506,134 @@ class AWIPlaywrightBridge:
         return interactive
 
     async def _extract_forms(self, session: BridgeSession) -> list[dict]:
-        """Extract form information."""
-        return []
+        """Extract form information using Playwright."""
+        if not session._page:
+            return []
+
+        try:
+            forms = await session._page.evaluate("""
+                () => {
+                    const forms = document.querySelectorAll('form');
+                    return Array.from(forms).map(form => {
+                        const inputs = Array.from(form.querySelectorAll('input, textarea, select')).map(input => ({
+                            name: input.name,
+                            id: input.id,
+                            type: input.type || input.tagName.toLowerCase(),
+                            placeholder: input.placeholder,
+                            required: input.required,
+                        }));
+                        return {
+                            id: form.id,
+                            action: form.action,
+                            method: form.method,
+                            inputs: inputs,
+                        };
+                    });
+                }
+            """)
+            return forms or []
+        except Exception as e:
+            logger.warning(f"Failed to extract forms: {e}")
+            return []
 
     async def _extract_navigation(self, session: BridgeSession) -> list[dict]:
-        """Extract navigation structure."""
-        return []
+        """Extract navigation structure using Playwright."""
+        if not session._page:
+            return []
+
+        try:
+            nav = await session._page.evaluate("""
+                () => {
+                    const navs = document.querySelectorAll('nav, [role="navigation"]');
+                    const items = [];
+                    navs.forEach(n => {
+                        const links = Array.from(n.querySelectorAll('a')).slice(0, 20);
+                        links.forEach(a => {
+                            items.push({
+                                text: a.innerText || '',
+                                href: a.href,
+                                visible: a.offsetParent !== null,
+                            });
+                        });
+                    });
+                    return items;
+                }
+            """)
+            return nav or []
+        except Exception as e:
+            logger.warning(f"Failed to extract navigation: {e}")
+            return []
 
     async def _get_buttons(self, session: BridgeSession) -> list[dict]:
-        """Get button elements."""
-        return []
+        """Get button elements using Playwright."""
+        if not session._page:
+            return []
+
+        try:
+            buttons = await session._page.evaluate("""
+                () => {
+                    const btns = document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]');
+                    return Array.from(btns).map(btn => ({
+                        text: btn.innerText || btn.value || '',
+                        id: btn.id,
+                        name: btn.name,
+                        type: btn.type || 'button',
+                        disabled: btn.disabled,
+                        visible: btn.offsetParent !== null,
+                    }));
+                }
+            """)
+            return buttons or []
+        except Exception as e:
+            logger.warning(f"Failed to get buttons: {e}")
+            return []
 
     async def _get_links(self, session: BridgeSession) -> list[dict]:
-        """Get link elements."""
-        return []
+        """Get link elements using Playwright."""
+        if not session._page:
+            return []
+
+        try:
+            links = await session._page.evaluate("""
+                () => {
+                    const anchors = document.querySelectorAll('a[href]');
+                    return Array.from(anchors).slice(0, 50).map(a => ({
+                        text: a.innerText || '',
+                        href: a.href,
+                        id: a.id,
+                        visible: a.offsetParent !== null,
+                    }));
+                }
+            """)
+            return links or []
+        except Exception as e:
+            logger.warning(f"Failed to get links: {e}")
+            return []
 
     async def _get_inputs(self, session: BridgeSession) -> list[dict]:
-        """Get input elements."""
-        return []
+        """Get input elements using Playwright."""
+        if not session._page:
+            return []
+
+        try:
+            inputs = await session._page.evaluate("""
+                () => {
+                    const inputs = document.querySelectorAll('input, textarea, select');
+                    return Array.from(inputs).map(input => ({
+                        name: input.name,
+                        id: input.id,
+                        type: input.type || input.tagName.toLowerCase(),
+                        placeholder: input.placeholder,
+                        value: input.value || '',
+                        required: input.required,
+                        disabled: input.disabled,
+                    }));
+                }
+            """)
+            return inputs or []
+        except Exception as e:
+            logger.warning(f"Failed to get inputs: {e}")
+            return []
 
     # ─────────────────────────────────────────────────────────────────────────
     # Command Execution
@@ -1439,24 +1645,94 @@ class AWIPlaywrightBridge:
         command: PlaywrightCommand,
     ) -> Any:
         """
-        Execute a single Playwright command.
+        Execute a single Playwright command using real Playwright API.
 
-        In production, this would map to actual Playwright API calls:
-        - page.click(selector)
-        - page.fill(selector, value)
-        - page.select_option(selector, value)
-        - page.goto(url)
-        - etc.
-
-        For now, this is a placeholder that logs the command.
+        Commands are mapped to Playwright calls:
+        - CLICK -> page.click(selector, **options)
+        - FILL -> page.fill(selector, value)
+        - SELECT -> page.select_option(selector, value)
+        - PRESS -> page.keyboard.press(key)
+        - HOVER -> page.hover(selector)
+        - SCROLL -> page.evaluate(JS scroll)
+        - GOTO -> page.goto(url)
+        - EVALUATE -> page.evaluate(js)
+        - WAIT_FOR_SELECTOR -> page.wait_for_selector(selector)
+        - WAIT_FOR_TIMEOUT -> page.wait_for_timeout(ms)
         """
-        if command.wait_for_timeout_ms > 0:
-            await asyncio.sleep(command.wait_for_timeout_ms / 1000)
+        if not session._page:
+            raise ValueError(f"No page available for session {session.session_id}")
 
-        if command.wait_for_selectors:
-            pass
+        page = session._page
 
-        return True
+        try:
+            # Wait for timeout if specified
+            if command.wait_for_timeout_ms > 0:
+                await asyncio.sleep(command.wait_for_timeout_ms / 1000)
+
+            # Wait for selectors if specified
+            for selector in command.wait_for_selectors:
+                try:
+                    await page.wait_for_selector(
+                        selector, timeout=self._default_timeout_ms
+                    )
+                except Exception:
+                    logger.debug(f"Selector {selector} not found, continuing")
+
+            # Execute the command
+            cmd_type = command.command_type
+
+            if cmd_type == CommandType.CLICK:
+                await page.click(command.target, **command.options)
+
+            elif cmd_type == CommandType.FILL:
+                await page.fill(command.target, str(command.value))
+
+            elif cmd_type == CommandType.SELECT:
+                await page.select_option(command.target, command.value)
+
+            elif cmd_type == CommandType.PRESS:
+                await page.keyboard.press(command.value)
+
+            elif cmd_type == CommandType.HOVER:
+                await page.hover(command.target)
+
+            elif cmd_type == CommandType.SCROLL:
+                await page.evaluate(f"window.scrollBy(0, {command.value})")
+                await asyncio.sleep(0.3)  # Allow render
+
+            elif cmd_type == CommandType.GOTO:
+                await page.goto(
+                    command.target,
+                    wait_until="networkidle",
+                    timeout=self._default_timeout_ms,
+                )
+
+            elif cmd_type == CommandType.EVALUATE:
+                await page.evaluate(command.target)
+
+            elif cmd_type == CommandType.SET_INPUT_FILES:
+                await page.set_input_files(command.target, command.value)
+
+            elif cmd_type == CommandType.WAIT_FOR_SELECTOR:
+                await page.wait_for_selector(
+                    command.target, timeout=self._default_timeout_ms
+                )
+
+            # Update session state after execution
+            session.current_url = page.url
+            session.page_title = await page.title()
+            session.last_activity = datetime.utcnow()
+
+            logger.debug(
+                f"Executed {cmd_type.value} on {command.target} for session {session.session_id}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Command execution failed for {command.command_type.value}: {e}"
+            )
+            raise
 
     # ─────────────────────────────────────────────────────────────────────────
     # Browser Initialization
@@ -1490,6 +1766,7 @@ class AWIPlaywrightBridge:
     ) -> None:
         """Create a new browser context for a session."""
         if not self._browser:
+            logger.warning("Browser not initialized, cannot create context")
             return
 
         context = await self._browser.new_context(
@@ -1497,24 +1774,56 @@ class AWIPlaywrightBridge:
                 "width": viewport[0] if viewport else 1280,
                 "height": viewport[1] if viewport else 720,
             },
-            user_agent="Mozilla/5.0 (compatible; AWI-Client/1.0)",
+            user_agent="Mozilla/5.0 (compatible; AWI-Client/1.0; +https://agent-middleware.dev)",
         )
 
         page = await context.new_page()
 
+        # Store real Playwright objects
+        session._context = context
+        session._page = page
         session.browser_context_id = str(uuid4())
         session.page_id = str(uuid4())
 
+        logger.info(
+            f"Created browser context {session.browser_context_id} for session {session.session_id}"
+        )
+
     async def _navigate_to(self, session: BridgeSession, url: str) -> None:
         """Navigate to a URL."""
-        if not session.page_id:
+        if not session._page:
+            logger.warning(f"No page available for session {session.session_id}")
+            session.current_url = url
             return
 
-        session.current_url = url
+        try:
+            await session._page.goto(
+                url, wait_until="networkidle", timeout=self._default_timeout_ms
+            )
+            session.current_url = session._page.url
+            session.page_title = await session._page.title()
+            logger.info(f"Navigated to {url} for session {session.session_id}")
+        except Exception as e:
+            logger.error(f"Navigation failed for {session.session_id}: {e}")
+            session.current_url = url
 
     async def _close_browser_context(self, session: BridgeSession) -> None:
-        """Close a browser context."""
-        pass
+        """Close a browser context and cleanup page."""
+        if session._page:
+            try:
+                await session._page.close()
+                session._page = None
+            except Exception as e:
+                logger.debug(f"Error closing page: {e}")
+
+        if session._context:
+            try:
+                await session._context.close()
+                session._context = None
+            except Exception as e:
+                logger.debug(f"Error closing context: {e}")
+
+        logger.info(f"Closed browser context for session {session.session_id}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Cleanup

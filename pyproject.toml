@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0.0"]
+playwright = ["playwright>=1.40.0"]
+browser = ["playwright>=1.40.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
