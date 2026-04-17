@@ -10,7 +10,7 @@
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
 
-**The FastAPI control plane for agent-native infrastructure.**
+**The FastAPI control plane for agent-native infrastructure — MCP + AWI powered.**
 
 **Agent Middleware API** is a production-ready FastAPI service that provides durable state, billing, telemetry, secure tool execution, IoT connectivity, and **AI-powered agent intelligence** for autonomous agents.
 
@@ -41,6 +41,8 @@ Deploy in minutes via Docker or Railway.
 | IoT Bridge               | `/v1/iot`         | Optional| Yes          | Yes           |
 | Security                 | `/v1/security`    | Partial | Yes          | Yes           |
 | **Agent Intelligence**   | `/v1/ai`          | Yes     | Yes          | Yes           |
+| **Agentic Web Interface** | `/v1/awi`         | Yes     | Yes          | Yes           |
+| **Behavioral Sandbox**    | `/v1/sandbox`     | Yes     | Yes          | Yes           |
 
 *(Additional modules include programmatic media, content factory, agent oracle, and protocol generation)*
 
@@ -436,6 +438,45 @@ POST /v1/billing/dry-run/session/{session_id}/revert
 
 ---
 
+## Behavioral Sandbox Engine (Phase 6)
+
+**Real tool execution testing with subprocess isolation and resource limits.**
+
+Unlike dry-run sandbox (cost simulation), the behavioral sandbox executes actual tools in isolated environments for testing behavior before production.
+
+### Features
+
+- **Python subprocess execution** with memory/CPU limits
+- **MCP tool sandboxing** with mocked responses
+- **HTTP proxy mode** for API testing
+- **Redis-backed state isolation** per environment
+
+### API Endpoints
+
+```bash
+# Create a sandbox environment
+curl -X POST http://localhost:8000/v1/sandbox/environments \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"env_type": "python", "name": "test-env"}'
+
+# Execute a tool in sandbox
+curl -X POST http://localhost:8000/v1/sandbox/execute \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"env_id": "...", "tool": "my_tool", "params": {"input": "test"}}'
+
+# Get sandbox metrics
+curl http://localhost:8000/v1/sandbox/metrics/{env_id} \
+  -H "X-API-Key: your-key"
+
+# Cleanup sandbox
+curl -X DELETE http://localhost:8000/v1/sandbox/environments/{env_id} \
+  -H "X-API-Key: your-key"
+```
+
+---
+
 ## MCP Server (`/mcp`)
 
 Model Context Protocol (MCP) enables agents to discover and call your billable services. Tools are automatically exposed with their schemas and pricing.
@@ -703,6 +744,7 @@ Current durable service stores:
 - [x] Stripe Identity (KYC) for sponsor verification
 - [x] Automated API key rotation for wallets
 - [x] Sandbox engine wired to billing
+- [x] Behavioral Sandbox Engine (subprocess isolation, MCP sandboxing)
 - [x] Full Agentic Web Interface (AWI) control plane
 - [x] External AWI Adoption Kit (Python/TS SDKs, manifest generator, adapter)
 - [ ] Add comprehensive agent interaction examples and recipes
