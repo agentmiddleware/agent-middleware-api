@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 
 from ..schemas.awi_enhanced import (
     DOMBridgeSessionRequest,
@@ -185,8 +186,109 @@ async def list_high_risk_actions():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DOM Bridge Endpoints
+# DOM Bridge Endpoints (AWI Session Integration)
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+class DOMAttachRequest(BaseModel):
+    """Request to attach DOM bridge to an AWI session."""
+
+    session_id: str
+    target_url: str | None = None
+
+
+class DOMAttachResponse(BaseModel):
+    """Response after attaching DOM bridge."""
+
+    status: str
+    session_id: str
+    dom_session_id: str
+    elements_count: int
+    page_type: str
+
+
+@router.post(
+    "/dom/attach",
+    response_model=DOMAttachResponse,
+    summary="Attach DOM bridge to AWI session",
+    description="Attach a Playwright DOM bridge to an existing AWI session for live browser automation.",
+)
+async def attach_dom_bridge(request: DOMAttachRequest):
+    """
+    Attach a Playwright DOM bridge to an existing AWI session.
+
+    After attachment, all actions executed via POST /v1/awi/execute will
+    be routed through the real browser via Playwright, enabling
+    interaction with any human-facing website.
+
+    This is the key to making AWI work with existing websites:
+    - Agent sends semantic action (e.g., "search_and_sort")
+    - Bridge translates to real DOM commands
+    - Browser executes the commands
+    - Bridge extracts resulting state as AWI representation
+    """
+    from ..services.awi_session import get_awi_session_manager
+
+    manager = get_awi_session_manager()
+
+    try:
+        result = await manager.attach_dom_bridge(
+            session_id=request.session_id,
+            target_url=request.target_url,
+        )
+        return DOMAttachResponse(**result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "session_not_found", "message": str(e)},
+        )
+    except Exception as e:
+        logger.exception(f"Failed to attach DOM bridge: {request.session_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "attachment_failed", "message": str(e)},
+        )
+
+
+@router.delete(
+    "/dom/attach/{session_id}",
+    summary="Detach DOM bridge from AWI session",
+)
+async def detach_dom_bridge(session_id: str):
+    """
+    Detach the Playwright DOM bridge from an AWI session.
+
+    Returns the session to mock/internal AWI mode. The browser context is closed.
+    """
+    from ..services.awi_session import get_awi_session_manager
+
+    manager = get_awi_session_manager()
+
+    try:
+        result = await manager.detach_dom_bridge(session_id)
+        return result
+    except Exception as e:
+        logger.exception(f"Failed to detach DOM bridge: {session_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "detachment_failed", "message": str(e)},
+        )
+
+
+@router.get(
+    "/dom/attach/{session_id}/status",
+    summary="Get DOM bridge status",
+)
+async def get_dom_bridge_status(session_id: str):
+    """
+    Check if a session has a DOM bridge attached.
+    """
+    from ..services.awi_session import get_awi_session_manager
+
+    manager = get_awi_session_manager()
+
+    status = await manager.get_dom_bridge_status(session_id)
+    return status
 
 
 @router.post(

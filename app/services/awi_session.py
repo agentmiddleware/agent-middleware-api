@@ -1,6 +1,6 @@
 """
 AWI Session Manager — Phase 7
-=============================
+==============================
 Stateful AWI session manager that ties together actions, representations,
 and task queues into cohesive agentic web interactions.
 
@@ -12,6 +12,7 @@ Provides:
 - Progressive representation generation
 - Human pause/steer capabilities
 - Integration with MCP layer
+- Phase 9: Playwright DOM bridge routing
 """
 
 import logging
@@ -32,6 +33,7 @@ from ..schemas.awi import (
 )
 from .awi_action_vocab import get_awi_vocabulary
 from .awi_representation import get_awi_representation
+from .awi_playwright_bridge import get_playwright_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,8 @@ class AWISessionManager:
     Based on the paper's principle: "Stateful interfaces (AWI)" -
     MCP is great but insufficient for web agents; they need stateful
     interfaces with persistent context.
+
+    Phase 9: Supports Playwright DOM bridge routing for live browser automation.
     """
 
     def __init__(self):
@@ -50,6 +54,10 @@ class AWISessionManager:
         self._session_state: dict[str, dict[str, Any]] = {}
         self._vocabulary = get_awi_vocabulary()
         self._representation = get_awi_representation()
+        self._playwright_bridge = get_playwright_bridge()
+        self._dom_sessions: dict[
+            str, str
+        ] = {}  # Maps AWI session_id -> DOM bridge session_id
 
     async def create_session(self, request: AWISessionCreate) -> AWISession:
         """Create a new AWI session."""
@@ -179,9 +187,29 @@ class AWISessionManager:
                     "Call POST /v1/awi/passkey/challenge first.",
                 )
 
-        result = await self._execute_action_logic(
-            request.action, request.parameters, state
-        )
+        # Phase 9: Route to Playwright DOM bridge if attached
+        dom_session_id = self._dom_sessions.get(request.session_id)
+        if dom_session_id:
+            logger.info(
+                f"Routing action {request.action.value} to live Playwright DOM bridge for session {request.session_id}"
+            )
+            try:
+                result = await self._execute_via_dom_bridge(
+                    request.session_id,
+                    dom_session_id,
+                    request.action,
+                    request.parameters,
+                )
+            except Exception as e:
+                logger.warning(f"DOM bridge routing failed, falling back to mock: {e}")
+                result = await self._execute_action_logic(
+                    request.action, request.parameters, state
+                )
+        else:
+            # Fall back to the existing mock/internal logic for headless/API-only AWI sessions
+            result = await self._execute_action_logic(
+                request.action, request.parameters, state
+            )
 
         session.action_history.append(
             {
@@ -336,12 +364,160 @@ class AWISessionManager:
         if session_id not in self._sessions:
             return False
 
+        # Cleanup DOM bridge if attached
+        await self.detach_dom_bridge(session_id)
+
         del self._sessions[session_id]
         if session_id in self._session_state:
             del self._session_state[session_id]
 
         logger.info(f"Destroyed AWI session: {session_id}")
         return True
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Phase 9: Playwright DOM Bridge Integration
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def attach_dom_bridge(
+        self, session_id: str, target_url: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Attach a Playwright DOM bridge to an AWI session.
+
+        After attachment, all actions on this session will be routed
+        through the real browser via Playwright.
+
+        Args:
+            session_id: AWI session to attach.
+            target_url: Optional URL override (defaults to session target_url).
+
+        Returns:
+            Dict with attachment status and initial DOM state.
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            raise ValueError(f"Session not found: {session_id}")
+
+        url = target_url or session.target_url
+
+        dom_session = await self._playwright_bridge.create_session(target_url=url)
+
+        self._dom_sessions[session_id] = dom_session.session_id
+
+        state = self._session_state.get(session_id, {})
+        state["dom_attached"] = True
+        state["dom_session_id"] = dom_session.session_id
+        self._session_state[session_id] = state
+
+        representation = await self._playwright_bridge.extract_state_representation(
+            session_id=dom_session.session_id,
+            representation_type="summary",
+            include_elements=True,
+        )
+
+        state["page_state"] = representation
+        state["current_url"] = url
+
+        logger.info(
+            f"Attached DOM bridge to AWI session {session_id} (DOM: {dom_session.session_id})"
+        )
+
+        return {
+            "status": "attached",
+            "session_id": session_id,
+            "dom_session_id": dom_session.session_id,
+            "elements_count": len(representation.get("interactive_elements", [])),
+            "page_type": representation.get("page_type", "unknown"),
+        }
+
+    async def detach_dom_bridge(self, session_id: str) -> dict[str, Any]:
+        """
+        Detach the Playwright DOM bridge from an AWI session.
+
+        Returns the session to mock/internal AWI mode.
+        """
+        dom_session_id = self._dom_sessions.pop(session_id, None)
+        if not dom_session_id:
+            return {"status": "not_attached", "session_id": session_id}
+
+        await self._playwright_bridge.destroy_session(dom_session_id)
+
+        state = self._session_state.get(session_id, {})
+        state["dom_attached"] = False
+        state.pop("dom_session_id", None)
+        self._session_state[session_id] = state
+
+        logger.info(f"Detached DOM bridge from AWI session {session_id}")
+
+        return {
+            "status": "detached",
+            "session_id": session_id,
+            "dom_session_id": dom_session_id,
+        }
+
+    async def get_dom_bridge_status(self, session_id: str) -> dict[str, Any]:
+        """Check if a session has a DOM bridge attached."""
+        dom_session_id = self._dom_sessions.get(session_id)
+        if not dom_session_id:
+            return {"attached": False, "session_id": session_id}
+
+        dom_session = await self._playwright_bridge.get_session(dom_session_id)
+        if not dom_session:
+            return {
+                "attached": False,
+                "session_id": session_id,
+                "error": "DOM session not found",
+            }
+
+        return {
+            "attached": True,
+            "session_id": session_id,
+            "dom_session_id": dom_session_id,
+            "current_url": dom_session.current_url,
+        }
+
+    async def _execute_via_dom_bridge(
+        self,
+        session_id: str,
+        dom_session_id: str,
+        action: AWIStandardAction,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Execute an AWI action via the Playwright DOM bridge.
+
+        Translates the semantic action to Playwright commands, executes them,
+        and returns the resulting DOM state.
+        """
+        commands = await self._playwright_bridge.translate_action(
+            session_id=dom_session_id,
+            action=action.value,
+            parameters=parameters,
+        )
+
+        execution = await self._playwright_bridge.execute_commands(
+            session_id=dom_session_id,
+            commands=commands,
+        )
+
+        state = self._session_state.get(session_id, {})
+
+        if execution.success:
+            representation = await self._playwright_bridge.extract_state_representation(
+                session_id=dom_session_id,
+                representation_type="summary",
+                include_elements=True,
+            )
+            state["page_state"] = representation
+            state["current_url"] = representation.get("url", state.get("current_url"))
+
+        return {
+            "success": execution.success,
+            "commands_executed": execution.commands_executed,
+            "new_url": execution.new_url,
+            "error": execution.error,
+            "duration_ms": execution.duration_ms,
+        }
 
 
 _awi_session_manager: AWISessionManager | None = None
