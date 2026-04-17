@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 
+from ..core.runtime_mode import require_simulation
 from ..schemas.media import (
     AspectRatio,
     CaptionStyle,
@@ -117,6 +118,7 @@ class HookDetector:
         """
         Analyze a video and return ranked viral hooks.
         """
+        require_simulation("media_engine", issue="#39")
         if not video.transcript:
             logger.warning(
                 f"No transcript for {video.video_id}, "

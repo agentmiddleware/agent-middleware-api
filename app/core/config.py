@@ -127,6 +127,20 @@ class Settings(BaseSettings):
     RAG_EMBEDDING_MODEL: str = "text-embedding-3-small"
     RAG_EMBEDDING_DIMENSION: int = 1536
 
+    # --- Simulation Mode ---
+    # Per-service flag. True = use the current mock/synthetic implementation.
+    # False = use the real integration (raises NotImplementedError until the
+    # corresponding real implementation lands — see issues #28-#39).
+    # Defaults to True so existing behavior is preserved without env changes.
+    SIMULATION_MODE_ORACLE: bool = True
+    SIMULATION_MODE_RED_TEAM: bool = True
+    SIMULATION_MODE_RTAAS: bool = True
+    SIMULATION_MODE_MEDIA_ENGINE: bool = True
+    SIMULATION_MODE_IOT_BRIDGE: bool = True
+    SIMULATION_MODE_TELEMETRY_PM: bool = True
+    SIMULATION_MODE_AGENT_COMMS: bool = True
+    SIMULATION_MODE_CONTENT_FACTORY: bool = True
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

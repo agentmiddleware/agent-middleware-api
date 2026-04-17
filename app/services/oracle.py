@@ -24,6 +24,7 @@ import hashlib
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from ..core.runtime_mode import require_simulation
 from ..schemas.oracle import (
     OracleStatus,
     DirectoryType,
@@ -346,6 +347,7 @@ class CrawlEngine:
         tags: list[str],
     ) -> IndexedAPI | None:
         """Crawl a URL and extract API metadata."""
+        require_simulation("oracle", issue="#34")
         # Simulate network crawl (production: real HTTP requests)
         match = next((d for d in SIMULATED_DIRECTORY if d["url"] == url), None)
 
@@ -443,6 +445,7 @@ class RegistrationEngine:
         profile_overrides: dict | None = None,
     ) -> RegistrationResult:
         """Register our API with an external directory."""
+        require_simulation("oracle", issue="#34")
         profile = {**OUR_PROFILE}
         if profile_overrides:
             profile.update(profile_overrides)

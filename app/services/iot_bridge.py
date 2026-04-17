@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..core.runtime_mode import require_simulation
+
 from ..schemas.iot import ACLPermission, ProtocolType
 
 logger = logging.getLogger(__name__)
@@ -287,6 +289,7 @@ class ProtocolBridge:
         """
         Send a message through the bridge with full ACL enforcement.
         """
+        require_simulation("iot_bridge", issue="#36")
         device = await self.registry.get(device_id)
         if not device:
             raise ValueError(f"Device '{device_id}' not found")

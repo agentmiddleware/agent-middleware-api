@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
 from ..core.durable_state import get_durable_state
+from ..core.runtime_mode import require_simulation
 from ..schemas.telemetry import (
     TelemetryEvent,
     Severity,
@@ -440,6 +441,7 @@ class AutoPRGenerator:
         Generate a code fix for an anomaly.
         Returns diff, files_changed, test results, and optionally a PR URL.
         """
+        require_simulation("telemetry_pm", issue="#37")
         # Build context for the LLM
         _context = self._build_context(anomaly, related_events)
 

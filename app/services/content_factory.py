@@ -24,6 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
+from ..core.runtime_mode import require_simulation
 from ..schemas.content_factory import (
     ContentFormat,
     ContentStatus,
@@ -543,6 +544,7 @@ class AlgorithmicScheduler:
         Generate optimal posting schedule based on engagement data.
         Spreads posts across days to avoid audience fatigue.
         """
+        require_simulation("content_factory", issue="#31")
         now = datetime.now(timezone.utc)
         start = earliest or now
         end = latest or (now + timedelta(days=7))

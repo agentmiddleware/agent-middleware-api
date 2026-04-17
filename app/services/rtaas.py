@@ -23,6 +23,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from ..core.runtime_mode import require_simulation
+
 from ..schemas.red_team import AttackCategory, Severity
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,7 @@ class RTaaSEngine:
         intensity: str = "standard",
     ) -> RTaaSJob:
         """Create and execute an RTaaS scanning job against external endpoints."""
+        require_simulation("rtaas", issue="#38")
         job_id = f"rtaas-{uuid.uuid4().hex[:12]}"
 
         parsed_targets = [

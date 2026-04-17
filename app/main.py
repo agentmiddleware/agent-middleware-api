@@ -24,6 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
+from .core.health import gather_dependency_report
 from .core.rate_limiter import RateLimitMiddleware
 from .db.database import init_db, close_db
 from .services.mcp_phase9_tools import (
@@ -658,17 +659,12 @@ async def health_ready():
     tags=["Discovery"],
     summary="Dependency health check",
     description=(
-        "Returns runtime dependency status for durable state backends "
-        "(PostgreSQL/Redis) and MQTT configuration."
+        "Probes every external dependency (PostgreSQL, Redis, MQTT broker, "
+        "Stripe, LLM provider) in parallel with a short timeout. Each entry "
+        "reports status, latency_ms, and an error message when unreachable. "
+        "Deps whose consumers are in simulation mode return `not_used` so "
+        "the health verdict doesn't degrade on mock-only deployments."
     ),
 )
 async def health_dependencies():
-    state_report = await get_durable_state().health_report()
-    return {
-        "status": "healthy" if state_report.get("ok", False) else "degraded",
-        "state_store": state_report,
-        "mqtt": {
-            "configured": bool(settings.MQTT_BROKER_URL),
-            "broker_url": settings.MQTT_BROKER_URL,
-        },
-    }
+    return await gather_dependency_report()

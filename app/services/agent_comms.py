@@ -21,6 +21,7 @@ from enum import Enum
 from typing import Any
 
 from ..core.durable_state import get_durable_state
+from ..core.runtime_mode import require_simulation
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,7 @@ class MessageRouter:
         self, message: AgentMessage, recipient: RegisteredAgent
     ) -> bool:
         """Deliver message via webhook. Production: use httpx with retry."""
+        require_simulation("agent_comms", issue="#35")
         logger.info(
             f"Webhook delivery to {recipient.webhook_url} for "
             f"{message.message_id}"

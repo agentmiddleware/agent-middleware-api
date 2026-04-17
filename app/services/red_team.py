@@ -24,6 +24,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from ..core.runtime_mode import require_simulation
+
 from ..schemas.red_team import (
     AttackCategory,
     Severity,
@@ -786,6 +788,7 @@ class RedTeamSwarm:
         auto_remediate: bool = False,
     ) -> ScanReport:
         """Execute a full security scan."""
+        require_simulation("red_team", issue="#38")
         scan_id = str(uuid.uuid4())
         started_at = datetime.now(timezone.utc)
 
