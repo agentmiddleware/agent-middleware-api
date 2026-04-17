@@ -446,7 +446,13 @@ class TestAWIPlaywrightBridge:
 
     @pytest.mark.asyncio
     async def test_execute_commands(self, bridge):
-        """Test executing commands."""
+        """Test executing commands (skipped if Playwright not installed)."""
+        # Check if Playwright is available
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            pytest.skip("Playwright not installed")
+
         session = await bridge.create_session("https://example.com")
 
         commands = [
@@ -469,7 +475,13 @@ class TestAWIPlaywrightBridge:
 
     @pytest.mark.asyncio
     async def test_extract_state_representation(self, bridge):
-        """Test extracting state representation."""
+        """Test extracting state representation (skipped if Playwright not installed)."""
+        # Check if Playwright is available
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            pytest.skip("Playwright not installed")
+
         session = await bridge.create_session("https://example.com")
 
         representation = await bridge.extract_state_representation(
