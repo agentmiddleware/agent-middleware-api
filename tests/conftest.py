@@ -11,6 +11,10 @@ from sqlalchemy import text
 
 # Set up SQLite for testing before any imports
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+# Configure auth so tests don't hit the fail-safe 503 in verify_api_key.
+# Tests authenticate with X-API-Key: test-key (see RateLimitMiddleware, which
+# also special-cases this value to bypass rate limiting).
+os.environ.setdefault("VALID_API_KEYS", "test-key")
 
 
 @pytest.fixture(scope="session")
@@ -25,6 +29,12 @@ async def setup_database():
 
     # Close any existing connection
     await close_db()
+
+    # Start from a clean SQLite file so stale rows from prior runs
+    # (e.g., unique constraints on seeded session IDs) don't leak
+    # into the next run.
+    if os.path.exists("test.db"):
+        os.remove("test.db")
 
     # Initialize tables
     await init_db()

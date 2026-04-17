@@ -29,6 +29,8 @@ env/
 htmlcov/
 .coverage
 coverage.xml
+test.db
+*.db
 
 # OS
 .DS_Store

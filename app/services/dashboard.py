@@ -200,7 +200,7 @@ class DashboardEngine:
         """Aggregate wallet economics."""
         metrics = EconomicMetrics()
 
-        all_wallets = await self.money.store.list_wallets()
+        all_wallets = await self.money.list_wallets()
         for w in all_wallets:
             if w.wallet_type == WalletType.SPONSOR:
                 metrics.total_sponsors += 1
@@ -224,7 +224,7 @@ class DashboardEngine:
 
     async def _build_wallet_tree(self) -> list[dict]:
         """Build hierarchical wallet tree for visualization."""
-        all_wallets = await self.money.store.list_wallets()
+        all_wallets = await self.money.list_wallets()
         nodes: dict[str, WalletNode] = {}
 
         # Create nodes

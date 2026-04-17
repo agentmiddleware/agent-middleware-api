@@ -21,6 +21,7 @@ Production wiring:
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from ..schemas.content_factory import (
     ContentFormat,
@@ -309,18 +310,25 @@ class LaunchSequence:
     async def _fund(self, config: LaunchConfig) -> FundReceipt:
         """Create sponsor wallet, top up with fiat, provision agent wallets."""
 
+        # AgentMoney expects Decimal for monetary fields; the LaunchConfig
+        # surface keeps floats so API callers can send JSON numbers. Convert
+        # at this boundary (same pattern as app/routers/billing.py).
+        seed_capital = Decimal(str(config.seed_capital_usd))
+        agent_budget = Decimal(str(config.agent_budget_credits))
+        agent_daily = Decimal(str(config.agent_daily_limit))
+
         # 1. Create the liability-sink root account
         sponsor = await self.money.create_sponsor_wallet(
             sponsor_name=config.sponsor_name,
             email=config.sponsor_email,
-            initial_credits=0.0,
+            initial_credits=Decimal("0"),
             owner_key="launch-sequence",
         )
 
         # 2. Top up with seed capital (fiat → credits)
         top_up = await self.money.top_up(
             wallet_id=sponsor.wallet_id,
-            amount_fiat=config.seed_capital_usd,
+            amount_fiat=seed_capital,
             payment_method="stripe",
         )
 
@@ -330,8 +338,8 @@ class LaunchSequence:
             agent_wallet = await self.money.create_agent_wallet(
                 sponsor_wallet_id=sponsor.wallet_id,
                 agent_id=agent_id,
-                budget_credits=config.agent_budget_credits,
-                daily_limit=config.agent_daily_limit,
+                budget_credits=agent_budget,
+                daily_limit=agent_daily,
                 auto_refill=config.auto_refill,
                 owner_key="launch-sequence",
             )
