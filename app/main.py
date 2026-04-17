@@ -21,6 +21,7 @@ from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
 from .core.rate_limiter import RateLimitMiddleware
 from .db.database import init_db, close_db
+from .services.mcp_phase9_tools import ensure_phase9_registered
 from .routers import (
     iot,
     telemetry,
@@ -45,6 +46,7 @@ from .routers import (
     kyc,
     api_keys,
     awi,
+    awi_enhanced,
     discover,
     well_known,
     static,
@@ -63,6 +65,10 @@ async def lifespan(app: FastAPI):
             logger.info("Database initialized")
         except Exception as e:
             logger.warning(f"Database initialization failed: {e}")
+
+    # Register Phase 9 MCP tools
+    ensure_phase9_registered()
+    logger.info("Phase 9 MCP tools registered")
 
     yield
 
@@ -154,6 +160,7 @@ app.include_router(mcp.router)
 app.include_router(kyc.router)
 app.include_router(api_keys.router)
 app.include_router(awi.router)
+app.include_router(awi_enhanced.router)
 app.include_router(discover.router)
 app.include_router(well_known.router)
 app.include_router(static.router)
@@ -383,6 +390,31 @@ async def root():
                     "POST /v1/sandbox/environments/{env_id}/evaluate",
                     "GET /v1/sandbox/environments/{env_id}",
                     "GET /v1/sandbox/environments",
+                ],
+            },
+            "awi_phase9": {
+                "base_path": "/v1/awi",
+                "description": (
+                    "AWI Phase 9 enhanced capabilities: FIDO2 passkey auth, "
+                    "bidirectional DOM bridge, and RAG-based semantic memory."
+                ),
+                "endpoints": [
+                    "POST /v1/awi/passkey/register",
+                    "POST /v1/awi/passkey/challenge",
+                    "POST /v1/awi/passkey/verify",
+                    "GET /v1/awi/passkey/list/{wallet_id}",
+                    "DELETE /v1/awi/passkey/{credential_id}",
+                    "POST /v1/awi/dom/snapshot",
+                    "POST /v1/awi/dom/element_at",
+                    "POST /v1/awi/dom/execute",
+                    "POST /v1/awi/dom/query",
+                    "POST /v1/awi/dom/to_awi",
+                    "POST /v1/awi/rag/ingest",
+                    "POST /v1/awi/rag/search",
+                    "POST /v1/awi/rag/context",
+                    "GET /v1/awi/rag/list/{wallet_id}",
+                    "DELETE /v1/awi/rag/{memory_id}",
+                    "DELETE /v1/awi/rag/clear/{wallet_id}",
                 ],
             },
             "telemetry_scope": {

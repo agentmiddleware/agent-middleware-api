@@ -169,6 +169,24 @@ def _build_capabilities() -> list[ServiceCapability]:
             description="Secure IoT protocol bridge with MQTT and CoAP support",
             category="iot",
         ),
+        ServiceCapability(
+            name="passkey",
+            version="1.0",
+            description="FIDO2/WebAuthn passkey verification for high-risk AWI actions like checkout and payments",
+            category="security",
+        ),
+        ServiceCapability(
+            name="dom_bridge",
+            version="1.0",
+            description="Bidirectional DOM↔AWI translation via Playwright for real browser automation on any website",
+            category="automation",
+        ),
+        ServiceCapability(
+            name="rag_memory",
+            version="1.0",
+            description="Semantic memory over AWI sessions with vector store and retrieval for long-term agent reasoning",
+            category="intelligence",
+        ),
     ]
 
 
@@ -223,6 +241,54 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
             credits_per_call=5.0,
             unit_name="session",
         ),
+        MCPToolInfo(
+            service_id="passkey",
+            name="create_passkey_challenge",
+            description="Create WebAuthn challenge for high-risk action verification (checkout, payment, etc.)",
+            category="security",
+            credits_per_call=2.0,
+            unit_name="challenge",
+        ),
+        MCPToolInfo(
+            service_id="passkey",
+            name="verify_passkey",
+            description="Verify WebAuthn credential response from biometric authentication",
+            category="security",
+            credits_per_call=1.0,
+            unit_name="verification",
+        ),
+        MCPToolInfo(
+            service_id="dom_bridge",
+            name="create_dom_session",
+            description="Create browser session for DOM automation via Playwright",
+            category="automation",
+            credits_per_call=5.0,
+            unit_name="session",
+        ),
+        MCPToolInfo(
+            service_id="dom_bridge",
+            name="sync_dom_action",
+            description="Execute AWI action via real browser DOM",
+            category="automation",
+            credits_per_call=3.0,
+            unit_name="action",
+        ),
+        MCPToolInfo(
+            service_id="rag_memory",
+            name="query_memories",
+            description="Semantic search over past AWI session memories",
+            category="intelligence",
+            credits_per_call=2.0,
+            unit_name="query",
+        ),
+        MCPToolInfo(
+            service_id="rag_memory",
+            name="get_session_context",
+            description="Get relevant context from past sessions for current session",
+            category="intelligence",
+            credits_per_call=2.0,
+            unit_name="context",
+        ),
     ]
 
 
@@ -264,6 +330,60 @@ def _build_awi_endpoints() -> list[AWIEndpoint]:
             method="GET",
             description="Get the AWI action vocabulary",
             action_type="discovery",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/passkey/challenge",
+            method="POST",
+            description="Create WebAuthn challenge for high-risk action verification",
+            action_type="security",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/passkey/verify",
+            method="POST",
+            description="Verify WebAuthn credential response",
+            action_type="security",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/passkey/status/{session_id}/{action}",
+            method="GET",
+            description="Check passkey verification status",
+            action_type="security",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/dom/session",
+            method="POST",
+            description="Create browser session for DOM automation",
+            action_type="browser_automation",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/dom/sync",
+            method="POST",
+            description="Execute AWI action via Playwright",
+            action_type="browser_automation",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/dom/state/{session_id}",
+            method="GET",
+            description="Get DOM state as AWI representation",
+            action_type="browser_automation",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/rag/index",
+            method="POST",
+            description="Index AWI session for semantic retrieval",
+            action_type="memory",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/rag/query",
+            method="POST",
+            description="Semantic search over session memories",
+            action_type="memory",
+        ),
+        AWIEndpoint(
+            path="/v1/awi/rag/context/{session_id}",
+            method="GET",
+            description="Get context from past sessions",
+            action_type="memory",
         ),
     ]
 

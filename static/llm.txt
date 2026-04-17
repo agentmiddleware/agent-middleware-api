@@ -107,6 +107,79 @@ POST /v1/awi/intervene
 {"session_id": "...", "action": "pause", "reason": "Review needed"}
 ```
 
+### AWI Phase 9 — Enhanced Capabilities
+
+**Passkey Authentication** — FIDO2/WebAuthn passkey support for agent sessions:
+
+```bash
+# Register a passkey for agent authentication
+POST /v1/awi/passkey/register
+{"wallet_id": "agent-001", "rp_name": "MyAgent", "user_name": "agent@example.com"}
+
+# Generate passkey challenge
+POST /v1/awi/passkey/challenge
+{"wallet_id": "agent-001"}
+
+# Verify passkey assertion
+POST /v1/awi/passkey/verify
+{"wallet_id": "agent-001", "assertion": {...}}
+
+# List registered passkeys
+GET /v1/awi/passkey/list/{wallet_id}
+
+# Delete a passkey
+DELETE /v1/awi/passkey/{credential_id}
+```
+
+**DOM Bridge** — Bidirectional DOM↔AWI translation for precise web control:
+
+```bash
+# Get DOM snapshot as structured data
+POST /v1/awi/dom/snapshot
+{"session_id": "...", "include_shadow_dom": true}
+
+# Get element at position (clickable elements)
+POST /v1/awi/dom/element_at
+{"session_id": "...", "x": 100, "y": 200}
+
+# Execute AWI action and return DOM result
+POST /v1/awi/dom/execute
+{"session_id": "...", "action": "click", "parameters": {"element_id": "btn-submit"}}
+
+# Query DOM with CSS selector
+POST /v1/awi/dom/query
+{"session_id": "...", "selector": "button.primary"}
+
+# Generate AWI action from DOM element
+POST /v1/awi/dom/to_awi
+{"session_id": "...", "element": {...}}
+```
+
+**RAG Memory** — Vector store for semantic agent memory:
+
+```bash
+# Ingest document into memory store
+POST /v1/awi/rag/ingest
+{"wallet_id": "agent-001", "content": "...", "metadata": {"source": "doc.pdf"}}
+
+# Search memory semantically
+POST /v1/awi/rag/search
+{"wallet_id": "agent-001", "query": "what was the previous checkout flow?", "top_k": 5}
+
+# Get memory context for session
+POST /v1/awi/rag/context
+{"wallet_id": "agent-001", "session_id": "..."}
+
+# List memory entries
+GET /v1/awi/rag/list/{wallet_id}
+
+# Delete memory entry
+DELETE /v1/awi/rag/{memory_id}
+
+# Clear all memory for wallet
+DELETE /v1/awi/rag/clear/{wallet_id}
+```
+
 ---
 
 ## Billing & Pricing
