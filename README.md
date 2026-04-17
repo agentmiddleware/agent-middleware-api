@@ -2,14 +2,17 @@
 
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
 [![Auto PR](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/Version-v1.0.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 ![Tests](https://img.shields.io/badge/Tests-339%20passing-brightgreen)
-![Phase](https://img.shields.io/badge/Phase-9%20Agent%20Discoverability-blue)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
+![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
+
+> **Now v1.0 — Fully Agent-Discoverable.** Built on arXiv:2506.10953v1.
 
 **The FastAPI control plane for agent-native infrastructure — MCP + AWI powered.**
 
@@ -26,6 +29,11 @@ It lets agents:
 * **Self-heal by diagnosing and fixing issues**
 * **Answer natural language queries**
 * **Remember and learn from experiences**
+* **Control real web browsers with semantic actions**
+* **Use passkey authentication for high-risk operations**
+* **Search past sessions semantically**
+
+**Deploy in minutes via Docker or Railway.**
 
 Deploy in minutes via Docker or Railway.
 

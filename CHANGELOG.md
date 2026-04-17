@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.0] - 2026-04-16
+
+### 🚀 Major Release — Agent-Native Middleware Platform
+
+**This release completes the full Agentic Web Interface (AWI) vision from arXiv:2506.10953v1.**
+
+#### Phase 9: AWI Phase 9 — Paper Gap Closure
+
+- **Agentic Web Interface (AWI)** — Stateful sessions, semantic actions, progressive representations
+- **Passkey Authentication** — FIDO2/WebAuthn for high-risk action verification (`/v1/awi/passkey/*`)
+- **Bidirectional DOM Bridge** — Playwright-powered browser automation for real website interaction (`/v1/awi/dom/*`)
+- **RAG Memory Engine** — Semantic search over session histories with ChromaDB persistence (`/v1/awi/rag/*`)
+- **Agent Discoverability** — Full discovery surfaces: `/.well-known/agent.json`, `/v1/discover`, `/mcp/tools.json`, `/llm.txt`
+
+#### Phase 9.1: Agent Discoverability Sprint
+
+- All Phase 9 capabilities registered in MCP tool manifest (9 new tools)
+- `/.well-known/agent.json` updated with Phase 9 capabilities
+- `/llm.txt` documentation includes Phase 9 examples
+- Root endpoint includes `awi_phase9` service definition
+
+#### Phase 9.2: Playwright DOM Bridge
+
+- **Real browser execution** — `page.click()`, `page.fill()`, `page.goto()`, etc.
+- DOM extraction — forms, buttons, links, navigation from live pages
+- Session lifecycle — proper page/context management
+- AWISessionManager routing — actions automatically route to live browser when attached
+
+#### Phase 9.3: WebAuthn Real Verification
+
+- **py_webauthn integration** for production-ready cryptographic verification
+- Signature verification against stored public key
+- Authenticator counter checking (prevents cloned credentials)
+- Challenge freshness and origin validation
+- Credential registration API
+
+#### Production Hardening
+
+- **Auth fail-safe** — Rejects requests if `VALID_API_KEYS` unset in production
+- **Background cleanup** — Periodic task cleans expired WebAuthn challenges and AWI sessions
+- **ChromaDB RAG persistence** — Vector storage for semantic memory
+
+#### All Phase 9 MCP Tools
+
+| Tool | Credits | Description |
+|------|----------|-------------|
+| `awi_passkey_challenge` | 1 | Generate passkey challenge |
+| `awi_passkey_verify` | 2 | Verify passkey response |
+| `awi_dom_bridge_session` | 5 | Create browser session |
+| `awi_dom_sync` | 3 | Execute action via DOM |
+| `awi_dom_state` | 2 | Get DOM state representation |
+| `awi_dom_action_preview` | 2 | Preview action translation |
+| `awi_memory_index` | 5 | Index session for search |
+| `awi_rag_query` | 3 | Semantic search |
+| `awi_session_context` | 2 | Get session context |
+
+**Tests:** 69 Phase 9 tests passing (339 total)
+
+---
+
 ## [v0.3.0] - 2026-04-16
 
 ### ✨ Major Features — Agentic Web Interface (AWI)
