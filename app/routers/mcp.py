@@ -19,9 +19,9 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, Field
 
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
@@ -35,6 +35,7 @@ router = APIRouter(prefix="/mcp", tags=["MCP"])
 
 class McpContext(BaseModel):
     """MCP execution context passed in tool calls."""
+
     wallet_id: str = Field(..., description="Wallet to charge for this call")
     request_path: str | None = Field(
         None, description="Optional request path for tracking"
@@ -43,6 +44,7 @@ class McpContext(BaseModel):
 
 class ToolCallRequest(BaseModel):
     """MCP tool call request (tools/call method)."""
+
     name: str = Field(..., description="Tool name (service_id)")
     arguments: dict[str, Any] = Field(
         default_factory=dict, description="Tool arguments"
@@ -52,6 +54,7 @@ class ToolCallRequest(BaseModel):
 
 class ToolCallResponse(BaseModel):
     """MCP tool call response."""
+
     content: list[dict[str, Any]]
     isError: bool = False
 
@@ -111,40 +114,48 @@ async def handle_messages(request: Request) -> JSONResponse:
 
     if method == "tools/list":
         result = await _handle_tools_list(params)
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": result,
-        })
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": result,
+            }
+        )
 
     elif method == "tools/call":
         try:
             result = await _handle_tools_call(params)
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": result,
-            })
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": result,
+                }
+            )
         except Exception as e:
             logger.error(f"MCP tool call failed: {e}")
-            return JSONResponse({
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32603,
+                        "message": str(e),
+                    },
+                }
+            )
+
+    else:
+        return JSONResponse(
+            {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "error": {
-                    "code": -32603,
-                    "message": str(e),
+                    "code": -32601,
+                    "message": f"Method not found: {method}",
                 },
-            })
-
-    else:
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "error": {
-                "code": -32601,
-                "message": f"Method not found: {method}",
-            },
-        })
+            }
+        )
 
 
 async def _handle_tools_list(params: dict) -> dict:
@@ -191,6 +202,7 @@ async def _handle_tools_call(params: dict) -> dict:
         func = registry.get_local_func(tool_name)
         if func:
             import asyncio
+
             if asyncio.iscoroutinefunction(func):
                 result = await func(**arguments)
             else:
@@ -256,6 +268,7 @@ async def invoke_tool(
     func = registry.get_local_func(service_id)
     if func:
         import asyncio
+
         try:
             if asyncio.iscoroutinefunction(func):
                 result = await func(**request.arguments)
@@ -279,25 +292,38 @@ async def invoke_tool(
 @router.get(
     "/tools",
     name="List MCP Tools",
-    summary="List all available MCP tools",
+    summary="List all available MCP tools (paginated)",
 )
 async def list_tools(
     category: ServiceCategory | None = None,
+    limit: int = Query(default=100, ge=1, le=500, description="Max tools to return"),
+    offset: int = Query(default=0, ge=0, description="Number of tools to skip"),
 ) -> dict[str, Any]:
     """
-    List all available MCP-enabled services.
+    List all available MCP-enabled services with pagination.
 
     Query Parameters:
         category: Optional service category filter
+        limit: Maximum number of tools to return (default 100, max 500)
+        offset: Number of tools to skip for pagination
 
     Returns:
-        List of tool definitions with schemas
+        Paginated list of tool definitions with schemas
     """
     generator = get_mcp_generator()
     manifest = await generator.generate_tools_json_async(category=category)
+    tools = manifest["tools"]
+    total = len(tools)
+
+    paginated_tools = tools[offset : offset + limit]
+
     return {
-        "tools": manifest["tools"],
-        "count": len(manifest["tools"]),
+        "tools": paginated_tools,
+        "count": len(paginated_tools),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(paginated_tools) < total,
         "generated_at": manifest["generated_at"],
     }
 

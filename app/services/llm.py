@@ -6,6 +6,7 @@ Enables autonomous decision-making, natural language understanding,
 and self-healing capabilities for agents.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 import httpx
 
 from ..core.config import get_settings
+from ..core.resilience import retry_with_backoff, CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LLMResponse:
     """Structured response from LLM provider."""
+
     content: str
     model: str
     usage: dict[str, int]
@@ -41,6 +44,10 @@ class LLMService:
     def __init__(self):
         self.settings = get_settings()
         self._client: httpx.AsyncClient | None = None
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout=30.0,
+        )
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -113,9 +120,7 @@ class LLMService:
 
         if provider == "ollama":
             # Ollama uses a different format
-            content = "\n".join(
-                f"{m['role']}: {m['content']}" for m in messages
-            )
+            content = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
             return {
                 "model": self.settings.OLLAMA_MODEL,
                 "prompt": content,
@@ -128,10 +133,12 @@ class LLMService:
             for m in messages:
                 if m["role"] == "system":
                     continue
-                anthropic_messages.append({
-                    "role": m["role"],
-                    "content": m["content"],
-                })
+                anthropic_messages.append(
+                    {
+                        "role": m["role"],
+                        "content": m["content"],
+                    }
+                )
 
             payload: dict[str, Any] = {
                 "model": self.settings.LLM_MODEL,
@@ -192,6 +199,7 @@ class LLMService:
             finish_reason=choice.get("finish_reason"),
         )
 
+    @retry_with_backoff(max_attempts=3, base_delay=1.0, max_delay=10.0)
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -210,7 +218,15 @@ class LLMService:
 
         Returns:
             LLMResponse with content and metadata
+
+        Retries with exponential backoff on transient failures.
         """
+        if not self._circuit_breaker.is_allowed():
+            logger.warning(
+                "llm_circuit_breaker_open", state=self._circuit_breaker.state
+            )
+            raise Exception("LLM circuit breaker is open")
+
         if not self.settings.LLM_API_KEY and self._get_provider() not in ("ollama",):
             logger.warning("LLM_API_KEY not set, returning mock response")
             return LLMResponse(
@@ -223,24 +239,27 @@ class LLMService:
         endpoint = self._build_endpoint()
         headers = self._build_headers()
 
-        logger.debug(
-            f"LLM request to {endpoint}: {json.dumps(payload, indent=2)[:500]}"
-        )
-
         try:
             response = await self.client.post(endpoint, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
 
-            logger.debug(f"LLM response: {json.dumps(data, indent=2)[:500]}")
+            self._circuit_breaker.record_success()
+            logger.debug("llm_response_received", model=data.get("model", "unknown"))
 
             return self._parse_response(data, self._get_provider())
 
+        except httpx.TimeoutException as e:
+            self._circuit_breaker.record_failure()
+            logger.warning("llm_timeout", error=str(e))
+            raise
         except httpx.HTTPStatusError as e:
-            logger.error(f"LLM API error: {e.response.status_code} - {e.response.text}")
+            self._circuit_breaker.record_failure()
+            logger.error("llm_http_error", status=e.response.status_code, error=str(e))
             raise
         except Exception as e:
-            logger.exception(f"LLM request failed: {e}")
+            self._circuit_breaker.record_failure()
+            logger.exception("llm_request_failed", error=str(e))
             raise
 
     async def generate(
@@ -274,10 +293,10 @@ class LLMService:
             {
                 "role": "user",
                 "content": (
-                f"Data:\n{data}\n\n"
-                f"Task: {instruction}\n\n"
-                "Respond with valid JSON only."
-            ),
+                    f"Data:\n{data}\n\n"
+                    f"Task: {instruction}\n\n"
+                    "Respond with valid JSON only."
+                ),
             }
         ]
 

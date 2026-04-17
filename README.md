@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
 [![Auto PR](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/Version-v1.0.0-blue)
+![Version](https://img.shields.io/badge/Version-v1.1.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
@@ -12,9 +12,37 @@
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
 
-> **Now v1.0 — Fully Agent-Discoverable.** Built on arXiv:2506.10953v1.
+> **Now v1.1 — Fully Agent-Discoverable.** Built on arXiv:2506.10953v1.
 
 **The FastAPI control plane for agent-native infrastructure — MCP + AWI powered.**
+
+### For Autonomous Agents
+
+Agents can immediately discover and use this platform:
+
+```bash
+# Auto-discover MCP tools
+curl http://localhost:8000/mcp/tools.json
+
+# Auto-discover agent capabilities
+curl http://localhost:8000/.well-known/agent.json
+
+# Auto-read documentation
+curl http://localhost:8000/llm.txt
+```
+
+### For Framework Developers
+
+```python
+# LangChain
+from agent_middleware import B2AClient, get_langgraph_tools
+client = B2AClient(api_key="...", wallet_id="...")
+tools = get_langgraph_tools(client)
+
+# CrewAI
+from agent_middleware import CrewAIB2ATool
+crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
+```
 
 **Agent Middleware API** is a production-ready FastAPI service that provides durable state, billing, telemetry, secure tool execution, IoT connectivity, and **AI-powered agent intelligence** for autonomous agents.
 
@@ -68,6 +96,46 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 Then open:
 - `http://localhost:8000/docs`
+
+---
+
+## 🚀 Get Started in 5 Minutes (Agents & Developers)
+
+### Option 1: Docker (Recommended)
+
+```bash
+docker run -p 8000:8000 \
+  -e VALID_API_KEYS=your-api-key \
+  -e STATE_BACKEND=sqlite \
+  ghcr.io/petrefiedthunder/agent-middleware-api:latest
+```
+
+### Option 2: Python
+
+```bash
+pip install agent-middleware-api
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Option 3: One-Line Agent Test
+
+```bash
+# Test MCP tool discovery (for autonomous agents)
+curl http://localhost:8000/mcp/tools.json | jq '.tools[0]'
+
+# Test AWI session creation
+curl -X POST http://localhost:8000/v1/awi/sessions \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"target_url": "https://example.com", "max_steps": 10}'
+```
+
+### For Autonomous Agents
+
+Agents can auto-discover this platform at:
+- `GET /mcp/tools.json` — MCP tool manifest
+- `GET /.well-known/agent.json` — Agent capability manifest
+- `GET /llm.txt` — LLM-readable documentation
 
 ---
 
