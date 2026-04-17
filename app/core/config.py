@@ -25,11 +25,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "*"
 
     # --- Durable Runtime State ---
-    # Backends: auto, postgres, redis, memory
+    # Backends: auto, postgres, redis, sqlite, memory
     STATE_BACKEND: str = "auto"
     STATE_NAMESPACE: str = "agent_middleware"
     DATABASE_URL: str = ""
     REDIS_URL: str = ""
+    SQLITE_URL: str = ""
 
     # --- Database Pool Settings ---
     # Used for SQLModel/SQLAlchemy async sessions

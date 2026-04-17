@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/Tests-317%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-339%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
@@ -688,6 +688,18 @@ railway variables set VELOCITY_FREEZE_THRESHOLD=3
 
 > **Note:** `DATABASE_URL` is automatically injected when you link the PostgreSQL database.
 
+### SQLite for Edge/Local Deployments
+
+For simpler edge deployments or local development, use SQLite:
+
+```bash
+# SQLite (zero infrastructure, file-based)
+railway variables set STATE_BACKEND=sqlite
+railway variables set SQLITE_URL=./data/state.db
+```
+
+SQLite backend provides durable state without requiring PostgreSQL or Redis infrastructure.
+
 ### 4. Verify Deployment
 
 - `GET /health` returns `200`
@@ -713,7 +725,7 @@ railway variables get DATABASE_URL
 - Red-team endpoints (`/v1/security`, `/v1/rtaas`) for adversarial testing
 - Memory fallback disabled in production by default
 
-> **Note:** This is not multi-tenant hardened unless deployed with isolated namespaces and database separation.
+> **Note:** Multi-tenant hardening validations are available in `app/core/tenant_validation.py` for production deployments requiring strict tenant isolation.
 
 ---
 
@@ -747,9 +759,9 @@ Current durable service stores:
 - [x] Behavioral Sandbox Engine (subprocess isolation, MCP sandboxing)
 - [x] Full Agentic Web Interface (AWI) control plane
 - [x] External AWI Adoption Kit (Python/TS SDKs, manifest generator, adapter)
-- [ ] Add comprehensive agent interaction examples and recipes
-- [ ] Multi-tenant hardening validations
-- [ ] Add SQLite backend support for simpler edge deployments
+- [x] Add comprehensive agent interaction examples and recipes
+- [x] Multi-tenant hardening validations
+- [x] Add SQLite backend support for simpler edge deployments
 
 ---
 

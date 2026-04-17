@@ -4,11 +4,13 @@ Durable state backend abstraction for runtime service stores.
 Priority order:
 1) PostgreSQL (DATABASE_URL)
 2) Redis (REDIS_URL)
-3) In-memory fallback
+3) SQLite (SQLITE_URL)
+4) In-memory fallback
 """
 
 from __future__ import annotations
 
+import aiosqlite
 import asyncio
 import json
 import logging
@@ -52,12 +54,14 @@ class DurableStateStore:
         self._state_backend = settings.STATE_BACKEND.strip().lower()
         self._redis_url = settings.REDIS_URL.strip()
         self._database_url = settings.DATABASE_URL.strip()
+        self._sqlite_url = settings.SQLITE_URL.strip()
 
         self._init_lock = asyncio.Lock()
         self._initialized = False
         self._backend: str = "memory"
         self._redis: redis.Redis | None = None
         self._pg_pool: asyncpg.Pool | None = None
+        self._sqlite_conn: aiosqlite.Connection | None = None
 
     @property
     def backend(self) -> str:
@@ -72,6 +76,8 @@ class DurableStateStore:
             return "postgres" if self._database_url else "memory"
         if self._state_backend == "redis":
             return "redis" if self._redis_url else "memory"
+        if self._state_backend == "sqlite":
+            return "sqlite" if self._sqlite_url else "memory"
         if self._state_backend == "memory":
             return "memory"
 
@@ -80,6 +86,8 @@ class DurableStateStore:
             return "postgres"
         if self._redis_url:
             return "redis"
+        if self._sqlite_url:
+            return "sqlite"
         return "memory"
 
     async def _ensure_ready(self) -> None:
@@ -119,6 +127,21 @@ class DurableStateStore:
                         decode_responses=True,
                     )
                     await self._redis.ping()
+                elif self._backend == "sqlite":
+                    self._sqlite_conn = await aiosqlite.connect(self._sqlite_url)
+                    self._sqlite_conn.row_factory = aiosqlite.Row
+                    await self._sqlite_conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS app_state_kv (
+                            namespace TEXT NOT NULL,
+                            state_key TEXT NOT NULL,
+                            payload TEXT NOT NULL,
+                            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                            PRIMARY KEY(namespace, state_key)
+                        )
+                        """
+                    )
+                    await self._sqlite_conn.commit()
             except Exception:
                 logger.exception(
                     "Failed to initialize durable state backend '%s'; falling "
@@ -154,6 +177,17 @@ class DurableStateStore:
                 return json.loads(payload)
             return payload
 
+        if self._backend == "sqlite":
+            assert self._sqlite_conn is not None
+            async with self._sqlite_conn.execute(
+                "SELECT payload FROM app_state_kv WHERE namespace = ? AND state_key = ?",
+                (self.namespace, key),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                return None
+            return json.loads(row["payload"])
+
         assert self._redis is not None
         raw = await self._redis.get(self._redis_key(key))
         if raw is None:
@@ -183,6 +217,20 @@ class DurableStateStore:
                 )
             return True
 
+        if self._backend == "sqlite":
+            assert self._sqlite_conn is not None
+            await self._sqlite_conn.execute(
+                """
+                INSERT INTO app_state_kv (namespace, state_key, payload, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(namespace, state_key)
+                DO UPDATE SET payload = excluded.payload, updated_at = datetime('now')
+                """,
+                (self.namespace, key, encoded),
+            )
+            await self._sqlite_conn.commit()
+            return True
+
         assert self._redis is not None
         await self._redis.set(self._redis_key(key), encoded)
         return True
@@ -202,6 +250,15 @@ class DurableStateStore:
                 )
             return True
 
+        if self._backend == "sqlite":
+            assert self._sqlite_conn is not None
+            await self._sqlite_conn.execute(
+                "DELETE FROM app_state_kv WHERE namespace = ? AND state_key = ?",
+                (self.namespace, key),
+            )
+            await self._sqlite_conn.commit()
+            return True
+
         assert self._redis is not None
         await self._redis.delete(self._redis_key(key))
         return True
@@ -214,7 +271,7 @@ class DurableStateStore:
                 "ok": True,
                 "backend": "memory",
                 "enabled": False,
-                "reason": "No DATABASE_URL/REDIS_URL configured",
+                "reason": "No DATABASE_URL/REDIS_URL/SQLITE_URL configured",
             }
 
         if self._backend == "postgres":
@@ -227,6 +284,19 @@ class DurableStateStore:
                 return {
                     "ok": False,
                     "backend": "postgres",
+                    "enabled": True,
+                    "error": str(exc),
+                }
+
+        if self._backend == "sqlite":
+            try:
+                assert self._sqlite_conn is not None
+                await self._sqlite_conn.execute("SELECT 1")
+                return {"ok": True, "backend": "sqlite", "enabled": True}
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "backend": "sqlite",
                     "enabled": True,
                     "error": str(exc),
                 }
@@ -257,6 +327,13 @@ class DurableStateStore:
             except Exception:
                 logger.debug("Failed to close Postgres pool cleanly", exc_info=True)
             self._pg_pool = None
+
+        if self._sqlite_conn is not None:
+            try:
+                await self._sqlite_conn.close()
+            except Exception:
+                logger.debug("Failed to close SQLite connection cleanly", exc_info=True)
+            self._sqlite_conn = None
 
         # Keep init state so this instance can re-initialize if needed.
         self._initialized = False
