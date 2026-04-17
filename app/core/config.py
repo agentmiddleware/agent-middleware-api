@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     PORT: int = 8000
     CORS_ORIGINS: str = "*"
 
+    # --- Public URL ---
+    # Used for agent manifests and documentation links
+    # Example: https://api.yourdomain.com or https://yourapp.up.railway.app
+    PUBLIC_URL: str = ""
+
     # --- Durable Runtime State ---
     # Backends: auto, postgres, redis, sqlite, memory
     STATE_BACKEND: str = "auto"

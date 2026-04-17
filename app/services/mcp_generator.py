@@ -75,6 +75,7 @@ class McpGenerator:
 
         if include_persistent:
             import asyncio
+
             persistent_services = asyncio.get_event_loop().run_until_complete(
                 self.registry.list_persistent(category=category)
             )
@@ -85,7 +86,7 @@ class McpGenerator:
             "version": MCP_TOOLS_JSON_VERSION,
             "name": "B2A Service Marketplace",
             "description": "Billable AI agent services powered by the B2A economy. "
-                "Each tool invocation deducts credits from the caller's wallet.",
+            "Each tool invocation deducts credits from the caller's wallet.",
             "tools": services,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -107,15 +108,23 @@ class McpGenerator:
                 services.append(self._service_to_mcp_tool(service))
 
         if include_persistent:
-            persistent_services = await self.registry.list_persistent(category=category)
-            for service in persistent_services:
-                services.append(self._service_to_mcp_tool(service))
+            try:
+                persistent_services = await self.registry.list_persistent(
+                    category=category
+                )
+                for service in persistent_services:
+                    services.append(self._service_to_mcp_tool(service))
+            except RuntimeError as e:
+                if "DATABASE_URL" in str(e):
+                    logger.debug("No database configured, skipping persistent services")
+                else:
+                    raise
 
         return {
             "version": MCP_TOOLS_JSON_VERSION,
             "name": "B2A Service Marketplace",
             "description": "Billable AI agent services powered by the B2A economy. "
-                "Each tool invocation deducts credits from the caller's wallet.",
+            "Each tool invocation deducts credits from the caller's wallet.",
             "tools": services,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }

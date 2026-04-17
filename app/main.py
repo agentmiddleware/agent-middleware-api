@@ -26,7 +26,10 @@ from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
 from .core.rate_limiter import RateLimitMiddleware
 from .db.database import init_db, close_db
-from .services.mcp_phase9_tools import ensure_phase9_registered
+from .services.mcp_phase9_tools import (
+    ensure_phase9_registered,
+    register_default_mcp_services,
+)
 from .routers import (
     iot,
     telemetry,
@@ -155,6 +158,14 @@ async def lifespan(app: FastAPI):
         startup_time_s=time.monotonic() - startup_time,
     )
 
+    startup_time = time.monotonic()
+    register_default_mcp_services()
+    logger.info(
+        "app_startup",
+        phase="default_mcp_services_registered",
+        startup_time_s=time.monotonic() - startup_time,
+    )
+
     logger.info("app_ready", version=settings.APP_VERSION)
 
     yield
@@ -213,13 +224,16 @@ app = FastAPI(
     openapi_url="/openapi.json",
     contact={
         "name": "Agent-Native Middleware",
-        "email": "api@yourdomain.com",
+        "email": "support@agent-middleware.dev",
     },
     license_info={
         "name": "MIT",
     },
     servers=[
-        {"url": "https://api.yourdomain.com", "description": "Production"},
+        {
+            "url": settings.PUBLIC_URL or "https://api.yourdomain.com",
+            "description": "Production",
+        },
         {"url": "http://localhost:8000", "description": "Local Development"},
     ],
 )

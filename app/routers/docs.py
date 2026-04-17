@@ -11,9 +11,11 @@ Endpoints:
 - /.well-known/agent.json — Standard agent discovery manifest
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 import os
+
+from ..core.config import get_settings
 
 router = APIRouter(
     tags=["Documentation & Discovery"],
@@ -35,7 +37,9 @@ async def get_llm_txt():
     # Serve from docs/llm.txt
     llm_txt_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "..", "docs", "llm.txt"
+        "..",
+        "docs",
+        "llm.txt",
     )
     try:
         with open(llm_txt_path, "r") as f:
@@ -323,7 +327,10 @@ async def get_doc_index():
         "are available — similar to robots.txt but for AI agents."
     ),
 )
-async def get_agent_manifest():
+async def get_agent_manifest(request: Request):
+    settings = get_settings()
+    base_url = settings.PUBLIC_URL or str(request.base_url).rstrip("/")
+
     return {
         "schema_version": "1.0",
         "name": "Agent-Native Middleware API",
@@ -333,13 +340,13 @@ async def get_agent_manifest():
             "programmatic video-to-viral distribution, agent-to-agent communications, "
             "and multi-format content generation with algorithmic scheduling."
         ),
-        "url": "https://api.yourdomain.com",
-        "documentation_url": "https://api.yourdomain.com/llm.txt",
-        "openapi_url": "https://api.yourdomain.com/openapi.json",
+        "url": base_url,
+        "documentation_url": f"{base_url}/llm.txt",
+        "openapi_url": f"{base_url}/openapi.json",
         "authentication": {
             "type": "api_key",
             "header": "X-API-Key",
-            "registration": "https://api.yourdomain.com/v1/comms/agents",
+            "registration": f"{base_url}/v1/comms/agents",
         },
         "capabilities": [
             {
@@ -361,8 +368,7 @@ async def get_agent_manifest():
             {
                 "name": "programmatic-media-distribution",
                 "description": (
-                    "Video-to-viral-clip pipeline with cross-platform "
-                    "distribution."
+                    "Video-to-viral-clip pipeline with cross-platform distribution."
                 ),
                 "endpoint": "/v1/media",
             },
@@ -415,7 +421,7 @@ async def get_agent_manifest():
             "batch_counts_as_one": True,
         },
         "contact": {
-            "email": "api@yourdomain.com",
+            "email": "support@agent-middleware.dev",
         },
         "protocols": ["rest", "json", "openapi"],
     }
