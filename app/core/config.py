@@ -101,6 +101,24 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3"
 
+    # --- Phase 9: WebAuthn / Passkey ---
+    # Relying Party configuration for FIDO2/WebAuthn
+    WEBAUTHN_RP_ID: str = "localhost"
+    WEBAUTHN_RP_NAME: str = "Agent-Native Middleware"
+    WEBAUTHN_TIMEOUT_MS: int = 60000
+    WEBAUTHN_CHALLENGE_EXPIRY: int = 300
+    WEBAUTHN_VERIFICATION_VALIDITY: int = 300
+
+    # --- Phase 9: Playwright Bridge ---
+    PLAYWRIGHT_HEADLESS: bool = True
+    PLAYWRIGHT_BROWSER_TYPE: str = "chromium"
+    PLAYWRIGHT_TIMEOUT_MS: int = 30000
+
+    # --- Phase 9: RAG Engine ---
+    RAG_VECTOR_STORE_PATH: str = "./data/awi_vectors"
+    RAG_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    RAG_EMBEDDING_DIMENSION: int = 1536
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

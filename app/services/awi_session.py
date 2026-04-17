@@ -160,6 +160,25 @@ class AWISessionManager:
                 error=f"Preconditions not met: {unmet}",
             )
 
+        # Phase 9: Check passkey requirement for high-risk actions
+        from .webauthn_provider import get_webauthn_provider
+
+        webauthn = get_webauthn_provider()
+
+        if await webauthn.requires_passkey(request.session_id, request.action.value):
+            if not await webauthn.is_action_verified(
+                request.session_id, request.action.value
+            ):
+                return AWIExecutionResponse(
+                    execution_id=execution_id,
+                    session_id=request.session_id,
+                    action=request.action,
+                    status="passkey_required",
+                    parameters=request.parameters,
+                    error="This action requires biometric verification. "
+                    "Call POST /v1/awi/passkey/challenge first.",
+                )
+
         result = await self._execute_action_logic(
             request.action, request.parameters, state
         )

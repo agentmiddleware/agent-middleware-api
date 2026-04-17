@@ -41,6 +41,9 @@ class AgentPluginManifest(BaseModel):
             "mcp_tools",
             "awi_automation",
             "sandbox_testing",
+            "passkey_auth",
+            "dom_bridge",
+            "rag_memory",
         ],
         description="List of capability identifiers",
     )
@@ -81,6 +84,9 @@ class AgentPluginManifest(BaseModel):
             "llm_readable": "/llm.txt",
             "awi_guide": "/docs/awi-adoption-guide.md",
             "agent_recipes": "/docs/agent-recipes.md",
+            "phase9_passkey": "/v1/awi/passkey/register",
+            "phase9_dom_bridge": "/v1/awi/dom/snapshot",
+            "phase9_rag": "/v1/awi/rag/ingest",
         }
     )
 
@@ -100,11 +106,16 @@ def _build_agent_manifest() -> AgentPluginManifest:
             "discovery": "/v1/discover",
             "mcp": "/mcp",
             "awi": "/v1/awi",
+            "awi_passkey": "/v1/awi/passkey",
+            "awi_dom": "/v1/awi/dom",
+            "awi_rag": "/v1/awi/rag",
             "billing": "/v1/billing",
             "telemetry": "/v1/telemetry",
             "comms": "/v1/comms",
             "ai": "/v1/ai",
             "health": "/health",
+            "agent_manifest": "/.well-known/agent.json",
+            "llm_docs": "/llm.txt",
         },
     )
 
