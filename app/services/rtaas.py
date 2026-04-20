@@ -24,7 +24,11 @@ import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from ..core.runtime_mode import require_simulation
+from ..db.database import get_session_factory, is_database_configured
+from ..db.models import SecurityScanModel, SecurityVulnerabilityModel
 
 from ..schemas.red_team import AttackCategory, Severity
 

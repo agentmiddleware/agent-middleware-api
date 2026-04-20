@@ -24,7 +24,16 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from ..core.runtime_mode import require_simulation
+from ..db.converters import (
+    scan_report_to_scan_model,
+    scan_model_to_report,
+    vulnerability_to_model,
+)
+from ..db.database import get_session_factory, is_database_configured
+from ..db.models import SecurityScanModel, SecurityVulnerabilityModel
 
 from ..schemas.red_team import (
     AttackCategory,
