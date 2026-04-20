@@ -9,6 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -49,17 +50,42 @@ def get_engine() -> AsyncEngine | None:
             logger.warning("DATABASE_URL not configured. Database features disabled.")
             return None
 
-        _engine = create_async_engine(
-            db_url,
-            echo=get_settings().DEBUG,
-            pool_size=get_settings().DB_POOL_SIZE,
-            max_overflow=get_settings().DB_MAX_OVERFLOW,
-            pool_pre_ping=True,
-        )
+        is_sqlite = db_url.startswith("sqlite")
+
+        engine_kwargs: dict = {
+            "echo": get_settings().DEBUG,
+            "pool_pre_ping": True,
+        }
+        if is_sqlite:
+            # SQLite doesn't benefit from a large pool (single-writer) and
+            # choking on concurrent writes manifests as OperationalError
+            # "database is locked". connect_args + WAL mode below solve it
+            # for dev/test; production runs on PostgreSQL.
+            engine_kwargs["connect_args"] = {"timeout": 30}
+        else:
+            engine_kwargs["pool_size"] = get_settings().DB_POOL_SIZE
+            engine_kwargs["max_overflow"] = get_settings().DB_MAX_OVERFLOW
+
+        _engine = create_async_engine(db_url, **engine_kwargs)
+
+        if is_sqlite:
+            # WAL mode permits concurrent reads during a write and smooths
+            # over the background-task-writes-while-next-test-runs case.
+            # busy_timeout gives writers a second chance instead of
+            # raising immediately.
+            @event.listens_for(_engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_conn, _connection_record):  # noqa: ANN001
+                cursor = dbapi_conn.cursor()
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA busy_timeout=10000")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+                finally:
+                    cursor.close()
 
         logger.info(
-            f"Database engine created: pool_size={get_settings().DB_POOL_SIZE}, "
-            f"max_overflow={get_settings().DB_MAX_OVERFLOW}"
+            "Database engine created: dialect=%s",
+            "sqlite" if is_sqlite else "postgres",
         )
 
     return _engine
