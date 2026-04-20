@@ -473,64 +473,213 @@ class RegistrationEngine:
 # ---------------------------------------------------------------------------
 
 class OracleStore:
-    """In-memory store for crawl targets, indexed APIs, and registrations."""
+    """PostgreSQL-backed store for crawl targets, indexed APIs, registrations, and discovery hits."""
 
-    def __init__(self):
-        self._targets: dict[str, dict] = {}
-        self._indexed: dict[str, IndexedAPI] = {}
-        self._registrations: list[RegistrationResult] = []
-        self._discovery_hits: int = 0
-        self._referrers: dict[str, int] = defaultdict(int)
-        self._lock = asyncio.Lock()
+    @staticmethod
+    def _require_db() -> None:
+        if not is_database_configured():
+            raise RuntimeError(
+                "OracleStore requires a configured database. Set DATABASE_URL."
+            )
 
     async def store_target(self, target_id: str, data: dict):
-        async with self._lock:
-            self._targets[target_id] = data
+        """Insert a crawl target row. Idempotent: re-storing same id is a no-op."""
+        self._require_db()
+        factory = get_session_factory()
+        queued_at = _parse_iso(data.get("queued_at")) or datetime.now(timezone.utc)
+        async with factory() as session:
+            existing = await session.get(OracleCrawlTargetModel, target_id)
+            if existing is not None:
+                return
+            session.add(
+                OracleCrawlTargetModel(
+                    target_id=target_id,
+                    url=data.get("url", ""),
+                    directory_type=data.get("directory_type", ""),
+                    status=data.get("status", OracleStatus.PENDING.value),
+                    api_id=data.get("api_id"),
+                    queued_at=queued_at,
+                )
+            )
+            await session.commit()
+
+    async def update_target(
+        self,
+        target_id: str,
+        *,
+        status: str | None = None,
+        api_id: str | None = None,
+        crawled_at: datetime | None = None,
+    ) -> None:
+        """Partial update — in-memory store used to expose the dict by
+        reference; the PG-backed equivalent requires an explicit write."""
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            row = await session.get(OracleCrawlTargetModel, target_id)
+            if row is None:
+                return
+            if status is not None:
+                row.status = status
+            if api_id is not None:
+                row.api_id = api_id
+            if crawled_at is not None:
+                row.crawled_at = crawled_at
+            await session.commit()
 
     async def get_target(self, target_id: str) -> dict | None:
-        return self._targets.get(target_id)
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            row = await session.get(OracleCrawlTargetModel, target_id)
+        if row is None:
+            return None
+        return {
+            "target_id": row.target_id,
+            "url": row.url,
+            "directory_type": row.directory_type,
+            "status": row.status,
+            "api_id": row.api_id,
+            "queued_at": row.queued_at.isoformat() if row.queued_at else None,
+            "crawled_at": row.crawled_at.isoformat() if row.crawled_at else None,
+        }
 
     async def store_indexed(self, api: IndexedAPI):
-        async with self._lock:
-            self._indexed[api.api_id] = api
+        """Upsert — re-indexing the same API replaces its row."""
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            existing = await session.get(OracleIndexedAPIModel, api.api_id)
+            new_row = indexed_api_to_model(api)
+            if existing is None:
+                session.add(new_row)
+            else:
+                for field in (
+                    "url",
+                    "name",
+                    "description",
+                    "directory_type",
+                    "compatibility_tier",
+                    "compatibility_score",
+                    "capabilities_json",
+                    "tags_json",
+                    "status",
+                    "last_crawled",
+                ):
+                    setattr(existing, field, getattr(new_row, field))
+            await session.commit()
 
     async def get_indexed(self, api_id: str) -> IndexedAPI | None:
-        return self._indexed.get(api_id)
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            row = await session.get(OracleIndexedAPIModel, api_id)
+        return indexed_api_model_to_schema(row) if row else None
 
     async def list_indexed(
         self,
         tier: CompatibilityTier | None = None,
         directory_type: DirectoryType | None = None,
     ) -> list[IndexedAPI]:
-        apis = list(self._indexed.values())
+        self._require_db()
+        factory = get_session_factory()
+        stmt = select(OracleIndexedAPIModel)
         if tier:
-            apis = [a for a in apis if a.compatibility_tier == tier]
+            stmt = stmt.where(OracleIndexedAPIModel.compatibility_tier == tier.value)
         if directory_type:
-            apis = [a for a in apis if a.directory_type == directory_type]
-        return sorted(apis, key=lambda a: a.compatibility_score, reverse=True)
+            stmt = stmt.where(
+                OracleIndexedAPIModel.directory_type == directory_type.value
+            )
+        stmt = stmt.order_by(OracleIndexedAPIModel.compatibility_score.desc())
+        async with factory() as session:
+            result = await session.execute(stmt)
+            rows = list(result.scalars().all())
+        return [indexed_api_model_to_schema(r) for r in rows]
 
     async def store_registration(self, result: RegistrationResult):
-        async with self._lock:
-            self._registrations.append(result)
+        self._require_db()
+        factory = get_session_factory()
+        # RegistrationResult may omit registration_id on failure — synthesize
+        # one so we still have a stable PK for audit.
+        if not result.registration_id:
+            result = result.model_copy(
+                update={"registration_id": f"failed-{uuid.uuid4().hex[:12]}"}
+            )
+        async with factory() as session:
+            session.add(registration_result_to_model(result))
+            await session.commit()
 
     async def get_registrations(self) -> list[RegistrationResult]:
-        return list(self._registrations)
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(OracleRegistrationModel).order_by(
+                    OracleRegistrationModel.created_at.desc()
+                )
+            )
+            rows = list(result.scalars().all())
+        return [registration_model_to_schema(r) for r in rows]
 
     async def record_discovery_hit(self, referrer: str = "direct"):
-        async with self._lock:
-            self._discovery_hits += 1
-            self._referrers[referrer] += 1
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            session.add(
+                OracleDiscoveryHitModel(
+                    hit_id=uuid.uuid4().hex,
+                    referrer=referrer or "direct",
+                )
+            )
+            await session.commit()
 
     async def get_stats(self) -> dict:
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            targets = await session.scalar(
+                select(func.count()).select_from(OracleCrawlTargetModel)
+            ) or 0
+            indexed = await session.scalar(
+                select(func.count()).select_from(OracleIndexedAPIModel)
+            ) or 0
+            registrations = await session.scalar(
+                select(func.count()).select_from(OracleRegistrationModel)
+            ) or 0
+            hits = await session.scalar(
+                select(func.count()).select_from(OracleDiscoveryHitModel)
+            ) or 0
+
+            referrer_rows = await session.execute(
+                select(
+                    OracleDiscoveryHitModel.referrer,
+                    func.count().label("n"),
+                )
+                .group_by(OracleDiscoveryHitModel.referrer)
+                .order_by(func.count().desc())
+                .limit(10)
+            )
+            top_referrers = {r.referrer: int(r.n) for r in referrer_rows}
+
         return {
-            "targets_crawled": len(self._targets),
-            "apis_indexed": len(self._indexed),
-            "registrations": len(self._registrations),
-            "discovery_hits": self._discovery_hits,
-            "top_referrers": dict(
-                sorted(self._referrers.items(), key=lambda x: x[1], reverse=True)[:10]
-            ),
+            "targets_crawled": int(targets),
+            "apis_indexed": int(indexed),
+            "registrations": int(registrations),
+            "discovery_hits": int(hits),
+            "top_referrers": top_referrers,
         }
+
+
+def _parse_iso(value: object) -> datetime | None:
+    """Best-effort parse of ISO-8601 timestamps passed into store_target."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -575,11 +724,12 @@ class AgentOracle:
 
         if indexed:
             await self.store.store_indexed(indexed)
-            # Update target status
-            target = await self.store.get_target(target_id)
-            if target:
-                target["status"] = OracleStatus.INDEXED.value
-                target["api_id"] = indexed.api_id
+            await self.store.update_target(
+                target_id,
+                status=OracleStatus.INDEXED.value,
+                api_id=indexed.api_id,
+                crawled_at=datetime.now(timezone.utc),
+            )
 
         return indexed  # type: ignore[no-any-return]
 
