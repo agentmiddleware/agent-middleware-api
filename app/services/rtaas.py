@@ -18,9 +18,10 @@ Unlike the internal /v1/security endpoints (which attack our own API),
 RTaaS attacks *external* services specified by the requesting agent.
 """
 
+import json
 import uuid
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 from ..core.runtime_mode import require_simulation
@@ -89,7 +90,169 @@ class RTaaSEngine:
     """
 
     def __init__(self):
+        # Kept for backward compatibility with any tests that still poke at
+        # the dict directly; the authoritative source is PostgreSQL.
         self._jobs: dict[str, RTaaSJob] = {}
+
+    @staticmethod
+    def _require_db() -> None:
+        if not is_database_configured():
+            raise RuntimeError(
+                "RTaaSEngine requires a configured database. Set DATABASE_URL."
+            )
+
+    @staticmethod
+    def _job_to_models(
+        job: RTaaSJob,
+    ) -> tuple[SecurityScanModel, list[SecurityVulnerabilityModel]]:
+        scan = SecurityScanModel(
+            scan_id=job.job_id,
+            scan_type="rtaas",
+            tenant_id=job.tenant_id,
+            targets_json=json.dumps([asdict(t) for t in job.targets], default=str),
+            attack_categories_json=json.dumps(
+                [c.value for c in job.attack_categories]
+            ),
+            intensity=job.intensity,
+            status=job.status,
+            total_tests_run=job.total_tests_run,
+            total_passed=None,
+            total_failed=None,
+            security_score=job.security_score,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+            created_at=job.created_at,
+        )
+        vulns = [
+            SecurityVulnerabilityModel(
+                vuln_id=v.vuln_id,
+                scan_id=job.job_id,
+                category=v.category.value,
+                severity=v.severity.value,
+                title=v.title,
+                description=v.description,
+                endpoint=v.target_url,
+                method=None,
+                evidence_json=(
+                    json.dumps({"text": v.evidence}) if v.evidence else None
+                ),
+                remediation=v.remediation,
+                remediation_status="open",
+                cwe_id=v.cwe_id,
+                discovered_at=job.completed_at or datetime.now(timezone.utc),
+            )
+            for v in job.vulnerabilities
+        ]
+        return scan, vulns
+
+    @staticmethod
+    def _models_to_job(
+        scan: SecurityScanModel,
+        vulns: list[SecurityVulnerabilityModel],
+    ) -> RTaaSJob:
+        target_records = []
+        if scan.targets_json:
+            try:
+                target_records = json.loads(scan.targets_json) or []
+            except json.JSONDecodeError:
+                target_records = []
+        targets = [
+            RTaaSTarget(
+                url=t.get("url", ""),
+                method=t.get("method", "GET"),
+                auth_header=t.get("auth_header"),
+                description=t.get("description", ""),
+            )
+            for t in target_records
+            if isinstance(t, dict)
+        ]
+
+        cats: list[AttackCategory] = []
+        if scan.attack_categories_json:
+            try:
+                for c in json.loads(scan.attack_categories_json) or []:
+                    try:
+                        cats.append(AttackCategory(c))
+                    except ValueError:
+                        continue
+            except json.JSONDecodeError:
+                pass
+
+        rtaas_vulns = []
+        for v in vulns:
+            evidence_text = ""
+            if v.evidence_json:
+                try:
+                    parsed = json.loads(v.evidence_json)
+                    if isinstance(parsed, dict):
+                        evidence_text = parsed.get("text", "")
+                except json.JSONDecodeError:
+                    pass
+            rtaas_vulns.append(
+                RTaaSVulnerability(
+                    vuln_id=v.vuln_id,
+                    severity=Severity(v.severity),
+                    category=AttackCategory(v.category),
+                    target_url=v.endpoint,
+                    title=v.title,
+                    description=v.description,
+                    evidence=evidence_text,
+                    cwe_id=v.cwe_id,
+                    remediation=v.remediation,
+                )
+            )
+
+        return RTaaSJob(
+            job_id=scan.scan_id,
+            tenant_id=scan.tenant_id or "",
+            targets=targets,
+            attack_categories=cats,
+            intensity=scan.intensity,
+            status=scan.status,
+            vulnerabilities=rtaas_vulns,
+            total_tests_run=scan.total_tests_run,
+            security_score=scan.security_score,
+            started_at=scan.started_at,
+            completed_at=scan.completed_at,
+            created_at=scan.created_at,
+        )
+
+    async def _persist_job(self, job: RTaaSJob) -> None:
+        """Upsert job + replace its vulnerabilities for idempotent rewrites."""
+        self._require_db()
+        factory = get_session_factory()
+        scan_row, vuln_rows = self._job_to_models(job)
+
+        async with factory() as session:
+            existing = await session.get(SecurityScanModel, job.job_id)
+            if existing is None:
+                session.add(scan_row)
+            else:
+                for field_name in (
+                    "scan_type",
+                    "tenant_id",
+                    "targets_json",
+                    "attack_categories_json",
+                    "intensity",
+                    "status",
+                    "total_tests_run",
+                    "total_passed",
+                    "total_failed",
+                    "security_score",
+                    "started_at",
+                    "completed_at",
+                ):
+                    setattr(existing, field_name, getattr(scan_row, field_name))
+
+            from sqlalchemy import delete as sa_delete
+
+            await session.execute(
+                sa_delete(SecurityVulnerabilityModel).where(
+                    SecurityVulnerabilityModel.scan_id == job.job_id
+                )
+            )
+            session.add_all(vuln_rows)
+            await session.commit()
 
     async def create_job(
         self,
@@ -137,6 +300,7 @@ class RTaaSEngine:
         job.completed_at = datetime.now(timezone.utc)
 
         self._jobs[job_id] = job
+        await self._persist_job(job)
         logger.info(
             f"RTaaS job {job_id}: {len(vulns)} vulns found across "
             f"{len(parsed_targets)} targets ({tests_run} tests)"
@@ -261,10 +425,42 @@ class RTaaSEngine:
         return mapping.get(cat, "Review and harden the affected endpoint.")
 
     async def get_job(self, job_id: str) -> RTaaSJob | None:
-        return self._jobs.get(job_id)
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            scan = await session.get(SecurityScanModel, job_id)
+            if scan is None or scan.scan_type != "rtaas":
+                return None
+            vuln_result = await session.execute(
+                select(SecurityVulnerabilityModel).where(
+                    SecurityVulnerabilityModel.scan_id == job_id
+                )
+            )
+            vulns = list(vuln_result.scalars().all())
+        return self._models_to_job(scan, vulns)
 
     async def list_jobs(self, tenant_id: str | None = None) -> list[RTaaSJob]:
-        jobs = list(self._jobs.values())
+        self._require_db()
+        factory = get_session_factory()
+
+        stmt = select(SecurityScanModel).where(
+            SecurityScanModel.scan_type == "rtaas"
+        )
         if tenant_id:
-            jobs = [j for j in jobs if j.tenant_id == tenant_id]
-        return sorted(jobs, key=lambda j: j.created_at, reverse=True)
+            stmt = stmt.where(SecurityScanModel.tenant_id == tenant_id)
+        stmt = stmt.order_by(SecurityScanModel.created_at.desc())
+
+        async with factory() as session:
+            result = await session.execute(stmt)
+            scans = list(result.scalars().all())
+
+            jobs: list[RTaaSJob] = []
+            for scan in scans:
+                vuln_result = await session.execute(
+                    select(SecurityVulnerabilityModel).where(
+                        SecurityVulnerabilityModel.scan_id == scan.scan_id
+                    )
+                )
+                vulns = list(vuln_result.scalars().all())
+                jobs.append(self._models_to_job(scan, vulns))
+        return jobs

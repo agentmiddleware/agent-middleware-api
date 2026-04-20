@@ -719,21 +719,97 @@ class AttackEngine:
 # ---------------------------------------------------------------------------
 
 class ScanStore:
-    """In-memory scan storage. Production: PostgreSQL."""
+    """PostgreSQL-backed scan storage shared with rtaas via
+    SecurityScanModel + SecurityVulnerabilityModel (discriminator:
+    scan_type='internal'). See issue #30."""
 
-    def __init__(self):
-        self._scans: dict[str, ScanReport] = {}
-        self._lock = asyncio.Lock()
+    @staticmethod
+    def _require_db() -> None:
+        if not is_database_configured():
+            raise RuntimeError(
+                "red_team.ScanStore requires a configured database. "
+                "Set DATABASE_URL."
+            )
 
     async def save(self, report: ScanReport):
-        async with self._lock:
-            self._scans[report.scan_id] = report
+        """Upsert a scan report and its child vulnerabilities."""
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            existing = await session.get(SecurityScanModel, report.scan_id)
+            new_row = scan_report_to_scan_model(report)
+            if existing is None:
+                session.add(new_row)
+            else:
+                for field in (
+                    "status",
+                    "targets_json",
+                    "attack_categories_json",
+                    "intensity",
+                    "total_tests_run",
+                    "total_passed",
+                    "total_failed",
+                    "security_score",
+                    "recommendations_json",
+                    "started_at",
+                    "completed_at",
+                ):
+                    setattr(existing, field, getattr(new_row, field))
+
+            # Replace vulnerabilities for idempotent re-save.
+            await session.execute(
+                select(SecurityVulnerabilityModel).where(
+                    SecurityVulnerabilityModel.scan_id == report.scan_id
+                )
+            )
+            from sqlalchemy import delete as sa_delete
+
+            await session.execute(
+                sa_delete(SecurityVulnerabilityModel).where(
+                    SecurityVulnerabilityModel.scan_id == report.scan_id
+                )
+            )
+            for vuln in report.vulnerabilities:
+                session.add(vulnerability_to_model(vuln))
+
+            await session.commit()
 
     async def get(self, scan_id: str) -> ScanReport | None:
-        return self._scans.get(scan_id)
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            scan = await session.get(SecurityScanModel, scan_id)
+            if scan is None or scan.scan_type != "internal":
+                return None
+            result = await session.execute(
+                select(SecurityVulnerabilityModel).where(
+                    SecurityVulnerabilityModel.scan_id == scan_id
+                )
+            )
+            vulns = list(result.scalars().all())
+        return scan_model_to_report(scan, vulns)
 
     async def list_all(self) -> list[ScanReport]:
-        return list(self._scans.values())
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(SecurityScanModel)
+                .where(SecurityScanModel.scan_type == "internal")
+                .order_by(SecurityScanModel.created_at.desc())
+            )
+            scans = list(result.scalars().all())
+
+            reports: list[ScanReport] = []
+            for scan in scans:
+                vuln_result = await session.execute(
+                    select(SecurityVulnerabilityModel).where(
+                        SecurityVulnerabilityModel.scan_id == scan.scan_id
+                    )
+                )
+                vulns = list(vuln_result.scalars().all())
+                reports.append(scan_model_to_report(scan, vulns))
+        return reports
 
 
 class RedTeamSwarm:
