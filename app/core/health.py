@@ -79,12 +79,13 @@ async def _check_postgres() -> dict[str, Any]:
 
 async def _check_redis() -> dict[str, Any]:
     settings = get_settings()
-    if not settings.REDIS_URL.strip():
+    redis_url = (settings.REDIS_URL or "").strip()
+    if not redis_url:
         return {"status": "not_configured"}
 
     import redis.asyncio as redis
 
-    client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    client = redis.from_url(redis_url, decode_responses=True)
     try:
         await client.ping()
         return {"status": "up"}
