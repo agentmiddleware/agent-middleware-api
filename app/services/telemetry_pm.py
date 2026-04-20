@@ -20,8 +20,16 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
+from sqlalchemy import select, delete, func
+
 from ..core.durable_state import get_durable_state
 from ..core.runtime_mode import require_simulation
+from ..db.converters import (
+    telemetry_event_to_model,
+    telemetry_event_model_to_schema,
+)
+from ..db.database import get_session_factory, is_database_configured
+from ..db.models import TelemetryEventModel
 from ..schemas.telemetry import (
     TelemetryEvent,
     Severity,
@@ -45,94 +53,70 @@ class StoredEvent:
     ingested_at: datetime
 
 
+def _row_to_stored(row: TelemetryEventModel) -> StoredEvent:
+    """Materialize a DB row back into the StoredEvent shape the anomaly
+    detector expects."""
+    return StoredEvent(
+        event_id=row.event_id,
+        batch_id=row.batch_id,
+        event=telemetry_event_model_to_schema(row),
+        ingested_at=row.ingested_at,
+    )
+
+
 class EventStore:
     """
-    In-memory time-series event store with windowed queries.
-    Production: replace with ClickHouse / TimescaleDB.
+    Time-series event store backed by PostgreSQL (TimescaleDB-friendly).
+
+    Keeps the public API (ingest / query / stats / _evict_expired) stable
+    so the rest of telemetry_pm — notably AnomalyDetector — is unchanged.
     """
 
     def __init__(self, retention_hours: int = 168):
-        self._events: list[StoredEvent] = []
         self._retention = timedelta(hours=retention_hours)
-        self._lock = asyncio.Lock()
-        self._init_lock = asyncio.Lock()
-        self._hydrated = False
-        self._state = get_durable_state()
 
-    async def _hydrate_if_needed(self):
-        if self._hydrated:
-            return
-
-        async with self._init_lock:
-            if self._hydrated:
-                return
-
-            payload = await self._state.load_json("telemetry.events")
-            if isinstance(payload, list):
-                loaded_events: list[StoredEvent] = []
-                for record in payload:
-                    if not isinstance(record, dict):
-                        continue
-                    try:
-                        loaded_events.append(
-                            StoredEvent(
-                                event_id=record["event_id"],
-                                batch_id=record["batch_id"],
-                                event=TelemetryEvent.model_validate(record["event"]),
-                                ingested_at=datetime.fromisoformat(record["ingested_at"]),
-                            )
-                        )
-                    except Exception:
-                        logger.exception("Skipping corrupt telemetry event record")
-                self._events = loaded_events
-
-            self._hydrated = True
-
-    async def _persist_locked(self):
-        if not self._state.enabled:
-            return
-        await self._state.save_json(
-            "telemetry.events",
-            [
-                {
-                    "event_id": se.event_id,
-                    "batch_id": se.batch_id,
-                    "event": se.event.model_dump(mode="json"),
-                    "ingested_at": se.ingested_at,
-                }
-                for se in self._events
-            ],
-        )
+    @staticmethod
+    def _require_db() -> None:
+        if not is_database_configured():
+            raise RuntimeError(
+                "telemetry_pm.EventStore requires a configured database. "
+                "Set DATABASE_URL."
+            )
 
     async def ingest(
         self,
         events: list[TelemetryEvent],
         batch_id: str,
     ) -> tuple[int, list[dict]]:
-        """Ingest a batch of events. Returns (ingested_count, errors)."""
-        await self._hydrate_if_needed()
-        ingested = 0
-        errors = []
+        """Persist a batch of events. Returns (ingested_count, errors)."""
+        self._require_db()
+        factory = get_session_factory()
 
-        async with self._lock:
-            for i, event in enumerate(events):
-                try:
-                    stored = StoredEvent(
+        errors: list[dict] = []
+        now = datetime.now(timezone.utc)
+
+        rows: list[TelemetryEventModel] = []
+        for i, event in enumerate(events):
+            try:
+                rows.append(
+                    telemetry_event_to_model(
                         event_id=str(uuid.uuid4()),
                         batch_id=batch_id,
                         event=event,
-                        ingested_at=datetime.now(timezone.utc),
+                        ingested_at=now,
                     )
-                    self._events.append(stored)
-                    ingested += 1
-                except Exception as e:
-                    errors.append({"index": i, "error": str(e)})
+                )
+            except Exception as exc:  # pragma: no cover — validation is upstream
+                errors.append({"index": i, "error": str(exc)})
 
-        # Lazy cleanup of expired events
+        async with factory() as session:
+            session.add_all(rows)
+            await session.commit()
+
+        # Lazy retention sweep on every ingest.
         await self._evict_expired()
-        async with self._lock:
-            await self._persist_locked()
-        return ingested, errors
+
+        return len(rows), errors
 
     async def query(
         self,
@@ -143,57 +127,96 @@ class EventStore:
         until: datetime | None = None,
         limit: int = 1000,
     ) -> list[StoredEvent]:
-        """Query events with optional filters."""
-        await self._hydrate_if_needed()
-        results = []
-        for se in reversed(self._events):
-            if event_type and se.event.event_type != event_type:
-                continue
-            if severity and se.event.severity != severity:
-                continue
-            if source and se.event.source != source:
-                continue
-            ts = se.event.timestamp or se.ingested_at
-            if since and ts < since:
-                continue
-            if until and ts > until:
-                continue
-            results.append(se)
-            if len(results) >= limit:
-                break
-        return results
+        """Query events with optional filters, newest first."""
+        self._require_db()
+        factory = get_session_factory()
+
+        stmt = select(TelemetryEventModel)
+        if event_type:
+            stmt = stmt.where(TelemetryEventModel.event_type == event_type.value)
+        if severity:
+            stmt = stmt.where(TelemetryEventModel.severity == severity.value)
+        if source:
+            stmt = stmt.where(TelemetryEventModel.source == source)
+        if since:
+            # Compare against the client-supplied event_timestamp when
+            # present, else fall back to ingested_at so rows without a
+            # client ts still match.
+            stmt = stmt.where(
+                func.coalesce(
+                    TelemetryEventModel.event_timestamp,
+                    TelemetryEventModel.ingested_at,
+                )
+                >= since
+            )
+        if until:
+            stmt = stmt.where(
+                func.coalesce(
+                    TelemetryEventModel.event_timestamp,
+                    TelemetryEventModel.ingested_at,
+                )
+                <= until
+            )
+        stmt = stmt.order_by(TelemetryEventModel.ingested_at.desc()).limit(limit)
+
+        async with factory() as session:
+            result = await session.execute(stmt)
+            rows = list(result.scalars().all())
+
+        return [_row_to_stored(r) for r in rows]
 
     async def stats(self) -> dict:
-        """Aggregate statistics."""
-        await self._hydrate_if_needed()
-        by_type: dict[str, int] = defaultdict(int)
-        by_severity: dict[str, int] = defaultdict(int)
-        by_source: dict[str, int] = defaultdict(int)
+        """Aggregate stats by type / severity / source over the full store."""
+        self._require_db()
+        factory = get_session_factory()
 
-        for se in self._events:
-            by_type[se.event.event_type.value] += 1
-            by_severity[se.event.severity.value] += 1
-            by_source[se.event.source] += 1
+        async with factory() as session:
+            total = await session.scalar(
+                select(func.count()).select_from(TelemetryEventModel)
+            ) or 0
+
+            by_type: dict[str, int] = defaultdict(int)
+            by_severity: dict[str, int] = defaultdict(int)
+            by_source: dict[str, int] = defaultdict(int)
+
+            result = await session.execute(
+                select(
+                    TelemetryEventModel.event_type,
+                    TelemetryEventModel.severity,
+                    TelemetryEventModel.source,
+                    func.count().label("n"),
+                ).group_by(
+                    TelemetryEventModel.event_type,
+                    TelemetryEventModel.severity,
+                    TelemetryEventModel.source,
+                )
+            )
+            for event_type, severity, source, count in result.all():
+                by_type[event_type] += count
+                by_severity[severity] += count
+                by_source[source] += count
 
         return {
-            "total": len(self._events),
+            "total": total,
             "by_type": dict(by_type),
             "by_severity": dict(by_severity),
             "by_source": dict(by_source),
         }
 
-    async def _evict_expired(self):
-        """Remove events older than retention period."""
-        await self._hydrate_if_needed()
+    async def _evict_expired(self) -> int:
+        """Delete events older than the retention window. Returns row count."""
+        self._require_db()
+        factory = get_session_factory()
         cutoff = datetime.now(timezone.utc) - self._retention
-        async with self._lock:
-            before = len(self._events)
-            self._events = [
-                se for se in self._events
-                if se.ingested_at >= cutoff
-            ]
-            if len(self._events) != before:
-                await self._persist_locked()
+
+        async with factory() as session:
+            result = await session.execute(
+                delete(TelemetryEventModel).where(
+                    TelemetryEventModel.ingested_at < cutoff
+                )
+            )
+            await session.commit()
+            return int(result.rowcount or 0)
 
 
 # ---------------------------------------------------------------------------

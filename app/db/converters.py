@@ -5,6 +5,8 @@ Conversion utilities between SQLModel database rows and Pydantic API schemas.
 import json
 from typing import Any
 
+from datetime import datetime, timezone
+
 from ..schemas.billing import (
     WalletResponse,
     WalletType,
@@ -17,7 +19,17 @@ from ..schemas.billing import (
     AlertSeverity,
     KYCStatus,
 )
-from .models import WalletModel, LedgerEntryModel, BillingAlertModel
+from ..schemas.telemetry import (
+    TelemetryEvent,
+    TelemetryEventType,
+    Severity,
+)
+from .models import (
+    WalletModel,
+    LedgerEntryModel,
+    BillingAlertModel,
+    TelemetryEventModel,
+)
 
 
 def wallet_model_to_response(
@@ -125,3 +137,41 @@ def parse_metadata_json(metadata_json: str | None) -> dict[str, Any]:
         return json.loads(metadata_json)
     except json.JSONDecodeError:
         return {}
+
+
+# ---------------------------------------------------------------------------
+# Telemetry
+# ---------------------------------------------------------------------------
+
+def telemetry_event_to_model(
+    event_id: str,
+    batch_id: str,
+    event: TelemetryEvent,
+    ingested_at: datetime,
+) -> TelemetryEventModel:
+    """Convert a TelemetryEvent API schema + storage metadata into a row."""
+    return TelemetryEventModel(
+        event_id=event_id,
+        batch_id=batch_id,
+        event_type=event.event_type.value,
+        severity=event.severity.value,
+        source=event.source,
+        message=event.message,
+        stack_trace=event.stack_trace,
+        payload_json=metadata_dict_to_json(event.metadata),
+        event_timestamp=event.timestamp,
+        ingested_at=ingested_at,
+    )
+
+
+def telemetry_event_model_to_schema(row: TelemetryEventModel) -> TelemetryEvent:
+    """Rebuild a TelemetryEvent from its stored row."""
+    return TelemetryEvent(
+        event_type=TelemetryEventType(row.event_type),
+        source=row.source,
+        message=row.message,
+        severity=Severity(row.severity),
+        stack_trace=row.stack_trace,
+        metadata=parse_metadata_json(row.payload_json),
+        timestamp=row.event_timestamp,
+    )

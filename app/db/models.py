@@ -258,6 +258,43 @@ class APIKeyModel(SQLModel, table=True):
         arbitrary_types_allowed = True
 
 
+class TelemetryEventModel(SQLModel, table=True):
+    """
+    Time-series telemetry events for the Autonomous PM.
+
+    Supplants the in-memory EventStore. On PostgreSQL with the TimescaleDB
+    extension, the Alembic migration converts this into a hypertable keyed
+    on ``event_timestamp`` so retention cleanup and time-range queries
+    scale to large volumes.
+
+    ``payload_json`` captures the full TelemetryEvent.metadata dict for
+    fidelity — any field the application cares to filter on is promoted
+    to a dedicated column for indexability.
+    """
+    __tablename__ = "telemetry_events"
+
+    event_id: str = Field(primary_key=True, max_length=50)
+    batch_id: str = Field(max_length=50, index=True)
+
+    # Promoted fields — dedicated columns so filters don't pay a JSON cost.
+    event_type: str = Field(max_length=20, index=True)
+    severity: str = Field(max_length=20, index=True)
+    source: str = Field(max_length=100, index=True)
+    message: str = Field(default="", max_length=1000)
+    stack_trace: Optional[str] = Field(default=None)
+
+    # Full metadata dict preserved as JSON for anything not promoted.
+    payload_json: Optional[str] = Field(default=None)
+
+    # Two timestamps: when the event actually happened (from the client)
+    # vs when we stored it (authoritative for retention).
+    event_timestamp: Optional[datetime] = Field(default=None, index=True)
+    ingested_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class KeyRotationLogModel(SQLModel, table=True):
     """
     Audit log for API key rotations.

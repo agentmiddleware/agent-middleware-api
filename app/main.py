@@ -126,6 +126,20 @@ async def lifespan(app: FastAPI):
                         sessions_removed=result["sessions_removed"],
                     )
 
+                # Telemetry retention sweep (per TELEMETRY_RETENTION_HOURS).
+                # Ingests do a lazy eviction too; this handles idle systems.
+                if settings.DATABASE_URL:
+                    from .services.telemetry_pm import EventStore
+
+                    removed = await EventStore(
+                        retention_hours=settings.TELEMETRY_RETENTION_HOURS
+                    )._evict_expired()
+                    if removed:
+                        logger.info(
+                            "cleanup_completed",
+                            telemetry_events_removed=removed,
+                        )
+
             except asyncio.CancelledError:
                 logger.info("cleanup_task_stopped")
                 break
