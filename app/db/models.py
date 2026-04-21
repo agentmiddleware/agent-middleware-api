@@ -295,6 +295,214 @@ class TelemetryEventModel(SQLModel, table=True):
         arbitrary_types_allowed = True
 
 
+class OracleCrawlTargetModel(SQLModel, table=True):
+    """Crawl target lifecycle row (pending → crawling → indexed|failed)."""
+    __tablename__ = "oracle_crawl_targets"
+
+    target_id: str = Field(primary_key=True, max_length=64)
+    url: str = Field(max_length=2048, index=True)
+    directory_type: str = Field(max_length=30, index=True)
+    status: str = Field(max_length=20, index=True)
+    api_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    queued_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    crawled_at: Optional[datetime] = Field(default=None)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class OracleIndexedAPIModel(SQLModel, table=True):
+    """An indexed external API with compatibility metadata."""
+    __tablename__ = "oracle_indexed_apis"
+
+    api_id: str = Field(primary_key=True, max_length=64)
+    url: str = Field(max_length=2048, index=True)
+    name: str = Field(max_length=255)
+    description: str = Field(default="", max_length=2000)
+    directory_type: str = Field(max_length=30, index=True)
+    compatibility_tier: str = Field(max_length=20, index=True)
+    compatibility_score: float = Field(default=0.0, index=True)
+    capabilities_json: Optional[str] = Field(default=None)
+    tags_json: Optional[str] = Field(default=None)
+    status: str = Field(max_length=20)
+    last_crawled: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class OracleRegistrationModel(SQLModel, table=True):
+    """One row per attempt to register our API in an external directory."""
+    __tablename__ = "oracle_registrations"
+
+    registration_id: str = Field(primary_key=True, max_length=64)
+    directory_url: str = Field(max_length=2048, index=True)
+    directory_type: str = Field(max_length=30, index=True)
+    status: str = Field(max_length=20, index=True)
+    message: str = Field(default="", max_length=2000)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class OracleDiscoveryHitModel(SQLModel, table=True):
+    """One row per inbound discovery hit for top-referrer aggregation."""
+    __tablename__ = "oracle_discovery_hits"
+
+    hit_id: str = Field(primary_key=True, max_length=64)
+    referrer: str = Field(default="direct", max_length=2048, index=True)
+    timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class SecurityScanModel(SQLModel, table=True):
+    """Shared scan table for red_team (internal) and rtaas (external)."""
+    __tablename__ = "security_scans"
+
+    scan_id: str = Field(primary_key=True, max_length=64)
+    scan_type: str = Field(max_length=20, index=True)
+    tenant_id: Optional[str] = Field(default=None, max_length=100, index=True)
+
+    targets_json: Optional[str] = Field(default=None)
+    attack_categories_json: Optional[str] = Field(default=None)
+    intensity: str = Field(default="standard", max_length=20)
+
+    status: str = Field(max_length=20, index=True)
+    total_tests_run: int = Field(default=0)
+    total_passed: Optional[int] = Field(default=None)
+    total_failed: Optional[int] = Field(default=None)
+    security_score: float = Field(default=0.0)
+
+    recommendations_json: Optional[str] = Field(default=None)
+
+    started_at: Optional[datetime] = Field(default=None)
+    completed_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class SecurityVulnerabilityModel(SQLModel, table=True):
+    """Shared vulnerability rows for both scan types."""
+    __tablename__ = "security_vulnerabilities"
+
+    vuln_id: str = Field(primary_key=True, max_length=64)
+    scan_id: str = Field(
+        max_length=64,
+        foreign_key="security_scans.scan_id",
+        index=True,
+    )
+
+    category: str = Field(max_length=50, index=True)
+    severity: str = Field(max_length=20, index=True)
+    title: str = Field(max_length=500)
+    description: str = Field(default="", max_length=4000)
+
+    endpoint: str = Field(max_length=2048)
+    method: Optional[str] = Field(default=None, max_length=10)
+
+    evidence_json: Optional[str] = Field(default=None)
+    remediation: str = Field(default="", max_length=4000)
+    remediation_status: str = Field(default="open", max_length=30)
+    cwe_id: Optional[str] = Field(default=None, max_length=20)
+
+    discovered_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class ContentPipelineModel(SQLModel, table=True):
+    """Content factory pipeline instance."""
+    __tablename__ = "content_pipelines"
+
+    pipeline_id: str = Field(primary_key=True, max_length=64)
+    title: str = Field(max_length=500)
+    source_clip_id: Optional[str] = Field(default=None, max_length=100)
+    source_url: Optional[str] = Field(default=None, max_length=2048)
+    target_formats_json: Optional[str] = Field(default=None)
+    brand_config_json: Optional[str] = Field(default=None)
+    language: str = Field(default="en", max_length=10)
+    auto_schedule: bool = Field(default=True)
+    owner_key: str = Field(default="", max_length=255, index=True)
+    status: str = Field(default="queued", max_length=30, index=True)
+    hook_json: Optional[str] = Field(default=None)
+    caption_style: str = Field(default="bold_impact", max_length=30)
+    aspect_ratio: str = Field(default="9:16", max_length=10)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class ContentPieceModel(SQLModel, table=True):
+    """One generated content piece. download_url holds the blob ref."""
+    __tablename__ = "content_pieces"
+
+    content_id: str = Field(primary_key=True, max_length=64)
+    pipeline_id: str = Field(
+        max_length=64,
+        foreign_key="content_pipelines.pipeline_id",
+        index=True,
+    )
+    format: str = Field(max_length=30, index=True)
+    title: str = Field(max_length=500)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    download_url: str = Field(max_length=2048)
+    thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
+    duration_seconds: Optional[float] = Field(default=None)
+    dimensions: Optional[str] = Field(default=None, max_length=30)
+    file_size_bytes: Optional[int] = Field(default=None)
+    status: str = Field(max_length=20, index=True)
+    metadata_json: Optional[str] = Field(default=None)
+    generated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class ContentCampaignModel(SQLModel, table=True):
+    """Top-level live campaign linking many pipelines + hooks."""
+    __tablename__ = "content_campaigns"
+
+    campaign_id: str = Field(primary_key=True, max_length=64)
+    campaign_title: str = Field(max_length=500)
+    source_url: str = Field(max_length=2048)
+    hooks_json: Optional[str] = Field(default=None)
+    pipeline_ids_json: Optional[str] = Field(default=None)
+    status: str = Field(default="running", max_length=30, index=True)
+    owner_key: str = Field(default="", max_length=255, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class ContentScheduleModel(SQLModel, table=True):
+    """Persisted scheduler recommendations."""
+    __tablename__ = "content_schedules"
+
+    schedule_id: str = Field(primary_key=True, max_length=64)
+    content_id: str = Field(
+        max_length=64,
+        foreign_key="content_pieces.content_id",
+        index=True,
+    )
+    platform: str = Field(max_length=50, index=True)
+    recommended_time: datetime = Field(index=True)
+    confidence: float = Field(default=0.0)
+    reasoning: str = Field(default="", max_length=2000)
+    estimated_views: Optional[int] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class KeyRotationLogModel(SQLModel, table=True):
     """
     Audit log for API key rotations.

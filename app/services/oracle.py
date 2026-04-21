@@ -24,7 +24,22 @@ import hashlib
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from sqlalchemy import select, func
+
 from ..core.runtime_mode import require_simulation
+from ..db.converters import (
+    indexed_api_to_model,
+    indexed_api_model_to_schema,
+    registration_result_to_model,
+    registration_model_to_schema,
+)
+from ..db.database import get_session_factory, is_database_configured
+from ..db.models import (
+    OracleCrawlTargetModel,
+    OracleDiscoveryHitModel,
+    OracleIndexedAPIModel,
+    OracleRegistrationModel,
+)
 from ..schemas.oracle import (
     OracleStatus,
     DirectoryType,

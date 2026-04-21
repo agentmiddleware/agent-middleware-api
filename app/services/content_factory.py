@@ -25,7 +25,19 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
+from sqlalchemy import select
+
 from ..core.runtime_mode import require_simulation
+from ..db.converters import (
+    content_piece_model_to_schema,
+    content_piece_to_model,
+)
+from ..db.database import get_session_factory, is_database_configured
+from ..db.models import (
+    ContentCampaignModel,
+    ContentPieceModel,
+    ContentPipelineModel,
+)
 from ..schemas.content_factory import (
     ContentFormat,
     ContentStatus,
