@@ -16,6 +16,7 @@ and PostgreSQL (audit log, ACL rules).
 
 import asyncio
 import json
+import os
 import re
 import uuid
 import logging
@@ -23,7 +24,11 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import select, func
+
 from ..core.runtime_mode import require_simulation
+from ..db.database import get_session_factory, is_database_configured
+from ..db.models import IoTDeviceEventModel, IoTDeviceModel
 
 from ..schemas.iot import ACLPermission, ProtocolType
 
@@ -125,51 +130,339 @@ class RegisteredDevice:
     message_count: int = 0
 
 
+def _device_to_row(device: RegisteredDevice) -> IoTDeviceModel:
+    acl_json = {
+        topic: (p.value if hasattr(p, "value") else str(p))
+        for topic, p in device.topic_acl.items()
+    }
+    return IoTDeviceModel(
+        device_id=device.device_id,
+        protocol=device.protocol.value,
+        broker_url=device.broker_url,
+        topic_acl_json=json.dumps(acl_json),
+        metadata_json=json.dumps(device.metadata or {}, default=str),
+        status=device.status,
+        registered_at=device.registered_at,
+        last_message_at=device.last_message_at,
+        message_count=device.message_count,
+    )
+
+
+def _row_to_device(row: IoTDeviceModel) -> RegisteredDevice:
+    acl: dict[str, ACLPermission] = {}
+    if row.topic_acl_json:
+        try:
+            raw = json.loads(row.topic_acl_json)
+            if isinstance(raw, dict):
+                for topic, perm in raw.items():
+                    try:
+                        acl[topic] = ACLPermission(perm)
+                    except ValueError:
+                        continue
+        except json.JSONDecodeError:
+            pass
+
+    metadata: dict = {}
+    if row.metadata_json:
+        try:
+            parsed = json.loads(row.metadata_json)
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except json.JSONDecodeError:
+            pass
+
+    try:
+        protocol = ProtocolType(row.protocol)
+    except ValueError:
+        protocol = ProtocolType.MQTT
+
+    return RegisteredDevice(
+        device_id=row.device_id,
+        protocol=protocol,
+        broker_url=row.broker_url,
+        topic_acl=acl,
+        metadata=metadata,
+        status=row.status,
+        registered_at=row.registered_at,
+        last_message_at=row.last_message_at,
+        message_count=row.message_count,
+    )
+
+
+class _DeviceCache:
+    """Optional Redis cache in front of iot_devices.
+
+    Silently no-ops if REDIS_URL is unset or the connection fails — the
+    registry stays functional, just hits PG on every read.
+    """
+
+    def __init__(self, ttl_seconds: int = 300):
+        self._ttl = ttl_seconds
+        self._url = os.environ.get("REDIS_URL", "").strip()
+        self._client: Any = None
+        self._disabled = not self._url
+        self._init_lock = asyncio.Lock()
+
+    @staticmethod
+    def _key(device_id: str) -> str:
+        return f"iot:device:{device_id}"
+
+    async def _ensure_client(self) -> Any:
+        if self._disabled or self._client is not None:
+            return self._client
+        async with self._init_lock:
+            if self._client is not None or self._disabled:
+                return self._client
+            try:
+                import redis.asyncio as redis
+
+                client = redis.from_url(self._url, decode_responses=True)
+                await client.ping()
+                self._client = client
+            except Exception as exc:
+                logger.warning(
+                    "IoT device cache disabled (Redis unavailable): %s", exc
+                )
+                self._disabled = True
+        return self._client
+
+    async def get(self, device_id: str) -> RegisteredDevice | None:
+        client = await self._ensure_client()
+        if client is None:
+            return None
+        try:
+            raw = await client.get(self._key(device_id))
+        except Exception:
+            return None
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        # Rehydrate through IoTDeviceModel → RegisteredDevice so
+        # enum-parsing and defaults stay consistent with PG reads.
+        if data.get("registered_at"):
+            data["registered_at"] = datetime.fromisoformat(data["registered_at"])
+        if data.get("last_message_at"):
+            data["last_message_at"] = datetime.fromisoformat(data["last_message_at"])
+        row = IoTDeviceModel(**data)
+        return _row_to_device(row)
+
+    async def set(self, device: RegisteredDevice) -> None:
+        client = await self._ensure_client()
+        if client is None:
+            return
+        row = _device_to_row(device)
+        serialized = json.dumps(
+            {
+                "device_id": row.device_id,
+                "protocol": row.protocol,
+                "broker_url": row.broker_url,
+                "topic_acl_json": row.topic_acl_json,
+                "metadata_json": row.metadata_json,
+                "status": row.status,
+                "registered_at": row.registered_at.isoformat(),
+                "last_message_at": (
+                    row.last_message_at.isoformat()
+                    if row.last_message_at
+                    else None
+                ),
+                "message_count": row.message_count,
+            },
+            default=str,
+        )
+        try:
+            await client.set(
+                self._key(device.device_id), serialized, ex=self._ttl
+            )
+        except Exception as exc:
+            logger.debug("Redis SET failed (cache skipped): %s", exc)
+
+    async def invalidate(self, device_id: str) -> None:
+        client = await self._ensure_client()
+        if client is None:
+            return
+        try:
+            await client.delete(self._key(device_id))
+        except Exception:
+            pass
+
+
 class DeviceRegistry:
     """
-    In-memory device registry. Replace with Redis/PostgreSQL in production.
-    Thread-safe via asyncio locks.
+    PG-backed device registry with an optional Redis cache in front of
+    ``get()`` (the hot ACL-check path). PG is the source of truth.
+    Register/deregister/update_message_stats invalidate the cache key.
     """
 
     def __init__(self):
-        self._devices: dict[str, RegisteredDevice] = {}
-        self._lock = asyncio.Lock()
+        self._cache = _DeviceCache()
+
+    @staticmethod
+    def _require_db() -> None:
+        if not is_database_configured():
+            raise RuntimeError(
+                "iot_bridge.DeviceRegistry requires a configured database. "
+                "Set DATABASE_URL."
+            )
+
+    @staticmethod
+    async def _write_event(
+        session,
+        device_id: str,
+        event_type: str,
+        topic: str | None = None,
+        payload: dict | None = None,
+    ) -> None:
+        session.add(
+            IoTDeviceEventModel(
+                event_id=uuid.uuid4().hex,
+                device_id=device_id,
+                event_type=event_type,
+                topic=topic,
+                payload_json=json.dumps(payload) if payload else None,
+            )
+        )
 
     async def register(self, device: RegisteredDevice) -> RegisteredDevice:
-        async with self._lock:
-            if device.device_id in self._devices:
-                raise ValueError(f"Device '{device.device_id}' already registered")
-            self._devices[device.device_id] = device
-            logger.info(f"Device registered: {device.device_id} ({device.protocol})")
-            return device
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            existing = await session.get(IoTDeviceModel, device.device_id)
+            if existing is not None:
+                raise ValueError(
+                    f"Device '{device.device_id}' already registered"
+                )
+            session.add(_device_to_row(device))
+            await self._write_event(
+                session,
+                device.device_id,
+                "register",
+                payload={"protocol": device.protocol.value},
+            )
+            await session.commit()
+
+        await self._cache.set(device)
+        logger.info(
+            f"Device registered: {device.device_id} ({device.protocol})"
+        )
+        return device
 
     async def get(self, device_id: str) -> RegisteredDevice | None:
-        return self._devices.get(device_id)
+        self._require_db()
+
+        cached = await self._cache.get(device_id)
+        if cached is not None:
+            return cached
+
+        factory = get_session_factory()
+        async with factory() as session:
+            row = await session.get(IoTDeviceModel, device_id)
+        if row is None:
+            return None
+        device = _row_to_device(row)
+        await self._cache.set(device)
+        return device
 
     async def list_all(
         self,
         page: int = 1,
         per_page: int = 50,
     ) -> tuple[list[RegisteredDevice], int]:
-        devices = list(self._devices.values())
-        total = len(devices)
-        start = (page - 1) * per_page
-        return devices[start:start + per_page], total
+        self._require_db()
+        factory = get_session_factory()
+        offset = max(0, (page - 1) * per_page)
+        async with factory() as session:
+            total = await session.scalar(
+                select(func.count()).select_from(IoTDeviceModel)
+            ) or 0
+            result = await session.execute(
+                select(IoTDeviceModel)
+                .order_by(IoTDeviceModel.registered_at.asc())
+                .offset(offset)
+                .limit(per_page)
+            )
+            rows = list(result.scalars().all())
+        return [_row_to_device(r) for r in rows], int(total)
 
     async def deregister(self, device_id: str) -> bool:
-        async with self._lock:
-            if device_id in self._devices:
-                del self._devices[device_id]
-                logger.info(f"Device deregistered: {device_id}")
-                return True
-            return False
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            existing = await session.get(IoTDeviceModel, device_id)
+            if existing is None:
+                return False
+            await session.delete(existing)
+            await self._write_event(session, device_id, "deregister")
+            await session.commit()
 
-    async def update_message_stats(self, device_id: str):
-        async with self._lock:
-            device = self._devices.get(device_id)
-            if device:
-                device.last_message_at = datetime.now(timezone.utc)
-                device.message_count += 1
+        await self._cache.invalidate(device_id)
+        logger.info(f"Device deregistered: {device_id}")
+        return True
+
+    async def update_message_stats(self, device_id: str) -> None:
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            row = await session.get(IoTDeviceModel, device_id)
+            if row is None:
+                return
+            row.last_message_at = datetime.now(timezone.utc)
+            row.message_count += 1
+            await session.commit()
+
+        await self._cache.invalidate(device_id)
+
+    async def record_event(
+        self,
+        device_id: str,
+        event_type: str,
+        topic: str | None = None,
+        payload: dict | None = None,
+    ) -> None:
+        """Append an audit event row. Used by ProtocolBridge to persist
+        acl_violation, message_sent, etc. into iot_device_events."""
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            await self._write_event(
+                session, device_id, event_type, topic, payload
+            )
+            await session.commit()
+
+    async def recent_events(self, limit: int = 100) -> list[dict]:
+        """Return the most recent audit entries as dicts."""
+        self._require_db()
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(IoTDeviceEventModel)
+                .order_by(IoTDeviceEventModel.timestamp.desc())
+                .limit(limit)
+            )
+            rows = list(result.scalars().all())
+
+        out: list[dict] = []
+        for r in rows:
+            entry: dict[str, Any] = {
+                "event": r.event_type,
+                "device_id": r.device_id,
+                "timestamp": r.timestamp.isoformat(),
+            }
+            if r.topic is not None:
+                entry["topic"] = r.topic
+            if r.payload_json:
+                try:
+                    extra = json.loads(r.payload_json)
+                    if isinstance(extra, dict):
+                        entry.update(extra)
+                except json.JSONDecodeError:
+                    pass
+            out.append(entry)
+        # Callers expect oldest-first within the returned window.
+        out.reverse()
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +564,6 @@ class ProtocolBridge:
         self.acl_engine = TopicACLEngine()
         self.mqtt = MQTTTranslator(mqtt_broker_url, mqtt_default_qos)
         self.coap = CoAPTranslator()
-        self._audit_log: list[dict] = []
 
     async def initialize(self):
         """Start protocol connections."""
@@ -296,13 +588,12 @@ class ProtocolBridge:
 
         # ACL check
         if not self.acl_engine.check(device.topic_acl, topic, ACLPermission.WRITE):
-            self._audit_log.append({
-                "event": "acl_violation",
-                "device_id": device_id,
-                "topic": topic,
-                "action": "write",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            await self.registry.record_event(
+                device_id,
+                "acl_violation",
+                topic=topic,
+                payload={"action": "write"},
+            )
             raise ACLViolation(device_id, topic, "write")
 
         # Route to correct translator
@@ -329,14 +620,15 @@ class ProtocolBridge:
             native_response=native_response,
         )
 
-        self._audit_log.append({
-            "event": "message_sent",
-            "device_id": device_id,
-            "topic": topic,
-            "message_id": message.message_id,
-            "protocol": device.protocol.value,
-            "timestamp": message.delivered_at.isoformat(),
-        })
+        await self.registry.record_event(
+            device_id,
+            "message_sent",
+            topic=topic,
+            payload={
+                "message_id": message.message_id,
+                "protocol": device.protocol.value,
+            },
+        )
 
         return message
 
@@ -358,6 +650,6 @@ class ProtocolBridge:
             "status": "active",
         }
 
-    def get_audit_log(self, limit: int = 100) -> list[dict]:
-        """Return recent audit log entries."""
-        return self._audit_log[-limit:]
+    async def get_audit_log(self, limit: int = 100) -> list[dict]:
+        """Return recent audit log entries from iot_device_events."""
+        return await self.registry.recent_events(limit=limit)
