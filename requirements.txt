@@ -33,4 +33,4 @@ aiosqlite>=0.22.1      # Async SQLite driver for testing
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
 httpx>=0.28.1           # Also used for test client
-mypy>=1.14.0            # Type checking
+mypy>=1.20.2            # Type checking
