@@ -27,7 +27,7 @@ mcp>=1.0.0             # MCP (Model Context Protocol) SDK for tool servers
 # --- Database ---
 sqlmodel>=0.0.14        # SQLAlchemy + Pydantic hybrid ORM
 alembic>=1.18.4        # Database migrations
-aiosqlite>=0.20.0      # Async SQLite driver for testing
+aiosqlite>=0.22.1      # Async SQLite driver for testing
 
 # --- Development ---
 pytest>=8.3.0
