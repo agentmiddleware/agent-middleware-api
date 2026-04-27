@@ -295,44 +295,6 @@ class TelemetryEventModel(SQLModel, table=True):
         arbitrary_types_allowed = True
 
 
-class IoTDeviceModel(SQLModel, table=True):
-    """
-    Current registration state for an IoT device. PostgreSQL is the
-    source of truth; iot_bridge layers an optional Redis cache in front
-    for the hot ACL-check path. topic_acl_json is the ACL dict (topic
-    pattern → permission); metadata is free-form per-tenant config.
-    """
-    __tablename__ = "iot_devices"
-
-    device_id: str = Field(primary_key=True, max_length=100)
-    protocol: str = Field(max_length=20, index=True)
-    broker_url: Optional[str] = Field(default=None, max_length=500)
-    topic_acl_json: Optional[str] = Field(default=None)
-    metadata_json: Optional[str] = Field(default=None)
-    status: str = Field(default="registered", max_length=30, index=True)
-    registered_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    last_message_at: Optional[datetime] = Field(default=None)
-    message_count: int = Field(default=0)
-
-    class Config:
-        arbitrary_types_allowed = True
-
-
-class IoTDeviceEventModel(SQLModel, table=True):
-    """Append-only audit log — register, message_sent, acl_violation, deregister."""
-    __tablename__ = "iot_device_events"
-
-    event_id: str = Field(primary_key=True, max_length=64)
-    device_id: str = Field(max_length=100, index=True)
-    event_type: str = Field(max_length=30, index=True)
-    topic: Optional[str] = Field(default=None, max_length=500)
-    payload_json: Optional[str] = Field(default=None)
-    timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
-
-    class Config:
-        arbitrary_types_allowed = True
-
-
 class OracleCrawlTargetModel(SQLModel, table=True):
     """Crawl target lifecycle row (pending → crawling → indexed|failed)."""
     __tablename__ = "oracle_crawl_targets"
