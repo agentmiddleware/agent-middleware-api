@@ -4,15 +4,15 @@
 # --- Core Framework ---
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-pydantic>=2.9.0
+pydantic>=2.13.3
 pydantic-settings>=2.5.0
 
 # --- IoT Protocol Bridge ---
-aiomqtt>=2.3.0          # Async MQTT client
+aiomqtt>=2.5.1          # Async MQTT client
 aiocoap>=0.4.0          # CoAP protocol support
 
 # --- Telemetry / Autonomous PM ---
-httpx>=0.27.0           # Async HTTP client for git API calls
+httpx>=0.28.1           # Async HTTP client for git API calls
 
 # --- Media Engine ---
 python-multipart>=0.0.9 # File upload support
@@ -21,16 +21,16 @@ python-multipart>=0.0.9 # File upload support
 python-dotenv>=1.0.0    # .env file loading
 redis>=5.2.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.30.0         # PostgreSQL-backed runtime persistence
-stripe>=6.0.0           # Stripe payment processing
+stripe>=15.1.0           # Stripe payment processing
 mcp>=1.0.0             # MCP (Model Context Protocol) SDK for tool servers
 
 # --- Database ---
 sqlmodel>=0.0.14        # SQLAlchemy + Pydantic hybrid ORM
-alembic>=1.13.0        # Database migrations
-aiosqlite>=0.20.0      # Async SQLite driver for testing
+alembic>=1.18.4        # Database migrations
+aiosqlite>=0.22.1      # Async SQLite driver for testing
 
 # --- Development ---
 pytest>=8.3.0
-pytest-asyncio>=0.24.0
-httpx>=0.27.0           # Also used for test client
-mypy>=1.14.0            # Type checking
+pytest-asyncio>=1.3.0
+httpx>=0.28.1           # Also used for test client
+mypy>=1.20.2            # Type checking
