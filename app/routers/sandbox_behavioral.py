@@ -4,7 +4,8 @@ Behavioral Sandbox Router — Phase 6
 Endpoints for creating and managing behavioral sandbox environments.
 
 Allows agents to test real tool execution in isolated environments
-with subprocess isolation and resource limits.
+when the selected backend provides isolation. Host Python subprocess execution
+is disabled by default and is not a production sandbox boundary.
 """
 
 import logging
@@ -39,9 +40,9 @@ async def create_environment(request: SandboxEnvironmentCreate):
     """
     Create a new behavioral sandbox environment.
 
-    The environment provides isolated execution for testing tools without
-    affecting production systems. Each environment has its own Redis
-    namespace for state isolation.
+    The environment provides dry-run and mocked execution for testing tools
+    without affecting production systems. Each environment has its own Redis
+    namespace for state isolation when Redis is available.
     """
     try:
         engine = get_behavioral_sandbox()
@@ -117,7 +118,7 @@ async def execute_tool(request: ToolExecutionRequest):
     Execute a tool within a sandbox environment.
 
     The tool can be:
-    - Python code (subprocess mode)
+    - Python code (dry-run by default; unsafe host subprocess mode requires opt-in)
     - MCP tool (sandboxed mode)
     - HTTP request (proxy mode)
 

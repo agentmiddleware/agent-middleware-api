@@ -5,6 +5,7 @@ micro-metering → 402 insufficient funds → top-ups → arbitrage reporting.
 """
 
 import pytest
+from decimal import Decimal
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
@@ -38,6 +39,7 @@ async def test_create_sponsor_wallet(client, api_headers):
     assert data["wallet_type"] == "sponsor"
     assert data["owner_name"] == "Acme Corp"
     assert data["balance"] == 50000.0
+    assert Decimal(data["balance_exact"]) == Decimal("50000")
     assert data["wallet_id"].startswith("spn-")
     assert data["status"] == "active"
 
@@ -139,7 +141,9 @@ async def test_charge_agent_wallet(client, api_headers):
     data = resp.json()
     assert data["action"] == "debit"
     assert data["amount"] == -20.0  # 10 units × 2 credits
+    assert Decimal(data["amount_exact"]) == Decimal("-20")
     assert data["balance_after"] == 4980.0
+    assert Decimal(data["balance_after_exact"]) == Decimal("4980")
     assert data["service_category"] == "iot_bridge"
     assert data["compute_cost"] is not None
     assert data["margin"] is not None
@@ -209,11 +213,13 @@ async def test_ledger_records_transactions(client, api_headers):
     assert data["wallet_id"] == agent_wallet_id
     assert data["total"] >= 2  # At least transfer in + debit
     assert data["period_debits"] > 0
+    assert "period_debits_exact" in data
 
     # Verify debit entry exists
     debits = [e for e in data["entries"] if e["action"] == "debit"]
     assert len(debits) >= 1
     assert debits[0]["service_category"] == "agent_comms"
+    assert debits[0]["amount_exact"].startswith("-")
 
 
 # --- Top-Up ---

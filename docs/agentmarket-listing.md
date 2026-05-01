@@ -21,7 +21,7 @@
 
 - First open-source platform to implement both MCP and a complete Agentic Web Interface (AWI), directly realizing the vision from arXiv:2506.10953 ("Build the web for agents, not agents for the web")
 - Fully self-hostable with zero vendor lock-in (unlike commercial control planes)
-- Production-hardened from day one: KYC, WebAuthn/passkey protection, circuit breakers, behavioral sandboxes, RAG memory, bidirectional Playwright DOM bridge, and more
+- Production-beta safety foundation: wallet-scoped keys, exact decimal billing fields, KYC, WebAuthn/passkey protection, simulation-mode visibility, authenticated behavioral sandbox routes with optional Docker isolation, row-keyed comms persistence, RAG memory, and a capped Playwright DOM bridge
 - Official wrappers for LangChain, CrewAI, and AutoGen — integrate in minutes
 - Designed for both agents and human developers
 
@@ -135,10 +135,10 @@ GET  /v1/awi/vocabulary                    - Action vocabulary
 
 ### Sandbox & Testing
 ```
-POST /v1/sandbox/environments               - Create sandbox
-POST /v1/sandbox/execute                   - Execute in sandbox
-GET  /v1/sandbox/metrics/{id}              - Sandbox metrics
-DELETE /v1/sandbox/environments/{id}        - Cleanup
+POST /v1/sandbox/behavioral/environments    - Create sandbox
+POST /v1/sandbox/behavioral/execute         - Execute dry-run/mocked tool or Docker-backed Python
+GET  /v1/sandbox/behavioral/environments/{id} - Read sandbox state
+DELETE /v1/sandbox/behavioral/environments/{id} - Cleanup
 ```
 
 ### Telemetry & Monitoring

@@ -34,6 +34,10 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 
+class BrowserSessionLimitExceeded(RuntimeError):
+    """Raised when DOM bridge session capacity is exhausted."""
+
+
 class TranslationMode(str, Enum):
     """Browser automation mode."""
 
@@ -323,6 +327,7 @@ class AWIPlaywrightBridge:
         headless: bool = True,
         browser_type: str = "chromium",
         default_timeout_ms: int = 30000,
+        max_sessions: int = 8,
     ):
         """
         Initialize the AWI Playwright Bridge.
@@ -337,6 +342,7 @@ class AWIPlaywrightBridge:
         self._headless = headless
         self._browser_type = browser_type
         self._default_timeout_ms = default_timeout_ms
+        self._max_sessions = max_sessions
 
         self._sessions: dict[str, BridgeSession] = {}
 
@@ -365,6 +371,11 @@ class AWIPlaywrightBridge:
         Returns:
             BridgeSession with session_id and initial state.
         """
+        if len(self._sessions) >= self._max_sessions:
+            raise BrowserSessionLimitExceeded(
+                f"DOM bridge session limit exceeded ({self._max_sessions})"
+            )
+
         session_id = str(uuid4())
 
         session = BridgeSession(
@@ -1857,5 +1868,13 @@ def get_playwright_bridge() -> AWIPlaywrightBridge:
     """Get or create the AWIPlaywrightBridge singleton."""
     global _bridge
     if _bridge is None:
-        _bridge = AWIPlaywrightBridge()
+        from ..core.config import get_settings
+
+        settings = get_settings()
+        _bridge = AWIPlaywrightBridge(
+            headless=settings.PLAYWRIGHT_HEADLESS,
+            browser_type=settings.PLAYWRIGHT_BROWSER_TYPE,
+            default_timeout_ms=settings.PLAYWRIGHT_TIMEOUT_MS,
+            max_sessions=settings.PLAYWRIGHT_MAX_SESSIONS,
+        )
     return _bridge

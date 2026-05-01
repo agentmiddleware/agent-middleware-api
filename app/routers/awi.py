@@ -13,8 +13,9 @@ Provides standardized, stateful interfaces for web agents with:
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from ..core.auth import AuthContext, get_auth_context
 from ..schemas.awi import (
     AWIHumanIntervention,
     AWIRepresentationRequest,
@@ -36,6 +37,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/awi", tags=["AWI"])
 
 
+async def _require_session_access(session_id: str, auth: AuthContext) -> AWISession:
+    """Authorize access to an AWI session before exposing or mutating state."""
+    manager = get_awi_session_manager()
+    session = await manager.get_session(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": f"Session {session_id} not found"},
+        )
+
+    if session.wallet_id:
+        auth.require_wallet_access(session.wallet_id)
+    else:
+        auth.require_bootstrap_admin()
+
+    return session
+
+
 @router.post(
     "/sessions",
     response_model=AWISession,
@@ -46,13 +66,21 @@ router = APIRouter(prefix="/v1/awi", tags=["AWI"])
         "Based on arXiv:2506.10953v1 - Stateful interfaces for web agents."
     ),
 )
-async def create_session(request: AWISessionCreate):
+async def create_session(
+    request: AWISessionCreate,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Create a new Agentic Web Interface (AWI) session.
 
     Sessions provide stateful context for web agent interactions,
     enabling higher-level unified actions instead of raw DOM manipulation.
     """
+    if request.wallet_id:
+        auth.require_wallet_access(request.wallet_id)
+    else:
+        auth.require_bootstrap_admin()
+
     try:
         manager = get_awi_session_manager()
         return await manager.create_session(request)
@@ -69,18 +97,12 @@ async def create_session(request: AWISessionCreate):
     summary="Get AWI session",
     description="Get the current state of an AWI session.",
 )
-async def get_session(session_id: str):
+async def get_session(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Get the current state of an AWI session."""
-    manager = get_awi_session_manager()
-    session = await manager.get_session(session_id)
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "not_found", "message": f"Session {session_id} not found"},
-        )
-
-    return session
+    return await _require_session_access(session_id, auth)
 
 
 @router.delete(
@@ -89,8 +111,12 @@ async def get_session(session_id: str):
     summary="Destroy AWI session",
     description="Destroy an AWI session and release resources.",
 )
-async def destroy_session(session_id: str):
+async def destroy_session(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Destroy an AWI session."""
+    await _require_session_access(session_id, auth)
     manager = get_awi_session_manager()
     destroyed = await manager.destroy_session(session_id)
 
@@ -107,7 +133,10 @@ async def destroy_session(session_id: str):
     summary="Execute AWI action",
     description="Execute a standardized AWI action within a session.",
 )
-async def execute_action(request: AWIExecutionRequest):
+async def execute_action(
+    request: AWIExecutionRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Execute a standardized AWI action.
 
@@ -115,8 +144,11 @@ async def execute_action(request: AWIExecutionRequest):
     of raw DOM manipulation, making agents more robust and website-independent.
     """
     try:
+        await _require_session_access(request.session_id, auth)
         manager = get_awi_session_manager()
         return await manager.execute_action(request)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"AWI execution failed: {request.session_id}")
         raise HTTPException(
@@ -131,7 +163,10 @@ async def execute_action(request: AWIExecutionRequest):
     summary="Request representation",
     description="Request a specific representation of the current session state.",
 )
-async def request_representation(request: AWIRepresentationRequest):
+async def request_representation(
+    request: AWIRepresentationRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Request a specific representation of the session state.
 
@@ -139,6 +174,7 @@ async def request_representation(request: AWIRepresentationRequest):
     low-res screenshot, etc.) instead of receiving full DOM every time.
     """
     try:
+        await _require_session_access(request.session_id, auth)
         manager = get_awi_session_manager()
         result = await manager.request_representation(request)
 
@@ -167,7 +203,10 @@ async def request_representation(request: AWIRepresentationRequest):
     summary="Human intervention",
     description="Pause, resume, or steer an AWI session (human-in-the-loop).",
 )
-async def human_intervention(intervention: AWIHumanIntervention):
+async def human_intervention(
+    intervention: AWIHumanIntervention,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Human intervention in an AWI session.
 
@@ -175,8 +214,11 @@ async def human_intervention(intervention: AWIHumanIntervention):
     and alignment with human preferences.
     """
     try:
+        await _require_session_access(intervention.session_id, auth)
         manager = get_awi_session_manager()
         return await manager.human_intervention(intervention)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Human intervention failed")
         raise HTTPException(
@@ -241,8 +283,12 @@ async def list_actions_by_category(category: AWIActionCategory):
     summary="Create AWI task",
     description="Create a new AWI task in the queue.",
 )
-async def create_task(request: AWITaskCreate):
+async def create_task(
+    request: AWITaskCreate,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Create a new AWI task in the queue."""
+    auth.require_bootstrap_admin()
     try:
         queue = get_awi_task_queue()
         return await queue.create_task(request)
@@ -259,8 +305,12 @@ async def create_task(request: AWITaskCreate):
     summary="Get task status",
     description="Get the status of an AWI task.",
 )
-async def get_task(task_id: str):
+async def get_task(
+    task_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Get the status of an AWI task."""
+    auth.require_bootstrap_admin()
     queue = get_awi_task_queue()
     task = await queue.get_task(task_id)
 
@@ -279,8 +329,9 @@ async def get_task(task_id: str):
     summary="Get queue status",
     description="Get current status of the AWI task queue.",
 )
-async def get_queue_status():
+async def get_queue_status(auth: AuthContext = Depends(get_auth_context)):
     """Get current status of the AWI task queue."""
+    auth.require_bootstrap_admin()
     queue = get_awi_task_queue()
     return await queue.get_queue_status()
 
@@ -290,8 +341,12 @@ async def get_queue_status():
     summary="Global pause",
     description="Pause all tasks globally (human intervention).",
 )
-async def global_pause(reason: str | None = None):
+async def global_pause(
+    reason: str | None = None,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Pause all AWI tasks globally."""
+    auth.require_bootstrap_admin()
     queue = get_awi_task_queue()
     await queue.global_pause(reason)
     return {"success": True, "status": "paused", "reason": reason}
@@ -302,8 +357,9 @@ async def global_pause(reason: str | None = None):
     summary="Global resume",
     description="Resume all AWI tasks after global pause.",
 )
-async def global_resume():
+async def global_resume(auth: AuthContext = Depends(get_auth_context)):
     """Resume all AWI tasks after global pause."""
+    auth.require_bootstrap_admin()
     queue = get_awi_task_queue()
     await queue.global_resume()
     return {"success": True, "status": "resumed"}

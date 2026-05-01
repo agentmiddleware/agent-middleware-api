@@ -24,6 +24,8 @@ from app.services.awi_representation import get_awi_representation
 from app.services.awi_task_queue import AWITaskQueue, get_awi_task_queue
 from app.services.awi_session import AWISessionManager, get_awi_session_manager
 
+HEADERS = {"X-API-Key": "test-key"}
+
 
 class TestAWIActionVocabulary:
     """Test AWI action vocabulary."""
@@ -301,6 +303,7 @@ class TestAWIRouter:
                     "target_url": "https://example.com",
                     "max_steps": 100,
                 },
+                headers=HEADERS,
             )
 
             assert response.status_code == 201
@@ -317,10 +320,13 @@ class TestAWIRouter:
             create_response = await client.post(
                 "/v1/awi/sessions",
                 json={"target_url": "https://example.com"},
+                headers=HEADERS,
             )
             session_id = create_response.json()["session_id"]
 
-            response = await client.get(f"/v1/awi/sessions/{session_id}")
+            response = await client.get(
+                f"/v1/awi/sessions/{session_id}", headers=HEADERS
+            )
 
             assert response.status_code == 200
             data = response.json()
@@ -335,6 +341,7 @@ class TestAWIRouter:
             create_response = await client.post(
                 "/v1/awi/sessions",
                 json={"target_url": "https://example.com"},
+                headers=HEADERS,
             )
             session_id = create_response.json()["session_id"]
 
@@ -345,6 +352,7 @@ class TestAWIRouter:
                     "action": "navigate_to",
                     "parameters": {"url": "https://new-page.com"},
                 },
+                headers=HEADERS,
             )
 
             assert response.status_code == 200
@@ -379,6 +387,7 @@ class TestAWIRouter:
                     "action_sequence": [{"action": "navigate_to"}],
                     "priority": 5,
                 },
+                headers=HEADERS,
             )
 
             assert response.status_code == 201
@@ -392,9 +401,116 @@ class TestAWIRouter:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            response = await client.get("/v1/awi/queue/status")
+            response = await client.get("/v1/awi/queue/status", headers=HEADERS)
 
             assert response.status_code == 200
             data = response.json()
             assert "total_pending" in data
             assert "total_running" in data
+
+    @pytest.mark.anyio
+    async def test_session_endpoints_require_api_key(self):
+        """AWI session control is not publicly reachable."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/v1/awi/sessions",
+                json={"target_url": "https://example.com"},
+            )
+
+            assert response.status_code == 401
+
+    @pytest.mark.anyio
+    async def test_db_key_is_scoped_to_awi_session_wallet(self):
+        """DB API keys can only drive AWI sessions for their issuing wallet."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            wallet_a_resp = await client.post(
+                "/v1/billing/wallets/sponsor",
+                json={"sponsor_name": "AWI Tenant A", "email": "awi-a@test.com"},
+                headers=HEADERS,
+            )
+            wallet_b_resp = await client.post(
+                "/v1/billing/wallets/sponsor",
+                json={"sponsor_name": "AWI Tenant B", "email": "awi-b@test.com"},
+                headers=HEADERS,
+            )
+            wallet_a = wallet_a_resp.json()["wallet_id"]
+            wallet_b = wallet_b_resp.json()["wallet_id"]
+
+            key_resp = await client.post(
+                "/v1/api-keys",
+                json={"wallet_id": wallet_a, "key_name": "awi-tenant-key"},
+                headers=HEADERS,
+            )
+            db_headers = {"X-API-Key": key_resp.json()["api_key"]}
+
+            own_session_resp = await client.post(
+                "/v1/awi/sessions",
+                json={"target_url": "https://example.com", "wallet_id": wallet_a},
+                headers=db_headers,
+            )
+            assert own_session_resp.status_code == 201
+            own_session_id = own_session_resp.json()["session_id"]
+
+            own_get = await client.get(
+                f"/v1/awi/sessions/{own_session_id}", headers=db_headers
+            )
+            assert own_get.status_code == 200
+
+            other_session_resp = await client.post(
+                "/v1/awi/sessions",
+                json={"target_url": "https://example.com", "wallet_id": wallet_b},
+                headers=HEADERS,
+            )
+            other_session_id = other_session_resp.json()["session_id"]
+
+            blocked_get = await client.get(
+                f"/v1/awi/sessions/{other_session_id}", headers=db_headers
+            )
+            blocked_execute = await client.post(
+                "/v1/awi/execute",
+                json={
+                    "session_id": other_session_id,
+                    "action": "navigate_to",
+                    "parameters": {"url": "https://blocked.example.com"},
+                },
+                headers=db_headers,
+            )
+
+            assert blocked_get.status_code == 403
+            assert blocked_execute.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_passkey_challenge_requires_session_owner(self):
+        """Login-window passkey challenges inherit AWI session ownership."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            wallet_resp = await client.post(
+                "/v1/billing/wallets/sponsor",
+                json={"sponsor_name": "AWI Passkey", "email": "awi-passkey@test.com"},
+                headers=HEADERS,
+            )
+            wallet_id = wallet_resp.json()["wallet_id"]
+            session_resp = await client.post(
+                "/v1/awi/sessions",
+                json={"target_url": "https://example.com", "wallet_id": wallet_id},
+                headers=HEADERS,
+            )
+            session_id = session_resp.json()["session_id"]
+
+            no_auth = await client.post(
+                "/v1/awi/passkey/challenge",
+                json={"session_id": session_id, "action": "checkout"},
+            )
+            with_auth = await client.post(
+                "/v1/awi/passkey/challenge",
+                json={"session_id": session_id, "action": "checkout"},
+                headers=HEADERS,
+            )
+
+            assert no_auth.status_code == 401
+            assert with_auth.status_code == 200

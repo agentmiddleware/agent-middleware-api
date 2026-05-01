@@ -121,6 +121,18 @@ class Settings(BaseSettings):
     PLAYWRIGHT_HEADLESS: bool = True
     PLAYWRIGHT_BROWSER_TYPE: str = "chromium"
     PLAYWRIGHT_TIMEOUT_MS: int = 30000
+    PLAYWRIGHT_MAX_SESSIONS: int = 8
+
+    # --- Behavioral Sandbox ---
+    # Python execution backend: disabled, docker, or unsafe_host. Docker is the
+    # only built-in backend intended to provide an actual process boundary.
+    BEHAVIORAL_SANDBOX_PYTHON_BACKEND: str = "disabled"
+    BEHAVIORAL_SANDBOX_DOCKER_IMAGE: str = "python:3.12-slim"
+
+    # Legacy local-development escape hatch. Host Python execution is not a
+    # production sandbox; keep this false unless an external isolation layer
+    # such as a container runtime, gVisor, or Firecracker owns the boundary.
+    ALLOW_UNSAFE_HOST_PYTHON_SANDBOX: bool = False
 
     # --- Phase 9: RAG Engine ---
     RAG_VECTOR_STORE_PATH: str = "./data/awi_vectors"

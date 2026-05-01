@@ -66,6 +66,7 @@ class AWISessionManager:
         session = AWISession(
             session_id=session_id,
             target_url=request.target_url,
+            wallet_id=request.wallet_id,
             status=AWISessionStatus.CREATED,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),

@@ -227,6 +227,14 @@ class MessageRouter:
         self._state = get_durable_state()
 
     @staticmethod
+    def _inbox_key(agent_id: str, message_id: str) -> str:
+        return f"comms.inbox.{agent_id}.{message_id}"
+
+    @staticmethod
+    def _outbox_key(message_id: str) -> str:
+        return f"comms.outbox.{message_id}"
+
+    @staticmethod
     def _message_from_dict(data: dict[str, Any]) -> AgentMessage:
         payload = dict(data)
         payload["message_type"] = MessageType(payload["message_type"])
@@ -275,23 +283,82 @@ class MessageRouter:
                         logger.exception("Skipping corrupt outbox message")
                 self._outbox = loaded_outbox
 
+            if self._state.enabled:
+                loaded_inbox = await self._load_all_inbox_messages()
+                if loaded_inbox:
+                    self._inbox = loaded_inbox
+
+                loaded_outbox = await self._load_outbox_messages()
+                if loaded_outbox:
+                    self._outbox = loaded_outbox
+
             self._hydrated = True
+
+    async def _load_agent_inbox(self, agent_id: str) -> list[AgentMessage]:
+        """Load a single agent inbox from row-keyed durable state."""
+        if not self._state.enabled:
+            return self._inbox.get(agent_id, [])
+
+        messages: list[AgentMessage] = []
+        for key in await self._state.list_keys(f"comms.inbox.{agent_id}."):
+            record = await self._state.load_json(key)
+            if not isinstance(record, dict):
+                continue
+            try:
+                messages.append(self._message_from_dict(record))
+            except Exception:
+                logger.exception("Skipping corrupt inbox message: %s", key)
+        return sorted(messages, key=lambda message: message.created_at)
+
+    async def _load_all_inbox_messages(self) -> dict[str, list[AgentMessage]]:
+        """Load all row-keyed inbox messages for process hydration."""
+        loaded: dict[str, list[AgentMessage]] = {}
+        for key in await self._state.list_keys("comms.inbox."):
+            record = await self._state.load_json(key)
+            if not isinstance(record, dict):
+                continue
+            try:
+                message = self._message_from_dict(record)
+                loaded.setdefault(message.to_agent, []).append(message)
+            except Exception:
+                logger.exception("Skipping corrupt inbox message: %s", key)
+        for messages in loaded.values():
+            messages.sort(key=lambda message: message.created_at)
+        return loaded
+
+    async def _load_outbox_messages(self) -> list[AgentMessage]:
+        """Load row-keyed outbox messages for process hydration."""
+        messages: list[AgentMessage] = []
+        for key in await self._state.list_keys("comms.outbox."):
+            record = await self._state.load_json(key)
+            if not isinstance(record, dict):
+                continue
+            try:
+                messages.append(self._message_from_dict(record))
+            except Exception:
+                logger.exception("Skipping corrupt outbox message: %s", key)
+        return sorted(messages, key=lambda message: message.created_at)
+
+    async def _persist_message_locked(self, message: AgentMessage) -> None:
+        """Persist one message without rewriting the global inbox."""
+        if not self._state.enabled:
+            return
+        await self._state.save_json(
+            self._inbox_key(message.to_agent, message.message_id),
+            asdict(message),
+        )
+        await self._state.save_json(
+            self._outbox_key(message.message_id),
+            asdict(message),
+        )
 
     async def _persist_locked(self):
         if not self._state.enabled:
             return
 
-        await self._state.save_json(
-            "comms.inbox",
-            {
-                agent_id: [asdict(message) for message in messages]
-                for agent_id, messages in self._inbox.items()
-            },
-        )
-        await self._state.save_json(
-            "comms.outbox",
-            [asdict(message) for message in self._outbox],
-        )
+        for messages in self._inbox.values():
+            for message in messages:
+                await self._persist_message_locked(message)
 
     async def persist(self):
         await self._hydrate_if_needed()
@@ -329,7 +396,8 @@ class MessageRouter:
             # No webhook — agent must poll
             message.delivery_status = DeliveryStatus.QUEUED
 
-        await self.persist()
+        async with self._lock:
+            await self._persist_message_locked(message)
 
         logger.info(
             f"Message routed: {message.from_agent} → {message.to_agent} "
@@ -340,6 +408,10 @@ class MessageRouter:
     async def poll(self, agent_id: str, limit: int = 50) -> list[AgentMessage]:
         """Poll for messages in an agent's inbox."""
         await self._hydrate_if_needed()
+        if self._state.enabled:
+            async with self._lock:
+                self._inbox[agent_id] = await self._load_agent_inbox(agent_id)
+
         changed = False
         async with self._lock:
             messages = self._inbox.get(agent_id, [])[:limit]
@@ -350,7 +422,9 @@ class MessageRouter:
                     msg.delivered_at = datetime.now(timezone.utc)
                     changed = True
         if changed:
-            await self.persist()
+            async with self._lock:
+                for msg in messages:
+                    await self._persist_message_locked(msg)
         return messages
 
     async def acknowledge(self, agent_id: str, message_id: str) -> bool:

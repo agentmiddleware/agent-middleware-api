@@ -10,8 +10,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy.exc import IntegrityError
 
 from app.main import app
+from app.services.stripe_integration import StripeIntegration
 
 
 @pytest.fixture
@@ -113,6 +115,22 @@ async def test_webhook_missing_signature(client):
 
 class TestStripeWebhookIdempotency:
     """Tests for webhook idempotency via UNIQUE constraint."""
+
+    def test_only_payment_intent_unique_errors_are_idempotent(self):
+        """Non-idempotency integrity errors must not be swallowed."""
+        duplicate = IntegrityError(
+            "insert",
+            {},
+            Exception("UNIQUE constraint failed: ledger_entries.payment_intent_id"),
+        )
+        foreign_key = IntegrityError(
+            "insert",
+            {},
+            Exception("FOREIGN KEY constraint failed"),
+        )
+
+        assert StripeIntegration._is_duplicate_payment_intent_error(duplicate) is True
+        assert StripeIntegration._is_duplicate_payment_intent_error(foreign_key) is False
 
     @pytest.mark.anyio
     async def test_duplicate_webhook_returns_200(self, client, sponsor_wallet, api_headers):

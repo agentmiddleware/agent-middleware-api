@@ -174,6 +174,7 @@ def get_playwright_bridge() -> AWIPlaywrightBridge:
         headless=settings.PLAYWRIGHT_HEADLESS,
         browser_type=settings.PLAYWRIGHT_BROWSER_TYPE,
         default_timeout_ms=settings.PLAYWRIGHT_TIMEOUT_MS,
+        max_sessions=settings.PLAYWRIGHT_MAX_SESSIONS,
     )
 
 

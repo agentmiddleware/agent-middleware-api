@@ -9,6 +9,14 @@ import pytest
 
 from app.core.durable_state import DurableStateStore
 from app.core.config import get_settings
+from app.services import agent_comms
+from app.services.agent_comms import (
+    AgentMessage,
+    AgentRegistry,
+    MessagePriority,
+    MessageRouter,
+    MessageType,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -110,3 +118,52 @@ async def test_sqlite_backend_multiple_keys(sqlite_store):
     for k, v in data.items():
         loaded = await sqlite_store.load_json(k)
         assert loaded == v
+
+
+@pytest.mark.asyncio
+async def test_sqlite_backend_list_keys_by_prefix(sqlite_store):
+    """State services can enumerate row-keyed records without a global blob."""
+    await sqlite_store._ensure_ready()
+
+    await sqlite_store.save_json("comms.inbox.agent-a.msg-1", {"message": 1})
+    await sqlite_store.save_json("comms.inbox.agent-a.msg-2", {"message": 2})
+    await sqlite_store.save_json("comms.inbox.agent-b.msg-3", {"message": 3})
+
+    keys = await sqlite_store.list_keys("comms.inbox.agent-a.")
+
+    assert keys == ["comms.inbox.agent-a.msg-1", "comms.inbox.agent-a.msg-2"]
+
+
+@pytest.mark.asyncio
+async def test_agent_comms_persists_messages_as_individual_rows(
+    sqlite_store, monkeypatch
+):
+    """Sending one message must not rewrite the global inbox for all agents."""
+    await sqlite_store._ensure_ready()
+    monkeypatch.setattr(agent_comms, "get_durable_state", lambda: sqlite_store)
+
+    registry = AgentRegistry()
+    router = MessageRouter(registry)
+    sender = await registry.register("sender", ["send"])
+    receiver = await registry.register("receiver", ["receive"])
+
+    message = AgentMessage(
+        message_id="msg-row-keyed",
+        from_agent=sender.agent_id,
+        to_agent=receiver.agent_id,
+        message_type=MessageType.REQUEST,
+        priority=MessagePriority.NORMAL,
+        subject="row keyed",
+        body={"ok": True},
+    )
+
+    await router.send(message)
+
+    inbox_keys = await sqlite_store.list_keys(f"comms.inbox.{receiver.agent_id}.")
+    assert inbox_keys == [f"comms.inbox.{receiver.agent_id}.msg-row-keyed"]
+    assert await sqlite_store.load_json("comms.inbox") is None
+
+    second_router = MessageRouter(registry)
+    polled = await second_router.poll(receiver.agent_id)
+
+    assert [msg.message_id for msg in polled] == ["msg-row-keyed"]

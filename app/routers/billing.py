@@ -9,6 +9,7 @@ This is how the API generates revenue autonomously.
 """
 
 from decimal import Decimal
+from typing import ClassVar
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
@@ -43,6 +44,7 @@ from ..schemas.billing import (
     AlertListResponse,
     RegisterServiceRequest,
     ServiceRegistration,
+    ExactDecimalFieldsMixin,
 )
 
 
@@ -702,12 +704,19 @@ class CreateDryRunSessionRequest(BaseModel):
     wallet_id: str = Field(..., description="Wallet to simulate charges against")
 
 
-class DryRunSessionResponse(BaseModel):
+class DryRunSessionResponse(ExactDecimalFieldsMixin):
     """Response when creating a dry-run session."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "real_balance": "real_balance_exact",
+        "virtual_balance": "virtual_balance_exact",
+    }
+
     session_id: str
     wallet_id: str
     real_balance: float
+    real_balance_exact: str | None = None
     virtual_balance: float
+    virtual_balance_exact: str | None = None
     created_at: str
     expires_in_seconds: int = 900
 
@@ -724,16 +733,25 @@ class SimulatedChargeRequest(BaseModel):
     )
 
 
-class SimulatedChargeResponse(BaseModel):
+class SimulatedChargeResponse(ExactDecimalFieldsMixin):
     """Result of a simulated charge."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "credits_would_charge": "credits_would_charge_exact",
+        "simulated_balance_before": "simulated_balance_before_exact",
+        "simulated_balance_after": "simulated_balance_after_exact",
+    }
+
     dry_run: bool = True
     session_id: str
     wallet_id: str
     service_category: str
     units: float
     credits_would_charge: float
+    credits_would_charge_exact: str | None = None
     simulated_balance_before: float
+    simulated_balance_before_exact: str | None = None
     simulated_balance_after: float
+    simulated_balance_after_exact: str | None = None
     would_succeed: bool
     reason: str | None = None
 

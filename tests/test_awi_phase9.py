@@ -14,8 +14,10 @@ from datetime import datetime, timedelta
 from app.services.webauthn_provider import WebAuthnProvider, ChallengeStatus
 from app.services.awi_playwright_bridge import (
     AWIPlaywrightBridge,
+    BrowserSessionLimitExceeded,
     PlaywrightCommand,
     CommandType,
+    TranslationMode,
 )
 from app.services.awi_rag_engine import AWIRAGEngine, SearchResult
 
@@ -270,7 +272,7 @@ class TestAWIPlaywrightBridge:
 
     @pytest.fixture
     def bridge(self):
-        return AWIPlaywrightBridge()
+        return AWIPlaywrightBridge(mode=TranslationMode.CDP_DIRECT)
 
     def test_semantic_patterns_exist(self, bridge):
         """Test that semantic patterns are defined."""
@@ -303,6 +305,17 @@ class TestAWIPlaywrightBridge:
         assert session.session_id is not None
         assert session.current_url == "https://example.com"
         assert session.created_at is not None
+
+        await bridge.destroy_session(session.session_id)
+
+    @pytest.mark.asyncio
+    async def test_create_session_enforces_max_sessions(self):
+        """DOM bridge refuses unbounded browser session creation."""
+        bridge = AWIPlaywrightBridge(mode=TranslationMode.CDP_DIRECT, max_sessions=1)
+        session = await bridge.create_session("https://example.com")
+
+        with pytest.raises(BrowserSessionLimitExceeded):
+            await bridge.create_session("https://example.org")
 
         await bridge.destroy_session(session.session_id)
 
@@ -446,14 +459,16 @@ class TestAWIPlaywrightBridge:
 
     @pytest.mark.asyncio
     async def test_execute_commands(self, bridge):
-        """Test executing commands (skipped if Playwright not installed)."""
-        # Check if Playwright is available
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            pytest.skip("Playwright not installed")
+        """Test command execution without opening a real browser."""
+
+        class FakePage:
+            url = "https://example.com"
+
+            async def title(self):
+                return "Example"
 
         session = await bridge.create_session("https://example.com")
+        session._page = FakePage()
 
         commands = [
             PlaywrightCommand(
