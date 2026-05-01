@@ -21,11 +21,6 @@ from app.schemas.telemetry import (
 from app.services.telemetry_pm import EventStore
 
 
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_telemetry_table():
     """Per-test isolation — other tests may have written events."""

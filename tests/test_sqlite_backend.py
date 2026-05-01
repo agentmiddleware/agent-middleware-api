@@ -35,7 +35,7 @@ def sqlite_store():
 
     import asyncio
 
-    asyncio.get_event_loop().run_until_complete(store.close())
+    asyncio.run(store.close())
 
     try:
         os.unlink(db_path)

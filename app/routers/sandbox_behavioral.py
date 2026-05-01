@@ -9,8 +9,9 @@ with subprocess isolation and resource limits.
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from ..core.auth import verify_api_key
 from ..schemas.sandbox_behavioral import (
     SandboxEnvironment,
     SandboxEnvironmentCreate,
@@ -20,7 +21,11 @@ from ..schemas.sandbox_behavioral import (
 from ..services.behavioral_sandbox import get_behavioral_sandbox
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/v1/sandbox/behavioral", tags=["Sandbox"])
+router = APIRouter(
+    prefix="/v1/sandbox/behavioral",
+    tags=["Sandbox"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 @router.post(

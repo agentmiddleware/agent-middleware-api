@@ -12,6 +12,7 @@ Architecture:
 """
 
 import hashlib
+import json
 import secrets
 import logging
 from datetime import datetime, timedelta, timezone
@@ -145,7 +146,7 @@ class APIKeyService:
                 key_hash=key_hash,
                 key_prefix=key_prefix,
                 status=APIKeyStatus.ACTIVE.value,
-                metadata_json=f'{{"name": "{key_name}"}}',
+                metadata_json=json.dumps({"name": key_name}),
                 expires_at=expires_at,
             )
             session.add(api_key)
@@ -180,12 +181,17 @@ class APIKeyService:
             }
         """
         async with self._session_factory()() as session:
+            wallet_result = await session.execute(
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            )
+            if not wallet_result.scalar_one_or_none():
+                raise WalletNotFoundError(wallet_id)
+
             result = await session.execute(
                 select(APIKeyModel).where(APIKeyModel.wallet_id == wallet_id)
             )
             keys = list(result.scalars().all())
 
-        import json
         response_keys = []
         total_active = 0
         total_revoked = 0
@@ -255,7 +261,10 @@ class APIKeyService:
                 return None
 
             now = datetime.now(timezone.utc)
-            if key.expires_at and key.expires_at < now:
+            expires_at = key.expires_at
+            if expires_at and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at and expires_at < now:
                 return None
 
             key.last_used_at = now
@@ -304,6 +313,12 @@ class APIKeyService:
         )
 
         async with self._session_factory()() as session:
+            wallet_result = await session.execute(
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            )
+            if not wallet_result.scalar_one_or_none():
+                raise WalletNotFoundError(wallet_id)
+
             if key_id:
                 result = await session.execute(
                     select(APIKeyModel).where(
@@ -451,6 +466,12 @@ class APIKeyService:
         now = datetime.now(timezone.utc)
 
         async with self._session_factory()() as session:
+            wallet_result = await session.execute(
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            )
+            if not wallet_result.scalar_one_or_none():
+                raise WalletNotFoundError(wallet_id)
+
             result = await session.execute(
                 select(APIKeyModel).where(
                     APIKeyModel.wallet_id == wallet_id,
@@ -480,9 +501,27 @@ class APIKeyService:
 
             new_key_data = None
             if create_new_key:
-                new_key_data = await self.create_key(
-                    wallet_id, key_name="emergency_key"
+                full_key, key_hash, key_prefix = generate_api_key()
+                new_key_id = f"key_{uuid4().hex[:12]}"
+                emergency_key = APIKeyModel(
+                    key_id=new_key_id,
+                    wallet_id=wallet_id,
+                    key_hash=key_hash,
+                    key_prefix=key_prefix,
+                    status=APIKeyStatus.ACTIVE.value,
+                    metadata_json=json.dumps({"name": "emergency_key"}),
                 )
+                session.add(emergency_key)
+                new_key_data = {
+                    "key_id": new_key_id,
+                    "wallet_id": wallet_id,
+                    "api_key": full_key,
+                    "key_prefix": key_prefix,
+                    "status": APIKeyStatus.ACTIVE.value,
+                    "key_name": "emergency_key",
+                    "created_at": now,
+                    "expires_at": None,
+                }
 
             await session.commit()
 

@@ -30,11 +30,6 @@ from app.services.rtaas import (
 )
 
 
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_security_tables():
     factory = get_session_factory()

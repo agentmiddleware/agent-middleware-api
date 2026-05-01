@@ -22,11 +22,6 @@ from app.core.blob import (
 
 
 @pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
-@pytest.fixture
 def local_blob(tmp_path: Path) -> LocalFilesystemBlob:
     return LocalFilesystemBlob(root=tmp_path)
 

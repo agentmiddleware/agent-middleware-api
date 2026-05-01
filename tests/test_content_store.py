@@ -33,11 +33,6 @@ from app.services.content_factory import (
 )
 
 
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_content_tables():
     factory = get_session_factory()

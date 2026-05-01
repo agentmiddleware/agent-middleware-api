@@ -22,11 +22,6 @@ from app.services.iot_bridge import (
 )
 
 
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_iot_tables():
     factory = get_session_factory()

@@ -1800,7 +1800,10 @@ class AWIPlaywrightBridge:
             await session._page.goto(
                 url, wait_until="networkidle", timeout=self._default_timeout_ms
             )
-            session.current_url = session._page.url
+            navigated_url = session._page.url
+            session.current_url = (
+                url if navigated_url == f"{url}/" else navigated_url
+            )
             session.page_title = await session._page.title()
             logger.info(f"Navigated to {url} for session {session.session_id}")
         except Exception as e:

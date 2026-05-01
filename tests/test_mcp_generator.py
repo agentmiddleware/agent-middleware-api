@@ -17,6 +17,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
 from app.services.service_registry import (
     ServiceRegistry,
     get_service_registry,
@@ -368,3 +371,57 @@ class TestGlobalSingletons:
         generator = get_mcp_generator()
         assert generator is not None
         assert isinstance(generator, McpGenerator)
+
+
+class TestMcpInvokeRoute:
+    """Test the HTTP MCP invoke route."""
+
+    @pytest.mark.anyio
+    async def test_invoke_tool_accepts_api_key_header(self):
+        registry = get_service_registry()
+
+        def echo_tool(value: str = "ok") -> dict:
+            return {"value": value}
+
+        registry.register_local(
+            service_id="header-auth-echo",
+            name="Header Auth Echo",
+            description="Echo for auth route testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=echo_tool,
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/mcp/tools/header-auth-echo/invoke",
+                    json={
+                        "name": "header-auth-echo",
+                        "arguments": {"value": "hello"},
+                        "mcp_context": {"wallet_id": "wallet-test"},
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            assert response.json()["isError"] is False
+        finally:
+            registry.unregister_local("header-auth-echo")
+
+    @pytest.mark.anyio
+    async def test_invoke_tool_requires_api_key_header(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/mcp/tools/anything/invoke",
+                json={
+                    "name": "anything",
+                    "arguments": {},
+                    "mcp_context": {"wallet_id": "wallet-test"},
+                },
+            )
+
+        assert response.status_code == 401

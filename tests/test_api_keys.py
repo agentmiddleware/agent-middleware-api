@@ -4,15 +4,11 @@ Validates key creation, rotation, revocation, and emergency procedures.
 """
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.db.database import get_session_factory
-
-
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
+from app.db.models import APIKeyModel
 
 @pytest.fixture
 async def client():
@@ -277,3 +273,97 @@ async def test_api_key_response_includes_warning(client, api_headers, sponsor_wa
     data = resp.json()
     assert "warning" in data
     assert "Store this key securely" in data["warning"]
+
+
+@pytest.mark.anyio
+async def test_db_created_key_authenticates_and_is_wallet_scoped(
+    client, api_headers, sponsor_wallet
+):
+    """DB-created keys authenticate but only for their issuing wallet."""
+    other_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Other Corp",
+            "email": "other@test.com",
+            "initial_credits": 1000.0,
+        },
+        headers=api_headers,
+    )
+    other_wallet = other_resp.json()
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    db_key = key_resp.json()["api_key"]
+    db_headers = {"X-API-Key": db_key}
+
+    own_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers=db_headers,
+    )
+    assert own_resp.status_code == 200
+
+    other_read = await client.get(
+        f"/v1/billing/wallets/{other_wallet['wallet_id']}",
+        headers=db_headers,
+    )
+    assert other_read.status_code == 403
+
+    other_keys = await client.get(
+        f"/v1/api-keys/{other_wallet['wallet_id']}",
+        headers=db_headers,
+    )
+    assert other_keys.status_code == 403
+
+    own_key_create = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "key_name": "self_managed"},
+        headers=db_headers,
+    )
+    assert own_key_create.status_code == 201
+
+
+@pytest.mark.anyio
+async def test_revoked_db_key_cannot_authenticate(client, api_headers, sponsor_wallet):
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    revoke_resp = await client.delete(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}/{key['key_id']}",
+        headers=api_headers,
+    )
+    assert revoke_resp.status_code == 204
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_expired_db_key_cannot_authenticate(client, api_headers, sponsor_wallet):
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    factory = get_session_factory()
+    async with factory() as session:
+        db_key = await session.get(APIKeyModel, key["key_id"])
+        db_key.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        await session.commit()
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert resp.status_code == 403

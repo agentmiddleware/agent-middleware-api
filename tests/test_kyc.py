@@ -12,11 +12,6 @@ from app.db.database import get_session_factory
 
 
 @pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
-@pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:

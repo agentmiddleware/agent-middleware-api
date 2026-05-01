@@ -4,6 +4,8 @@ Agents pass their key via the X-API-Key header. No cookies, no sessions,
 no OAuth dance — just a key and a handshake.
 """
 
+from dataclasses import dataclass
+
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from .config import get_settings
@@ -17,13 +19,40 @@ api_key_header = APIKeyHeader(
 )
 
 
-async def verify_api_key(
+@dataclass(frozen=True)
+class AuthContext:
+    """Authenticated caller details used for tenant-scoped authorization."""
+
+    source: str
+    raw_key: str
+    key_id: str | None = None
+    wallet_id: str | None = None
+    is_bootstrap_admin: bool = False
+
+    def require_wallet_access(self, wallet_id: str) -> None:
+        """Allow bootstrap admins or the exact wallet owning a DB-backed key."""
+        if self.is_bootstrap_admin:
+            return
+        if self.wallet_id == wallet_id:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "wallet_access_denied",
+                "message": "API key is not authorized for this wallet.",
+                "wallet_id": wallet_id,
+            },
+        )
+
+
+async def get_auth_context(
     api_key: str | None = Security(api_key_header),
-) -> str:
+) -> AuthContext:
     """
-    Validate the provided API key against the allow-list.
-    Returns the key on success so downstream handlers can use it
-    for per-key rate limiting or usage tracking.
+    Validate an API key and return caller context.
+
+    Environment keys are trusted bootstrap/admin credentials. If the key
+    is not an environment key, fall through to the DB-backed key registry.
     """
     if api_key is None:
         raise HTTPException(
@@ -50,25 +79,30 @@ async def verify_api_key(
 
     valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
 
-    if not valid_keys:
-        # SECURITY FIX: Fail-safe for production.
-        # If VALID_API_KEYS is unset/empty AND we're not in dev mode,
-        # reject all requests. This prevents accidental open auth in production.
-        if not settings.DEBUG:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error": "auth_not_configured",
-                    "message": (
-                        "API keys not configured. Set VALID_API_KEYS environment variable "
-                        "or enable DEBUG=true for development."
-                    ),
-                },
-            )
-        # Development mode — accept any key ≥8 chars (for local testing)
-        return stripped
+    if stripped in valid_keys:
+        return AuthContext(
+            source="env",
+            raw_key=stripped,
+            is_bootstrap_admin=True,
+        )
 
-    if stripped not in valid_keys:
+    try:
+        from ..services.api_key_service import get_api_key_service
+
+        db_key = await get_api_key_service().validate_key(stripped)
+    except RuntimeError:
+        db_key = None
+
+    if db_key:
+        return AuthContext(
+            source="db",
+            raw_key=stripped,
+            key_id=db_key.key_id,
+            wallet_id=db_key.wallet_id,
+            is_bootstrap_admin=False,
+        )
+
+    if valid_keys or not settings.DEBUG:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -77,4 +111,21 @@ async def verify_api_key(
             },
         )
 
-    return stripped
+    # Development mode with no configured keys: preserve the previous local
+    # testing behavior while still identifying the caller as bootstrap-scoped.
+    return AuthContext(
+        source="env",
+        raw_key=stripped,
+        is_bootstrap_admin=True,
+    )
+
+
+async def verify_api_key(
+    api_key: str | None = Security(api_key_header),
+) -> str:
+    """
+    Validate the provided API key.
+    Returns the raw key on success for backwards-compatible dependencies.
+    """
+    context = await get_auth_context(api_key)
+    return context.raw_key
