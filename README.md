@@ -65,6 +65,12 @@ It lets agents:
 
 Deploy in minutes via Docker or Railway.
 
+### Production Beta Docs
+
+- [Production beta roadmap](docs/production-beta-roadmap.md)
+- [Threat model](docs/threat-model.md)
+- [Golden-path wallet-scoped agent flow](docs/golden-path.md)
+
 ---
 
 ## Architecture Overview
