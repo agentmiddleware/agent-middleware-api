@@ -44,6 +44,18 @@ class AuthContext:
             },
         )
 
+    def require_bootstrap_admin(self) -> None:
+        """Allow only trusted bootstrap/admin environment keys."""
+        if self.is_bootstrap_admin:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "admin_access_denied",
+                "message": "This operation requires a bootstrap admin API key.",
+            },
+        )
+
 
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),

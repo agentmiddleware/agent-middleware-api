@@ -93,6 +93,7 @@ class AWISession(BaseModel):
 
     session_id: str = Field(..., description="Unique session identifier")
     target_url: str
+    wallet_id: str | None = Field(None, description="Wallet that owns this session")
     status: AWISessionStatus
     created_at: datetime
     updated_at: datetime

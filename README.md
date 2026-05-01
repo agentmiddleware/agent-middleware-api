@@ -6,15 +6,39 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/Tests-339%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-517%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
 
-> **Now v1.1 — Fully Agent-Discoverable.** Built on arXiv:2506.10953v1.
+> **Production beta — agent-discoverable, not production complete.** Built on arXiv:2506.10953v1.
 
 **The FastAPI control plane for agent-native infrastructure — MCP + AWI powered.**
+
+### Current Implementation Status
+
+This repository is a production-beta control plane, not a finished production
+platform. The wallet/key auth path, billing ledger, MCP discovery, health checks,
+golden-path flow, and core API contracts are executable and tested. Several
+larger product pillars intentionally default to simulation mode and return
+synthetic data until their real integrations land:
+
+- agent oracle
+- red-team swarm
+- RTaaS
+- media engine
+- IoT bridge
+- autonomous telemetry PM
+- agent comms
+- content factory
+
+Agents and operators should inspect `GET /health/dependencies` and the
+`SIMULATION_MODE_*` environment flags before assuming an endpoint performs real
+external work. Public arbitrary Python execution is disabled by default. Set
+`BEHAVIORAL_SANDBOX_PYTHON_BACKEND=docker` to run Python in an unprivileged
+Docker container; `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true` is a
+local-development escape hatch and is not a production sandbox.
 
 ### For Autonomous Agents
 
@@ -44,7 +68,11 @@ from agent_middleware import CrewAIB2ATool
 crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
 ```
 
-**Agent Middleware API** is a production-ready FastAPI service that provides durable state, billing, telemetry, secure tool execution, IoT connectivity, and **AI-powered agent intelligence** for autonomous agents.
+**Agent Middleware API** is a FastAPI production-beta service that provides
+agent-discoverable contracts for durable state, wallet-scoped billing,
+telemetry, sandboxed tool workflows, IoT connectivity, and agent intelligence.
+Some domains are implemented as simulations until their production integrations
+are wired up.
 
 It lets agents:
 
@@ -523,13 +551,21 @@ POST /v1/billing/dry-run/session/{session_id}/revert
 
 ## Behavioral Sandbox Engine (Phase 6)
 
-**Real tool execution testing with subprocess isolation and resource limits.**
+**Authenticated tool-behavior testing with safe dry runs, mocked backends, and optional Docker isolation.**
 
-Unlike dry-run sandbox (cost simulation), the behavioral sandbox executes actual tools in isolated environments for testing behavior before production.
+The behavioral sandbox is not a general-purpose code execution platform. Python
+dry runs return synthetic execution metadata by default. Real Python execution
+requires `BEHAVIORAL_SANDBOX_PYTHON_BACKEND=docker`, which runs code with no
+network, dropped capabilities, a read-only filesystem, resource limits, and an
+unprivileged user. Direct host Python subprocess execution is blocked unless
+`ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true` is set for local development, and that
+mode must not be treated as production isolation.
 
 ### Features
 
-- **Python subprocess execution** with memory/CPU limits
+- **Python dry-run simulation** by default
+- **Docker backend** for container-bounded Python execution
+- **Opt-in unsafe host Python subprocess mode** for local development only
 - **MCP tool sandboxing** with mocked responses
 - **HTTP proxy mode** for API testing
 - **Redis-backed state isolation** per environment
@@ -538,23 +574,23 @@ Unlike dry-run sandbox (cost simulation), the behavioral sandbox executes actual
 
 ```bash
 # Create a sandbox environment
-curl -X POST http://localhost:8000/v1/sandbox/environments \
+curl -X POST http://localhost:8000/v1/sandbox/behavioral/environments \
   -H "X-API-Key: your-key" \
   -H "Content-Type: application/json" \
-  -d '{"env_type": "python", "name": "test-env"}'
+  -d '{"environment_type": "python_subprocess", "name": "test-env"}'
 
 # Execute a tool in sandbox
-curl -X POST http://localhost:8000/v1/sandbox/execute \
+curl -X POST http://localhost:8000/v1/sandbox/behavioral/execute \
   -H "X-API-Key: your-key" \
   -H "Content-Type: application/json" \
-  -d '{"env_id": "...", "tool": "my_tool", "params": {"input": "test"}}'
+  -d '{"env_id": "...", "tool_name": "my_tool", "tool_input": {"code": "print(42)"}, "dry_run": true}'
 
-# Get sandbox metrics
-curl http://localhost:8000/v1/sandbox/metrics/{env_id} \
+# Get sandbox state
+curl http://localhost:8000/v1/sandbox/behavioral/environments/{env_id} \
   -H "X-API-Key: your-key"
 
 # Cleanup sandbox
-curl -X DELETE http://localhost:8000/v1/sandbox/environments/{env_id} \
+curl -X DELETE http://localhost:8000/v1/sandbox/behavioral/environments/{env_id} \
   -H "X-API-Key: your-key"
 ```
 
@@ -879,8 +915,12 @@ railway variables get DATABASE_URL
 
 Current durable service stores:
 - Billing (`wallets`, `ledger`, `alerts`, `velocity_snapshots`, `services`)
-- Comms (`agent registry`, `inbox`, `outbox`)
+- Comms (`agent registry`, row-keyed `inbox` and `outbox` messages)
 - Telemetry (`events`, `anomalies`)
+
+Billing responses keep legacy numeric fields and also include `*_exact` decimal
+string companions for programmatic reconciliation, for example `balance_exact`,
+`amount_exact`, and `period_debits_exact`.
 
 ---
 
@@ -896,7 +936,7 @@ Current durable service stores:
 - [x] Stripe Identity (KYC) for sponsor verification
 - [x] Automated API key rotation for wallets
 - [x] Sandbox engine wired to billing
-- [x] Behavioral Sandbox Engine (subprocess isolation, MCP sandboxing)
+- [x] Behavioral Sandbox Engine (safe dry runs, mocked MCP sandboxing)
 - [x] Full Agentic Web Interface (AWI) control plane
 - [x] External AWI Adoption Kit (Python/TS SDKs, manifest generator, adapter)
 - [x] Add comprehensive agent interaction examples and recipes

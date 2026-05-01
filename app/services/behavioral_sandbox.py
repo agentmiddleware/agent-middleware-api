@@ -2,10 +2,13 @@
 Behavioral Sandbox Engine — Phase 6
 ==================================
 Allows agents to test real tool execution (not just cost simulation) in
-isolated environments with subprocess isolation and resource limits.
+controlled environments. Host Python execution is disabled by default because
+a subprocess is not a production sandbox boundary.
 
 Supports:
-- Python subprocess execution with memory/CPU limits
+- Python dry-run simulation, container execution via Docker when configured,
+  and unsafe host subprocess execution only behind an explicit local-development
+  opt-in
 - MCP tool sandboxing with mocked responses
 - HTTP proxy mode for API testing
 - Redis-backed state isolation per environment
@@ -15,23 +18,20 @@ import asyncio
 import json
 import logging
 import resource
-import signal
-import subprocess
+import sys
 import tempfile
-import time
 import uuid
 from datetime import datetime, timezone
-from multiprocessing import Process
 from typing import Any
 
 import redis.asyncio as redis
 
+from ..core.config import get_settings
 from ..schemas.sandbox_behavioral import (
     ExecutionStatus,
     SandboxEnvironment,
     SandboxEnvironmentCreate,
     SandboxEnvironmentType,
-    SandboxMetrics,
     ToolExecutionRequest,
     ToolExecutionResponse,
 )
@@ -39,13 +39,28 @@ from ..schemas.sandbox_behavioral import (
 logger = logging.getLogger(__name__)
 
 
+def _limit_child_process(memory_limit_mb: int) -> None:
+    """Apply best-effort resource limits before executing opt-in host Python."""
+    memory_bytes = memory_limit_mb * 1024 * 1024
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
+    except (ValueError, OSError, AttributeError):
+        logger.debug("Unable to apply address-space limit to sandbox subprocess")
+
+    try:
+        resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
+    except (ValueError, OSError, AttributeError):
+        logger.debug("Unable to apply CPU limit to sandbox subprocess")
+
+
 class BehavioralSandboxEngine:
     """
     Core engine for behavioral sandbox execution.
 
-    Provides subprocess isolation for safe tool testing without affecting
-    production systems. Each environment gets its own Redis namespace
-    for state isolation.
+    Provides dry-run and mocked execution for tool testing without affecting
+    production systems. Each environment gets its own Redis namespace for state
+    isolation when Redis is available. Host Python execution is unsafe and
+    disabled unless a real backend such as Docker is explicitly configured.
     """
 
     def __init__(self, redis_url: str = "redis://localhost:6379"):
@@ -207,13 +222,71 @@ class BehavioralSandboxEngine:
         memory_limit_mb: int,
         env_vars: dict[str, str],
     ) -> dict[str, Any]:
-        """Execute Python code in a subprocess with resource limits."""
+        """Execute Python code through the configured sandbox backend."""
         code = tool_input.get("code", "print('Hello from sandbox')")
         context = tool_input.get("context", {})
+        sandbox_code = self._build_python_wrapper(code, context, dry_run)
 
-        sandbox_code = f"""
+        if dry_run:
+            return {
+                "success": True,
+                "output": {
+                    "sandboxed": True,
+                    "mode": "python_subprocess_dry_run",
+                    "code_provided": bool(code),
+                    "context_keys": sorted(context.keys()),
+                    "dry_run": True,
+                },
+                "cost_estimate": 0.001,
+            }
+
+        settings = get_settings()
+        backend = settings.BEHAVIORAL_SANDBOX_PYTHON_BACKEND.strip().lower()
+
+        if backend == "docker":
+            return await self._execute_python_docker(
+                sandbox_code=sandbox_code,
+                timeout_seconds=timeout_seconds,
+                memory_limit_mb=memory_limit_mb,
+                env_vars=env_vars,
+                image=settings.BEHAVIORAL_SANDBOX_DOCKER_IMAGE,
+            )
+
+        if backend in ("unsafe_host", "host") or settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX:
+            return await self._execute_python_host(
+                sandbox_code=sandbox_code,
+                timeout_seconds=timeout_seconds,
+                memory_limit_mb=memory_limit_mb,
+                env_vars=env_vars,
+                unsafe_allowed=True,
+            )
+
+        if backend != "disabled":
+            logger.warning("Unknown Python sandbox backend configured: %s", backend)
+
+        logger.warning(
+            "Blocked Python sandbox execution. Configure "
+            "BEHAVIORAL_SANDBOX_PYTHON_BACKEND=docker for container isolation, "
+            "or unsafe_host only for local dev."
+        )
+        return {
+            "success": False,
+            "error": (
+                "Python execution is disabled. Configure "
+                "BEHAVIORAL_SANDBOX_PYTHON_BACKEND=docker for container isolation, "
+                "or unsafe_host only for local development."
+            ),
+            "resources": {
+                "blocked": True,
+                "reason": "python_execution_backend_disabled",
+            },
+        }
+
+    @staticmethod
+    def _build_python_wrapper(code: str, context: dict[str, Any], dry_run: bool) -> str:
+        """Build the small runner passed to the selected execution backend."""
+        return f"""
 import json
-import sys
 
 context = {json.dumps(context)}
 dry_run = {str(dry_run).lower()}
@@ -229,43 +302,172 @@ result = sandboxed_execute(context, dry_run)
 print(json.dumps(result))
 """
 
+    async def _execute_python_docker(
+        self,
+        sandbox_code: str,
+        timeout_seconds: int,
+        memory_limit_mb: int,
+        env_vars: dict[str, str],
+        image: str,
+    ) -> dict[str, Any]:
+        """Execute Python in an unprivileged Docker container."""
+        command = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--memory",
+            f"{memory_limit_mb}m",
+            "--cpus",
+            "1",
+            "--pids-limit",
+            "64",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=16m",
+            "--security-opt",
+            "no-new-privileges",
+            "--cap-drop",
+            "ALL",
+            "--user",
+            "65534:65534",
+            "--env",
+            "SANDBOX=true",
+            "--env",
+            "PYTHONDONTWRITEBYTECODE=1",
+        ]
+        for name, value in env_vars.items():
+            if name.isidentifier():
+                command.extend(["--env", f"{name}={value}"])
+        command.extend([image, "python", "-I", "-S", "-c", sandbox_code])
+
         try:
             proc = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-c",
-                sandbox_code,
+                *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**dict(env_vars), "SANDBOX": "true"},
             )
+        except FileNotFoundError:
+            return {
+                "success": False,
+                "error": "Docker executable not found for sandbox backend.",
+                "resources": {"blocked": True, "reason": "docker_unavailable"},
+            }
 
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_seconds
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {
+                "success": False,
+                "error": f"Timeout after {timeout_seconds}s",
+                "resources": {"timeout": True, "backend": "docker"},
+            }
+
+        return self._parse_python_execution_output(
+            stdout=stdout,
+            stderr=stderr,
+            backend="docker",
+        )
+
+    async def _execute_python_host(
+        self,
+        sandbox_code: str,
+        timeout_seconds: int,
+        memory_limit_mb: int,
+        env_vars: dict[str, str],
+        unsafe_allowed: bool,
+    ) -> dict[str, Any]:
+        """Execute Python on the host; unsafe and only for local development."""
+        if not unsafe_allowed:
+            logger.warning(
+                "Blocked host Python sandbox execution. Configure a real isolation "
+                "backend or set ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true only for local dev."
+            )
+            return {
+                "success": False,
+                "error": (
+                    "Python subprocess execution is disabled because host Python is "
+                    "not a production sandbox. Use an external isolation backend "
+                    "or set ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true only for local development."
+                ),
+                "resources": {
+                    "blocked": True,
+                    "reason": "unsafe_host_execution_disabled",
+                },
+            }
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="bhe-python-") as tmpdir:
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    "-c",
+                    sandbox_code,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env={**dict(env_vars), "SANDBOX": "true"},
+                    cwd=tmpdir,
+                    preexec_fn=lambda: _limit_child_process(memory_limit_mb),
                 )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return {
-                    "success": False,
-                    "error": f"Timeout after {timeout_seconds}s",
-                    "resources": {"timeout": True},
-                }
 
-            output = stdout.decode().strip()
-            error = stderr.decode().strip()
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=timeout_seconds
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return {
+                        "success": False,
+                        "error": f"Timeout after {timeout_seconds}s",
+                        "resources": {"timeout": True},
+                    }
 
-            if error and not output:
-                return {"success": False, "error": error}
-
-            try:
-                result = json.loads(output)
-                return result
-            except json.JSONDecodeError:
-                return {"success": True, "output": output}
+            return self._parse_python_execution_output(
+                stdout=stdout,
+                stderr=stderr,
+                backend="unsafe_host",
+            )
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def _parse_python_execution_output(
+        stdout: bytes,
+        stderr: bytes,
+        backend: str,
+    ) -> dict[str, Any]:
+        output = stdout.decode().strip()
+        error = stderr.decode().strip()
+
+        if error and not output:
+            return {
+                "success": False,
+                "error": error,
+                "resources": {"backend": backend},
+            }
+
+        try:
+            result = json.loads(output)
+            if isinstance(result, dict):
+                result.setdefault("resources", {})
+                result["resources"].setdefault("backend", backend)
+                return result
+        except json.JSONDecodeError:
+            pass
+
+        return {
+            "success": True,
+            "output": output,
+            "resources": {"backend": backend},
+        }
 
     async def _execute_mcp_sandbox(
         self,

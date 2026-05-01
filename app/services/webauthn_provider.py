@@ -496,6 +496,10 @@ class WebAuthnProvider:
         """Get list of actions that require passkey verification."""
         return sorted(self.HIGH_RISK_ACTIONS)
 
+    def get_challenge(self, challenge_id: str) -> WebAuthnChallenge | None:
+        """Get a stored challenge for route-level ownership checks."""
+        return self._challenges.get(challenge_id)
+
     async def register_credential(
         self,
         user_id: str,

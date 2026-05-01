@@ -5,12 +5,16 @@ Two-tiered wallet system:
 - Human Sponsor Layer: Fiat ingestion via Stripe/payment rails → ecosystem credits
 - Agent Wallet Layer: Pre-paid, programmatic wallets for autonomous spending
 
-IMPORTANT: While the API accepts/returns float for backward compatibility,
-the service layer uses Decimal for all monetary calculations to avoid
-floating-point precision errors (e.g., 0.1 + 0.2 ≠ 0.3 with floats).
+IMPORTANT: Numeric fields are retained for backward compatibility, and response
+models also expose *_exact decimal strings for agent-safe reconciliation. The
+service layer uses Decimal for all monetary calculations to avoid floating-point
+precision errors (e.g., 0.1 + 0.2 ≠ 0.3 with floats).
 """
 
-from pydantic import BaseModel, Field
+from decimal import Decimal
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from enum import Enum
 from datetime import datetime
 import re
@@ -109,6 +113,44 @@ class AlertSeverity(str, Enum):
 # ---------------------------------------------------------------------------
 
 SAFE_WALLET_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
+
+
+def _exact_decimal(value: Any) -> str | None:
+    """Return a JSON-safe exact decimal string without binary float math."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return str(value)
+    return str(Decimal(str(value)))
+
+
+class ExactDecimalFieldsMixin(BaseModel):
+    """Populate *_exact string fields before legacy float coercion runs."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _populate_exact_fields(cls, data: Any) -> Any:
+        if not cls._decimal_exact_fields:
+            return data
+
+        if isinstance(data, dict):
+            payload = dict(data)
+        else:
+            payload = {
+                field_name: getattr(data, field_name)
+                for field_name in cls.model_fields
+                if hasattr(data, field_name)
+            }
+
+        for source_field, exact_field in cls._decimal_exact_fields.items():
+            if payload.get(exact_field) is None and source_field in payload:
+                payload[exact_field] = _exact_decimal(payload[source_field])
+
+        return payload
 
 
 class CreateSponsorWalletRequest(BaseModel):
@@ -218,15 +260,24 @@ class CreateChildWalletRequest(BaseModel):
     )
 
 
-class ChildWalletResponse(BaseModel):
+class ChildWalletResponse(ExactDecimalFieldsMixin):
     """Child wallet details with parent lineage."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "balance": "balance_exact",
+        "max_spend": "max_spend_exact",
+        "spent": "spent_exact",
+    }
+
     wallet_id: str
     wallet_type: WalletType
     parent_wallet_id: str | None = None
     child_agent_id: str | None = None
     balance: float
+    balance_exact: str | None = None
     max_spend: float | None = None
+    max_spend_exact: str | None = None
     spent: float = 0.0
+    spent_exact: str | None = None
     task_description: str = ""
     ttl_seconds: int | None = None
     auto_reclaim: bool = True
@@ -234,46 +285,81 @@ class ChildWalletResponse(BaseModel):
     created_at: datetime
 
 
-class SwarmBudgetSummary(BaseModel):
+class SwarmBudgetSummary(ExactDecimalFieldsMixin):
     """Hierarchical budget summary for an agent's child swarm."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "parent_balance": "parent_balance_exact",
+        "total_delegated": "total_delegated_exact",
+        "total_reclaimed": "total_reclaimed_exact",
+    }
+
     parent_wallet_id: str
     parent_balance: float
+    parent_balance_exact: str | None = None
     total_delegated: float
+    total_delegated_exact: str | None = None
     total_reclaimed: float
+    total_reclaimed_exact: str | None = None
     active_children: int
     completed_children: int
     frozen_children: int
     children: list["WalletResponse"]
 
 
-class ReclaimResponse(BaseModel):
+class ReclaimResponse(ExactDecimalFieldsMixin):
     """Result of reclaiming unspent credits from a child wallet."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "credits_reclaimed": "credits_reclaimed_exact",
+        "parent_balance_after": "parent_balance_after_exact",
+    }
+
     child_wallet_id: str
     parent_wallet_id: str
     credits_reclaimed: float
+    credits_reclaimed_exact: str | None = None
     parent_balance_after: float
+    parent_balance_after_exact: str | None = None
     child_status: WalletStatus
 
 
-class WalletResponse(BaseModel):
+class WalletResponse(ExactDecimalFieldsMixin):
     """Wallet details."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "balance": "balance_exact",
+        "lifetime_credits": "lifetime_credits_exact",
+        "lifetime_debits": "lifetime_debits_exact",
+        "daily_limit": "daily_limit_exact",
+        "auto_refill_threshold": "auto_refill_threshold_exact",
+        "auto_refill_amount": "auto_refill_amount_exact",
+        "max_spend": "max_spend_exact",
+    }
+
     wallet_id: str
     wallet_type: WalletType
     owner_name: str | None = None
     email: str | None = None
     balance: float = Field(..., description="Current credit balance.")
+    balance_exact: str | None = Field(
+        None, description="Exact current credit balance as a decimal string."
+    )
     lifetime_credits: float = Field(..., description="Total credits ever deposited.")
+    lifetime_credits_exact: str | None = None
     lifetime_debits: float = Field(..., description="Total credits ever consumed.")
+    lifetime_debits_exact: str | None = None
     status: WalletStatus
     kyc_status: KYCStatus = Field(default=KYCStatus.NOT_REQUIRED)
     daily_limit: float | None = None
+    daily_limit_exact: str | None = None
     auto_refill: bool = False
     auto_refill_threshold: float | None = None
+    auto_refill_threshold_exact: str | None = None
     auto_refill_amount: float | None = None
+    auto_refill_amount_exact: str | None = None
     sponsor_wallet_id: str | None = None
     agent_id: str | None = None
     child_agent_id: str | None = None
     max_spend: float | None = None
+    max_spend_exact: str | None = None
     task_description: str | None = None
     ttl_seconds: int | None = None
     created_at: datetime
@@ -289,8 +375,15 @@ class WalletListResponse(BaseModel):
 # Ledger Schemas
 # ---------------------------------------------------------------------------
 
-class LedgerEntry(BaseModel):
+class LedgerEntry(ExactDecimalFieldsMixin):
     """A single atomic transaction in the billing ledger."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "amount": "amount_exact",
+        "balance_after": "balance_after_exact",
+        "compute_cost": "compute_cost_exact",
+        "margin": "margin_exact",
+    }
+
     entry_id: str
     wallet_id: str
     action: LedgerAction
@@ -298,26 +391,41 @@ class LedgerEntry(BaseModel):
         ...,
         description="Credit amount (positive=credit, negative=debit).",
     )
+    amount_exact: str | None = Field(
+        None, description="Exact transaction amount as a decimal string."
+    )
     balance_after: float = Field(
         ...,
         description="Wallet balance after this transaction.",
+    )
+    balance_after_exact: str | None = Field(
+        None, description="Exact post-transaction balance as a decimal string."
     )
     service_category: ServiceCategory | None = None
     description: str = ""
     request_path: str | None = None
     compute_cost: float | None = None
+    compute_cost_exact: str | None = None
     margin: float | None = None
+    margin_exact: str | None = None
     timestamp: datetime
     metadata: dict = Field(default_factory=dict)
 
 
-class LedgerResponse(BaseModel):
+class LedgerResponse(ExactDecimalFieldsMixin):
     """Paginated ledger entries."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "period_credits": "period_credits_exact",
+        "period_debits": "period_debits_exact",
+    }
+
     entries: list[LedgerEntry]
     total: int
     wallet_id: str
     period_credits: float
+    period_credits_exact: str | None = None
     period_debits: float
+    period_debits_exact: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -336,24 +444,42 @@ class TopUpRequest(BaseModel):
     payment_token: str | None = Field(default=None, description="Payment method token.")
 
 
-class TopUpResponse(BaseModel):
+class TopUpResponse(ExactDecimalFieldsMixin):
     """Result of a top-up request."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "amount_fiat": "amount_fiat_exact",
+        "credits_added": "credits_added_exact",
+        "exchange_rate": "exchange_rate_exact",
+    }
+
     top_up_id: str
     wallet_id: str
     amount_fiat: float
+    amount_fiat_exact: str | None = None
     credits_added: float
+    credits_added_exact: str | None = None
     exchange_rate: float
+    exchange_rate_exact: str | None = None
     status: TopUpStatus
     payment_url: str | None = None
 
 
-class InsufficientFundsResponse(BaseModel):
+class InsufficientFundsResponse(ExactDecimalFieldsMixin):
     """Structured 402 Payment Required response."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "current_balance": "current_balance_exact",
+        "required_amount": "required_amount_exact",
+        "shortfall": "shortfall_exact",
+    }
+
     error: str = "insufficient_funds"
     wallet_id: str
     current_balance: float
+    current_balance_exact: str | None = None
     required_amount: float
+    required_amount_exact: str | None = None
     shortfall: float
+    shortfall_exact: str | None = None
     top_up_url: str
     message: str = "Wallet balance insufficient."
 
@@ -362,18 +488,28 @@ class InsufficientFundsResponse(BaseModel):
 # Metering & Pricing Schemas
 # ---------------------------------------------------------------------------
 
-class ServicePricing(BaseModel):
+class ServicePricing(ExactDecimalFieldsMixin):
     """Per-action pricing for a service category."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "credits_per_unit": "credits_per_unit_exact",
+    }
+
     service_category: ServiceCategory
     unit: str
     credits_per_unit: float
+    credits_per_unit_exact: str | None = None
     description: str = ""
 
 
-class PricingTableResponse(BaseModel):
+class PricingTableResponse(ExactDecimalFieldsMixin):
     """Full pricing table for all services."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "exchange_rate": "exchange_rate_exact",
+    }
+
     pricing: list[ServicePricing]
     exchange_rate: float
+    exchange_rate_exact: str | None = None
     last_updated: datetime
 
 
@@ -381,13 +517,24 @@ class PricingTableResponse(BaseModel):
 # Arbitrage / Margin Schemas
 # ---------------------------------------------------------------------------
 
-class ArbitrageReport(BaseModel):
+class ArbitrageReport(ExactDecimalFieldsMixin):
     """Swarm arbitrage profitability report."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "total_revenue": "total_revenue_exact",
+        "total_compute_cost": "total_compute_cost_exact",
+        "gross_margin": "gross_margin_exact",
+        "margin_percentage": "margin_percentage_exact",
+    }
+
     period: str
     total_revenue: float
+    total_revenue_exact: str | None = None
     total_compute_cost: float
+    total_compute_cost_exact: str | None = None
     gross_margin: float
+    gross_margin_exact: str | None = None
     margin_percentage: float
+    margin_percentage_exact: str | None = None
     by_service: dict[str, dict] = Field(default_factory=dict)
     top_profitable_actions: list[dict] = Field(default_factory=list)
 
@@ -396,14 +543,21 @@ class ArbitrageReport(BaseModel):
 # Alert Schemas
 # ---------------------------------------------------------------------------
 
-class BillingAlert(BaseModel):
+class BillingAlert(ExactDecimalFieldsMixin):
     """Billing alert for sponsors or agents."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "threshold_amount": "threshold_amount_exact",
+        "current_balance": "current_balance_exact",
+    }
+
     alert_id: str
     alert_type: AlertType
     wallet_id: str
     message: str
     threshold_amount: float | None = None
+    threshold_amount_exact: str | None = None
     current_balance: float | None = None
+    current_balance_exact: str | None = None
     severity: AlertSeverity = AlertSeverity.INFO
     acknowledged: bool = False
     created_at: datetime
@@ -425,28 +579,42 @@ class RegisterServiceRequest(BaseModel):
     mcp_manifest: dict | None = None
 
 
-class ServiceRegistration(BaseModel):
+class ServiceRegistration(ExactDecimalFieldsMixin):
     """A registered billable service in the marketplace."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "credits_per_unit": "credits_per_unit_exact",
+    }
+
     service_id: str
     name: str
     description: str
     owner_wallet_id: str
     category: ServiceCategory
     credits_per_unit: float
+    credits_per_unit_exact: str | None = None
     unit_name: str
     mcp_manifest: dict | None = None
     is_active: bool
     created_at: datetime
 
 
-class TransferResponse(BaseModel):
+class TransferResponse(ExactDecimalFieldsMixin):
     """Response for a wallet-to-wallet transfer."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "amount": "amount_exact",
+        "from_balance_after": "from_balance_after_exact",
+        "to_balance_after": "to_balance_after_exact",
+    }
+
     transfer_id: str
     from_wallet_id: str
     to_wallet_id: str
     amount: float
+    amount_exact: str | None = None
     from_balance_after: float
+    from_balance_after_exact: str | None = None
     to_balance_after: float
+    to_balance_after_exact: str | None = None
     status: str
 
 
@@ -617,14 +785,23 @@ class SandboxCommitRequest(BaseModel):
     session_id: str = Field(..., description="Sandbox session ID to commit.")
 
 
-class SandboxCommitResponse(BaseModel):
+class SandboxCommitResponse(ExactDecimalFieldsMixin):
     """Response after committing a sandbox session."""
+    _decimal_exact_fields: ClassVar[dict[str, str]] = {
+        "total_credits_deducted": "total_credits_deducted_exact",
+        "real_balance_before": "real_balance_before_exact",
+        "real_balance_after": "real_balance_after_exact",
+    }
+
     session_id: str
     wallet_id: str
     committed_charges: int
     total_credits_deducted: float
+    total_credits_deducted_exact: str | None = None
     real_balance_before: float
+    real_balance_before_exact: str | None = None
     real_balance_after: float
+    real_balance_after_exact: str | None = None
     ledger_entries: list[dict]
     success: bool
     message: str

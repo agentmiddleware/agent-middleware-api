@@ -786,15 +786,18 @@ class AWIRAGEngine:
         from ..core.config import get_settings
 
         settings = get_settings()
+        if not settings.LLM_API_KEY:
+            raise ValueError("LLM_API_KEY is not configured")
 
         client = AsyncOpenAI(api_key=settings.LLM_API_KEY)
-
-        response = await client.embeddings.create(
-            model=self._embedding_model,
-            input=text[:8192],
-        )
-
-        return response.data[0].embedding
+        try:
+            response = await client.embeddings.create(
+                model=self._embedding_model,
+                input=text[:8192],
+            )
+            return response.data[0].embedding
+        finally:
+            await client.close()
 
     def _generate_mock_embedding(self, text: str) -> list[float]:
         """Generate deterministic mock embedding from text."""

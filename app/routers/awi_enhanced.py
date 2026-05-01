@@ -15,9 +15,10 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from ..core.auth import AuthContext, get_auth_context
 from ..schemas.awi_enhanced import (
     DOMBridgeSessionRequest,
     DOMBridgeSessionResponse,
@@ -39,10 +40,60 @@ from ..schemas.awi_enhanced import (
     SessionContextRequest,
     SessionContextResponse,
 )
+from ..services.awi_playwright_bridge import BrowserSessionLimitExceeded
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/awi", tags=["AWI Enhanced"])
+_DOM_SESSION_WALLETS: dict[str, str | None] = {}
+
+
+async def _require_awi_session_access(session_id: str, auth: AuthContext) -> None:
+    """Authorize access to wallet-scoped AWI session state."""
+    from ..services.awi_session import get_awi_session_manager
+
+    manager = get_awi_session_manager()
+    session = await manager.get_session(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": f"Session {session_id} not found"},
+        )
+
+    if session.wallet_id:
+        auth.require_wallet_access(session.wallet_id)
+    else:
+        auth.require_bootstrap_admin()
+
+
+async def _require_dom_session_access(session_id: str, auth: AuthContext) -> None:
+    """Authorize access to standalone DOM bridge sessions."""
+    from ..services.awi_playwright_bridge import get_playwright_bridge
+
+    bridge = get_playwright_bridge()
+    session = await bridge.get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": f"Session {session_id} not found"},
+        )
+
+    wallet_id = _DOM_SESSION_WALLETS.get(session_id)
+    if wallet_id:
+        auth.require_wallet_access(wallet_id)
+    else:
+        auth.require_bootstrap_admin()
+
+
+async def _require_memory_access(session_id: str, auth: AuthContext) -> None:
+    """Authorize access to RAG memories through their owning AWI session."""
+    try:
+        await _require_awi_session_access(session_id, auth)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+        auth.require_bootstrap_admin()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,7 +107,10 @@ router = APIRouter(prefix="/v1/awi", tags=["AWI Enhanced"])
     summary="Create passkey challenge",
     description="Create a WebAuthn challenge for high-risk AWI action verification.",
 )
-async def create_passkey_challenge(request: PasskeyChallengeRequest):
+async def create_passkey_challenge(
+    request: PasskeyChallengeRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Create a WebAuthn registration/authentication challenge.
 
@@ -64,6 +118,8 @@ async def create_passkey_challenge(request: PasskeyChallengeRequest):
     options, then call /passkey/verify with the credential response.
     """
     from ..services.webauthn_provider import get_webauthn_provider
+
+    await _require_awi_session_access(request.session_id, auth)
 
     webauthn = get_webauthn_provider()
 
@@ -102,7 +158,10 @@ async def create_passkey_challenge(request: PasskeyChallengeRequest):
     summary="Verify passkey response",
     description="Verify the WebAuthn credential response from the client.",
 )
-async def verify_passkey(request: PasskeyVerifyRequest):
+async def verify_passkey(
+    request: PasskeyVerifyRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Verify WebAuthn assertion response.
 
@@ -112,6 +171,14 @@ async def verify_passkey(request: PasskeyVerifyRequest):
     from ..services.webauthn_provider import get_webauthn_provider
 
     webauthn = get_webauthn_provider()
+    challenge = webauthn.get_challenge(request.challenge_id)
+    if not challenge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "verification_failed", "message": "Challenge not found"},
+        )
+
+    await _require_awi_session_access(challenge.session_id, auth)
 
     try:
         result = await webauthn.verify_response(
@@ -138,9 +205,15 @@ async def verify_passkey(request: PasskeyVerifyRequest):
     summary="Check passkey verification status",
     description="Check if a session:action pair has valid passkey verification.",
 )
-async def check_passkey_status(session_id: str, action: str):
+async def check_passkey_status(
+    session_id: str,
+    action: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Check if the action is currently verified for this session."""
     from ..services.webauthn_provider import get_webauthn_provider
+
+    await _require_awi_session_access(session_id, auth)
 
     webauthn = get_webauthn_provider()
 
@@ -153,9 +226,15 @@ async def check_passkey_status(session_id: str, action: str):
     summary="Invalidate passkey verifications",
     description="Invalidate all passkey verifications for a session.",
 )
-async def invalidate_passkey(session_id: str, action: str | None = None):
+async def invalidate_passkey(
+    session_id: str,
+    action: str | None = None,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Invalidate passkey verifications for a session."""
     from ..services.webauthn_provider import get_webauthn_provider
+
+    await _require_awi_session_access(session_id, auth)
 
     webauthn = get_webauthn_provider()
 
@@ -173,7 +252,7 @@ async def invalidate_passkey(session_id: str, action: str | None = None):
     summary="List high-risk actions",
     description="Get list of actions that require passkey verification.",
 )
-async def list_high_risk_actions():
+async def list_high_risk_actions(auth: AuthContext = Depends(get_auth_context)):
     """Get all actions that require passkey verification."""
     from ..services.webauthn_provider import get_webauthn_provider
 
@@ -213,7 +292,10 @@ class DOMAttachResponse(BaseModel):
     summary="Attach DOM bridge to AWI session",
     description="Attach a Playwright DOM bridge to an existing AWI session for live browser automation.",
 )
-async def attach_dom_bridge(request: DOMAttachRequest):
+async def attach_dom_bridge(
+    request: DOMAttachRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Attach a Playwright DOM bridge to an existing AWI session.
 
@@ -229,6 +311,8 @@ async def attach_dom_bridge(request: DOMAttachRequest):
     """
     from ..services.awi_session import get_awi_session_manager
 
+    await _require_awi_session_access(request.session_id, auth)
+
     manager = get_awi_session_manager()
 
     try:
@@ -237,6 +321,11 @@ async def attach_dom_bridge(request: DOMAttachRequest):
             target_url=request.target_url,
         )
         return DOMAttachResponse(**result)
+    except BrowserSessionLimitExceeded as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"error": "dom_session_limit_exceeded", "message": str(e)},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -254,13 +343,18 @@ async def attach_dom_bridge(request: DOMAttachRequest):
     "/dom/attach/{session_id}",
     summary="Detach DOM bridge from AWI session",
 )
-async def detach_dom_bridge(session_id: str):
+async def detach_dom_bridge(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Detach the Playwright DOM bridge from an AWI session.
 
     Returns the session to mock/internal AWI mode. The browser context is closed.
     """
     from ..services.awi_session import get_awi_session_manager
+
+    await _require_awi_session_access(session_id, auth)
 
     manager = get_awi_session_manager()
 
@@ -279,11 +373,16 @@ async def detach_dom_bridge(session_id: str):
     "/dom/attach/{session_id}/status",
     summary="Get DOM bridge status",
 )
-async def get_dom_bridge_status(session_id: str):
+async def get_dom_bridge_status(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Check if a session has a DOM bridge attached.
     """
     from ..services.awi_session import get_awi_session_manager
+
+    await _require_awi_session_access(session_id, auth)
 
     manager = get_awi_session_manager()
 
@@ -298,14 +397,25 @@ async def get_dom_bridge_status(session_id: str):
     summary="Create DOM bridge session",
     description="Create a browser session for bidirectional DOM translation.",
 )
-async def create_dom_session(request: DOMBridgeSessionRequest):
+async def create_dom_session(
+    request: DOMBridgeSessionRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Create a new Playwright bridge session.
 
     The session opens a headless browser and navigates to the target URL.
     Use the returned session_id for subsequent DOM operations.
     """
-    from ..services.awi_playwright_bridge import get_playwright_bridge
+    from ..services.awi_playwright_bridge import (
+        BrowserSessionLimitExceeded,
+        get_playwright_bridge,
+    )
+
+    if request.wallet_id:
+        auth.require_wallet_access(request.wallet_id)
+    else:
+        auth.require_bootstrap_admin()
 
     bridge = get_playwright_bridge()
 
@@ -315,9 +425,15 @@ async def create_dom_session(request: DOMBridgeSessionRequest):
             headless=request.headless,
             viewport=(request.viewport_width, request.viewport_height),
         )
+        _DOM_SESSION_WALLETS[session.session_id] = request.wallet_id
         return DOMBridgeSessionResponse(
             session_id=session.session_id,
             current_url=session.current_url or request.target_url,
+        )
+    except BrowserSessionLimitExceeded as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"error": "dom_session_limit_exceeded", "message": str(e)},
         )
     except Exception as e:
         logger.exception("Failed to create DOM session")
@@ -332,13 +448,19 @@ async def create_dom_session(request: DOMBridgeSessionRequest):
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Destroy DOM bridge session",
 )
-async def destroy_dom_session(session_id: str):
+async def destroy_dom_session(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Destroy a Playwright bridge session and cleanup resources."""
     from ..services.awi_playwright_bridge import get_playwright_bridge
+
+    await _require_dom_session_access(session_id, auth)
 
     bridge = get_playwright_bridge()
 
     destroyed = await bridge.destroy_session(session_id)
+    _DOM_SESSION_WALLETS.pop(session_id, None)
 
     if not destroyed:
         raise HTTPException(
@@ -352,13 +474,19 @@ async def destroy_dom_session(session_id: str):
     summary="List DOM sessions",
     description="List all active DOM bridge sessions.",
 )
-async def list_dom_sessions():
+async def list_dom_sessions(auth: AuthContext = Depends(get_auth_context)):
     """List all active DOM bridge sessions."""
     from ..services.awi_playwright_bridge import get_playwright_bridge
 
     bridge = get_playwright_bridge()
 
     sessions = await bridge.list_sessions()
+    if not auth.is_bootstrap_admin:
+        sessions = [
+            s
+            for s in sessions
+            if _DOM_SESSION_WALLETS.get(s["session_id"]) == auth.wallet_id
+        ]
 
     return {
         "sessions": sessions,
@@ -372,7 +500,10 @@ async def list_dom_sessions():
     summary="Execute AWI action via DOM",
     description="Execute an AWI action against real browser DOM via Playwright.",
 )
-async def sync_dom(request: DOMSyncRequest):
+async def sync_dom(
+    request: DOMSyncRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Bidirectional AWI ↔ DOM translation.
 
@@ -380,6 +511,8 @@ async def sync_dom(request: DOMSyncRequest):
     and returns the resulting state representation.
     """
     from ..services.awi_playwright_bridge import get_playwright_bridge
+
+    await _require_dom_session_access(request.session_id, auth)
 
     bridge = get_playwright_bridge()
 
@@ -434,9 +567,12 @@ async def sync_dom(request: DOMSyncRequest):
 async def get_dom_state(
     session_id: str,
     representation_type: DOMRepresentationType = DOMRepresentationType.SUMMARY,
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Get current DOM state as AWI representation."""
     from ..services.awi_playwright_bridge import get_playwright_bridge
+
+    await _require_dom_session_access(session_id, auth)
 
     bridge = get_playwright_bridge()
 
@@ -479,9 +615,14 @@ async def get_dom_state(
     summary="Preview AWI action translation",
     description="Preview what commands will be generated for an action.",
 )
-async def preview_action(request: DOMSyncRequest):
+async def preview_action(
+    request: DOMSyncRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Preview commands without executing them."""
     from ..services.awi_playwright_bridge import get_playwright_bridge
+
+    await _require_dom_session_access(request.session_id, auth)
 
     bridge = get_playwright_bridge()
 
@@ -517,13 +658,18 @@ async def preview_action(request: DOMSyncRequest):
     summary="Index AWI session",
     description="Index a completed AWI session for future retrieval.",
 )
-async def index_session(request: MemoryIndexRequest):
+async def index_session(
+    request: MemoryIndexRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Index an AWI session for semantic search.
 
     Extracts entities, infers intent, and generates embeddings for retrieval.
     """
     from ..services.awi_rag_engine import get_awi_rag_engine
+
+    await _require_awi_session_access(request.session_id, auth)
 
     rag = get_awi_rag_engine()
 
@@ -560,13 +706,18 @@ async def index_session(request: MemoryIndexRequest):
     summary="Query session memories",
     description="Semantic search over past AWI session memories.",
 )
-async def query_memories(request: RAGQueryRequest):
+async def query_memories(
+    request: RAGQueryRequest,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Query session memories with natural language.
 
     Returns relevant past sessions sorted by similarity to the query.
     """
     from ..services.awi_rag_engine import get_awi_rag_engine
+
+    auth.require_bootstrap_admin()
 
     rag = get_awi_rag_engine()
 
@@ -618,7 +769,10 @@ async def query_memories(request: RAGQueryRequest):
     summary="Get memory details",
     description="Get detailed information about a specific memory.",
 )
-async def get_memory(memory_id: str):
+async def get_memory(
+    memory_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Get a specific memory by ID."""
     from ..services.awi_rag_engine import get_awi_rag_engine
 
@@ -631,6 +785,8 @@ async def get_memory(memory_id: str):
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "not_found", "message": f"Memory {memory_id} not found"},
         )
+
+    await _require_memory_access(memory.session_id, auth)
 
     return {
         "memory_id": memory.memory_id,
@@ -653,11 +809,22 @@ async def get_memory(memory_id: str):
     summary="Delete memory",
     description="Delete a memory from the index.",
 )
-async def delete_memory(memory_id: str):
+async def delete_memory(
+    memory_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Delete a specific memory."""
     from ..services.awi_rag_engine import get_awi_rag_engine
 
     rag = get_awi_rag_engine()
+    memory = await rag.get_memory(memory_id)
+    if not memory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found", "message": f"Memory {memory_id} not found"},
+        )
+
+    await _require_memory_access(memory.session_id, auth)
 
     deleted = await rag.delete_memory(memory_id)
 
@@ -678,6 +845,7 @@ async def get_session_context(
     session_id: str,
     session_type: str | None = None,
     top_k: int = 3,
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Get relevant context from past sessions.
@@ -690,6 +858,8 @@ async def get_session_context(
 
     rag = get_awi_rag_engine()
     session_manager = get_awi_session_manager()
+
+    await _require_awi_session_access(session_id, auth)
 
     session = await session_manager.get_session(session_id)
 
@@ -727,9 +897,11 @@ async def get_session_context(
     summary="Get RAG statistics",
     description="Get statistics about the memory store.",
 )
-async def get_rag_stats():
+async def get_rag_stats(auth: AuthContext = Depends(get_auth_context)):
     """Get statistics about indexed memories."""
     from ..services.awi_rag_engine import get_awi_rag_engine
+
+    auth.require_bootstrap_admin()
 
     rag = get_awi_rag_engine()
 
@@ -743,9 +915,14 @@ async def get_rag_stats():
     summary="Get session memories",
     description="Get all indexed memories for a session.",
 )
-async def get_session_memories(session_id: str):
+async def get_session_memories(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Get all memories for a specific session."""
     from ..services.awi_rag_engine import get_awi_rag_engine
+
+    await _require_awi_session_access(session_id, auth)
 
     rag = get_awi_rag_engine()
 
@@ -773,9 +950,14 @@ async def get_session_memories(session_id: str):
     summary="Delete session memories",
     description="Delete all memories for a session.",
 )
-async def delete_session_memories(session_id: str):
+async def delete_session_memories(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Delete all memories for a specific session."""
     from ..services.awi_rag_engine import get_awi_rag_engine
+
+    await _require_awi_session_access(session_id, auth)
 
     rag = get_awi_rag_engine()
 

@@ -263,6 +263,49 @@ class DurableStateStore:
         await self._redis.delete(self._redis_key(key))
         return True
 
+    async def list_keys(self, prefix: str) -> list[str]:
+        """List durable state keys by prefix for row-keyed service state."""
+        await self._ensure_ready()
+        if self._backend == "memory":
+            return []
+
+        if self._backend == "postgres":
+            assert self._pg_pool is not None
+            async with self._pg_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT state_key
+                    FROM app_state_kv
+                    WHERE namespace = $1 AND state_key LIKE $2
+                    ORDER BY state_key
+                    """,
+                    self.namespace,
+                    f"{prefix}%",
+                )
+            return [row["state_key"] for row in rows]
+
+        if self._backend == "sqlite":
+            assert self._sqlite_conn is not None
+            async with self._sqlite_conn.execute(
+                """
+                SELECT state_key
+                FROM app_state_kv
+                WHERE namespace = ? AND state_key LIKE ?
+                ORDER BY state_key
+                """,
+                (self.namespace, f"{prefix}%"),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            return [row["state_key"] for row in rows]
+
+        assert self._redis is not None
+        keys: list[str] = []
+        redis_prefix = self._redis_key(prefix)
+        async for key in self._redis.scan_iter(match=f"{redis_prefix}*"):
+            if key.startswith(f"{self.namespace}:"):
+                keys.append(key.split(":", 1)[1])
+        return sorted(keys)
+
     async def health_report(self) -> dict[str, Any]:
         await self._ensure_ready()
 

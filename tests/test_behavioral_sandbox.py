@@ -2,6 +2,7 @@
 Tests for the Behavioral Sandbox Engine — Phase 6
 """
 
+import asyncio
 import pytest
 from datetime import datetime, timezone
 
@@ -147,7 +148,7 @@ class TestBehavioralSandboxEngine:
 
     @pytest.mark.anyio
     async def test_execute_with_real_code(self, engine, sample_env_request):
-        """Test execution with actual Python code."""
+        """Host Python execution is blocked unless explicitly enabled."""
         env = await engine.create_environment(sample_env_request)
 
         request = ToolExecutionRequest(
@@ -162,7 +163,53 @@ class TestBehavioralSandboxEngine:
 
         result = await engine.execute_tool(request)
 
-        assert result.status.value in ["success", "failed"]
+        assert result.status.value == "failed"
+        assert result.error is not None
+        assert "disabled" in result.error
+        assert result.resources_used["reason"] == "python_execution_backend_disabled"
+
+        await engine.destroy_environment(env.env_id)
+
+    @pytest.mark.anyio
+    async def test_docker_backend_reports_unavailable_without_falling_back_to_host(
+        self, engine, monkeypatch
+    ):
+        """Docker backend failures do not silently fall back to host execution."""
+
+        async def missing_docker(*args, **kwargs):
+            raise FileNotFoundError("docker")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", missing_docker)
+
+        result = await engine._execute_python_docker(
+            sandbox_code="print('should not run on host')",
+            timeout_seconds=1,
+            memory_limit_mb=64,
+            env_vars={},
+            image="python:3.12-slim",
+        )
+
+        assert result["success"] is False
+        assert result["resources"]["reason"] == "docker_unavailable"
+
+    @pytest.mark.anyio
+    async def test_dry_run_python_subprocess_does_not_execute_code(
+        self, engine, sample_env_request
+    ):
+        """Dry runs return a synthetic result without invoking host Python."""
+        env = await engine.create_environment(sample_env_request)
+
+        request = ToolExecutionRequest(
+            env_id=env.env_id,
+            tool_name="dry_run_probe",
+            tool_input={"code": "raise RuntimeError('would execute')"},
+            dry_run=True,
+        )
+
+        result = await engine.execute_tool(request)
+
+        assert result.status.value == "success"
+        assert result.output["mode"] == "python_subprocess_dry_run"
 
         await engine.destroy_environment(env.env_id)
 

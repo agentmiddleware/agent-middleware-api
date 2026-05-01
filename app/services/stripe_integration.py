@@ -7,7 +7,7 @@ Architecture:
 2. Client completes payment via Stripe.js in browser
 3. Stripe sends webhook to /webhooks/stripe
 4. Webhook handler mints credits to the wallet
-5. If Stripe retries webhook, IntegrityError is caught for idempotency
+5. If Stripe retries webhook, only duplicate payment intents are treated as idempotent
 """
 
 import logging
@@ -40,6 +40,15 @@ class StripeIntegration:
 
     def __init__(self):
         self._session_factory = get_session_factory
+
+    @staticmethod
+    def _is_duplicate_payment_intent_error(exc: IntegrityError) -> bool:
+        """Return true only for the idempotency unique constraint."""
+        message = str(getattr(exc, "orig", exc)).lower()
+        return (
+            "payment_intent_id" in message
+            and ("unique" in message or "duplicate" in message)
+        )
 
     async def create_top_up_intent(
         self,
@@ -216,9 +225,9 @@ class StripeIntegration:
         """
         Mint credits to a wallet with idempotency.
 
-        The UNIQUE constraint on payment_intent_id ensures we never
-        double-mint. Catching IntegrityError returns 200 to Stripe
-        to stop their retry loop (hybrid Option A+B approach).
+        The UNIQUE constraint on payment_intent_id ensures we never double-mint.
+        Only that duplicate-key failure is swallowed to stop Stripe retries; other
+        integrity errors must surface so a real payment is not silently dropped.
         """
         try:
             async with self._session_factory()() as session:
@@ -250,7 +259,15 @@ class StripeIntegration:
 
                 await session.commit()
 
-        except IntegrityError:
+        except IntegrityError as exc:
+            if not self._is_duplicate_payment_intent_error(exc):
+                logger.exception(
+                    "Stripe credit mint failed with non-idempotency integrity error "
+                    "for PaymentIntent %s",
+                    payment_intent_id,
+                )
+                raise
+
             logger.info(
                 f"Idempotency catch: PaymentIntent {payment_intent_id} "
                 f"already processed. Swallowing error to return 200 OK."

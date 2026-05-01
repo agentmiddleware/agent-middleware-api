@@ -147,6 +147,7 @@ class DOMBridgeSessionRequest(BaseModel):
         description="URL to open in the browser",
         examples=["https://example.com/shop"],
     )
+    wallet_id: Optional[str] = Field(None, description="Wallet that owns this session")
     headless: bool = Field(default=True, description="Run browser in headless mode")
     viewport_width: int = Field(default=1280, description="Viewport width in pixels")
     viewport_height: int = Field(default=720, description="Viewport height in pixels")
