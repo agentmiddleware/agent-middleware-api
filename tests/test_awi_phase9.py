@@ -253,9 +253,7 @@ class TestWebAuthnProvider:
 
         import asyncio
 
-        asyncio.get_event_loop().run_until_complete(
-            provider.create_challenge("session1", "checkout")
-        )
+        asyncio.run(provider.create_challenge("session1", "checkout"))
 
         import time
 
@@ -318,6 +316,25 @@ class TestAWIPlaywrightBridge:
             await bridge.create_session("https://example.org")
 
         await bridge.destroy_session(session.session_id)
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_sessions_releases_capacity(self):
+        """Idle DOM bridge sessions are destroyed before capacity checks."""
+        bridge = AWIPlaywrightBridge(
+            mode=TranslationMode.CDP_DIRECT,
+            max_sessions=1,
+            session_ttl_seconds=1,
+        )
+        session = await bridge.create_session("https://example.com")
+        session.last_activity = datetime.utcnow() - timedelta(seconds=5)
+
+        replacement = await bridge.create_session("https://example.org")
+
+        assert replacement.session_id != session.session_id
+        assert await bridge.get_session(session.session_id) is None
+        assert await bridge.get_session(replacement.session_id) is not None
+
+        await bridge.destroy_session(replacement.session_id)
 
     @pytest.mark.asyncio
     async def test_destroy_session(self, bridge):

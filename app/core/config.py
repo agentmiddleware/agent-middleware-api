@@ -122,6 +122,7 @@ class Settings(BaseSettings):
     PLAYWRIGHT_BROWSER_TYPE: str = "chromium"
     PLAYWRIGHT_TIMEOUT_MS: int = 30000
     PLAYWRIGHT_MAX_SESSIONS: int = 8
+    PLAYWRIGHT_SESSION_TTL_SECONDS: int = 900
 
     # --- Behavioral Sandbox ---
     # Python execution backend: disabled, docker, or unsafe_host. Docker is the

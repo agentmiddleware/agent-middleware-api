@@ -3,12 +3,16 @@ Tests for the Behavioral Sandbox Engine — Phase 6
 """
 
 import asyncio
+import os
 import pytest
 from datetime import datetime, timezone
 
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.core.config import get_settings
+from app.services import behavioral_sandbox
+from app.core.durable_state import DurableStateStore
 from app.schemas.sandbox_behavioral import (
     SandboxEnvironmentCreate,
     SandboxEnvironmentType,
@@ -34,6 +38,21 @@ def sample_env_request():
         memory_limit_mb=128,
         network_access=False,
     )
+
+
+@pytest.fixture
+async def sqlite_store(tmp_path, monkeypatch):
+    """Create a SQLite durable-state store for sandbox rehydration tests."""
+    monkeypatch.setenv("SQLITE_URL", os.fspath(tmp_path / "state.db"))
+    monkeypatch.setenv("STATE_BACKEND", "sqlite")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("REDIS_URL", "")
+    get_settings.cache_clear()
+
+    store = DurableStateStore()
+    yield store
+    await store.close()
+    get_settings.cache_clear()
 
 
 class TestBehavioralSandboxSchemas:
@@ -238,6 +257,32 @@ class TestBehavioralSandboxEngine:
         assert "metrics" in state
 
         await engine.destroy_environment(env.env_id)
+
+    @pytest.mark.anyio
+    async def test_environment_rehydrates_from_durable_state(
+        self, sample_env_request, sqlite_store, monkeypatch
+    ):
+        """Sandbox env state survives process-local dictionary loss."""
+        monkeypatch.setattr(behavioral_sandbox, "get_durable_state", lambda: sqlite_store)
+
+        first_engine = BehavioralSandboxEngine(redis_url="redis://localhost:6379")
+        env = await first_engine.create_environment(sample_env_request)
+
+        request = ToolExecutionRequest(
+            env_id=env.env_id,
+            tool_name="rehydrate_probe",
+            tool_input={"code": "print('persisted')"},
+            dry_run=True,
+        )
+        await first_engine.execute_tool(request)
+
+        second_engine = BehavioralSandboxEngine(redis_url="redis://localhost:6379")
+        state = await second_engine.get_environment_state(env.env_id)
+
+        assert state["env_id"] == env.env_id
+        assert state["metrics"]["total_executions"] == 1
+
+        await second_engine.destroy_environment(env.env_id)
 
     @pytest.mark.anyio
     async def test_destroy_environment(self, engine, sample_env_request):

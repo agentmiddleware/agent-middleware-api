@@ -194,7 +194,7 @@ class TestServiceRegistry:
             func=service_b,
         )
 
-        services = asyncio.get_event_loop().run_until_complete(registry.list_local())
+        services = asyncio.run(registry.list_local())
         assert len(services) == 2
         assert all(s["is_local"] for s in services)
 

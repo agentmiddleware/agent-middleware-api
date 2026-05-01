@@ -8,9 +8,14 @@ import pytest
 
 from httpx import ASGITransport, AsyncClient
 
+import app.services.awi_session as awi_session_module
+import app.services.awi_task_queue as awi_task_queue_module
+from app.core.config import get_settings
+from app.core.durable_state import DurableStateStore
 from app.main import app
 from app.schemas.awi import (
     AWIActionCategory,
+    AWIExecutionRequest,
     AWISessionCreate,
     AWISessionStatus,
     AWIStandardAction,
@@ -196,6 +201,43 @@ class TestAWITaskQueue:
 
         assert is_paused is False
 
+    @pytest.mark.anyio
+    async def test_task_queue_rehydrates_from_durable_state(
+        self, tmp_path, monkeypatch
+    ):
+        """Another queue instance can reload pending and completed tasks."""
+        monkeypatch.setenv("STATE_BACKEND", "sqlite")
+        monkeypatch.setenv("SQLITE_URL", str(tmp_path / "awi-tasks.db"))
+        get_settings.cache_clear()
+        store = DurableStateStore()
+        monkeypatch.setattr(awi_task_queue_module, "get_durable_state", lambda: store)
+
+        try:
+            queue = AWITaskQueue()
+            task = await queue.create_task(
+                AWITaskCreate(
+                    task_type="durable",
+                    target_url="https://example.com",
+                    action_sequence=[{"action": "navigate_to"}],
+                    priority=2,
+                )
+            )
+            started = await queue.start_next_task()
+            assert started is not None
+            await queue.complete_task(task.task_id, {"ok": True})
+
+            rehydrated_queue = AWITaskQueue()
+            rehydrated = await rehydrated_queue.get_task(task.task_id)
+            status = await rehydrated_queue.get_queue_status()
+
+            assert rehydrated is not None
+            assert rehydrated.status == AWITaskStatus.COMPLETED
+            assert rehydrated.result == {"ok": True}
+            assert status.total_completed == 1
+        finally:
+            await store.close()
+            get_settings.cache_clear()
+
 
 class TestAWISessionManager:
     """Test AWI session manager."""
@@ -226,8 +268,6 @@ class TestAWISessionManager:
             )
         )
 
-        from app.schemas.awi import AWIExecutionRequest
-
         result = await manager.execute_action(
             AWIExecutionRequest(
                 session_id=session.session_id,
@@ -238,6 +278,43 @@ class TestAWISessionManager:
 
         assert result.status == "success"
         assert result.action == AWIStandardAction.NAVIGATE_TO
+
+    @pytest.mark.anyio
+    async def test_session_rehydrates_from_durable_state(self, tmp_path, monkeypatch):
+        """Another manager process can reload AWI session and state rows."""
+        monkeypatch.setenv("STATE_BACKEND", "sqlite")
+        monkeypatch.setenv("SQLITE_URL", str(tmp_path / "awi-state.db"))
+        get_settings.cache_clear()
+        store = DurableStateStore()
+        monkeypatch.setattr(awi_session_module, "get_durable_state", lambda: store)
+
+        try:
+            manager = AWISessionManager()
+            session = await manager.create_session(
+                AWISessionCreate(
+                    target_url="https://example.com",
+                    timeout_seconds=42,
+                )
+            )
+            await manager.execute_action(
+                AWIExecutionRequest(
+                    session_id=session.session_id,
+                    action=AWIStandardAction.NAVIGATE_TO,
+                    parameters={"url": "https://example.com/checkout"},
+                )
+            )
+
+            rehydrated_manager = AWISessionManager()
+            rehydrated = await rehydrated_manager.get_session(session.session_id)
+
+            assert rehydrated is not None
+            assert rehydrated.session_id == session.session_id
+            assert rehydrated.current_url == "https://example.com/checkout"
+            assert rehydrated.step_count == 1
+            assert rehydrated.timeout_seconds == 42
+        finally:
+            await store.close()
+            get_settings.cache_clear()
 
     @pytest.mark.anyio
     async def test_human_intervention_pause(self):

@@ -31,6 +31,8 @@ htmlcov/
 coverage.xml
 test.db
 *.db
+*.db-shm
+*.db-wal
 
 # OS
 .DS_Store

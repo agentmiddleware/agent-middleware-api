@@ -13,6 +13,7 @@ MCP Protocol Reference: https://modelcontextprotocol.io/
 """
 
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -74,11 +75,17 @@ class McpGenerator:
                 services.append(self._service_to_mcp_tool(service))
 
         if include_persistent:
-            import asyncio
-
-            persistent_services = asyncio.get_event_loop().run_until_complete(
-                self.registry.list_persistent(category=category)
-            )
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                persistent_services = asyncio.run(
+                    self.registry.list_persistent(category=category)
+                )
+            else:
+                raise RuntimeError(
+                    "generate_tools_json() cannot load persistent services from an "
+                    "active event loop. Use generate_tools_json_async() instead."
+                )
             for service in persistent_services:
                 services.append(self._service_to_mcp_tool(service))
 

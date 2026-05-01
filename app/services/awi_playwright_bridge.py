@@ -26,7 +26,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
@@ -328,6 +328,7 @@ class AWIPlaywrightBridge:
         browser_type: str = "chromium",
         default_timeout_ms: int = 30000,
         max_sessions: int = 8,
+        session_ttl_seconds: int = 900,
     ):
         """
         Initialize the AWI Playwright Bridge.
@@ -343,6 +344,7 @@ class AWIPlaywrightBridge:
         self._browser_type = browser_type
         self._default_timeout_ms = default_timeout_ms
         self._max_sessions = max_sessions
+        self._session_ttl_seconds = session_ttl_seconds
 
         self._sessions: dict[str, BridgeSession] = {}
 
@@ -371,6 +373,8 @@ class AWIPlaywrightBridge:
         Returns:
             BridgeSession with session_id and initial state.
         """
+        await self.cleanup_expired_sessions()
+
         if len(self._sessions) >= self._max_sessions:
             raise BrowserSessionLimitExceeded(
                 f"DOM bridge session limit exceeded ({self._max_sessions})"
@@ -429,10 +433,12 @@ class AWIPlaywrightBridge:
 
     async def get_session(self, session_id: str) -> Optional[BridgeSession]:
         """Get a session by ID."""
+        await self.cleanup_expired_sessions()
         return self._sessions.get(session_id)
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         """List all active sessions."""
+        await self.cleanup_expired_sessions()
         return [
             {
                 "session_id": s.session_id,
@@ -442,6 +448,23 @@ class AWIPlaywrightBridge:
             }
             for s in self._sessions.values()
         ]
+
+    async def cleanup_expired_sessions(self) -> dict[str, int]:
+        """Destroy idle browser sessions so forgotten contexts do not pile up."""
+        if self._session_ttl_seconds <= 0:
+            return {"expired": 0, "active": len(self._sessions)}
+
+        cutoff = datetime.utcnow() - timedelta(seconds=self._session_ttl_seconds)
+        expired_session_ids = [
+            session_id
+            for session_id, session in self._sessions.items()
+            if session.last_activity < cutoff
+        ]
+
+        for session_id in expired_session_ids:
+            await self.destroy_session(session_id)
+
+        return {"expired": len(expired_session_ids), "active": len(self._sessions)}
 
     # ─────────────────────────────────────────────────────────────────────────
     # AWI-to-DOM Translation
@@ -1876,5 +1899,6 @@ def get_playwright_bridge() -> AWIPlaywrightBridge:
             browser_type=settings.PLAYWRIGHT_BROWSER_TYPE,
             default_timeout_ms=settings.PLAYWRIGHT_TIMEOUT_MS,
             max_sessions=settings.PLAYWRIGHT_MAX_SESSIONS,
+            session_ttl_seconds=settings.PLAYWRIGHT_SESSION_TTL_SECONDS,
         )
     return _bridge

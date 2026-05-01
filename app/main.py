@@ -3,11 +3,10 @@ Agent-Native Middleware API
 ===========================
 Headless infrastructure for the Business-to-Agent (B2A) economy.
 
-Four service pillars:
-1. IoT Protocol Bridge — Secure protocol translation for physical devices
-2. Autonomous Product Manager — Telemetry-driven self-healing code
-3. Programmatic Media Engine — Video-to-viral-clip pipeline
-4. Agent Communications — Machine-to-machine messaging and swarm coordination
+Agent-facing capabilities include device protocol bridging, telemetry-driven
+code repair, media and content pipelines, agent communications, discovery,
+billing, security testing, sandboxes, MCP tooling, KYC, API key management,
+and AWI integrations.
 
 Zero GUI. Your customer is an autonomous agent.
 """
@@ -119,7 +118,7 @@ async def lifespan(app: FastAPI):
                 from .services.awi_session import get_awi_session_manager
 
                 session_mgr = get_awi_session_manager()
-                result = session_mgr.cleanup_expired()
+                result = await session_mgr.cleanup_expired_async()
                 if result["sessions_removed"] > 0:
                     logger.info(
                         "cleanup_completed",
@@ -214,9 +213,9 @@ app = FastAPI(
     description=(
         "## Agent-Native Middleware API\n\n"
         "Headless infrastructure for the B2A (Business-to-Agent) economy. "
-        "This API provides four core services that give AI agents the "
+        "This API provides a broad set of services that give AI agents the "
         "'hands' and 'eyes' to manipulate the digital and physical world.\n\n"
-        "### Service Pillars\n\n"
+        "### Capability Surface\n\n"
         "- **IoT Protocol Bridge** (`/v1/iot`) — Secure, ACL-enforced protocol "
         "translation for IoT devices (MQTT, CoAP, Zigbee, etc.)\n"
         "- **Autonomous Product Manager** (`/v1/telemetry`) — Ingest telemetry, "
@@ -224,7 +223,12 @@ app = FastAPI(
         "- **Programmatic Media Engine** (`/v1/media`) — Video ingestion, viral hook "
         "detection, reframing, captioning, and cross-platform distribution\n"
         "- **Agent Communications** (`/v1/comms`) — Agent registration, structured "
-        "messaging, capability discovery, and swarm task handoffs\n\n"
+        "messaging, capability discovery, and swarm task handoffs\n"
+        "- **Extended Agent Operations** — Content factory, oracle discovery, "
+        "billing, MCP tools, security scanning, launch automation, protocol "
+        "generation, RTaaS, sandboxes, telemetry scopes, dashboards, broadcast, "
+        "AI helpers, webhooks, KYC, API keys, AWI, discovery, well-known, and "
+        "static documentation routes\n\n"
         "### Authentication\n\n"
         "All endpoints require an API key passed via the `X-API-Key` header.\n\n"
         "### For Agents\n\n"
@@ -317,7 +321,8 @@ async def root():
         "version": settings.APP_VERSION,
         "description": (
             "Agent-native middleware for IoT bridging, autonomous code repair, "
-            "programmatic media distribution, and agent-to-agent communications."
+            "media distribution, agent communications, discovery, billing, "
+            "security, sandboxes, MCP tooling, and AWI integrations."
         ),
         "services": {
             "iot_bridge": {

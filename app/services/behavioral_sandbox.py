@@ -27,6 +27,7 @@ from typing import Any
 import redis.asyncio as redis
 
 from ..core.config import get_settings
+from ..core.durable_state import get_durable_state
 from ..schemas.sandbox_behavioral import (
     ExecutionStatus,
     SandboxEnvironment,
@@ -67,6 +68,62 @@ class BehavioralSandboxEngine:
         self.redis_url = redis_url
         self._redis: redis.Redis | None = None
         self._environments: dict[str, dict[str, Any]] = {}
+        self._state = get_durable_state()
+
+    @staticmethod
+    def _state_key(env_id: str) -> str:
+        return f"bhe.environments.{env_id}"
+
+    @staticmethod
+    def _env_data_to_json(env_data: dict[str, Any]) -> dict[str, Any]:
+        env = env_data["env"]
+        executions = env_data.get("executions", [])
+        return {
+            "env": env.model_dump(mode="json"),
+            "executions": [
+                execution.model_dump(mode="json") for execution in executions
+            ],
+            "state": env_data.get("state", {}),
+            "env_vars": env_data.get("env_vars", {}),
+        }
+
+    @staticmethod
+    def _env_data_from_json(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "env": SandboxEnvironment.model_validate(payload["env"]),
+            "executions": [
+                ToolExecutionResponse.model_validate(execution)
+                for execution in payload.get("executions", [])
+            ],
+            "state": payload.get("state", {}),
+            "env_vars": payload.get("env_vars", {}),
+        }
+
+    async def _save_environment(self, env_id: str) -> None:
+        if env_id not in self._environments:
+            return
+        await self._state.save_json(
+            self._state_key(env_id),
+            self._env_data_to_json(self._environments[env_id]),
+        )
+
+    async def _load_environment(self, env_id: str) -> dict[str, Any] | None:
+        env_data = self._environments.get(env_id)
+        if env_data:
+            return env_data
+
+        payload = await self._state.load_json(self._state_key(env_id))
+        if not isinstance(payload, dict):
+            return None
+
+        try:
+            env_data = self._env_data_from_json(payload)
+        except Exception:
+            logger.exception("Skipping corrupt behavioral sandbox state: %s", env_id)
+            return None
+
+        self._environments[env_id] = env_data
+        return env_data
 
     async def get_redis(self) -> redis.Redis | None:
         """Get or create Redis connection."""
@@ -101,6 +158,7 @@ class BehavioralSandboxEngine:
             "state": {},
             "env_vars": request.env_vars,
         }
+        await self._save_environment(env_id)
 
         r = await self.get_redis()
         if r:
@@ -125,10 +183,10 @@ class BehavioralSandboxEngine:
         self, request: ToolExecutionRequest
     ) -> ToolExecutionResponse:
         """Execute a tool within a sandbox environment."""
-        if request.env_id not in self._environments:
+        env_data = await self._load_environment(request.env_id)
+        if env_data is None:
             raise ValueError(f"Environment not found: {request.env_id}")
 
-        env_data = self._environments[request.env_id]
         env = env_data["env"]
 
         execution_id = f"exec-{uuid.uuid4().hex[:12]}"
@@ -193,6 +251,7 @@ class BehavioralSandboxEngine:
         )
 
         env_data["executions"].append(execution)
+        await self._save_environment(request.env_id)
 
         r = await self.get_redis()
         if r:
@@ -575,10 +634,10 @@ print(json.dumps(result))
 
     async def get_environment_state(self, env_id: str) -> dict[str, Any]:
         """Get current state of a sandbox environment."""
-        if env_id not in self._environments:
+        env_data = await self._load_environment(env_id)
+        if env_data is None:
             raise ValueError(f"Environment not found: {env_id}")
 
-        env_data = self._environments[env_id]
         env = env_data["env"]
 
         return {
@@ -618,10 +677,12 @@ print(json.dumps(result))
 
     async def destroy_environment(self, env_id: str) -> bool:
         """Destroy a sandbox environment."""
-        if env_id not in self._environments:
+        env_data = await self._load_environment(env_id)
+        if env_data is None:
             return False
 
-        del self._environments[env_id]
+        self._environments.pop(env_id, None)
+        await self._state.delete(self._state_key(env_id))
 
         r = await self.get_redis()
         if r:

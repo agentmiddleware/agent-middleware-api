@@ -33,8 +33,9 @@ async def setup_database():
     # Start from a clean SQLite file so stale rows from prior runs
     # (e.g., unique constraints on seeded session IDs) don't leak
     # into the next run.
-    if os.path.exists("test.db"):
-        os.remove("test.db")
+    for db_file in ("test.db", "test.db-shm", "test.db-wal"):
+        if os.path.exists(db_file):
+            os.remove(db_file)
 
     # Initialize tables
     await init_db()

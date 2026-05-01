@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/Tests-517%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-521%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
@@ -916,6 +916,8 @@ railway variables get DATABASE_URL
 Current durable service stores:
 - Billing (`wallets`, `ledger`, `alerts`, `velocity_snapshots`, `services`)
 - Comms (`agent registry`, row-keyed `inbox` and `outbox` messages)
+- AWI sessions and task queue (`awi.sessions.*`, `awi.session_state.*`, `awi.tasks.*`)
+- Behavioral sandbox environments (`bhe.environments.*`)
 - Telemetry (`events`, `anomalies`)
 
 Billing responses keep legacy numeric fields and also include `*_exact` decimal

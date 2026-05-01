@@ -21,7 +21,7 @@
 
 - First open-source platform to implement both MCP and a complete Agentic Web Interface (AWI), directly realizing the vision from arXiv:2506.10953 ("Build the web for agents, not agents for the web")
 - Fully self-hostable with zero vendor lock-in (unlike commercial control planes)
-- Production-beta safety foundation: wallet-scoped keys, exact decimal billing fields, KYC, WebAuthn/passkey protection, simulation-mode visibility, authenticated behavioral sandbox routes with optional Docker isolation, row-keyed comms persistence, RAG memory, and a capped Playwright DOM bridge
+- Production-beta safety foundation: wallet-scoped keys, exact decimal billing fields, KYC, WebAuthn/passkey protection, simulation-mode visibility, authenticated behavioral sandbox routes with optional Docker isolation and durable environment state, durable AWI session/task state, row-keyed comms persistence, RAG memory, and a capped/TTL-cleaned Playwright DOM bridge
 - Official wrappers for LangChain, CrewAI, and AutoGen — integrate in minutes
 - Designed for both agents and human developers
 

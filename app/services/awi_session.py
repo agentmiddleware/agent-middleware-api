@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from ..core.durable_state import get_durable_state
 from ..schemas.awi import (
     AWIExecutionRequest,
     AWIExecutionResponse,
@@ -52,6 +53,7 @@ class AWISessionManager:
     def __init__(self):
         self._sessions: dict[str, AWISession] = {}
         self._session_state: dict[str, dict[str, Any]] = {}
+        self._state = get_durable_state()
         self._vocabulary = get_awi_vocabulary()
         self._representation = get_awi_representation()
         self._playwright_bridge = get_playwright_bridge()
@@ -59,27 +61,16 @@ class AWISessionManager:
             str, str
         ] = {}  # Maps AWI session_id -> DOM bridge session_id
 
-    async def create_session(self, request: AWISessionCreate) -> AWISession:
-        """Create a new AWI session."""
-        session_id = f"awi-{uuid.uuid4().hex[:12]}"
+    @staticmethod
+    def _session_key(session_id: str) -> str:
+        return f"awi.sessions.{session_id}"
 
-        session = AWISession(
-            session_id=session_id,
-            target_url=request.target_url,
-            wallet_id=request.wallet_id,
-            status=AWISessionStatus.CREATED,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-            current_url=request.target_url,
-            max_steps=request.max_steps,
-            human_pause_enabled=request.allow_human_pause,
-            representation_history=[],
-            action_history=[],
-        )
+    @staticmethod
+    def _session_state_key(session_id: str) -> str:
+        return f"awi.session_state.{session_id}"
 
-        self._sessions[session_id] = session
-
-        self._session_state[session_id] = {
+    def _initial_session_state(self, request: AWISessionCreate) -> dict[str, Any]:
+        return {
             "target_url": request.target_url,
             "current_url": request.target_url,
             "cookies": {},
@@ -95,18 +86,74 @@ class AWISessionManager:
             },
         }
 
+    async def _save_session(self, session_id: str) -> None:
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+
+        await self._state.save_json(
+            self._session_key(session_id), session.model_dump(mode="json")
+        )
+        await self._state.save_json(
+            self._session_state_key(session_id),
+            self._session_state.get(session_id, {}),
+        )
+
+    async def _load_session(self, session_id: str) -> AWISession | None:
+        session = self._sessions.get(session_id)
+        if session:
+            return session
+
+        payload = await self._state.load_json(self._session_key(session_id))
+        if not isinstance(payload, dict):
+            return None
+
+        session = AWISession.model_validate(payload)
+        raw_state = await self._state.load_json(self._session_state_key(session_id))
+        session_state = raw_state if isinstance(raw_state, dict) else {}
+
+        self._sessions[session_id] = session
+        self._session_state[session_id] = session_state
+        dom_session_id = session_state.get("dom_session_id")
+        if isinstance(dom_session_id, str):
+            self._dom_sessions[session_id] = dom_session_id
+        return session
+
+    async def create_session(self, request: AWISessionCreate) -> AWISession:
+        """Create a new AWI session."""
+        session_id = f"awi-{uuid.uuid4().hex[:12]}"
+
+        session = AWISession(
+            session_id=session_id,
+            target_url=request.target_url,
+            wallet_id=request.wallet_id,
+            status=AWISessionStatus.CREATED,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            current_url=request.target_url,
+            max_steps=request.max_steps,
+            timeout_seconds=request.timeout_seconds,
+            human_pause_enabled=request.allow_human_pause,
+            representation_history=[],
+            action_history=[],
+        )
+
+        self._sessions[session_id] = session
+        self._session_state[session_id] = self._initial_session_state(request)
+        await self._save_session(session_id)
+
         logger.info(f"Created AWI session: {session_id}")
         return session
 
     async def get_session(self, session_id: str) -> AWISession | None:
         """Get an existing session."""
-        return self._sessions.get(session_id)
+        return await self._load_session(session_id)
 
     async def execute_action(
         self, request: AWIExecutionRequest
     ) -> AWIExecutionResponse:
         """Execute an AWI action within a session."""
-        session = self._sessions.get(request.session_id)
+        session = await self._load_session(request.session_id)
         if not session:
             return AWIExecutionResponse(
                 execution_id=f"exec-{uuid.uuid4().hex[:12]}",
@@ -129,6 +176,8 @@ class AWISessionManager:
 
         if session.step_count >= session.max_steps:
             session.status = AWISessionStatus.COMPLETED
+            session.updated_at = datetime.now(timezone.utc)
+            await self._save_session(request.session_id)
             return AWIExecutionResponse(
                 execution_id=f"exec-{uuid.uuid4().hex[:12]}",
                 session_id=request.session_id,
@@ -225,6 +274,8 @@ class AWISessionManager:
         session.step_count += 1
         session.updated_at = datetime.now(timezone.utc)
         session.status = AWISessionStatus.ACTIVE
+        if isinstance(state.get("current_url"), str):
+            session.current_url = state["current_url"]
 
         representation = None
         if request.representation_request:
@@ -241,6 +292,7 @@ class AWISessionManager:
             (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         )
         cost = self._vocabulary.get_estimated_cost(request.action)
+        await self._save_session(request.session_id)
 
         return AWIExecutionResponse(
             execution_id=execution_id,
@@ -297,7 +349,7 @@ class AWISessionManager:
         self, request: AWIRepresentationRequest
     ) -> AWIRepresentationResponse | None:
         """Request a specific representation of the session state."""
-        session = self._sessions.get(request.session_id)
+        session = await self._load_session(request.session_id)
         if not session:
             return None
 
@@ -312,6 +364,8 @@ class AWISessionManager:
         )
 
         session.representation_history.append(result)
+        session.updated_at = datetime.now(timezone.utc)
+        await self._save_session(request.session_id)
 
         return AWIRepresentationResponse(
             representation_id=result.get("representation_id", ""),
@@ -326,7 +380,7 @@ class AWISessionManager:
         self, intervention: AWIHumanIntervention
     ) -> dict[str, Any]:
         """Handle human intervention in a session."""
-        session = self._sessions.get(intervention.session_id)
+        session = await self._load_session(intervention.session_id)
         if not session:
             return {"success": False, "error": "Session not found"}
 
@@ -334,12 +388,16 @@ class AWISessionManager:
             session.status = AWISessionStatus.PAUSED
             session.paused_by_human = True
             session.pause_reason = intervention.reason
+            session.updated_at = datetime.now(timezone.utc)
+            await self._save_session(intervention.session_id)
             return {"success": True, "status": "paused"}
 
         elif intervention.action == "resume":
             session.status = AWISessionStatus.ACTIVE
             session.paused_by_human = False
             session.pause_reason = None
+            session.updated_at = datetime.now(timezone.utc)
+            await self._save_session(intervention.session_id)
             return {"success": True, "status": "active"}
 
         elif intervention.action == "steer":
@@ -352,6 +410,8 @@ class AWISessionManager:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
+            session.updated_at = datetime.now(timezone.utc)
+            await self._save_session(intervention.session_id)
             return {
                 "success": True,
                 "status": "steered",
@@ -362,15 +422,16 @@ class AWISessionManager:
 
     async def destroy_session(self, session_id: str) -> bool:
         """Destroy an AWI session."""
-        if session_id not in self._sessions:
+        if not await self._load_session(session_id):
             return False
 
         # Cleanup DOM bridge if attached
         await self.detach_dom_bridge(session_id)
 
-        del self._sessions[session_id]
-        if session_id in self._session_state:
-            del self._session_state[session_id]
+        self._sessions.pop(session_id, None)
+        self._session_state.pop(session_id, None)
+        await self._state.delete(self._session_key(session_id))
+        await self._state.delete(self._session_state_key(session_id))
 
         logger.info(f"Destroyed AWI session: {session_id}")
         return True
@@ -395,7 +456,7 @@ class AWISessionManager:
         Returns:
             Dict with attachment status and initial DOM state.
         """
-        session = self._sessions.get(session_id)
+        session = await self._load_session(session_id)
         if not session:
             raise ValueError(f"Session not found: {session_id}")
 
@@ -418,6 +479,8 @@ class AWISessionManager:
 
         state["page_state"] = representation
         state["current_url"] = url
+        session.updated_at = datetime.now(timezone.utc)
+        await self._save_session(session_id)
 
         logger.info(
             f"Attached DOM bridge to AWI session {session_id} (DOM: {dom_session.session_id})"
@@ -447,6 +510,10 @@ class AWISessionManager:
         state["dom_attached"] = False
         state.pop("dom_session_id", None)
         self._session_state[session_id] = state
+        session = await self._load_session(session_id)
+        if session:
+            session.updated_at = datetime.now(timezone.utc)
+            await self._save_session(session_id)
 
         logger.info(f"Detached DOM bridge from AWI session {session_id}")
 
@@ -458,6 +525,7 @@ class AWISessionManager:
 
     async def get_dom_bridge_status(self, session_id: str) -> dict[str, Any]:
         """Check if a session has a DOM bridge attached."""
+        await self._load_session(session_id)
         dom_session_id = self._dom_sessions.get(session_id)
         if not dom_session_id:
             return {"attached": False, "session_id": session_id}
@@ -527,8 +595,6 @@ class AWISessionManager:
         Returns:
             Dict with count of removed sessions.
         """
-        from datetime import datetime, timezone
-
         now = datetime.now(timezone.utc)
         expired_ids = [
             sid for sid, session in self._sessions.items() if session.expires_at < now
@@ -548,6 +614,39 @@ class AWISessionManager:
                 del self._session_state[session_id]
             if session_id in self._dom_sessions:
                 del self._dom_sessions[session_id]
+
+        if expired_ids:
+            logger.info(f"Cleaned up {len(expired_ids)} expired sessions")
+
+        return {"sessions_removed": len(expired_ids)}
+
+    async def cleanup_expired_async(self) -> dict[str, int]:
+        """
+        Remove expired sessions from local memory and durable state.
+
+        This is the production cleanup path used by the FastAPI lifespan task.
+        The synchronous cleanup_expired method is retained for legacy callers
+        that only need to sweep the current process.
+        """
+        for key in await self._state.list_keys("awi.sessions."):
+            session_id = key.removeprefix("awi.sessions.")
+            await self._load_session(session_id)
+
+        expired_ids = [
+            sid
+            for sid, session in self._sessions.items()
+            if session.expires_at < datetime.now(timezone.utc)
+        ]
+
+        for session_id in expired_ids:
+            dom_session_id = self._dom_sessions.pop(session_id, None)
+            if dom_session_id:
+                await self._playwright_bridge.destroy_session(dom_session_id)
+
+            self._sessions.pop(session_id, None)
+            self._session_state.pop(session_id, None)
+            await self._state.delete(self._session_key(session_id))
+            await self._state.delete(self._session_state_key(session_id))
 
         if expired_ids:
             logger.info(f"Cleaned up {len(expired_ids)} expired sessions")
