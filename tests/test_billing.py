@@ -8,12 +8,6 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
-
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
@@ -379,3 +373,86 @@ async def test_billing_requires_api_key(client):
 async def test_charge_requires_api_key(client):
     resp = await client.post("/v1/billing/charge?wallet_id=x&service=iot_bridge")
     assert resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_db_key_cannot_operate_on_other_wallet(client, api_headers):
+    wallet_a_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Tenant A", "email": "a@test.com", "initial_credits": 1000},
+        headers=api_headers,
+    )
+    wallet_b_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Tenant B", "email": "b@test.com", "initial_credits": 1000},
+        headers=api_headers,
+    )
+    wallet_a = wallet_a_resp.json()["wallet_id"]
+    wallet_b = wallet_b_resp.json()["wallet_id"]
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_a},
+        headers=api_headers,
+    )
+    db_headers = {"X-API-Key": key_resp.json()["api_key"]}
+
+    blocked_requests = [
+        client.get(f"/v1/billing/wallets/{wallet_b}", headers=db_headers),
+        client.get(f"/v1/billing/ledger/{wallet_b}", headers=db_headers),
+        client.post(
+            f"/v1/billing/charge?wallet_id={wallet_b}&service=iot_bridge",
+            headers=db_headers,
+        ),
+        client.post(
+            "/v1/billing/top-up",
+            json={"wallet_id": wallet_b, "amount_fiat": 1.0},
+            headers=db_headers,
+        ),
+        client.post(
+            f"/v1/billing/transfer?from_wallet_id={wallet_b}&to_wallet_id={wallet_a}&amount=1",
+            headers=db_headers,
+        ),
+        client.get(f"/v1/billing/alerts?wallet_id={wallet_b}", headers=db_headers),
+        client.get(f"/v1/billing/wallets/{wallet_b}/velocity", headers=db_headers),
+        client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_b},
+            headers=db_headers,
+        ),
+    ]
+
+    for request in blocked_requests:
+        resp = await request
+        assert resp.status_code == 403
+
+    own_resp = await client.get(f"/v1/billing/wallets/{wallet_a}", headers=db_headers)
+    assert own_resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_bootstrap_key_can_manage_multiple_wallets(client, api_headers):
+    wallet_a_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Admin A", "email": "admin-a@test.com"},
+        headers=api_headers,
+    )
+    wallet_b_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Admin B", "email": "admin-b@test.com"},
+        headers=api_headers,
+    )
+
+    for wallet_id in (
+        wallet_a_resp.json()["wallet_id"],
+        wallet_b_resp.json()["wallet_id"],
+    ):
+        resp = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+        assert resp.status_code == 200
+
+        key_resp = await client.post(
+            "/v1/api-keys",
+            json={"wallet_id": wallet_id},
+            headers=api_headers,
+        )
+        assert key_resp.status_code == 201

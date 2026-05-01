@@ -19,14 +19,14 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, Field
+from pydantic import BaseModel, Field
 
+from ..core.auth import AuthContext, get_auth_context
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
 from ..schemas.billing import ServiceCategory
-from .billing import verify_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +229,7 @@ async def _handle_tools_call(params: dict) -> dict:
 async def invoke_tool(
     service_id: str,
     request: ToolCallRequest,
-    api_key: str | None = None,
+    auth: AuthContext = Depends(get_auth_context),
 ) -> ToolCallResponse:
     """
     Invoke an MCP-enabled service.
@@ -242,12 +242,6 @@ async def invoke_tool(
 
     For persistent services, see POST /v1/billing/services/{id}/invoke
     """
-    api_key = api_key or request.headers.get("X-API-Key")
-    if not api_key:
-        raise HTTPException(status_code=401, detail="Missing API key")
-
-    await verify_api_key(api_key)
-
     registry = get_service_registry()
     service = registry.get_local(service_id)
 
@@ -264,6 +258,7 @@ async def invoke_tool(
 
     if not mcp_context.wallet_id:
         raise HTTPException(status_code=400, detail="Missing wallet_id")
+    auth.require_wallet_access(mcp_context.wallet_id)
 
     func = registry.get_local_func(service_id)
     if func:

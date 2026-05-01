@@ -26,7 +26,6 @@ def upgrade() -> None:
             "payment_intent_id",
             sa.String(100),
             nullable=True,
-            unique=True,
         ),
     )
     op.add_column(

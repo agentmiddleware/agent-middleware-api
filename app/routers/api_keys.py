@@ -6,7 +6,7 @@ Handles API key creation, rotation, and revocation for wallet security.
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..services.api_key_service import (
     get_api_key_service,
     KeyNotFoundError,
@@ -46,7 +46,7 @@ router = APIRouter(
 )
 async def create_api_key(
     request: CreateAPIKeyRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Create a new API key for a wallet.
@@ -54,6 +54,7 @@ async def create_api_key(
     Returns the full API key which is only shown once.
     Store it securely - it cannot be retrieved later.
     """
+    auth.require_wallet_access(request.wallet_id)
     service = get_api_key_service()
 
     try:
@@ -84,9 +85,10 @@ async def create_api_key(
 )
 async def list_api_keys(
     wallet_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """List all API keys for a wallet."""
+    auth.require_wallet_access(wallet_id)
     service = get_api_key_service()
 
     try:
@@ -113,13 +115,14 @@ async def list_api_keys(
 async def rotate_api_key(
     request: RotateAPIKeyRequest,
     http_request: Request,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Rotate an API key.
 
     Creates a new key and optionally revokes the old one.
     """
+    auth.require_wallet_access(request.wallet_id)
     service = get_api_key_service()
 
     client_ip = http_request.client.host if http_request.client else None
@@ -172,9 +175,10 @@ async def revoke_api_key(
     wallet_id: str,
     key_id: str,
     reason: str = "user_request",
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Revoke an API key immediately."""
+    auth.require_wallet_access(wallet_id)
     service = get_api_key_service()
 
     try:
@@ -194,7 +198,7 @@ async def revoke_api_key(
 )
 async def emergency_revoke(
     request: EmergencyKeyRevocationRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Emergency revocation - revoke all keys for a wallet.
@@ -202,6 +206,7 @@ async def emergency_revoke(
     Use this when a wallet may be compromised.
     Optionally creates a new emergency key.
     """
+    auth.require_wallet_access(request.wallet_id)
     service = get_api_key_service()
 
     try:
@@ -243,9 +248,10 @@ async def emergency_revoke(
 async def get_rotation_logs(
     wallet_id: str,
     limit: int = 50,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Get rotation audit logs for a wallet."""
+    auth.require_wallet_access(wallet_id)
     service = get_api_key_service()
 
     try:

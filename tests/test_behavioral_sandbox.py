@@ -251,8 +251,25 @@ class TestBehavioralSandboxEngine:
 class TestBehavioralSandboxRouter:
     """Test the behavioral sandbox router endpoints."""
 
+    @pytest.fixture
+    def api_headers(self):
+        return {"X-API-Key": "test-key"}
+
     @pytest.mark.anyio
-    async def test_create_environment_endpoint(self):
+    async def test_create_environment_endpoint_requires_api_key(self):
+        """Behavioral sandbox endpoints require authentication."""
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/v1/sandbox/behavioral/environments",
+                json={"name": "unauthenticated"},
+            )
+
+            assert response.status_code == 401
+
+    @pytest.mark.anyio
+    async def test_create_environment_endpoint(self, api_headers):
         """Test POST /v1/sandbox/behavioral/environments."""
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -264,6 +281,7 @@ class TestBehavioralSandboxRouter:
                     "environment_type": "python_subprocess",
                     "timeout_seconds": 10,
                 },
+                headers=api_headers,
             )
 
             assert response.status_code == 201
@@ -272,7 +290,7 @@ class TestBehavioralSandboxRouter:
             assert data["name"] == "router-test"
 
     @pytest.mark.anyio
-    async def test_execute_tool_endpoint(self):
+    async def test_execute_tool_endpoint(self, api_headers):
         """Test POST /v1/sandbox/behavioral/execute."""
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -280,6 +298,7 @@ class TestBehavioralSandboxRouter:
             create_response = await client.post(
                 "/v1/sandbox/behavioral/environments",
                 json={"name": "execute-test"},
+                headers=api_headers,
             )
             env_id = create_response.json()["env_id"]
 
@@ -291,6 +310,7 @@ class TestBehavioralSandboxRouter:
                     "tool_input": {"code": "print('hello')"},
                     "dry_run": True,
                 },
+                headers=api_headers,
             )
 
             assert response.status_code == 200
@@ -299,7 +319,7 @@ class TestBehavioralSandboxRouter:
             assert data["env_id"] == env_id
 
     @pytest.mark.anyio
-    async def test_get_environment_endpoint(self):
+    async def test_get_environment_endpoint(self, api_headers):
         """Test GET /v1/sandbox/behavioral/environments/{env_id}."""
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -307,17 +327,21 @@ class TestBehavioralSandboxRouter:
             create_response = await client.post(
                 "/v1/sandbox/behavioral/environments",
                 json={"name": "get-test"},
+                headers=api_headers,
             )
             env_id = create_response.json()["env_id"]
 
-            response = await client.get(f"/v1/sandbox/behavioral/environments/{env_id}")
+            response = await client.get(
+                f"/v1/sandbox/behavioral/environments/{env_id}",
+                headers=api_headers,
+            )
 
             assert response.status_code == 200
             data = response.json()
             assert data["env_id"] == env_id
 
     @pytest.mark.anyio
-    async def test_delete_environment_endpoint(self):
+    async def test_delete_environment_endpoint(self, api_headers):
         """Test DELETE /v1/sandbox/behavioral/environments/{env_id}."""
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -325,17 +349,19 @@ class TestBehavioralSandboxRouter:
             create_response = await client.post(
                 "/v1/sandbox/behavioral/environments",
                 json={"name": "delete-test"},
+                headers=api_headers,
             )
             env_id = create_response.json()["env_id"]
 
             response = await client.delete(
-                f"/v1/sandbox/behavioral/environments/{env_id}"
+                f"/v1/sandbox/behavioral/environments/{env_id}",
+                headers=api_headers,
             )
 
             assert response.status_code == 204
 
     @pytest.mark.anyio
-    async def test_execute_nonexistent_environment(self):
+    async def test_execute_nonexistent_environment(self, api_headers):
         """Test execution on non-existent environment returns 404."""
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -347,6 +373,7 @@ class TestBehavioralSandboxRouter:
                     "tool_name": "test",
                     "tool_input": {},
                 },
+                headers=api_headers,
             )
 
             assert response.status_code == 404

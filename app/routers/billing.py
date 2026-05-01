@@ -12,7 +12,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.dependencies import get_agent_money
 from ..services.agent_money import (
     AgentMoney,
@@ -44,6 +44,11 @@ from ..schemas.billing import (
     RegisterServiceRequest,
     ServiceRegistration,
 )
+
+
+def _require_wallet_access(auth: AuthContext, wallet_id: str) -> None:
+    auth.require_wallet_access(wallet_id)
+
 
 router = APIRouter(
     prefix="/v1/billing",
@@ -104,9 +109,10 @@ async def create_sponsor_wallet(
 )
 async def create_agent_wallet(
     request: CreateAgentWalletRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, request.sponsor_wallet_id)
     try:
         return await money.create_agent_wallet(
             sponsor_wallet_id=request.sponsor_wallet_id,
@@ -120,7 +126,7 @@ async def create_agent_wallet(
             auto_refill=request.auto_refill,
             auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),
             auto_refill_amount=Decimal(str(request.auto_refill_amount)),
-            owner_key=api_key,
+            owner_key=auth.raw_key,
         )
     except WalletNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -160,9 +166,10 @@ async def create_agent_wallet(
 )
 async def create_child_wallet(
     request: CreateChildWalletRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, request.parent_wallet_id)
     try:
         response = await money.create_child_wallet(
             parent_wallet_id=request.parent_wallet_id,
@@ -172,7 +179,7 @@ async def create_child_wallet(
             task_description=request.task_description,
             ttl_seconds=request.ttl_seconds,
             auto_reclaim=request.auto_reclaim,
-            owner_key=api_key,
+            owner_key=auth.raw_key,
         )
         return ChildWalletResponse(
             wallet_id=response.wallet_id,
@@ -219,9 +226,10 @@ async def create_child_wallet(
 )
 async def reclaim_child_wallet(
     wallet_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, wallet_id)
     try:
         result = await money.reclaim_child_wallet(wallet_id)
         return ReclaimResponse(
@@ -248,9 +256,10 @@ async def reclaim_child_wallet(
 )
 async def get_swarm_budget(
     wallet_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, wallet_id)
     try:
         result = await money.get_swarm_budget(wallet_id)
         return SwarmBudgetSummary(
@@ -274,9 +283,10 @@ async def get_swarm_budget(
 )
 async def get_wallet(
     wallet_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, wallet_id)
     wallet = await money.get_wallet(wallet_id)
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
@@ -290,13 +300,16 @@ async def get_wallet(
 )
 async def list_wallets(
     wallet_type: str | None = Query(None, description="Filter by wallet type"),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
-    wallets = await money.list_wallets(
-        wallet_type=wallet_type,
-        owner_key=api_key,
-    )
+    if auth.is_bootstrap_admin:
+        wallets = await money.list_wallets(wallet_type=wallet_type)
+    else:
+        wallet = await money.get_wallet(auth.wallet_id or "")
+        wallets = [wallet] if wallet else []
+        if wallet_type:
+            wallets = [w for w in wallets if w.wallet_type.value == wallet_type]
     return WalletListResponse(wallets=wallets, total=len(wallets))
 
 
@@ -310,9 +323,10 @@ async def list_wallets(
 async def get_ledger(
     wallet_id: str,
     limit: int = Query(50, ge=1, le=200),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, wallet_id)
     entries = await money.get_ledger(wallet_id, limit)
 
     period_credits = sum(e.amount for e in entries if e.amount > 0)
@@ -343,9 +357,10 @@ async def charge_wallet(
     units: float = Query(1.0, gt=0, description="Number of units consumed"),
     request_path: str | None = None,
     description: str | None = None,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, wallet_id)
     category = service_category or service
     if not category:
         raise HTTPException(
@@ -393,9 +408,10 @@ async def charge_wallet(
 )
 async def top_up_wallet(
     request: TopUpRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    _require_wallet_access(auth, request.wallet_id)
     try:
         return await money.top_up(
             wallet_id=request.wallet_id,
@@ -436,8 +452,9 @@ async def prepare_top_up(
     wallet_id: str,
     amount_fiat: float = Query(..., gt=0, description="Amount in fiat currency (USD)"),
     currency: str = Query("USD", description="Fiat currency code"),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
+    _require_wallet_access(auth, wallet_id)
     """
     Prepare a fiat top-up by creating a Stripe PaymentIntent.
 
@@ -510,7 +527,7 @@ async def transfer_wallets(
         None,
         description="Optional ID to link related transfers",
     ),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     """
@@ -519,6 +536,7 @@ async def transfer_wallets(
     This enables agent-to-agent payments for completed tasks.
     Both wallets are locked during the transaction for ACID compliance.
     """
+    _require_wallet_access(auth, from_wallet_id)
     try:
         result = await money.transfer(
             from_wallet_id=from_wallet_id,
@@ -588,10 +606,15 @@ async def get_arbitrage_report(
 )
 async def get_alerts(
     wallet_id: str | None = Query(None),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
-    alerts = await money.get_alerts(wallet_id)
+    if wallet_id:
+        _require_wallet_access(auth, wallet_id)
+        wallet_filter = wallet_id
+    else:
+        wallet_filter = None if auth.is_bootstrap_admin else auth.wallet_id
+    alerts = await money.get_alerts(wallet_filter)
     unacknowledged = sum(1 for a in alerts if not a.acknowledged)
     return AlertListResponse(
         alerts=alerts,
@@ -662,11 +685,12 @@ async def list_services(
 )
 async def get_velocity_status(
     wallet_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Get current velocity status including hourly/daily spend vs limits."""
     from ..services.velocity_monitor import get_velocity_monitor
 
+    _require_wallet_access(auth, wallet_id)
     monitor = get_velocity_monitor()
     return await monitor.get_velocity_status(wallet_id)
 
@@ -732,10 +756,11 @@ class SimulatedChargeResponse(BaseModel):
 )
 async def create_dry_run_session(
     request: CreateDryRunSessionRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     """Start a new dry-run session for the specified wallet."""
+    _require_wallet_access(auth, request.wallet_id)
     wallet = await money.get_wallet(request.wallet_id)
     if not wallet:
         raise HTTPException(
@@ -769,7 +794,7 @@ async def create_dry_run_session(
 )
 async def get_dry_run_session(
     session_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Get the current state of a dry-run session."""
     shadow_ledger = get_shadow_ledger()
@@ -784,6 +809,7 @@ async def get_dry_run_session(
             },
         )
 
+    _require_wallet_access(auth, session.wallet_id)
     return {
         "session_id": session.session_id,
         "wallet_id": session.wallet_id,
@@ -815,13 +841,12 @@ async def get_dry_run_session(
 )
 async def end_dry_run_session(
     session_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """End a dry-run session and return summary."""
     shadow_ledger = get_shadow_ledger()
-    summary = await shadow_ledger.end_session(session_id)
-
-    if not summary:
+    session = await shadow_ledger.get_session(session_id)
+    if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -829,6 +854,8 @@ async def end_dry_run_session(
                 "message": f"Session {session_id} not found",
             },
         )
+    _require_wallet_access(auth, session.wallet_id)
+    summary = await shadow_ledger.end_session(session_id)
 
     return {
         "session_id": summary.session_id,
@@ -854,7 +881,7 @@ async def end_dry_run_session(
 )
 async def commit_dry_run_session(
     session_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     """
@@ -864,9 +891,8 @@ async def commit_dry_run_session(
     The session is ended after committing.
     """
     shadow_ledger = get_shadow_ledger()
-    result = await shadow_ledger.commit_session(session_id, money)
-
-    if result.wallet_id == "":
+    session = await shadow_ledger.get_session(session_id)
+    if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -874,6 +900,8 @@ async def commit_dry_run_session(
                 "message": f"Session {session_id} not found",
             },
         )
+    _require_wallet_access(auth, session.wallet_id)
+    result = await shadow_ledger.commit_session(session_id, money)
 
     return {
         "session_id": result.session_id,
@@ -900,7 +928,7 @@ async def commit_dry_run_session(
 )
 async def revert_dry_run_session(
     session_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Revert a sandbox session.
@@ -909,9 +937,8 @@ async def revert_dry_run_session(
     The session is ended after reverting.
     """
     shadow_ledger = get_shadow_ledger()
-    result = await shadow_ledger.revert_session(session_id)
-
-    if not result.reverted:
+    session = await shadow_ledger.get_session(session_id)
+    if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -919,6 +946,8 @@ async def revert_dry_run_session(
                 "message": f"Session {session_id} not found",
             },
         )
+    _require_wallet_access(auth, session.wallet_id)
+    result = await shadow_ledger.revert_session(session_id)
 
     return {
         "session_id": result.session_id,
@@ -943,7 +972,7 @@ async def revert_dry_run_session(
 )
 async def simulate_charge(
     request: SimulatedChargeRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     """Simulate a charge operation."""
@@ -951,6 +980,16 @@ async def simulate_charge(
 
     if session_id:
         shadow_ledger = get_shadow_ledger()
+        session = await shadow_ledger.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "session_not_found",
+                    "message": f"Session {session_id} not found",
+                },
+            )
+        _require_wallet_access(auth, session.wallet_id)
         result = await shadow_ledger.simulate_charge(
             session_id=session_id,
             service_category=request.service,
@@ -970,6 +1009,7 @@ async def simulate_charge(
             reason=result.reason,
         )
 
+    _require_wallet_access(auth, request.wallet_id)
     wallet = await money.get_wallet(request.wallet_id)
     if not wallet:
         raise HTTPException(
