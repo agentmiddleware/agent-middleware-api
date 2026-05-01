@@ -30,11 +30,6 @@ from app.schemas.oracle import (
 from app.services.oracle import OracleStore
 
 
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_tables():
     """Reset oracle tables between tests — other tests share the DB."""
