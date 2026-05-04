@@ -18,7 +18,7 @@ httpx>=0.28.1           # Async HTTP client for git API calls
 python-multipart>=0.0.9 # File upload support
 
 # --- Utilities ---
-python-dotenv>=1.0.0    # .env file loading
+python-dotenv>=1.2.2    # .env file loading
 redis>=5.2.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.30.0         # PostgreSQL-backed runtime persistence
 stripe>=15.1.0           # Stripe payment processing
