@@ -19,6 +19,8 @@ content factory perform real external work when they are still simulated.
 - [ ] Call `GET /health/dependencies` and read `simulation_modes`. Any service
       with value `true` is using **simulation** behavior for that domain (see
       `app/core/runtime_mode.py`).
+- [ ] Regenerate and skim [Simulation & MCP honesty inventory](simulations-inventory.md)
+      (`python scripts/generate_sim_inventory.py`) for a pillar × MCP tool matrix.
 - [ ] Compare deployed configuration to `.env.example` (`SIMULATION_MODE_*`
       variables). Defaults in code treat simulation as **on** for those domains.
 - [ ] If you need a real integration, set the corresponding flag to `false`

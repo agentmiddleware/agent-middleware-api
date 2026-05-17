@@ -56,6 +56,10 @@ jobs:
       - name: Verify docs/openapi.json matches app (single source)
         if: matrix.python-version == '3.12'
         run: python scripts/export_openapi.py --check
+
+      - name: Verify simulation inventory matches runtime (Phase 0)
+        if: matrix.python-version == '3.12'
+        run: python scripts/generate_sim_inventory.py --check
   lint:
     runs-on: ubuntu-latest
     steps:

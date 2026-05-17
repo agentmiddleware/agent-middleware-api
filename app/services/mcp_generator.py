@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..services.service_registry import ServiceRegistry, get_service_registry
+from ..services.mcp_integration_truth import truth_for_category
 from ..schemas.billing import ServiceCategory
 
 logger = logging.getLogger(__name__)
@@ -146,11 +147,19 @@ class McpGenerator:
             ),
         }
 
+        cat = service.get("category", "unknown") or "unknown"
+        truth = truth_for_category(cat)
+
         annotations = {
             "creditsPerCall": service.get("credits_per_unit", 1.0),
             "unitName": service.get("unit_name", "call"),
-            "category": service.get("category", "unknown"),
+            "category": cat,
+            "simulation": truth["simulation"],
+            "integrationStatus": truth["integration_status"],
         }
+
+        if truth.get("runtime_service"):
+            annotations["runtimeService"] = truth["runtime_service"]
 
         if service.get("owner_wallet_id"):
             annotations["providerWallet"] = service["owner_wallet_id"]

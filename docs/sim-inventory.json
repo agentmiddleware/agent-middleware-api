@@ -1,0 +1,129 @@
+{
+  "generated_at": "2026-05-17T03:30:24.686988+00:00",
+  "mcp_tool_count": 9,
+  "mcp_tools_local": [
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_dom_action_preview",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_dom_bridge_session",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_dom_state",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_dom_sync",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_memory_index",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_passkey_challenge",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_passkey_verify",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_rag_query",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    },
+    {
+      "category": "agent_comms",
+      "integration_status": "simulated",
+      "name": "awi_session_context",
+      "runtime_service": "agent_comms",
+      "simulation": true
+    }
+  ],
+  "services": [
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "agent_comms",
+      "settings_attribute": "SIMULATION_MODE_AGENT_COMMS"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "content_factory",
+      "settings_attribute": "SIMULATION_MODE_CONTENT_FACTORY"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "iot_bridge",
+      "settings_attribute": "SIMULATION_MODE_IOT_BRIDGE"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "media_engine",
+      "settings_attribute": "SIMULATION_MODE_MEDIA_ENGINE"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "oracle",
+      "settings_attribute": "SIMULATION_MODE_ORACLE"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "red_team",
+      "settings_attribute": "SIMULATION_MODE_RED_TEAM"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "rtaas",
+      "settings_attribute": "SIMULATION_MODE_RTAAS"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "telemetry_pm",
+      "settings_attribute": "SIMULATION_MODE_TELEMETRY_PM"
+    }
+  ],
+  "simulation_modes": {
+    "agent_comms": true,
+    "content_factory": true,
+    "iot_bridge": true,
+    "media_engine": true,
+    "oracle": true,
+    "red_team": true,
+    "rtaas": true,
+    "telemetry_pm": true
+  }
+}
