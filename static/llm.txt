@@ -1,8 +1,10 @@
 # Agent-Native Middleware API — LLM-Readable Documentation
 
-**Version:** 0.4.1
-**Base URL:** http://localhost:8000
-**Auth:** X-API-Key header
+**Agent-first:** You are the intended reader. This file is primary prose for autonomous agents and orchestrators. Before acting, fetch `GET /.well-known/agent.json` and use `GET /health/dependencies` (`simulation_modes`) so you do not treat simulated domains as real.
+
+**Version:** use `version` from `GET /.well-known/agent.json` (this document may be cached).
+**Base URL:** supplied by your operator (example: http://localhost:8000)
+**Auth:** `X-API-Key` header on protected routes
 
 ---
 

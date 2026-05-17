@@ -10,10 +10,11 @@ capabilities, tools, pricing, and how to integrate.
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Optional
 
 from ..core.auth import verify_api_key
 from ..core.config import get_settings
+from .well_known import get_agent_first_metadata
 
 router = APIRouter(
     prefix="/v1",
@@ -103,6 +104,14 @@ class DiscoveryManifest(BaseModel):
             "mcp_server": "/mcp",
             "awi_adoption": "/docs/awi-adoption-guide.md",
         }
+    )
+
+    agent_first: dict[str, Any] = Field(
+        default_factory=get_agent_first_metadata,
+        description=(
+            "Same metadata as /.well-known/agent.json agent_first: "
+            "bootstrap order and where to read simulation vs real state."
+        ),
     )
 
 

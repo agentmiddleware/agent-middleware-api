@@ -14,7 +14,44 @@
 
 > **Production beta — agent-discoverable, not production complete.** Built on arXiv:2506.10953v1.
 
+**Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
+
 **The FastAPI control plane for agent-native infrastructure — MCP + AWI powered.**
+
+### Primary interface (autonomous clients)
+
+Bootstrap in the order given in `GET /.well-known/agent.json` → field `agent_first.bootstrap_sequence`. Minimally:
+
+```bash
+# Capability manifest (start here)
+curl http://localhost:8000/.well-known/agent.json
+
+# Canonical prose for agents
+curl http://localhost:8000/llm.txt
+
+# MCP tool manifest
+curl http://localhost:8000/mcp/tools.json
+
+# Machine-readable API contract
+curl http://localhost:8000/openapi.json
+```
+
+Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes`. Optional index: `GET /v1/discover`.
+
+### Framework adapters (optional)
+
+For LangGraph, CrewAI, or AutoGen, use the published wrappers — HTTP + MCP above remain canonical.
+
+```python
+# LangChain
+from agent_middleware import B2AClient, get_langgraph_tools
+client = B2AClient(api_key="...", wallet_id="...")
+tools = get_langgraph_tools(client)
+
+# CrewAI
+from agent_middleware import CrewAIB2ATool
+crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
+```
 
 ### Current Implementation Status
 
@@ -33,40 +70,12 @@ synthetic data until their real integrations land:
 - agent comms
 - content factory
 
-Agents and operators should inspect `GET /health/dependencies` and the
-`SIMULATION_MODE_*` environment flags before assuming an endpoint performs real
-external work. Public arbitrary Python execution is disabled by default. Set
+Autonomous clients **must** inspect `GET /health/dependencies` (`simulation_modes`) and
+`SIMULATION_MODE_*` configuration before treating an endpoint as real external
+work. Public arbitrary Python execution is disabled by default. Set
 `BEHAVIORAL_SANDBOX_PYTHON_BACKEND=docker` to run Python in an unprivileged
 Docker container; `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true` is a
 local-development escape hatch and is not a production sandbox.
-
-### For Autonomous Agents
-
-Agents can immediately discover and use this platform:
-
-```bash
-# Auto-discover MCP tools
-curl http://localhost:8000/mcp/tools.json
-
-# Auto-discover agent capabilities
-curl http://localhost:8000/.well-known/agent.json
-
-# Auto-read documentation
-curl http://localhost:8000/llm.txt
-```
-
-### For Framework Developers
-
-```python
-# LangChain
-from agent_middleware import B2AClient, get_langgraph_tools
-client = B2AClient(api_key="...", wallet_id="...")
-tools = get_langgraph_tools(client)
-
-# CrewAI
-from agent_middleware import CrewAIB2ATool
-crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
-```
 
 **Agent Middleware API** is a FastAPI production-beta service that provides
 agent-discoverable contracts for durable state, wallet-scoped billing,
@@ -91,13 +100,17 @@ It lets agents:
 
 **Deploy in minutes via Docker or Railway.**
 
-Deploy in minutes via Docker or Railway.
-
 ### Production Beta Docs
 
 - [Production beta roadmap](docs/production-beta-roadmap.md)
 - [Threat model](docs/threat-model.md)
 - [Golden-path wallet-scoped agent flow](docs/golden-path.md)
+
+### Operators (deployment only)
+
+Not part of the autonomous-client contract — for people running this service:
+[docs/human-onboarding.md](docs/human-onboarding.md) and
+`API_URL=http://localhost:8000 bash scripts/human_preflight.sh`.
 
 ---
 
@@ -154,22 +167,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ### Option 3: One-Line Agent Test
 
 ```bash
-# Test MCP tool discovery (for autonomous agents)
+# Capability manifest (agent-first bootstrap)
+curl http://localhost:8000/.well-known/agent.json | head
+
+# MCP tool discovery
 curl http://localhost:8000/mcp/tools.json | jq '.tools[0]'
 
-# Test AWI session creation
+# AWI session (requires API key)
 curl -X POST http://localhost:8000/v1/awi/sessions \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"target_url": "https://example.com", "max_steps": 10}'
 ```
-
-### For Autonomous Agents
-
-Agents can auto-discover this platform at:
-- `GET /mcp/tools.json` — MCP tool manifest
-- `GET /.well-known/agent.json` — Agent capability manifest
-- `GET /llm.txt` — LLM-readable documentation
 
 ---
 
