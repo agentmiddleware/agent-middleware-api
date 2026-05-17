@@ -339,6 +339,7 @@ class OracleCrawlTargetModel(SQLModel, table=True):
     api_id: Optional[str] = Field(default=None, max_length=64, index=True)
     queued_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     crawled_at: Optional[datetime] = Field(default=None)
+    raw_payload_hash: Optional[str] = Field(default=None, max_length=128)
 
     class Config:
         arbitrary_types_allowed = True
@@ -386,6 +387,29 @@ class OracleDiscoveryHitModel(SQLModel, table=True):
     hit_id: str = Field(primary_key=True, max_length=64)
     referrer: str = Field(default="direct", max_length=2048, index=True)
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class AgentCommsMessageModel(SQLModel, table=True):
+    """Durable agent-to-agent message row when SIMULATION_MODE_AGENT_COMMS is false."""
+
+    __tablename__ = "agent_comms_messages"
+
+    message_id: str = Field(primary_key=True, max_length=64)
+    from_agent: str = Field(max_length=100, index=True)
+    to_agent: str = Field(max_length=100, index=True)
+    message_type: str = Field(max_length=30)
+    priority: str = Field(max_length=20)
+    subject: str = Field(default="", max_length=500)
+    body_json: Optional[str] = Field(default=None)
+    correlation_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    reply_to: Optional[str] = Field(default=None, max_length=64)
+    status: str = Field(max_length=20, index=True)
+    payload_hash: Optional[str] = Field(default=None, max_length=128)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    delivered_at: Optional[datetime] = Field(default=None)
 
     class Config:
         arbitrary_types_allowed = True
@@ -536,6 +560,24 @@ class ContentScheduleModel(SQLModel, table=True):
         arbitrary_types_allowed = True
 
 
+class ContentFactoryGenerationModel(SQLModel, table=True):
+    """LLM text generation row when ``SIMULATION_MODE_CONTENT_FACTORY`` is false."""
+
+    __tablename__ = "content_factory_generations"
+
+    content_id: str = Field(primary_key=True, max_length=36)
+    prompt_hash: Optional[str] = Field(default=None, max_length=64, index=True)
+    output_hash: Optional[str] = Field(default=None, max_length=64)
+    model: Optional[str] = Field(default=None, max_length=128)
+    provenance_json: Optional[str] = Field(default=None)
+    output_text: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: Optional[datetime] = Field(default=None)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class KeyRotationLogModel(SQLModel, table=True):
     """
     Audit log for API key rotations.
@@ -563,3 +605,24 @@ class KeyRotationLogModel(SQLModel, table=True):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class OptimizerTelemetryModel(SQLModel, table=True):
+    """Planner telemetry rows for optimization and policy tuning."""
+
+    __tablename__ = "optimizer_telemetry"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ts: datetime = Field(default_factory=datetime.utcnow, index=True)
+    wallet_id: str = Field(max_length=64, index=True)
+    agent_id: str = Field(max_length=64, index=True)
+    task_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    request_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    endpoint: str = Field(max_length=128, index=True)
+    action_features: Optional[str] = Field(default=None)
+    latency_ms: Optional[int] = Field(default=None)
+    credits_delta: Optional[Decimal] = Field(default=None, decimal_places=8)
+    success: bool = Field(default=True)
+    error_class: Optional[str] = Field(default=None, max_length=64)
+    risk_flags: Optional[str] = Field(default=None)
+    payload_hash: Optional[str] = Field(default=None, max_length=64, index=True)

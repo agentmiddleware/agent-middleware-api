@@ -29,11 +29,17 @@ Before opening a PR:
 - Keep changes focused to one concern.
 - Add or update tests for behavioral changes.
 - Run `pytest -q` locally.
+- If you add or change routes or response models, refresh the committed spec:
+  `python scripts/export_openapi.py`
+- If you add `SIMULATION_MODE_*` fields or MCP tools, refresh inventory:
+  `python scripts/generate_sim_inventory.py`
 - Update docs (`README.md`, env examples, or API docs) when behavior/config changes.
 
 PR checklist:
 
 - [ ] Tests pass
+- [ ] `python scripts/export_openapi.py --check` passes (or run `export_openapi.py` to refresh `docs/openapi.json`)
+- [ ] `python scripts/generate_sim_inventory.py --check` passes (or regenerate inventory)
 - [ ] Backward compatibility considered
 - [ ] New env vars documented
 - [ ] Security impact reviewed

@@ -64,3 +64,13 @@ def require_simulation(service: str, issue: str | None = None) -> None:
 def get_simulation_modes() -> dict[str, bool]:
     """Snapshot of every service's simulation state. Used by health checks."""
     return {name: is_simulation(name) for name in sorted(SERVICE_NAMES)}
+
+
+def simulation_settings_field(service: str) -> str:
+    """Return the Settings attribute name for a gated service (e.g. SIMULATION_MODE_ORACLE)."""
+    attr = _SERVICE_TO_SETTING.get(service)
+    if attr is None:
+        raise UnknownServiceError(
+            f"Unknown service '{service}'. Known: {sorted(SERVICE_NAMES)}"
+        )
+    return attr
