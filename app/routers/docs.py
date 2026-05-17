@@ -6,50 +6,18 @@ This is the new SEO: if an LLM can't parse your docs, agents won't
 recommend your product.
 
 Endpoints:
-- /llm.txt — Flat-text summary for LLM context windows
+- /llm.txt — Canonical copy in ``static/llm.txt`` (served by ``app/routers/static.py``)
 - /docs/index — Structured JSON doc index for agent navigation
-- /.well-known/agent.json — Standard agent discovery manifest
+- /.well-known/agent.json — Standard agent discovery manifest (``app/routers/well_known.py``)
 """
 
 from fastapi import APIRouter, Request
-from fastapi.responses import PlainTextResponse
-import os
 
 from ..core.config import get_settings
 
 router = APIRouter(
     tags=["Documentation & Discovery"],
 )
-
-
-@router.get(
-    "/llm.txt",
-    response_class=PlainTextResponse,
-    summary="LLM-optimized documentation",
-    description=(
-        "Returns the full API documentation in a flat plaintext format "
-        "designed for LLM context windows. This is the primary entry point "
-        "for AI agents evaluating whether to recommend this API. "
-        "Think of this as SEO for the agentic web."
-    ),
-)
-async def get_llm_txt():
-    # Serve from docs/llm.txt
-    llm_txt_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "..",
-        "docs",
-        "llm.txt",
-    )
-    try:
-        with open(llm_txt_path, "r") as f:
-            content = f.read()
-        return PlainTextResponse(content, media_type="text/plain")
-    except FileNotFoundError:
-        return PlainTextResponse(
-            "# llm.txt not found. Run the documentation generator.",
-            status_code=404,
-        )
 
 
 @router.get(
