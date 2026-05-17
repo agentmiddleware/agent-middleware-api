@@ -1,12 +1,12 @@
 # Agent Middleware API
 
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
-[![Auto PR](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/Version-v1.1.0-blue)
+[![Auto PR](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml/badge.svg?branch=master)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/auto-pr.yml)
+![Version](https://img.shields.io/badge/Version-v1.2.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
-![Tests](https://img.shields.io/badge/Tests-521%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-540%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
@@ -38,6 +38,8 @@ curl http://localhost:8000/openapi.json
 
 Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes`. Optional index: `GET /v1/discover`.
 
+**Phase 1 (on `master`):** Agent Oracle (`/v1/oracle`), agent comms (`/v1/agent-comms/*`), and content (`/v1/content/*`) can use PostgreSQL-backed persistence and real LLM calls when simulation flags are off. See [Phase 1: Durable oracle, comms, and content](#phase-1-durable-oracle-comms-and-content) for env vars, migrations, and copy-paste `curl` examples.
+
 ### Framework adapters (optional)
 
 For LangGraph, CrewAI, or AutoGen, use the published wrappers — HTTP + MCP above remain canonical.
@@ -57,18 +59,21 @@ crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
 
 This repository is a production-beta control plane, not a finished production
 platform. The wallet/key auth path, billing ledger, MCP discovery, health checks,
-golden-path flow, and core API contracts are executable and tested. Several
-larger product pillars intentionally default to simulation mode and return
-synthetic data until their real integrations land:
+golden-path flow, and core API contracts are executable and tested.
 
-- agent oracle
+**Phase 1 (simulation-gated “real” mode):** With PostgreSQL and the right env flags, these areas persist state and/or call external models instead of returning only synthetic payloads:
+
+- **Agent Oracle** — Durable crawl payload hashing and index surfaces (`SIMULATION_MODE_ORACLE=false`).
+- **Agent Comms** — SQL-backed send + inbox at **`/v1/agent-comms/send`** and **`/v1/agent-comms/inbox`** (`SIMULATION_MODE_AGENT_COMMS=false`). Legacy **`/v1/comms/*`** remains for compatibility.
+- **Content Factory (text)** — **`POST /v1/content/generate`** and **`GET /v1/content/{content_id}`** with row persistence (`SIMULATION_MODE_CONTENT_FACTORY=false`) and OpenAI-compatible chat when **`LLM_BASE_URL`** + **`LLM_API_KEY`** are set.
+
+Other pillars still default to simulation-first behavior until their production integrations land, for example:
+
 - red-team swarm
 - RTaaS
 - media engine
 - IoT bridge
 - autonomous telemetry PM
-- agent comms
-- content factory
 
 Autonomous clients **must** inspect `GET /health/dependencies` (`simulation_modes`) and
 `SIMULATION_MODE_*` configuration before treating an endpoint as real external
@@ -80,8 +85,8 @@ local-development escape hatch and is not a production sandbox.
 **Agent Middleware API** is a FastAPI production-beta service that provides
 agent-discoverable contracts for durable state, wallet-scoped billing,
 telemetry, sandboxed tool workflows, IoT connectivity, and agent intelligence.
-Some domains are implemented as simulations until their production integrations
-are wired up.
+Pillars outside Phase 1 above often remain simulation-first until their
+production integrations are wired up.
 
 It lets agents:
 
@@ -122,13 +127,101 @@ Not part of the autonomous-client contract — for people running this service:
 | Stripe Webhooks          | `/webhooks/stripe`| -       | -            | Yes           |
 | Telemetry                | `/v1/telemetry`   | Yes     | Yes          | Yes           |
 | Comms                    | `/v1/comms`       | Yes     | Yes          | Yes           |
+| **Agent Comms (Phase 1)**| `/v1/agent-comms` | When sim off | Yes     | Yes           |
+| **Content Factory (text)**| `/v1/content`    | When sim off | Yes     | Yes           |
+| **Agent Oracle**         | `/v1/oracle`      | When sim off | Yes     | Yes           |
 | IoT Bridge               | `/v1/iot`         | Optional| Yes          | Yes           |
 | Security                 | `/v1/security`    | Partial | Yes          | Yes           |
 | **Agent Intelligence**   | `/v1/ai`          | Yes     | Yes          | Yes           |
 | **Agentic Web Interface** | `/v1/awi`         | Yes     | Yes          | Yes           |
 | **Behavioral Sandbox**    | `/v1/sandbox`     | Yes     | Yes          | Yes           |
 
-*(Additional modules include programmatic media, content factory, agent oracle, and protocol generation)*
+*(Additional modules include programmatic media, legacy content factory MCP tooling, and protocol generation.)*
+
+---
+
+## Phase 1: Durable oracle, comms, and content
+
+Routes are always registered; **whether work hits the database or an external LLM** depends on `SIMULATION_MODE_*`, `DATABASE_URL` / `STATE_BACKEND`, and (for text generation) `LLM_*`. Use `GET /health/dependencies` for `simulation_modes` and integration hints before you trust responses.
+
+### Environment checklist (non-simulation)
+
+```bash
+export STATE_BACKEND=postgres
+export DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
+
+# Defaults are all true (synthetic / in-memory behavior preserved for dev)
+export SIMULATION_MODE_ORACLE=false
+export SIMULATION_MODE_AGENT_COMMS=false
+export SIMULATION_MODE_CONTENT_FACTORY=false
+
+# Content Factory: OpenAI-compatible chat completions at ${LLM_BASE_URL}/chat/completions
+export LLM_BASE_URL=https://api.openai.com/v1
+export LLM_API_KEY=sk-...
+# Optional: default model; callers can also pass model on generate
+export LLM_MODEL=gpt-4o
+```
+
+Apply migrations: **`alembic upgrade head`** (revisions **010**–**012** cover oracle crawl payload hash, agent comms messages, and content generations).
+
+### Agent Oracle (`/v1/oracle`)
+
+With `SIMULATION_MODE_ORACLE=false`, crawl activity is durable and responses include payload provenance (for example `payload_hash` on index rows where applicable).
+
+```bash
+curl -X POST http://localhost:8000/v1/oracle/crawl \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "directory_type": "well_known",
+    "tags": ["demo"],
+    "priority": 5
+  }'
+
+curl -s "http://localhost:8000/v1/oracle/index?limit=20" \
+  -H "X-API-Key: $API_KEY" | jq '.apis[:3]'
+
+# With SIMULATION_MODE_ORACLE=false, durable crawl rows (URL substring on domain):
+curl -s "http://localhost:8000/v1/oracle/index?domain=example.com&limit=20" \
+  -H "X-API-Key: $API_KEY" | jq '.crawl_targets[:3]'
+```
+
+### Durable agent comms (`/v1/agent-comms`)
+
+These endpoints complement legacy **`/v1/comms`**. With `SIMULATION_MODE_AGENT_COMMS=false`, send and inbox are backed by SQL (and audited). Inbox listing requires access to the recipient agent (same rules as the comms registry).
+
+```bash
+curl -X POST http://localhost:8000/v1/agent-comms/send \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_agent": "agent-a",
+    "to_agent": "agent-b",
+    "subject": "handoff",
+    "body": {"step": 1, "note": "hello"},
+    "message_type": "request",
+    "priority": "normal"
+  }'
+
+curl -s "http://localhost:8000/v1/agent-comms/inbox?agent_id=agent-b&limit=50&offset=0" \
+  -H "X-API-Key: $API_KEY" | jq '.messages | length'
+```
+
+### Content Factory — text (`/v1/content`)
+
+With `SIMULATION_MODE_CONTENT_FACTORY=false`, `POST /v1/content/generate` persists rows and calls the configured LLM. With simulation on, text is synthetic and hashes/provenance may be absent (see OpenAPI for response shapes).
+
+```bash
+curl -X POST http://localhost:8000/v1/content/generate \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "One sentence on idempotent agent middleware."}'
+
+# Use content_id from the response:
+curl -s "http://localhost:8000/v1/content/$CONTENT_ID" \
+  -H "X-API-Key: $API_KEY" | jq '.text'
+```
 
 ---
 
@@ -358,7 +451,6 @@ curl -X POST http://localhost:8000/v1/api-keys/emergency-revoke \
 # Get rotation audit logs
 curl http://localhost:8000/v1/api-keys/agent-001/logs \
   -H "X-API-Key: your-key"
-```
 ```
 
 ### Configure Stripe & Notifications
@@ -890,6 +982,7 @@ SQLite backend provides durable state without requiring PostgreSQL or Redis infr
 - `GET /health` returns `200`
 - `GET /health/dependencies` reports healthy state backend
 - `GET /docs` loads OpenAPI UI
+- Run database migrations (`alembic upgrade head`) so Phase 1 tables exist (e.g. revisions `010`–`012`).
 
 ### PostgreSQL Connection String
 
@@ -925,6 +1018,9 @@ railway variables get DATABASE_URL
 Current durable service stores:
 - Billing (`wallets`, `ledger`, `alerts`, `velocity_snapshots`, `services`)
 - Comms (`agent registry`, row-keyed `inbox` and `outbox` messages)
+- **Agent Comms Phase 1** (`agent_comms_messages` when `SIMULATION_MODE_AGENT_COMMS=false`)
+- **Oracle crawl/index** (payload hash column + crawl durability when `SIMULATION_MODE_ORACLE=false`)
+- **Content Factory** (`content_factory_generations` when `SIMULATION_MODE_CONTENT_FACTORY=false`)
 - AWI sessions and task queue (`awi.sessions.*`, `awi.session_state.*`, `awi.tasks.*`)
 - Behavioral sandbox environments (`bhe.environments.*`)
 - Telemetry (`events`, `anomalies`)
@@ -937,6 +1033,9 @@ string companions for programmatic reconciliation, for example `balance_exact`,
 
 ## Roadmap
 
+- [x] Phase 1 Agent Oracle durable crawl/index (simulation-gated)
+- [x] Phase 1 Agent Comms SQL store + `/v1/agent-comms` API
+- [x] Content Factory durable text generation + `/v1/content` API
 - [x] PostgreSQL ledger with ACID transactions
 - [x] Stripe fiat ingestion with webhooks
 - [x] Agent-to-agent transfers with child wallets
