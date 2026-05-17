@@ -61,6 +61,7 @@ from .routers import (
     discover,
     well_known,
     static,
+    planner,
 )
 
 settings = get_settings()
@@ -303,6 +304,7 @@ app.include_router(api_keys.router)
 app.include_router(awi.router)
 app.include_router(awi_enhanced.router)
 app.include_router(discover.router)
+app.include_router(planner.router)
 app.include_router(well_known.router)
 app.include_router(static.router)
 

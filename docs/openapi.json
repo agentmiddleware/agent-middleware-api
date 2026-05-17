@@ -9057,6 +9057,47 @@
         ]
       }
     },
+    "/v1/planner/optimize": {
+      "post": {
+        "tags": [
+          "optimizer"
+        ],
+        "summary": "Optimize Endpoint",
+        "operationId": "optimize_endpoint_v1_planner_optimize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/.well-known/mcp/tools.json": {
       "get": {
         "tags": [
@@ -16140,6 +16181,207 @@
         ],
         "title": "NetworkGraphResponse",
         "description": "The agent network graph centered on our API."
+      },
+      "OptimizerRequest": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/OptimizerState"
+          },
+          "objective_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective Overrides"
+          },
+          "max_actions": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Actions",
+            "default": 5
+          },
+          "require_real_effects": {
+            "type": "boolean",
+            "title": "Require Real Effects",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "OptimizerRequest"
+      },
+      "OptimizerResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "Optimal",
+              "HeuristicFallback",
+              "Infeasible"
+            ],
+            "title": "Status"
+          },
+          "selected_actions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Selected Actions"
+          },
+          "rejected_actions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rejected Actions"
+          },
+          "expected_utility": {
+            "type": "number",
+            "title": "Expected Utility"
+          },
+          "totals": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Totals"
+          },
+          "constraint_margins": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Constraint Margins"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "selected_actions",
+          "rejected_actions",
+          "expected_utility",
+          "totals",
+          "constraint_margins"
+        ],
+        "title": "OptimizerResponse"
+      },
+      "OptimizerState": {
+        "properties": {
+          "wallet_id": {
+            "type": "string",
+            "title": "Wallet Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "wallet_balance": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Wallet Balance"
+          },
+          "daily_spend_used": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Daily Spend Used"
+          },
+          "daily_limit": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Daily Limit"
+          },
+          "rate_limit_headroom": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Rate Limit Headroom"
+          },
+          "service_health": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "healthy",
+                "degraded",
+                "down"
+              ]
+            },
+            "type": "object",
+            "title": "Service Health"
+          },
+          "simulation_flags": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Simulation Flags"
+          },
+          "auth_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Auth Scope"
+          },
+          "task_context": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Task Context"
+          },
+          "remaining_budget": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Remaining Budget"
+          },
+          "slo_window_seconds": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Slo Window Seconds",
+            "default": 30
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_id",
+          "agent_id",
+          "task_id",
+          "request_id",
+          "wallet_balance",
+          "daily_spend_used",
+          "daily_limit",
+          "rate_limit_headroom",
+          "service_health",
+          "simulation_flags",
+          "auth_scope",
+          "task_context",
+          "remaining_budget"
+        ],
+        "title": "OptimizerState"
       },
       "OracleCrawlTargetRecord": {
         "properties": {

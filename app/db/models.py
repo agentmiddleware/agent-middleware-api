@@ -605,3 +605,24 @@ class KeyRotationLogModel(SQLModel, table=True):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class OptimizerTelemetryModel(SQLModel, table=True):
+    """Planner telemetry rows for optimization and policy tuning."""
+
+    __tablename__ = "optimizer_telemetry"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ts: datetime = Field(default_factory=datetime.utcnow, index=True)
+    wallet_id: str = Field(max_length=64, index=True)
+    agent_id: str = Field(max_length=64, index=True)
+    task_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    request_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    endpoint: str = Field(max_length=128, index=True)
+    action_features: Optional[str] = Field(default=None)
+    latency_ms: Optional[int] = Field(default=None)
+    credits_delta: Optional[Decimal] = Field(default=None, decimal_places=8)
+    success: bool = Field(default=True)
+    error_class: Optional[str] = Field(default=None, max_length=64)
+    risk_flags: Optional[str] = Field(default=None)
+    payload_hash: Optional[str] = Field(default=None, max_length=64, index=True)
