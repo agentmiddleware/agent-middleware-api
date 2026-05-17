@@ -89,7 +89,7 @@ def optimize_action_set(state: OptimizerState, candidates: list[dict], req: Opti
     if not admissible:
         return _pack_response("Infeasible", [], rejected, state, risk_budget, lambdas)
 
-    max_actions = req.max_actions or 5
+    max_actions = 5 if req.max_actions is None else req.max_actions
 
     if pulp is not None:
         try:
@@ -103,7 +103,9 @@ def optimize_action_set(state: OptimizerState, candidates: list[dict], req: Opti
             status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
             if pulp.LpStatus[status] == "Optimal":
                 selected = [admissible[i] for i in range(len(admissible)) if x[i].value() and x[i].value() > 0.5]
-                return _pack_response("Optimal", selected, rejected, state, risk_budget, lambdas)
+                if selected:
+                    return _pack_response("Optimal", selected, rejected, state, risk_budget, lambdas)
+                return _pack_response("Infeasible", [], rejected, state, risk_budget, lambdas)
         except Exception:
             pass
 

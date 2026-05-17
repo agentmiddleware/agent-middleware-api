@@ -52,3 +52,14 @@ def test_risk_budget_enforced_by_tier():
     out = planner.optimize_action_set(state, candidates, req)
     ids = {x["id"] for x in out["selected_actions"]}
     assert "risky" not in ids
+
+
+def test_solver_empty_solution_returns_infeasible_regression():
+    state = _state(tier="high")
+    req = OptimizerRequest(state=state)
+    candidates = [
+        {"id": "x1", "service": "svc1", "credit_cost": 10, "latency_ms": 10, "risk_score": 0.01, "expected_value": 4, "reliability": 1.0},
+    ]
+    out = planner.optimize_action_set(state, candidates, req)
+    assert out["selected_actions"] == []
+    assert out["status"] == "Infeasible"
