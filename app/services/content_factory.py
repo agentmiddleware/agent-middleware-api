@@ -24,6 +24,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from typing import Any
 
 from sqlalchemy import select
 
@@ -49,6 +50,8 @@ from ..schemas.content_factory import (
     CampaignHookResult,
     LiveCampaignResponse,
 )
+
+from .content_factory_generation import ContentGenerationStore, generate_text
 
 logger = logging.getLogger(__name__)
 
@@ -909,6 +912,19 @@ class ContentFactory:
     def __init__(self):
         self.store = ContentStore()
         self.scheduler = AlgorithmicScheduler()
+        self.generation_store = ContentGenerationStore()
+
+    async def generate_llm_text(
+        self, prompt: str, model: str | None = None
+    ) -> dict[str, Any]:
+        """Simulated or OpenAI-compatible text generation with optional DB persistence."""
+        return await generate_text(
+            store=self.generation_store, prompt=prompt, model=model
+        )
+
+    async def get_llm_generation(self, content_id: str) -> dict[str, Any] | None:
+        """Fetch a persisted generation row (real mode only)."""
+        return await self.generation_store.get_record(content_id)
 
     async def create_pipeline(
         self,

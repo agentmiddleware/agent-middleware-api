@@ -19,12 +19,12 @@ def truth_for_category(category: str) -> dict[str, Any]:
     Return stable annotation fields for MCP tool manifests.
 
     - ``simulated`` / ``integrated`` / ``postgres``: category is a gated runtime pillar
-    - ``postgres``: Durable SQL path: Oracle or Agent Comms when simulation is off
+    - ``postgres``: Durable SQL path (and/or LLM): Oracle, Agent Comms, Content Factory when simulation is off
     - ``platform``: billing, sandbox, protocol helpers, etc. (no SIMULATION_MODE flag)
     """
     if category in SERVICE_NAMES:
         sim = is_simulation(category)
-        if not sim and category in ("oracle", "agent_comms"):
+        if not sim and category in ("oracle", "agent_comms", "content_factory"):
             status: IntegrationStatus = "postgres"
         else:
             status = "simulated" if sim else "integrated"

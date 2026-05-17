@@ -560,6 +560,24 @@ class ContentScheduleModel(SQLModel, table=True):
         arbitrary_types_allowed = True
 
 
+class ContentFactoryGenerationModel(SQLModel, table=True):
+    """LLM text generation row when ``SIMULATION_MODE_CONTENT_FACTORY`` is false."""
+
+    __tablename__ = "content_factory_generations"
+
+    content_id: str = Field(primary_key=True, max_length=36)
+    prompt_hash: Optional[str] = Field(default=None, max_length=64, index=True)
+    output_hash: Optional[str] = Field(default=None, max_length=64)
+    model: Optional[str] = Field(default=None, max_length=128)
+    provenance_json: Optional[str] = Field(default=None)
+    output_text: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: Optional[datetime] = Field(default=None)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class KeyRotationLogModel(SQLModel, table=True):
     """
     Audit log for API key rotations.
