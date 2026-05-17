@@ -19,7 +19,7 @@ python-multipart>=0.0.9 # File upload support
 
 # --- Utilities ---
 python-dotenv>=1.0.0    # .env file loading
-redis>=5.2.0            # Redis-backed rate limiting and runtime persistence
+redis>=7.4.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.30.0         # PostgreSQL-backed runtime persistence
 stripe>=15.1.0           # Stripe payment processing
 mcp>=1.0.0             # MCP (Model Context Protocol) SDK for tool servers
