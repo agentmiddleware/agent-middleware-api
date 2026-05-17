@@ -5,7 +5,7 @@
 ![Version](https://img.shields.io/badge/Version-v1.2.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
-![License](https://img.shields.io/badge/License-Apache%202.0-blue)
+![License](https://img.shields.io/badge/License-MIT-blue)
 ![Tests](https://img.shields.io/badge/Tests-540%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
