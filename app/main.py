@@ -39,6 +39,7 @@ from .routers import (
     agent_comms_durable,
     docs,
     factory,
+    content_generation,
     red_team,
     oracle,
     billing,
@@ -281,6 +282,7 @@ app.include_router(media.router)
 app.include_router(comms.router)
 app.include_router(agent_comms_durable.router)
 app.include_router(factory.router)
+app.include_router(content_generation.router)
 app.include_router(red_team.router)
 app.include_router(oracle.router)
 app.include_router(billing.router)
@@ -408,6 +410,8 @@ async def root():
                     "POST /v1/factory/analytics",
                     "GET /v1/factory/analytics/summary",
                     "POST /v1/factory/schedule",
+                    "POST /v1/content/generate",
+                    "GET /v1/content/{content_id}",
                 ],
             },
             "agent_oracle": {
