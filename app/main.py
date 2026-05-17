@@ -30,13 +30,16 @@ from .services.mcp_phase9_tools import (
     ensure_phase9_registered,
     register_default_mcp_services,
 )
+from .routers.well_known import get_agent_first_metadata
 from .routers import (
     iot,
     telemetry,
     media,
     comms,
+    agent_comms_durable,
     docs,
     factory,
+    content_generation,
     red_team,
     oracle,
     billing,
@@ -58,6 +61,7 @@ from .routers import (
     discover,
     well_known,
     static,
+    planner,
 )
 
 settings = get_settings()
@@ -277,7 +281,9 @@ app.include_router(iot.router)
 app.include_router(telemetry.router)
 app.include_router(media.router)
 app.include_router(comms.router)
+app.include_router(agent_comms_durable.router)
 app.include_router(factory.router)
+app.include_router(content_generation.router)
 app.include_router(red_team.router)
 app.include_router(oracle.router)
 app.include_router(billing.router)
@@ -298,6 +304,7 @@ app.include_router(api_keys.router)
 app.include_router(awi.router)
 app.include_router(awi_enhanced.router)
 app.include_router(discover.router)
+app.include_router(planner.router)
 app.include_router(well_known.router)
 app.include_router(static.router)
 
@@ -308,17 +315,18 @@ app.include_router(static.router)
 @app.get(
     "/",
     tags=["Discovery"],
-    summary="API root — agent discovery endpoint",
+    summary="API root — legacy service index",
     description=(
-        "Returns a machine-readable manifest of all available services, "
-        "their base paths, and links to documentation. This is the first "
-        "endpoint an agent should hit to understand what this API offers."
+        "Returns a broad service catalog. For agent-first bootstrap, follow "
+        "`GET /.well-known/agent.json` → field `agent_first` (paths and "
+        "`simulation_and_dependency_truth`), not this index alone."
     ),
 )
 async def root():
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
+        "agent_first": get_agent_first_metadata(),
         "description": (
             "Agent-native middleware for IoT bridging, autonomous code repair, "
             "media distribution, agent communications, discovery, billing, "
@@ -381,6 +389,8 @@ async def root():
                     "GET /v1/comms/messages/{agent_id}/inbox",
                     "POST /v1/comms/messages/{agent_id}/ack/{message_id}",
                     "POST /v1/comms/handoff",
+                    "POST /v1/agent-comms/send",
+                    "GET /v1/agent-comms/inbox",
                 ],
             },
             "content_factory": {
@@ -402,6 +412,8 @@ async def root():
                     "POST /v1/factory/analytics",
                     "GET /v1/factory/analytics/summary",
                     "POST /v1/factory/schedule",
+                    "POST /v1/content/generate",
+                    "GET /v1/content/{content_id}",
                 ],
             },
             "agent_oracle": {
@@ -621,6 +633,8 @@ async def root():
             "redoc": "/redoc",
             "llm_txt": "/llm.txt",
             "agent_manifest": "/.well-known/agent.json",
+            "capability_index": "/v1/discover",
+            "dependency_truth": "/health/dependencies",
         },
     }
 

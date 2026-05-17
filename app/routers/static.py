@@ -31,23 +31,22 @@ async def get_llm_txt():
     if llm_path.exists():
         return FileResponse(llm_path, media_type="text/plain")
 
-    fallback_content = """# Agent-Native Middleware API
+    fallback_content = """# Agent-Native Middleware API — LLM-Readable Documentation
 
-**Version:** 0.4.1
-**Base URL:** http://localhost:8000
+**Agent-first:** Intended reader = autonomous agents. Fetch GET /.well-known/agent.json first; use GET /health/dependencies (simulation_modes) before assuming real side effects.
+
+**Version:** from GET /.well-known/agent.json
+**Base URL:** operator-supplied (e.g. http://localhost:8000)
+**Auth:** X-API-Key on protected routes
 
 ## Quick Start
 
-1. GET /v1/discover — Discover all capabilities
-2. Use X-API-Key header for authentication
-3. Create wallet at POST /v1/billing/wallets/agent
-4. Use services: /v1/telemetry, /v1/comms, /v1/ai, /v1/awi
+1. GET /.well-known/agent.json — Bootstrap manifest (includes agent_first.bootstrap_sequence)
+2. GET /llm.txt — Full prose (if this fallback appears, static/llm.txt is missing on disk)
+3. GET /mcp/tools.json — MCP tools
+4. GET /openapi.json — API contract
 
 ## MCP Tools
 GET /mcp/tools.json — List available tools
-
-## Documentation
-/docs — Interactive API docs
-/openapi.json — OpenAPI spec
 """
     return PlainTextResponse(content=fallback_content)

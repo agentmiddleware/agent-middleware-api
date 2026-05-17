@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from ..audit.lightweight import record_audit
 from ..core.auth import AuthContext, get_auth_context
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
@@ -195,30 +196,48 @@ async def _handle_tools_call(params: dict) -> dict:
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
 
-    registry = get_service_registry()
-    service = registry.get_local(tool_name)
+    ok = False
+    err: str | None = None
+    try:
+        registry = get_service_registry()
+        service = registry.get_local(tool_name)
 
-    if service:
-        func = registry.get_local_func(tool_name)
-        if func:
-            import asyncio
+        if service:
+            func = registry.get_local_func(tool_name)
+            if func:
+                import asyncio
 
-            if asyncio.iscoroutinefunction(func):
-                result = await func(**arguments)
-            else:
-                result = func(**arguments)
+                if asyncio.iscoroutinefunction(func):
+                    result = await func(**arguments)
+                else:
+                    result = func(**arguments)
 
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(result, default=str),
-                    }
-                ],
-                "isError": False,
-            }
+                ok = True
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(result, default=str),
+                        }
+                    ],
+                    "isError": False,
+                }
 
-    raise ValueError(f"Tool not found: {tool_name}")
+        err = f"Tool not found: {tool_name}"
+        raise ValueError(err)
+    except Exception as exc:
+        if err is None:
+            err = str(exc)
+        raise
+    finally:
+        record_audit(
+            "mcp.tools.call",
+            tool=tool_name,
+            wallet_id=wallet_id,
+            transport="jsonrpc",
+            ok=ok,
+            error=err,
+        )
 
 
 @router.post(
@@ -270,12 +289,29 @@ async def invoke_tool(
             else:
                 result = func(**request.arguments)
 
+            record_audit(
+                "mcp.http.invoke",
+                tool=service_id,
+                wallet_id=mcp_context.wallet_id,
+                auth_source=auth.source,
+                key_id=auth.key_id,
+                ok=True,
+            )
             return ToolCallResponse(
                 content=[{"type": "text", "text": json.dumps(result, default=str)}],
                 isError=False,
             )
         except Exception as e:
             logger.error(f"Tool invocation failed: {e}")
+            record_audit(
+                "mcp.http.invoke",
+                tool=service_id,
+                wallet_id=mcp_context.wallet_id,
+                auth_source=auth.source,
+                key_id=auth.key_id,
+                ok=False,
+                error=str(e),
+            )
             return ToolCallResponse(
                 content=[{"type": "text", "text": f"Error: {str(e)}"}],
                 isError=True,

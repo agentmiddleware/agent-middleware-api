@@ -54,6 +54,27 @@ class TestWellKnownAgentJson:
         for doc in phase9_docs:
             assert doc in data["documentation"], f"Missing Phase 9 doc link: {doc}"
 
+    def test_well_known_agent_json_declares_agent_first(self):
+        """Autonomous clients: manifest exposes agent_first bootstrap metadata."""
+        from app.routers.well_known import _build_agent_manifest
+
+        data = _build_agent_manifest().model_dump()
+        assert "agent_first" in data
+        af = data["agent_first"]
+        assert af.get("primary_audience") == "autonomous_agents"
+        assert af.get("design_principle") == "agent_first"
+        assert "/.well-known/agent.json" in af.get("bootstrap_sequence", [])
+        assert af.get("simulation_and_dependency_truth") == "/health/dependencies"
+
+    def test_agent_first_metadata_matches_manifest_field(self):
+        """agent_first in manifest equals get_agent_first_metadata()."""
+        from app.routers.well_known import _build_agent_manifest, get_agent_first_metadata
+
+        assert (
+            _build_agent_manifest().model_dump()["agent_first"]
+            == get_agent_first_metadata()
+        )
+
 
 class TestDiscoverEndpoint:
     """Test /v1/discover includes Phase 9."""
@@ -146,6 +167,7 @@ class TestLlmTxt:
         with open("static/llm.txt", "r") as f:
             content = f.read()
 
+        assert "Agent-first" in content, "Missing agent-first preamble"
         assert "Passkey" in content, "Missing passkey documentation"
         assert "DOM Bridge" in content, "Missing DOM bridge documentation"
         assert "RAG Memory" in content, "Missing RAG memory documentation"
