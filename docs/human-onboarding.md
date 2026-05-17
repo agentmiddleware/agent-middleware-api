@@ -106,6 +106,20 @@ settlement, or public arbitrary-code execution without strong isolation.
 
 ---
 
+## 7. Database migrations (production)
+
+**Risk:** API starts against an empty database, or Phase 1 tables never appear.
+
+**Do this:**
+
+- [ ] Set **`DATABASE_URL`** to a URL your app and Alembic can use (PostgreSQL in production: prefer **`postgresql+asyncpg://`** so async SQLAlchemy matches Alembic’s async `env.py`).
+- [ ] **Before or on first deploy**, bring the schema to head:
+  - **One-off (any host):** `alembic upgrade head` with the same `DATABASE_URL` in the environment.
+  - **Docker / Railway using this repo’s image:** set **`RUN_MIGRATIONS_ON_START=true`** so the container entrypoint runs migrations then starts uvicorn. If `DATABASE_URL` is missing, migrations are skipped (see `scripts/docker_entrypoint.sh`).
+- [ ] Do **not** rely on multi-replica races: for many instances, run migrations once (release job or single boot) instead of flipping the flag on every replica simultaneously — Alembic is usually safe, but your platform may prefer a dedicated migrate step.
+
+---
+
 ## Preflight script
 
 From the repository root, with the API running:
@@ -132,3 +146,4 @@ the golden path for that.
 | End-to-end wallet + key + tool flow | `docs/golden-path.md` |
 | What “beta” still means | `docs/production-beta-roadmap.md` |
 | Env flags | `.env.example` |
+| Database migrations | This section §7 + `scripts/docker_entrypoint.sh` |

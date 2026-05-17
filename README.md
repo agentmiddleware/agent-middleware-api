@@ -1024,9 +1024,12 @@ railway variables set STRIPE_WEBHOOK_SECRET=whsec_...
 railway variables set VELOCITY_HOURLY_LIMIT=1000.0
 railway variables set VELOCITY_DAILY_LIMIT=10000.0
 railway variables set VELOCITY_FREEZE_THRESHOLD=3
+
+# Run Alembic before uvicorn (Dockerfile entrypoint). Use postgresql+asyncpg:// for DATABASE_URL.
+railway variables set RUN_MIGRATIONS_ON_START=true
 ```
 
-> **Note:** `DATABASE_URL` is automatically injected when you link the PostgreSQL database.
+> **Note:** `DATABASE_URL` is automatically injected when you link the PostgreSQL database. For async SQLAlchemy + Alembic, set it to **`postgresql+asyncpg://`** (not only `postgresql://`) unless your platform documents otherwise.
 
 ### SQLite for Edge/Local Deployments
 

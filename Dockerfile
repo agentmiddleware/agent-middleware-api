@@ -17,6 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+RUN chmod +x scripts/docker_entrypoint.sh
+
 # Expose port
 EXPOSE 8000
 
@@ -24,5 +26,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen(f\"http://localhost:{os.getenv('PORT', '8000')}/health\")"
 
-# Run with uvicorn
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Optional: RUN_MIGRATIONS_ON_START=true + DATABASE_URL for production cutover (see docs/human-onboarding.md)
+ENTRYPOINT ["scripts/docker_entrypoint.sh"]
