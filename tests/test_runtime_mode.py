@@ -130,18 +130,16 @@ async def test_health_dependencies_surfaces_simulation_modes(client):
 
 
 @pytest.mark.anyio
-async def test_service_method_raises_when_simulation_disabled(client):
-    """
-    With the oracle flag off, hitting the crawl endpoint must trigger the
-    guard. ASGITransport propagates the unhandled NotImplementedError
-    directly (unlike a real uvicorn server, which would wrap it in a 500),
-    so assert on the exception — that proves the guard actually fired.
-    """
+async def test_oracle_crawl_works_when_simulation_disabled(client):
+    """Durable crawl path: synthetic extractor runs; DB persistence is allowed."""
     settings = get_settings()
     settings.SIMULATION_MODE_ORACLE = False
-    with pytest.raises(NotImplementedError, match="oracle"):
-        await client.post(
-            "/v1/oracle/crawl",
-            json={"url": "https://api.example.com", "directory_type": "openapi"},
-            headers=HEADERS,
-        )
+    resp = await client.post(
+        "/v1/oracle/crawl",
+        json={"url": "https://api.example.com", "directory_type": "openapi"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["url"] == "https://api.example.com"
+    assert data["status"] == "indexed"

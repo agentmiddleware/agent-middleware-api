@@ -11,19 +11,23 @@ from typing import Any, Literal
 
 from ..core.runtime_mode import SERVICE_NAMES, is_simulation
 
-IntegrationStatus = Literal["simulated", "integrated", "platform"]
+IntegrationStatus = Literal["simulated", "integrated", "platform", "postgres"]
 
 
 def truth_for_category(category: str) -> dict[str, Any]:
     """
     Return stable annotation fields for MCP tool manifests.
 
-    - ``simulated`` / ``integrated``: category is a gated runtime pillar
+    - ``simulated`` / ``integrated`` / ``postgres``: category is a gated runtime pillar
+    - ``postgres``: Durable SQL path: Oracle or Agent Comms when simulation is off
     - ``platform``: billing, sandbox, protocol helpers, etc. (no SIMULATION_MODE flag)
     """
     if category in SERVICE_NAMES:
         sim = is_simulation(category)
-        status: IntegrationStatus = "simulated" if sim else "integrated"
+        if not sim and category in ("oracle", "agent_comms"):
+            status: IntegrationStatus = "postgres"
+        else:
+            status = "simulated" if sim else "integrated"
         return {
             "simulation": sim,
             "integration_status": status,

@@ -54,6 +54,7 @@ async def clean_database():
     factory = get_session_factory()
     async with factory() as session:
         # Clean up tables
+        await session.execute(text("DELETE FROM agent_comms_messages"))
         await session.execute(text("DELETE FROM ledger_entries"))
         await session.execute(text("DELETE FROM billing_alerts"))
         await session.execute(text("DELETE FROM wallets"))

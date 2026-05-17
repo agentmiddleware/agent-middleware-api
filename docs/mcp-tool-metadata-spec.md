@@ -6,8 +6,8 @@ tool in that manifest includes **annotations** beyond pricing:
 | Field | Type | Meaning |
 |-------|------|--------|
 | `simulation` | boolean | `true` if this tool’s billing category maps to a runtime pillar that is **currently simulated** (`is_simulation(category)`). |
-| `integrationStatus` | string | `simulated` — pillar is synthetic; `integrated` — pillar flag is off (real path expected); `platform` — not a gated pillar (billing, sandbox helper, etc.). |
-| `runtimeService` | string or omitted | When status is `simulated` or `integrated`, the **runtime registry** pillar id (`oracle`, `agent_comms`, …). Omitted / `null` for `platform`. |
+| `integrationStatus` | string | `simulated` — pillar is synthetic; `integrated` — pillar flag is off (non-Postgres integration); `postgres` — Oracle or Agent Comms durable SQL path when the matching `SIMULATION_MODE_*` is false; `platform` — not a gated pillar (billing, sandbox helper, etc.). |
+| `runtimeService` | string or omitted | When status is `simulated`, `integrated`, or `postgres`, the **runtime registry** pillar id (`oracle`, `agent_comms`, …). Omitted / `null` for `platform`. |
 
 Existing fields (`creditsPerCall`, `unitName`, `category`, …) are unchanged.
 

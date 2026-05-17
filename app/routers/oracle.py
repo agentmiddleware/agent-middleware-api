@@ -9,13 +9,18 @@ This is SEO for the agentic web. If agents can't find you, you don't exist.
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from ..core.auth import verify_api_key
+import hashlib
+import json
+
+from ..audit.lightweight import record_audit
+from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.dependencies import get_agent_oracle
 from ..services.oracle import AgentOracle
 from ..schemas.oracle import (
     CrawlTargetRequest,
     IndexedAPI,
     IndexedAPIListResponse,
+    OracleCrawlTargetRecord,
     CompatibilityTier,
     DirectoryType,
     RegistrationRequest,
@@ -51,14 +56,20 @@ router = APIRouter(
 )
 async def crawl_target(
     request: CrawlTargetRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     oracle: AgentOracle = Depends(get_agent_oracle),
 ):
+    audit_ctx = {
+        "source": auth.source,
+        "key_id": auth.key_id,
+        "wallet_id": auth.wallet_id,
+    }
     result = await oracle.crawl(
         url=request.url,
         directory_type=request.directory_type,
         tags=request.tags,
         priority=request.priority,
+        audit_context=audit_ctx,
     )
     if not result:
         raise HTTPException(
@@ -79,10 +90,15 @@ async def crawl_target(
 )
 async def batch_crawl(
     urls: list[str],
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     oracle: AgentOracle = Depends(get_agent_oracle),
 ):
-    results = await oracle.batch_crawl(urls)
+    audit_ctx = {
+        "source": auth.source,
+        "key_id": auth.key_id,
+        "wallet_id": auth.wallet_id,
+    }
+    results = await oracle.batch_crawl(urls, audit_context=audit_ctx)
     return {
         "crawled": len(results),
         "submitted": len(urls),
@@ -106,31 +122,97 @@ async def batch_crawl(
     response_model=IndexedAPIListResponse,
     summary="List indexed APIs",
     description=(
-        "Browse the Oracle's index of external APIs. Filter by compatibility tier "
-        "or directory type. Sorted by compatibility score (highest first)."
+        "Browse the Oracle's index of external APIs, or list durable crawl rows. "
+        "Without ``domain``: returns ``apis`` (indexed APIs), filterable by tier "
+        "and directory type. With ``domain``: returns ``crawl_targets`` from the "
+        "database (substring match on URL). Sorted by compatibility score (apis) "
+        "or queued_at descending (crawl targets)."
     ),
 )
 async def list_indexed(
     tier: CompatibilityTier | None = Query(
-        None, description="Filter by compatibility tier"
+        None, description="Filter indexed APIs by compatibility tier (ignored when domain is set)"
     ),
     directory_type: DirectoryType | None = Query(
-        None, description="Filter by directory type"
+        None,
+        description="Filter indexed APIs by directory type (ignored when domain is set)",
     ),
-    api_key: str = Depends(verify_api_key),
+    domain: str | None = Query(
+        None,
+        description="When set, list durable crawl targets whose URL contains this host fragment (e.g. example.com).",
+    ),
+    limit: int = Query(50, ge=1, le=200, description="Page size"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    auth: AuthContext = Depends(get_auth_context),
     oracle: AgentOracle = Depends(get_agent_oracle),
 ):
-    apis = await oracle.store.list_indexed(tier=tier, directory_type=directory_type)
-    filters = {}
+    filters: dict = {}
+    audit_basis: dict
+
+    if domain:
+        filters["domain"] = domain
+        rows, total = await oracle.store.list_crawl_targets(
+            domain=domain, limit=limit, offset=offset
+        )
+        audit_basis = {"mode": "crawl_targets", **filters, "limit": limit, "offset": offset}
+        record_audit(
+            "oracle.index.list",
+            actor_source=auth.source,
+            key_id=auth.key_id,
+            wallet_id=auth.wallet_id,
+            outcome="ok",
+            payload_hash=hashlib.sha256(
+                json.dumps(audit_basis, sort_keys=True).encode()
+            ).hexdigest(),
+        )
+        crawl_targets = [
+            OracleCrawlTargetRecord(
+                target_id=r["target_id"],
+                url=r["url"],
+                domain=r["domain"],
+                directory_type=r["directory_type"],
+                status=r["status"],
+                api_id=r["api_id"],
+                queued_at=r["queued_at"],
+                crawled_at=r["crawled_at"],
+                raw_payload_hash=r["raw_payload_hash"],
+            )
+            for r in rows
+        ]
+        return IndexedAPIListResponse(
+            apis=[],
+            total=total,
+            filters_applied=filters,
+            limit=limit,
+            offset=offset,
+            crawl_targets=crawl_targets,
+        )
+
     if tier:
         filters["tier"] = tier.value
     if directory_type:
         filters["directory_type"] = directory_type.value
-
+    apis, total = await oracle.store.list_indexed(
+        tier=tier, directory_type=directory_type, limit=limit, offset=offset
+    )
+    audit_basis = {"mode": "indexed_apis", **filters, "limit": limit, "offset": offset}
+    record_audit(
+        "oracle.index.list",
+        actor_source=auth.source,
+        key_id=auth.key_id,
+        wallet_id=auth.wallet_id,
+        outcome="ok",
+        payload_hash=hashlib.sha256(
+            json.dumps(audit_basis, sort_keys=True).encode()
+        ).hexdigest(),
+    )
     return IndexedAPIListResponse(
         apis=apis,
-        total=len(apis),
+        total=total,
         filters_applied=filters,
+        limit=limit,
+        offset=offset,
+        crawl_targets=[],
     )
 
 
