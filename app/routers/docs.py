@@ -14,6 +14,7 @@ Endpoints:
 from fastapi import APIRouter, Request
 
 from ..core.config import get_settings
+from .well_known import get_agent_first_metadata
 
 router = APIRouter(
     tags=["Documentation & Discovery"],
@@ -31,13 +32,23 @@ router = APIRouter(
 )
 async def get_doc_index():
     return {
+        "agent_first": get_agent_first_metadata(),
         "version": "0.1.0",
         "format": "agent-native-docs/v1",
         "last_updated": "2026-02-22",
         "sections": [
             {
+                "id": "agent_manifest",
+                "title": "Agent plugin manifest",
+                "path": "/.well-known/agent.json",
+                "content_type": "application/json",
+                "summary": (
+                    "Canonical bootstrap: capabilities, endpoints, and agent_first."
+                ),
+            },
+            {
                 "id": "overview",
-                "title": "API Overview",
+                "title": "API Overview (llm.txt)",
                 "path": "/llm.txt",
                 "content_type": "text/plain",
                 "summary": "Full API documentation in LLM-optimized plaintext format.",

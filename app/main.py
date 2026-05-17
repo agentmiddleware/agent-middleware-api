@@ -30,6 +30,7 @@ from .services.mcp_phase9_tools import (
     ensure_phase9_registered,
     register_default_mcp_services,
 )
+from .routers.well_known import get_agent_first_metadata
 from .routers import (
     iot,
     telemetry,
@@ -308,17 +309,18 @@ app.include_router(static.router)
 @app.get(
     "/",
     tags=["Discovery"],
-    summary="API root — agent discovery endpoint",
+    summary="API root — legacy service index",
     description=(
-        "Returns a machine-readable manifest of all available services, "
-        "their base paths, and links to documentation. This is the first "
-        "endpoint an agent should hit to understand what this API offers."
+        "Returns a broad service catalog. For agent-first bootstrap, follow "
+        "`GET /.well-known/agent.json` → field `agent_first` (paths and "
+        "`simulation_and_dependency_truth`), not this index alone."
     ),
 )
 async def root():
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
+        "agent_first": get_agent_first_metadata(),
         "description": (
             "Agent-native middleware for IoT bridging, autonomous code repair, "
             "media distribution, agent communications, discovery, billing, "
@@ -621,6 +623,8 @@ async def root():
             "redoc": "/redoc",
             "llm_txt": "/llm.txt",
             "agent_manifest": "/.well-known/agent.json",
+            "capability_index": "/v1/discover",
+            "dependency_truth": "/health/dependencies",
         },
     }
 

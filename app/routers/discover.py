@@ -441,21 +441,18 @@ def _build_pricing() -> list[PricingTier]:
     response_model=DiscoveryManifest,
     summary="Agent Discovery Manifest",
     description=(
-        "Returns a comprehensive machine-readable manifest of all services, "
-        "MCP tools, AWI endpoints, and pricing. This is the primary endpoint "
-        "for autonomous agents to discover and integrate with this platform."
+        "Aggregated capability index: services, MCP tools, AWI endpoints, and "
+        "pricing. Bootstrap order is defined in `/.well-known/agent.json` under "
+        "`agent_first.bootstrap_sequence` (this endpoint is optional after those "
+        "hints)."
     ),
 )
 async def get_discovery_manifest():
     """
-    Primary discovery endpoint for autonomous agents.
+    Aggregated discovery manifest for autonomous agents.
 
-    Returns a complete manifest including:
-    - All service capabilities
-    - Available MCP tools with pricing
-    - AWI endpoints for web automation
-    - Pricing tiers
-    - Integration guides
+    Prefer `GET /.well-known/agent.json` first for `agent_first` metadata, then
+    this payload for a fuller catalog when needed.
     """
     return DiscoveryManifest(
         name=settings.APP_NAME,

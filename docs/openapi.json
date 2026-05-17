@@ -8711,7 +8711,7 @@
           "Agent Discovery"
         ],
         "summary": "Agent Discovery Manifest",
-        "description": "Returns a comprehensive machine-readable manifest of all services, MCP tools, AWI endpoints, and pricing. This is the primary endpoint for autonomous agents to discover and integrate with this platform.",
+        "description": "Aggregated capability index: services, MCP tools, AWI endpoints, and pricing. Bootstrap order is defined in `/.well-known/agent.json` under `agent_first.bootstrap_sequence` (this endpoint is optional after those hints).",
         "operationId": "get_discovery_manifest_v1_discover_get",
         "responses": {
           "200": {
@@ -8824,8 +8824,8 @@
         "tags": [
           "Discovery"
         ],
-        "summary": "API root — agent discovery endpoint",
-        "description": "Returns a machine-readable manifest of all available services, their base paths, and links to documentation. This is the first endpoint an agent should hit to understand what this API offers.",
+        "summary": "API root — legacy service index",
+        "description": "Returns a broad service catalog. For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first` (paths and `simulation_and_dependency_truth`), not this index alone.",
         "operationId": "root__get",
         "responses": {
           "200": {

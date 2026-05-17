@@ -29,6 +29,11 @@ async def test_root_returns_manifest(client):
     assert "iot_bridge" in data["services"]
     assert "autonomous_pm" in data["services"]
     assert "media_engine" in data["services"]
+    from app.routers.well_known import get_agent_first_metadata
+
+    assert data["agent_first"] == get_agent_first_metadata()
+    assert data["docs"].get("dependency_truth") == "/health/dependencies"
+    assert data["docs"].get("capability_index") == "/v1/discover"
 
 
 @pytest.mark.anyio
@@ -59,6 +64,8 @@ async def test_doc_index(client):
     data = resp.json()
     assert "sections" in data
     assert "services" in data
+    assert data["agent_first"]["design_principle"] == "agent_first"
+    assert data["sections"][0]["path"] == "/.well-known/agent.json"
     assert len(data["services"]) >= 15  # 13 pillars + dashboard + broadcast
 
 
@@ -78,6 +85,10 @@ async def test_v1_discover_includes_agent_first(client):
 
 
 # --- Agent Manifest ---
+
+
+@pytest.mark.anyio
+async def test_well_known_agent_json(client):
     resp = await client.get("/.well-known/agent.json")
     assert resp.status_code == 200
     data = resp.json()
