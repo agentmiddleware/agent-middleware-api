@@ -53,6 +53,9 @@ jobs:
           assert len(paths) > 20, f'Expected >20 paths, got {len(paths)}'
           "
 
+      - name: Verify docs/openapi.json matches app (single source)
+        if: matrix.python-version == '3.12'
+        run: python scripts/export_openapi.py --check
   lint:
     runs-on: ubuntu-latest
     steps:

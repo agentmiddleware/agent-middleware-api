@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent-Native Middleware API",
-    "description": "## Agent-Native Middleware API\n\nHeadless infrastructure for the B2A (Business-to-Agent) economy. This API provides a broad set of services that give AI agents the 'hands' and 'eyes' to manipulate the digital and physical world.\n\n### Capability Surface\n\n- **IoT Protocol Bridge** (`/v1/iot`) \u2014 Secure, ACL-enforced protocol translation for IoT devices (MQTT, CoAP, Zigbee, etc.)\n- **Autonomous Product Manager** (`/v1/telemetry`) \u2014 Ingest telemetry, detect anomalies, auto-generate pull requests to fix bugs\n- **Programmatic Media Engine** (`/v1/media`) \u2014 Video ingestion, viral hook detection, reframing, captioning, and cross-platform distribution\n- **Agent Communications** (`/v1/comms`) \u2014 Agent registration, structured messaging, capability discovery, and swarm task handoffs\n- **Extended Agent Operations** \u2014 Content factory, oracle discovery, billing, MCP tools, security scanning, launch automation, protocol generation, RTaaS, sandboxes, telemetry scopes, dashboards, broadcast, AI helpers, webhooks, KYC, API keys, AWI, discovery, well-known, and static documentation routes\n\n### Authentication\n\nAll endpoints require an API key passed via the `X-API-Key` header.\n\n### For Agents\n\nThis API is designed for programmatic consumption. See `/llm.txt` for LLM-optimized documentation and `/openapi.json` for the full spec.\n\n### v0.2.0\n\n\u2705 Now MCP-native with discoverable monetized tools, dry-run sandboxing, KYC gating, and automatic key rotation.",
+    "description": "## Agent-Native Middleware API\n\nHeadless infrastructure for the B2A (Business-to-Agent) economy. This API provides a broad set of services that give AI agents the 'hands' and 'eyes' to manipulate the digital and physical world.\n\n### Capability Surface\n\n- **IoT Protocol Bridge** (`/v1/iot`) — Secure, ACL-enforced protocol translation for IoT devices (MQTT, CoAP, Zigbee, etc.)\n- **Autonomous Product Manager** (`/v1/telemetry`) — Ingest telemetry, detect anomalies, auto-generate pull requests to fix bugs\n- **Programmatic Media Engine** (`/v1/media`) — Video ingestion, viral hook detection, reframing, captioning, and cross-platform distribution\n- **Agent Communications** (`/v1/comms`) — Agent registration, structured messaging, capability discovery, and swarm task handoffs\n- **Extended Agent Operations** — Content factory, oracle discovery, billing, MCP tools, security scanning, launch automation, protocol generation, RTaaS, sandboxes, telemetry scopes, dashboards, broadcast, AI helpers, webhooks, KYC, API keys, AWI, discovery, well-known, and static documentation routes\n\n### Authentication\n\nAll endpoints require an API key passed via the `X-API-Key` header.\n\n### For Agents\n\nThis API is designed for programmatic consumption. See `/llm.txt` for LLM-optimized documentation and `/openapi.json` for the full spec.\n\n### v0.2.0\n\n✅ Now MCP-native with discoverable monetized tools, dry-run sandboxing, KYC gating, and automatic key rotation.",
     "contact": {
       "name": "Agent-Native Middleware",
       "email": "support@agent-middleware.dev"
@@ -892,7 +892,7 @@
           "Programmatic Media Engine"
         ],
         "summary": "Generate platform-ready clips",
-        "description": "Generate reframed, captioned clips from detected viral hooks. Clips are automatically reframed to the target aspect ratio(s) and overlaid with animated captions in the chosen style. 80%% of social video is consumed muted \u2014 captions are not optional.",
+        "description": "Generate reframed, captioned clips from detected viral hooks. Clips are automatically reframed to the target aspect ratio(s) and overlaid with animated captions in the chosen style. 80%% of social video is consumed muted — captions are not optional.",
         "operationId": "generate_clips_v1_media_videos__video_id__clips_post",
         "security": [
           {
@@ -1672,7 +1672,7 @@
           "Content Factory & Scheduling"
         ],
         "summary": "Launch a live content campaign",
-        "description": "The 'Big Red Button' \u2014 submit a source video URL and targeted hooks. Each hook is a specific segment (e.g., 30-45s reaction clip, 60s explainer). The factory applies the 1-to-N multiplication rule: each hook produces multiple format-adapted pieces (short videos, quote cards, carousels, text posts) all rendered in 9:16 vertical with animated captions. Then the AlgorithmicScheduler staggers posts across platforms (TikTok, YouTube Shorts, Instagram Reels) to maximize view velocity.",
+        "description": "The 'Big Red Button' — submit a source video URL and targeted hooks. Each hook is a specific segment (e.g., 30-45s reaction clip, 60s explainer). The factory applies the 1-to-N multiplication rule: each hook produces multiple format-adapted pieces (short videos, quote cards, carousels, text posts) all rendered in 9:16 vertical with animated captions. Then the AlgorithmicScheduler staggers posts across platforms (TikTok, YouTube Shorts, Instagram Reels) to maximize view velocity.",
         "operationId": "launch_campaign_v1_factory_campaigns_post",
         "requestBody": {
           "content": {
@@ -2098,7 +2098,7 @@
           "Red Team Security Swarm"
         ],
         "summary": "Quick security check",
-        "description": "Runs a fast, surface-level scan focused on CRITICAL and HIGH severity vectors only (ACL bypass, auth probes, privilege escalation). Returns the full report synchronously \u2014 use for CI/CD gates.",
+        "description": "Runs a fast, surface-level scan focused on CRITICAL and HIGH severity vectors only (ACL bypass, auth probes, privilege escalation). Returns the full report synchronously — use for CI/CD gates.",
         "operationId": "quick_scan_v1_security_scans_quick_post",
         "responses": {
           "200": {
@@ -2368,7 +2368,7 @@
           "Agent Oracle & Network Infiltration"
         ],
         "summary": "Register in external agent directories",
-        "description": "Push our API profile into external agent directories and registries. This is how agents find us \u2014 by being listed in the directories they already crawl. Supports /.well-known, MCP server listings, plugin stores, and centralized agent registries.",
+        "description": "Push our API profile into external agent directories and registries. This is how agents find us — by being listed in the directories they already crawl. Supports /.well-known, MCP server listings, plugin stores, and centralized agent registries.",
         "operationId": "register_in_directories_v1_oracle_register_post",
         "requestBody": {
           "content": {
@@ -4164,7 +4164,7 @@
           "Launch Sequence"
         ],
         "summary": "Execute Day 1 Launch Sequence",
-        "description": "The ignition key. Executes all four launch phases in sequence:\n\n1. **FUND** \u2014 Create sponsor wallet, inject seed capital, provision agent wallets\n2. **INFILTRATE** \u2014 Crawl 6 major APIs, register in 4 agent directories\n3. **IGNITE** \u2014 Launch B2A content campaign (3 hooks \u00d7 N formats = 40+ pieces)\n4. **ARM** \u2014 Activate Red Team perimeter scanning across all API paths\n\nReturns a LaunchResponse (the system's birth certificate) with full metrics.",
+        "description": "The ignition key. Executes all four launch phases in sequence:\n\n1. **FUND** — Create sponsor wallet, inject seed capital, provision agent wallets\n2. **INFILTRATE** — Crawl 6 major APIs, register in 4 agent directories\n3. **IGNITE** — Launch B2A content campaign (3 hooks × N formats = 40+ pieces)\n4. **ARM** — Activate Red Team perimeter scanning across all API paths\n\nReturns a LaunchResponse (the system's birth certificate) with full metrics.",
         "operationId": "execute_launch_v1_launch_post",
         "requestBody": {
           "content": {
@@ -4211,7 +4211,7 @@
           "Launch Sequence"
         ],
         "summary": "Pre-flight Readiness Check",
-        "description": "Runs a comprehensive validation sweep before Day 1 launch:\n\n1. **KEYS** \u2014 Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** \u2014 Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** \u2014 Validate agent directory registration URLs\n4. **ASSETS** \u2014 Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details. Fix all critical failures before calling POST /v1/launch.",
+        "description": "Runs a comprehensive validation sweep before Day 1 launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details. Fix all critical failures before calling POST /v1/launch.",
         "operationId": "run_preflight_v1_launch_preflight_post",
         "requestBody": {
           "content": {
@@ -4261,7 +4261,7 @@
           "Launch Sequence"
         ],
         "summary": "Meta-Launch: Spawn the Genesis Builder Agent",
-        "description": "The ultimate proof of infrastructure autonomy. Executes a 6-phase lifecycle:\n\n1. **FUND** \u2014 Create sponsor wallet, spawn Genesis Builder child wallet with spend cap\n2. **BUILD** \u2014 Genesis Agent writes a micro-service API\n3. **SECURE** \u2014 RTaaS attacks the new service (thorough intensity)\n4. **TEST** \u2014 Sandbox validates the agent's generalization ability\n5. **PUBLISH** \u2014 Protocol Engine generates llm.txt + OpenAPI + agent.json\n6. **MONITOR** \u2014 Telemetry Scope pipeline watches the new service\n\nReturns a GenesisReport \u2014 proof that the infrastructure can self-replicate.",
+        "description": "The ultimate proof of infrastructure autonomy. Executes a 6-phase lifecycle:\n\n1. **FUND** — Create sponsor wallet, spawn Genesis Builder child wallet with spend cap\n2. **BUILD** — Genesis Agent writes a micro-service API\n3. **SECURE** — RTaaS attacks the new service (thorough intensity)\n4. **TEST** — Sandbox validates the agent's generalization ability\n5. **PUBLISH** — Protocol Engine generates llm.txt + OpenAPI + agent.json\n6. **MONITOR** — Telemetry Scope pipeline watches the new service\n\nReturns a GenesisReport — proof that the infrastructure can self-replicate.",
         "operationId": "execute_genesis_v1_launch_genesis_post",
         "requestBody": {
           "content": {
@@ -4340,7 +4340,7 @@
           "Protocol Generation Engine"
         ],
         "summary": "Generate protocol package from source code",
-        "description": "Submit raw API source code and receive a complete agent-discoverable package:\n\n1. **llm.txt** \u2014 LLM-optimized documentation\n2. **OpenAPI 3.1 spec** \u2014 Machine-readable API schema\n3. **agent.json** \u2014 Agent discovery manifest\n4. **Oracle registration** \u2014 (optional) Push to agent directories\n\nThe instant go-to-market engine for any tool an agent builds.",
+        "description": "Submit raw API source code and receive a complete agent-discoverable package:\n\n1. **llm.txt** — LLM-optimized documentation\n2. **OpenAPI 3.1 spec** — Machine-readable API schema\n3. **agent.json** — Agent discovery manifest\n4. **Oracle registration** — (optional) Push to agent directories\n\nThe instant go-to-market engine for any tool an agent builds.",
         "operationId": "generate_protocol_v1_protocol_generate_post",
         "requestBody": {
           "content": {
@@ -4698,7 +4698,7 @@
           "Interactive Testing Sandboxes"
         ],
         "summary": "Create a testing environment",
-        "description": "Spin up a headless puzzle environment. The agent-under-test must discover hidden rules through interaction, not instruction.\n\n**Environment Types:**\n- **pattern** \u2014 Discover input\u2192output transformation rules\n- **navigation** \u2014 Navigate a state graph to reach a goal\n- **api_mock** \u2014 Interact with a shifting mock API\n- **adversarial** \u2014 Environment actively tries to deceive",
+        "description": "Spin up a headless puzzle environment. The agent-under-test must discover hidden rules through interaction, not instruction.\n\n**Environment Types:**\n- **pattern** — Discover input→output transformation rules\n- **navigation** — Navigate a state graph to reach a goal\n- **api_mock** — Interact with a shifting mock API\n- **adversarial** — Environment actively tries to deceive",
         "operationId": "create_environment_v1_sandbox_environments_post",
         "requestBody": {
           "content": {
@@ -4745,7 +4745,7 @@
           "Interactive Testing Sandboxes"
         ],
         "summary": "Submit an action to the environment",
-        "description": "The agent-under-test submits an action, receives feedback and reward. No instructions are given \u2014 the agent must discover the rules.",
+        "description": "The agent-under-test submits an action, receives feedback and reward. No instructions are given — the agent must discover the rules.",
         "operationId": "submit_action_v1_sandbox_environments__env_id__actions_post",
         "security": [
           {
@@ -5544,7 +5544,7 @@
           "Real-Time Dashboard"
         ],
         "summary": "Wallet Economics & Hierarchy",
-        "description": "Credit metrics + full wallet tree (Sponsor \u2192 Agent \u2192 Child).",
+        "description": "Credit metrics + full wallet tree (Sponsor → Agent → Child).",
         "operationId": "get_economics_v1_dashboard_economics_get",
         "responses": {
           "200": {
@@ -6038,7 +6038,7 @@
           "Agent Intelligence"
         ],
         "summary": "Diagnose And Heal",
-        "description": "Automatically diagnose and suggest a fix for an issue.\n\nThe AI analyzes error logs and produces a potential fix.\nNote: Fixes are not auto-applied \u2014 human review recommended.",
+        "description": "Automatically diagnose and suggest a fix for an issue.\n\nThe AI analyzes error logs and produces a potential fix.\nNote: Fixes are not auto-applied — human review recommended.",
         "operationId": "diagnose_and_heal_v1_ai_heal_post",
         "requestBody": {
           "content": {
@@ -6313,28 +6313,6 @@
         ]
       }
     },
-    "/llm.txt": {
-      "get": {
-        "tags": [
-          "Static"
-        ],
-        "summary": "LLM-Readable Documentation",
-        "description": "Plain-text documentation optimized for LLM agents to understand this API.",
-        "operationId": "get_llm_txt_llm_txt_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/docs/index": {
       "get": {
         "tags": [
@@ -6381,7 +6359,7 @@
           "Webhooks"
         ],
         "summary": "Handle Stripe Webhook",
-        "description": "Receive and process Stripe webhook events.\n\nStripe will retry this endpoint if we return non-200.\nOur service layer handles idempotency internally via\nUNIQUE constraint on payment_intent_id + IntegrityError catch.\n\nEvents handled:\n- payment_intent.succeeded \u2192 Mint credits to wallet\n- payment_intent.payment_failed \u2192 Log and notify\n- charge.refunded \u2192 Debit wallet\n- identity.verification_session.verified \u2192 Approve KYC\n- identity.verification_session.requires_input \u2192 Log\n- identity.verification_session.redacted \u2192 Expire verification",
+        "description": "Receive and process Stripe webhook events.\n\nStripe will retry this endpoint if we return non-200.\nOur service layer handles idempotency internally via\nUNIQUE constraint on payment_intent_id + IntegrityError catch.\n\nEvents handled:\n- payment_intent.succeeded → Mint credits to wallet\n- payment_intent.payment_failed → Log and notify\n- charge.refunded → Debit wallet\n- identity.verification_session.verified → Approve KYC\n- identity.verification_session.requires_input → Log\n- identity.verification_session.redacted → Expire verification",
         "operationId": "handle_stripe_webhook_v1_webhooks_stripe_post",
         "responses": {
           "200": {
@@ -8819,12 +8797,34 @@
         }
       }
     },
+    "/llm.txt": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "LLM-Readable Documentation",
+        "description": "Plain-text documentation optimized for LLM agents to understand this API.",
+        "operationId": "get_llm_txt_llm_txt_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "tags": [
           "Discovery"
         ],
-        "summary": "API root \u2014 agent discovery endpoint",
+        "summary": "API root — agent discovery endpoint",
         "description": "Returns a machine-readable manifest of all available services, their base paths, and links to documentation. This is the first endpoint an agent should hit to understand what this API offers.",
         "operationId": "root__get",
         "responses": {
@@ -12548,6 +12548,12 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Integration Guides"
+          },
+          "agent_first": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Agent First",
+            "description": "Same metadata as /.well-known/agent.json agent_first: bootstrap order and where to read simulation vs real state."
           }
         },
         "type": "object",
@@ -12855,7 +12861,7 @@
             },
             "type": "array",
             "title": "Wallet Tree",
-            "description": "Hierarchical wallet tree: Sponsor \u2192 Agent \u2192 Child"
+            "description": "Hierarchical wallet tree: Sponsor → Agent → Child"
           }
         },
         "type": "object",
@@ -13619,7 +13625,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Context",
-            "description": "Context for the handoff \u2014 what needs to be done and why.",
+            "description": "Context for the handoff — what needs to be done and why.",
             "examples": [
               {
                 "language": "en",
@@ -14864,7 +14870,7 @@
             "title": "Campaign Title",
             "description": "Campaign name for tracking.",
             "examples": [
-              "B2A Launch \u2014 Why Agents Need Their Own API Layer"
+              "B2A Launch — Why Agents Need Their Own API Layer"
             ]
           },
           "hooks": {
@@ -14934,7 +14940,7 @@
           "hooks"
         ],
         "title": "LiveCampaignRequest",
-        "description": "Launch a full live content campaign from a single source.\n\nThis is the 'Big Red Button' \u2014 submit a source URL and a set of\ntargeted hooks. The factory will:\n1. Extract each hook segment\n2. Apply the 1-to-N multiplication rule per hook\n3. Render all pieces in 9:16 vertical with animated captions\n4. Auto-schedule across platforms via the AlgorithmicScheduler"
+        "description": "Launch a full live content campaign from a single source.\n\nThis is the 'Big Red Button' — submit a source URL and a set of\ntargeted hooks. The factory will:\n1. Extract each hook segment\n2. Apply the 1-to-N multiplication rule per hook\n3. Render all pieces in 9:16 vertical with animated captions\n4. Auto-schedule across platforms via the AlgorithmicScheduler"
       },
       "LiveCampaignResponse": {
         "properties": {
@@ -15944,7 +15950,7 @@
           "summary"
         ],
         "title": "PreflightResponse",
-        "description": "Pre-flight readiness report \u2014 the checklist before you turn the key."
+        "description": "Pre-flight readiness report — the checklist before you turn the key."
       },
       "PricingTableResponse": {
         "properties": {
