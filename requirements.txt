@@ -6,6 +6,7 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.46.0
 pydantic>=2.13.3
 pydantic-settings>=2.14.0
+structlog>=24.1.0
 
 # --- IoT Protocol Bridge ---
 aiomqtt>=2.5.1          # Async MQTT client
