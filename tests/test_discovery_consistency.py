@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.runtime_mode import SERVICE_NAMES
 from app.main import app
 
-_INTEGRATION_STATUSES = frozenset({"simulated", "integrated", "platform"})
+_INTEGRATION_STATUSES = frozenset({"simulated", "integrated", "platform", "postgres"})
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ async def test_mcp_tools_json_each_tool_has_honesty_annotations(client):
         assert status in _INTEGRATION_STATUSES
 
         rs = ann.get("runtimeService")
-        if status in ("simulated", "integrated"):
+        if status in ("simulated", "integrated", "postgres"):
             assert rs in SERVICE_NAMES
         if status == "platform":
             assert rs is None

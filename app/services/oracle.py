@@ -18,15 +18,18 @@ Production wiring:
 """
 
 import asyncio
+import json
 import uuid
 import logging
 import hashlib
 from collections import defaultdict
+from typing import Any
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 
-from ..core.runtime_mode import require_simulation
+from ..audit.lightweight import record_audit
+from ..core.runtime_mode import is_simulation, require_simulation
 from ..db.converters import (
     indexed_api_to_model,
     indexed_api_model_to_schema,
@@ -362,7 +365,8 @@ class CrawlEngine:
         tags: list[str],
     ) -> IndexedAPI | None:
         """Crawl a URL and extract API metadata."""
-        require_simulation("oracle", issue="#34")
+        # Production still uses deterministic/synthetic extraction (#34); simulation
+        # only gates durable hash + integration metadata, not this code path.
         # Simulate network crawl (production: real HTTP requests)
         match = next((d for d in SIMULATED_DIRECTORY if d["url"] == url), None)
 
@@ -483,6 +487,11 @@ class RegistrationEngine:
         )
 
 
+def domain_host_from_url(url: str) -> str:
+    """Lowercase hostname from a URL (no scheme, no path)."""
+    return url.split("//", 1)[-1].split("/")[0].lower()
+
+
 # ---------------------------------------------------------------------------
 # Oracle Store
 # ---------------------------------------------------------------------------
@@ -525,6 +534,7 @@ class OracleStore:
         status: str | None = None,
         api_id: str | None = None,
         crawled_at: datetime | None = None,
+        raw_payload_hash: str | None = None,
     ) -> None:
         """Partial update — in-memory store used to expose the dict by
         reference; the PG-backed equivalent requires an explicit write."""
@@ -540,6 +550,8 @@ class OracleStore:
                 row.api_id = api_id
             if crawled_at is not None:
                 row.crawled_at = crawled_at
+            if raw_payload_hash is not None:
+                row.raw_payload_hash = raw_payload_hash
             await session.commit()
 
     async def get_target(self, target_id: str) -> dict | None:
@@ -557,6 +569,7 @@ class OracleStore:
             "api_id": row.api_id,
             "queued_at": row.queued_at.isoformat() if row.queued_at else None,
             "crawled_at": row.crawled_at.isoformat() if row.crawled_at else None,
+            "raw_payload_hash": row.raw_payload_hash,
         }
 
     async def store_indexed(self, api: IndexedAPI):
@@ -595,21 +608,82 @@ class OracleStore:
         self,
         tier: CompatibilityTier | None = None,
         directory_type: DirectoryType | None = None,
-    ) -> list[IndexedAPI]:
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[IndexedAPI], int]:
+        """Return (page of indexed APIs, total matching filters)."""
         self._require_db()
         factory = get_session_factory()
-        stmt = select(OracleIndexedAPIModel)
+        filters: list = []
         if tier:
-            stmt = stmt.where(OracleIndexedAPIModel.compatibility_tier == tier.value)
+            filters.append(
+                OracleIndexedAPIModel.compatibility_tier == tier.value
+            )
         if directory_type:
-            stmt = stmt.where(
+            filters.append(
                 OracleIndexedAPIModel.directory_type == directory_type.value
             )
+        count_stmt = select(func.count()).select_from(OracleIndexedAPIModel)
+        stmt = select(OracleIndexedAPIModel)
+        if filters:
+            count_stmt = count_stmt.where(*filters)
+            stmt = stmt.where(*filters)
         stmt = stmt.order_by(OracleIndexedAPIModel.compatibility_score.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
         async with factory() as session:
+            total = int(
+                (await session.execute(count_stmt)).scalar_one()
+            )
             result = await session.execute(stmt)
             rows = list(result.scalars().all())
-        return [indexed_api_model_to_schema(r) for r in rows]
+        return [indexed_api_model_to_schema(r) for r in rows], total
+
+    async def list_crawl_targets(
+        self,
+        *,
+        domain: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Crawl target rows whose URL matches domain (substring, case-insensitive)."""
+        self._require_db()
+        factory = get_session_factory()
+        needle = f"%{domain.strip()}%"
+        filt = OracleCrawlTargetModel.url.ilike(needle)
+        count_stmt = (
+            select(func.count())
+            .select_from(OracleCrawlTargetModel)
+            .where(filt)
+        )
+        stmt = (
+            select(OracleCrawlTargetModel)
+            .where(filt)
+            .order_by(OracleCrawlTargetModel.queued_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        async with factory() as session:
+            total = int((await session.execute(count_stmt)).scalar_one())
+            result = await session.execute(stmt)
+            rows = list(result.scalars().all())
+        out: list[dict] = []
+        for row in rows:
+            out.append(
+                {
+                    "target_id": row.target_id,
+                    "url": row.url,
+                    "domain": domain_host_from_url(row.url),
+                    "directory_type": row.directory_type,
+                    "status": row.status,
+                    "api_id": row.api_id,
+                    "queued_at": row.queued_at,
+                    "crawled_at": row.crawled_at,
+                    "raw_payload_hash": row.raw_payload_hash,
+                }
+            )
+        return out, total
 
     async def store_registration(self, result: RegistrationResult):
         self._require_db()
@@ -722,9 +796,11 @@ class AgentOracle:
         directory_type: DirectoryType = DirectoryType.WELL_KNOWN,
         tags: list[str] | None = None,
         priority: int = 5,
+        audit_context: dict[str, Any] | None = None,
     ) -> IndexedAPI | None:
         """Crawl a URL, index it, and compute compatibility."""
         target_id = str(uuid.uuid4())
+        raw_hash: str | None = None
 
         await self.store.store_target(target_id, {
             "target_id": target_id,
@@ -739,18 +815,55 @@ class AgentOracle:
 
         if indexed:
             await self.store.store_indexed(indexed)
+            if not is_simulation("oracle"):
+                payload_for_hash: dict[str, Any] = {
+                    "url": url,
+                    "directory_type": directory_type.value,
+                    "tags": sorted(tags or []),
+                    "api_id": indexed.api_id,
+                    "name": indexed.name,
+                    "compatibility_tier": indexed.compatibility_tier.value,
+                    "compatibility_score": indexed.compatibility_score,
+                }
+                raw_hash = hashlib.sha256(
+                    json.dumps(payload_for_hash, sort_keys=True).encode()
+                ).hexdigest()
             await self.store.update_target(
                 target_id,
                 status=OracleStatus.INDEXED.value,
                 api_id=indexed.api_id,
                 crawled_at=datetime.now(timezone.utc),
+                raw_payload_hash=raw_hash,
+            )
+        else:
+            await self.store.update_target(
+                target_id,
+                status=OracleStatus.FAILED.value,
+                crawled_at=datetime.now(timezone.utc),
+            )
+
+        if audit_context is not None:
+            record_audit(
+                "oracle.crawl",
+                actor_source=audit_context.get("source"),
+                key_id=audit_context.get("key_id"),
+                wallet_id=audit_context.get("wallet_id"),
+                url=url,
+                outcome="indexed" if indexed else "failed",
+                payload_hash=raw_hash or "",
             )
 
         return indexed  # type: ignore[no-any-return]
 
-    async def batch_crawl(self, urls: list[str]) -> list[IndexedAPI]:
+    async def batch_crawl(
+        self,
+        urls: list[str],
+        audit_context: dict[str, Any] | None = None,
+    ) -> list[IndexedAPI]:
         """Crawl multiple URLs concurrently."""
-        tasks = [self.crawl(url) for url in urls]
+        tasks = [
+            self.crawl(url, audit_context=audit_context) for url in urls
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return [r for r in results if isinstance(r, IndexedAPI)]
 
@@ -776,7 +889,7 @@ class AgentOracle:
         """Compute our overall visibility score across agent networks."""
         stats = await self.store.get_stats()
         await self.store.get_registrations()
-        indexed_apis = await self.store.list_indexed()
+        indexed_apis, _ = await self.store.list_indexed()
 
         # Compute compatibility distribution
         compat_map: dict[str, int] = defaultdict(int)
@@ -842,7 +955,7 @@ class AgentOracle:
 
     async def get_network_graph(self) -> NetworkGraphResponse:
         """Build a network graph of all indexed APIs centered on our API."""
-        indexed = await self.store.list_indexed()
+        indexed, _ = await self.store.list_indexed()
         registrations = await self.store.get_registrations()
 
         nodes: list[NetworkGraphNode] = []

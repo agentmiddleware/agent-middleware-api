@@ -107,6 +107,9 @@ async def test_list_indexed_empty(client, api_headers):
     data = resp.json()
     assert "apis" in data
     assert "total" in data
+    assert data["crawl_targets"] == []
+    assert "limit" in data
+    assert "offset" in data
 
 
 @pytest.mark.anyio

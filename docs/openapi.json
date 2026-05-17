@@ -1424,6 +1424,136 @@
         }
       }
     },
+    "/v1/agent-comms/send": {
+      "post": {
+        "tags": [
+          "Agent Communications (durable)"
+        ],
+        "summary": "Send message (durable store in real mode)",
+        "operationId": "agent_comms_send_v1_agent_comms_send_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentCommsSendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCommsSendResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing API key"
+          },
+          "403": {
+            "description": "Invalid API key"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/v1/agent-comms/inbox": {
+      "get": {
+        "tags": [
+          "Agent Communications (durable)"
+        ],
+        "summary": "List inbox (persisted in real mode)",
+        "operationId": "agent_comms_inbox_v1_agent_comms_inbox_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Recipient agent id",
+              "title": "Agent Id"
+            },
+            "description": "Recipient agent id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCommsInboxResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing API key"
+          },
+          "403": {
+            "description": "Invalid API key"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/factory/pipelines": {
       "post": {
         "tags": [
@@ -2233,7 +2363,7 @@
           "Agent Oracle & Network Infiltration"
         ],
         "summary": "List indexed APIs",
-        "description": "Browse the Oracle's index of external APIs. Filter by compatibility tier or directory type. Sorted by compatibility score (highest first).",
+        "description": "Browse the Oracle's index of external APIs, or list durable crawl rows. Without ``domain``: returns ``apis`` (indexed APIs), filterable by tier and directory type. With ``domain``: returns ``crawl_targets`` from the database (substring match on URL). Sorted by compatibility score (apis) or queued_at descending (crawl targets).",
         "operationId": "list_indexed_v1_oracle_index_get",
         "security": [
           {
@@ -2254,10 +2384,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by compatibility tier",
+              "description": "Filter indexed APIs by compatibility tier (ignored when domain is set)",
               "title": "Tier"
             },
-            "description": "Filter by compatibility tier"
+            "description": "Filter indexed APIs by compatibility tier (ignored when domain is set)"
           },
           {
             "name": "directory_type",
@@ -2272,10 +2402,55 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by directory type",
+              "description": "Filter indexed APIs by directory type (ignored when domain is set)",
               "title": "Directory Type"
             },
-            "description": "Filter by directory type"
+            "description": "Filter indexed APIs by directory type (ignored when domain is set)"
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When set, list durable crawl targets whose URL contains this host fragment (e.g. example.com).",
+              "title": "Domain"
+            },
+            "description": "When set, list durable crawl targets whose URL contains this host fragment (e.g. example.com)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Page size",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Offset for pagination",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Offset for pagination"
           }
         ],
         "responses": {
@@ -9873,6 +10048,159 @@
         "title": "ActionResponse",
         "description": "Result of an action in the environment."
       },
+      "AgentCommsInboxResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/InboxMessageItem"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "messages",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AgentCommsInboxResponse"
+      },
+      "AgentCommsSendRequest": {
+        "properties": {
+          "from_agent": {
+            "type": "string",
+            "title": "From Agent",
+            "description": "Sender agent id"
+          },
+          "to_agent": {
+            "type": "string",
+            "title": "To Agent",
+            "description": "Recipient agent id"
+          },
+          "message_type": {
+            "$ref": "#/components/schemas/MessageType",
+            "default": "request"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/MessagePriority",
+            "default": "normal"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Body"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "reply_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_agent",
+          "to_agent",
+          "subject",
+          "body"
+        ],
+        "title": "AgentCommsSendRequest"
+      },
+      "AgentCommsSendResponse": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "from_agent": {
+            "type": "string",
+            "title": "From Agent"
+          },
+          "to_agent": {
+            "type": "string",
+            "title": "To Agent"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "payload_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Hash",
+            "description": "Set when SIMULATION_MODE_AGENT_COMMS is false (DB mode)."
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id",
+          "from_agent",
+          "to_agent",
+          "status",
+          "created_at"
+        ],
+        "title": "AgentCommsSendResponse"
+      },
       "AgentRegistrationRequest": {
         "properties": {
           "name": {
@@ -13792,6 +14120,108 @@
         "title": "HookType",
         "description": "Types of content hooks extracted from source material."
       },
+      "InboxMessageItem": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "from_agent": {
+            "type": "string",
+            "title": "From Agent"
+          },
+          "to_agent": {
+            "type": "string",
+            "title": "To Agent"
+          },
+          "message_type": {
+            "type": "string",
+            "title": "Message Type"
+          },
+          "priority": {
+            "type": "string",
+            "title": "Priority"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Body"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "reply_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "payload_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Hash"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id",
+          "from_agent",
+          "to_agent",
+          "message_type",
+          "priority",
+          "subject",
+          "body",
+          "correlation_id",
+          "reply_to",
+          "status",
+          "payload_hash",
+          "created_at",
+          "delivered_at"
+        ],
+        "title": "InboxMessageItem"
+      },
       "IndexedAPI": {
         "properties": {
           "api_id": {
@@ -13872,12 +14302,34 @@
           },
           "total": {
             "type": "integer",
-            "title": "Total"
+            "title": "Total",
+            "description": "Total rows matching the active query (indexed APIs or crawl targets)."
           },
           "filters_applied": {
             "additionalProperties": true,
             "type": "object",
             "title": "Filters Applied"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 50
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Offset",
+            "default": 0
+          },
+          "crawl_targets": {
+            "items": {
+              "$ref": "#/components/schemas/OracleCrawlTargetRecord"
+            },
+            "type": "array",
+            "title": "Crawl Targets",
+            "description": "When ``domain`` is passed to ``GET /v1/oracle/index``, populated from ``oracle_crawl_targets``; otherwise empty."
           }
         },
         "type": "object",
@@ -13886,7 +14338,7 @@
           "total"
         ],
         "title": "IndexedAPIListResponse",
-        "description": "Paginated list of indexed APIs."
+        "description": "Paginated list of indexed APIs and/or durable crawl rows."
       },
       "IndexedCapability": {
         "properties": {
@@ -15424,6 +15876,82 @@
         ],
         "title": "NetworkGraphResponse",
         "description": "The agent network graph centered on our API."
+      },
+      "OracleCrawlTargetRecord": {
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "description": "Host extracted from url (lowercase), for filtering and display."
+          },
+          "directory_type": {
+            "type": "string",
+            "title": "Directory Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "api_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Id"
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          },
+          "crawled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crawled At"
+          },
+          "raw_payload_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Payload Hash",
+            "description": "SHA-256 of canonical crawl payload when SIMULATION_MODE_ORACLE is false."
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_id",
+          "url",
+          "domain",
+          "directory_type",
+          "status",
+          "queued_at"
+        ],
+        "title": "OracleCrawlTargetRecord",
+        "description": "One durable crawl target row as returned by ``GET /v1/oracle/index``."
       },
       "OracleStatus": {
         "type": "string",

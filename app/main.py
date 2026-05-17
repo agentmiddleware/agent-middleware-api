@@ -36,6 +36,7 @@ from .routers import (
     telemetry,
     media,
     comms,
+    agent_comms_durable,
     docs,
     factory,
     red_team,
@@ -278,6 +279,7 @@ app.include_router(iot.router)
 app.include_router(telemetry.router)
 app.include_router(media.router)
 app.include_router(comms.router)
+app.include_router(agent_comms_durable.router)
 app.include_router(factory.router)
 app.include_router(red_team.router)
 app.include_router(oracle.router)
@@ -383,6 +385,8 @@ async def root():
                     "GET /v1/comms/messages/{agent_id}/inbox",
                     "POST /v1/comms/messages/{agent_id}/ack/{message_id}",
                     "POST /v1/comms/handoff",
+                    "POST /v1/agent-comms/send",
+                    "GET /v1/agent-comms/inbox",
                 ],
             },
             "content_factory": {

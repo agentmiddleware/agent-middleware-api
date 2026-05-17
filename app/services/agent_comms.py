@@ -21,7 +21,8 @@ from enum import Enum
 from typing import Any
 
 from ..core.durable_state import get_durable_state
-from ..core.runtime_mode import require_simulation
+from ..core.runtime_mode import is_simulation
+from .agent_comms_store import CommsMessageStore, compute_payload_hash
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +428,23 @@ class MessageRouter:
                     await self._persist_message_locked(msg)
         return messages
 
+    async def list_inbox_page(
+        self, agent_id: str, limit: int = 50, offset: int = 0
+    ) -> tuple[list[AgentMessage], int]:
+        """Paginated inbox view without mutating delivery (simulation / HTTP inbox)."""
+        await self._hydrate_if_needed()
+        if self._state.enabled:
+            async with self._lock:
+                self._inbox[agent_id] = await self._load_agent_inbox(agent_id)
+        async with self._lock:
+            all_msgs = sorted(
+                self._inbox.get(agent_id, []),
+                key=lambda m: m.created_at,
+            )
+            total = len(all_msgs)
+            page = all_msgs[offset : offset + limit]
+        return list(page), total
+
     async def acknowledge(self, agent_id: str, message_id: str) -> bool:
         """Acknowledge receipt of a message."""
         await self._hydrate_if_needed()
@@ -444,7 +462,7 @@ class MessageRouter:
         self, message: AgentMessage, recipient: RegisteredAgent
     ) -> bool:
         """Deliver message via webhook. Production: use httpx with retry."""
-        require_simulation("agent_comms", issue="#35")
+        # Simulation flag gates DB-backed message rows, not this stub delivery (#35).
         logger.info(
             f"Webhook delivery to {recipient.webhook_url} for "
             f"{message.message_id}"
@@ -465,6 +483,7 @@ class AgentComms:
     def __init__(self):
         self.registry = AgentRegistry()
         self.router = MessageRouter(self.registry)
+        self._db_store = CommsMessageStore()
 
     async def register_agent(
         self,
@@ -497,7 +516,69 @@ class AgentComms:
             correlation_id=correlation_id or str(uuid.uuid4()),
             reply_to=reply_to,
         )
-        return await self.router.send(message)  # type: ignore[no-any-return]
+        result = await self.router.send(message)
+        if not is_simulation("agent_comms"):
+            ph = compute_payload_hash(
+                body=result.body,
+                correlation_id=result.correlation_id,
+                from_agent=result.from_agent,
+                message_type=result.message_type.value,
+                priority=result.priority.value,
+                reply_to=result.reply_to,
+                subject=result.subject,
+                to_agent=result.to_agent,
+            )
+            await self._db_store.insert_message(
+                message_id=result.message_id,
+                from_agent=result.from_agent,
+                to_agent=result.to_agent,
+                message_type=result.message_type.value,
+                priority=result.priority.value,
+                subject=result.subject,
+                body=result.body,
+                correlation_id=result.correlation_id,
+                reply_to=result.reply_to,
+                status=result.delivery_status.value,
+                payload_hash=ph,
+                created_at=result.created_at,
+                delivered_at=result.delivered_at,
+            )
+        return result  # type: ignore[no-any-return]
+
+    async def list_inbox_for_http(
+        self, agent_id: str, limit: int, offset: int
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        """
+        Inbox listing for ``/v1/agent-comms/inbox``.
+
+        Returns (messages_as_dicts, total, from_durable_db).
+        """
+        if not is_simulation("agent_comms"):
+            rows, total = await self._db_store.list_inbox_for_agent(
+                agent_id, limit=limit, offset=offset
+            )
+            return rows, total, True
+        page, total = await self.router.list_inbox_page(agent_id, limit, offset)
+        serialized: list[dict[str, Any]] = []
+        for m in page:
+            serialized.append(
+                {
+                    "message_id": m.message_id,
+                    "from_agent": m.from_agent,
+                    "to_agent": m.to_agent,
+                    "message_type": m.message_type.value,
+                    "priority": m.priority.value,
+                    "subject": m.subject,
+                    "body": m.body,
+                    "correlation_id": m.correlation_id,
+                    "reply_to": m.reply_to,
+                    "status": m.delivery_status.value,
+                    "payload_hash": None,
+                    "created_at": m.created_at,
+                    "delivered_at": m.delivered_at,
+                }
+            )
+        return serialized, total, False
 
     async def request_handoff(
         self,
