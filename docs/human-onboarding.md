@@ -76,6 +76,8 @@ capabilities that are simulated or undocumented.
 
 - [ ] Fetch and skim:
       - `GET /.well-known/agent.json`
+      - `GET /v1/discover` (full capability index; includes the same `agent_first`
+        block as the manifest — they must stay in sync)
       - `GET /llm.txt`
       - `GET /mcp/tools.json` (canonical MCP manifest from the MCP router)
 - [ ] Optionally compare with `GET /.well-known/mcp/tools.json` (separate route;
