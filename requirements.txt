@@ -9,7 +9,7 @@ pydantic-settings>=2.5.0
 
 # --- IoT Protocol Bridge ---
 aiomqtt>=2.5.1          # Async MQTT client
-aiocoap>=0.4.0          # CoAP protocol support
+aiocoap>=0.4.17          # CoAP protocol support
 
 # --- Telemetry / Autonomous PM ---
 httpx>=0.28.1           # Async HTTP client for git API calls
