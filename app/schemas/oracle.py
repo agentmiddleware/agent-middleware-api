@@ -120,11 +120,44 @@ class IndexedAPI(BaseModel):
     status: OracleStatus
 
 
+class OracleCrawlTargetRecord(BaseModel):
+    """One durable crawl target row as returned by ``GET /v1/oracle/index``."""
+
+    target_id: str
+    url: str
+    domain: str = Field(
+        ...,
+        description="Host extracted from url (lowercase), for filtering and display.",
+    )
+    directory_type: str
+    status: str
+    api_id: str | None = None
+    queued_at: datetime
+    crawled_at: datetime | None = None
+    raw_payload_hash: str | None = Field(
+        None,
+        description="SHA-256 of canonical crawl payload when SIMULATION_MODE_ORACLE is false.",
+    )
+
+
 class IndexedAPIListResponse(BaseModel):
-    """Paginated list of indexed APIs."""
+    """Paginated list of indexed APIs and/or durable crawl rows."""
+
     apis: list[IndexedAPI]
-    total: int
+    total: int = Field(
+        ...,
+        description="Total rows matching the active query (indexed APIs or crawl targets).",
+    )
     filters_applied: dict = Field(default_factory=dict)
+    limit: int = Field(50, ge=1, le=200)
+    offset: int = Field(0, ge=0)
+    crawl_targets: list[OracleCrawlTargetRecord] = Field(
+        default_factory=list,
+        description=(
+            "When ``domain`` is passed to ``GET /v1/oracle/index``, populated from "
+            "``oracle_crawl_targets``; otherwise empty."
+        ),
+    )
 
 
 # --- Registration Schemas ---

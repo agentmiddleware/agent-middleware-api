@@ -10,10 +10,11 @@ capabilities, tools, pricing, and how to integrate.
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Optional
 
 from ..core.auth import verify_api_key
 from ..core.config import get_settings
+from .well_known import get_agent_first_metadata
 
 router = APIRouter(
     prefix="/v1",
@@ -103,6 +104,14 @@ class DiscoveryManifest(BaseModel):
             "mcp_server": "/mcp",
             "awi_adoption": "/docs/awi-adoption-guide.md",
         }
+    )
+
+    agent_first: dict[str, Any] = Field(
+        default_factory=get_agent_first_metadata,
+        description=(
+            "Same metadata as /.well-known/agent.json agent_first: "
+            "bootstrap order and where to read simulation vs real state."
+        ),
     )
 
 
@@ -432,21 +441,18 @@ def _build_pricing() -> list[PricingTier]:
     response_model=DiscoveryManifest,
     summary="Agent Discovery Manifest",
     description=(
-        "Returns a comprehensive machine-readable manifest of all services, "
-        "MCP tools, AWI endpoints, and pricing. This is the primary endpoint "
-        "for autonomous agents to discover and integrate with this platform."
+        "Aggregated capability index: services, MCP tools, AWI endpoints, and "
+        "pricing. Bootstrap order is defined in `/.well-known/agent.json` under "
+        "`agent_first.bootstrap_sequence` (this endpoint is optional after those "
+        "hints)."
     ),
 )
 async def get_discovery_manifest():
     """
-    Primary discovery endpoint for autonomous agents.
+    Aggregated discovery manifest for autonomous agents.
 
-    Returns a complete manifest including:
-    - All service capabilities
-    - Available MCP tools with pricing
-    - AWI endpoints for web automation
-    - Pricing tiers
-    - Integration guides
+    Prefer `GET /.well-known/agent.json` first for `agent_first` metadata, then
+    this payload for a fuller catalog when needed.
     """
     return DiscoveryManifest(
         name=settings.APP_NAME,

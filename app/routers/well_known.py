@@ -9,13 +9,31 @@ Implements /.well-known/agent.json for agent directory registration.
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any
 
 from ..core.config import get_settings
 
 router = APIRouter(prefix="", tags=["Agent Discovery"])
 
 settings = get_settings()
+
+
+def get_agent_first_metadata() -> dict[str, Any]:
+    """
+    Single source of truth for agent-first bootstrap hints.
+    Used by /.well-known/agent.json and GET /v1/discover.
+    """
+    return {
+        "primary_audience": "autonomous_agents",
+        "design_principle": "agent_first",
+        "bootstrap_sequence": [
+            "/.well-known/agent.json",
+            "/llm.txt",
+            "/mcp/tools.json",
+            "/openapi.json",
+        ],
+        "simulation_and_dependency_truth": "/health/dependencies",
+    }
 
 
 class AgentPluginManifest(BaseModel):
@@ -88,6 +106,14 @@ class AgentPluginManifest(BaseModel):
             "phase9_dom_bridge": "/v1/awi/dom/snapshot",
             "phase9_rag": "/v1/awi/rag/ingest",
         }
+    )
+
+    agent_first: dict[str, Any] = Field(
+        default_factory=get_agent_first_metadata,
+        description=(
+            "How autonomous clients should treat this service: discovery order, "
+            "authority for simulation vs real behavior."
+        ),
     )
 
 

@@ -95,12 +95,14 @@ async def test_target_lifecycle_store_update_get():
         status=OracleStatus.INDEXED.value,
         api_id="api-42",
         crawled_at=datetime.now(timezone.utc),
+        raw_payload_hash="abc123",
     )
 
     t2 = await store.get_target("t-1")
     assert t2["status"] == OracleStatus.INDEXED.value
     assert t2["api_id"] == "api-42"
     assert t2["crawled_at"] is not None
+    assert t2["raw_payload_hash"] == "abc123"
 
 
 @pytest.mark.anyio
@@ -115,7 +117,7 @@ async def test_store_indexed_upserts_on_same_api_id():
     assert row.name == "Second"
     assert row.compatibility_score == 0.9
 
-    all_rows = await store.list_indexed()
+    all_rows, _ = await store.list_indexed()
     assert len(all_rows) == 1
 
 
@@ -136,16 +138,54 @@ async def test_list_indexed_filters_and_sorts():
     )
 
     # Sorted descending by score by default.
-    all_rows = await store.list_indexed()
+    all_rows, _ = await store.list_indexed()
     assert [r.api_id for r in all_rows] == ["a", "b", "c"]
 
     # Tier filter.
-    natives = await store.list_indexed(tier=CompatibilityTier.NATIVE)
+    natives, _ = await store.list_indexed(tier=CompatibilityTier.NATIVE)
     assert {r.api_id for r in natives} == {"a", "c"}
 
     # Directory-type filter.
-    mcps = await store.list_indexed(directory_type=DirectoryType.MCP_SERVER)
+    mcps, _ = await store.list_indexed(directory_type=DirectoryType.MCP_SERVER)
     assert [r.api_id for r in mcps] == ["c"]
+
+
+@pytest.mark.anyio
+async def test_list_indexed_respects_pagination():
+    store = OracleStore()
+    for i in range(5):
+        await store.store_indexed(
+            _indexed(api_id=f"p{i}", score=0.1 * (i + 1), name=f"API {i}")
+        )
+    page, total = await store.list_indexed(limit=2, offset=1)
+    assert total == 5
+    assert len(page) == 2
+    assert [a.api_id for a in page] == ["p3", "p2"]
+
+
+@pytest.mark.anyio
+async def test_list_crawl_targets_filters_by_domain():
+    store = OracleStore()
+    await store.store_target(
+        "ct-1",
+        {
+            "url": "https://api.foo.example.com/v1",
+            "directory_type": "openapi",
+            "status": "indexed",
+        },
+    )
+    await store.store_target(
+        "ct-2",
+        {
+            "url": "https://other.net/",
+            "directory_type": "openapi",
+            "status": "failed",
+        },
+    )
+    rows, total = await store.list_crawl_targets(domain="foo.example", limit=10, offset=0)
+    assert total == 1
+    assert rows[0]["target_id"] == "ct-1"
+    assert rows[0]["domain"] == "api.foo.example.com"
 
 
 @pytest.mark.anyio
