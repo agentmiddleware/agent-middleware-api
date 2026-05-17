@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Tests](https://img.shields.io/badge/Tests-540%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-545%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
@@ -38,7 +38,7 @@ curl http://localhost:8000/openapi.json
 
 Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes`. Optional index: `GET /v1/discover`.
 
-**Phase 1 (on `master`):** Agent Oracle (`/v1/oracle`), agent comms (`/v1/agent-comms/*`), and content (`/v1/content/*`) can use PostgreSQL-backed persistence and real LLM calls when simulation flags are off. See [Phase 1: Durable oracle, comms, and content](#phase-1-durable-oracle-comms-and-content) for env vars, migrations, and copy-paste `curl` examples.
+**Phase 1 (on `master`):** Agent Oracle (`/v1/oracle`), agent comms (`/v1/agent-comms/*`), and content (`/v1/content/*`) can use PostgreSQL-backed persistence and real LLM calls when simulation flags are off. The planner optimizer (`/v1/planner/optimize`) is also available for constrained action selection over candidate tool calls. See [Phase 1: Durable oracle, comms, and content](#phase-1-durable-oracle-comms-and-content) and [Planner Optimizer](#planner-optimizer-v1planneroptimize) for env vars, migrations, and copy-paste `curl` examples.
 
 ### Framework adapters (optional)
 
@@ -66,6 +66,8 @@ golden-path flow, and core API contracts are executable and tested.
 - **Agent Oracle** — Durable crawl payload hashing and index surfaces (`SIMULATION_MODE_ORACLE=false`).
 - **Agent Comms** — SQL-backed send + inbox at **`/v1/agent-comms/send`** and **`/v1/agent-comms/inbox`** (`SIMULATION_MODE_AGENT_COMMS=false`). Legacy **`/v1/comms/*`** remains for compatibility.
 - **Content Factory (text)** — **`POST /v1/content/generate`** and **`GET /v1/content/{content_id}`** with row persistence (`SIMULATION_MODE_CONTENT_FACTORY=false`) and OpenAI-compatible chat when **`LLM_BASE_URL`** + **`LLM_API_KEY`** are set.
+
+The planner optimizer is a stateless action-selection surface for agents: **`POST /v1/planner/optimize`** chooses candidate actions subject to budget, latency, risk, service health, scope, and simulation constraints.
 
 Other pillars still default to simulation-first behavior until their production integrations land, for example:
 
@@ -102,6 +104,7 @@ It lets agents:
 * **Control real web browsers with semantic actions**
 * **Use passkey authentication for high-risk operations**
 * **Search past sessions semantically**
+* **Optimize agent action plans under budget, latency, risk, scope, health, and simulation constraints**
 
 **Deploy in minutes via Docker or Railway.**
 
@@ -130,6 +133,7 @@ Not part of the autonomous-client contract — for people running this service:
 | **Agent Comms (Phase 1)**| `/v1/agent-comms` | When sim off | Yes     | Yes           |
 | **Content Factory (text)**| `/v1/content`    | When sim off | Yes     | Yes           |
 | **Agent Oracle**         | `/v1/oracle`      | When sim off | Yes     | Yes           |
+| **Planner Optimizer**    | `/v1/planner`     | Telemetry table | Yes  | No            |
 | IoT Bridge               | `/v1/iot`         | Optional| Yes          | Yes           |
 | Security                 | `/v1/security`    | Partial | Yes          | Yes           |
 | **Agent Intelligence**   | `/v1/ai`          | Yes     | Yes          | Yes           |
@@ -162,7 +166,7 @@ export LLM_API_KEY=sk-...
 export LLM_MODEL=gpt-4o
 ```
 
-Apply migrations: **`alembic upgrade head`** (revisions **010**–**012** cover oracle crawl payload hash, agent comms messages, and content generations).
+Apply migrations: **`alembic upgrade head`** (revisions **010**–**013** cover oracle crawl payload hash, agent comms messages, content generations, and optimizer telemetry).
 
 ### Agent Oracle (`/v1/oracle`)
 
@@ -222,6 +226,65 @@ curl -X POST http://localhost:8000/v1/content/generate \
 curl -s "http://localhost:8000/v1/content/$CONTENT_ID" \
   -H "X-API-Key: $API_KEY" | jq '.text'
 ```
+
+---
+
+## Planner Optimizer (`/v1/planner/optimize`)
+
+The planner optimizer selects an action set from candidate tool calls while enforcing budget, latency, risk, service-health, scope, and simulation constraints. It uses PuLP when available and falls back to a deterministic greedy planner if the solver is unavailable.
+
+Candidates are supplied in `state.task_context.candidate_actions`; each action can include `expected_value`, `reliability`, `credit_cost`, `latency_ms`, `risk_score`, `scope_allowed`, and `service`.
+
+```bash
+curl -X POST http://localhost:8000/v1/planner/optimize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "state": {
+      "wallet_id": "wallet-1",
+      "agent_id": "agent-1",
+      "task_id": "task-1",
+      "request_id": "req-1",
+      "wallet_balance": 100,
+      "daily_spend_used": 0,
+      "daily_limit": 100,
+      "rate_limit_headroom": 1,
+      "service_health": {"content": "healthy", "oracle": "healthy"},
+      "simulation_flags": {"content": false, "oracle": true},
+      "auth_scope": ["invoke"],
+      "remaining_budget": 20,
+      "slo_window_seconds": 2,
+      "task_context": {
+        "tier": "medium",
+        "candidate_actions": [
+          {
+            "id": "generate-summary",
+            "service": "content",
+            "expected_value": 10,
+            "reliability": 0.95,
+            "credit_cost": 4,
+            "latency_ms": 700,
+            "risk_score": 0.03,
+            "scope_allowed": true
+          },
+          {
+            "id": "crawl-source",
+            "service": "oracle",
+            "expected_value": 7,
+            "reliability": 0.9,
+            "credit_cost": 6,
+            "latency_ms": 900,
+            "risk_score": 0.04,
+            "scope_allowed": true
+          }
+        ]
+      }
+    },
+    "max_actions": 2,
+    "require_real_effects": true
+  }'
+```
+
+Responses return `status`, `selected_actions`, `rejected_actions`, `expected_utility`, `totals`, and `constraint_margins`. Revision **013** adds the `optimizer_telemetry` table for planner telemetry storage.
 
 ---
 
@@ -982,7 +1045,7 @@ SQLite backend provides durable state without requiring PostgreSQL or Redis infr
 - `GET /health` returns `200`
 - `GET /health/dependencies` reports healthy state backend
 - `GET /docs` loads OpenAPI UI
-- Run database migrations (`alembic upgrade head`) so Phase 1 tables exist (e.g. revisions `010`–`012`).
+- Run database migrations (`alembic upgrade head`) so Phase 1 tables exist (e.g. revisions `010`–`013`).
 
 ### PostgreSQL Connection String
 
@@ -1021,6 +1084,7 @@ Current durable service stores:
 - **Agent Comms Phase 1** (`agent_comms_messages` when `SIMULATION_MODE_AGENT_COMMS=false`)
 - **Oracle crawl/index** (payload hash column + crawl durability when `SIMULATION_MODE_ORACLE=false`)
 - **Content Factory** (`content_factory_generations` when `SIMULATION_MODE_CONTENT_FACTORY=false`)
+- **Planner Optimizer telemetry** (`optimizer_telemetry`)
 - AWI sessions and task queue (`awi.sessions.*`, `awi.session_state.*`, `awi.tasks.*`)
 - Behavioral sandbox environments (`bhe.environments.*`)
 - Telemetry (`events`, `anomalies`)
@@ -1036,6 +1100,7 @@ string companions for programmatic reconciliation, for example `balance_exact`,
 - [x] Phase 1 Agent Oracle durable crawl/index (simulation-gated)
 - [x] Phase 1 Agent Comms SQL store + `/v1/agent-comms` API
 - [x] Content Factory durable text generation + `/v1/content` API
+- [x] Constrained planner optimizer + `/v1/planner/optimize` API
 - [x] PostgreSQL ledger with ACID transactions
 - [x] Stripe fiat ingestion with webhooks
 - [x] Agent-to-agent transfers with child wallets
