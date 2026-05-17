@@ -51,7 +51,7 @@ router = APIRouter(
         "Submit a URL for the Oracle to crawl. It will attempt to discover "
         "the API's capabilities via /.well-known/agent.json, /llm.txt, or "
         "OpenAPI specs, then compute a compatibility score indicating how "
-        "well it integrates with our middleware."
+        "well it fits this control plane."
     ),
 )
 async def crawl_target(
@@ -347,7 +347,7 @@ async def get_network_graph(
     description=(
         "Called when an external agent discovers our API. "
         "Tracks referrer for analytics. This endpoint should be called "
-        "by our middleware whenever an agent first hits / or /.well-known/agent.json."
+        "by this service whenever an agent first hits / or /.well-known/agent.json."
     ),
 )
 async def record_discovery(

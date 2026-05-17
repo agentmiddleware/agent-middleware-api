@@ -314,10 +314,9 @@ async def get_agent_manifest(request: Request):
         "schema_version": "1.0",
         "name": "Agent-Native Middleware API",
         "description": (
-            "Headless middleware for the B2A economy. "
-            "Provides IoT protocol bridging, autonomous code repair via telemetry, "
-            "programmatic video-to-viral distribution, agent-to-agent communications, "
-            "and multi-format content generation with algorithmic scheduling."
+            "Operational control plane for autonomous agents: identity, billing, "
+            "discovery, policy, and execution governance for machine-native "
+            "software tenants."
         ),
         "url": base_url,
         "documentation_url": f"{base_url}/llm.txt",

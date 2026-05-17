@@ -4,7 +4,9 @@
 
 ## Value Proposition / Tagline
 
-**"The open-source B2A control plane with full MCP + Agentic Web Interface (AWI). Agents discover, simulate, pay, and act securely on any website — without fighting human-designed UIs."**
+**"Operational control plane for autonomous agents: identity, billing, discovery, policy, and execution governance for machine-native software tenants."**
+
+Canonical loop: `discover -> authenticate -> invoke -> meter -> govern`.
 
 ---
 
@@ -19,9 +21,10 @@
 
 ## Competitive Differentiation
 
-- First open-source platform to implement both MCP and a complete Agentic Web Interface (AWI), directly realizing the vision from arXiv:2506.10953 ("Build the web for agents, not agents for the web")
+- Control-plane positioning: wallet-scoped identity, delegated credentials, MCP discovery, policy-constrained execution, ledgering, telemetry, and bounded autonomy in one self-hostable service
 - Fully self-hostable with zero vendor lock-in (unlike commercial control planes)
 - Production-beta safety foundation: wallet-scoped keys, exact decimal billing fields, KYC, WebAuthn/passkey protection, simulation-mode visibility, authenticated behavioral sandbox routes with optional Docker isolation and durable environment state, durable AWI session/task state, row-keyed comms persistence, RAG memory, and a capped/TTL-cleaned Playwright DOM bridge
+- AWI, browser control, content generation, oracle crawls, and sandbox demos act as proof-of-usefulness surfaces for the infrastructure layer
 - Official wrappers for LangChain, CrewAI, and AutoGen — integrate in minutes
 - Designed for both agents and human developers
 
@@ -60,12 +63,15 @@
 
 **Name:** Agent Middleware API
 **Category:** Agent Infrastructure / Control Plane
+**Product:** Operational control plane for autonomous agents
+**Mechanism:** Identity, billing, discovery, policy, and execution governance
+**Thesis:** Autonomous systems will require the same operational infrastructure humans and cloud workloads already depend on
 **Pricing Model:** Open Source (Self-hosted) + Enterprise tiers available
 **Website:** https://github.com/PetrefiedThunder/agent-middleware-api
 
 ---
 
-## Core Capabilities
+## Core Infrastructure Capabilities
 
 ### MCP Server (Model Context Protocol)
 Dynamic MCP server that exposes billable services as discoverable tools.
@@ -77,6 +83,18 @@ Dynamic MCP server that exposes billable services as discoverable tools.
 | Pagination | `limit`/`offset` query params prevent large payload issues |
 | Tool Generator | `python -m b2a_sdk.mcp standalone` creates standalone servers |
 | Context Passing | `mcpContext.wallet_id` for billing attribution |
+
+### Control Plane Primitives
+
+| Capability | Description |
+|------------|-------------|
+| Wallet-scoped identity | Sponsor, agent, and child wallets with scoped API keys |
+| Delegated authority | Revocable, expirable keys and cross-wallet access checks |
+| Metering & ledgering | Dry-run pricing, committed charges, exact decimal reconciliation |
+| Policy-constrained execution | Planner optimization across budget, latency, health, risk, scope, and simulation state |
+| Governance | Telemetry, audit surfaces, dependency truth, readiness, and security posture |
+
+## Proof-of-Usefulness Surfaces
 
 ### Agentic Web Interface (AWI)
 Based on arXiv:2506.10953v1 - "Build the web for agents, not agents for the web"

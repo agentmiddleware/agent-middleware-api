@@ -35,7 +35,7 @@ class DirectoryType(str, Enum):
 
 
 class CompatibilityTier(str, Enum):
-    """How well an external API integrates with our middleware."""
+    """How well an external API fits this control plane."""
     NATIVE = "native"          # Direct API-to-API, zero adaptation needed
     COMPATIBLE = "compatible"  # Minor translation layer required
     BRIDGEABLE = "bridgeable"  # Needs our IoT/Comms bridge
@@ -113,7 +113,7 @@ class IndexedAPI(BaseModel):
         ...,
         ge=0.0,
         le=1.0,
-        description="How well this API complements our middleware (0-1).",
+        description="How well this API complements this control plane (0-1).",
     )
     tags: list[str] = Field(default_factory=list)
     last_crawled: datetime

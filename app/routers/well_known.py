@@ -122,9 +122,9 @@ def _build_agent_manifest() -> AgentPluginManifest:
     return AgentPluginManifest(
         name="agent-middleware-api",
         description=(
-            "The first open-source MCP + AWI control plane. "
-            "Provides billing, telemetry, agent communication, AI decision making, "
-            "and Agentic Web Interface automation for autonomous agents."
+            "Operational control plane for autonomous agents: identity, billing, "
+            "discovery, policy, and execution governance for machine-native "
+            "software tenants."
         ),
         version=settings.APP_VERSION,
         endpoints={

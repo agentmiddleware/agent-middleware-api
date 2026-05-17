@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # Compatibility Engine
 # ---------------------------------------------------------------------------
 
-# Keywords that indicate high compatibility with our middleware
+# Keywords that indicate high compatibility with this control plane
 COMPATIBILITY_KEYWORDS = {
     "native": [
         "agent", "api", "headless", "programmatic", "machine-to-machine",
@@ -91,7 +91,7 @@ CAPABILITY_CATEGORIES = {
 
 
 class CompatibilityEngine:
-    """Computes how well an external API integrates with our middleware."""
+    """Computes how well an external API fits this control plane."""
 
     @staticmethod
     def compute_score(
@@ -427,9 +427,9 @@ class CrawlEngine:
 OUR_PROFILE = {
     "name": "Agent-Native Middleware API",
     "description": (
-        "Headless B2A middleware: IoT protocol bridging, autonomous code repair, "
-        "programmatic media distribution, agent-to-agent comms, content factory "
-        "with 1-to-20 multiplication, and red team security scanning."
+        "Operational control plane for autonomous agents: identity, billing, "
+        "discovery, policy, and execution governance for machine-native "
+        "software tenants."
     ),
     "url": "https://api.yourdomain.com",
     "capabilities": [

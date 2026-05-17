@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent-Native Middleware API",
-    "description": "## Agent-Native Middleware API\n\nHeadless infrastructure for the B2A (Business-to-Agent) economy. This API provides a broad set of services that give AI agents the 'hands' and 'eyes' to manipulate the digital and physical world.\n\n### Capability Surface\n\n- **IoT Protocol Bridge** (`/v1/iot`) — Secure, ACL-enforced protocol translation for IoT devices (MQTT, CoAP, Zigbee, etc.)\n- **Autonomous Product Manager** (`/v1/telemetry`) — Ingest telemetry, detect anomalies, auto-generate pull requests to fix bugs\n- **Programmatic Media Engine** (`/v1/media`) — Video ingestion, viral hook detection, reframing, captioning, and cross-platform distribution\n- **Agent Communications** (`/v1/comms`) — Agent registration, structured messaging, capability discovery, and swarm task handoffs\n- **Extended Agent Operations** — Content factory, oracle discovery, billing, MCP tools, security scanning, launch automation, protocol generation, RTaaS, sandboxes, telemetry scopes, dashboards, broadcast, AI helpers, webhooks, KYC, API keys, AWI, discovery, well-known, and static documentation routes\n\n### Authentication\n\nAll endpoints require an API key passed via the `X-API-Key` header.\n\n### For Agents\n\nThis API is designed for programmatic consumption. See `/llm.txt` for LLM-optimized documentation and `/openapi.json` for the full spec.\n\n### v0.2.0\n\n✅ Now MCP-native with discoverable monetized tools, dry-run sandboxing, KYC gating, and automatic key rotation.",
+    "description": "## Agent-Native Middleware API\n\nAgent Middleware API is the operational control plane for autonomous agents: identity, billing, discovery, policy, and execution governance for machine-native software tenants.\n\n### Canonical Loop\n\n`discover -> authenticate -> invoke -> meter -> govern`\n\n### Core Infrastructure\n\n- **Identity and authority** — wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks, and cross-wallet isolation\n- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `llm.txt`, OpenAPI, and `/v1/discover`\n- **Policy-constrained execution** — MCP invocation, planner optimization, service health checks, simulation visibility, and bounded sandbox execution\n- **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows\n- **Governance and readiness** — telemetry, audit surfaces, dependency health, security posture, and operator preflight checks\n\n### Proof Surfaces\n\nAWI, browser control, content generation, oracle crawls, sandbox demos, media utilities, IoT bridges, and red-team services exercise the control plane without defining the core product surface.\n\n### Authentication\n\nAll endpoints require an API key passed via the `X-API-Key` header.\n\n### For Agents\n\nThis API is designed for programmatic consumption. See `/llm.txt` for LLM-optimized documentation and `/openapi.json` for the full spec.",
     "contact": {
       "name": "Agent-Native Middleware",
       "email": "support@agent-middleware.dev"
@@ -2360,7 +2360,7 @@
           "Agent Oracle & Network Infiltration"
         ],
         "summary": "Crawl and index an external API",
-        "description": "Submit a URL for the Oracle to crawl. It will attempt to discover the API's capabilities via /.well-known/agent.json, /llm.txt, or OpenAPI specs, then compute a compatibility score indicating how well it integrates with our middleware.",
+        "description": "Submit a URL for the Oracle to crawl. It will attempt to discover the API's capabilities via /.well-known/agent.json, /llm.txt, or OpenAPI specs, then compute a compatibility score indicating how well it fits this control plane.",
         "operationId": "crawl_target_v1_oracle_crawl_post",
         "requestBody": {
           "content": {
@@ -2798,7 +2798,7 @@
           "Agent Oracle & Network Infiltration"
         ],
         "summary": "Record inbound discovery hit",
-        "description": "Called when an external agent discovers our API. Tracks referrer for analytics. This endpoint should be called by our middleware whenever an agent first hits / or /.well-known/agent.json.",
+        "description": "Called when an external agent discovers our API. Tracks referrer for analytics. This endpoint should be called by this service whenever an agent first hits / or /.well-known/agent.json.",
         "operationId": "record_discovery_v1_oracle_discovery_post",
         "security": [
           {
@@ -11535,7 +11535,7 @@
           "incompatible"
         ],
         "title": "CompatibilityTier",
-        "description": "How well an external API integrates with our middleware."
+        "description": "How well an external API fits this control plane."
       },
       "ContentFormat": {
         "type": "string",
@@ -14563,7 +14563,7 @@
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Compatibility Score",
-            "description": "How well this API complements our middleware (0-1)."
+            "description": "How well this API complements this control plane (0-1)."
           },
           "tags": {
             "items": {

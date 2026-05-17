@@ -11,23 +11,31 @@
 ```markdown
 # Agent-Native Middleware API
 
-**The first open-source MCP + AWI control plane.**
+**Operational control plane for autonomous agents.**
 
-A production-ready FastAPI service that provides billing, telemetry, agent communication, AI decision making, and Agentic Web Interface (AWI) automation for autonomous agents.
+Agent Middleware API provides identity, billing, discovery, policy, and execution governance for machine-native software tenants.
+
+Canonical loop: `discover -> authenticate -> invoke -> meter -> govern`.
 
 ## Capabilities
 
-### Core Services
-- **Billing & Payments** — Two-tier wallet system with Stripe integration, spend velocity monitoring
-- **Telemetry** — Event tracking, anomaly detection, autonomous responses
-- **Agent Communication** — Agent-to-agent messaging, swarm coordination
-- **AI Decision Making** — Autonomous decisions, self-healing, natural language queries, memory
-- **AWI (Agentic Web Interface)** — Web automation without DOM fighting, human pause/steer
+### Core Infrastructure
+- **Identity & Authority** — Wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks
+- **Discovery & Negotiation** — MCP, `.well-known/agent.json`, `llm.txt`, OpenAPI, `/v1/discover`
+- **Execution Governance** — Tool invocation, planner constraints, service health, simulation state
+- **Economics** — Dry-run pricing, spend limits, ledgering, Stripe integration
+- **Governance** — Telemetry, audit surfaces, readiness, security posture
 
 ### Protocol Support
 - **MCP (Model Context Protocol)** — Native tool discovery and execution
-- **AWI Standard** — Standardized web automation interface
+- **AWI Standard** — Proof-of-usefulness surface for standardized web automation
 - **REST API** — Full REST API for all services
+
+### Proof Surfaces
+- **AWI (Agentic Web Interface)** — Web automation without DOM fighting, human pause/steer
+- **Agent Communication** — Agent-to-agent messaging, swarm coordination
+- **AI Decision Making** — Autonomous decisions, self-healing, natural language queries, memory
+- **Sandboxing** — Dry-run and bounded execution environments
 
 ### Framework Integrations
 - LangGraph ✓

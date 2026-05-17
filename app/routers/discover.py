@@ -457,7 +457,11 @@ async def get_discovery_manifest():
     return DiscoveryManifest(
         name=settings.APP_NAME,
         version=settings.APP_VERSION,
-        description="Agent-native middleware platform - the first open-source MCP + AWI control plane",
+        description=(
+            "Operational control plane for autonomous agents: identity, billing, "
+            "discovery, policy, and execution governance for machine-native "
+            "software tenants."
+        ),
         capabilities=_build_capabilities(),
         mcp_tools=_build_mcp_tools(),
         awi_endpoints=_build_awi_endpoints(),

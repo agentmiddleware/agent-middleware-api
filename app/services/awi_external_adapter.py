@@ -44,7 +44,7 @@ class AWIExternalAdapter:
         await self._client.aclose()
 
     async def discover_manifest(self) -> dict[str, Any]:
-        """Fetch the AWI manifest from our middleware."""
+        """Fetch the AWI manifest from the configured control plane."""
         response = await self._client.get("/v1/awi/vocabulary")
         response.raise_for_status()
         return response.json()

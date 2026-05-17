@@ -14,9 +14,21 @@
 
 > **Production beta — agent-discoverable, not production complete.** Built on arXiv:2506.10953v1.
 
-**Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
+**Product:** Agent Middleware API is the operational control plane for autonomous agents: identity, billing, discovery, policy, and execution governance for machine-native software tenants.
 
-**The FastAPI control plane for agent-native infrastructure — MCP + AWI powered.**
+**Platform:** A self-hostable infrastructure layer for wallet-scoped agents that need to discover capabilities, authenticate, invoke tools, meter usage, and operate inside enforceable boundaries.
+
+**Thesis:** Autonomous systems will require the same operational infrastructure humans and cloud workloads already depend on.
+
+The core loop is:
+
+```text
+discover -> authenticate -> invoke -> meter -> govern
+```
+
+Everything else in this repository exists to strengthen that loop or prove it in realistic agent workflows.
+
+**Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
 
 ### Primary interface (autonomous clients)
 
@@ -38,22 +50,17 @@ curl http://localhost:8000/openapi.json
 
 Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes`. Optional index: `GET /v1/discover`.
 
-**Phase 1 (on `master`):** Agent Oracle (`/v1/oracle`), agent comms (`/v1/agent-comms/*`), and content (`/v1/content/*`) can use PostgreSQL-backed persistence and real LLM calls when simulation flags are off. The planner optimizer (`/v1/planner/optimize`) is also available for constrained action selection over candidate tool calls. See [Phase 1: Durable oracle, comms, and content](#phase-1-durable-oracle-comms-and-content) and [Planner Optimizer](#planner-optimizer-v1planneroptimize) for env vars, migrations, and copy-paste `curl` examples.
+### Core infrastructure primitives
 
-### Framework adapters (optional)
+- **Identity and authority** — wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks, and cross-wallet isolation.
+- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `llm.txt`, OpenAPI, and `/v1/discover`.
+- **Policy-constrained execution** — MCP invocation, planner optimization, service health checks, simulation visibility, and bounded sandbox execution.
+- **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
+- **Governance and readiness** — telemetry, audit surfaces, dependency health, security posture, and operator preflight checks.
 
-For LangGraph, CrewAI, or AutoGen, use the published wrappers — HTTP + MCP above remain canonical.
+### Proof-of-usefulness surfaces
 
-```python
-# LangChain
-from agent_middleware import B2AClient, get_langgraph_tools
-client = B2AClient(api_key="...", wallet_id="...")
-tools = get_langgraph_tools(client)
-
-# CrewAI
-from agent_middleware import CrewAIB2ATool
-crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
-```
+AWI, browser control, content generation, oracle crawls, sandbox demos, media utilities, IoT bridges, and red-team services are examples of agent workflows that exercise the control plane. They are useful, but they are not the core product surface. The durable substrate is identity, policy, economics, orchestration, and governance.
 
 ### Current Implementation Status
 
@@ -61,7 +68,7 @@ This repository is a production-beta control plane, not a finished production
 platform. The wallet/key auth path, billing ledger, MCP discovery, health checks,
 golden-path flow, and core API contracts are executable and tested.
 
-**Phase 1 (simulation-gated “real” mode):** With PostgreSQL and the right env flags, these areas persist state and/or call external models instead of returning only synthetic payloads:
+**Phase 1 (on `master`, simulation-gated "real" mode):** With PostgreSQL and the right env flags, these areas persist state and/or call external models instead of returning only synthetic payloads:
 
 - **Agent Oracle** — Durable crawl payload hashing and index surfaces (`SIMULATION_MODE_ORACLE=false`).
 - **Agent Comms** — SQL-backed send + inbox at **`/v1/agent-comms/send`** and **`/v1/agent-comms/inbox`** (`SIMULATION_MODE_AGENT_COMMS=false`). Legacy **`/v1/comms/*`** remains for compatibility.
@@ -84,27 +91,20 @@ work. Public arbitrary Python execution is disabled by default. Set
 Docker container; `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true` is a
 local-development escape hatch and is not a production sandbox.
 
-**Agent Middleware API** is a FastAPI production-beta service that provides
-agent-discoverable contracts for durable state, wallet-scoped billing,
-telemetry, sandboxed tool workflows, IoT connectivity, and agent intelligence.
-Pillars outside Phase 1 above often remain simulation-first until their
-production integrations are wired up.
+### Framework adapters (optional)
 
-It lets agents:
+For LangGraph, CrewAI, AutoGen, or LlamaIndex, use the published wrappers — HTTP + MCP above remain canonical.
 
-* Send and receive structured messages
-* Store persistent state
-* Bill and track usage
-* Emit telemetry and anomaly alerts
-* Execute secure external actions
-* **Make autonomous decisions with AI reasoning**
-* **Self-heal by diagnosing and fixing issues**
-* **Answer natural language queries**
-* **Remember and learn from experiences**
-* **Control real web browsers with semantic actions**
-* **Use passkey authentication for high-risk operations**
-* **Search past sessions semantically**
-* **Optimize agent action plans under budget, latency, risk, scope, health, and simulation constraints**
+```python
+# LangChain
+from agent_middleware import B2AClient, get_langgraph_tools
+client = B2AClient(api_key="...", wallet_id="...")
+tools = get_langgraph_tools(client)
+
+# CrewAI
+from agent_middleware import CrewAIB2ATool
+crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
+```
 
 **Deploy in minutes via Docker or Railway.**
 
@@ -830,11 +830,11 @@ python my_server.py
 
 ---
 
-## External AWI Adoption Kit — Phase 8
+## Proof Surface: External AWI Adoption Kit — Phase 8
 
 **Turn any website into an agent-native platform in <30 minutes.**
 
-Website owners can now expose a full **Agentic Web Interface (AWI)** that works seamlessly with this middleware.
+Website owners can expose an **Agentic Web Interface (AWI)** that exercises the control plane's identity, billing, task-queue, and governance flows without changing their existing human UI.
 
 ### One-command adoption
 
@@ -853,7 +853,7 @@ The kit includes:
 
 **Documentation:** [docs/awi-adoption-guide.md](docs/awi-adoption-guide.md)
 
-This directly implements the vision from **arXiv:2506.10953v1** — we no longer force agents to fight human-designed interfaces.
+AWI is a proof-of-usefulness surface for the broader infrastructure thesis: agents need machine-native interfaces, but those interfaces still need authority, accounting, and governance.
 
 ---
 
@@ -914,11 +914,11 @@ See [`docs/agent-recipes.md`](docs/agent-recipes.md) for examples.
 
 ---
 
-## Agentic Web Interface (AWI) — Phase 7
+## Proof Surface: Agentic Web Interface (AWI) — Phase 7
 
 **Based on arXiv:2506.10953v1 — "Build the web for agents, not agents for the web"** ([Lù et al., 2025, CC BY 4.0](https://arxiv.org/abs/2506.10953))
 
-We believe agents should not be forced to adapt to human-designed UIs and DOM trees. Instead, we provide a full **Agentic Web Interface (AWI)** layer that implements the paper's six guiding principles:
+Agents should not be forced to adapt to human-designed UIs and DOM trees. AWI is the primary browser-facing proof surface for the control plane and implements the paper's six guiding principles:
 
 - **Stateful sessions** (`awi_session.py`)
 - **13 standardized higher-level actions** (`awi_action_vocab.py`)
@@ -926,7 +926,7 @@ We believe agents should not be forced to adapt to human-designed UIs and DOM tr
 - **Agentic task queues** with concurrency limits and human pause/steer
 - Human-centric intervention endpoint (`/v1/awi/intervene`)
 
-This makes our middleware the first open-source **MCP + AWI control plane** — websites can expose an AWI that our platform consumes, while agents get a clean, safe, standardized interface.
+Websites can expose an AWI that this platform consumes, while agents get a clean, safe, standardized interface governed by the same identity, billing, and policy layer as other tool calls.
 
 ### Create an AWI Session
 
@@ -1097,6 +1097,7 @@ string companions for programmatic reconciliation, for example `balance_exact`,
 
 ## Roadmap
 
+- [ ] Deepen trust primitives: full action audit trail, replayable execution records, explicit trust boundaries, and policy enforcement
 - [x] Phase 1 Agent Oracle durable crawl/index (simulation-gated)
 - [x] Phase 1 Agent Comms SQL store + `/v1/agent-comms` API
 - [x] Content Factory durable text generation + `/v1/content` API
@@ -1112,7 +1113,7 @@ string companions for programmatic reconciliation, for example `balance_exact`,
 - [x] Automated API key rotation for wallets
 - [x] Sandbox engine wired to billing
 - [x] Behavioral Sandbox Engine (safe dry runs, mocked MCP sandboxing)
-- [x] Full Agentic Web Interface (AWI) control plane
+- [x] Full Agentic Web Interface (AWI) proof surface
 - [x] External AWI Adoption Kit (Python/TS SDKs, manifest generator, adapter)
 - [x] Add comprehensive agent interaction examples and recipes
 - [x] Multi-tenant hardening validations

@@ -7,7 +7,7 @@
 ```json
 {
   "name": "Agent Middleware API",
-  "description": "The open-source B2A control plane with full MCP + Agentic Web Interface (AWI). Agents discover, simulate, pay, and act securely on any website — without fighting human-designed UIs. Provides billing, telemetry, IoT bridging, agent-to-agent messaging, and AI-powered decision making.",
+  "description": "Operational control plane for autonomous agents: identity, billing, discovery, policy, and execution governance for machine-native software tenants. Canonical loop: discover -> authenticate -> invoke -> meter -> govern.",
   "url": "https://api-service-production-433c.up.railway.app",
   "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
   "categories": [
@@ -31,13 +31,13 @@
   },
   "capabilities": [
     "MCP Server (Model Context Protocol) with auto-discovery",
-    "Agentic Web Interface (AWI) - arXiv:2506.10953v1 implementation",
-    "Billing & wallet management with Stripe integration",
-    "Agent-to-agent messaging and transfers",
-    "IoT protocol bridging (MQTT, CoAP, Zigbee)",
-    "Telemetry and anomaly detection",
+    "Wallet-scoped identity and delegated credentials",
+    "Billing, dry-run pricing, and ledgering with Stripe integration",
+    "Policy-constrained execution and planner optimization",
+    "Telemetry, audit surfaces, and readiness checks",
     "Behavioral and dry-run sandboxes",
-    "LLM-powered decision making and self-healing",
+    "Agentic Web Interface (AWI) proof surface",
+    "Agent-to-agent messaging and transfers",
     "WebAuthn/passkey for high-risk actions",
     "RAG memory over AWI session history"
   ],
@@ -83,7 +83,7 @@ You can add a `.mcp.json` file to the repo root:
 ```json
 {
   "name": "Agent Middleware API",
-  "description": "Open-source B2A control plane with MCP + AWI",
+  "description": "Operational control plane for autonomous agents",
   "url": "https://api-service-production-433c.up.railway.app"
 }
 ```

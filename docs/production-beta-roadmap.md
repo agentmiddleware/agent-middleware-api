@@ -1,25 +1,31 @@
 # Production Beta Roadmap
 
 This roadmap defines the minimum product shape for a credible production beta:
-an agent-native middleware control plane that agents can discover, developers
-can integrate quickly, and operators can trust with scoped keys, wallets,
-telemetry, and billable tool execution.
+an operational control plane for autonomous agents. The product is identity,
+billing, discovery, policy, and execution governance for machine-native
+software tenants.
 
 ## Product Goal
 
-Agent Middleware API should become the default control plane for monetized,
-observable, tool-using autonomous agents.
+Agent Middleware API should become the default control plane for autonomous
+agents that need to discover capabilities, authenticate, invoke tools, meter
+usage, and operate inside enforceable boundaries.
 
 The core beta loop is:
 
-1. An agent discovers capabilities through MCP, `.well-known/agent.json`, and
-   `llm.txt`.
-2. A developer provisions a sponsor wallet, an agent wallet, and scoped API
-   keys.
+```text
+discover -> authenticate -> invoke -> meter -> govern
+```
+
+1. An agent discovers capabilities through MCP, `.well-known/agent.json`, and `llm.txt`.
+2. A developer provisions a sponsor wallet, an agent wallet, and scoped API keys.
 3. The agent invokes tools or services using a wallet-scoped key.
-4. The platform meters usage, records ledger entries, emits telemetry, and
-   enforces spending limits.
-5. Operators can inspect failures, cost, keys, security posture, and readiness.
+4. The platform meters usage, records ledger entries, emits telemetry, and enforces spending limits.
+5. Operators inspect failures, cost, keys, security posture, and readiness.
+
+AWI, content generation, oracle crawls, browser control, and sandbox demos are
+proof-of-usefulness surfaces. They should strengthen the loop above, not
+compete with it in product positioning.
 
 ## Beta Acceptance Criteria
 
@@ -92,7 +98,17 @@ The core beta loop is:
 - Complete the threat model in `docs/threat-model.md`.
 - Replace subprocess sandbox execution with a stronger isolation boundary before
   offering public arbitrary-code execution.
-- Add audit export for key, wallet, sandbox, and MCP actions.
+- Add full action audit semantics: who authorized, what policy allowed, what
+  wallet paid, what tool executed, and what telemetry was emitted.
+- Add replayable execution records for enterprise and regulated environments.
+- Make trust boundaries explicit for container isolation, network policy,
+  secrets handling, and execution guarantees.
+
+### Milestone 4b: Policy Engine Depth
+
+- Express wallet, tool, risk, network, and human-approval constraints as explicit policies.
+- Ensure planner decisions report the policy and constraint reasons behind selected and rejected actions.
+- Treat governance as the near-term strategic center before expanding feature breadth.
 
 ### Milestone 5: Commercial Beta
 

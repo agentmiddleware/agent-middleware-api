@@ -2,7 +2,7 @@
 
 **Based on arXiv:2506.10953v1 — "Build the web for agents, not agents for the web"**
 
-This guide helps website owners and framework authors expose an **Agentic Web Interface (AWI)** that plugs into our middleware — without changing their existing human-facing UI.
+This guide helps website owners and framework authors expose an **Agentic Web Interface (AWI)** that plugs into the Agent Middleware API control plane — without changing their existing human-facing UI.
 
 ---
 
@@ -13,7 +13,7 @@ AWI is a standardized, stateful interface layer that lets autonomous agents inte
 **Benefits:**
 - Agents can discover and use your services without reverse-engineering your UI
 - Progressive representations let agents request exactly the data they need
-- Built-in safety: human pause/steer, KYC verification, wallet billing
+- Built-in safety: human pause/steer, KYC verification, wallet billing, and execution governance
 - No changes to your human UX required
 
 ---

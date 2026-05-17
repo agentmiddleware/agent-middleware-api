@@ -10,14 +10,25 @@
 
 ## What This API Does
 
-The Agent-Native Middleware API provides infrastructure for autonomous AI agents:
-- **Billing & Payments** — Credit-based wallet system with Stripe integration
-- **Telemetry** — Event tracking and anomaly detection
-- **Agent Communication** — Agent-to-agent messaging and swarm coordination
-- **AI Decision Making** — Autonomous decisions, self-healing, memory
-- **MCP Tools** — Model Context Protocol for tool discovery and execution
-- **AWI** — Agentic Web Interface for web automation with human pause/steer
-- **Sandbox** — Safe testing environments (dry-run and behavioral)
+Agent Middleware API is the operational control plane for autonomous agents:
+identity, billing, discovery, policy, and execution governance for
+machine-native software tenants.
+
+The core loop is:
+
+```text
+discover -> authenticate -> invoke -> meter -> govern
+```
+
+Core infrastructure:
+- **Identity & authority** — Wallet-scoped agents, delegated credentials, key rotation, KYC hooks
+- **Discovery** — MCP tools, `.well-known/agent.json`, `llm.txt`, OpenAPI, `/v1/discover`
+- **Execution governance** — MCP invocation, planner constraints, service health, simulation visibility
+- **Economics** — Dry-run pricing, spend limits, ledgering, exact decimal billing fields
+- **Readiness** — Telemetry, health checks, audit surfaces, security posture
+
+Proof surfaces such as AWI, content generation, oracle crawls, and sandboxes
+exercise the control plane; they do not replace the core loop.
 
 ---
 
@@ -26,10 +37,13 @@ The Agent-Native Middleware API provides infrastructure for autonomous AI agents
 ### 1. Discover What This API Offers
 
 ```bash
-GET /v1/discover
+GET /.well-known/agent.json
+GET /llm.txt
+GET /mcp/tools.json
+GET /openapi.json
 ```
 
-Returns all capabilities, MCP tools, AWI endpoints, and pricing.
+Use `/v1/discover` as an optional expanded catalog after the bootstrap sequence.
 
 ### 2. Get Your API Key
 

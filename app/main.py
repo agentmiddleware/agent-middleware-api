@@ -1,12 +1,12 @@
 """
 Agent-Native Middleware API
 ===========================
-Headless infrastructure for the Business-to-Agent (B2A) economy.
+Operational control plane for autonomous agents.
 
-Agent-facing capabilities include device protocol bridging, telemetry-driven
-code repair, media and content pipelines, agent communications, discovery,
-billing, security testing, sandboxes, MCP tooling, KYC, API key management,
-and AWI integrations.
+Agent-facing capabilities center on identity, billing, discovery, policy,
+and execution governance for machine-native software tenants. Demo and
+integration surfaces such as AWI, content generation, IoT bridging, and
+sandboxes exercise that control plane.
 
 Zero GUI. Your customer is an autonomous agent.
 """
@@ -216,31 +216,32 @@ app = FastAPI(
     version=settings.APP_VERSION,
     description=(
         "## Agent-Native Middleware API\n\n"
-        "Headless infrastructure for the B2A (Business-to-Agent) economy. "
-        "This API provides a broad set of services that give AI agents the "
-        "'hands' and 'eyes' to manipulate the digital and physical world.\n\n"
-        "### Capability Surface\n\n"
-        "- **IoT Protocol Bridge** (`/v1/iot`) — Secure, ACL-enforced protocol "
-        "translation for IoT devices (MQTT, CoAP, Zigbee, etc.)\n"
-        "- **Autonomous Product Manager** (`/v1/telemetry`) — Ingest telemetry, "
-        "detect anomalies, auto-generate pull requests to fix bugs\n"
-        "- **Programmatic Media Engine** (`/v1/media`) — Video ingestion, viral hook "
-        "detection, reframing, captioning, and cross-platform distribution\n"
-        "- **Agent Communications** (`/v1/comms`) — Agent registration, structured "
-        "messaging, capability discovery, and swarm task handoffs\n"
-        "- **Extended Agent Operations** — Content factory, oracle discovery, "
-        "billing, MCP tools, security scanning, launch automation, protocol "
-        "generation, RTaaS, sandboxes, telemetry scopes, dashboards, broadcast, "
-        "AI helpers, webhooks, KYC, API keys, AWI, discovery, well-known, and "
-        "static documentation routes\n\n"
+        "Agent Middleware API is the operational control plane for autonomous "
+        "agents: identity, billing, discovery, policy, and execution governance "
+        "for machine-native software tenants.\n\n"
+        "### Canonical Loop\n\n"
+        "`discover -> authenticate -> invoke -> meter -> govern`\n\n"
+        "### Core Infrastructure\n\n"
+        "- **Identity and authority** — wallet-scoped agents, delegated "
+        "credentials, API-key rotation, KYC hooks, and cross-wallet isolation\n"
+        "- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, "
+        "`llm.txt`, OpenAPI, and `/v1/discover`\n"
+        "- **Policy-constrained execution** — MCP invocation, planner optimization, "
+        "service health checks, simulation visibility, and bounded sandbox "
+        "execution\n"
+        "- **Economics and accounting** — dry-run pricing, spend limits, ledger "
+        "entries, exact decimal fields, Stripe top-ups, and transfer flows\n"
+        "- **Governance and readiness** — telemetry, audit surfaces, dependency "
+        "health, security posture, and operator preflight checks\n\n"
+        "### Proof Surfaces\n\n"
+        "AWI, browser control, content generation, oracle crawls, sandbox demos, "
+        "media utilities, IoT bridges, and red-team services exercise the control "
+        "plane without defining the core product surface.\n\n"
         "### Authentication\n\n"
         "All endpoints require an API key passed via the `X-API-Key` header.\n\n"
         "### For Agents\n\n"
         "This API is designed for programmatic consumption. See `/llm.txt` for "
-        "LLM-optimized documentation and `/openapi.json` for the full spec.\n\n"
-        "### v0.2.0\n\n"
-        "✅ Now MCP-native with discoverable monetized tools, dry-run sandboxing, "
-        "KYC gating, and automatic key rotation."
+        "LLM-optimized documentation and `/openapi.json` for the full spec."
     ),
     docs_url="/docs",
     redoc_url="/redoc",
@@ -328,9 +329,9 @@ async def root():
         "version": settings.APP_VERSION,
         "agent_first": get_agent_first_metadata(),
         "description": (
-            "Agent-native middleware for IoT bridging, autonomous code repair, "
-            "media distribution, agent communications, discovery, billing, "
-            "security, sandboxes, MCP tooling, and AWI integrations."
+            "Operational control plane for autonomous agents: identity, billing, "
+            "discovery, policy, and execution governance for machine-native "
+            "software tenants."
         ),
         "services": {
             "iot_bridge": {
