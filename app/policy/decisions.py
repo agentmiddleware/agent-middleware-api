@@ -19,7 +19,7 @@ class PolicyDecision:
     estimated_cost: float | None
     request_id: str | None
 
-    def model_dump(self) -> dict[str, Any]:
+    def model_dump(self, **_: Any) -> dict[str, Any]:
         return asdict(self)
 
 
