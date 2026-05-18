@@ -467,6 +467,60 @@ class TestMcpInvokeRoute:
         assert response.status_code == 401
 
     @pytest.mark.anyio
+    async def test_messages_tools_call_maps_missing_wallet_to_invalid_params(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "missing-wallet-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "anything",
+                        "arguments": {},
+                        "mcpContext": {},
+                    },
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["error"]["code"] == -32602
+        assert payload["error"]["message"] == "Missing wallet_id in mcpContext"
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_maps_tool_not_found(self, clean_database):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            wallet_id = await _create_funded_agent_wallet(
+                client,
+                "missing-tool-agent",
+            )
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "missing-tool-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "missing-jsonrpc-tool",
+                        "arguments": {},
+                        "mcpContext": {"wallet_id": wallet_id},
+                    },
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["error"]["code"] == -32001
+        assert payload["error"]["message"] == "Tool not found: missing-jsonrpc-tool"
+
+    @pytest.mark.anyio
     async def test_messages_tools_list_requires_api_key_header(self):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -804,6 +858,68 @@ class TestMcpInvokeRoute:
             ]
         finally:
             registry.unregister_local("jsonrpc-refund-fails")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_reports_refund_and_audit_failure(
+        self, clean_database, monkeypatch
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise RuntimeError("tool exploded")
+
+        async def failing_refund(self, **_kwargs):
+            raise RuntimeError("refund down")
+
+        async def failing_audit(**_kwargs):
+            raise RuntimeError("audit down")
+
+        monkeypatch.setattr(
+            "app.services.agent_money.AgentMoney.refund_charge",
+            failing_refund,
+        )
+        monkeypatch.setattr("app.routers.mcp._audit_mcp_invocation", failing_audit)
+        registry.register_local(
+            service_id="jsonrpc-refund-audit-fails",
+            name="JSON-RPC Refund Audit Fails",
+            description="Failing refund and audit tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-refund-audit-fails-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "refund-audit-fails-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-refund-audit-fails",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "refund_failed:refund down" in payload["error"]["message"]
+            assert "tool_error:tool exploded" in payload["error"]["message"]
+            assert "audit_failed:audit down" in payload["error"]["message"]
+        finally:
+            registry.unregister_local("jsonrpc-refund-audit-fails")
 
     @pytest.mark.anyio
     async def test_messages_tools_call_insufficient_funds_uses_jsonrpc_error(

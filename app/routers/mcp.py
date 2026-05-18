@@ -160,24 +160,15 @@ async def handle_messages(
                 }
             )
         except ValueError as e:
-            if str(e) == "insufficient_funds":
-                return JSONResponse(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {
-                            "code": -32004,
-                            "message": str(e),
-                        },
-                    }
-                )
-            logger.error(f"MCP tool call failed: {e}")
+            code = _value_error_jsonrpc_code(str(e))
+            if code == -32603:
+                logger.error(f"MCP tool call failed: {e}")
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "error": {
-                        "code": -32603,
+                        "code": code,
                         "message": str(e),
                     },
                 }
@@ -311,13 +302,21 @@ async def _execute_registered_tool(
                 charge_result.entry_id,
                 refund_exc,
             )
-            await _audit_mcp_invocation(
-                decision=decision,
-                endpoint=endpoint,
-                transport=transport,
-                ok=False,
-                error=error,
-            )
+            try:
+                await _audit_mcp_invocation(
+                    decision=decision,
+                    endpoint=endpoint,
+                    transport=transport,
+                    ok=False,
+                    error=error,
+                )
+            except Exception as audit_exc:
+                error = f"{error}; audit_failed:{audit_exc}"
+                logger.error(
+                    "Failed to audit MCP refund failure for charge %s: %s",
+                    charge_result.entry_id,
+                    audit_exc,
+                )
             raise RuntimeError(error) from refund_exc
         await _audit_mcp_invocation(
             decision=decision,
@@ -355,6 +354,18 @@ def _charge_units_for_registered_cost(
 ) -> Decimal:
     default_price = DEFAULT_PRICING[category][1]
     return registered_cost / default_price
+
+
+def _value_error_jsonrpc_code(message: str) -> int:
+    if message in {"Missing tool name", "Missing wallet_id in mcpContext"}:
+        return -32602
+    if message.startswith("Tool not found"):
+        return -32001
+    if message.startswith("Tool not executable"):
+        return -32002
+    if message == "insufficient_funds":
+        return -32004
+    return -32603
 
 
 async def _audit_mcp_invocation(
