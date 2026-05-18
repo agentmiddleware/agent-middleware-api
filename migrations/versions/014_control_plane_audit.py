@@ -19,7 +19,9 @@ def upgrade() -> None:
     op.create_table(
         "control_plane_audit_events",
         sa.Column("event_id", sa.String(length=50), primary_key=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("event", sa.String(length=128), nullable=False),
         sa.Column("wallet_id", sa.String(length=64), nullable=True),
         sa.Column("tool", sa.String(length=128), nullable=True),
@@ -32,25 +34,76 @@ def upgrade() -> None:
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("metadata_json", sa.Text(), nullable=True),
     )
-    op.create_index("ix_control_plane_audit_events_created_at", "control_plane_audit_events", ["created_at"])
-    op.create_index("ix_control_plane_audit_events_event", "control_plane_audit_events", ["event"])
-    op.create_index("ix_control_plane_audit_events_wallet_id", "control_plane_audit_events", ["wallet_id"])
-    op.create_index("ix_control_plane_audit_events_tool", "control_plane_audit_events", ["tool"])
-    op.create_index("ix_control_plane_audit_events_endpoint", "control_plane_audit_events", ["endpoint"])
-    op.create_index("ix_control_plane_audit_events_key_id", "control_plane_audit_events", ["key_id"])
-    op.create_index("ix_control_plane_audit_events_policy_decision_id", "control_plane_audit_events", ["policy_decision_id"])
-    op.create_index("ix_control_plane_audit_events_request_id", "control_plane_audit_events", ["request_id"])
-    op.create_index("ix_control_plane_audit_events_ok", "control_plane_audit_events", ["ok"])
+    op.create_index(
+        "ix_control_plane_audit_events_created_at",
+        "control_plane_audit_events",
+        ["created_at"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_event", "control_plane_audit_events", ["event"]
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_wallet_id",
+        "control_plane_audit_events",
+        ["wallet_id"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_tool", "control_plane_audit_events", ["tool"]
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_endpoint",
+        "control_plane_audit_events",
+        ["endpoint"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_key_id", "control_plane_audit_events", ["key_id"]
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_policy_decision_id",
+        "control_plane_audit_events",
+        ["policy_decision_id"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_request_id",
+        "control_plane_audit_events",
+        ["request_id"],
+    )
+    op.create_index(
+        "ix_control_plane_audit_events_ok", "control_plane_audit_events", ["ok"]
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_control_plane_audit_events_ok", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_request_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_policy_decision_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_key_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_endpoint", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_tool", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_wallet_id", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_event", table_name="control_plane_audit_events")
-    op.drop_index("ix_control_plane_audit_events_created_at", table_name="control_plane_audit_events")
+    op.drop_index(
+        "ix_control_plane_audit_events_ok", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_request_id",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_policy_decision_id",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_key_id", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_endpoint",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_tool", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_wallet_id",
+        table_name="control_plane_audit_events",
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_event", table_name="control_plane_audit_events"
+    )
+    op.drop_index(
+        "ix_control_plane_audit_events_created_at",
+        table_name="control_plane_audit_events",
+    )
     op.drop_table("control_plane_audit_events")

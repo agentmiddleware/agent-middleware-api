@@ -32,7 +32,12 @@ class AuditEvent:
 def _to_event(row: ControlPlaneAuditEventModel) -> AuditEvent:
     metadata: dict[str, Any] = {}
     if row.metadata_json:
-        metadata = json.loads(row.metadata_json)
+        try:
+            decoded = json.loads(row.metadata_json)
+        except json.JSONDecodeError:
+            decoded = {}
+        if isinstance(decoded, dict):
+            metadata = decoded
     return AuditEvent(
         event_id=row.event_id,
         created_at=row.created_at,
@@ -94,9 +99,11 @@ async def list_audit_events(
     request_id: str | None = None,
     limit: int = 50,
 ) -> list[AuditEvent]:
-    stmt = select(ControlPlaneAuditEventModel).order_by(
-        desc(ControlPlaneAuditEventModel.created_at)
-    ).limit(limit)
+    stmt = (
+        select(ControlPlaneAuditEventModel)
+        .order_by(desc(ControlPlaneAuditEventModel.created_at))
+        .limit(limit)
+    )
     if wallet_id:
         stmt = stmt.where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
     if key_id:
