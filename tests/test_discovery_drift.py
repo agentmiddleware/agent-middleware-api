@@ -29,8 +29,12 @@ def _assert_phase9_tool_available(tools):
     assert {tool["name"] for tool in tools} >= {"awi_passkey_challenge"}
 
 
-def _tool_annotations_by_name(tools):
-    return {tool["name"]: tool["annotations"] for tool in tools}
+def _tools_by_name(tools):
+    return {tool["name"]: tool for tool in tools}
+
+
+def _without_generated_at(manifest):
+    return {key: value for key, value in manifest.items() if key != "generated_at"}
 
 
 @pytest.fixture
@@ -108,16 +112,25 @@ async def test_well_known_mcp_manifest_matches_canonical_mcp_manifest(client):
     well_known = well_known_response.json()
     canonical = canonical_response.json()
 
-    assert well_known["version"] == canonical["version"]
-    assert well_known["name"] == canonical["name"]
-    assert well_known["description"] == canonical["description"]
-    assert [tool["name"] for tool in well_known["tools"]] == [
-        tool["name"] for tool in canonical["tools"]
-    ]
-    _assert_phase9_tool_available(well_known["tools"])
-    assert _tool_annotations_by_name(well_known["tools"]) == _tool_annotations_by_name(
-        canonical["tools"]
-    )
+    assert _without_generated_at(well_known) == _without_generated_at(canonical)
+
+    well_known_tools = _tools_by_name(well_known["tools"])
+    assert "awi_passkey_challenge" in well_known_tools
+
+    annotations = well_known_tools["awi_passkey_challenge"]["annotations"]
+    assert annotations["creditsPerCall"] == 1.0
+    assert annotations["unitName"] == "challenge"
+    assert annotations["category"] == "agent_comms"
+    assert annotations["simulation"] is True
+    assert annotations["integrationStatus"] == "simulated"
+    assert annotations["runtimeService"] == "agent_comms"
+
+
+@pytest.mark.anyio
+async def test_prefixed_well_known_mcp_manifest_is_not_a_discovery_route(client):
+    response = await client.get("/mcp/.well-known/mcp/tools.json")
+
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio

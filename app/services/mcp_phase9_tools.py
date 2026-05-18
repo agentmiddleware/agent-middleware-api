@@ -247,9 +247,31 @@ def ensure_phase9_registered():
 _default_services_registered = False
 
 
-async def default_service_placeholder(**kwargs) -> dict[str, Any]:
-    """Placeholder for default services."""
-    return {"status": "service_available", "message": "This is a default MCP service"}
+def _make_default_service_handler(service_def: dict[str, Any]):
+    """Create a deterministic preview handler for a default control-plane tool."""
+    category = service_def["category"].value
+    service_id = service_def["service_id"]
+    service_name = service_def["name"]
+    unit_name = service_def["unit_name"]
+
+    async def default_service_handler(**kwargs) -> dict[str, Any]:
+        return {
+            "status": "preview_available",
+            "service_id": service_id,
+            "service_name": service_name,
+            "category": category,
+            "unit_name": unit_name,
+            "mode": "agent_operations_control_plane_preview",
+            "integration_status": "contract_only",
+            "message": (
+                f"{service_name} exposes the deterministic control-plane contract "
+                "agents can use for discovery, planning, and policy evaluation. "
+                "Runtime side effects are not wired in this preview handler."
+            ),
+            "input_keys": sorted(kwargs),
+        }
+
+    return default_service_handler
 
 
 def register_default_mcp_services():
@@ -309,7 +331,10 @@ def register_default_mcp_services():
 
         for service_def in default_services:
             try:
-                registry.register_local(func=default_service_placeholder, **service_def)
+                registry.register_local(
+                    func=_make_default_service_handler(service_def),
+                    **service_def,
+                )
                 logger.info(
                     f"Registered default MCP service: {service_def['service_id']}"
                 )

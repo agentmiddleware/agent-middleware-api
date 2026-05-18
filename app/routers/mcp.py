@@ -5,7 +5,7 @@ MCP Router
 Dynamic MCP Proxy router for the B2A Service Marketplace.
 
 Provides:
-- /.well-known/mcp/tools.json - MCP manifest discovery
+- /mcp/tools.json - MCP manifest discovery
 - /mcp/sse - Server-Sent Events transport
 - /mcp/messages - JSON-RPC message handling
 
@@ -104,17 +104,6 @@ async def get_tools_json(
         MCP tools.json manifest with tool definitions
     """
     manifest = await build_mcp_tools_manifest(category=category)
-    return JSONResponse(content=manifest)
-
-
-@router.get("/.well-known/mcp/tools.json")
-async def well_known_tools_json() -> JSONResponse:
-    """
-    MCP tools manifest at the standard .well-known location.
-
-    This follows the MCP specification for tool discovery.
-    """
-    manifest = await build_mcp_tools_manifest()
     return JSONResponse(content=manifest)
 
 

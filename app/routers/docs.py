@@ -13,7 +13,7 @@ Endpoints:
 
 from fastapi import APIRouter
 
-from .well_known import _build_agent_manifest, get_agent_first_metadata
+from .well_known import get_agent_first_metadata
 
 router = APIRouter(
     tags=["Documentation & Discovery"],
@@ -293,17 +293,3 @@ async def get_doc_index():
             "docs": "/llm.txt#authentication",
         },
     }
-
-
-@router.get(
-    "/.well-known/agent.json",
-    summary="Agent discovery manifest",
-    description=(
-        "Standard agent discovery manifest following the emerging "
-        ".well-known/agent.json convention. External agents fetch this to understand "
-        "what this API does, how to authenticate, and what capabilities "
-        "are available — similar to robots.txt but for AI agents."
-    ),
-)
-async def get_agent_manifest():
-    return _build_agent_manifest().model_dump(mode="json")
