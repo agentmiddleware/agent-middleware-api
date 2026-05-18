@@ -16535,6 +16535,7 @@
           "status",
           "selected_actions",
           "rejected_actions",
+          "policy_reasons",
           "expected_utility",
           "totals",
           "constraint_margins"
