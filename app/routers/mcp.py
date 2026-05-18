@@ -17,6 +17,7 @@ This enables agents to:
 
 import json
 import logging
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
@@ -25,9 +26,12 @@ from pydantic import BaseModel, Field
 
 from ..audit.lightweight import record_audit
 from ..core.auth import AuthContext, get_auth_context
+from ..policy.decisions import PolicyDecision, evaluate_tool_invocation
+from ..services.agent_money import AgentMoney, get_agent_money
+from ..services.audit_log import record_audit_event
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
-from ..schemas.billing import ServiceCategory
+from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +98,11 @@ async def well_known_tools_json() -> JSONResponse:
 
 
 @router.post("/messages", name="MCP JSON-RPC Messages")
-async def handle_messages(request: Request) -> JSONResponse:
+async def handle_messages(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    money: AgentMoney = Depends(get_agent_money),
+) -> JSONResponse:
     """
     Handle MCP JSON-RPC messages.
 
@@ -125,12 +133,30 @@ async def handle_messages(request: Request) -> JSONResponse:
 
     elif method == "tools/call":
         try:
-            result = await _handle_tools_call(params)
+            result = await _handle_tools_call(
+                params,
+                auth=auth,
+                money=money,
+                transport="jsonrpc",
+                endpoint="/mcp/messages",
+                request_id=str(request_id) if request_id is not None else None,
+            )
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "result": result,
+                }
+            )
+        except PermissionError as e:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32003,
+                        "message": str(e),
+                    },
                 }
             )
         except Exception as e:
@@ -173,71 +199,163 @@ async def _handle_tools_list(params: dict) -> dict:
     return {"tools": manifest["tools"]}
 
 
-async def _handle_tools_call(params: dict) -> dict:
-    """
-    Handle MCP tools/call request.
-
-    This routes through the existing billing layer:
-    1. Extract wallet_id from mcp_context
-    2. Call the service via service registry
-    3. Return the result
-
-    For local services, we execute the function directly.
-    For persistent services, we call the API endpoint.
-    """
-    tool_name = params.get("name")
-    arguments = params.get("arguments", {})
-    mcp_context = params.get("mcpContext", {})
-
+async def _execute_registered_tool(
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    wallet_id: str,
+    auth: AuthContext,
+    money: AgentMoney,
+    transport: str,
+    endpoint: str,
+    request_id: str | None,
+) -> dict:
     if not tool_name:
         raise ValueError("Missing tool name")
-
-    wallet_id = mcp_context.get("wallet_id")
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
 
-    ok = False
-    err: str | None = None
-    try:
-        registry = get_service_registry()
-        service = registry.get_local(tool_name)
+    registry = get_service_registry()
+    service = registry.get_local(tool_name)
+    if not service:
+        service = await registry.get_persistent(tool_name)
+    if not service:
+        raise ValueError(f"Tool not found: {tool_name}")
 
-        if service:
-            func = registry.get_local_func(tool_name)
-            if func:
-                import asyncio
+    func = registry.get_local_func(tool_name)
+    if not func:
+        raise ValueError(f"Tool not executable: {tool_name}")
 
-                if asyncio.iscoroutinefunction(func):
-                    result = await func(**arguments)
-                else:
-                    result = func(**arguments)
-
-                ok = True
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(result, default=str),
-                        }
-                    ],
-                    "isError": False,
-                }
-
-        err = f"Tool not found: {tool_name}"
-        raise ValueError(err)
-    except Exception as exc:
-        if err is None:
-            err = str(exc)
-        raise
-    finally:
-        record_audit(
-            "mcp.tools.call",
-            tool=tool_name,
-            wallet_id=wallet_id,
-            transport="jsonrpc",
-            ok=ok,
-            error=err,
+    estimated_cost = float(service.get("credits_per_unit", 1.0))
+    decision = evaluate_tool_invocation(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        estimated_cost=estimated_cost,
+        request_id=request_id,
+    )
+    if not decision.allowed:
+        await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=decision.reason,
         )
+        raise PermissionError(decision.reason)
+
+    category = ServiceCategory(
+        service.get("category", ServiceCategory.PLATFORM_FEE.value)
+    )
+    charge_result = await money.charge(
+        wallet_id=wallet_id,
+        service_category=category,
+        units=Decimal("1"),
+        request_path=endpoint,
+        description=f"MCP {transport} invoke {tool_name}",
+    )
+    if isinstance(charge_result, InsufficientFundsResponse):
+        await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error="insufficient_funds",
+        )
+        raise ValueError("insufficient_funds")
+
+    import asyncio
+
+    try:
+        if asyncio.iscoroutinefunction(func):
+            result = await func(**arguments)
+        else:
+            result = func(**arguments)
+    except Exception as exc:
+        await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=str(exc),
+        )
+        raise
+
+    await _audit_mcp_invocation(
+        decision=decision,
+        endpoint=endpoint,
+        transport=transport,
+        ok=True,
+        error=None,
+    )
+    return {
+        "content": [{"type": "text", "text": json.dumps(result, default=str)}],
+        "isError": False,
+    }
+
+
+async def _audit_mcp_invocation(
+    *,
+    decision: PolicyDecision,
+    endpoint: str,
+    transport: str,
+    ok: bool,
+    error: str | None,
+) -> None:
+    record_audit(
+        "mcp.invoke",
+        tool=decision.tool_name,
+        wallet_id=decision.wallet_id,
+        transport=transport,
+        auth_source=decision.auth_source,
+        key_id=decision.key_id,
+        policy_decision_id=decision.decision_id,
+        request_id=decision.request_id,
+        ok=ok,
+        error=error,
+    )
+    await record_audit_event(
+        event="mcp.invoke",
+        wallet_id=decision.wallet_id,
+        tool=decision.tool_name,
+        endpoint=endpoint,
+        auth_source=decision.auth_source,
+        key_id=decision.key_id,
+        policy_decision_id=decision.decision_id,
+        request_id=decision.request_id,
+        ok=ok,
+        error=error,
+        metadata={
+            "transport": transport,
+            "estimated_cost": decision.estimated_cost,
+            "policy_reason": decision.reason,
+        },
+    )
+
+
+async def _handle_tools_call(
+    params: dict,
+    *,
+    auth: AuthContext,
+    money: AgentMoney,
+    transport: str,
+    endpoint: str,
+    request_id: str | None,
+) -> dict:
+    tool_name = params.get("name")
+    arguments = params.get("arguments", {})
+    mcp_context = params.get("mcpContext", {})
+    wallet_id = mcp_context.get("wallet_id")
+    return await _execute_registered_tool(
+        tool_name=tool_name,
+        arguments=arguments,
+        wallet_id=wallet_id,
+        auth=auth,
+        money=money,
+        transport=transport,
+        endpoint=endpoint,
+        request_id=request_id,
+    )
 
 
 @router.post(
@@ -249,6 +367,7 @@ async def invoke_tool(
     service_id: str,
     request: ToolCallRequest,
     auth: AuthContext = Depends(get_auth_context),
+    money: AgentMoney = Depends(get_agent_money),
 ) -> ToolCallResponse:
     """
     Invoke an MCP-enabled service.
@@ -261,63 +380,42 @@ async def invoke_tool(
 
     For persistent services, see POST /v1/billing/services/{id}/invoke
     """
-    registry = get_service_registry()
-    service = registry.get_local(service_id)
-
-    if not service:
-        service = await registry.get_persistent(service_id)
-        if not service:
-            raise HTTPException(
-                status_code=404, detail=f"Service not found: {service_id}"
-            )
-
     mcp_context = request.mcp_context
     if not mcp_context:
         mcp_context = McpContext(wallet_id=request.arguments.get("wallet_id", ""))
 
     if not mcp_context.wallet_id:
         raise HTTPException(status_code=400, detail="Missing wallet_id")
-    auth.require_wallet_access(mcp_context.wallet_id)
 
-    func = registry.get_local_func(service_id)
-    if func:
-        import asyncio
-
-        try:
-            if asyncio.iscoroutinefunction(func):
-                result = await func(**request.arguments)
-            else:
-                result = func(**request.arguments)
-
-            record_audit(
-                "mcp.http.invoke",
-                tool=service_id,
-                wallet_id=mcp_context.wallet_id,
-                auth_source=auth.source,
-                key_id=auth.key_id,
-                ok=True,
-            )
-            return ToolCallResponse(
-                content=[{"type": "text", "text": json.dumps(result, default=str)}],
-                isError=False,
-            )
-        except Exception as e:
-            logger.error(f"Tool invocation failed: {e}")
-            record_audit(
-                "mcp.http.invoke",
-                tool=service_id,
-                wallet_id=mcp_context.wallet_id,
-                auth_source=auth.source,
-                key_id=auth.key_id,
-                ok=False,
-                error=str(e),
-            )
-            return ToolCallResponse(
-                content=[{"type": "text", "text": f"Error: {str(e)}"}],
-                isError=True,
-            )
-
-    raise HTTPException(status_code=501, detail="Service not executable")
+    try:
+        result = await _execute_registered_tool(
+            tool_name=service_id,
+            arguments=request.arguments,
+            wallet_id=mcp_context.wallet_id,
+            auth=auth,
+            money=money,
+            transport="http",
+            endpoint=f"/mcp/tools/{service_id}/invoke",
+            request_id=None,
+        )
+        return ToolCallResponse(**result)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        message = str(exc)
+        if message == "insufficient_funds":
+            raise HTTPException(status_code=402, detail=message)
+        if message.startswith("Tool not found"):
+            raise HTTPException(status_code=404, detail=message)
+        if message.startswith("Tool not executable"):
+            raise HTTPException(status_code=501, detail=message)
+        raise HTTPException(status_code=400, detail=message)
+    except Exception as exc:
+        logger.error(f"Tool invocation failed: {exc}")
+        return ToolCallResponse(
+            content=[{"type": "text", "text": f"Error: {str(exc)}"}],
+            isError=True,
+        )
 
 
 @router.get(
