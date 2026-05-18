@@ -25,7 +25,7 @@ async def test_wallet_scoped_agent_golden_path(client, clean_database):
     bootstrap_headers = {"X-API-Key": "test-key"}
 
     # Agent-facing discovery surfaces should be reachable.
-    for path in ("/.well-known/agent.json", "/llm.txt", "/mcp/tools.json"):
+    for path in ("/.well-known/agent.json", "/llm.txt"):
         resp = await client.get(path, headers=bootstrap_headers)
         assert resp.status_code == 200
 
@@ -124,7 +124,12 @@ async def test_wallet_scoped_agent_golden_path(client, clean_database):
     try:
         mcp_resp = await client.get("/mcp/tools.json", headers=agent_headers)
         assert mcp_resp.status_code == 200
-        assert "tools" in mcp_resp.json()
+        mcp_payload = mcp_resp.json()
+        assert "tools" in mcp_payload
+        assert any(
+            tool["name"] == "golden-path-echo"
+            for tool in mcp_payload["tools"]
+        )
 
         invoke_resp = await client.post(
             "/mcp/messages",
