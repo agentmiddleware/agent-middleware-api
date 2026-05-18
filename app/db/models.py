@@ -626,3 +626,23 @@ class OptimizerTelemetryModel(SQLModel, table=True):
     error_class: Optional[str] = Field(default=None, max_length=64)
     risk_flags: Optional[str] = Field(default=None)
     payload_hash: Optional[str] = Field(default=None, max_length=64, index=True)
+
+
+class ControlPlaneAuditEventModel(SQLModel, table=True):
+    """Durable control-plane audit event for agent operations."""
+
+    __tablename__ = "control_plane_audit_events"
+
+    event_id: str = Field(primary_key=True, max_length=50)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    event: str = Field(max_length=128, index=True)
+    wallet_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    tool: Optional[str] = Field(default=None, max_length=128, index=True)
+    endpoint: Optional[str] = Field(default=None, max_length=256, index=True)
+    auth_source: Optional[str] = Field(default=None, max_length=32)
+    key_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    policy_decision_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    request_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    ok: bool = Field(default=True, index=True)
+    error: Optional[str] = Field(default=None)
+    metadata_json: Optional[str] = Field(default=None)
