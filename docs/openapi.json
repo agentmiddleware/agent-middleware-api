@@ -2842,6 +2842,120 @@
         }
       }
     },
+    "/v1/audit/events": {
+      "get": {
+        "tags": [
+          "Control Plane Audit"
+        ],
+        "summary": "Get Audit Events",
+        "operationId": "get_audit_events_v1_audit_events_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Wallet Id"
+            }
+          },
+          {
+            "name": "key_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key Id"
+            }
+          },
+          {
+            "name": "tool",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tool"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/billing/wallets/sponsor": {
       "post": {
         "tags": [
@@ -6613,26 +6727,6 @@
         }
       }
     },
-    "/.well-known/agent.json": {
-      "get": {
-        "tags": [
-          "Agent Discovery"
-        ],
-        "summary": "Agent Plugin Manifest",
-        "description": "Returns a standard agent plugin manifest for agent directories and plugin registries. This is how autonomous agents discover and evaluate this service.",
-        "operationId": "get_agent_json__well_known_agent_json_get",
-        "responses": {
-          "200": {
-            "description": "Agent plugin manifest",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/webhooks/stripe": {
       "post": {
         "tags": [
@@ -6721,26 +6815,6 @@
         }
       }
     },
-    "/mcp/.well-known/mcp/tools.json": {
-      "get": {
-        "tags": [
-          "MCP"
-        ],
-        "summary": "Well Known Tools Json",
-        "description": "MCP tools manifest at the standard .well-known location.\n\nThis follows the MCP specification for tool discovery.",
-        "operationId": "well_known_tools_json_mcp__well_known_mcp_tools_json_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/mcp/messages": {
       "post": {
         "tags": [
@@ -6758,7 +6832,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/mcp/tools/{service_id}/invoke": {
@@ -9098,6 +9177,26 @@
         }
       }
     },
+    "/.well-known/agent.json": {
+      "get": {
+        "tags": [
+          "Agent Discovery"
+        ],
+        "summary": "Agent Plugin Manifest",
+        "description": "Returns a standard agent plugin manifest for agent directories and plugin registries. This is how autonomous agents discover and evaluate this service.",
+        "operationId": "get_agent_json__well_known_agent_json_get",
+        "responses": {
+          "200": {
+            "description": "Agent plugin manifest",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/.well-known/mcp/tools.json": {
       "get": {
         "tags": [
@@ -10772,6 +10871,158 @@
         ],
         "title": "AttackCategory",
         "description": "Categories of automated attack vectors."
+      },
+      "AuditEventListResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventResponse"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events",
+          "total"
+        ],
+        "title": "AuditEventListResponse"
+      },
+      "AuditEventResponse": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "wallet_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet Id"
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
+          },
+          "auth_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Source"
+          },
+          "key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Id"
+          },
+          "policy_decision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Decision Id"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "created_at",
+          "event",
+          "wallet_id",
+          "tool",
+          "endpoint",
+          "auth_source",
+          "key_id",
+          "policy_decision_id",
+          "request_id",
+          "ok",
+          "error",
+          "metadata"
+        ],
+        "title": "AuditEventResponse"
       },
       "AutoPRRequest": {
         "properties": {
@@ -16252,6 +16503,13 @@
             },
             "type": "array",
             "title": "Rejected Actions"
+          },
+          "policy_reasons": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Policy Reasons"
           },
           "expected_utility": {
             "type": "number",

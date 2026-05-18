@@ -52,6 +52,9 @@ def test_risk_budget_enforced_by_tier():
     out = planner.optimize_action_set(state, candidates, req)
     ids = {x["id"] for x in out["selected_actions"]}
     assert "risky" not in ids
+    rejected = {x["id"]: x["reason"] for x in out["rejected_actions"]}
+    assert rejected["risky"] == "risk_budget_exceeded"
+    assert out["policy_reasons"]["risky"] == "risk_budget_exceeded"
 
 
 def test_solver_empty_solution_returns_infeasible_regression():

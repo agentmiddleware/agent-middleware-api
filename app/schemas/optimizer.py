@@ -33,6 +33,7 @@ class OptimizerResponse(BaseModel):
     status: Literal["Optimal", "HeuristicFallback", "Infeasible"]
     selected_actions: List[Dict]
     rejected_actions: List[Dict]
+    policy_reasons: Dict[str, str] = Field(default_factory=dict)
     expected_utility: float
     totals: Dict[str, float]
     constraint_margins: Dict[str, float]
