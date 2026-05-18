@@ -2,6 +2,31 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.services import mcp_phase9_tools
+from app.services.mcp_phase9_tools import MCP_PHASE9_TOOLS
+from app.services.service_registry import get_service_registry
+
+
+_DEFAULT_MCP_TOOL_IDS = {
+    "data-indexer",
+    "content-generator",
+    "telemetry-processor",
+    "semantic-search",
+}
+
+
+def _clear_builtin_mcp_tools_for_lazy_start():
+    registry = get_service_registry()
+    for tool in MCP_PHASE9_TOOLS:
+        registry.unregister_local(tool["service_id"])
+    for tool_id in _DEFAULT_MCP_TOOL_IDS:
+        registry.unregister_local(tool_id)
+    mcp_phase9_tools._registered = False
+    mcp_phase9_tools._default_services_registered = False
+
+
+def _assert_phase9_tool_available(tools):
+    assert {tool["name"] for tool in tools} >= {"awi_passkey_challenge"}
 
 
 @pytest.fixture
@@ -65,3 +90,46 @@ async def test_mcp_manifest_tools_include_pricing_and_simulation_truth(client):
         assert "unitName" in annotations
         assert "simulation" in annotations
         assert "integrationStatus" in annotations
+
+
+@pytest.mark.anyio
+async def test_mcp_tools_endpoint_lazily_registers_local_tools(client):
+    _clear_builtin_mcp_tools_for_lazy_start()
+
+    response = await client.get("/mcp/tools")
+
+    assert response.status_code == 200
+    _assert_phase9_tool_available(response.json()["tools"])
+
+
+@pytest.mark.anyio
+async def test_mcp_messages_tools_list_lazily_registers_local_tools(client):
+    _clear_builtin_mcp_tools_for_lazy_start()
+
+    response = await client.post(
+        "/mcp/messages",
+        json={
+            "jsonrpc": "2.0",
+            "id": "lazy-list",
+            "method": "tools/list",
+            "params": {},
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "lazy-list"
+    _assert_phase9_tool_available(payload["result"]["tools"])
+
+
+@pytest.mark.anyio
+async def test_mcp_get_tool_lazily_registers_local_tools(client):
+    _clear_builtin_mcp_tools_for_lazy_start()
+
+    response = await client.get("/mcp/tools/awi_passkey_challenge")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "awi_passkey_challenge"
+    assert data["annotations"]["creditsPerCall"] == 1.0

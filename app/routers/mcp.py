@@ -217,6 +217,7 @@ async def handle_messages(
 
 async def _handle_tools_list(params: dict) -> dict:
     """Handle MCP tools/list request."""
+    _ensure_local_mcp_tools_registered()
     generator = get_mcp_generator()
     category = params.get("category")
     if category:
@@ -245,6 +246,7 @@ async def _execute_registered_tool(
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
 
+    _ensure_local_mcp_tools_registered()
     registry = get_service_registry()
     service = registry.get_local(tool_name)
     if not service:
@@ -529,6 +531,7 @@ async def list_tools(
     Returns:
         Paginated list of tool definitions with schemas
     """
+    _ensure_local_mcp_tools_registered()
     generator = get_mcp_generator()
     manifest = await generator.generate_tools_json_async(category=category)
     tools = manifest["tools"]
@@ -561,6 +564,7 @@ async def get_tool(service_id: str) -> dict[str, Any]:
     - outputSchema (if available)
     - pricing and category annotations
     """
+    _ensure_local_mcp_tools_registered()
     registry = get_service_registry()
 
     service = registry.get_local(service_id)
