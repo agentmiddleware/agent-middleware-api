@@ -467,6 +467,37 @@ class TestMcpInvokeRoute:
         assert response.status_code == 401
 
     @pytest.mark.anyio
+    async def test_messages_tools_list_requires_api_key_header(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            unauthenticated_resp = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "list-unauth",
+                    "method": "tools/list",
+                    "params": {},
+                },
+            )
+            authenticated_resp = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "list-auth",
+                    "method": "tools/list",
+                    "params": {},
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+
+        assert unauthenticated_resp.status_code == 401
+        assert authenticated_resp.status_code == 200
+        payload = authenticated_resp.json()
+        assert payload["id"] == "list-auth"
+        assert "tools" in payload["result"]
+
+    @pytest.mark.anyio
     async def test_messages_tools_call_rejects_cross_wallet_db_key(self, clean_database):
         registry = get_service_registry()
 
@@ -520,11 +551,24 @@ class TestMcpInvokeRoute:
                     },
                     headers={"X-API-Key": key_resp.json()["api_key"]},
                 )
+                audit_resp = await client.get(
+                    (
+                        f"/v1/audit/events?wallet_id={other_wallet_id}"
+                        "&tool=cross-wallet-echo"
+                    ),
+                    headers={"X-API-Key": "test-key"},
+                )
 
             assert response.status_code == 200
             payload = response.json()
             assert payload["error"]["code"] == -32003
             assert "wallet_access_denied" in payload["error"]["message"]
+            assert audit_resp.status_code == 200
+            audit_events = audit_resp.json()["events"]
+            assert len(audit_events) == 1
+            assert audit_events[0]["ok"] is False
+            assert audit_events[0]["error"] == "wallet_access_denied"
+            assert audit_events[0]["policy_decision_id"].startswith("pol-")
         finally:
             registry.unregister_local("cross-wallet-echo")
 
@@ -577,10 +621,17 @@ class TestMcpInvokeRoute:
                     headers={"X-API-Key": "test-key"},
                 )
                 assert ledger_resp.status_code == 200
-                assert any(
-                    "jsonrpc-paid-echo" in entry.get("description", "")
+                paid_entries = [
+                    entry
                     for entry in ledger_resp.json()["entries"]
+                    if "jsonrpc-paid-echo" in entry.get("description", "")
+                ]
+                assert len(paid_entries) == 1
+                debit_amount = Decimal(
+                    paid_entries[0].get("amount_exact")
+                    or str(paid_entries[0]["amount"])
                 )
+                assert debit_amount == Decimal("-2.0")
 
                 audit_resp = await client.get(
                     f"/v1/audit/events?wallet_id={wallet_id}&tool=jsonrpc-paid-echo",
@@ -592,6 +643,64 @@ class TestMcpInvokeRoute:
                 assert audit_events[0]["metadata"]["transport"] == "jsonrpc"
         finally:
             registry.unregister_local("jsonrpc-paid-echo")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_does_not_charge_when_tool_fails(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise RuntimeError("boom")
+
+        registry.register_local(
+            service_id="jsonrpc-failing-echo",
+            name="JSON-RPC Failing Echo",
+            description="Failing tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-failing-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "failing-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-failing-echo",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                ledger_resp = await client.get(
+                    f"/v1/billing/ledger/{wallet_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "boom" in payload["error"]["message"]
+            assert ledger_resp.status_code == 200
+            assert not any(
+                "jsonrpc-failing-echo" in entry.get("description", "")
+                for entry in ledger_resp.json()["entries"]
+            )
+        finally:
+            registry.unregister_local("jsonrpc-failing-echo")
 
     @pytest.mark.anyio
     async def test_invoke_tool_requires_api_key_header(self):

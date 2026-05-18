@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from ..audit.lightweight import record_audit
 from ..core.auth import AuthContext, get_auth_context
 from ..policy.decisions import PolicyDecision, evaluate_tool_invocation
-from ..services.agent_money import AgentMoney, get_agent_money
+from ..services.agent_money import DEFAULT_PRICING, AgentMoney, get_agent_money
 from ..services.audit_log import record_audit_event
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
@@ -226,7 +226,12 @@ async def _execute_registered_tool(
     if not func:
         raise ValueError(f"Tool not executable: {tool_name}")
 
-    estimated_cost = float(service.get("credits_per_unit", 1.0))
+    category = ServiceCategory(
+        service.get("category", ServiceCategory.PLATFORM_FEE.value)
+    )
+    registered_cost = _registered_tool_cost(service, category)
+    charge_units = _charge_units_for_registered_cost(registered_cost, category)
+    estimated_cost = float(registered_cost)
     decision = evaluate_tool_invocation(
         auth=auth,
         wallet_id=wallet_id,
@@ -244,17 +249,19 @@ async def _execute_registered_tool(
         )
         raise PermissionError(decision.reason)
 
-    category = ServiceCategory(
-        service.get("category", ServiceCategory.PLATFORM_FEE.value)
-    )
-    charge_result = await money.charge(
+    description = f"MCP {transport} invoke {tool_name}"
+    dry_run_result = await money.charge(
         wallet_id=wallet_id,
         service_category=category,
-        units=Decimal("1"),
+        units=charge_units,
         request_path=endpoint,
-        description=f"MCP {transport} invoke {tool_name}",
+        description=description,
+        dry_run=True,
     )
-    if isinstance(charge_result, InsufficientFundsResponse):
+    if (
+        isinstance(dry_run_result, InsufficientFundsResponse)
+        or not dry_run_result.would_succeed
+    ):
         await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,
@@ -281,6 +288,23 @@ async def _execute_registered_tool(
         )
         raise
 
+    charge_result = await money.charge(
+        wallet_id=wallet_id,
+        service_category=category,
+        units=charge_units,
+        request_path=endpoint,
+        description=description,
+    )
+    if isinstance(charge_result, InsufficientFundsResponse):
+        await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error="insufficient_funds",
+        )
+        raise ValueError("insufficient_funds")
+
     await _audit_mcp_invocation(
         decision=decision,
         endpoint=endpoint,
@@ -292,6 +316,22 @@ async def _execute_registered_tool(
         "content": [{"type": "text", "text": json.dumps(result, default=str)}],
         "isError": False,
     }
+
+
+def _registered_tool_cost(
+    service: dict[str, Any],
+    category: ServiceCategory,
+) -> Decimal:
+    default_price = DEFAULT_PRICING[category][1]
+    return Decimal(str(service.get("credits_per_unit", default_price)))
+
+
+def _charge_units_for_registered_cost(
+    registered_cost: Decimal,
+    category: ServiceCategory,
+) -> Decimal:
+    default_price = DEFAULT_PRICING[category][1]
+    return registered_cost / default_price
 
 
 async def _audit_mcp_invocation(
