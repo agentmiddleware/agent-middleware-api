@@ -695,12 +695,80 @@ class TestMcpInvokeRoute:
             assert payload["error"]["code"] == -32603
             assert "boom" in payload["error"]["message"]
             assert ledger_resp.status_code == 200
-            assert not any(
-                "jsonrpc-failing-echo" in entry.get("description", "")
+            tool_entries = [
+                entry
                 for entry in ledger_resp.json()["entries"]
+                if "jsonrpc-failing-echo" in entry.get("description", "")
+            ]
+            assert len(tool_entries) == 2
+            debit_entries = [
+                entry for entry in tool_entries if entry["action"] == "debit"
+            ]
+            refund_entries = [
+                entry for entry in tool_entries if entry["action"] == "refund"
+            ]
+            assert len(debit_entries) == 1
+            assert len(refund_entries) == 1
+            net_amount = sum(
+                Decimal(entry.get("amount_exact") or str(entry["amount"]))
+                for entry in tool_entries
             )
+            assert net_amount == Decimal("0.0")
         finally:
             registry.unregister_local("jsonrpc-failing-echo")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_insufficient_funds_uses_jsonrpc_error(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+        called = False
+
+        def expensive_tool() -> dict:
+            nonlocal called
+            called = True
+            return {"value": "should not run"}
+
+        registry.register_local(
+            service_id="jsonrpc-expensive-echo",
+            name="JSON-RPC Expensive Echo",
+            description="Expensive tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=expensive_tool,
+            credits_per_unit=10000.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-expensive-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "expensive-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-expensive-echo",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32004
+            assert payload["error"]["message"] == "insufficient_funds"
+            assert called is False
+        finally:
+            registry.unregister_local("jsonrpc-expensive-echo")
 
     @pytest.mark.anyio
     async def test_invoke_tool_requires_api_key_header(self):

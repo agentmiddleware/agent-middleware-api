@@ -159,6 +159,29 @@ async def handle_messages(
                     },
                 }
             )
+        except ValueError as e:
+            if str(e) == "insufficient_funds":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32004,
+                            "message": str(e),
+                        },
+                    }
+                )
+            logger.error(f"MCP tool call failed: {e}")
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32603,
+                        "message": str(e),
+                    },
+                }
+            )
         except Exception as e:
             logger.error(f"MCP tool call failed: {e}")
             return JSONResponse(
@@ -250,18 +273,14 @@ async def _execute_registered_tool(
         raise PermissionError(decision.reason)
 
     description = f"MCP {transport} invoke {tool_name}"
-    dry_run_result = await money.charge(
+    charge_result = await money.charge(
         wallet_id=wallet_id,
         service_category=category,
         units=charge_units,
         request_path=endpoint,
         description=description,
-        dry_run=True,
     )
-    if (
-        isinstance(dry_run_result, InsufficientFundsResponse)
-        or not dry_run_result.would_succeed
-    ):
+    if isinstance(charge_result, InsufficientFundsResponse):
         await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,
@@ -279,6 +298,18 @@ async def _execute_registered_tool(
         else:
             result = func(**arguments)
     except Exception as exc:
+        try:
+            await money.refund_charge(
+                wallet_id=wallet_id,
+                charge_entry_id=charge_result.entry_id,
+                description=f"Refund {description}",
+            )
+        except Exception as refund_exc:
+            logger.error(
+                "Failed to refund MCP charge %s after tool error: %s",
+                charge_result.entry_id,
+                refund_exc,
+            )
         await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,
@@ -287,23 +318,6 @@ async def _execute_registered_tool(
             error=str(exc),
         )
         raise
-
-    charge_result = await money.charge(
-        wallet_id=wallet_id,
-        service_category=category,
-        units=charge_units,
-        request_path=endpoint,
-        description=description,
-    )
-    if isinstance(charge_result, InsufficientFundsResponse):
-        await _audit_mcp_invocation(
-            decision=decision,
-            endpoint=endpoint,
-            transport=transport,
-            ok=False,
-            error="insufficient_funds",
-        )
-        raise ValueError("insufficient_funds")
 
     await _audit_mcp_invocation(
         decision=decision,
