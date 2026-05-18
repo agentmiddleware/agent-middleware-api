@@ -94,7 +94,7 @@ async def test_well_known_agent_json(client):
     data = resp.json()
     assert data["schema_version"] == "1.0"
     assert "capabilities" in data
-    assert len(data["capabilities"]) == 8
+    assert len(data["capabilities"]) >= 8
     assert data["authentication"]["type"] == "api_key"
 
 

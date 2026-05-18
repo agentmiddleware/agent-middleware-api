@@ -31,11 +31,21 @@ from ..services.agent_money import DEFAULT_PRICING, AgentMoney, get_agent_money
 from ..services.audit_log import record_audit_event
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
+from ..services.mcp_phase9_tools import (
+    ensure_phase9_registered,
+    register_default_mcp_services,
+)
 from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["MCP"])
+
+
+def _ensure_local_mcp_tools_registered() -> None:
+    """Keep discovery populated when tests or transports skip app lifespan startup."""
+    ensure_phase9_registered()
+    register_default_mcp_services()
 
 
 class ToolExecutionError(RuntimeError):
@@ -84,6 +94,7 @@ async def get_tools_json(
     Returns:
         MCP tools.json manifest with tool definitions
     """
+    _ensure_local_mcp_tools_registered()
     generator = get_mcp_generator()
     manifest = await generator.generate_tools_json_async(category=category)
     return JSONResponse(content=manifest)
@@ -96,6 +107,7 @@ async def well_known_tools_json() -> JSONResponse:
 
     This follows the MCP specification for tool discovery.
     """
+    _ensure_local_mcp_tools_registered()
     generator = get_mcp_generator()
     manifest = await generator.generate_tools_json_async()
     return JSONResponse(content=manifest)

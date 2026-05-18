@@ -11,10 +11,9 @@ Endpoints:
 - /.well-known/agent.json — Standard agent discovery manifest (``app/routers/well_known.py``)
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
-from ..core.config import get_settings
-from .well_known import get_agent_first_metadata
+from .well_known import _build_agent_manifest, get_agent_first_metadata
 
 router = APIRouter(
     tags=["Documentation & Discovery"],
@@ -306,100 +305,5 @@ async def get_doc_index():
         "are available — similar to robots.txt but for AI agents."
     ),
 )
-async def get_agent_manifest(request: Request):
-    settings = get_settings()
-    base_url = settings.PUBLIC_URL or str(request.base_url).rstrip("/")
-
-    return {
-        "schema_version": "1.0",
-        "name": "Agent-Native Middleware API",
-        "description": (
-            "Operational control plane for autonomous agents: identity, billing, "
-            "discovery, policy, and execution governance for machine-native "
-            "software tenants."
-        ),
-        "url": base_url,
-        "documentation_url": f"{base_url}/llm.txt",
-        "openapi_url": f"{base_url}/openapi.json",
-        "authentication": {
-            "type": "api_key",
-            "header": "X-API-Key",
-            "registration": f"{base_url}/v1/comms/agents",
-        },
-        "capabilities": [
-            {
-                "name": "iot-protocol-bridging",
-                "description": (
-                    "Securely bridge IoT protocols (MQTT, CoAP, Zigbee, etc.) "
-                    "to REST with topic-level ACLs."
-                ),
-                "endpoint": "/v1/iot",
-            },
-            {
-                "name": "autonomous-code-repair",
-                "description": (
-                    "Ingest telemetry, detect anomalies, and auto-generate pull "
-                    "requests to fix bugs."
-                ),
-                "endpoint": "/v1/telemetry",
-            },
-            {
-                "name": "programmatic-media-distribution",
-                "description": (
-                    "Video-to-viral-clip pipeline with cross-platform distribution."
-                ),
-                "endpoint": "/v1/media",
-            },
-            {
-                "name": "agent-to-agent-messaging",
-                "description": (
-                    "Structured messaging, capability discovery, and "
-                    "task handoffs between agents."
-                ),
-                "endpoint": "/v1/comms",
-            },
-            {
-                "name": "content-factory-scheduling",
-                "description": (
-                    "Hook-based 1-to-20 content multiplication with 9:16 vertical "
-                    "rendering, animated captions, live campaign orchestration, "
-                    "and engagement-optimized algorithmic scheduling."
-                ),
-                "endpoint": "/v1/factory",
-            },
-            {
-                "name": "agent-oracle-infiltration",
-                "description": (
-                    "Crawl agent directories, index external APIs, compute "
-                    "compatibility scores, and register for inbound discovery "
-                    "traffic across the agentic web."
-                ),
-                "endpoint": "/v1/oracle",
-            },
-            {
-                "name": "agent-financial-gateways",
-                "description": (
-                    "Two-tier wallet system: human sponsors provision agent "
-                    "wallets, per-action micro-metering, fiat-to-credit conversion, "
-                    "and swarm arbitrage profit engine."
-                ),
-                "endpoint": "/v1/billing",
-            },
-            {
-                "name": "red-team-security-swarm",
-                "description": (
-                    "Autonomous penetration testing that continuously attacks all API "
-                    "endpoints to find vulnerabilities."
-                ),
-                "endpoint": "/v1/security",
-            },
-        ],
-        "rate_limits": {
-            "requests_per_minute": 120,
-            "batch_counts_as_one": True,
-        },
-        "contact": {
-            "email": "support@agent-middleware.dev",
-        },
-        "protocols": ["rest", "json", "openapi"],
-    }
+async def get_agent_manifest():
+    return _build_agent_manifest().model_dump(mode="json")
