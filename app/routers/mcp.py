@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mcp", tags=["MCP"])
 
 
+class ToolExecutionError(RuntimeError):
+    """Raised after a dispatched tool fails and compensation is complete."""
+
+
 class McpContext(BaseModel):
     """MCP execution context passed in tool calls."""
 
@@ -325,7 +329,7 @@ async def _execute_registered_tool(
             ok=False,
             error=str(exc),
         )
-        raise
+        raise ToolExecutionError(str(exc)) from exc
 
     await _audit_mcp_invocation(
         decision=decision,

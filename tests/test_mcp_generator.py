@@ -772,6 +772,122 @@ class TestMcpInvokeRoute:
             registry.unregister_local("jsonrpc-failing-echo")
 
     @pytest.mark.anyio
+    async def test_messages_tools_call_tool_value_error_is_execution_failure(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise ValueError("insufficient_funds")
+
+        registry.register_local(
+            service_id="jsonrpc-value-error-echo",
+            name="JSON-RPC ValueError Echo",
+            description="Tool ValueError billing classification test",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-value-error-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "value-error-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-value-error-echo",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                ledger_resp = await client.get(
+                    f"/v1/billing/ledger/{wallet_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "insufficient_funds" in payload["error"]["message"]
+            assert ledger_resp.status_code == 200
+            tool_entries = [
+                entry
+                for entry in ledger_resp.json()["entries"]
+                if "jsonrpc-value-error-echo" in entry.get("description", "")
+            ]
+            debit_entries = [
+                entry for entry in tool_entries if entry["action"] == "debit"
+            ]
+            refund_entries = [
+                entry for entry in tool_entries if entry["action"] == "refund"
+            ]
+            assert len(debit_entries) == 1
+            assert len(refund_entries) == 1
+            net_amount = sum(
+                Decimal(entry.get("amount_exact") or str(entry["amount"]))
+                for entry in tool_entries
+            )
+            assert net_amount == Decimal("0.0")
+        finally:
+            registry.unregister_local("jsonrpc-value-error-echo")
+
+    @pytest.mark.anyio
+    async def test_http_invoke_tool_value_error_returns_tool_error(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise ValueError("insufficient_funds")
+
+        registry.register_local(
+            service_id="http-value-error-echo",
+            name="HTTP ValueError Echo",
+            description="HTTP tool ValueError classification test",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "http-value-error-agent",
+                )
+                response = await client.post(
+                    "/mcp/tools/http-value-error-echo/invoke",
+                    json={
+                        "name": "http-value-error-echo",
+                        "arguments": {},
+                        "mcp_context": {"wallet_id": wallet_id},
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["isError"] is True
+            assert "insufficient_funds" in payload["content"][0]["text"]
+        finally:
+            registry.unregister_local("http-value-error-echo")
+
+    @pytest.mark.anyio
     async def test_messages_tools_call_reports_refund_failure(
         self, clean_database, monkeypatch
     ):
