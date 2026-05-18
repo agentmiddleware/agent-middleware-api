@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import AuthContext, get_auth_context
@@ -27,6 +29,6 @@ async def get_audit_events(
         limit=limit,
     )
     return AuditEventListResponse(
-        events=[AuditEventResponse(**event.__dict__) for event in events],
+        events=[AuditEventResponse(**asdict(event)) for event in events],
         total=len(events),
     )

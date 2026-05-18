@@ -41,9 +41,31 @@ async def test_bootstrap_admin_can_list_audit_events(client, clean_database):
 
 @pytest.mark.anyio
 async def test_db_wallet_key_cannot_list_audit_events(client, clean_database):
+    sponsor_response = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Audit Route Test Corp",
+            "email": "audit-route@test.com",
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert sponsor_response.status_code == 201
+    wallet_id = sponsor_response.json()["wallet_id"]
+
+    key_response = await client.post(
+        "/v1/api-keys",
+        json={
+            "wallet_id": wallet_id,
+            "key_name": "audit-route-test-key",
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert key_response.status_code == 201
+    wallet_api_key = key_response.json()["api_key"]
+
     response = await client.get(
         "/v1/audit/events",
-        headers={"X-API-Key": "not-a-real-db-key"},
+        headers={"X-API-Key": wallet_api_key},
     )
 
-    assert response.status_code in {403, 503}
+    assert response.status_code == 403
