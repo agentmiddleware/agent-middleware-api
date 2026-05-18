@@ -48,6 +48,15 @@ def _ensure_local_mcp_tools_registered() -> None:
     register_default_mcp_services()
 
 
+async def build_mcp_tools_manifest(
+    category: ServiceCategory | None = None,
+) -> dict[str, Any]:
+    """Build the canonical MCP tools manifest for all public discovery routes."""
+    _ensure_local_mcp_tools_registered()
+    generator = get_mcp_generator()
+    return await generator.generate_tools_json_async(category=category)
+
+
 class ToolExecutionError(RuntimeError):
     """Raised after a dispatched tool fails and compensation is complete."""
 
@@ -94,9 +103,7 @@ async def get_tools_json(
     Returns:
         MCP tools.json manifest with tool definitions
     """
-    _ensure_local_mcp_tools_registered()
-    generator = get_mcp_generator()
-    manifest = await generator.generate_tools_json_async(category=category)
+    manifest = await build_mcp_tools_manifest(category=category)
     return JSONResponse(content=manifest)
 
 
@@ -107,9 +114,7 @@ async def well_known_tools_json() -> JSONResponse:
 
     This follows the MCP specification for tool discovery.
     """
-    _ensure_local_mcp_tools_registered()
-    generator = get_mcp_generator()
-    manifest = await generator.generate_tools_json_async()
+    manifest = await build_mcp_tools_manifest()
     return JSONResponse(content=manifest)
 
 
@@ -217,8 +222,6 @@ async def handle_messages(
 
 async def _handle_tools_list(params: dict) -> dict:
     """Handle MCP tools/list request."""
-    _ensure_local_mcp_tools_registered()
-    generator = get_mcp_generator()
     category = params.get("category")
     if category:
         try:
@@ -226,7 +229,7 @@ async def _handle_tools_list(params: dict) -> dict:
         except ValueError:
             category = None
 
-    manifest = await generator.generate_tools_json_async(category=category)
+    manifest = await build_mcp_tools_manifest(category=category)
     return {"tools": manifest["tools"]}
 
 
@@ -531,9 +534,7 @@ async def list_tools(
     Returns:
         Paginated list of tool definitions with schemas
     """
-    _ensure_local_mcp_tools_registered()
-    generator = get_mcp_generator()
-    manifest = await generator.generate_tools_json_async(category=category)
+    manifest = await build_mcp_tools_manifest(category=category)
     tools = manifest["tools"]
     total = len(tools)
 

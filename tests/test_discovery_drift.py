@@ -29,6 +29,10 @@ def _assert_phase9_tool_available(tools):
     assert {tool["name"] for tool in tools} >= {"awi_passkey_challenge"}
 
 
+def _tool_annotations_by_name(tools):
+    return {tool["name"]: tool["annotations"] for tool in tools}
+
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
@@ -90,6 +94,30 @@ async def test_mcp_manifest_tools_include_pricing_and_simulation_truth(client):
         assert "unitName" in annotations
         assert "simulation" in annotations
         assert "integrationStatus" in annotations
+
+
+@pytest.mark.anyio
+async def test_well_known_mcp_manifest_matches_canonical_mcp_manifest(client):
+    _clear_builtin_mcp_tools_for_lazy_start()
+
+    well_known_response = await client.get("/.well-known/mcp/tools.json")
+    canonical_response = await client.get("/mcp/tools.json")
+
+    assert well_known_response.status_code == 200
+    assert canonical_response.status_code == 200
+    well_known = well_known_response.json()
+    canonical = canonical_response.json()
+
+    assert well_known["version"] == canonical["version"]
+    assert well_known["name"] == canonical["name"]
+    assert well_known["description"] == canonical["description"]
+    assert [tool["name"] for tool in well_known["tools"]] == [
+        tool["name"] for tool in canonical["tools"]
+    ]
+    _assert_phase9_tool_available(well_known["tools"])
+    assert _tool_annotations_by_name(well_known["tools"]) == _tool_annotations_by_name(
+        canonical["tools"]
+    )
 
 
 @pytest.mark.anyio
