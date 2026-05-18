@@ -26,6 +26,8 @@ The core loop is:
 discover -> authenticate -> invoke -> meter -> govern
 ```
 
+The MCP invocation path now records a policy decision, charges the wallet, writes a ledger entry, and persists a control-plane audit event for operator inspection.
+
 Everything else in this repository exists to strengthen that loop or prove it in realistic agent workflows.
 
 **Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.

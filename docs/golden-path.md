@@ -158,7 +158,18 @@ curl -X POST "$API_URL/mcp/tools/{service_id}/invoke" \
 
 Replace `{service_id}` with a tool from `/mcp/tools.json`.
 
-## 8. Inspect Ledger And Velocity
+## 8. Inspect The Operation Record
+
+After a scoped agent invokes a tool, operators can inspect the control-plane record:
+
+```bash
+curl "$API_URL/v1/audit/events?wallet_id=$AGENT_WALLET_ID" \
+  -H "X-API-Key: $BOOTSTRAP_KEY"
+```
+
+Each event includes the wallet, credential source, tool, endpoint, policy decision ID, request ID, success flag, error, and metadata such as transport and estimated cost.
+
+## 9. Inspect Ledger And Velocity
 
 ```bash
 curl "$API_URL/v1/billing/ledger/$AGENT_WALLET_ID" \
@@ -176,4 +187,5 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Agent API key can access only its own wallet.
 - Dry-run simulation returns a cost estimate.
 - MCP manifest is available.
+- Control-plane audit records are inspectable with the bootstrap key.
 - Ledger and velocity endpoints are inspectable with the agent key.
