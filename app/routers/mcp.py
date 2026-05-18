@@ -305,11 +305,20 @@ async def _execute_registered_tool(
                 description=f"Refund {description}",
             )
         except Exception as refund_exc:
+            error = f"refund_failed:{refund_exc}; tool_error:{exc}"
             logger.error(
                 "Failed to refund MCP charge %s after tool error: %s",
                 charge_result.entry_id,
                 refund_exc,
             )
+            await _audit_mcp_invocation(
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=error,
+            )
+            raise RuntimeError(error) from refund_exc
         await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,

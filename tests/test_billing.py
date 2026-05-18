@@ -5,6 +5,7 @@ micro-metering → 402 insufficient funds → top-ups → arbitrage reporting.
 """
 
 import pytest
+from datetime import timedelta
 from decimal import Decimal
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
@@ -193,9 +194,17 @@ async def test_refund_charge_reverses_debit(client, api_headers, clean_database)
         charge_entry_id=charge["entry_id"],
         description="Refund failed MCP tool",
     )
+    duplicate_refund = await get_agent_money().refund_charge(
+        wallet_id=agent_wallet_id,
+        charge_entry_id=charge["entry_id"],
+        description="Refund failed MCP tool",
+    )
     assert refund.action.value == "refund"
+    assert refund.entry_id == f"refund-{charge['entry_id']}"
+    assert duplicate_refund.entry_id == refund.entry_id
     assert refund.amount == Decimal("7.5")
     assert refund.balance_after == Decimal("5000")
+    assert duplicate_refund.balance_after == Decimal("5000")
 
     wallet_resp = await client.get(
         f"/v1/billing/wallets/{agent_wallet_id}",
@@ -212,6 +221,14 @@ async def test_refund_charge_reverses_debit(client, api_headers, clean_database)
         )
         refund_row = refund_result.scalar_one()
         assert refund_row.correlation_id == charge["entry_id"]
+        refund_count_result = await session.execute(
+            select(LedgerEntryModel).where(
+                LedgerEntryModel.wallet_id == agent_wallet_id,
+                LedgerEntryModel.action == "refund",
+                LedgerEntryModel.correlation_id == charge["entry_id"],
+            )
+        )
+        assert len(refund_count_result.scalars().all()) == 1
 
         wallet_result = await session.execute(
             select(WalletModel).where(WalletModel.wallet_id == agent_wallet_id)
@@ -220,6 +237,78 @@ async def test_refund_charge_reverses_debit(client, api_headers, clean_database)
         assert wallet.lifetime_debits == Decimal("0")
         assert wallet.hourly_spent == Decimal("0")
         assert wallet.daily_spent == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_late_refund_does_not_reduce_new_period_spend(
+    client, api_headers, clean_database
+):
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Late Refund Test",
+            "email": "late-refund@example.com",
+            "initial_credits": 10000,
+        },
+        headers=api_headers,
+    )
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "late-refund-bot",
+            "budget_credits": 5000,
+            "daily_limit": 1000,
+        },
+        headers=api_headers,
+    )
+    agent_wallet_id = agent_resp.json()["wallet_id"]
+
+    charge_resp = await client.post(
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=agent_comms&units=5",
+        headers=api_headers,
+    )
+    assert charge_resp.status_code == 200
+    charge = charge_resp.json()
+
+    factory = get_session_factory()
+    async with factory() as session:
+        charge_result = await session.execute(
+            select(LedgerEntryModel).where(
+                LedgerEntryModel.entry_id == charge["entry_id"]
+            )
+        )
+        charge_row = charge_result.scalar_one()
+        reset_after_charge = charge_row.timestamp + timedelta(days=1)
+
+        wallet_result = await session.execute(
+            select(WalletModel).where(WalletModel.wallet_id == agent_wallet_id)
+        )
+        wallet = wallet_result.scalar_one()
+        wallet.hourly_reset_at = reset_after_charge
+        wallet.daily_reset_at = reset_after_charge
+        wallet.hourly_spent = Decimal("25")
+        wallet.daily_spent = Decimal("50")
+        await session.commit()
+
+    refund = await get_agent_money().refund_charge(
+        wallet_id=agent_wallet_id,
+        charge_entry_id=charge["entry_id"],
+        description="Late refund failed MCP tool",
+    )
+    assert refund.entry_id == f"refund-{charge['entry_id']}"
+
+    async with factory() as session:
+        wallet_result = await session.execute(
+            select(WalletModel).where(WalletModel.wallet_id == agent_wallet_id)
+        )
+        wallet = wallet_result.scalar_one()
+        assert wallet.balance == Decimal("5000")
+        assert wallet.lifetime_debits == Decimal("0")
+        assert wallet.hourly_spent == Decimal("25")
+        assert wallet.daily_spent == Decimal("50")
 
 
 @pytest.mark.anyio

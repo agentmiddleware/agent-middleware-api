@@ -718,6 +718,94 @@ class TestMcpInvokeRoute:
             registry.unregister_local("jsonrpc-failing-echo")
 
     @pytest.mark.anyio
+    async def test_messages_tools_call_reports_refund_failure(
+        self, clean_database, monkeypatch
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise RuntimeError("tool exploded")
+
+        async def failing_refund(self, **_kwargs):
+            raise RuntimeError("refund down")
+
+        monkeypatch.setattr(
+            "app.services.agent_money.AgentMoney.refund_charge",
+            failing_refund,
+        )
+        registry.register_local(
+            service_id="jsonrpc-refund-fails",
+            name="JSON-RPC Refund Fails",
+            description="Failing refund tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-refund-fails-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "refund-fails-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-refund-fails",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                audit_resp = await client.get(
+                    (
+                        f"/v1/audit/events?wallet_id={wallet_id}"
+                        "&tool=jsonrpc-refund-fails"
+                    ),
+                    headers={"X-API-Key": "test-key"},
+                )
+                ledger_resp = await client.get(
+                    f"/v1/billing/ledger/{wallet_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "refund_failed:refund down" in payload["error"]["message"]
+            assert "tool_error:tool exploded" in payload["error"]["message"]
+            assert audit_resp.status_code == 200
+            audit_events = audit_resp.json()["events"]
+            assert len(audit_events) == 1
+            assert audit_events[0]["ok"] is False
+            assert "refund_failed:refund down" in audit_events[0]["error"]
+            assert "tool_error:tool exploded" in audit_events[0]["error"]
+
+            assert ledger_resp.status_code == 200
+            tool_entries = [
+                entry
+                for entry in ledger_resp.json()["entries"]
+                if "jsonrpc-refund-fails" in entry.get("description", "")
+            ]
+            debit_entries = [
+                entry for entry in tool_entries if entry["action"] == "debit"
+            ]
+            assert len(debit_entries) == 1
+            assert not [
+                entry for entry in tool_entries if entry["action"] == "refund"
+            ]
+        finally:
+            registry.unregister_local("jsonrpc-refund-fails")
+
+    @pytest.mark.anyio
     async def test_messages_tools_call_insufficient_funds_uses_jsonrpc_error(
         self, clean_database
     ):
