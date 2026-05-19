@@ -6,6 +6,7 @@ fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
 pydantic>=2.13.4
 pydantic-settings>=2.14.0
+email-validator>=2.3.0  # Keep FastAPI/Pydantic OpenAPI email schema stable in CI
 
 # --- IoT Protocol Bridge ---
 aiomqtt>=2.5.1          # Async MQTT client
