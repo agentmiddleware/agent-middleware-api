@@ -45,7 +45,7 @@ requires-dist = [
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40.0" },
     { name = "playwright", marker = "extra == 'playwright'", specifier = ">=1.40.0" },
-    { name = "structlog", marker = "extra == 'observability'", specifier = ">=24.0.0" },
+    { name = "structlog", marker = "extra == 'observability'", specifier = ">=24.1.0" },
     { name = "tenacity", marker = "extra == 'resilience'", specifier = ">=8.0.0" },
     { name = "webauthn", marker = "extra == 'webauthn'", specifier = ">=1.0.0" },
 ]
