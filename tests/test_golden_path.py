@@ -9,6 +9,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.schemas.billing import ServiceCategory
+from app.services.service_registry import get_service_registry
 
 
 @pytest.fixture
@@ -23,7 +25,7 @@ async def test_wallet_scoped_agent_golden_path(client, clean_database):
     bootstrap_headers = {"X-API-Key": "test-key"}
 
     # Agent-facing discovery surfaces should be reachable.
-    for path in ("/.well-known/agent.json", "/llm.txt", "/mcp/tools.json"):
+    for path in ("/.well-known/agent.json", "/llm.txt"):
         resp = await client.get(path, headers=bootstrap_headers)
         assert resp.status_code == 200
 
@@ -104,9 +106,54 @@ async def test_wallet_scoped_agent_golden_path(client, clean_database):
     assert simulation["wallet_id"] == agent_wallet_id
     assert simulation["would_succeed"] is True
 
-    mcp_resp = await client.get("/mcp/tools.json", headers=agent_headers)
-    assert mcp_resp.status_code == 200
-    assert "tools" in mcp_resp.json()
+    registry = get_service_registry()
+
+    def golden_path_echo(message: str = "ok") -> dict:
+        return {"message": message}
+
+    registry.register_local(
+        service_id="golden-path-echo",
+        name="Golden Path Echo",
+        description="Echo tool for golden path MCP invocation",
+        category=ServiceCategory.AGENT_COMMS,
+        func=golden_path_echo,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+
+    try:
+        mcp_resp = await client.get("/mcp/tools.json", headers=agent_headers)
+        assert mcp_resp.status_code == 200
+        mcp_payload = mcp_resp.json()
+        assert "tools" in mcp_payload
+        assert any(
+            tool["name"] == "golden-path-echo"
+            for tool in mcp_payload["tools"]
+        )
+
+        invoke_resp = await client.post(
+            "/mcp/messages",
+            json={
+                "jsonrpc": "2.0",
+                "id": "golden-call-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "golden-path-echo",
+                    "arguments": {"message": "hello"},
+                    "mcpContext": {
+                        "wallet_id": agent_wallet_id,
+                        "request_path": "POST /mcp/messages",
+                    },
+                },
+            },
+            headers=agent_headers,
+        )
+        assert invoke_resp.status_code == 200
+        invoke_payload = invoke_resp.json()
+        assert "result" in invoke_payload
+        assert invoke_payload["result"]["isError"] is False
+    finally:
+        registry.unregister_local("golden-path-echo")
 
     ledger_resp = await client.get(
         f"/v1/billing/ledger/{agent_wallet_id}",
@@ -114,6 +161,22 @@ async def test_wallet_scoped_agent_golden_path(client, clean_database):
     )
     assert ledger_resp.status_code == 200
     assert ledger_resp.json()["wallet_id"] == agent_wallet_id
+    ledger_entries = ledger_resp.json()["entries"]
+    assert any(
+        entry["service_category"] == "agent_comms"
+        and "golden-path-echo" in entry.get("description", "")
+        for entry in ledger_entries
+    )
+
+    audit_resp = await client.get(
+        f"/v1/audit/events?wallet_id={agent_wallet_id}&tool=golden-path-echo",
+        headers=bootstrap_headers,
+    )
+    assert audit_resp.status_code == 200
+    audit_events = audit_resp.json()["events"]
+    assert len(audit_events) == 1
+    assert audit_events[0]["policy_decision_id"].startswith("pol-")
+    assert audit_events[0]["metadata"]["transport"] == "jsonrpc"
 
     velocity_resp = await client.get(
         f"/v1/billing/wallets/{agent_wallet_id}/velocity",

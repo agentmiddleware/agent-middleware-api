@@ -184,11 +184,6 @@ async def get_mcp_tools_json():
     This is the standard endpoint MCP clients use to discover
     available tools.
     """
-    from .discover import _build_mcp_tools
+    from .mcp import build_mcp_tools_manifest
 
-    return JSONResponse(
-        content={
-            "tools": [_build_mcp_tools()[0].model_dump()],  # Placeholder
-            "count": len(_build_mcp_tools()),
-        }
-    )
+    return JSONResponse(content=await build_mcp_tools_manifest())

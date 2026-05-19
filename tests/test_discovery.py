@@ -94,7 +94,12 @@ async def test_well_known_agent_json(client):
     data = resp.json()
     assert data["schema_version"] == "1.0"
     assert "capabilities" in data
-    assert len(data["capabilities"]) == 8
+    from app.routers.well_known import _build_agent_manifest
+
+    assert (
+        data["capabilities"]
+        == _build_agent_manifest().model_dump(mode="json")["capabilities"]
+    )
     assert data["authentication"]["type"] == "api_key"
 
 

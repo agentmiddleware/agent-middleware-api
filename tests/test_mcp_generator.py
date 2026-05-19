@@ -373,11 +373,40 @@ class TestGlobalSingletons:
         assert isinstance(generator, McpGenerator)
 
 
+async def _create_funded_agent_wallet(client: AsyncClient, agent_id: str) -> str:
+    headers = {"X-API-Key": "test-key"}
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": f"{agent_id} sponsor",
+            "email": f"{agent_id}@example.com",
+            "initial_credits": 10000,
+            "require_kyc": False,
+        },
+        headers=headers,
+    )
+    assert sponsor_resp.status_code == 201
+    sponsor_wallet_id = sponsor_resp.json()["wallet_id"]
+
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_wallet_id,
+            "agent_id": agent_id,
+            "budget_credits": 1000,
+            "daily_limit": 250,
+        },
+        headers=headers,
+    )
+    assert agent_resp.status_code == 201
+    return agent_resp.json()["wallet_id"]
+
+
 class TestMcpInvokeRoute:
     """Test the HTTP MCP invoke route."""
 
     @pytest.mark.anyio
-    async def test_invoke_tool_accepts_api_key_header(self):
+    async def test_invoke_tool_accepts_api_key_header(self, clean_database):
         registry = get_service_registry()
 
         def echo_tool(value: str = "ok") -> dict:
@@ -389,18 +418,24 @@ class TestMcpInvokeRoute:
             description="Echo for auth route testing",
             category=ServiceCategory.AGENT_COMMS,
             func=echo_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
         )
 
         try:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "header-auth-agent",
+                )
                 response = await client.post(
                     "/mcp/tools/header-auth-echo/invoke",
                     json={
                         "name": "header-auth-echo",
                         "arguments": {"value": "hello"},
-                        "mcp_context": {"wallet_id": "wallet-test"},
+                        "mcp_context": {"wallet_id": wallet_id},
                     },
                     headers={"X-API-Key": "test-key"},
                 )
@@ -409,6 +444,651 @@ class TestMcpInvokeRoute:
             assert response.json()["isError"] is False
         finally:
             registry.unregister_local("header-auth-echo")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_requires_api_key_header(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "call-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "anything",
+                        "arguments": {},
+                        "mcpContext": {"wallet_id": "wallet-test"},
+                    },
+                },
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_maps_missing_wallet_to_invalid_params(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "missing-wallet-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "anything",
+                        "arguments": {},
+                        "mcpContext": {},
+                    },
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["error"]["code"] == -32602
+        assert payload["error"]["message"] == "Missing wallet_id in mcpContext"
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_maps_tool_not_found(self, clean_database):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            wallet_id = await _create_funded_agent_wallet(
+                client,
+                "missing-tool-agent",
+            )
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "missing-tool-1",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "missing-jsonrpc-tool",
+                        "arguments": {},
+                        "mcpContext": {"wallet_id": wallet_id},
+                    },
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["error"]["code"] == -32001
+        assert payload["error"]["message"] == "Tool not found: missing-jsonrpc-tool"
+
+    @pytest.mark.anyio
+    async def test_messages_tools_list_requires_api_key_header(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            unauthenticated_resp = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "list-unauth",
+                    "method": "tools/list",
+                    "params": {},
+                },
+            )
+            authenticated_resp = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "list-auth",
+                    "method": "tools/list",
+                    "params": {},
+                },
+                headers={"X-API-Key": "test-key"},
+            )
+
+        assert unauthenticated_resp.status_code == 401
+        assert authenticated_resp.status_code == 200
+        payload = authenticated_resp.json()
+        assert payload["id"] == "list-auth"
+        assert "tools" in payload["result"]
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_rejects_cross_wallet_db_key(self, clean_database):
+        registry = get_service_registry()
+
+        def echo_tool(value: str = "ok") -> dict:
+            return {"value": value}
+
+        registry.register_local(
+            service_id="cross-wallet-echo",
+            name="Cross Wallet Echo",
+            description="Echo for cross-wallet auth testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=echo_tool,
+            credits_per_unit=1.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                owned_wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "owned-runtime-agent",
+                )
+                other_wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "other-runtime-agent",
+                )
+                key_resp = await client.post(
+                    "/v1/api-keys",
+                    json={
+                        "wallet_id": owned_wallet_id,
+                        "key_name": "runtime",
+                        "expires_in_days": 30,
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                assert key_resp.status_code == 201
+
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "cross-wallet-echo",
+                            "arguments": {"value": "hello"},
+                            "mcpContext": {"wallet_id": other_wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": key_resp.json()["api_key"]},
+                )
+                audit_resp = await client.get(
+                    (
+                        f"/v1/audit/events?wallet_id={other_wallet_id}"
+                        "&tool=cross-wallet-echo"
+                    ),
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32003
+            assert "wallet_access_denied" in payload["error"]["message"]
+            assert audit_resp.status_code == 200
+            audit_events = audit_resp.json()["events"]
+            assert len(audit_events) == 1
+            assert audit_events[0]["ok"] is False
+            assert audit_events[0]["error"] == "wallet_access_denied"
+            assert audit_events[0]["policy_decision_id"].startswith("pol-")
+        finally:
+            registry.unregister_local("cross-wallet-echo")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_charges_wallet_and_records_audit(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+
+        def paid_echo(value: str = "ok") -> dict:
+            return {"value": value}
+
+        registry.register_local(
+            service_id="jsonrpc-paid-echo",
+            name="JSON-RPC Paid Echo",
+            description="Echo for JSON-RPC billing and audit testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=paid_echo,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-paid-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "paid-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-paid-echo",
+                            "arguments": {"value": "hello"},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                assert response.status_code == 200
+                assert response.json()["result"]["isError"] is False
+
+                ledger_resp = await client.get(
+                    f"/v1/billing/ledger/{wallet_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+                assert ledger_resp.status_code == 200
+                paid_entries = [
+                    entry
+                    for entry in ledger_resp.json()["entries"]
+                    if "jsonrpc-paid-echo" in entry.get("description", "")
+                ]
+                assert len(paid_entries) == 1
+                debit_amount = Decimal(
+                    paid_entries[0].get("amount_exact")
+                    or str(paid_entries[0]["amount"])
+                )
+                assert debit_amount == Decimal("-2.0")
+
+                audit_resp = await client.get(
+                    f"/v1/audit/events?wallet_id={wallet_id}&tool=jsonrpc-paid-echo",
+                    headers={"X-API-Key": "test-key"},
+                )
+                assert audit_resp.status_code == 200
+                audit_events = audit_resp.json()["events"]
+                assert len(audit_events) == 1
+                assert audit_events[0]["metadata"]["transport"] == "jsonrpc"
+        finally:
+            registry.unregister_local("jsonrpc-paid-echo")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_does_not_charge_when_tool_fails(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise RuntimeError("boom")
+
+        registry.register_local(
+            service_id="jsonrpc-failing-echo",
+            name="JSON-RPC Failing Echo",
+            description="Failing tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-failing-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "failing-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-failing-echo",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                ledger_resp = await client.get(
+                    f"/v1/billing/ledger/{wallet_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "boom" in payload["error"]["message"]
+            assert ledger_resp.status_code == 200
+            tool_entries = [
+                entry
+                for entry in ledger_resp.json()["entries"]
+                if "jsonrpc-failing-echo" in entry.get("description", "")
+            ]
+            assert len(tool_entries) == 2
+            debit_entries = [
+                entry for entry in tool_entries if entry["action"] == "debit"
+            ]
+            refund_entries = [
+                entry for entry in tool_entries if entry["action"] == "refund"
+            ]
+            assert len(debit_entries) == 1
+            assert len(refund_entries) == 1
+            net_amount = sum(
+                Decimal(entry.get("amount_exact") or str(entry["amount"]))
+                for entry in tool_entries
+            )
+            assert net_amount == Decimal("0.0")
+        finally:
+            registry.unregister_local("jsonrpc-failing-echo")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_tool_value_error_is_execution_failure(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise ValueError("insufficient_funds")
+
+        registry.register_local(
+            service_id="jsonrpc-value-error-echo",
+            name="JSON-RPC ValueError Echo",
+            description="Tool ValueError billing classification test",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-value-error-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "value-error-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-value-error-echo",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                ledger_resp = await client.get(
+                    f"/v1/billing/ledger/{wallet_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "insufficient_funds" in payload["error"]["message"]
+            assert ledger_resp.status_code == 200
+            tool_entries = [
+                entry
+                for entry in ledger_resp.json()["entries"]
+                if "jsonrpc-value-error-echo" in entry.get("description", "")
+            ]
+            debit_entries = [
+                entry for entry in tool_entries if entry["action"] == "debit"
+            ]
+            refund_entries = [
+                entry for entry in tool_entries if entry["action"] == "refund"
+            ]
+            assert len(debit_entries) == 1
+            assert len(refund_entries) == 1
+            net_amount = sum(
+                Decimal(entry.get("amount_exact") or str(entry["amount"]))
+                for entry in tool_entries
+            )
+            assert net_amount == Decimal("0.0")
+        finally:
+            registry.unregister_local("jsonrpc-value-error-echo")
+
+    @pytest.mark.anyio
+    async def test_http_invoke_tool_value_error_returns_tool_error(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise ValueError("insufficient_funds")
+
+        registry.register_local(
+            service_id="http-value-error-echo",
+            name="HTTP ValueError Echo",
+            description="HTTP tool ValueError classification test",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "http-value-error-agent",
+                )
+                response = await client.post(
+                    "/mcp/tools/http-value-error-echo/invoke",
+                    json={
+                        "name": "http-value-error-echo",
+                        "arguments": {},
+                        "mcp_context": {"wallet_id": wallet_id},
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["isError"] is True
+            assert "insufficient_funds" in payload["content"][0]["text"]
+        finally:
+            registry.unregister_local("http-value-error-echo")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_reports_refund_failure(
+        self, clean_database, monkeypatch
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise RuntimeError("tool exploded")
+
+        async def failing_refund(self, **_kwargs):
+            raise RuntimeError("refund down")
+
+        monkeypatch.setattr(
+            "app.services.agent_money.AgentMoney.refund_charge",
+            failing_refund,
+        )
+        registry.register_local(
+            service_id="jsonrpc-refund-fails",
+            name="JSON-RPC Refund Fails",
+            description="Failing refund tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-refund-fails-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "refund-fails-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-refund-fails",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+                audit_resp = await client.get(
+                    (
+                        f"/v1/audit/events?wallet_id={wallet_id}"
+                        "&tool=jsonrpc-refund-fails"
+                    ),
+                    headers={"X-API-Key": "test-key"},
+                )
+                ledger_resp = await client.get(
+                    f"/v1/billing/ledger/{wallet_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "refund_failed:refund down" in payload["error"]["message"]
+            assert "tool_error:tool exploded" in payload["error"]["message"]
+            assert audit_resp.status_code == 200
+            audit_events = audit_resp.json()["events"]
+            assert len(audit_events) == 1
+            assert audit_events[0]["ok"] is False
+            assert "refund_failed:refund down" in audit_events[0]["error"]
+            assert "tool_error:tool exploded" in audit_events[0]["error"]
+
+            assert ledger_resp.status_code == 200
+            tool_entries = [
+                entry
+                for entry in ledger_resp.json()["entries"]
+                if "jsonrpc-refund-fails" in entry.get("description", "")
+            ]
+            debit_entries = [
+                entry for entry in tool_entries if entry["action"] == "debit"
+            ]
+            assert len(debit_entries) == 1
+            assert not [
+                entry for entry in tool_entries if entry["action"] == "refund"
+            ]
+        finally:
+            registry.unregister_local("jsonrpc-refund-fails")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_reports_refund_and_audit_failure(
+        self, clean_database, monkeypatch
+    ):
+        registry = get_service_registry()
+
+        def failing_tool() -> dict:
+            raise RuntimeError("tool exploded")
+
+        async def failing_refund(self, **_kwargs):
+            raise RuntimeError("refund down")
+
+        async def failing_audit(**_kwargs):
+            raise RuntimeError("audit down")
+
+        monkeypatch.setattr(
+            "app.services.agent_money.AgentMoney.refund_charge",
+            failing_refund,
+        )
+        monkeypatch.setattr("app.routers.mcp._audit_mcp_invocation", failing_audit)
+        registry.register_local(
+            service_id="jsonrpc-refund-audit-fails",
+            name="JSON-RPC Refund Audit Fails",
+            description="Failing refund and audit tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=failing_tool,
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-refund-audit-fails-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "refund-audit-fails-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-refund-audit-fails",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32603
+            assert "refund_failed:refund down" in payload["error"]["message"]
+            assert "tool_error:tool exploded" in payload["error"]["message"]
+            assert "audit_failed:audit down" in payload["error"]["message"]
+        finally:
+            registry.unregister_local("jsonrpc-refund-audit-fails")
+
+    @pytest.mark.anyio
+    async def test_messages_tools_call_insufficient_funds_uses_jsonrpc_error(
+        self, clean_database
+    ):
+        registry = get_service_registry()
+        called = False
+
+        def expensive_tool() -> dict:
+            nonlocal called
+            called = True
+            return {"value": "should not run"}
+
+        registry.register_local(
+            service_id="jsonrpc-expensive-echo",
+            name="JSON-RPC Expensive Echo",
+            description="Expensive tool for JSON-RPC billing testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=expensive_tool,
+            credits_per_unit=10000.0,
+            unit_name="call",
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await _create_funded_agent_wallet(
+                    client,
+                    "jsonrpc-expensive-agent",
+                )
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "expensive-call-1",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-expensive-echo",
+                            "arguments": {},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["error"]["code"] == -32004
+            assert payload["error"]["message"] == "insufficient_funds"
+            assert called is False
+        finally:
+            registry.unregister_local("jsonrpc-expensive-echo")
 
     @pytest.mark.anyio
     async def test_invoke_tool_requires_api_key_header(self):

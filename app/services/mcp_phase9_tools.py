@@ -12,6 +12,7 @@ Wrapper functions provide schema information for MCP discovery.
 """
 
 import logging
+from threading import Lock
 from typing import Any
 
 from .service_registry import get_service_registry
@@ -219,30 +220,58 @@ def register_phase9_tools():
     registry = get_service_registry()
 
     for tool in MCP_PHASE9_TOOLS:
-        func = tool.pop("func")
-        input_model = tool.pop("input_model", None)
+        tool_def = tool.copy()
+        func = tool_def.pop("func")
+        input_model = tool_def.pop("input_model", None)
 
-        registry.register_local(func=func, input_model=input_model, **tool)
-        logger.info(f"Registered Phase 9 MCP tool: {tool['service_id']}")
+        registry.register_local(func=func, input_model=input_model, **tool_def)
+        logger.info(f"Registered Phase 9 MCP tool: {tool_def['service_id']}")
 
 
 _registered = False
+_registration_lock = Lock()
 
 
 def ensure_phase9_registered():
     """Ensure Phase 9 tools are registered exactly once."""
     global _registered
-    if not _registered:
-        register_phase9_tools()
-        _registered = True
+    if _registered:
+        return
+
+    with _registration_lock:
+        if not _registered:
+            register_phase9_tools()
+            _registered = True
 
 
 _default_services_registered = False
 
 
-async def default_service_placeholder(**kwargs) -> dict[str, Any]:
-    """Placeholder for default services."""
-    return {"status": "service_available", "message": "This is a default MCP service"}
+def _make_default_service_handler(service_def: dict[str, Any]):
+    """Create a deterministic preview handler for a default control-plane tool."""
+    category = service_def["category"].value
+    service_id = service_def["service_id"]
+    service_name = service_def["name"]
+    unit_name = service_def["unit_name"]
+
+    async def default_service_handler(**kwargs) -> dict[str, Any]:
+        return {
+            "status": "preview_available",
+            "service_id": service_id,
+            "service_name": service_name,
+            "category": category,
+            "unit_name": unit_name,
+            "mode": "agent_operations_control_plane_preview",
+            "integration_status": "contract_only",
+            "message": (
+                f"{service_name} exposes the deterministic control-plane contract "
+                "agents can use for discovery, planning, and policy evaluation. "
+                "Runtime side effects are not wired in this preview handler."
+            ),
+            "input_keys": sorted(kwargs),
+        }
+
+    return default_service_handler
 
 
 def register_default_mcp_services():
@@ -251,58 +280,67 @@ def register_default_mcp_services():
     if _default_services_registered:
         return
 
-    registry = get_service_registry()
+    with _registration_lock:
+        if _default_services_registered:
+            return
 
-    default_services = [
-        {
-            "service_id": "data-indexer",
-            "name": "Data Indexer",
-            "description": "Fast vector indexing for documents and content. Enables semantic search capabilities for AI agents.",
-            "category": ServiceCategory.PROTOCOL_GEN,
-            "credits_per_unit": 10.0,
-            "unit_name": "document",
-            "input_model": None,
-            "output_model": None,
-        },
-        {
-            "service_id": "content-generator",
-            "name": "Content Generator",
-            "description": "Generate marketing copy, product descriptions, and social media content using AI.",
-            "category": ServiceCategory.CONTENT_FACTORY,
-            "credits_per_unit": 25.0,
-            "unit_name": "piece",
-            "input_model": None,
-            "output_model": None,
-        },
-        {
-            "service_id": "telemetry-processor",
-            "name": "Telemetry Processor",
-            "description": "Process and analyze agent telemetry data for anomaly detection and monitoring.",
-            "category": ServiceCategory.TELEMETRY_PM,
-            "credits_per_unit": 5.0,
-            "unit_name": "event",
-            "input_model": None,
-            "output_model": None,
-        },
-        {
-            "service_id": "semantic-search",
-            "name": "Semantic Search",
-            "description": "Natural language search across indexed content using embeddings.",
-            "category": ServiceCategory.PROTOCOL_GEN,
-            "credits_per_unit": 15.0,
-            "unit_name": "query",
-            "input_model": None,
-            "output_model": None,
-        },
-    ]
+        registry = get_service_registry()
 
-    for service_def in default_services:
-        try:
-            registry.register_local(func=default_service_placeholder, **service_def)
-            logger.info(f"Registered default MCP service: {service_def['service_id']}")
-        except Exception as e:
-            logger.warning(
-                f"Failed to register default service {service_def['service_id']}: {e}"
-            )
+        default_services = [
+            {
+                "service_id": "data-indexer",
+                "name": "Data Indexer",
+                "description": "Fast vector indexing for documents and content. Enables semantic search capabilities for AI agents.",
+                "category": ServiceCategory.PROTOCOL_GEN,
+                "credits_per_unit": 10.0,
+                "unit_name": "document",
+                "input_model": None,
+                "output_model": None,
+            },
+            {
+                "service_id": "content-generator",
+                "name": "Content Generator",
+                "description": "Generate marketing copy, product descriptions, and social media content using AI.",
+                "category": ServiceCategory.CONTENT_FACTORY,
+                "credits_per_unit": 25.0,
+                "unit_name": "piece",
+                "input_model": None,
+                "output_model": None,
+            },
+            {
+                "service_id": "telemetry-processor",
+                "name": "Telemetry Processor",
+                "description": "Process and analyze agent telemetry data for anomaly detection and monitoring.",
+                "category": ServiceCategory.TELEMETRY_PM,
+                "credits_per_unit": 5.0,
+                "unit_name": "event",
+                "input_model": None,
+                "output_model": None,
+            },
+            {
+                "service_id": "semantic-search",
+                "name": "Semantic Search",
+                "description": "Natural language search across indexed content using embeddings.",
+                "category": ServiceCategory.PROTOCOL_GEN,
+                "credits_per_unit": 15.0,
+                "unit_name": "query",
+                "input_model": None,
+                "output_model": None,
+            },
+        ]
 
-    _default_services_registered = True
+        for service_def in default_services:
+            try:
+                registry.register_local(
+                    func=_make_default_service_handler(service_def),
+                    **service_def,
+                )
+                logger.info(
+                    f"Registered default MCP service: {service_def['service_id']}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to register default service {service_def['service_id']}: {e}"
+                )
+
+        _default_services_registered = True

@@ -83,6 +83,21 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _timestamp_in_current_period(
+    timestamp: datetime,
+    period_start: datetime | None,
+) -> bool:
+    if period_start is None:
+        return True
+    return _as_utc(timestamp) >= _as_utc(period_start)
+
+
 # ---------------------------------------------------------------------------
 # Pricing Table (now using Decimal)
 # ---------------------------------------------------------------------------
@@ -868,6 +883,103 @@ class AgentMoney:
                         severity=AlertSeverity.WARNING.value,
                     )
                     session.add(alert)
+
+            await session.commit()
+            return ledger_entry_model_to_schema(entry)
+
+    async def refund_charge(
+        self,
+        *,
+        wallet_id: str,
+        charge_entry_id: str,
+        description: str = "",
+    ) -> LedgerEntry:
+        """Reverse a prior debit with a correlated refund ledger entry."""
+        async with self._session_factory()() as session:
+            async with session.begin():
+                refund_entry_id = f"refund-{charge_entry_id}"
+                wallet_result = await session.execute(
+                    select(WalletModel)
+                    .where(WalletModel.wallet_id == wallet_id)
+                    .with_for_update()
+                )
+                wallet = wallet_result.scalar_one_or_none()
+                if not wallet:
+                    raise WalletNotFoundError(wallet_id)
+
+                charge_result = await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.entry_id == charge_entry_id,
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.action == LedgerAction.DEBIT.value,
+                    )
+                )
+                charge_entry = charge_result.scalar_one_or_none()
+                if not charge_entry:
+                    raise ValueError(f"Debit ledger entry not found: {charge_entry_id}")
+
+                existing_refund_result = await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.action == LedgerAction.REFUND.value,
+                        LedgerEntryModel.correlation_id == charge_entry_id,
+                    )
+                )
+                existing_refund = existing_refund_result.scalar_one_or_none()
+                if existing_refund:
+                    return ledger_entry_model_to_schema(existing_refund)
+
+                existing_refund_result = await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.entry_id == refund_entry_id,
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.action == LedgerAction.REFUND.value,
+                    )
+                )
+                existing_refund = existing_refund_result.scalar_one_or_none()
+                if existing_refund:
+                    return ledger_entry_model_to_schema(existing_refund)
+
+                refund_amount = abs(charge_entry.amount)
+                wallet.balance += refund_amount
+                wallet.lifetime_debits = max(
+                    Decimal("0"),
+                    wallet.lifetime_debits - refund_amount,
+                )
+                if _timestamp_in_current_period(
+                    charge_entry.timestamp,
+                    wallet.hourly_reset_at,
+                ):
+                    wallet.hourly_spent = max(
+                        Decimal("0"),
+                        wallet.hourly_spent - refund_amount,
+                    )
+                if _timestamp_in_current_period(
+                    charge_entry.timestamp,
+                    wallet.daily_reset_at,
+                ):
+                    # charge() records daily spend once in the velocity precheck
+                    # and once when the debit posts; reverse both increments.
+                    wallet.daily_spent = max(
+                        Decimal("0"),
+                        wallet.daily_spent - (refund_amount * Decimal("2")),
+                    )
+                wallet.updated_at = datetime.now(timezone.utc)
+
+                entry = LedgerEntryModel(
+                    entry_id=refund_entry_id,
+                    wallet_id=wallet_id,
+                    action=LedgerAction.REFUND.value,
+                    amount=refund_amount,
+                    balance_after=wallet.balance,
+                    service_category=charge_entry.service_category,
+                    description=description or f"Refund for {charge_entry.description}",
+                    request_path=charge_entry.request_path,
+                    compute_cost=Decimal("0"),
+                    margin=Decimal("0"),
+                    correlation_id=charge_entry_id,
+                )
+                session.add(entry)
 
             await session.commit()
             return ledger_entry_model_to_schema(entry)
