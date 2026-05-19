@@ -27,6 +27,12 @@ Run the focused one-command proof first:
 make demo-trust-plane
 ```
 
+If the partner wants the operator narrative instead of the compact proof, run:
+
+```bash
+make agent-ops-war-room
+```
+
 Then walk the partner through the live flow:
 
 1. Create a sponsor wallet.

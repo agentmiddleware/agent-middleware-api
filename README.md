@@ -45,6 +45,16 @@ idempotent replay, and denies an out-of-scope tool with a denial receipt. The
 sample proof artifact is in
 [`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md).
 
+For an operator-style walkthrough that prints the full control-plane timeline:
+
+```bash
+make agent-ops-war-room
+```
+
+That proof walks discovery, bounded authority, governed MCP invocation, receipt
+verification, ledger inspection, audit-chain verification, replay safety, and
+out-of-scope denial in one run.
+
 **Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
 
 ### Primary interface (autonomous clients)

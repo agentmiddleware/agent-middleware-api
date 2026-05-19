@@ -41,6 +41,19 @@ For CI or pre-merge verification:
 make demo-trust-plane-check
 ```
 
+For an operator-facing timeline that is easier to narrate in a live design
+partner walkthrough:
+
+```bash
+make agent-ops-war-room
+```
+
+For machine-readable verification of the same war-room flow:
+
+```bash
+make agent-ops-war-room-check
+```
+
 The proof artifact shape is captured in
 [`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md). Use the
 live demo flow below when walking a partner through the product story.
