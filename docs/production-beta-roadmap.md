@@ -87,6 +87,11 @@ audit event, ledger entry, and request or correlation ID for a scoped tool call.
 That makes the beta story auditable from discovery through invocation,
 metering, and governance.
 
+Wallet-scoped audit inspection is now additive to the operator view: DB-created
+wallet keys can list audit events only for their own `wallet_id`, while global
+audit queries, summaries, and cross-wallet inspection remain bootstrap/admin
+only.
+
 ## Recommended Milestones
 
 ### Milestone 1: Green And Trustworthy Mainline

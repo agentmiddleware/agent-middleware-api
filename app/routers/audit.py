@@ -20,6 +20,23 @@ from app.services.audit_log import (
 router = APIRouter(prefix="/v1/audit", tags=["Control Plane Audit"])
 
 
+def _authorize_audit_events_request(
+    *,
+    auth: AuthContext,
+    wallet_id: str | None,
+    key_id: str | None,
+    summary: bool,
+) -> tuple[str | None, str | None]:
+    if auth.is_bootstrap_admin:
+        return wallet_id, key_id
+
+    if summary or not wallet_id:
+        auth.require_bootstrap_admin()
+
+    auth.require_wallet_access(wallet_id)
+    return wallet_id, None
+
+
 @router.get("/events", response_model=AuditEventListResponse)
 async def get_audit_events(
     event: str | None = Query(None),
@@ -37,7 +54,12 @@ async def get_audit_events(
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuditEventListResponse:
-    auth.require_bootstrap_admin()
+    wallet_id, key_id = _authorize_audit_events_request(
+        auth=auth,
+        wallet_id=wallet_id,
+        key_id=key_id,
+        summary=summary,
+    )
     events = await list_audit_events(
         event=event,
         wallet_id=wallet_id,
