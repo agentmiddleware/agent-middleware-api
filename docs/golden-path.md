@@ -167,6 +167,13 @@ curl "$API_URL/v1/audit/events?wallet_id=$AGENT_WALLET_ID" \
   -H "X-API-Key: $BOOTSTRAP_KEY"
 ```
 
+The scoped agent key can also inspect its own wallet's audit stream:
+
+```bash
+curl "$API_URL/v1/audit/events?wallet_id=$AGENT_WALLET_ID" \
+  -H "X-API-Key: $AGENT_API_KEY"
+```
+
 Each audit event should let an operator tie the action back to its wallet,
 credential source, tool, endpoint, policy decision, request ID or correlation
 ID, success flag, error, and metadata such as transport and estimated cost.
