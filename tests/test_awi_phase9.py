@@ -25,6 +25,12 @@ from app.services.awi_rag_engine import AWIRAGEngine, SearchResult
 class TestWebAuthnProvider:
     """Tests for WebAuthn/Passkey provider."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_mock_webauthn(self, monkeypatch):
+        # py_webauthn is not installed in CI; production fails closed
+        # without it. Tests explicitly opt into the mock verification path.
+        monkeypatch.setenv("WEBAUTHN_ALLOW_MOCK", "true")
+
     @pytest.fixture
     def provider(self):
         return WebAuthnProvider(
