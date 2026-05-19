@@ -17919,7 +17919,8 @@
                 "type": "number"
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               }
             ],
             "title": "Max Credits"
@@ -17991,10 +17992,12 @@
           },
           "max_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Max Credits"
           },
           "spent_credits": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Spent Credits"
           },
           "expires_at": {
@@ -18077,7 +18080,8 @@
                 "type": "number"
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -19112,10 +19116,12 @@
           },
           "credits_authorized": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Authorized"
           },
           "credits_charged": {
             "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Credits Charged"
           },
           "outcome": {
