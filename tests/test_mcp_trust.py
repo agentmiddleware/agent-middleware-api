@@ -5,6 +5,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.schemas.billing import ServiceCategory
+from app.services.idempotency import get_idempotency_service
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
@@ -132,6 +133,82 @@ async def test_governed_mcp_requires_idempotency_key(client, clean_database):
         registry.unregister_local("missing-idem-tool")
     assert resp.status_code == 200
     assert resp.json()["error"]["message"] == "idempotency_key_required"
+
+
+@pytest.mark.anyio
+async def test_governed_mcp_rejects_in_progress_idempotency_without_charge(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    calls = {"count": 0}
+    registry = get_service_registry()
+
+    def in_progress_tool() -> dict:
+        calls["count"] += 1
+        return {"ok": True}
+
+    registry.register_local(
+        service_id="in-progress-idem-tool",
+        name="In Progress Idempotency Tool",
+        description="Governed idempotency in-progress test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=in_progress_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="in-progress-idem-tool",
+        idem_key="in-progress-mcp-permit-create-1",
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": "in-progress-idem-call",
+        "method": "tools/call",
+        "params": {
+            "name": "in-progress-idem-tool",
+            "arguments": {},
+            "mcpContext": {
+                "wallet_id": provisioned["agent_wallet_id"],
+                "permit_id": permit["permit_id"],
+                "idempotency_key": "in-progress-mcp-key",
+            },
+        },
+    }
+    await get_idempotency_service().begin(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint="/mcp/messages",
+        idempotency_key="in-progress-mcp-key",
+        request_payload=body,
+    )
+    try:
+        resp = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+    finally:
+        registry.unregister_local("in-progress-idem-tool")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["error"]["code"] == -32003
+    assert payload["error"]["message"] == "idempotency_in_progress"
+    assert calls["count"] == 0
+    ledger_resp = await client.get(
+        f"/v1/billing/ledger/{provisioned['agent_wallet_id']}",
+        headers=provisioned["agent_headers"],
+    )
+    debits = [
+        entry
+        for entry in ledger_resp.json()["entries"]
+        if entry["service_category"] == "agent_comms"
+        and "in-progress-idem-tool" in entry["description"]
+    ]
+    assert debits == []
 
 
 @pytest.mark.anyio

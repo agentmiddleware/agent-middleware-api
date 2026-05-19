@@ -16,6 +16,10 @@ class IdempotencyConflictError(RuntimeError):
     """Raised when an idempotency key is reused for a different request."""
 
 
+class IdempotencyInProgressError(RuntimeError):
+    """Raised when an idempotency key is already executing without a result."""
+
+
 @dataclass(frozen=True)
 class IdempotencyReplay:
     response_reference: str | None
@@ -46,19 +50,18 @@ class IdempotencyService:
             if existing:
                 if existing.request_hash != request_hash:
                     raise IdempotencyConflictError("idempotency_key_reused")
-                response_json = None
                 if existing.response_json:
                     try:
                         decoded = json.loads(existing.response_json)
                     except json.JSONDecodeError:
                         decoded = None
                     if isinstance(decoded, dict):
-                        response_json = decoded
-                return IdempotencyReplay(
-                    response_reference=existing.response_reference,
-                    response_json=response_json,
-                    status_code=existing.status_code,
-                )
+                        return IdempotencyReplay(
+                            response_reference=existing.response_reference,
+                            response_json=decoded,
+                            status_code=existing.status_code,
+                        )
+                raise IdempotencyInProgressError("idempotency_in_progress")
 
             session.add(
                 IdempotencyRecordModel(

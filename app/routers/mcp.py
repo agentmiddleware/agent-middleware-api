@@ -33,6 +33,7 @@ from ..services.agent_money import DEFAULT_PRICING, AgentMoney, get_agent_money
 from ..services.audit_log import record_audit_event
 from ..services.idempotency import (
     IdempotencyConflictError,
+    IdempotencyInProgressError,
     get_idempotency_service,
 )
 from ..services.permits import get_permit_service
@@ -341,7 +342,7 @@ async def _execute_registered_tool(
                 },
             )
             idem_started = True
-        except IdempotencyConflictError as exc:
+        except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
             raise ValueError(str(exc)) from exc
         if replay and replay.response_json:
             _raise_replayed_error(replay)
@@ -424,7 +425,7 @@ async def _execute_registered_tool(
                     "permit_id": permit_id,
                 },
             )
-        except IdempotencyConflictError as exc:
+        except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
             await _audit_mcp_invocation(
                 decision=decision,
                 endpoint=endpoint,
@@ -853,6 +854,8 @@ def _value_error_jsonrpc_code(message: str) -> int:
     if message.startswith("Tool not executable"):
         return -32002
     if message == "idempotency_key_required":
+        return -32003
+    if message == "idempotency_in_progress":
         return -32003
     if message == "insufficient_funds":
         return -32004

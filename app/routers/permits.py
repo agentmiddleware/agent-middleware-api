@@ -16,6 +16,7 @@ from app.schemas.trust import (
 )
 from app.services.idempotency import (
     IdempotencyConflictError,
+    IdempotencyInProgressError,
     get_idempotency_service,
 )
 from app.services.permits import (
@@ -96,7 +97,7 @@ async def create_permit(
             idempotency_key=idempotency_key,
             request_payload=request.model_dump(mode="json"),
         )
-    except IdempotencyConflictError as exc:
+    except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
     if replay and replay.response_json:
         return PermitResponse(**replay.response_json)
