@@ -7,6 +7,7 @@ uvicorn[standard]>=0.46.0
 pydantic>=2.13.4
 pydantic-settings>=2.14.0
 email-validator>=2.3.0  # Keep FastAPI/Pydantic OpenAPI email schema stable in CI
+structlog>=24.1.0       # Structured startup/runtime logging
 
 # --- IoT Protocol Bridge ---
 aiomqtt>=2.5.1          # Async MQTT client
@@ -23,6 +24,7 @@ python-dotenv>=1.2.2    # .env file loading
 cryptography>=46.0.0    # Ed25519 trust-plane signatures
 redis>=7.4.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
+greenlet>=3.0.0         # SQLAlchemy async engine support
 stripe>=15.1.0           # Stripe payment processing
 mcp>=1.0.0             # MCP (Model Context Protocol) SDK for tool servers
 
