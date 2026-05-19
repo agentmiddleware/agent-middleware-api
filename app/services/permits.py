@@ -213,7 +213,7 @@ class PermitService:
                 return PermitValidation(False, "permit_expired", model)
             if model.subject_wallet_id != wallet_id:
                 return PermitValidation(False, "permit_wallet_mismatch", model)
-            if model.subject_key_id and key_id and model.subject_key_id != key_id:
+            if model.subject_key_id and model.subject_key_id != key_id:
                 return PermitValidation(False, "permit_key_mismatch", model)
             allowed_tools = _loads_list(model.allowed_tools_json)
             if allowed_tools and tool_name not in allowed_tools:

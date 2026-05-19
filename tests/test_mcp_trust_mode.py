@@ -178,6 +178,7 @@ async def test_strict_mode_denies_missing_idempotency_and_audits(
         )
         payload = resp.json()
         assert resp.status_code == 200
+        assert payload["error"]["code"] == -32003
         assert payload["error"]["message"] == "idempotency_key_required"
         await _assert_denial_audited(
             wallet_id=provisioned["agent_wallet_id"],
@@ -232,6 +233,24 @@ async def test_strict_mode_denies_wrong_permit_key_wallet_and_tool_with_audit(
             headers={"X-API-Key": second_key},
         )
         assert wrong_key_resp.json()["error"]["message"] == "permit_key_mismatch"
+        await _assert_denial_audited(
+            wallet_id=provisioned["agent_wallet_id"],
+            tool_name=allowed_tool,
+            reason="permit_key_mismatch",
+        )
+
+        bootstrap_key_resp = await client.post(
+            "/mcp/messages",
+            json=_jsonrpc_body(
+                tool_name=allowed_tool,
+                wallet_id=provisioned["agent_wallet_id"],
+                request_id="strict-bootstrap-bound-key-call",
+                permit_id=permit["permit_id"],
+                idempotency_key="strict-bootstrap-bound-key-idem",
+            ),
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert bootstrap_key_resp.json()["error"]["message"] == "permit_key_mismatch"
         await _assert_denial_audited(
             wallet_id=provisioned["agent_wallet_id"],
             tool_name=allowed_tool,

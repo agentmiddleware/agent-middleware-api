@@ -682,6 +682,8 @@ def _value_error_jsonrpc_code(message: str) -> int:
         return -32001
     if message.startswith("Tool not executable"):
         return -32002
+    if message == "idempotency_key_required":
+        return -32003
     if message == "insufficient_funds":
         return -32004
     return -32603
