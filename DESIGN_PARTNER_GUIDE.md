@@ -1,22 +1,55 @@
 # Design Partner Guide
 
+Use this guide to qualify design partners for the concrete trust-plane proof:
+scoped signed permit, governed MCP invoke, wallet charge, signed receipt,
+ledger entry, audit chain, replay safety, and out-of-scope denial.
+
 ## Best-Fit Partner
 
-An AI platform team with internal agents that call MCP-style tools and need
-budget controls, replay-safe retries, auditability, and proof of authorization.
+An AI platform, infrastructure, or security engineering team that already has
+internal agents calling MCP-style tools and needs a practical control point for:
+
+- Tool-level authorization.
+- Wallet or budget-backed metering.
+- Replay-safe retries.
+- Post-hoc receipt verification.
+- Audit evidence for who authorized what, what ran, and what it cost.
+
+This is best for teams that can bring one real internal tool call to the demo.
+It is not yet a fit for teams seeking production settlement, a full IAM
+replacement, or universal governance across every agent framework.
 
 ## Demo Path
 
-1. Create sponsor wallet.
-2. Create agent wallet.
-3. Issue DB-backed API key for the agent wallet.
-4. Issue a signed permit for one MCP tool.
-5. Invoke the tool with `permit_id` and `idempotency_key`.
-6. Show the ledger debit.
+Run the focused one-command proof first:
+
+```bash
+make demo-trust-plane
+```
+
+Then walk the partner through the live flow:
+
+1. Create a sponsor wallet.
+2. Create an agent wallet.
+3. Issue a DB-backed API key for the agent wallet.
+4. Issue a signed permit for one MCP tool with wallet binding, allowed tool,
+   `billing:charge`, budget, expiry, nonce, and idempotency.
+5. Invoke the tool through governed MCP with `permit_id` and
+   `idempotency_key`.
+6. Show the wallet charge in the ledger.
 7. Verify the signed receipt.
 8. Verify the wallet audit chain.
-9. Replay the same request and show no second debit.
-10. Attempt an out-of-scope tool and show denial.
+9. Replay the same request and show the same receipt ID with no second debit.
+10. Attempt a different tool under the same permit and show out-of-scope
+    denial.
+
+## What To Listen For
+
+- "Can this sit in front of one of our internal MCP tools?"
+- "Can we tune permit scopes, budgets, and expiry per agent or workflow?"
+- "Can our operators verify receipts without trusting application logs?"
+- "Can retries be safe when an agent or orchestrator repeats a request?"
+- "Can denial evidence be audited, not just returned to the caller?"
 
 ## Success Criteria
 
@@ -26,6 +59,22 @@ budget controls, replay-safe retries, auditability, and proof of authorization.
 - The partner can verify a receipt after the fact.
 - The partner can audit who authorized the action, what tool ran, and what it
   cost.
+- The partner can see an out-of-scope request denied with an explicit reason.
+
+## Positioning Language
+
+Use:
+
+- "Governed MCP trust plane for scoped, metered tool calls."
+- "Signed proof of authorization and execution for a single tool boundary."
+- "Replay-safe billing and audit artifacts for partner evaluation."
+
+Avoid:
+
+- "Production-ready agent payments."
+- "Autonomous economic actor infrastructure."
+- "Complete policy layer for all agent frameworks."
+- "Compliance-grade ledger or audit storage."
 
 ## Do Not Promise Yet
 
@@ -34,3 +83,4 @@ budget controls, replay-safe retries, auditability, and proof of authorization.
 - Full IAM replacement.
 - Production sandbox isolation.
 - Cross-protocol governance for every agent framework.
+- Key-management hardening beyond the current trust-plane proof.

@@ -25,6 +25,7 @@ from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
 from .core.health import gather_dependency_report
 from .core.rate_limiter import RateLimitMiddleware
+from .core.trust_mode import validate_trust_mode_guardrails
 from .db.database import init_db, close_db
 from .services.mcp_phase9_tools import (
     ensure_phase9_registered,
@@ -59,6 +60,7 @@ from .routers import (
     mcp,
     kyc,
     api_keys,
+    keys,
     awi,
     awi_enhanced,
     discover,
@@ -100,6 +102,8 @@ except ImportError:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_trust_mode_guardrails(settings)
+
     cleanup_task: asyncio.Task | None = None
     startup_time = time.monotonic()
 
@@ -293,6 +297,7 @@ CORE_TRUST_ROUTERS = (
     mcp,
     kyc,
     api_keys,
+    keys,
     discover,
     planner,
     well_known,
@@ -358,6 +363,7 @@ async def root():
                 "receipts",
                 "mcp",
                 "api_keys",
+                "signing_keys",
                 "kyc",
                 "discover",
                 "planner",

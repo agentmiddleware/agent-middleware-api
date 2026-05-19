@@ -132,3 +132,58 @@ async def test_governed_mcp_requires_idempotency_key(client, clean_database):
         registry.unregister_local("missing-idem-tool")
     assert resp.status_code == 200
     assert resp.json()["error"]["message"] == "idempotency_key_required"
+
+
+@pytest.mark.anyio
+async def test_out_of_scope_governed_mcp_denial_returns_receipt(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    registry = get_service_registry()
+    registry.register_local(
+        service_id="blocked-trust-tool",
+        name="Blocked Trust Tool",
+        description="Governed trust denial test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ok": True},
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="allowed-trust-tool",
+        idem_key="permit-denial-create-1",
+    )
+    try:
+        resp = await client.post(
+            "/mcp/messages",
+            json={
+                "jsonrpc": "2.0",
+                "id": "trust-denial-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "blocked-trust-tool",
+                    "arguments": {},
+                    "mcpContext": {
+                        "wallet_id": provisioned["agent_wallet_id"],
+                        "permit_id": permit["permit_id"],
+                        "idempotency_key": "trust-denial-invoke-1",
+                    },
+                },
+            },
+            headers=provisioned["agent_headers"],
+        )
+    finally:
+        registry.unregister_local("blocked-trust-tool")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["error"]["message"] == "permit_tool_not_allowed"
+    receipt = payload["error"]["data"]["receipt"]
+    assert receipt["permit_id"] == permit["permit_id"]
+    assert receipt["outcome"] == "denied"
+    assert receipt["ledger_entry_id"] is None
+    assert receipt["credits_charged"] == "0"

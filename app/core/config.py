@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # --- Application ---
     APP_NAME: str = "Agent-Native Middleware API"
     APP_VERSION: str = "1.2.0"
+    ENVIRONMENT: str = "local"
     DEBUG: bool = False
 
     # --- Server ---
