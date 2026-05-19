@@ -30,6 +30,19 @@ Everything else in this repository exists to strengthen that loop or prove it in
 
 **Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
 
+> ## ⏸️ Project Status: Paused (2026-05-19)
+>
+> This repository is a paused prototype. The core control-plane loop
+> (wallet-scoped billing, API-key auth, MCP discovery/invocation, audit
+> logging) is real and functional. The trust primitives required to
+> position this as infrastructure for autonomous economic actors —
+> signed permits, verifiable signed receipts, replay protection,
+> hardened sandbox isolation — are NOT yet implemented.
+>
+> Development is paused pending a decision on whether to pursue this as
+> a standalone product. No active maintenance. Do not deploy to
+> production.
+
 ### Primary interface (autonomous clients)
 
 Bootstrap in the order given in `GET /.well-known/agent.json` → field `agent_first.bootstrap_sequence`. Minimally:

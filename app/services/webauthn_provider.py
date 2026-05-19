@@ -48,7 +48,24 @@ try:
 
     PY_WEBAUTHN_AVAILABLE = True
 except ImportError:
-    pass  # py_webauthn not installed - will use mock verification
+    pass  # py_webauthn not installed - see fail-closed behavior below
+
+
+def _mock_verification_allowed() -> bool:
+    """
+    Whether mock WebAuthn verification is explicitly permitted.
+
+    Defaults to False. Production MUST fail closed when py_webauthn is
+    absent: a security provider that silently degrades to mock
+    verification emits a false "verified" signal, which is worse than
+    having no provider at all. Test config may opt in by setting
+    WEBAUTHN_ALLOW_MOCK=true.
+    """
+    return os.getenv("WEBAUTHN_ALLOW_MOCK", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 class ChallengeStatus(str, Enum):
@@ -611,8 +628,18 @@ class WebAuthnProvider:
             Tuple of (success: bool, new_sign_count: int).
         """
         if not PY_WEBAUTHN_AVAILABLE:
-            logger.warning("py_webauthn not available, using mock verification")
-            return True, 0
+            if _mock_verification_allowed():
+                logger.warning(
+                    "py_webauthn not available; WEBAUTHN_ALLOW_MOCK is set - "
+                    "using MOCK verification (test-only path)"
+                )
+                return True, 0
+            logger.error(
+                "py_webauthn not available and WEBAUTHN_ALLOW_MOCK is not set - "
+                "failing closed: WebAuthn verification cannot succeed without "
+                "the real cryptographic library"
+            )
+            return False, 0
 
         credential_id = credential.get("id", "")
         stored_credential = self._credentials.get(credential_id)
