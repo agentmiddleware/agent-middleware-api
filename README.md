@@ -30,6 +30,21 @@ The governed MCP invocation path can now validate a signed permit, enforce idemp
 
 Everything else in this repository exists to strengthen that loop or prove it in realistic agent workflows.
 
+### Trust Plane Demo
+
+Run the concrete local proof:
+
+```bash
+make demo-trust-plane
+```
+
+This creates a sponsor wallet, provisions an agent wallet and API key, issues a
+signed permit for one MCP tool, invokes that tool through governed MCP, charges
+the wallet once, returns a signed receipt, verifies the audit chain, proves
+idempotent replay, and denies an out-of-scope tool with a denial receipt. The
+sample proof artifact is in
+[`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md).
+
 **Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
 
 ### Primary interface (autonomous clients)

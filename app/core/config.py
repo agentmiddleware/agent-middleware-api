@@ -49,9 +49,10 @@ class Settings(BaseSettings):
     VALID_API_KEYS: str = ""
 
     # --- Trust Plane ---
-    # When enabled, governed MCP invokes require signed permits and
-    # idempotency. Legacy wallet-only MCP remains available for local/demo
-    # compatibility while TRUST_MODE_ENABLED is false.
+    # Strict trust mode requires both TRUST_MODE_ENABLED=true and
+    # ALLOW_LEGACY_UNPERMITTED_MCP=false. This lets local demos keep
+    # wallet-only MCP compatibility while production-like environments
+    # fail closed via app.core.trust_mode guardrails.
     TRUST_MODE_ENABLED: bool = False
     ALLOW_LEGACY_UNPERMITTED_MCP: bool = True
     TRUST_SIGNING_KEY_ID: str = "local-dev-ed25519"
