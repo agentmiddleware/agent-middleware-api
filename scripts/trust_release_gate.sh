@@ -27,6 +27,9 @@ TRUST_TESTS=(
 echo "[trust-gate] focused trust-plane pytest suite"
 "${PYTEST_CMD[@]}" -q "${TRUST_TESTS[@]}"
 
+echo "[trust-gate] trust-core coverage gate"
+scripts/trust_coverage_gate.sh
+
 echo "[trust-gate] trust-plane demo proof"
 "$PYTHON_BIN" scripts/demo_trust_plane.py --assert
 

@@ -68,6 +68,8 @@ compete with it in product positioning.
 - `/health`, `/ready`, and preflight checks are documented.
 - Release candidates pass one local release-gate command before tagging:
   `scripts/trust_release_gate.sh`
+- Trust-plane changes pass the focused coverage gate:
+  `scripts/trust_coverage_gate.sh`
 - Production env vars have a complete reference.
 - Migrations upgrade an empty database and the latest known production schema.
 - CI is green on `master`.

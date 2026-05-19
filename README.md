@@ -55,6 +55,16 @@ That proof walks discovery, bounded authority, governed MCP invocation, receipt
 verification, ledger inspection, audit-chain verification, replay safety, and
 out-of-scope denial in one run.
 
+To prove the trust core has measurable test coverage before a release:
+
+```bash
+make trust-coverage-gate
+```
+
+The gate enforces at least 80% coverage over the trust-plane control modules:
+governed MCP, permits, receipts, signing-key metadata, idempotency, audit
+verification, trust-mode guardrails, and the wallet self-inspection ledger.
+
 **Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
 
 ### Primary interface (autonomous clients)

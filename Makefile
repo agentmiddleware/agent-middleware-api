@@ -1,4 +1,4 @@
-.PHONY: demo-trust-plane demo-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-release-gate
+.PHONY: demo-trust-plane demo-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate
 
 demo-trust-plane:
 	uv run python scripts/demo_trust_plane.py
@@ -11,6 +11,9 @@ agent-ops-war-room:
 
 agent-ops-war-room-check:
 	uv run python scripts/agent_ops_war_room_demo.py --assert --json
+
+trust-coverage-gate:
+	scripts/trust_coverage_gate.sh
 
 trust-release-gate:
 	scripts/trust_release_gate.sh
