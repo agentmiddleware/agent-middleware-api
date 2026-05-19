@@ -92,6 +92,16 @@ wallet keys can list audit events only for their own `wallet_id`, while global
 audit queries, summaries, and cross-wallet inspection remain bootstrap/admin
 only.
 
+## Policy Bundle Enforcement Outcome
+
+Policy bundles make governance actively enforceable instead of only inspectable.
+Bootstrap/admin operators can create wallet-scoped policies at `/v1/policies`
+to constrain allowed tools, service categories, per-action cost, real-effects
+requirements, risk tier, and human-approval gates. MCP invocation, billing
+charges, and planner optimization now evaluate active wallet policies before
+execution or charge, and audit metadata records the matched `policy_id` and
+evaluated constraints.
+
 ## Recommended Milestones
 
 ### Milestone 1: Green And Trustworthy Mainline

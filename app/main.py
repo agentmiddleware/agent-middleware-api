@@ -63,6 +63,7 @@ from .routers import (
     well_known,
     static,
     planner,
+    policies,
 )
 
 settings = get_settings()
@@ -289,6 +290,7 @@ app.include_router(content_generation.router)
 app.include_router(red_team.router)
 app.include_router(oracle.router)
 app.include_router(audit.router)
+app.include_router(policies.router)
 app.include_router(billing.router)
 app.include_router(launch.router)
 app.include_router(protocol.router)

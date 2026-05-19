@@ -131,6 +131,26 @@ curl -X POST "$API_URL/v1/billing/dry-run/charge" \
   }"
 ```
 
+## 6a. Optional: Attach A Wallet Policy
+
+Operators can constrain the agent wallet before execution:
+
+```bash
+curl -X POST "$API_URL/v1/policies" \
+  -H "X-API-Key: $BOOTSTRAP_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"wallet_id\": \"$AGENT_WALLET_ID\",
+    \"name\": \"golden-path-policy\",
+    \"allowed_service_categories\": [\"agent_comms\"],
+    \"max_cost_per_action\": 5
+  }"
+```
+
+If an MCP invocation, billing charge, or planner action violates the active
+wallet policy, it is denied before execution or charge and the audit event
+includes the `policy_id` and evaluated constraints.
+
 ## 7. Invoke Or Discover Tools
 
 Fetch the MCP manifest:

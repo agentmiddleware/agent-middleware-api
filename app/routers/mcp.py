@@ -29,6 +29,7 @@ from ..core.auth import AuthContext, get_auth_context
 from ..policy.decisions import PolicyDecision, evaluate_tool_invocation
 from ..services.agent_money import DEFAULT_PRICING, AgentMoney, get_agent_money
 from ..services.audit_log import record_audit_event
+from ..services.policies import evaluate_wallet_policy
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
 from ..services.mcp_phase9_tools import (
@@ -273,6 +274,35 @@ async def _execute_registered_tool(
         )
         raise PermissionError(decision.reason)
 
+    simulation = False
+    try:
+        from ..core.runtime_mode import is_simulation
+
+        simulation = is_simulation(category.value)
+    except Exception:
+        simulation = False
+    policy = await evaluate_wallet_policy(
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        service_category=category.value,
+        estimated_cost=estimated_cost,
+        simulation=simulation,
+    )
+    policy_metadata = {
+        "policy_id": policy.policy_id,
+        "evaluated_constraints": policy.evaluated_constraints,
+    }
+    if not policy.allowed:
+        await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=policy.reason,
+            extra_metadata=policy_metadata,
+        )
+        raise PermissionError(policy.reason)
+
     description = f"MCP {transport} invoke {tool_name}"
     charge_result = await money.charge(
         wallet_id=wallet_id,
@@ -288,6 +318,7 @@ async def _execute_registered_tool(
             transport=transport,
             ok=False,
             error="insufficient_funds",
+            extra_metadata=policy_metadata,
         )
         raise ValueError("insufficient_funds")
 
@@ -319,6 +350,7 @@ async def _execute_registered_tool(
                     transport=transport,
                     ok=False,
                     error=error,
+                    extra_metadata=policy_metadata,
                 )
             except Exception as audit_exc:
                 error = f"{error}; audit_failed:{audit_exc}"
@@ -334,6 +366,7 @@ async def _execute_registered_tool(
             transport=transport,
             ok=False,
             error=str(exc),
+            extra_metadata=policy_metadata,
         )
         raise ToolExecutionError(str(exc)) from exc
 
@@ -343,6 +376,7 @@ async def _execute_registered_tool(
         transport=transport,
         ok=True,
         error=None,
+        extra_metadata=policy_metadata,
     )
     return {
         "content": [{"type": "text", "text": json.dumps(result, default=str)}],
@@ -385,6 +419,7 @@ async def _audit_mcp_invocation(
     transport: str,
     ok: bool,
     error: str | None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     record_audit(
         "mcp.invoke",
@@ -413,6 +448,7 @@ async def _audit_mcp_invocation(
             "transport": transport,
             "estimated_cost": decision.estimated_cost,
             "policy_reason": decision.reason,
+            **(extra_metadata or {}),
         },
     )
 
