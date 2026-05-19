@@ -11,6 +11,8 @@ from app.schemas.audit import (
     AuditEventResponse,
     AuditSummaryResponse,
 )
+from app.schemas.trust import AuditChainVerifyRequest, AuditChainVerifyResponse
+from app.services.audit_chain import verify_audit_chain
 from app.services.audit_log import (
     count_audit_events,
     list_audit_events,
@@ -141,3 +143,20 @@ async def get_audit_summary(
         created_before=created_before,
     )
     return AuditSummaryResponse(**summary)
+
+
+@router.post("/verify-chain", response_model=AuditChainVerifyResponse)
+async def verify_chain(
+    request: AuditChainVerifyRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> AuditChainVerifyResponse:
+    if request.wallet_id:
+        auth.require_wallet_access(request.wallet_id)
+    else:
+        auth.require_bootstrap_admin()
+    result = await verify_audit_chain(
+        wallet_id=request.wallet_id,
+        created_after=request.created_after,
+        created_before=request.created_before,
+    )
+    return AuditChainVerifyResponse(**asdict(result))

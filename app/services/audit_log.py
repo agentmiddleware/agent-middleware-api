@@ -28,6 +28,11 @@ class AuditEvent:
     ok: bool
     error: str | None
     metadata: dict[str, Any]
+    payload_hash: str | None
+    previous_hash: str | None
+    chain_hash: str | None
+    signature: str | None
+    signature_key_id: str | None
 
 
 def _to_event(row: ControlPlaneAuditEventModel) -> AuditEvent:
@@ -53,6 +58,11 @@ def _to_event(row: ControlPlaneAuditEventModel) -> AuditEvent:
         ok=row.ok,
         error=row.error,
         metadata=metadata,
+        payload_hash=row.payload_hash,
+        previous_hash=row.previous_hash,
+        chain_hash=row.chain_hash,
+        signature=row.signature,
+        signature_key_id=row.signature_key_id,
     )
 
 
@@ -84,11 +94,13 @@ async def record_audit_event(
         error=error,
         metadata_json=json.dumps(metadata or {}, default=str),
     )
+    from app.services.audit_chain import sign_audit_model
+
+    await sign_audit_model(model)
     factory = get_session_factory()
     async with factory() as session:
         session.add(model)
         await session.commit()
-        await session.refresh(model)
     return _to_event(model)
 
 

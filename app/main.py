@@ -44,6 +44,8 @@ from .routers import (
     oracle,
     audit,
     billing,
+    permits,
+    receipts,
     launch,
     protocol,
     rtaas,
@@ -280,38 +282,49 @@ app.add_middleware(
 )
 
 # --- Mount service routers ---
-app.include_router(iot.router)
-app.include_router(telemetry.router)
-app.include_router(media.router)
-app.include_router(comms.router)
-app.include_router(agent_comms_durable.router)
-app.include_router(factory.router)
-app.include_router(content_generation.router)
-app.include_router(red_team.router)
-app.include_router(oracle.router)
-app.include_router(audit.router)
-app.include_router(policies.router)
-app.include_router(billing.router)
-app.include_router(launch.router)
-app.include_router(protocol.router)
-app.include_router(rtaas.router)
-app.include_router(sandbox.router)
-app.include_router(sandbox_behavioral.router)
-app.include_router(telemetry_scope.router)
-app.include_router(dashboard.router)
-app.include_router(broadcast.router)
-app.include_router(ai.router)
-app.include_router(docs.router)
-app.include_router(webhooks.router)
-app.include_router(mcp.router)
-app.include_router(kyc.router)
-app.include_router(api_keys.router)
-app.include_router(awi.router)
-app.include_router(awi_enhanced.router)
-app.include_router(discover.router)
-app.include_router(planner.router)
-app.include_router(well_known.router)
-app.include_router(static.router)
+
+CORE_TRUST_ROUTERS = (
+    audit,
+    policies,
+    billing,
+    permits,
+    receipts,
+    webhooks,
+    mcp,
+    kyc,
+    api_keys,
+    discover,
+    planner,
+    well_known,
+    static,
+)
+
+PROOF_SURFACE_ROUTERS = (
+    iot,
+    telemetry,
+    media,
+    comms,
+    agent_comms_durable,
+    factory,
+    content_generation,
+    red_team,
+    oracle,
+    launch,
+    protocol,
+    rtaas,
+    sandbox,
+    sandbox_behavioral,
+    telemetry_scope,
+    dashboard,
+    broadcast,
+    ai,
+    docs,
+    awi,
+    awi_enhanced,
+)
+
+for router_module in (*PROOF_SURFACE_ROUTERS, *CORE_TRUST_ROUTERS):
+    app.include_router(router_module.router)
 
 
 # --- Discovery & Health Endpoints ---
@@ -337,6 +350,32 @@ async def root():
             "discovery, policy, and execution governance for machine-native "
             "software tenants."
         ),
+        "surface_boundaries": {
+            "core_trust": [
+                "audit",
+                "billing",
+                "permits",
+                "receipts",
+                "mcp",
+                "api_keys",
+                "kyc",
+                "discover",
+                "planner",
+                "policies",
+            ],
+            "proof_surface": [
+                "awi",
+                "browser_automation",
+                "content_generation",
+                "iot_bridge",
+                "media_engine",
+                "oracle",
+                "red_team",
+                "rtaas",
+                "sandbox",
+                "telemetry_pm",
+            ],
+        },
         "services": {
             "iot_bridge": {
                 "base_path": "/v1/iot",

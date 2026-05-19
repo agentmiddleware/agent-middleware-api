@@ -54,6 +54,9 @@ async def clean_database():
     factory = get_session_factory()
     async with factory() as session:
         # Clean up tables
+        await session.execute(text("DELETE FROM idempotency_records"))
+        await session.execute(text("DELETE FROM receipts"))
+        await session.execute(text("DELETE FROM permits"))
         await session.execute(text("DELETE FROM agent_comms_messages"))
         await session.execute(text("DELETE FROM content_factory_generations"))
         await session.execute(text("DELETE FROM ledger_entries"))
@@ -66,6 +69,7 @@ async def clean_database():
         await session.execute(text("DELETE FROM key_rotation_logs"))
         await session.execute(text("DELETE FROM service_registry"))
         await session.execute(text("DELETE FROM control_plane_audit_events"))
+        await session.execute(text("DELETE FROM signing_keys"))
         await session.execute(text("DELETE FROM optimizer_telemetry"))
         await session.commit()
 

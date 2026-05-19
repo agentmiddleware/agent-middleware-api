@@ -6,6 +6,7 @@ fastapi>=0.136.1
 uvicorn[standard]>=0.46.0
 pydantic>=2.13.4
 pydantic-settings>=2.14.0
+email-validator>=2.3.0  # Keep FastAPI/Pydantic OpenAPI email schema stable in CI
 
 # --- IoT Protocol Bridge ---
 aiomqtt>=2.5.1          # Async MQTT client
@@ -19,6 +20,7 @@ python-multipart>=0.0.29 # File upload support
 
 # --- Utilities ---
 python-dotenv>=1.2.2    # .env file loading
+cryptography>=46.0.0    # Ed25519 trust-plane signatures
 redis>=7.4.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
 stripe>=15.1.0           # Stripe payment processing

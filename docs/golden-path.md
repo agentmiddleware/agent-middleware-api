@@ -89,7 +89,35 @@ echo "$AGENT_API_KEY"
 
 Store this key securely. It is shown once.
 
-## 5. Verify Agent-Scoped Access
+## 5. Issue A Signed Tool Permit
+
+Governed MCP calls use a signed permit plus an idempotency key. The permit
+binds the agent wallet, the runtime key, the allowed tool, scope, budget, and
+expiry.
+
+```bash
+export AGENT_KEY_ID=$(echo "$AGENT_KEY_JSON" | jq -r '.key_id')
+export PERMIT_JSON=$(
+  curl -s -X POST "$API_URL/v1/permits" \
+    -H "X-API-Key: $BOOTSTRAP_KEY" \
+    -H "Idempotency-Key: permit-research-agent-001" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"issuer_wallet_id\": \"$AGENT_WALLET_ID\",
+      \"subject_wallet_id\": \"$AGENT_WALLET_ID\",
+      \"subject_key_id\": \"$AGENT_KEY_ID\",
+      \"allowed_tools\": [\"golden-path-echo\"],
+      \"scopes\": [\"tool:golden-path-echo:invoke\", \"billing:charge\"],
+      \"max_credits\": 50,
+      \"expires_at\": \"$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\"
+    }"
+)
+
+export PERMIT_ID=$(echo "$PERMIT_JSON" | jq -r '.permit_id')
+echo "$PERMIT_ID"
+```
+
+## 6. Verify Agent-Scoped Access
 
 The agent key can read its own wallet:
 
@@ -107,7 +135,7 @@ curl -i "$API_URL/v1/billing/wallets/$SPONSOR_WALLET_ID" \
 
 Expected result: `403 Forbidden`.
 
-## 6. Simulate Cost Before Acting
+## 7. Simulate Cost Before Acting
 
 ```bash
 DRY_RUN_JSON=$(
@@ -163,20 +191,27 @@ curl "$API_URL/mcp/tools.json" \
 For a registered local or persistent MCP service, invoke with wallet context:
 
 ```bash
-curl -X POST "$API_URL/mcp/tools/{service_id}/invoke" \
+INVOKE_JSON=$(
+  curl -s -X POST "$API_URL/mcp/tools/golden-path-echo/invoke" \
   -H "X-API-Key: $AGENT_API_KEY" \
+  -H "Idempotency-Key: golden-path-invoke-001" \
   -H "Content-Type: application/json" \
   -d "{
-    \"name\": \"{service_id}\",
+    \"name\": \"golden-path-echo\",
     \"arguments\": {},
     \"mcp_context\": {
       \"wallet_id\": \"$AGENT_WALLET_ID\",
-      \"request_path\": \"/golden-path/demo\"
+      \"request_path\": \"/golden-path/demo\",
+      \"permit_id\": \"$PERMIT_ID\"
     }
   }"
+)
+
+export RECEIPT_ID=$(echo "$INVOKE_JSON" | jq -r '.receipt.receipt_id')
+echo "$RECEIPT_ID"
 ```
 
-Replace `{service_id}` with a tool from `/mcp/tools.json`.
+Replace `golden-path-echo` with a tool from `/mcp/tools.json`.
 
 ## 8. Inspect The Operation Record
 
@@ -198,6 +233,24 @@ Each audit event should let an operator tie the action back to its wallet,
 credential source, tool, endpoint, policy decision, request ID or correlation
 ID, success flag, error, and metadata such as transport and estimated cost.
 Use the policy decision ID to confirm why the action was allowed or denied.
+
+Verify the signed receipt:
+
+```bash
+curl -X POST "$API_URL/v1/receipts/verify" \
+  -H "X-API-Key: $AGENT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"receipt_id\": \"$RECEIPT_ID\"}"
+```
+
+Verify the wallet audit chain:
+
+```bash
+curl -X POST "$API_URL/v1/audit/verify-chain" \
+  -H "X-API-Key: $AGENT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"wallet_id\": \"$AGENT_WALLET_ID\"}"
+```
 
 ## 9. Inspect Ledger And Velocity
 

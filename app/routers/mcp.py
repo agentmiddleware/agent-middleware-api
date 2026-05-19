@@ -25,11 +25,19 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..audit.lightweight import record_audit
+from ..core.config import get_settings
 from ..core.auth import AuthContext, get_auth_context
 from ..policy.decisions import PolicyDecision, evaluate_tool_invocation
 from ..services.agent_money import DEFAULT_PRICING, AgentMoney, get_agent_money
 from ..services.audit_log import record_audit_event
+from ..services.idempotency import (
+    IdempotencyConflictError,
+    get_idempotency_service,
+)
+from ..services.permits import get_permit_service
 from ..services.policies import evaluate_wallet_policy
+from ..services.receipts import get_receipt_service
+from ..services.signing_keys import sha256_hex
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
 from ..services.mcp_phase9_tools import (
@@ -39,6 +47,7 @@ from ..services.mcp_phase9_tools import (
 from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter(prefix="/mcp", tags=["MCP"])
 
@@ -69,6 +78,10 @@ class McpContext(BaseModel):
     request_path: str | None = Field(
         None, description="Optional request path for tracking"
     )
+    permit_id: str | None = Field(None, description="Signed permit for governed calls")
+    idempotency_key: str | None = Field(
+        None, description="Replay key for governed calls"
+    )
 
 
 class ToolCallRequest(BaseModel):
@@ -86,6 +99,7 @@ class ToolCallResponse(BaseModel):
 
     content: list[dict[str, Any]]
     isError: bool = False
+    receipt: dict[str, Any] | None = None
 
 
 @router.get("/tools.json", name="MCP Tools Manifest")
@@ -143,6 +157,7 @@ async def handle_messages(
         )
 
     elif method == "tools/call":
+        mcp_context = params.get("mcpContext", {}) or {}
         try:
             result = await _handle_tools_call(
                 params,
@@ -151,6 +166,9 @@ async def handle_messages(
                 transport="jsonrpc",
                 endpoint="/mcp/messages",
                 request_id=str(request_id) if request_id is not None else None,
+                idempotency_key=mcp_context.get("idempotency_key")
+                or request.headers.get("Idempotency-Key"),
+                request_payload=body,
             )
             return JSONResponse(
                 {
@@ -233,6 +251,9 @@ async def _execute_registered_tool(
     transport: str,
     endpoint: str,
     request_id: str | None,
+    permit_id: str | None = None,
+    idempotency_key: str | None = None,
+    request_payload: dict[str, Any] | None = None,
 ) -> dict:
     if not tool_name:
         raise ValueError("Missing tool name")
@@ -257,6 +278,34 @@ async def _execute_registered_tool(
     registered_cost = _registered_tool_cost(service, category)
     charge_units = _charge_units_for_registered_cost(registered_cost, category)
     estimated_cost = float(registered_cost)
+    governed_call = bool(permit_id) or (
+        settings.TRUST_MODE_ENABLED and not settings.ALLOW_LEGACY_UNPERMITTED_MCP
+    )
+    if governed_call and not permit_id:
+        raise PermissionError("permit_required")
+    if governed_call and not idempotency_key:
+        raise ValueError("idempotency_key_required")
+
+    idem = get_idempotency_service()
+    if governed_call:
+        try:
+            replay = await idem.begin(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key or "",
+                request_payload=request_payload
+                or {
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "wallet_id": wallet_id,
+                    "permit_id": permit_id,
+                },
+            )
+        except IdempotencyConflictError as exc:
+            raise ValueError(str(exc))
+        if replay and replay.response_json:
+            return replay.response_json
+
     decision = evaluate_tool_invocation(
         auth=auth,
         wallet_id=wallet_id,
@@ -273,6 +322,31 @@ async def _execute_registered_tool(
             error=decision.reason,
         )
         raise PermissionError(decision.reason)
+
+    permit_model = None
+    if governed_call:
+        permit_validation = await get_permit_service().validate_for_action(
+            permit_id=permit_id or "",
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            estimated_credits=registered_cost,
+            key_id=auth.key_id,
+        )
+        permit_model = permit_validation.permit
+        if not permit_validation.allowed:
+            await _audit_mcp_invocation(
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=permit_validation.reason,
+                extra_metadata={
+                    "permit_id": permit_id,
+                    "idempotency_key": idempotency_key,
+                    "request_hash": sha256_hex(request_payload or arguments),
+                },
+            )
+            raise PermissionError(permit_validation.reason or "permit_denied")
 
     simulation = False
     try:
@@ -293,7 +367,7 @@ async def _execute_registered_tool(
         "evaluated_constraints": policy.evaluated_constraints,
     }
     if not policy.allowed:
-        await _audit_mcp_invocation(
+        audit_event = await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -301,9 +375,33 @@ async def _execute_registered_tool(
             error=policy.reason,
             extra_metadata=policy_metadata,
         )
+        if governed_call and permit_model:
+            receipt = await get_receipt_service().create_receipt(
+                permit_id=permit_model.permit_id,
+                wallet_id=wallet_id,
+                key_id=auth.key_id,
+                tool=tool_name,
+                request_payload=request_payload or arguments,
+                response_payload={"error": policy.reason},
+                ledger_entry_id=None,
+                credits_authorized=registered_cost,
+                credits_charged=Decimal("0"),
+                outcome="denied",
+                audit_event_id=audit_event.event_id,
+            )
+            await idem.complete(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key or "",
+                response_reference=receipt.receipt_id,
+                response_json={"content": [], "isError": True, "receipt": receipt.model_dump(mode="json")},
+                status_code=403,
+            )
         raise PermissionError(policy.reason)
 
     description = f"MCP {transport} invoke {tool_name}"
+    if governed_call and permit_model:
+        await get_permit_service().reserve_budget(permit_model.permit_id, registered_cost)
     charge_result = await money.charge(
         wallet_id=wallet_id,
         service_category=category,
@@ -312,7 +410,12 @@ async def _execute_registered_tool(
         description=description,
     )
     if isinstance(charge_result, InsufficientFundsResponse):
-        await _audit_mcp_invocation(
+        if governed_call and permit_model:
+            await get_permit_service().release_budget(
+                permit_model.permit_id,
+                registered_cost,
+            )
+        audit_event = await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -320,6 +423,28 @@ async def _execute_registered_tool(
             error="insufficient_funds",
             extra_metadata=policy_metadata,
         )
+        if governed_call and permit_model:
+            receipt = await get_receipt_service().create_receipt(
+                permit_id=permit_model.permit_id,
+                wallet_id=wallet_id,
+                key_id=auth.key_id,
+                tool=tool_name,
+                request_payload=request_payload or arguments,
+                response_payload={"error": "insufficient_funds"},
+                ledger_entry_id=None,
+                credits_authorized=registered_cost,
+                credits_charged=Decimal("0"),
+                outcome="insufficient_funds",
+                audit_event_id=audit_event.event_id,
+            )
+            await idem.complete(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key or "",
+                response_reference=receipt.receipt_id,
+                response_json={"content": [], "isError": True, "receipt": receipt.model_dump(mode="json")},
+                status_code=402,
+            )
         raise ValueError("insufficient_funds")
 
     import asyncio
@@ -337,6 +462,11 @@ async def _execute_registered_tool(
                 description=f"Refund {description}",
             )
         except Exception as refund_exc:
+            if governed_call and permit_model:
+                await get_permit_service().release_budget(
+                    permit_model.permit_id,
+                    registered_cost,
+                )
             error = f"refund_failed:{refund_exc}; tool_error:{exc}"
             logger.error(
                 "Failed to refund MCP charge %s after tool error: %s",
@@ -360,7 +490,12 @@ async def _execute_registered_tool(
                     audit_exc,
                 )
             raise RuntimeError(error) from refund_exc
-        await _audit_mcp_invocation(
+        if governed_call and permit_model:
+            await get_permit_service().release_budget(
+                permit_model.permit_id,
+                registered_cost,
+            )
+        audit_event = await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -368,9 +503,32 @@ async def _execute_registered_tool(
             error=str(exc),
             extra_metadata=policy_metadata,
         )
+        if governed_call and permit_model:
+            receipt = await get_receipt_service().create_receipt(
+                permit_id=permit_model.permit_id,
+                wallet_id=wallet_id,
+                key_id=auth.key_id,
+                tool=tool_name,
+                request_payload=request_payload or arguments,
+                response_payload={"error": str(exc)},
+                ledger_entry_id=charge_result.entry_id,
+                credits_authorized=registered_cost,
+                credits_charged=Decimal("0"),
+                outcome="failed_refunded",
+                audit_event_id=audit_event.event_id,
+            )
+            await idem.complete(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key or "",
+                response_reference=receipt.receipt_id,
+                response_json={"content": [], "isError": True, "receipt": receipt.model_dump(mode="json")},
+                status_code=500,
+            )
         raise ToolExecutionError(str(exc)) from exc
 
-    await _audit_mcp_invocation(
+    response_payload = {"content": [{"type": "text", "text": json.dumps(result, default=str)}], "isError": False}
+    audit_event = await _audit_mcp_invocation(
         decision=decision,
         endpoint=endpoint,
         transport=transport,
@@ -378,10 +536,30 @@ async def _execute_registered_tool(
         error=None,
         extra_metadata=policy_metadata,
     )
-    return {
-        "content": [{"type": "text", "text": json.dumps(result, default=str)}],
-        "isError": False,
-    }
+    if governed_call and permit_model:
+        receipt = await get_receipt_service().create_receipt(
+            permit_id=permit_model.permit_id,
+            wallet_id=wallet_id,
+            key_id=auth.key_id,
+            tool=tool_name,
+            request_payload=request_payload or arguments,
+            response_payload=response_payload,
+            ledger_entry_id=charge_result.entry_id,
+            credits_authorized=registered_cost,
+            credits_charged=registered_cost,
+            outcome="success",
+            audit_event_id=audit_event.event_id,
+        )
+        response_payload["receipt"] = receipt.model_dump(mode="json")
+        await idem.complete(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key or "",
+            response_reference=receipt.receipt_id,
+            response_json=response_payload,
+            status_code=200,
+        )
+    return response_payload
 
 
 def _registered_tool_cost(
@@ -420,7 +598,7 @@ async def _audit_mcp_invocation(
     ok: bool,
     error: str | None,
     extra_metadata: dict[str, Any] | None = None,
-) -> None:
+) -> Any:
     record_audit(
         "mcp.invoke",
         tool=decision.tool_name,
@@ -433,7 +611,7 @@ async def _audit_mcp_invocation(
         ok=ok,
         error=error,
     )
-    await record_audit_event(
+    return await record_audit_event(
         event="mcp.invoke",
         wallet_id=decision.wallet_id,
         tool=decision.tool_name,
@@ -461,11 +639,14 @@ async def _handle_tools_call(
     transport: str,
     endpoint: str,
     request_id: str | None,
+    idempotency_key: str | None = None,
+    request_payload: dict[str, Any] | None = None,
 ) -> dict:
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
     mcp_context = params.get("mcpContext", {})
     wallet_id = mcp_context.get("wallet_id")
+    permit_id = mcp_context.get("permit_id")
     return await _execute_registered_tool(
         tool_name=tool_name,
         arguments=arguments,
@@ -475,6 +656,9 @@ async def _handle_tools_call(
         transport=transport,
         endpoint=endpoint,
         request_id=request_id,
+        permit_id=permit_id,
+        idempotency_key=idempotency_key or mcp_context.get("idempotency_key"),
+        request_payload=request_payload,
     )
 
 
@@ -486,6 +670,7 @@ async def _handle_tools_call(
 async def invoke_tool(
     service_id: str,
     request: ToolCallRequest,
+    http_request: Request,
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ) -> ToolCallResponse:
@@ -517,6 +702,10 @@ async def invoke_tool(
             transport="http",
             endpoint=f"/mcp/tools/{service_id}/invoke",
             request_id=None,
+            permit_id=mcp_context.permit_id,
+            idempotency_key=mcp_context.idempotency_key
+            or http_request.headers.get("Idempotency-Key"),
+            request_payload=request.model_dump(mode="json"),
         )
         return ToolCallResponse(**result)
     except PermissionError as exc:

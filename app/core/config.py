@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # Comma-separated list of valid API keys (use a secrets manager in production)
     VALID_API_KEYS: str = ""
 
+    # --- Trust Plane ---
+    # When enabled, governed MCP invokes require signed permits and
+    # idempotency. Legacy wallet-only MCP remains available for local/demo
+    # compatibility while TRUST_MODE_ENABLED is false.
+    TRUST_MODE_ENABLED: bool = False
+    ALLOW_LEGACY_UNPERMITTED_MCP: bool = True
+    TRUST_SIGNING_KEY_ID: str = "local-dev-ed25519"
+    TRUST_SIGNING_PRIVATE_KEY_B64: str = ""
+
     # --- Stripe Payment Processing ---
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

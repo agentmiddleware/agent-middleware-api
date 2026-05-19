@@ -14,19 +14,19 @@
 
 > **Production beta — agent-discoverable, not production complete.** Built on arXiv:2506.10953v1.
 
-**Product:** Agent Middleware API is the operational control plane for autonomous agents: identity, billing, discovery, policy, and execution governance for machine-native software tenants.
+**Product:** Agent Middleware API is narrowing around an MCP governance and metering layer for agent tool calls. The current spine is wallet-scoped auth, billing, MCP invocation, signed permits, signed receipts, replay protection, and audit.
 
 **Platform:** A self-hostable infrastructure layer for wallet-scoped agents that need to discover capabilities, authenticate, invoke tools, meter usage, and operate inside enforceable boundaries.
 
 **Thesis:** Autonomous systems will require the same operational infrastructure humans and cloud workloads already depend on.
 
-The core loop is:
+The target trust loop is:
 
 ```text
-discover -> authenticate -> invoke -> meter -> govern
+discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
 ```
 
-The MCP invocation path now records a policy decision, charges the wallet, writes a ledger entry, and persists a control-plane audit event for operator inspection.
+The governed MCP invocation path can now validate a signed permit, enforce idempotency, charge the wallet, write a ledger entry, generate a signed receipt, and persist a signed audit-chain event.
 
 Everything else in this repository exists to strengthen that loop or prove it in realistic agent workflows.
 
@@ -52,13 +52,15 @@ curl http://localhost:8000/openapi.json
 
 Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes`. Optional index: `GET /v1/discover`.
 
-### Core infrastructure primitives
+### Core trust primitives
 
 - **Identity and authority** — wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks, and cross-wallet isolation.
 - **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `llm.txt`, OpenAPI, and `/v1/discover`.
-- **Policy-constrained execution** — MCP invocation, planner optimization, service health checks, simulation visibility, and bounded sandbox execution.
+- **Signed authorization** — `/v1/permits` issues Ed25519-signed tool permits with scopes, wallet binding, budget, expiry, nonce, and revocation.
+- **Policy-constrained execution** — MCP invocation can require signed permits and idempotency keys before billable tool calls.
 - **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
-- **Governance and readiness** — telemetry, audit surfaces, dependency health, security posture, and operator preflight checks.
+- **Receipts and audit** — `/v1/receipts` verifies signed action receipts, and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
+- **Governance and readiness** — telemetry, dependency health, security posture, and operator preflight checks.
 
 ### Proof-of-usefulness surfaces
 
