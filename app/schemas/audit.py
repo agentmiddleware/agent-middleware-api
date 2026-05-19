@@ -25,3 +25,16 @@ class AuditEventResponse(BaseModel):
 class AuditEventListResponse(BaseModel):
     events: list[AuditEventResponse]
     total: int
+    limit: int = 50
+    offset: int = 0
+    has_more: bool = False
+    next_offset: int | None = None
+    summary: dict[str, Any] | None = None
+
+
+class AuditSummaryResponse(BaseModel):
+    total: int
+    by_event: dict[str, int]
+    by_outcome: dict[str, int]
+    by_wallet: dict[str, int]
+    by_policy_reason: dict[str, int]

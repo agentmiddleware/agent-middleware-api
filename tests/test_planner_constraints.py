@@ -1,5 +1,10 @@
 import app.optimizer.planner as planner
 from app.schemas.optimizer import OptimizerRequest, OptimizerState
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.services.audit_log import list_audit_events
 
 
 def _state(tier="low", service_health=None):
@@ -112,3 +117,71 @@ def test_solver_empty_solution_returns_infeasible_regression():
     out = planner.optimize_action_set(state, candidates, req)
     assert out["selected_actions"] == []
     assert out["status"] == "Infeasible"
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.anyio
+async def test_planner_endpoint_returns_governance_context_and_records_audit(
+    client,
+    clean_database,
+):
+    request_id = "req-planner-governance"
+    payload = {
+        "state": _state(tier="high").model_dump(),
+        "max_actions": 1,
+    }
+    payload["state"]["request_id"] = request_id
+    payload["state"]["wallet_id"] = "wallet-planner-governance"
+    payload["state"]["task_context"]["candidate_actions"] = [
+        {
+            "id": "winner",
+            "service": "svc1",
+            "credit_cost": 1,
+            "latency_ms": 10,
+            "risk_score": 0.01,
+            "expected_value": 4,
+            "reliability": 1.0,
+        },
+        {
+            "id": "too_slow",
+            "service": "svc1",
+            "credit_cost": 1,
+            "latency_ms": 2000,
+            "risk_score": 0.01,
+            "expected_value": 10,
+            "reliability": 1.0,
+        },
+    ]
+
+    response = await client.post(
+        "/v1/planner/optimize",
+        json=payload,
+        headers={"X-API-Key": "test-key", "X-Request-ID": request_id},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["governance"]["request_id"] == request_id
+    assert data["governance"]["wallet_id"] == "wallet-planner-governance"
+    assert data["governance"]["audit_event_id"].startswith("audit-")
+    assert data["governance"]["policy_decision_id"].startswith("pol-")
+    assert data["policy_reasons"] == {"too_slow": "latency_budget_exceeded"}
+
+    events = await list_audit_events(request_id=request_id)
+    assert len(events) == 1
+    event = events[0]
+    assert event.event == "planner.optimize"
+    assert event.wallet_id == "wallet-planner-governance"
+    assert event.tool == "planner"
+    assert event.endpoint == "/v1/planner/optimize"
+    assert event.ok is True
+    assert event.policy_decision_id == data["governance"]["policy_decision_id"]
+    assert event.metadata["status"] == data["status"]
+    assert event.metadata["selected_count"] == 1
+    assert event.metadata["rejected_count"] == 1

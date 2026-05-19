@@ -10,7 +10,7 @@ This is how the API generates revenue autonomously.
 
 from decimal import Decimal
 from typing import ClassVar
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
@@ -22,6 +22,7 @@ from ..services.agent_money import (
     WalletNotFoundError,
     KYCVerificationRequiredError,
 )
+from ..services.governance import record_governed_action
 from ..services.velocity_monitor import WalletFrozenError
 from ..services.stripe_integration import get_stripe_integration
 from ..services.shadow_ledger import get_shadow_ledger
@@ -50,6 +51,37 @@ from ..schemas.billing import (
 
 def _require_wallet_access(auth: AuthContext, wallet_id: str) -> None:
     auth.require_wallet_access(wallet_id)
+
+
+async def _record_billing_governance(
+    *,
+    event: str,
+    auth: AuthContext,
+    wallet_id: str,
+    service_category: str | None = None,
+    endpoint: str,
+    request_id: str | None = None,
+    estimated_cost: float | None = None,
+    committed_cost: float | None = None,
+    ok: bool = True,
+    error: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    await record_governed_action(
+        event=event,
+        auth=auth,
+        wallet_id=wallet_id,
+        target="billing",
+        endpoint=endpoint,
+        request_id=request_id,
+        estimated_cost=estimated_cost,
+        committed_cost=committed_cost,
+        allowed=ok,
+        reason="allowed" if ok else error,
+        ok=ok,
+        error=error,
+        metadata={"service_category": service_category, **(metadata or {})},
+    )
 
 
 router = APIRouter(
@@ -350,6 +382,7 @@ async def get_ledger(
     summary="Charge a wallet for API usage",
 )
 async def charge_wallet(
+    request: Request,
     wallet_id: str,
     service_category: ServiceCategory | None = None,
     service: ServiceCategory | None = Query(
@@ -382,10 +415,56 @@ async def charge_wallet(
         )
 
         if isinstance(result, InsufficientFundsResponse):
+            await _record_billing_governance(
+                event="billing.charge",
+                auth=auth,
+                wallet_id=wallet_id,
+                service_category=category.value,
+                endpoint="/v1/billing/charge",
+                request_id=request.headers.get("X-Request-ID"),
+                estimated_cost=float(result.required_amount),
+                ok=False,
+                error="insufficient_funds",
+                metadata={
+                    "units": units,
+                    "request_path": request_path,
+                    "shortfall": float(result.shortfall),
+                },
+            )
             raise HTTPException(status_code=402, detail=result.model_dump())
 
+        await _record_billing_governance(
+            event="billing.charge",
+            auth=auth,
+            wallet_id=wallet_id,
+            service_category=category.value,
+            endpoint="/v1/billing/charge",
+            request_id=request.headers.get("X-Request-ID"),
+            estimated_cost=abs(float(result.amount)),
+            committed_cost=abs(float(result.amount)),
+            ok=True,
+            metadata={
+                "units": units,
+                "request_path": request_path,
+                "ledger_entry_id": result.entry_id,
+                "amount_exact": result.amount_exact,
+                "balance_after_exact": result.balance_after_exact,
+            },
+        )
         return result
     except WalletFrozenError as e:
+        if category:
+            await _record_billing_governance(
+                event="billing.charge",
+                auth=auth,
+                wallet_id=wallet_id,
+                service_category=category.value,
+                endpoint="/v1/billing/charge",
+                request_id=request.headers.get("X-Request-ID"),
+                ok=False,
+                error="wallet_frozen",
+                metadata={"reason": e.reason, "units": units},
+            )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -415,15 +494,50 @@ async def top_up_wallet(
 ):
     _require_wallet_access(auth, request.wallet_id)
     try:
-        return await money.top_up(
+        result = await money.top_up(
             wallet_id=request.wallet_id,
             amount_fiat=Decimal(str(request.amount_fiat)),
             payment_method=request.payment_method,
             payment_token=request.payment_token,
         )
+        await _record_billing_governance(
+            event="billing.top_up",
+            auth=auth,
+            wallet_id=request.wallet_id,
+            service_category="top_up",
+            endpoint="/v1/billing/top-up",
+            committed_cost=float(result.credits_added),
+            ok=True,
+            metadata={
+                "amount_fiat": request.amount_fiat,
+                "payment_method": request.payment_method,
+                "top_up_id": result.top_up_id,
+            },
+        )
+        return result
     except WalletNotFoundError as e:
+        await _record_billing_governance(
+            event="billing.top_up",
+            auth=auth,
+            wallet_id=request.wallet_id,
+            service_category="top_up",
+            endpoint="/v1/billing/top-up",
+            ok=False,
+            error="wallet_not_found",
+            metadata={"amount_fiat": request.amount_fiat},
+        )
         raise HTTPException(status_code=404, detail=str(e))
     except KYCVerificationRequiredError as e:
+        await _record_billing_governance(
+            event="billing.top_up",
+            auth=auth,
+            wallet_id=request.wallet_id,
+            service_category="top_up",
+            endpoint="/v1/billing/top-up",
+            ok=False,
+            error="kyc_required",
+            metadata={"amount_fiat": request.amount_fiat, "kyc_status": e.kyc_status},
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -435,6 +549,16 @@ async def top_up_wallet(
             },
         )
     except ValueError as e:
+        await _record_billing_governance(
+            event="billing.top_up",
+            auth=auth,
+            wallet_id=request.wallet_id,
+            service_category="top_up",
+            endpoint="/v1/billing/top-up",
+            ok=False,
+            error="topup_error",
+            metadata={"amount_fiat": request.amount_fiat, "message": str(e)},
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "topup_error", "message": str(e)},
@@ -547,10 +671,50 @@ async def transfer_wallets(
             description=description or "",
             correlation_id=correlation_id,
         )
+        await _record_billing_governance(
+            event="billing.transfer",
+            auth=auth,
+            wallet_id=from_wallet_id,
+            service_category="transfer",
+            endpoint="/v1/billing/transfer",
+            request_id=correlation_id,
+            estimated_cost=amount,
+            committed_cost=amount,
+            ok=True,
+            metadata={
+                "to_wallet_id": to_wallet_id,
+                "transfer_id": result.get("transfer_id"),
+                "description": description,
+            },
+        )
         return result
     except WalletNotFoundError as e:
+        await _record_billing_governance(
+            event="billing.transfer",
+            auth=auth,
+            wallet_id=from_wallet_id,
+            service_category="transfer",
+            endpoint="/v1/billing/transfer",
+            request_id=correlation_id,
+            estimated_cost=amount,
+            ok=False,
+            error="wallet_not_found",
+            metadata={"to_wallet_id": to_wallet_id},
+        )
         raise HTTPException(status_code=404, detail=str(e))
     except InsufficientFundsError as e:
+        await _record_billing_governance(
+            event="billing.transfer",
+            auth=auth,
+            wallet_id=from_wallet_id,
+            service_category="transfer",
+            endpoint="/v1/billing/transfer",
+            request_id=correlation_id,
+            estimated_cost=amount,
+            ok=False,
+            error="insufficient_funds",
+            metadata={"to_wallet_id": to_wallet_id, "shortfall": float(e.shortfall)},
+        )
         raise HTTPException(
             status_code=402,
             detail={
@@ -560,6 +724,18 @@ async def transfer_wallets(
             },
         )
     except ValueError as e:
+        await _record_billing_governance(
+            event="billing.transfer",
+            auth=auth,
+            wallet_id=from_wallet_id,
+            service_category="transfer",
+            endpoint="/v1/billing/transfer",
+            request_id=correlation_id,
+            estimated_cost=amount,
+            ok=False,
+            error="transfer_error",
+            metadata={"to_wallet_id": to_wallet_id, "message": str(e)},
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "transfer_error", "message": str(e)},
@@ -1014,6 +1190,23 @@ async def simulate_charge(
             units=request.units,
             description=request.description or "",
         )
+        await _record_billing_governance(
+            event="billing.dry_run",
+            auth=auth,
+            wallet_id=result.wallet_id,
+            service_category=result.service_category,
+            endpoint="/v1/billing/dry-run/charge",
+            request_id=session_id,
+            estimated_cost=float(result.credits_would_charge),
+            ok=result.would_succeed,
+            error=None if result.would_succeed else result.reason,
+            metadata={
+                "session_id": session_id,
+                "units": result.units,
+                "simulated_balance_before": result.simulated_balance_before,
+                "simulated_balance_after": result.simulated_balance_after,
+            },
+        )
         return SimulatedChargeResponse(
             dry_run=True,
             session_id=result.session_id,
@@ -1048,6 +1241,19 @@ async def simulate_charge(
     )
 
     if hasattr(result, "credits_would_charge"):
+        await _record_billing_governance(
+            event="billing.dry_run",
+            auth=auth,
+            wallet_id=getattr(result, "wallet_id", request.wallet_id),
+            service_category=getattr(result, "service_category", request.service.value),
+            endpoint="/v1/billing/dry-run/charge",
+            estimated_cost=float(
+                getattr(result, "credits_would_charge", Decimal("0"))
+            ),
+            ok=getattr(result, "would_succeed", True),
+            error=None if getattr(result, "would_succeed", True) else getattr(result, "reason", None),
+            metadata={"units": getattr(result, "units", request.units)},
+        )
         return SimulatedChargeResponse(
             dry_run=True,
             session_id=getattr(result, "session_id", ""),
@@ -1067,6 +1273,16 @@ async def simulate_charge(
             reason=getattr(result, "reason", None),
         )
 
+    await _record_billing_governance(
+        event="billing.dry_run",
+        auth=auth,
+        wallet_id=request.wallet_id,
+        service_category=request.service.value,
+        endpoint="/v1/billing/dry-run/charge",
+        estimated_cost=float(wallet.balance),
+        ok=True,
+        metadata={"units": request.units},
+    )
     return SimulatedChargeResponse(
         dry_run=True,
         session_id="",

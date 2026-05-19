@@ -7,6 +7,7 @@ from typing import Any
 import uuid
 
 from sqlalchemy import desc, select
+from sqlalchemy import func
 
 from app.db.database import get_session_factory
 from app.db.models import ControlPlaneAuditEventModel
@@ -93,27 +94,141 @@ async def record_audit_event(
 
 async def list_audit_events(
     *,
+    event: str | None = None,
     wallet_id: str | None = None,
     key_id: str | None = None,
     tool: str | None = None,
+    endpoint: str | None = None,
+    policy_decision_id: str | None = None,
     request_id: str | None = None,
+    ok: bool | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> list[AuditEvent]:
     stmt = (
         select(ControlPlaneAuditEventModel)
         .order_by(desc(ControlPlaneAuditEventModel.created_at))
         .limit(limit)
+        .offset(offset)
     )
+    stmt = _apply_audit_filters(
+        stmt,
+        event=event,
+        wallet_id=wallet_id,
+        key_id=key_id,
+        tool=tool,
+        endpoint=endpoint,
+        policy_decision_id=policy_decision_id,
+        request_id=request_id,
+        ok=ok,
+        created_after=created_after,
+        created_before=created_before,
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(stmt)
+        return [_to_event(row) for row in result.scalars().all()]
+
+
+async def count_audit_events(
+    *,
+    event: str | None = None,
+    wallet_id: str | None = None,
+    key_id: str | None = None,
+    tool: str | None = None,
+    endpoint: str | None = None,
+    policy_decision_id: str | None = None,
+    request_id: str | None = None,
+    ok: bool | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(ControlPlaneAuditEventModel)
+    stmt = _apply_audit_filters(
+        stmt,
+        event=event,
+        wallet_id=wallet_id,
+        key_id=key_id,
+        tool=tool,
+        endpoint=endpoint,
+        policy_decision_id=policy_decision_id,
+        request_id=request_id,
+        ok=ok,
+        created_after=created_after,
+        created_before=created_before,
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(stmt)
+        return int(result.scalar_one())
+
+
+async def summarize_audit_events(
+    *,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+) -> dict[str, Any]:
+    events = await list_audit_events(
+        created_after=created_after,
+        created_before=created_before,
+        limit=10_000,
+    )
+    summary: dict[str, Any] = {
+        "total": len(events),
+        "by_event": {},
+        "by_outcome": {"ok": 0, "error": 0},
+        "by_wallet": {},
+        "by_policy_reason": {},
+    }
+    for event in events:
+        summary["by_event"][event.event] = summary["by_event"].get(event.event, 0) + 1
+        outcome = "ok" if event.ok else "error"
+        summary["by_outcome"][outcome] = summary["by_outcome"].get(outcome, 0) + 1
+        wallet_key = event.wallet_id or "unknown"
+        summary["by_wallet"][wallet_key] = summary["by_wallet"].get(wallet_key, 0) + 1
+        reason = str(event.metadata.get("policy_reason") or event.error or "unknown")
+        summary["by_policy_reason"][reason] = (
+            summary["by_policy_reason"].get(reason, 0) + 1
+        )
+    return summary
+
+
+def _apply_audit_filters(stmt, **filters):
+    event = filters.get("event")
+    wallet_id = filters.get("wallet_id")
+    key_id = filters.get("key_id")
+    tool = filters.get("tool")
+    endpoint = filters.get("endpoint")
+    policy_decision_id = filters.get("policy_decision_id")
+    request_id = filters.get("request_id")
+    ok = filters.get("ok")
+    created_after = filters.get("created_after")
+    created_before = filters.get("created_before")
+
+    if event:
+        stmt = stmt.where(ControlPlaneAuditEventModel.event == event)
     if wallet_id:
         stmt = stmt.where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
     if key_id:
         stmt = stmt.where(ControlPlaneAuditEventModel.key_id == key_id)
     if tool:
         stmt = stmt.where(ControlPlaneAuditEventModel.tool == tool)
+    if endpoint:
+        stmt = stmt.where(ControlPlaneAuditEventModel.endpoint == endpoint)
+    if policy_decision_id:
+        stmt = stmt.where(
+            ControlPlaneAuditEventModel.policy_decision_id == policy_decision_id
+        )
     if request_id:
         stmt = stmt.where(ControlPlaneAuditEventModel.request_id == request_id)
-
-    factory = get_session_factory()
-    async with factory() as session:
-        result = await session.execute(stmt)
-        return [_to_event(row) for row in result.scalars().all()]
+    if ok is not None:
+        stmt = stmt.where(ControlPlaneAuditEventModel.ok == ok)
+    if created_after:
+        stmt = stmt.where(ControlPlaneAuditEventModel.created_at >= created_after)
+    if created_before:
+        stmt = stmt.where(ControlPlaneAuditEventModel.created_at <= created_before)
+    return stmt

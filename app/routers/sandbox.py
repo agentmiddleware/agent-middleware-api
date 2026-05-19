@@ -5,18 +5,18 @@ Headless puzzle environments for testing agent-built tools'
 ability to generalize and adapt without human instruction.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_sandbox_engine
+from ..services.governance import record_governed_action
 from ..services.sandbox import SandboxEngine
 
 router = APIRouter(
     prefix="/v1/sandbox",
     tags=["Interactive Testing Sandboxes"],
-    dependencies=[Depends(verify_api_key)],
 )
 
 
@@ -114,7 +114,9 @@ class EnvironmentListResponse(BaseModel):
     ),
 )
 async def create_environment(
+    http_request: Request,
     request: CreateEnvironmentRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: SandboxEngine = Depends(get_sandbox_engine),
 ):
     try:
@@ -123,7 +125,22 @@ async def create_environment(
             difficulty=request.difficulty,
             seed=request.seed,
         )
-        return _env_to_response(env, engine)
+        response = _env_to_response(env, engine)
+        await record_governed_action(
+            event="sandbox.environment.create",
+            auth=auth,
+            wallet_id=auth.wallet_id,
+            target="sandbox",
+            endpoint="/v1/sandbox/environments",
+            request_id=http_request.headers.get("X-Request-ID"),
+            ok=True,
+            metadata={
+                "env_id": response.env_id,
+                "env_type": response.env_type,
+                "difficulty": response.difficulty,
+            },
+        )
+        return response
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -141,13 +158,15 @@ async def create_environment(
     ),
 )
 async def submit_action(
+    http_request: Request,
     env_id: str,
     request: ActionRequest,
+    auth: AuthContext = Depends(get_auth_context),
     engine: SandboxEngine = Depends(get_sandbox_engine),
 ):
     try:
         result = await engine.submit_action(env_id, request.action)
-        return ActionResponse(
+        response = ActionResponse(
             step=result.step,
             action_accepted=result.action_accepted,
             state_changed=result.state_changed,
@@ -156,6 +175,22 @@ async def submit_action(
             done=result.done,
             new_state=result.new_state,
         )
+        await record_governed_action(
+            event="sandbox.action.submit",
+            auth=auth,
+            wallet_id=auth.wallet_id,
+            target="sandbox",
+            endpoint=f"/v1/sandbox/environments/{env_id}/actions",
+            request_id=http_request.headers.get("X-Request-ID"),
+            ok=True,
+            metadata={
+                "env_id": env_id,
+                "action_accepted": response.action_accepted,
+                "step": response.step,
+                "done": response.done,
+            },
+        )
+        return response
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -176,12 +211,30 @@ async def submit_action(
     ),
 )
 async def evaluate_environment(
+    http_request: Request,
     env_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     engine: SandboxEngine = Depends(get_sandbox_engine),
 ):
     try:
         result = await engine.evaluate(env_id)
-        return EvaluationResponse(**result)
+        response = EvaluationResponse(**result)
+        await record_governed_action(
+            event="sandbox.evaluate",
+            auth=auth,
+            wallet_id=auth.wallet_id,
+            target="sandbox",
+            endpoint=f"/v1/sandbox/environments/{env_id}/evaluate",
+            request_id=http_request.headers.get("X-Request-ID"),
+            ok=True,
+            metadata={
+                "env_id": env_id,
+                "generalization_score": response.generalization_score,
+                "solved": response.solved,
+                "steps_used": response.steps_used,
+            },
+        )
+        return response
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

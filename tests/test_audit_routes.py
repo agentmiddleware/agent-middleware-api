@@ -40,6 +40,68 @@ async def test_bootstrap_admin_can_list_audit_events(client, clean_database):
 
 
 @pytest.mark.anyio
+async def test_bootstrap_admin_can_filter_paginate_and_summarize_audit_events(
+    client,
+    clean_database,
+):
+    await record_audit_event(
+        event="billing.charge",
+        wallet_id="wallet-1",
+        tool="billing",
+        endpoint="/v1/billing/charge",
+        auth_source="bootstrap",
+        key_id="key-1",
+        request_id="req-billing-1",
+        ok=True,
+        metadata={"credits": "2.0"},
+    )
+    await record_audit_event(
+        event="planner.optimize",
+        wallet_id="wallet-1",
+        tool="planner",
+        endpoint="/v1/planner/optimize",
+        auth_source="bootstrap",
+        key_id="key-1",
+        request_id="req-planner-1",
+        ok=False,
+        error="infeasible",
+        metadata={"status": "Infeasible"},
+    )
+    await record_audit_event(
+        event="sandbox.evaluate",
+        wallet_id="wallet-2",
+        tool="sandbox",
+        endpoint="/v1/sandbox/environments/env-1/evaluate",
+        auth_source="bootstrap",
+        key_id="key-2",
+        request_id="req-sandbox-1",
+        ok=True,
+    )
+
+    response = await client.get(
+        "/v1/audit/events?wallet_id=wallet-1&limit=1&offset=1&summary=true",
+        headers={"X-API-Key": "test-key"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert data["limit"] == 1
+    assert data["offset"] == 1
+    assert len(data["events"]) == 1
+    assert data["events"][0]["wallet_id"] == "wallet-1"
+    assert data["summary"] == {
+        "total": 2,
+        "ok": 1,
+        "failed": 1,
+        "by_event": {
+            "billing.charge": 1,
+            "planner.optimize": 1,
+        },
+    }
+
+
+@pytest.mark.anyio
 async def test_db_wallet_key_cannot_list_audit_events(client, clean_database):
     sponsor_response = await client.post(
         "/v1/billing/wallets/sponsor",
@@ -69,3 +131,10 @@ async def test_db_wallet_key_cannot_list_audit_events(client, clean_database):
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_audit_summary_requires_bootstrap_admin(client, clean_database):
+    response = await client.get("/v1/audit/events?summary=true")
+
+    assert response.status_code in (401, 403)

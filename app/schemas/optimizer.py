@@ -37,3 +37,4 @@ class OptimizerResponse(BaseModel):
     expected_utility: float
     totals: Dict[str, float]
     constraint_margins: Dict[str, float]
+    governance: Optional[Dict] = None

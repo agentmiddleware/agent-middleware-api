@@ -14,6 +14,7 @@ from app.main import app
 from app.db.database import get_session_factory
 from app.db.models import LedgerEntryModel, WalletModel
 from app.services.agent_money import get_agent_money
+from app.services.audit_log import list_audit_events
 
 @pytest.fixture
 async def client():
@@ -154,6 +155,60 @@ async def test_charge_agent_wallet(client, api_headers):
     assert data["compute_cost"] is not None
     assert data["margin"] is not None
     assert data["margin"] > 0  # Arbitrage should be positive
+
+
+@pytest.mark.anyio
+async def test_billing_charge_records_governance_audit_event(
+    client,
+    api_headers,
+    clean_database,
+):
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Governance Billing Test",
+            "email": "governance-billing@example.com",
+            "initial_credits": 10000,
+        },
+        headers=api_headers,
+    )
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "governance-billing-bot",
+            "budget_credits": 1000,
+        },
+        headers=api_headers,
+    )
+    agent_wallet_id = agent_resp.json()["wallet_id"]
+
+    charge_resp = await client.post(
+        (
+            f"/v1/billing/charge?wallet_id={agent_wallet_id}"
+            "&service=agent_comms&units=2&request_path=POST+/v1/agent-comms/send"
+        ),
+        headers={**api_headers, "X-Request-ID": "req-billing-governance"},
+    )
+
+    assert charge_resp.status_code == 200
+    charge = charge_resp.json()
+    events = await list_audit_events(
+        wallet_id=agent_wallet_id,
+        request_id="req-billing-governance",
+    )
+    assert len(events) == 1
+    event = events[0]
+    assert event.event == "billing.charge"
+    assert event.tool == "billing"
+    assert event.endpoint == "/v1/billing/charge"
+    assert event.auth_source == "bootstrap"
+    assert event.ok is True
+    assert event.metadata["ledger_entry_id"] == charge["entry_id"]
+    assert event.metadata["service_category"] == "agent_comms"
+    assert event.metadata["amount_exact"] == charge["amount_exact"]
+    assert event.metadata["balance_after_exact"] == charge["balance_after_exact"]
 
 
 @pytest.mark.anyio

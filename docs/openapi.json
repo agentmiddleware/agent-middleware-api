@@ -2856,6 +2856,22 @@
         ],
         "parameters": [
           {
+            "name": "event",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event"
+            }
+          },
+          {
             "name": "wallet_id",
             "in": "query",
             "required": false,
@@ -2904,6 +2920,38 @@
             }
           },
           {
+            "name": "endpoint",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Endpoint"
+            }
+          },
+          {
+            "name": "policy_decision_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Policy Decision Id"
+            }
+          },
+          {
             "name": "request_id",
             "in": "query",
             "required": false,
@@ -2920,6 +2968,66 @@
             }
           },
           {
+            "name": "ok",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ok"
+            }
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created After"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created Before"
+            }
+          },
+          {
+            "name": "summary",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Summary"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -2930,6 +3038,17 @@
               "default": 50,
               "title": "Limit"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -2939,6 +3058,78 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AuditEventListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audit/summary": {
+      "get": {
+        "tags": [
+          "Control Plane Audit"
+        ],
+        "summary": "Get Audit Summary",
+        "operationId": "get_audit_summary_v1_audit_summary_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "created_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created After"
+            }
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditSummaryResponse"
                 }
               }
             }
@@ -5080,12 +5271,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -5247,11 +5433,6 @@
         "summary": "Get environment state",
         "description": "Retrieve current state of a sandbox environment.",
         "operationId": "get_environment_v1_sandbox_environments__env_id__get",
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "parameters": [
           {
             "name": "env_id",
@@ -5342,11 +5523,6 @@
         "summary": "Get environment state",
         "description": "Get the current state of a sandbox environment.",
         "operationId": "get_environment_v1_sandbox_behavioral_environments__env_id__get",
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "parameters": [
           {
             "name": "env_id",
@@ -5386,11 +5562,6 @@
         "summary": "Destroy environment",
         "description": "Destroy a sandbox environment and release resources.",
         "operationId": "destroy_environment_v1_sandbox_behavioral_environments__env_id__delete",
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "parameters": [
           {
             "name": "env_id",
@@ -10884,6 +11055,44 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 50
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset",
+            "default": 0
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "default": false
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           }
         },
         "type": "object",
@@ -11023,6 +11232,51 @@
           "metadata"
         ],
         "title": "AuditEventResponse"
+      },
+      "AuditSummaryResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_event": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Event"
+          },
+          "by_outcome": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Outcome"
+          },
+          "by_wallet": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Wallet"
+          },
+          "by_policy_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Policy Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "by_event",
+          "by_outcome",
+          "by_wallet",
+          "by_policy_reason"
+        ],
+        "title": "AuditSummaryResponse"
       },
       "AutoPRRequest": {
         "properties": {
@@ -16528,6 +16782,18 @@
             },
             "type": "object",
             "title": "Constraint Margins"
+          },
+          "governance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Governance"
           }
         },
         "type": "object",
