@@ -117,6 +117,27 @@ async def _assert_denial_audited(
     assert events[0].metadata.get("request_hash")
 
 
+async def _assert_no_tool_debits(
+    *,
+    client: AsyncClient,
+    wallet_id: str,
+    headers: dict[str, str],
+    tool_name: str,
+) -> None:
+    ledger_resp = await client.get(
+        f"/v1/billing/ledger/{wallet_id}",
+        headers=headers,
+    )
+    assert ledger_resp.status_code == 200
+    debits = [
+        entry
+        for entry in ledger_resp.json()["entries"]
+        if entry["service_category"] == "agent_comms"
+        and tool_name in entry["description"]
+    ]
+    assert debits == []
+
+
 @pytest.mark.anyio
 async def test_strict_mode_denies_unpermitted_mcp_invoke_and_audits(
     client,
@@ -147,6 +168,123 @@ async def test_strict_mode_denies_unpermitted_mcp_invoke_and_audits(
         )
     finally:
         registry.unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_strict_mode_replays_missing_permit_denial_with_idempotency_key(
+    client,
+    clean_database,
+    strict_trust_mode,
+):
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "strict-replay-missing-permit-tool"
+    calls = {"count": 0}
+    registry = get_service_registry()
+
+    def counted_tool(message: str = "ok") -> dict:
+        calls["count"] += 1
+        return {"message": message}
+
+    registry.register_local(
+        service_id=tool_name,
+        name="Strict Replay Missing Permit Tool",
+        description="Trust mode missing permit replay test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=counted_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    body = _jsonrpc_body(
+        tool_name=tool_name,
+        wallet_id=provisioned["agent_wallet_id"],
+        request_id="strict-missing-permit-replay-call",
+        idempotency_key="strict-missing-permit-replay-idem",
+    )
+    try:
+        first = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+    finally:
+        registry.unregister_local(tool_name)
+
+    assert first.status_code == 200
+    assert first.json()["error"]["message"] == "permit_required"
+    assert replay.status_code == 200
+    assert replay.json()["error"]["message"] == "permit_required"
+    assert replay.json()["error"]["message"] != "idempotency_in_progress"
+    assert calls["count"] == 0
+    await _assert_no_tool_debits(
+        client=client,
+        wallet_id=provisioned["agent_wallet_id"],
+        headers=provisioned["agent_headers"],
+        tool_name=tool_name,
+    )
+
+
+@pytest.mark.anyio
+async def test_strict_mode_replays_unknown_permit_denial_with_idempotency_key(
+    client,
+    clean_database,
+    strict_trust_mode,
+):
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "strict-replay-unknown-permit-tool"
+    calls = {"count": 0}
+    registry = get_service_registry()
+
+    def counted_tool(message: str = "ok") -> dict:
+        calls["count"] += 1
+        return {"message": message}
+
+    registry.register_local(
+        service_id=tool_name,
+        name="Strict Replay Unknown Permit Tool",
+        description="Trust mode unknown permit replay test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=counted_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    body = _jsonrpc_body(
+        tool_name=tool_name,
+        wallet_id=provisioned["agent_wallet_id"],
+        request_id="strict-unknown-permit-replay-call",
+        permit_id="permit-does-not-exist",
+        idempotency_key="strict-unknown-permit-replay-idem",
+    )
+    try:
+        first = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+    finally:
+        registry.unregister_local(tool_name)
+
+    assert first.status_code == 200
+    assert first.json()["error"]["message"] == "permit_not_found"
+    assert replay.status_code == 200
+    assert replay.json()["error"]["message"] == "permit_not_found"
+    assert replay.json()["error"]["message"] != "idempotency_in_progress"
+    assert calls["count"] == 0
+    await _assert_no_tool_debits(
+        client=client,
+        wallet_id=provisioned["agent_wallet_id"],
+        headers=provisioned["agent_headers"],
+        tool_name=tool_name,
+    )
 
 
 @pytest.mark.anyio

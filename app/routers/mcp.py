@@ -396,6 +396,14 @@ async def _execute_registered_tool(
                 "request_hash": sha256_hex(request_payload or arguments),
             },
         )
+        await _complete_governed_denial_idempotency(
+            idem=idem,
+            idem_started=idem_started,
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            reason="permit_required",
+        )
         raise PermissionError("permit_required")
     if governed_call and not idempotency_key:
         await _audit_mcp_invocation(
@@ -490,6 +498,15 @@ async def _execute_registered_tool(
                     response_reference=receipt.receipt_id,
                     response_json=_governed_error_payload(reason, receipt_payload),
                     status_code=403,
+                )
+            elif permit_validation.reason:
+                await _complete_governed_denial_idempotency(
+                    idem=idem,
+                    idem_started=idem_started,
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    reason=permit_validation.reason,
                 )
             raise ToolPermissionDenied(
                 permit_validation.reason or "permit_denied",
@@ -801,6 +818,27 @@ def _governed_error_payload(
         "error": reason,
         "receipt": receipt,
     }
+
+
+async def _complete_governed_denial_idempotency(
+    *,
+    idem: Any,
+    idem_started: bool,
+    wallet_id: str,
+    endpoint: str,
+    idempotency_key: str | None,
+    reason: str,
+) -> None:
+    if not idem_started or not idempotency_key:
+        return
+    await idem.complete(
+        wallet_id=wallet_id,
+        endpoint=endpoint,
+        idempotency_key=idempotency_key,
+        response_reference=None,
+        response_json=_governed_error_payload(reason, None),
+        status_code=403,
+    )
 
 
 def _raise_replayed_error(replay: Any) -> None:
