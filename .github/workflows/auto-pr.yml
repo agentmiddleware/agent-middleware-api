@@ -1,10 +1,16 @@
 name: Autonomous PM — Auto-PR Generator
 
-# Runs every 6 hours to check for anomalies and generate fixes
+# DISABLED 2026-05-19: autonomous PR creation is an untrusted-input
+# -> code injection path. Re-enable only with provenance controls
+# and manual approval gates. See repo freeze note in README.
+#
+# Original triggers (disabled, kept for reversibility):
+# on:
+#   schedule:
+#     - cron: "0 * * * *"
+#   workflow_dispatch:  # Allow manual trigger
 on:
-  schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:   # manual-only; no automatic triggers
 
 permissions:
   contents: write
