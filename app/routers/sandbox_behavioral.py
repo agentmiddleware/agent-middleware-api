@@ -10,9 +10,10 @@ is disabled by default and is not a production sandbox boundary.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
+from ..core.config import get_settings
 from ..schemas.sandbox_behavioral import (
     SandboxEnvironment,
     SandboxEnvironmentCreate,
@@ -20,12 +21,12 @@ from ..schemas.sandbox_behavioral import (
     ToolExecutionResponse,
 )
 from ..services.behavioral_sandbox import get_behavioral_sandbox
+from ..services.governance import record_governed_action
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/v1/sandbox/behavioral",
     tags=["Sandbox"],
-    dependencies=[Depends(verify_api_key)],
 )
 
 
@@ -36,7 +37,11 @@ router = APIRouter(
     summary="Create sandbox environment",
     description="Create an isolated sandbox environment for tool testing.",
 )
-async def create_environment(request: SandboxEnvironmentCreate):
+async def create_environment(
+    request: SandboxEnvironmentCreate,
+    http_request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Create a new behavioral sandbox environment.
 
@@ -46,7 +51,22 @@ async def create_environment(request: SandboxEnvironmentCreate):
     """
     try:
         engine = get_behavioral_sandbox()
-        return await engine.create_environment(request)
+        env = await engine.create_environment(request)
+        await record_governed_action(
+            event="sandbox.behavioral.environment.create",
+            auth=auth,
+            wallet_id=env.wallet_id or auth.wallet_id,
+            target="sandbox",
+            endpoint="/v1/sandbox/behavioral/environments",
+            request_id=http_request.headers.get("X-Request-ID"),
+            ok=True,
+            metadata={
+                "env_id": env.env_id,
+                "environment_type": env.environment_type,
+                "network_access": env.network_access,
+            },
+        )
+        return env
     except Exception as e:
         logger.exception("Failed to create sandbox environment")
         raise HTTPException(
@@ -113,7 +133,11 @@ async def destroy_environment(env_id: str):
     summary="Execute tool in sandbox",
     description="Execute a tool within an isolated sandbox environment.",
 )
-async def execute_tool(request: ToolExecutionRequest):
+async def execute_tool(
+    request: ToolExecutionRequest,
+    http_request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """
     Execute a tool within a sandbox environment.
 
@@ -126,7 +150,29 @@ async def execute_tool(request: ToolExecutionRequest):
     """
     try:
         engine = get_behavioral_sandbox()
-        return await engine.execute_tool(request)
+        result = await engine.execute_tool(request)
+        settings = get_settings()
+        await record_governed_action(
+            event="sandbox.execute",
+            auth=auth,
+            wallet_id=auth.wallet_id,
+            target="sandbox",
+            endpoint="/v1/sandbox/behavioral/execute",
+            request_id=http_request.headers.get("X-Request-ID"),
+            estimated_cost=result.cost_estimate,
+            ok=result.error is None,
+            error=result.error,
+            metadata={
+                "env_id": request.env_id,
+                "tool_name": request.tool_name,
+                "dry_run": request.dry_run,
+                "status": result.status,
+                "backend_mode": settings.BEHAVIORAL_SANDBOX_PYTHON_BACKEND,
+                "allow_unsafe_host_python": settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX,
+                "resources_used": result.resources_used,
+            },
+        )
+        return result
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -147,10 +193,12 @@ async def execute_tool(request: ToolExecutionRequest):
     description="Execute a named tool in a specific environment.",
 )
 async def execute_tool_by_name(
+    http_request: Request,
     env_id: str,
     tool_name: str,
     tool_input: dict | None = None,
     dry_run: bool = False,
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Execute a tool by name in a specific environment."""
     request = ToolExecutionRequest(
@@ -159,4 +207,4 @@ async def execute_tool_by_name(
         tool_input=tool_input or {},
         dry_run=dry_run,
     )
-    return await execute_tool(request)
+    return await execute_tool(request, http_request, auth)

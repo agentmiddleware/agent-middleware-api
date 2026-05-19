@@ -66,11 +66,26 @@ compete with it in product positioning.
 ### Operator Readiness
 
 - `/health`, `/ready`, and preflight checks are documented.
+- Release candidates pass one local release-gate command before tagging:
+  `PYTHON=${PYTHON:-python3.12}; pytest && pytest tests/test_golden_path.py tests/test_discovery_drift.py && "$PYTHON" scripts/export_openapi.py --check && "$PYTHON" scripts/generate_sim_inventory.py --check`
 - Production env vars have a complete reference.
 - Migrations upgrade an empty database and the latest known production schema.
 - CI is green on `master`.
 - A release tag includes the exact tested commit.
 - Incident response and security reporting paths are documented.
+
+## Governance Spine Sprint Outcome
+
+The Governance Spine Sprint tightened the production-beta release gate around
+the core control-plane loop. A release candidate is not ready until the single
+gate command above passes full pytest coverage, the canonical golden path,
+discovery drift checks, committed OpenAPI parity, and the generated simulation
+inventory check.
+
+The golden path now explicitly tells operators to inspect the policy decision,
+audit event, ledger entry, and request or correlation ID for a scoped tool call.
+That makes the beta story auditable from discovery through invocation,
+metering, and governance.
 
 ## Recommended Milestones
 

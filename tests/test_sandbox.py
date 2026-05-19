@@ -6,6 +6,7 @@ Validates headless puzzle environments and generalization scoring.
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.services.audit_log import list_audit_events
 
 
 @pytest.fixture
@@ -176,3 +177,60 @@ async def test_sandbox_requires_api_key(client):
         "env_type": "pattern",
     })
     assert resp.status_code in (401, 403)
+
+
+@pytest.mark.anyio
+async def test_sandbox_lifecycle_records_governance_audit_events(
+    client,
+    clean_database,
+):
+    create = await client.post(
+        "/v1/sandbox/environments",
+        json={
+            "env_type": "pattern",
+            "difficulty": "easy",
+            "seed": 123,
+        },
+        headers={**HEADERS, "X-Request-ID": "req-sandbox-create"},
+    )
+    assert create.status_code == 201
+    env_id = create.json()["env_id"]
+
+    action = await client.post(
+        f"/v1/sandbox/environments/{env_id}/actions",
+        json={"action": {"type": "observe", "value": "grid"}},
+        headers={**HEADERS, "X-Request-ID": "req-sandbox-action"},
+    )
+    assert action.status_code == 200
+
+    evaluate = await client.post(
+        f"/v1/sandbox/environments/{env_id}/evaluate",
+        headers={**HEADERS, "X-Request-ID": "req-sandbox-evaluate"},
+    )
+    assert evaluate.status_code == 200
+
+    events = await list_audit_events(tool="sandbox", limit=10)
+    by_request_id = {event.request_id: event for event in events}
+
+    assert by_request_id["req-sandbox-create"].event == "sandbox.environment.create"
+    assert by_request_id["req-sandbox-create"].endpoint == "/v1/sandbox/environments"
+    assert by_request_id["req-sandbox-create"].ok is True
+    assert by_request_id["req-sandbox-create"].metadata["env_id"] == env_id
+    assert by_request_id["req-sandbox-create"].metadata["env_type"] == "pattern"
+
+    assert by_request_id["req-sandbox-action"].event == "sandbox.action.submit"
+    assert (
+        by_request_id["req-sandbox-action"].endpoint
+        == f"/v1/sandbox/environments/{env_id}/actions"
+    )
+    assert by_request_id["req-sandbox-action"].metadata["action_accepted"] is True
+    assert by_request_id["req-sandbox-action"].metadata["step"] == action.json()["step"]
+
+    assert by_request_id["req-sandbox-evaluate"].event == "sandbox.evaluate"
+    assert (
+        by_request_id["req-sandbox-evaluate"].endpoint
+        == f"/v1/sandbox/environments/{env_id}/evaluate"
+    )
+    assert by_request_id["req-sandbox-evaluate"].metadata["generalization_score"] == (
+        evaluate.json()["generalization_score"]
+    )
