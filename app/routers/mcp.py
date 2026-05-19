@@ -354,11 +354,31 @@ async def _execute_registered_tool(
     if not service:
         service = await registry.get_persistent(tool_name)
     if not service:
-        raise ValueError(f"Tool not found: {tool_name}")
+        reason = f"Tool not found: {tool_name}"
+        await _complete_governed_denial_idempotency(
+            idem=idem,
+            idem_started=idem_started,
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            reason=reason,
+            status_code=400,
+        )
+        raise ValueError(reason)
 
     func = registry.get_local_func(tool_name)
     if not func:
-        raise ValueError(f"Tool not executable: {tool_name}")
+        reason = f"Tool not executable: {tool_name}"
+        await _complete_governed_denial_idempotency(
+            idem=idem,
+            idem_started=idem_started,
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            reason=reason,
+            status_code=400,
+        )
+        raise ValueError(reason)
 
     category = ServiceCategory(
         service.get("category", ServiceCategory.PLATFORM_FEE.value)
@@ -828,6 +848,7 @@ async def _complete_governed_denial_idempotency(
     endpoint: str,
     idempotency_key: str | None,
     reason: str,
+    status_code: int = 403,
 ) -> None:
     if not idem_started or not idempotency_key:
         return
@@ -837,7 +858,7 @@ async def _complete_governed_denial_idempotency(
         idempotency_key=idempotency_key,
         response_reference=None,
         response_json=_governed_error_payload(reason, None),
-        status_code=403,
+        status_code=status_code,
     )
 
 
@@ -859,6 +880,10 @@ def _raise_replayed_error(replay: Any) -> None:
 def _status_to_jsonrpc_code(status_code: int, reason: str) -> int:
     if status_code == 402 or reason == "insufficient_funds":
         return -32004
+    if reason.startswith("Tool not found"):
+        return -32001
+    if reason.startswith("Tool not executable"):
+        return -32002
     if status_code == 403:
         return -32003
     return -32603

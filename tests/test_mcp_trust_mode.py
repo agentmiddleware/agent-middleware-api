@@ -288,6 +288,97 @@ async def test_strict_mode_replays_unknown_permit_denial_with_idempotency_key(
 
 
 @pytest.mark.anyio
+async def test_strict_mode_replays_missing_tool_lookup_error_with_idempotency_key(
+    client,
+    clean_database,
+    strict_trust_mode,
+):
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "strict-missing-lookup-tool"
+    body = _jsonrpc_body(
+        tool_name=tool_name,
+        wallet_id=provisioned["agent_wallet_id"],
+        request_id="strict-missing-lookup-call",
+        idempotency_key="strict-missing-lookup-idem",
+    )
+
+    first = await client.post(
+        "/mcp/messages",
+        json=body,
+        headers=provisioned["agent_headers"],
+    )
+    replay = await client.post(
+        "/mcp/messages",
+        json=body,
+        headers=provisioned["agent_headers"],
+    )
+
+    assert first.status_code == 200
+    assert first.json()["error"]["code"] == -32001
+    assert first.json()["error"]["message"] == f"Tool not found: {tool_name}"
+    assert replay.status_code == 200
+    assert replay.json()["error"]["code"] == -32001
+    assert replay.json()["error"]["message"] == f"Tool not found: {tool_name}"
+    assert replay.json()["error"]["message"] != "idempotency_in_progress"
+    await _assert_no_tool_debits(
+        client=client,
+        wallet_id=provisioned["agent_wallet_id"],
+        headers=provisioned["agent_headers"],
+        tool_name=tool_name,
+    )
+
+
+@pytest.mark.anyio
+async def test_strict_mode_replays_non_executable_tool_error_with_idempotency_key(
+    client,
+    clean_database,
+    strict_trust_mode,
+):
+    provisioned = await provision_agent_wallet(client)
+    registry = get_service_registry()
+    service = await registry.register_persistent(
+        owner_key="test-key",
+        name="Strict Non Executable Lookup Tool",
+        description="Persistent service without local executable function",
+        category=ServiceCategory.AGENT_COMMS,
+        credits_per_unit=2.0,
+        owner_wallet_id=provisioned["agent_wallet_id"],
+    )
+    tool_name = service["service_id"]
+    body = _jsonrpc_body(
+        tool_name=tool_name,
+        wallet_id=provisioned["agent_wallet_id"],
+        request_id="strict-non-executable-lookup-call",
+        idempotency_key="strict-non-executable-lookup-idem",
+    )
+
+    first = await client.post(
+        "/mcp/messages",
+        json=body,
+        headers=provisioned["agent_headers"],
+    )
+    replay = await client.post(
+        "/mcp/messages",
+        json=body,
+        headers=provisioned["agent_headers"],
+    )
+
+    assert first.status_code == 200
+    assert first.json()["error"]["code"] == -32002
+    assert first.json()["error"]["message"] == f"Tool not executable: {tool_name}"
+    assert replay.status_code == 200
+    assert replay.json()["error"]["code"] == -32002
+    assert replay.json()["error"]["message"] == f"Tool not executable: {tool_name}"
+    assert replay.json()["error"]["message"] != "idempotency_in_progress"
+    await _assert_no_tool_debits(
+        client=client,
+        wallet_id=provisioned["agent_wallet_id"],
+        headers=provisioned["agent_headers"],
+        tool_name=tool_name,
+    )
+
+
+@pytest.mark.anyio
 async def test_strict_mode_denies_missing_idempotency_and_audits(
     client,
     clean_database,
