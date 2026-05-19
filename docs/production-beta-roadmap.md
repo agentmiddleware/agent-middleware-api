@@ -67,7 +67,7 @@ compete with it in product positioning.
 
 - `/health`, `/ready`, and preflight checks are documented.
 - Release candidates pass one local release-gate command before tagging:
-  `PYTHON=${PYTHON:-python3.12}; pytest && pytest tests/test_golden_path.py tests/test_discovery_drift.py && "$PYTHON" scripts/export_openapi.py --check && "$PYTHON" scripts/generate_sim_inventory.py --check`
+  `scripts/trust_release_gate.sh`
 - Production env vars have a complete reference.
 - Migrations upgrade an empty database and the latest known production schema.
 - CI is green on `master`.
@@ -78,9 +78,25 @@ compete with it in product positioning.
 
 The Governance Spine Sprint tightened the production-beta release gate around
 the core control-plane loop. A release candidate is not ready until the single
-gate command above passes full pytest coverage, the canonical golden path,
-discovery drift checks, committed OpenAPI parity, and the generated simulation
-inventory check.
+gate command above passes the focused trust-plane pytest suite, the canonical
+golden path, the executable trust-plane demo proof, discovery drift checks,
+committed OpenAPI parity, and the generated simulation inventory check.
+
+## Agent Trust Ledger Outcome
+
+The Agent Trust Ledger makes the governed MCP proof inspectable by operators
+without adding a dashboard surface. Admin operators can list permits and
+receipts globally; wallet keys can inspect only wallet-scoped permit, receipt,
+audit, and ledger records. The one-command demo now proves scoped permit,
+strict governed invoke, ledger debit, signed receipt, receipt and audit
+inspection, signing-key metadata discovery, replay safety, out-of-scope denial,
+and cross-wallet isolation.
+
+Production-like trust mode is now fail-closed: `TRUST_MODE_ENABLED=true`
+requires configured signing key material and rejects legacy unpermitted MCP in
+production-like environments. Retired public signing-key metadata remains
+available so historical permits, receipts, and audit-chain signatures continue
+to verify.
 
 The golden path now explicitly tells operators to inspect the policy decision,
 audit event, ledger entry, and request or correlation ID for a scoped tool call.

@@ -33,6 +33,16 @@ class PermitResponse(BaseModel):
     signature: str
     key_id: str
     issued_at: datetime
+    revoked_at: datetime | None = None
+
+
+class PermitListResponse(BaseModel):
+    permits: list[PermitResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
 
 
 class PermitVerifyRequest(BaseModel):
@@ -66,6 +76,15 @@ class ReceiptResponse(BaseModel):
     signature_key_id: str
 
 
+class ReceiptListResponse(BaseModel):
+    receipts: list[ReceiptResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
+
+
 class ReceiptVerifyRequest(BaseModel):
     receipt_id: str
 
@@ -97,3 +116,16 @@ class TrustMcpMetadata(BaseModel):
     idempotency_key: str | None = None
     request_hash: str | None = None
     receipt: dict[str, Any] | None = None
+
+
+class SigningKeyMetadataResponse(BaseModel):
+    key_id: str
+    alg: str
+    public_key_b64: str
+    status: str
+    created_at: datetime
+    activated_at: datetime | None = None
+    retired_at: datetime | None = None
+
+
+SigningKeyResponse = SigningKeyMetadataResponse

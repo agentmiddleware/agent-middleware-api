@@ -101,8 +101,9 @@ class SigningKeyService:
             if key:
                 if key.public_key_b64 != public_key_b64:
                     key.public_key_b64 = public_key_b64
-                    key.status = "active"
                     key.activated_at = datetime.now(timezone.utc)
+                key.status = "active"
+                key.retired_at = None
                 session.add(key)
             else:
                 key = SigningKeyModel(
@@ -115,6 +116,11 @@ class SigningKeyService:
             await session.commit()
             return key
 
+    async def get_active_key(self) -> SigningKeyModel:
+        """Return the current active public metadata, creating it if needed."""
+
+        return await self.ensure_active_key()
+
     async def get_public_key(self, key_id: str) -> SigningKeyModel | None:
         factory = get_session_factory()
         async with factory() as session:
@@ -122,6 +128,68 @@ class SigningKeyService:
                 select(SigningKeyModel).where(SigningKeyModel.key_id == key_id)
             )
             return result.scalar_one_or_none()
+
+    async def retire_key_metadata(self, key_id: str) -> SigningKeyModel:
+        """Retire public-key metadata without disabling historical verification."""
+
+        factory = get_session_factory()
+        async with factory() as session:
+            key = await session.get(SigningKeyModel, key_id)
+            if not key:
+                raise SigningKeyError("signing_key_not_found")
+            if key.status != "disabled":
+                key.status = "retired"
+                key.retired_at = datetime.now(timezone.utc)
+            session.add(key)
+            await session.commit()
+            await session.refresh(key)
+            return key
+
+    async def rotate_active_key_metadata(self, new_key_id: str) -> SigningKeyModel:
+        """
+        Move future signatures to a new key id while preserving old public metadata.
+
+        This intentionally rotates metadata only. Operators can still perform
+        private-key rotation via environment configuration; tests and local
+        control-plane flows can exercise key lifecycle without exposing private
+        key material or invalidating existing signatures.
+        """
+
+        if not new_key_id.strip():
+            raise SigningKeyError("signing_key_id_required")
+
+        old_key = await self.ensure_active_key()
+        new_key_id = new_key_id.strip()
+        now = datetime.now(timezone.utc)
+        public_key_b64 = self._public_key_b64()
+        factory = get_session_factory()
+        async with factory() as session:
+            if old_key.key_id != new_key_id:
+                old = await session.get(SigningKeyModel, old_key.key_id)
+                if old and old.status != "disabled":
+                    old.status = "retired"
+                    old.retired_at = now
+                    session.add(old)
+
+            key = await session.get(SigningKeyModel, new_key_id)
+            if key:
+                key.public_key_b64 = public_key_b64
+                key.status = "active"
+                key.activated_at = now
+                key.retired_at = None
+            else:
+                key = SigningKeyModel(
+                    key_id=new_key_id,
+                    public_key_b64=public_key_b64,
+                    status="active",
+                    activated_at=now,
+                )
+            session.add(key)
+            await session.commit()
+            await session.refresh(key)
+
+        self._key_id = new_key_id
+        return key
 
     async def sign_payload(self, payload: dict[str, Any]) -> tuple[str, str, str]:
         key = await self.ensure_active_key()

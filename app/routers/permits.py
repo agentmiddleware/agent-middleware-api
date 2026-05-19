@@ -1,23 +1,85 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
 from app.schemas.trust import (
     PermitCreateRequest,
+    PermitListResponse,
     PermitResponse,
     PermitVerifyRequest,
     PermitVerifyResponse,
+    ReceiptListResponse,
 )
 from app.services.idempotency import (
     IdempotencyConflictError,
+    IdempotencyInProgressError,
     get_idempotency_service,
 )
-from app.services.permits import PermitError, get_permit_service, permit_model_to_response
+from app.services.permits import (
+    PermitError,
+    get_permit_service,
+    permit_model_to_response,
+)
+from app.services.receipts import get_receipt_service
 
 router = APIRouter(prefix="/v1/permits", tags=["Trust Permits"])
+
+
+def _authorize_permit_inspection(
+    *,
+    auth: AuthContext,
+    issuer_wallet_id: str,
+    subject_wallet_id: str,
+) -> None:
+    if auth.is_bootstrap_admin:
+        return
+    if auth.wallet_id in {issuer_wallet_id, subject_wallet_id}:
+        return
+    auth.require_bootstrap_admin()
+
+
+@router.get("", response_model=PermitListResponse)
+async def list_permits(
+    wallet_id: str | None = Query(None),
+    status: str | None = Query(None),
+    subject_key_id: str | None = Query(None),
+    created_after: datetime | None = Query(None),
+    created_before: datetime | None = Query(None),
+    expires_after: datetime | None = Query(None),
+    expires_before: datetime | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
+) -> PermitListResponse:
+    if wallet_id:
+        auth.require_wallet_access(wallet_id)
+    else:
+        auth.require_bootstrap_admin()
+
+    permits, total = await get_permit_service().list_permits(
+        wallet_id=wallet_id,
+        status=status,
+        subject_key_id=subject_key_id,
+        created_after=created_after,
+        created_before=created_before,
+        expires_after=expires_after,
+        expires_before=expires_before,
+        limit=limit,
+        offset=offset,
+    )
+    next_offset = offset + len(permits) if offset + len(permits) < total else None
+    return PermitListResponse(
+        permits=permits,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=next_offset is not None,
+        next_offset=next_offset,
+    )
 
 
 @router.post("", response_model=PermitResponse, status_code=status.HTTP_201_CREATED)
@@ -35,7 +97,7 @@ async def create_permit(
             idempotency_key=idempotency_key,
             request_payload=request.model_dump(mode="json"),
         )
-    except IdempotencyConflictError as exc:
+    except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
     if replay and replay.response_json:
         return PermitResponse(**replay.response_json)
@@ -53,6 +115,57 @@ async def create_permit(
         status_code=201,
     )
     return permit
+
+
+@router.get("/{permit_id}", response_model=PermitResponse)
+async def get_permit(
+    permit_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> PermitResponse:
+    permit = await get_permit_service().get_permit(permit_id)
+    if not permit:
+        raise HTTPException(status_code=404, detail="permit_not_found")
+    _authorize_permit_inspection(
+        auth=auth,
+        issuer_wallet_id=permit.issuer_wallet_id,
+        subject_wallet_id=permit.subject_wallet_id,
+    )
+    return permit
+
+
+@router.get("/{permit_id}/receipts", response_model=ReceiptListResponse)
+async def list_permit_receipts(
+    permit_id: str,
+    tool: str | None = Query(None),
+    outcome: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
+) -> ReceiptListResponse:
+    permit = await get_permit_service().get_permit(permit_id)
+    if not permit:
+        raise HTTPException(status_code=404, detail="permit_not_found")
+    _authorize_permit_inspection(
+        auth=auth,
+        issuer_wallet_id=permit.issuer_wallet_id,
+        subject_wallet_id=permit.subject_wallet_id,
+    )
+    receipts, total = await get_receipt_service().list_receipts(
+        permit_id=permit_id,
+        tool=tool,
+        outcome=outcome,
+        limit=limit,
+        offset=offset,
+    )
+    next_offset = offset + len(receipts) if offset + len(receipts) < total else None
+    return ReceiptListResponse(
+        receipts=receipts,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=next_offset is not None,
+        next_offset=next_offset,
+    )
 
 
 @router.post("/{permit_id}/revoke", response_model=PermitResponse)

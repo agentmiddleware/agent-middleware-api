@@ -188,30 +188,84 @@ curl "$API_URL/mcp/tools.json" \
   -H "X-API-Key: $AGENT_API_KEY"
 ```
 
-For a registered local or persistent MCP service, invoke with wallet context:
+For a registered local or persistent MCP service, invoke through JSON-RPC with
+wallet, permit, and replay context:
 
 ```bash
 INVOKE_JSON=$(
-  curl -s -X POST "$API_URL/mcp/tools/golden-path-echo/invoke" \
+  curl -s -X POST "$API_URL/mcp/messages" \
   -H "X-API-Key: $AGENT_API_KEY" \
-  -H "Idempotency-Key: golden-path-invoke-001" \
   -H "Content-Type: application/json" \
   -d "{
-    \"name\": \"golden-path-echo\",
-    \"arguments\": {},
-    \"mcp_context\": {
-      \"wallet_id\": \"$AGENT_WALLET_ID\",
-      \"request_path\": \"/golden-path/demo\",
-      \"permit_id\": \"$PERMIT_ID\"
+    \"jsonrpc\": \"2.0\",
+    \"id\": \"golden-call-1\",
+    \"method\": \"tools/call\",
+    \"params\": {
+      \"name\": \"golden-path-echo\",
+      \"arguments\": {\"message\": \"hello\"},
+      \"mcpContext\": {
+        \"wallet_id\": \"$AGENT_WALLET_ID\",
+        \"permit_id\": \"$PERMIT_ID\",
+        \"idempotency_key\": \"golden-path-invoke-001\"
+      }
     }
   }"
 )
 
-export RECEIPT_ID=$(echo "$INVOKE_JSON" | jq -r '.receipt.receipt_id')
+export RECEIPT_ID=$(echo "$INVOKE_JSON" | jq -r '.result.receipt.receipt_id')
 echo "$RECEIPT_ID"
 ```
 
 Replace `golden-path-echo` with a tool from `/mcp/tools.json`.
+
+Replay the exact same request and confirm the receipt ID is unchanged:
+
+```bash
+REPLAY_JSON=$(
+  curl -s -X POST "$API_URL/mcp/messages" \
+  -H "X-API-Key: $AGENT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"jsonrpc\": \"2.0\",
+    \"id\": \"golden-call-1\",
+    \"method\": \"tools/call\",
+    \"params\": {
+      \"name\": \"golden-path-echo\",
+      \"arguments\": {\"message\": \"hello\"},
+      \"mcpContext\": {
+        \"wallet_id\": \"$AGENT_WALLET_ID\",
+        \"permit_id\": \"$PERMIT_ID\",
+        \"idempotency_key\": \"golden-path-invoke-001\"
+      }
+    }
+  }"
+)
+
+echo "$REPLAY_JSON" | jq -r '.result.receipt.receipt_id'
+```
+
+Try a different registered tool under the same permit and confirm the response
+is denied with a signed denial receipt:
+
+```bash
+curl -s -X POST "$API_URL/mcp/messages" \
+  -H "X-API-Key: $AGENT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"jsonrpc\": \"2.0\",
+    \"id\": \"golden-denial-1\",
+    \"method\": \"tools/call\",
+    \"params\": {
+      \"name\": \"another-registered-tool\",
+      \"arguments\": {},
+      \"mcpContext\": {
+        \"wallet_id\": \"$AGENT_WALLET_ID\",
+        \"permit_id\": \"$PERMIT_ID\",
+        \"idempotency_key\": \"golden-path-denial-001\"
+      }
+    }
+  }" | jq '.error'
+```
 
 ## 8. Inspect The Operation Record
 
@@ -231,7 +285,8 @@ curl "$API_URL/v1/audit/events?wallet_id=$AGENT_WALLET_ID" \
 
 Each audit event should let an operator tie the action back to its wallet,
 credential source, tool, endpoint, policy decision, request ID or correlation
-ID, success flag, error, and metadata such as transport and estimated cost.
+ID, success flag, error, and metadata such as transport, estimated cost,
+`permit_id`, `idempotency_key`, `request_hash`, and `ledger_entry_id`.
 Use the policy decision ID to confirm why the action was allowed or denied.
 
 Verify the signed receipt:
@@ -241,6 +296,27 @@ curl -X POST "$API_URL/v1/receipts/verify" \
   -H "X-API-Key: $AGENT_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{\"receipt_id\": \"$RECEIPT_ID\"}"
+```
+
+Inspect the permit and receipt ledger from the trust surfaces:
+
+```bash
+curl "$API_URL/v1/permits/$PERMIT_ID" \
+  -H "X-API-Key: $AGENT_API_KEY"
+
+curl "$API_URL/v1/permits/$PERMIT_ID/receipts" \
+  -H "X-API-Key: $AGENT_API_KEY"
+
+curl "$API_URL/v1/receipts?permit_id=$PERMIT_ID&wallet_id=$AGENT_WALLET_ID" \
+  -H "X-API-Key: $AGENT_API_KEY"
+```
+
+Operators can also inspect public signing-key metadata without receiving
+private key material:
+
+```bash
+curl "$API_URL/v1/signing-keys/active" \
+  -H "X-API-Key: $BOOTSTRAP_KEY"
 ```
 
 Verify the wallet audit chain:
@@ -270,6 +346,12 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Agent API key can access only its own wallet.
 - Dry-run simulation returns a cost estimate.
 - MCP manifest is available.
+- Signed permit creation binds wallet, key, tool, budget, and expiry.
+- Governed MCP invocation returns a signed receipt.
+- Receipt verification and audit-chain verification succeed.
+- Replaying the same governed invoke returns the same receipt without a second
+  ledger debit.
+- Out-of-scope governed invocation is denied with a signed denial receipt.
 - Control-plane audit records are inspectable with the bootstrap key.
 - Operators can inspect the policy decision, audit event, ledger entry, and
   request/correlation ID for the scoped tool call.

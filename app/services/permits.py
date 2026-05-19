@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from app.db.database import get_session_factory
 from app.db.models import PermitModel, WalletModel
@@ -52,6 +52,7 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         signature=model.signature,
         key_id=model.key_id,
         issued_at=model.issued_at,
+        revoked_at=model.revoked_at,
     )
 
 
@@ -61,6 +62,56 @@ class PermitService:
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
             return permit_model_to_response(model) if model else None
+
+    async def list_permits(
+        self,
+        *,
+        wallet_id: str | None = None,
+        status: str | None = None,
+        subject_key_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        expires_after: datetime | None = None,
+        expires_before: datetime | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[PermitResponse], int]:
+        stmt = select(PermitModel)
+        count_stmt = select(func.count()).select_from(PermitModel)
+
+        filters = []
+        if wallet_id:
+            filters.append(
+                or_(
+                    PermitModel.issuer_wallet_id == wallet_id,
+                    PermitModel.subject_wallet_id == wallet_id,
+                )
+            )
+        if status:
+            filters.append(PermitModel.status == status)
+        if subject_key_id:
+            filters.append(PermitModel.subject_key_id == subject_key_id)
+        if created_after:
+            filters.append(PermitModel.issued_at >= created_after)
+        if created_before:
+            filters.append(PermitModel.issued_at <= created_before)
+        if expires_after:
+            filters.append(PermitModel.expires_at >= expires_after)
+        if expires_before:
+            filters.append(PermitModel.expires_at <= expires_before)
+
+        if filters:
+            stmt = stmt.where(*filters)
+            count_stmt = count_stmt.where(*filters)
+
+        stmt = stmt.order_by(PermitModel.issued_at.desc()).limit(limit).offset(offset)
+
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(stmt)
+            total = await session.scalar(count_stmt)
+            permits = [permit_model_to_response(model) for model in result.scalars()]
+            return permits, int(total or 0)
 
     async def create_permit(self, request: PermitCreateRequest) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
@@ -162,7 +213,7 @@ class PermitService:
                 return PermitValidation(False, "permit_expired", model)
             if model.subject_wallet_id != wallet_id:
                 return PermitValidation(False, "permit_wallet_mismatch", model)
-            if model.subject_key_id and key_id and model.subject_key_id != key_id:
+            if model.subject_key_id and model.subject_key_id != key_id:
                 return PermitValidation(False, "permit_key_mismatch", model)
             allowed_tools = _loads_list(model.allowed_tools_json)
             if allowed_tools and tool_name not in allowed_tools:

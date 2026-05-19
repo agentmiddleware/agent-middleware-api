@@ -54,6 +54,9 @@ jobs:
             tests/test_route_auth_inventory.py \
             -v --tb=short
 
+      - name: Run trust-plane demo smoke test
+        run: python scripts/demo_trust_plane.py --assert
+
       - name: Validate OpenAPI spec generates
         run: |
           python -c "
