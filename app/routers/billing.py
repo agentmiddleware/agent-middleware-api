@@ -17,12 +17,14 @@ from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.dependencies import get_agent_money
 from ..services.agent_money import (
     AgentMoney,
+    DEFAULT_PRICING,
     EXCHANGE_RATE,
     InsufficientFundsError,
     WalletNotFoundError,
     KYCVerificationRequiredError,
 )
 from ..services.governance import record_governed_action
+from ..services.policies import evaluate_wallet_policy
 from ..services.velocity_monitor import WalletFrozenError
 from ..services.stripe_integration import get_stripe_integration
 from ..services.shadow_ledger import get_shadow_ledger
@@ -82,6 +84,52 @@ async def _record_billing_governance(
         error=error,
         metadata={"service_category": service_category, **(metadata or {})},
     )
+
+
+async def _enforce_billing_policy(
+    *,
+    auth: AuthContext,
+    wallet_id: str,
+    category: ServiceCategory,
+    units: float,
+    endpoint: str,
+    request_id: str | None,
+    money: AgentMoney,
+) -> tuple[float, str | None, dict]:
+    estimated_cost = float(Decimal(str(units)) * DEFAULT_PRICING[category][1])
+    policy = await evaluate_wallet_policy(
+        wallet_id=wallet_id,
+        tool_name="billing",
+        service_category=category.value,
+        estimated_cost=estimated_cost,
+        simulation=False,
+    )
+    if not policy.allowed:
+        await _record_billing_governance(
+            event="billing.charge",
+            auth=auth,
+            wallet_id=wallet_id,
+            service_category=category.value,
+            endpoint=endpoint,
+            request_id=request_id,
+            estimated_cost=estimated_cost,
+            ok=False,
+            error=policy.reason,
+            metadata={
+                "policy_id": policy.policy_id,
+                "evaluated_constraints": policy.evaluated_constraints,
+                "units": units,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": policy.reason,
+                "policy_id": policy.policy_id,
+                "evaluated_constraints": policy.evaluated_constraints,
+            },
+        )
+    return estimated_cost, policy.policy_id, policy.evaluated_constraints
 
 
 router = APIRouter(
@@ -405,6 +453,20 @@ async def charge_wallet(
                 "message": "service_category is required",
             },
         )
+    request_id = request.headers.get("X-Request-ID")
+    (
+        policy_estimated_cost,
+        policy_id,
+        evaluated_constraints,
+    ) = await _enforce_billing_policy(
+        auth=auth,
+        wallet_id=wallet_id,
+        category=category,
+        units=units,
+        endpoint="/v1/billing/charge",
+        request_id=request_id,
+        money=money,
+    )
     try:
         result = await money.charge(
             wallet_id=wallet_id,
@@ -421,7 +483,7 @@ async def charge_wallet(
                 wallet_id=wallet_id,
                 service_category=category.value,
                 endpoint="/v1/billing/charge",
-                request_id=request.headers.get("X-Request-ID"),
+                request_id=request_id,
                 estimated_cost=float(result.required_amount),
                 ok=False,
                 error="insufficient_funds",
@@ -439,8 +501,8 @@ async def charge_wallet(
             wallet_id=wallet_id,
             service_category=category.value,
             endpoint="/v1/billing/charge",
-            request_id=request.headers.get("X-Request-ID"),
-            estimated_cost=abs(float(result.amount)),
+            request_id=request_id,
+            estimated_cost=policy_estimated_cost,
             committed_cost=abs(float(result.amount)),
             ok=True,
             metadata={
@@ -449,6 +511,8 @@ async def charge_wallet(
                 "ledger_entry_id": result.entry_id,
                 "amount_exact": result.amount_exact,
                 "balance_after_exact": result.balance_after_exact,
+                "policy_id": policy_id,
+                "evaluated_constraints": evaluated_constraints,
             },
         )
         return result
@@ -460,7 +524,7 @@ async def charge_wallet(
                 wallet_id=wallet_id,
                 service_category=category.value,
                 endpoint="/v1/billing/charge",
-                request_id=request.headers.get("X-Request-ID"),
+                request_id=request_id,
                 ok=False,
                 error="wallet_frozen",
                 metadata={"reason": e.reason, "units": units},

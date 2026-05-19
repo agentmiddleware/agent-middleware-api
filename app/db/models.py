@@ -646,3 +646,26 @@ class ControlPlaneAuditEventModel(SQLModel, table=True):
     ok: bool = Field(default=True, index=True)
     error: Optional[str] = Field(default=None)
     metadata_json: Optional[str] = Field(default=None)
+
+
+class PolicyBundleModel(SQLModel, table=True):
+    """Wallet-scoped execution policy bundle."""
+
+    __tablename__ = "policy_bundles"
+
+    policy_id: str = Field(primary_key=True, max_length=64)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    name: str = Field(max_length=255)
+    allowed_tools_json: Optional[str] = Field(default=None)
+    allowed_service_categories_json: Optional[str] = Field(default=None)
+    max_cost_per_action: Optional[Decimal] = Field(default=None, decimal_places=8)
+    daily_spend_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
+    require_real_effects: bool = Field(default=False)
+    risk_tier: str = Field(default="medium", max_length=20)
+    human_approval_required: bool = Field(default=False)
+    is_active: bool = Field(default=True, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        arbitrary_types_allowed = True
