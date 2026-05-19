@@ -78,9 +78,9 @@ compete with it in product positioning.
 
 The Governance Spine Sprint tightened the production-beta release gate around
 the core control-plane loop. A release candidate is not ready until the single
-gate command above passes full pytest coverage, the canonical golden path,
-discovery drift checks, committed OpenAPI parity, and the generated simulation
-inventory check.
+gate command above passes the focused trust-plane pytest suite, the canonical
+golden path, the executable trust-plane demo proof, discovery drift checks,
+committed OpenAPI parity, and the generated simulation inventory check.
 
 ## Agent Trust Ledger Outcome
 
