@@ -20,6 +20,11 @@ class AuditEventResponse(BaseModel):
     ok: bool
     error: str | None
     metadata: dict[str, Any]
+    payload_hash: str | None = None
+    previous_hash: str | None = None
+    chain_hash: str | None = None
+    signature: str | None = None
+    signature_key_id: str | None = None
 
 
 class AuditEventListResponse(BaseModel):

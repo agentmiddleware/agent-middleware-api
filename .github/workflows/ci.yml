@@ -8,7 +8,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
 jobs:
   test:
@@ -42,6 +42,18 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
+      - name: Run trust primitive invariant tests
+        run: |
+          pytest \
+            tests/test_permits.py \
+            tests/test_receipts.py \
+            tests/test_mcp_trust.py \
+            tests/test_audit_chain.py \
+            tests/test_key_management.py \
+            tests/test_idempotency.py \
+            tests/test_route_auth_inventory.py \
+            -v --tb=short
+
       - name: Validate OpenAPI spec generates
         run: |
           python -c "
@@ -60,6 +72,11 @@ jobs:
       - name: Verify simulation inventory matches runtime (Phase 0)
         if: matrix.python-version == '3.12'
         run: python scripts/generate_sim_inventory.py --check
+
+      - name: Verify Alembic migrations upgrade from empty DB
+        if: matrix.python-version == '3.12'
+        run: pytest tests/test_migrations.py -v --tb=short
+
   lint:
     runs-on: ubuntu-latest
     steps:

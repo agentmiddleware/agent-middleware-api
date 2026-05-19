@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field
 
 
@@ -646,6 +647,135 @@ class ControlPlaneAuditEventModel(SQLModel, table=True):
     ok: bool = Field(default=True, index=True)
     error: Optional[str] = Field(default=None)
     metadata_json: Optional[str] = Field(default=None)
+    payload_hash: Optional[str] = Field(default=None, max_length=64, index=True)
+    previous_hash: Optional[str] = Field(default=None, max_length=64)
+    chain_hash: Optional[str] = Field(default=None, max_length=64, index=True)
+    signature: Optional[str] = Field(default=None)
+    signature_key_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        foreign_key="signing_keys.key_id",
+        index=True,
+    )
+
+
+class SigningKeyModel(SQLModel, table=True):
+    """Public signing-key metadata for permits, receipts, and audit events."""
+
+    __tablename__ = "signing_keys"
+
+    key_id: str = Field(primary_key=True, max_length=64)
+    alg: str = Field(default="Ed25519", max_length=20)
+    public_key_b64: str
+    status: str = Field(default="active", max_length=20, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    activated_at: Optional[datetime] = Field(default=None)
+    retired_at: Optional[datetime] = Field(default=None)
+
+
+class PermitModel(SQLModel, table=True):
+    """Signed wallet-scoped authority for a governed agent action."""
+
+    __tablename__ = "permits"
+    __table_args__ = (
+        UniqueConstraint("permit_id", "nonce", name="uq_permits_permit_nonce"),
+    )
+
+    permit_id: str = Field(primary_key=True, max_length=64)
+    issuer_wallet_id: str = Field(
+        max_length=50,
+        foreign_key="wallets.wallet_id",
+        index=True,
+    )
+    subject_wallet_id: str = Field(
+        max_length=50,
+        foreign_key="wallets.wallet_id",
+        index=True,
+    )
+    subject_key_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        foreign_key="api_keys.key_id",
+        index=True,
+    )
+    scopes_json: str
+    allowed_tools_json: str
+    max_credits: Decimal = Field(decimal_places=8)
+    spent_credits: Decimal = Field(default=Decimal("0"), decimal_places=8)
+    expires_at: datetime = Field(index=True)
+    nonce: str = Field(max_length=64, index=True)
+    status: str = Field(default="active", max_length=20, index=True)
+    signature: str
+    key_id: str = Field(max_length=64, foreign_key="signing_keys.key_id", index=True)
+    issued_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    revoked_at: Optional[datetime] = Field(default=None)
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class ReceiptModel(SQLModel, table=True):
+    """Signed receipt for a governed MCP invocation attempt."""
+
+    __tablename__ = "receipts"
+
+    receipt_id: str = Field(primary_key=True, max_length=64)
+    permit_id: str = Field(max_length=64, foreign_key="permits.permit_id", index=True)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    key_id: Optional[str] = Field(default=None, max_length=50, index=True)
+    tool: str = Field(max_length=128, index=True)
+    request_hash: str = Field(max_length=64, index=True)
+    response_hash: Optional[str] = Field(default=None, max_length=64)
+    ledger_entry_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        foreign_key="ledger_entries.entry_id",
+        index=True,
+    )
+    credits_authorized: Decimal = Field(decimal_places=8)
+    credits_charged: Decimal = Field(default=Decimal("0"), decimal_places=8)
+    outcome: str = Field(max_length=32, index=True)
+    audit_event_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        foreign_key="control_plane_audit_events.event_id",
+        index=True,
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    signature: str
+    signature_key_id: str = Field(
+        max_length=64,
+        foreign_key="signing_keys.key_id",
+        index=True,
+    )
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class IdempotencyRecordModel(SQLModel, table=True):
+    """Wallet-scoped replay protection for state-changing trust endpoints."""
+
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "wallet_id",
+            "endpoint",
+            "idempotency_key",
+            name="uq_idempotency_wallet_endpoint_key",
+        ),
+    )
+
+    record_id: str = Field(primary_key=True, max_length=64)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    endpoint: str = Field(max_length=256, index=True)
+    idempotency_key: str = Field(max_length=128, index=True)
+    request_hash: str = Field(max_length=64)
+    response_reference: Optional[str] = Field(default=None, max_length=128)
+    response_json: Optional[str] = Field(default=None)
+    status_code: int = Field(default=200)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    expires_at: Optional[datetime] = Field(default=None)
 
 
 class PolicyBundleModel(SQLModel, table=True):

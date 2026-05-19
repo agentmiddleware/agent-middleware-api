@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import select
+
+from app.db.database import get_session_factory
+from app.db.models import PermitModel, WalletModel
+from app.schemas.trust import PermitCreateRequest, PermitResponse
+from app.services.signing_keys import get_signing_key_service
+
+
+class PermitError(RuntimeError):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+@dataclass(frozen=True)
+class PermitValidation:
+    allowed: bool
+    reason: str | None
+    permit: PermitModel | None
+
+
+def _loads_list(value: str) -> list[str]:
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in decoded] if isinstance(decoded, list) else []
+
+
+def permit_model_to_response(model: PermitModel) -> PermitResponse:
+    return PermitResponse(
+        permit_id=model.permit_id,
+        issuer_wallet_id=model.issuer_wallet_id,
+        subject_wallet_id=model.subject_wallet_id,
+        subject_key_id=model.subject_key_id,
+        scopes=_loads_list(model.scopes_json),
+        allowed_tools=_loads_list(model.allowed_tools_json),
+        max_credits=model.max_credits,
+        spent_credits=model.spent_credits,
+        expires_at=model.expires_at,
+        nonce=model.nonce,
+        status=model.status,
+        signature=model.signature,
+        key_id=model.key_id,
+        issued_at=model.issued_at,
+    )
+
+
+class PermitService:
+    async def get_permit(self, permit_id: str) -> PermitResponse | None:
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit_id)
+            return permit_model_to_response(model) if model else None
+
+    async def create_permit(self, request: PermitCreateRequest) -> PermitResponse:
+        if request.max_credits <= Decimal("0"):
+            raise PermitError("max_credits_must_be_positive")
+        expires_at = request.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            raise PermitError("permit_expired_at_creation")
+        scopes = request.scopes or [
+            f"tool:{tool}:invoke" for tool in request.allowed_tools
+        ]
+        if "billing:charge" not in scopes:
+            scopes = [*scopes, "billing:charge"]
+
+        factory = get_session_factory()
+        async with factory() as session:
+            issuer = await session.get(WalletModel, request.issuer_wallet_id)
+            subject = await session.get(WalletModel, request.subject_wallet_id)
+            if not issuer:
+                raise PermitError("issuer_wallet_not_found")
+            if not subject:
+                raise PermitError("subject_wallet_not_found")
+            if subject.balance < request.max_credits:
+                raise PermitError("permit_budget_exceeds_wallet_balance")
+
+        now = datetime.now(timezone.utc)
+        permit_id = f"permit-{uuid.uuid4().hex[:16]}"
+        nonce = request.nonce or uuid.uuid4().hex
+        payload = {
+            "permit_id": permit_id,
+            "issuer_wallet_id": request.issuer_wallet_id,
+            "subject_wallet_id": request.subject_wallet_id,
+            "subject_key_id": request.subject_key_id,
+            "scopes": scopes,
+            "allowed_tools": request.allowed_tools,
+            "max_credits": request.max_credits,
+            "expires_at": expires_at,
+            "nonce": nonce,
+            "status": "active",
+            "issued_at": now,
+        }
+        signature, key_id, _ = await get_signing_key_service().sign_payload(payload)
+
+        model = PermitModel(
+            permit_id=permit_id,
+            issuer_wallet_id=request.issuer_wallet_id,
+            subject_wallet_id=request.subject_wallet_id,
+            subject_key_id=request.subject_key_id,
+            scopes_json=json.dumps(scopes),
+            allowed_tools_json=json.dumps(request.allowed_tools),
+            max_credits=request.max_credits,
+            expires_at=expires_at,
+            nonce=nonce,
+            status="active",
+            signature=signature,
+            key_id=key_id,
+            issued_at=now,
+        )
+        async with factory() as session:
+            session.add(model)
+            await session.commit()
+            await session.refresh(model)
+        return permit_model_to_response(model)
+
+    async def revoke_permit(self, permit_id: str) -> PermitResponse:
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit_id)
+            if not model:
+                raise PermitError("permit_not_found")
+            model.status = "revoked"
+            model.revoked_at = datetime.now(timezone.utc)
+            session.add(model)
+            await session.commit()
+            await session.refresh(model)
+            return permit_model_to_response(model)
+
+    async def validate_for_action(
+        self,
+        *,
+        permit_id: str,
+        wallet_id: str,
+        tool_name: str,
+        estimated_credits: Decimal,
+        key_id: str | None = None,
+    ) -> PermitValidation:
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit_id)
+            if not model:
+                return PermitValidation(False, "permit_not_found", None)
+            if model.status != "active":
+                return PermitValidation(False, f"permit_{model.status}", model)
+            expires_at = model.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at <= datetime.now(timezone.utc):
+                return PermitValidation(False, "permit_expired", model)
+            if model.subject_wallet_id != wallet_id:
+                return PermitValidation(False, "permit_wallet_mismatch", model)
+            if model.subject_key_id and key_id and model.subject_key_id != key_id:
+                return PermitValidation(False, "permit_key_mismatch", model)
+            allowed_tools = _loads_list(model.allowed_tools_json)
+            if allowed_tools and tool_name not in allowed_tools:
+                return PermitValidation(False, "permit_tool_not_allowed", model)
+            scopes = set(_loads_list(model.scopes_json))
+            required_scope = f"tool:{tool_name}:invoke"
+            if required_scope not in scopes or "billing:charge" not in scopes:
+                return PermitValidation(False, "permit_scope_missing", model)
+            if model.spent_credits + estimated_credits > model.max_credits:
+                return PermitValidation(False, "permit_budget_exceeded", model)
+            if not await self.verify_signature(model):
+                return PermitValidation(False, "permit_signature_invalid", model)
+            return PermitValidation(True, None, model)
+
+    async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                model = await session.get(PermitModel, permit_id, with_for_update=True)
+                if not model:
+                    raise PermitError("permit_not_found")
+                if model.spent_credits + amount > model.max_credits:
+                    raise PermitError("permit_budget_exceeded")
+                model.spent_credits += amount
+                session.add(model)
+            await session.commit()
+
+    async def release_budget(self, permit_id: str, amount: Decimal) -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                model = await session.get(PermitModel, permit_id, with_for_update=True)
+                if not model:
+                    return
+                model.spent_credits = max(Decimal("0"), model.spent_credits - amount)
+                session.add(model)
+            await session.commit()
+
+    async def verify_signature(self, model: PermitModel) -> bool:
+        payload = {
+            "permit_id": model.permit_id,
+            "issuer_wallet_id": model.issuer_wallet_id,
+            "subject_wallet_id": model.subject_wallet_id,
+            "subject_key_id": model.subject_key_id,
+            "scopes": _loads_list(model.scopes_json),
+            "allowed_tools": _loads_list(model.allowed_tools_json),
+            "max_credits": model.max_credits,
+            "expires_at": model.expires_at,
+            "nonce": model.nonce,
+            "status": "active",
+            "issued_at": model.issued_at,
+            "alg": "Ed25519",
+            "kid": model.key_id,
+        }
+        from app.services.signing_keys import sha256_hex
+
+        payload["payload_hash"] = sha256_hex(payload)
+        return await get_signing_key_service().verify_payload(
+            payload,
+            signature=model.signature,
+            key_id=model.key_id,
+        )
+
+
+_service: PermitService | None = None
+
+
+def get_permit_service() -> PermitService:
+    global _service
+    if _service is None:
+        _service = PermitService()
+    return _service

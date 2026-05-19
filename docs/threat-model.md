@@ -10,6 +10,9 @@ and sandboxed execution.
 - Prevent one tenant or wallet from reading or mutating another wallet.
 - Preserve ledger integrity for credits, debits, transfers, top-ups, and dry-run
   commits.
+- Ensure governed MCP actions are authorized by signed permits, protected from
+  replay, bound to a wallet budget, and represented by signed receipts.
+- Preserve tamper-evident audit history for wallet-scoped action review.
 - Ensure API-key creation, rotation, revocation, and logs are wallet-scoped.
 - Keep untrusted code or tool execution from compromising the host.
 - Preserve enough audit history to investigate security and billing incidents.
@@ -19,6 +22,8 @@ and sandboxed execution.
 - Env bootstrap/admin API keys from `VALID_API_KEYS`.
 - DB-created API keys and their hashes.
 - Wallet balances, ledger entries, KYC state, and Stripe payment references.
+- Ed25519 public signing keys, permit records, receipt records, idempotency
+  records, and audit-chain hashes.
 - MCP tool registry and service invocation inputs/outputs.
 - Sandbox code, tool payloads, execution output, and environment state.
 - Telemetry, anomaly reports, generated patches, and agent session history.
@@ -44,6 +49,9 @@ and sandboxed execution.
 - API-key management requires bootstrap/admin or exact wallet access.
 - Behavioral sandbox routes require authentication.
 - MCP invoke uses shared auth context and checks wallet access.
+- Governed MCP invoke validates signed permits and idempotency before billing.
+- Signed receipts bind governed MCP attempts to permit, ledger, and audit IDs.
+- Audit events are signed and hash-linked per wallet.
 - Alembic migrations cover wallet/API-key/KYC/service registry schema drift.
 - Tests cover revoked/expired DB keys, cross-wallet denial, sandbox auth, MCP
   header auth, and migration creation.
@@ -111,8 +119,29 @@ outside expected constraints.
 Required controls:
 - MCP invoke must accept header auth through shared auth dependencies.
 - Tool calls must require wallet context before billable execution.
+- Governed tool calls must require a signed permit with wallet, key, tool,
+  scope, budget, expiry, and nonce constraints.
+- Governed tool calls must require an idempotency key to prevent double charge
+  on retry.
+- Denied and failed governed attempts should produce receipts when a valid
+  permit was present.
 - Registry tools should declare pricing, input schema, and owner wallet.
 - Persistent tools should enforce source wallet billing before invocation.
+
+### Agentic Workflow Injection And Tool Abuse
+
+Threat: Untrusted GitHub issues, PRs, comments, webhook bodies, tool outputs,
+prompt text, or generated scripts influence shell commands, browser automation,
+billing decisions, authorization decisions, or receipt payloads.
+
+Required controls:
+- Treat all external workflow context as attacker-controlled.
+- Do not let tool output mutate permit scope, wallet authority, billing amount,
+  or receipt content without a separate policy decision.
+- Keep AWI/browser automation and auto-PR generation outside the core trust
+  plane until provenance, allowlists, escaping, and abuse tests exist.
+- Never execute untrusted code or generated patches without explicit sandboxing
+  and human review.
 
 ### IoT ACL Bypass
 

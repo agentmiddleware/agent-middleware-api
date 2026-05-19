@@ -23,7 +23,16 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
     inspector = inspect(engine)
 
     tables = set(inspector.get_table_names())
-    assert {"api_keys", "key_rotation_logs", "kyc_verifications", "service_registry"} <= tables
+    assert {
+        "api_keys",
+        "key_rotation_logs",
+        "kyc_verifications",
+        "service_registry",
+        "signing_keys",
+        "permits",
+        "receipts",
+        "idempotency_records",
+    } <= tables
 
     wallet_columns = {col["name"] for col in inspector.get_columns("wallets")}
     assert {
@@ -34,6 +43,17 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         "kyc_status",
         "kyc_verified_at",
     } <= wallet_columns
+
+    audit_columns = {
+        col["name"] for col in inspector.get_columns("control_plane_audit_events")
+    }
+    assert {
+        "payload_hash",
+        "previous_hash",
+        "chain_hash",
+        "signature",
+        "signature_key_id",
+    } <= audit_columns
 
     engine.dispose()
     os.remove(db_path)
