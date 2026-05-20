@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-05-17T07:11:20.287900+00:00",
-  "mcp_tool_count": 9,
+  "generated_at": "2026-05-19T10:02:55.886073+00:00",
+  "mcp_tool_count": 10,
   "mcp_tools_local": [
     {
       "category": "agent_comms",
@@ -64,6 +64,13 @@
       "name": "awi_session_context",
       "runtime_service": "agent_comms",
       "simulation": true
+    },
+    {
+      "category": "platform_fee",
+      "integration_status": "platform",
+      "name": "regengine.agent_reviews.list",
+      "runtime_service": null,
+      "simulation": false
     }
   ],
   "services": [

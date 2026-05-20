@@ -16,6 +16,8 @@ TRUST_COVERAGE_TESTS=(
   tests/test_golden_path.py
   tests/test_demo_trust_plane.py
   tests/test_agent_ops_war_room_demo.py
+  tests/test_regengine_bridge.py
+  tests/test_regengine_bridge_demo.py
   tests/test_me_trust_ledger.py
   tests/test_mcp_trust.py
   tests/test_mcp_trust_mode.py
@@ -37,6 +39,7 @@ TRUST_COVERAGE_MODULES=(
   app.routers.me
   app.services.permits
   app.services.receipts
+  app.services.regengine_bridge
   app.services.signing_keys
   app.services.idempotency
   app.core.trust_mode

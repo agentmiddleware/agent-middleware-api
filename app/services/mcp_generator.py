@@ -158,6 +158,9 @@ class McpGenerator:
             "integrationStatus": truth["integration_status"],
         }
 
+        if service.get("requires_permit"):
+            annotations["requiresPermit"] = True
+
         if truth.get("runtime_service"):
             annotations["runtimeService"] = truth["runtime_service"]
 

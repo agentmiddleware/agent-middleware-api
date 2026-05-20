@@ -150,6 +150,9 @@ def _service_to_mcp_tool(service: dict) -> dict:
     if not service.get("is_local", True):
         annotations["external"] = True
 
+    if service.get("requires_permit"):
+        annotations["requiresPermit"] = True
+
     tool["annotations"] = annotations
 
     return tool
@@ -187,6 +190,7 @@ class ServiceRegistry:
         unit_name: str = "call",
         owner_key: str | None = None,
         owner_wallet_id: str | None = None,
+        requires_permit: bool = False,
     ) -> dict:
         """
         Register a service locally (in-memory) for immediate use.
@@ -211,6 +215,7 @@ class ServiceRegistry:
             "output_schema": output_schema,
             "owner_key": owner_key,
             "owner_wallet_id": owner_wallet_id,
+            "requires_permit": requires_permit,
             "is_active": True,
             "is_local": True,
             "func": func,

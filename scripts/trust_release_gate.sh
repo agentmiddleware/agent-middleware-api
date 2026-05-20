@@ -13,6 +13,8 @@ fi
 TRUST_TESTS=(
   tests/test_golden_path.py
   tests/test_demo_trust_plane.py
+  tests/test_regengine_bridge.py
+  tests/test_regengine_bridge_demo.py
   tests/test_mcp_trust.py
   tests/test_mcp_trust_mode.py
   tests/test_trust_operator_inspection.py
@@ -32,6 +34,9 @@ scripts/trust_coverage_gate.sh
 
 echo "[trust-gate] trust-plane demo proof"
 "$PYTHON_BIN" scripts/demo_trust_plane.py --assert
+
+echo "[trust-gate] RegEngine governed bridge proof"
+"$PYTHON_BIN" scripts/demo_regengine_bridge.py --assert
 
 echo "[trust-gate] discovery drift checks"
 "${PYTEST_CMD[@]}" -q tests/test_discovery_drift.py

@@ -36,6 +36,7 @@ def _inventory_payload() -> dict:
     )
     from app.services.mcp_generator import get_mcp_generator
     from app.services.mcp_phase9_tools import ensure_phase9_registered
+    from app.services.regengine_bridge import ensure_regengine_bridge_registered
 
     sim_modes = get_simulation_modes()
     rows = []
@@ -53,6 +54,7 @@ def _inventory_payload() -> dict:
         )
 
     ensure_phase9_registered()
+    ensure_regengine_bridge_registered()
     gen = get_mcp_generator()
 
     async def _tools() -> list[dict]:

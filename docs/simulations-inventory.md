@@ -6,7 +6,7 @@
 python scripts/generate_sim_inventory.py
 ```
 
-- **Local MCP tools:** 9
+- **Local MCP tools:** 10
 
 _Canonical timestamp and machine-readable snapshot: `docs/sim-inventory.json`._
 
@@ -36,3 +36,4 @@ _Canonical timestamp and machine-readable snapshot: `docs/sim-inventory.json`._
 | `awi_passkey_verify` | `True` | `simulated` | `agent_comms` | `agent_comms` |
 | `awi_rag_query` | `True` | `simulated` | `agent_comms` | `agent_comms` |
 | `awi_session_context` | `True` | `simulated` | `agent_comms` | `agent_comms` |
+| `regengine.agent_reviews.list` | `False` | `platform` | `None` | `platform_fee` |

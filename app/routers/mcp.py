@@ -46,6 +46,7 @@ from ..services.mcp_phase9_tools import (
     ensure_phase9_registered,
     register_default_mcp_services,
 )
+from ..services.regengine_bridge import ensure_regengine_bridge_registered
 from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ def _ensure_local_mcp_tools_registered() -> None:
     """Keep discovery populated when tests or transports skip app lifespan startup."""
     ensure_phase9_registered()
     register_default_mcp_services()
+    ensure_regengine_bridge_registered()
 
 
 async def build_mcp_tools_manifest(
@@ -365,6 +367,9 @@ async def _execute_registered_tool(
             status_code=400,
         )
         raise ValueError(reason)
+
+    if service.get("requires_permit"):
+        governed_call = True
 
     func = registry.get_local_func(tool_name)
     if not func:
