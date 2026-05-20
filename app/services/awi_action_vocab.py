@@ -9,10 +9,23 @@ Provides a unified vocabulary of web actions that abstract away DOM manipulation
 - Actions can be composed into sequences for complex workflows
 """
 
+import re
 import uuid
 from typing import Any
 
-from ..schemas.awi import AWIStandardAction, AWIActionCategory
+from ..schemas.awi import (
+    AWIActionCategory,
+    AWIActionRiskLevel,
+    AWIActionStatus,
+    AWIActionTier,
+    AWIStandardAction,
+)
+
+
+def _normalize_sensitive_key(value: str) -> str:
+    """Normalize parameter keys so redaction catches common casing variants."""
+    snake_case = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+    return snake_case.replace("-", "_").lower()
 
 
 class AWIActionDefinition:
@@ -27,6 +40,10 @@ class AWIActionDefinition:
         required_preconditions: list[str],
         postconditions: list[str],
         estimated_cost: float = 0.001,
+        tier: AWIActionTier = AWIActionTier.SEMANTIC,
+        status: AWIActionStatus = AWIActionStatus.STABLE,
+        risk_level: AWIActionRiskLevel = AWIActionRiskLevel.LOW,
+        sensitive_parameters: list[str] | None = None,
     ):
         self.action = action
         self.category = category
@@ -35,6 +52,26 @@ class AWIActionDefinition:
         self.required_preconditions = required_preconditions
         self.postconditions = postconditions
         self.estimated_cost = estimated_cost
+        self.tier = tier
+        self.status = status
+        self.risk_level = risk_level
+        self.sensitive_parameters = sensitive_parameters or []
+
+    def to_public_dict(self) -> dict[str, Any]:
+        """Return the public, transport-safe action definition."""
+        return {
+            "action": self.action.value,
+            "category": self.category.value,
+            "description": self.description,
+            "parameters": self.parameters,
+            "required_preconditions": self.required_preconditions,
+            "postconditions": self.postconditions,
+            "estimated_cost": self.estimated_cost,
+            "tier": self.tier.value,
+            "status": self.status.value,
+            "risk_level": self.risk_level.value,
+            "sensitive_parameters": self.sensitive_parameters,
+        }
 
 
 class AWIActionVocabulary:
@@ -79,6 +116,7 @@ class AWIActionVocabulary:
                 required_preconditions=["item_visible", "cart_accessible"],
                 postconditions=["item_in_cart"],
                 estimated_cost=0.001,
+                risk_level=AWIActionRiskLevel.MEDIUM,
             ),
             AWIActionDefinition(
                 action=AWIStandardAction.CHECKOUT,
@@ -92,6 +130,8 @@ class AWIActionVocabulary:
                 required_preconditions=["cart_not_empty", "user_authenticated"],
                 postconditions=["order_placed", "payment_processed"],
                 estimated_cost=0.01,
+                risk_level=AWIActionRiskLevel.HIGH,
+                sensitive_parameters=["payment_method"],
             ),
             AWIActionDefinition(
                 action=AWIStandardAction.FILL_FORM,
@@ -105,19 +145,43 @@ class AWIActionVocabulary:
                 required_preconditions=["form_visible"],
                 postconditions=["form_filled", "form_submitted"],
                 estimated_cost=0.001,
+                risk_level=AWIActionRiskLevel.MEDIUM,
             ),
             AWIActionDefinition(
                 action=AWIStandardAction.LOGIN,
                 category=AWIActionCategory.AUTH,
-                description="Authenticate with the target website",
+                description=(
+                    "Authenticate with the target website. Provisional: "
+                    "credential_handle is preferred; username/password remains "
+                    "accepted for v0.1 compatibility and is redacted from durable "
+                    "state."
+                ),
                 parameters={
-                    "username": {"type": "string", "required": True},
-                    "password": {"type": "string", "required": True},
+                    "credential_handle": {
+                        "type": "string",
+                        "required": False,
+                        "preferred": True,
+                    },
+                    "username": {
+                        "type": "string",
+                        "required": False,
+                        "deprecated": True,
+                        "sensitive": True,
+                    },
+                    "password": {
+                        "type": "string",
+                        "required": False,
+                        "deprecated": True,
+                        "sensitive": True,
+                    },
                     "remember_me": {"type": "boolean", "required": False},
                 },
                 required_preconditions=["login_page_visible"],
                 postconditions=["user_authenticated", "session_created"],
                 estimated_cost=0.002,
+                status=AWIActionStatus.PROVISIONAL,
+                risk_level=AWIActionRiskLevel.HIGH,
+                sensitive_parameters=["username", "password"],
             ),
             AWIActionDefinition(
                 action=AWIStandardAction.LOGOUT,
@@ -152,6 +216,7 @@ class AWIActionVocabulary:
                 required_preconditions=["button_visible"],
                 postconditions=["button_clicked"],
                 estimated_cost=0.0005,
+                tier=AWIActionTier.COMPATIBILITY,
             ),
             AWIActionDefinition(
                 action=AWIStandardAction.SCROLL,
@@ -164,6 +229,7 @@ class AWIActionVocabulary:
                 required_preconditions=["page_loaded"],
                 postconditions=["scrolled"],
                 estimated_cost=0.0002,
+                tier=AWIActionTier.COMPATIBILITY,
             ),
             AWIActionDefinition(
                 action=AWIStandardAction.SELECT_OPTION,
@@ -189,6 +255,7 @@ class AWIActionVocabulary:
                 required_preconditions=["upload_input_visible"],
                 postconditions=["file_uploaded"],
                 estimated_cost=0.005,
+                risk_level=AWIActionRiskLevel.MEDIUM,
             ),
             AWIActionDefinition(
                 action=AWIStandardAction.EXTRACT_DATA,
@@ -246,11 +313,60 @@ class AWIActionVocabulary:
         if not action_def:
             return False, f"Unknown action: {action}"
 
+        if action == AWIStandardAction.LOGIN:
+            if params.get("credential_handle"):
+                return True, None
+            missing = [
+                name for name in ("username", "password") if name not in params
+            ]
+            if missing:
+                return (
+                    False,
+                    "Missing required login parameters: credential_handle or "
+                    "username+password",
+                )
+            return True, None
+
         for param_name, param_def in action_def.parameters.items():
             if param_def.get("required", False) and param_name not in params:
                 return False, f"Missing required parameter: {param_name}"
 
         return True, None
+
+    def redact_parameters(
+        self, action: AWIStandardAction, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Redact sensitive action parameters before durable storage or response."""
+        action_def = self._actions.get(action)
+        sensitive = {
+            "api_key",
+            "access_token",
+            "credential",
+            "password",
+            "refresh_token",
+            "secret",
+            "token",
+        }
+        if action_def:
+            sensitive.update(
+                _normalize_sensitive_key(name)
+                for name in action_def.sensitive_parameters
+            )
+
+        def redact(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    key: "[REDACTED]"
+                    if _normalize_sensitive_key(key) in sensitive
+                    else redact(item)
+                    for key, item in value.items()
+                }
+            if isinstance(value, list):
+                return [redact(item) for item in value]
+            return value
+
+        redacted = redact(params)
+        return redacted if isinstance(redacted, dict) else {}
 
     def check_preconditions(
         self, action: AWIStandardAction, session_state: dict[str, Any]

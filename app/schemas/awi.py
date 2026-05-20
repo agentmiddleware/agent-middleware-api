@@ -68,6 +68,80 @@ class AWIStandardAction(str, Enum):
     GET_REPRESENTATION = "get_representation"
 
 
+class AWIActionTier(str, Enum):
+    """How directly an action expresses AWI semantic intent."""
+
+    SEMANTIC = "semantic"
+    COMPATIBILITY = "compatibility"
+
+
+class AWIActionStatus(str, Enum):
+    """Maturity status for AWI action contracts."""
+
+    STABLE = "stable"
+    PROVISIONAL = "provisional"
+    DEPRECATED = "deprecated"
+
+
+class AWIActionRiskLevel(str, Enum):
+    """Risk level for policy and human-approval decisions."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class AWIActionDefinitionResponse(BaseModel):
+    """Public action vocabulary entry exposed by AWI discovery surfaces."""
+
+    action: AWIStandardAction
+    category: AWIActionCategory
+    description: str
+    parameters: dict[str, dict[str, Any]]
+    required_preconditions: list[str]
+    postconditions: list[str]
+    estimated_cost: float
+    tier: AWIActionTier
+    status: AWIActionStatus
+    risk_level: AWIActionRiskLevel
+    sensitive_parameters: list[str] = Field(default_factory=list)
+
+
+class AWIManifestTransport(BaseModel):
+    """Transport metadata for the AWI discovery manifest."""
+
+    primary: str
+    mcp_compatible: bool
+    mcp_manifest: str
+
+
+class AWIManifestSafetyCapabilities(BaseModel):
+    """Safety capabilities advertised by the AWI discovery manifest."""
+
+    wallet_scoped_authorization: bool
+    human_intervention: list[str]
+    passkey_high_risk_actions: bool
+    signed_permits: bool
+    tamper_evident_audit_chain: bool
+    sensitive_parameter_redaction: bool
+
+
+class AWIDiscoveryManifest(BaseModel):
+    """Draft AWI-over-MCP discovery manifest."""
+
+    schema_version: str
+    awi_version: str
+    status: str
+    profile: str
+    transport: AWIManifestTransport
+    description: str
+    endpoints: dict[str, str]
+    representation_types: list[AWIRepresentationType]
+    actions: list[AWIActionDefinitionResponse]
+    safety_capabilities: AWIManifestSafetyCapabilities
+    known_limitations: list[str]
+
+
 class AWISessionCreate(BaseModel):
     """Request to create an AWI session."""
 

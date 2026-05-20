@@ -216,7 +216,7 @@ async def human_intervention(
     try:
         await _require_session_access(intervention.session_id, auth)
         manager = get_awi_session_manager()
-        return await manager.human_intervention(intervention)
+        return await manager.human_intervention(intervention, auth=auth)
     except HTTPException:
         raise
     except Exception as e:
@@ -238,16 +238,7 @@ async def list_actions():
     actions = vocabulary.list_all_actions()
 
     return {
-        "actions": [
-            {
-                "action": a.action.value,
-                "category": a.category.value,
-                "description": a.description,
-                "parameters": a.parameters,
-                "estimated_cost": a.estimated_cost,
-            }
-            for a in actions
-        ],
+        "actions": [a.to_public_dict() for a in actions],
         "categories": [c.value for c in AWIActionCategory],
     }
 
@@ -264,15 +255,7 @@ async def list_actions_by_category(category: AWIActionCategory):
 
     return {
         "category": category.value,
-        "actions": [
-            {
-                "action": a.action.value,
-                "description": a.description,
-                "parameters": a.parameters,
-                "estimated_cost": a.estimated_cost,
-            }
-            for a in actions
-        ],
+        "actions": [a.to_public_dict() for a in actions],
     }
 
 

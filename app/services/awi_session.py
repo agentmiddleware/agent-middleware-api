@@ -15,6 +15,7 @@ Provides:
 - Phase 9: Playwright DOM bridge routing
 """
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ from ..schemas.awi import (
 from .awi_action_vocab import get_awi_vocabulary
 from .awi_representation import get_awi_representation
 from .awi_playwright_bridge import get_playwright_bridge
+from .audit_log import record_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +155,9 @@ class AWISessionManager:
         self, request: AWIExecutionRequest
     ) -> AWIExecutionResponse:
         """Execute an AWI action within a session."""
+        response_parameters = self._vocabulary.redact_parameters(
+            request.action, request.parameters
+        )
         session = await self._load_session(request.session_id)
         if not session:
             return AWIExecutionResponse(
@@ -160,7 +165,7 @@ class AWISessionManager:
                 session_id=request.session_id,
                 action=request.action,
                 status="error",
-                parameters=request.parameters,
+                parameters=response_parameters,
                 error=f"Session not found: {request.session_id}",
             )
 
@@ -170,7 +175,7 @@ class AWISessionManager:
                 session_id=request.session_id,
                 action=request.action,
                 status="paused",
-                parameters=request.parameters,
+                parameters=response_parameters,
                 error="Session is paused by human intervention",
             )
 
@@ -183,7 +188,7 @@ class AWISessionManager:
                 session_id=request.session_id,
                 action=request.action,
                 status="max_steps_reached",
-                parameters=request.parameters,
+                parameters=response_parameters,
                 error="Maximum steps reached",
             )
 
@@ -199,7 +204,7 @@ class AWISessionManager:
                 session_id=request.session_id,
                 action=request.action,
                 status="error",
-                parameters=request.parameters,
+                parameters=response_parameters,
                 error=error,
             )
 
@@ -214,7 +219,7 @@ class AWISessionManager:
                 session_id=request.session_id,
                 action=request.action,
                 status="error",
-                parameters=request.parameters,
+                parameters=response_parameters,
                 error=f"Preconditions not met: {unmet}",
             )
 
@@ -232,7 +237,7 @@ class AWISessionManager:
                     session_id=request.session_id,
                     action=request.action,
                     status="passkey_required",
-                    parameters=request.parameters,
+                    parameters=response_parameters,
                     error="This action requires biometric verification. "
                     "Call POST /v1/awi/passkey/challenge first.",
                 )
@@ -265,7 +270,7 @@ class AWISessionManager:
             {
                 "execution_id": execution_id,
                 "action": request.action.value,
-                "parameters": request.parameters,
+                "parameters": response_parameters,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "success": result.get("success", True),
             }
@@ -299,7 +304,7 @@ class AWISessionManager:
             session_id=request.session_id,
             action=request.action,
             status="success",
-            parameters=request.parameters,
+            parameters=response_parameters,
             result=result,
             new_state=state,
             representation=representation,
@@ -329,7 +334,10 @@ class AWISessionManager:
 
         elif action == AWIStandardAction.FILL_FORM:
             fields = params.get("fields", {})
-            state["form_data"].update(fields)
+            redacted_fields = self._vocabulary.redact_parameters(
+                AWIStandardAction.FILL_FORM, {"fields": fields}
+            ).get("fields", {})
+            state["form_data"].update(redacted_fields)
             return {"success": True, "fields_filled": len(fields)}
 
         elif action == AWIStandardAction.CLICK_BUTTON:
@@ -377,7 +385,7 @@ class AWISessionManager:
         )
 
     async def human_intervention(
-        self, intervention: AWIHumanIntervention
+        self, intervention: AWIHumanIntervention, auth: Any | None = None
     ) -> dict[str, Any]:
         """Handle human intervention in a session."""
         session = await self._load_session(intervention.session_id)
@@ -390,6 +398,12 @@ class AWISessionManager:
             session.pause_reason = intervention.reason
             session.updated_at = datetime.now(timezone.utc)
             await self._save_session(intervention.session_id)
+            await self._record_human_intervention_audit(
+                session=session,
+                intervention=intervention,
+                status="paused",
+                auth=auth,
+            )
             return {"success": True, "status": "paused"}
 
         elif intervention.action == "resume":
@@ -398,27 +412,109 @@ class AWISessionManager:
             session.pause_reason = None
             session.updated_at = datetime.now(timezone.utc)
             await self._save_session(intervention.session_id)
+            await self._record_human_intervention_audit(
+                session=session,
+                intervention=intervention,
+                status="active",
+                auth=auth,
+            )
             return {"success": True, "status": "active"}
 
         elif intervention.action == "steer":
             if not intervention.steer_instructions:
+                await self._record_human_intervention_audit(
+                    session=session,
+                    intervention=intervention,
+                    status=session.status.value,
+                    auth=auth,
+                    ok=False,
+                    error="missing_steer_instructions",
+                )
                 return {"success": False, "error": "No steering instructions provided"}
+            instructions_hash = self._hash_text(intervention.steer_instructions)
             session.action_history.append(
                 {
                     "type": "human_steer",
-                    "instructions": intervention.steer_instructions,
+                    "instructions_sha256": instructions_hash,
+                    "instructions_length": len(intervention.steer_instructions),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
             session.updated_at = datetime.now(timezone.utc)
             await self._save_session(intervention.session_id)
+            await self._record_human_intervention_audit(
+                session=session,
+                intervention=intervention,
+                status="steered",
+                auth=auth,
+            )
             return {
                 "success": True,
                 "status": "steered",
-                "instructions_recorded": intervention.steer_instructions,
+                "instructions_recorded": True,
+                "instructions_sha256": instructions_hash,
             }
 
+        await self._record_human_intervention_audit(
+            session=session,
+            intervention=intervention,
+            status=session.status.value,
+            auth=auth,
+            ok=False,
+            error=f"unknown_action:{intervention.action}",
+        )
         return {"success": False, "error": f"Unknown action: {intervention.action}"}
+
+    @staticmethod
+    def _hash_text(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    async def _record_human_intervention_audit(
+        self,
+        *,
+        session: AWISession,
+        intervention: AWIHumanIntervention,
+        status: str,
+        auth: Any | None,
+        ok: bool = True,
+        error: str | None = None,
+    ) -> None:
+        metadata: dict[str, Any] = {
+            "session_id": session.session_id,
+            "action": intervention.action,
+            "status": status,
+            "reason": intervention.reason,
+        }
+        if intervention.steer_instructions:
+            metadata["steer_instructions_sha256"] = self._hash_text(
+                intervention.steer_instructions
+            )
+            metadata["steer_instructions_length"] = len(
+                intervention.steer_instructions
+            )
+
+        try:
+            await record_audit_event(
+                event="awi.human_intervention",
+                wallet_id=session.wallet_id,
+                tool="awi",
+                endpoint="/v1/awi/intervene",
+                auth_source=getattr(auth, "source", None),
+                key_id=getattr(auth, "key_id", None),
+                request_id=session.session_id,
+                ok=ok,
+                error=error,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to audit AWI human intervention",
+                extra={
+                    "event": "awi.human_intervention",
+                    "session_id": session.session_id,
+                    "wallet_id": session.wallet_id,
+                },
+            )
 
     async def destroy_session(self, session_id: str) -> bool:
         """Destroy an AWI session."""

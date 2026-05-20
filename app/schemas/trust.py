@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -108,6 +108,24 @@ class AuditChainVerifyResponse(BaseModel):
     last_event_id: str | None = None
     reason: str | None = None
     broken_event_id: str | None = None
+
+
+class ReceiptEvidenceCheck(BaseModel):
+    name: str
+    status: Literal["passed", "failed", "skipped"]
+    reason: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReceiptEvidenceResponse(BaseModel):
+    receipt_id: str
+    valid: bool
+    checks: list[ReceiptEvidenceCheck]
+    receipt: ReceiptResponse
+    permit: PermitResponse | None = None
+    audit_event: dict[str, Any] | None = None
+    audit_chain: AuditChainVerifyResponse | None = None
+    ledger_entry: dict[str, Any] | None = None
 
 
 class TrustMcpMetadata(BaseModel):

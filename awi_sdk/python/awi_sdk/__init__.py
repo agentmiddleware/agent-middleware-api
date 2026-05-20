@@ -8,15 +8,23 @@ pip install agent-middleware-awi
 
 from .client import AWIClient, AWIClientConfig
 from .models import (
-    AWIStandardAction,
+    AWIActionDefinition,
+    AWIActionRiskLevel,
+    AWIActionStatus,
+    AWIActionTier,
     AWIRepresentationType,
-    AWISession,
+    AWIStandardAction,
     AWIExecutionResponse,
+    AWISession,
 )
 
 __all__ = [
     "AWIClient",
     "AWIClientConfig",
+    "AWIActionDefinition",
+    "AWIActionRiskLevel",
+    "AWIActionStatus",
+    "AWIActionTier",
     "AWIStandardAction",
     "AWIRepresentationType",
     "AWISession",

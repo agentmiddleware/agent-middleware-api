@@ -9444,6 +9444,53 @@
         }
       }
     },
+    "/v1/receipts/{receipt_id}/evidence": {
+      "get": {
+        "tags": [
+          "Trust Receipts"
+        ],
+        "summary": "Get Receipt Evidence",
+        "operationId": "get_receipt_evidence_v1_receipts__receipt_id__evidence_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Receipt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptEvidenceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/receipts/verify": {
       "post": {
         "tags": [
@@ -10944,6 +10991,28 @@
         }
       }
     },
+    "/.well-known/awi.json": {
+      "get": {
+        "tags": [
+          "Agent Discovery"
+        ],
+        "summary": "AWI Discovery Manifest",
+        "description": "Returns the draft AWI-over-MCP manifest with action vocabulary, representation types, endpoints, safety capabilities, and known limits.",
+        "operationId": "get_awi_json__well_known_awi_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AWIDiscoveryManifest"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/.well-known/mcp/tools.json": {
       "get": {
         "tags": [
@@ -11269,6 +11338,180 @@
         "title": "AWIActionCategory",
         "description": "Categories of standardized AWI actions."
       },
+      "AWIActionDefinitionResponse": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/AWIStandardAction"
+          },
+          "category": {
+            "$ref": "#/components/schemas/AWIActionCategory"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Parameters"
+          },
+          "required_preconditions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Preconditions"
+          },
+          "postconditions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Postconditions"
+          },
+          "estimated_cost": {
+            "type": "number",
+            "title": "Estimated Cost"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/AWIActionTier"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AWIActionStatus"
+          },
+          "risk_level": {
+            "$ref": "#/components/schemas/AWIActionRiskLevel"
+          },
+          "sensitive_parameters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sensitive Parameters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "category",
+          "description",
+          "parameters",
+          "required_preconditions",
+          "postconditions",
+          "estimated_cost",
+          "tier",
+          "status",
+          "risk_level"
+        ],
+        "title": "AWIActionDefinitionResponse",
+        "description": "Public action vocabulary entry exposed by AWI discovery surfaces."
+      },
+      "AWIActionRiskLevel": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "AWIActionRiskLevel",
+        "description": "Risk level for policy and human-approval decisions."
+      },
+      "AWIActionStatus": {
+        "type": "string",
+        "enum": [
+          "stable",
+          "provisional",
+          "deprecated"
+        ],
+        "title": "AWIActionStatus",
+        "description": "Maturity status for AWI action contracts."
+      },
+      "AWIActionTier": {
+        "type": "string",
+        "enum": [
+          "semantic",
+          "compatibility"
+        ],
+        "title": "AWIActionTier",
+        "description": "How directly an action expresses AWI semantic intent."
+      },
+      "AWIDiscoveryManifest": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "awi_version": {
+            "type": "string",
+            "title": "Awi Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "profile": {
+            "type": "string",
+            "title": "Profile"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/AWIManifestTransport"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "endpoints": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Endpoints"
+          },
+          "representation_types": {
+            "items": {
+              "$ref": "#/components/schemas/AWIRepresentationType"
+            },
+            "type": "array",
+            "title": "Representation Types"
+          },
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/AWIActionDefinitionResponse"
+            },
+            "type": "array",
+            "title": "Actions"
+          },
+          "safety_capabilities": {
+            "$ref": "#/components/schemas/AWIManifestSafetyCapabilities"
+          },
+          "known_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Known Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_version",
+          "awi_version",
+          "status",
+          "profile",
+          "transport",
+          "description",
+          "endpoints",
+          "representation_types",
+          "actions",
+          "safety_capabilities",
+          "known_limitations"
+        ],
+        "title": "AWIDiscoveryManifest",
+        "description": "Draft AWI-over-MCP discovery manifest."
+      },
       "AWIEndpoint": {
         "properties": {
           "path": {
@@ -11492,6 +11735,72 @@
         ],
         "title": "AWIHumanIntervention",
         "description": "Request human intervention in an AWI session."
+      },
+      "AWIManifestSafetyCapabilities": {
+        "properties": {
+          "wallet_scoped_authorization": {
+            "type": "boolean",
+            "title": "Wallet Scoped Authorization"
+          },
+          "human_intervention": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Human Intervention"
+          },
+          "passkey_high_risk_actions": {
+            "type": "boolean",
+            "title": "Passkey High Risk Actions"
+          },
+          "signed_permits": {
+            "type": "boolean",
+            "title": "Signed Permits"
+          },
+          "tamper_evident_audit_chain": {
+            "type": "boolean",
+            "title": "Tamper Evident Audit Chain"
+          },
+          "sensitive_parameter_redaction": {
+            "type": "boolean",
+            "title": "Sensitive Parameter Redaction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_scoped_authorization",
+          "human_intervention",
+          "passkey_high_risk_actions",
+          "signed_permits",
+          "tamper_evident_audit_chain",
+          "sensitive_parameter_redaction"
+        ],
+        "title": "AWIManifestSafetyCapabilities",
+        "description": "Safety capabilities advertised by the AWI discovery manifest."
+      },
+      "AWIManifestTransport": {
+        "properties": {
+          "primary": {
+            "type": "string",
+            "title": "Primary"
+          },
+          "mcp_compatible": {
+            "type": "boolean",
+            "title": "Mcp Compatible"
+          },
+          "mcp_manifest": {
+            "type": "string",
+            "title": "Mcp Manifest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "primary",
+          "mcp_compatible",
+          "mcp_manifest"
+        ],
+        "title": "AWIManifestTransport",
+        "description": "Transport metadata for the AWI discovery manifest."
       },
       "AWIRepresentationRequest": {
         "properties": {
@@ -20204,6 +20513,119 @@
         ],
         "title": "RecallRequest",
         "description": "Recall memories for an agent."
+      },
+      "ReceiptEvidenceCheck": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "status"
+        ],
+        "title": "ReceiptEvidenceCheck"
+      },
+      "ReceiptEvidenceResponse": {
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "title": "Receipt Id"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptEvidenceCheck"
+            },
+            "type": "array",
+            "title": "Checks"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/ReceiptResponse"
+          },
+          "permit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermitResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audit_event": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Event"
+          },
+          "audit_chain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditChainVerifyResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ledger_entry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledger Entry"
+          }
+        },
+        "type": "object",
+        "required": [
+          "receipt_id",
+          "valid",
+          "checks",
+          "receipt"
+        ],
+        "title": "ReceiptEvidenceResponse"
       },
       "ReceiptListResponse": {
         "properties": {

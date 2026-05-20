@@ -67,6 +67,29 @@ export type AWIRepresentationType =
   | "json_structure"
   | "text_extraction";
 
+export type AWIActionTier = "semantic" | "compatibility";
+export type AWIActionStatus = "stable" | "provisional" | "deprecated";
+export type AWIActionRiskLevel = "low" | "medium" | "high";
+
+export interface AWIActionDefinition {
+  action: AWIAction;
+  category: string;
+  description: string;
+  parameters: Record<string, Record<string, unknown>>;
+  required_preconditions: string[];
+  postconditions: string[];
+  estimated_cost: number;
+  tier: AWIActionTier;
+  status: AWIActionStatus;
+  risk_level: AWIActionRiskLevel;
+  sensitive_parameters: string[];
+}
+
+export interface AWIVocabulary {
+  actions: AWIActionDefinition[];
+  categories: string[];
+}
+
 /**
  * AWI TypeScript Client
  *
@@ -101,7 +124,7 @@ export class AWIClient {
     });
   }
 
-  async discover(): Promise<unknown> {
+  async discover(): Promise<AWIVocabulary> {
     const response: AxiosResponse = await this.client.get("/v1/awi/vocabulary");
     return response.data;
   }

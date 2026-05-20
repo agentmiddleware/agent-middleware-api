@@ -151,6 +151,7 @@ crewai_tools = [CrewAIB2ATool(api_key="...", wallet_id="...")]
 
 - [Production beta roadmap](docs/production-beta-roadmap.md)
 - [Threat model](docs/threat-model.md)
+- [Related work and claim evidence](docs/related-work.md)
 - [Golden-path wallet-scoped agent flow](docs/golden-path.md)
 
 ### Operators (deployment only)
