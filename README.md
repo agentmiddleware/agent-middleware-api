@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)
 ![License](https://img.shields.io/badge/License-MIT-blue)
-![Tests](https://img.shields.io/badge/Tests-545%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-670%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
 ![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
@@ -26,7 +26,7 @@ The target trust loop is:
 discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
 ```
 
-The governed MCP invocation path can now validate a signed permit, enforce idempotency, charge the wallet, write a ledger entry, generate a signed receipt, and persist a signed audit-chain event.
+The governed MCP invocation path can now validate a signed permit, enforce idempotency, charge the wallet, write a ledger entry, generate a signed receipt, persist a signed audit-chain event, and expose receipt evidence linked to permit, ledger, and audit artifacts.
 
 Everything else in this repository exists to strengthen that loop or prove it in realistic agent workflows.
 
@@ -41,7 +41,8 @@ make demo-trust-plane
 This creates a sponsor wallet, provisions an agent wallet and API key, issues a
 signed permit for one MCP tool, invokes that tool through governed MCP, charges
 the wallet once, returns a signed receipt, verifies the audit chain, proves
-idempotent replay, and denies an out-of-scope tool with a denial receipt. The
+idempotent replay, inspects the receipt evidence bundle, and denies an
+out-of-scope tool with a denial receipt. The
 sample proof artifact is in
 [`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md).
 
@@ -52,8 +53,8 @@ make agent-ops-war-room
 ```
 
 That proof walks discovery, bounded authority, governed MCP invocation, receipt
-verification, ledger inspection, audit-chain verification, replay safety, and
-out-of-scope denial in one run.
+verification, receipt-evidence inspection, ledger inspection, audit-chain
+verification, replay safety, and out-of-scope denial in one run.
 
 To prove the trust core has measurable test coverage before a release:
 
@@ -75,6 +76,9 @@ Bootstrap in the order given in `GET /.well-known/agent.json` → field `agent_f
 # Capability manifest (start here)
 curl http://localhost:8000/.well-known/agent.json
 
+# AWI-over-MCP discovery profile
+curl http://localhost:8000/.well-known/awi.json
+
 # Canonical prose for agents
 curl http://localhost:8000/llm.txt
 
@@ -90,11 +94,11 @@ Before assuming real side effects, call `GET /health/dependencies` and read `sim
 ### Core trust primitives
 
 - **Identity and authority** — wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks, and cross-wallet isolation.
-- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `llm.txt`, OpenAPI, and `/v1/discover`.
+- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `.well-known/awi.json`, `llm.txt`, OpenAPI, and `/v1/discover`.
 - **Signed authorization** — `/v1/permits` issues Ed25519-signed tool permits with scopes, wallet binding, budget, expiry, nonce, and revocation.
 - **Policy-constrained execution** — MCP invocation can require signed permits and idempotency keys before billable tool calls.
 - **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
-- **Receipts and audit** — `/v1/receipts` verifies signed action receipts, and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
+- **Receipts and audit** — `/v1/receipts` verifies signed action receipts, `/v1/receipts/{receipt_id}/evidence` checks linked permit, ledger, and audit artifacts, and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
 - **Governance and readiness** — telemetry, dependency health, security posture, and operator preflight checks.
 
 ### Proof-of-usefulness surfaces
@@ -167,6 +171,9 @@ Not part of the autonomous-client contract — for people running this service:
 | Domain                   | Endpoint Prefix   | Durable | Rate Limited | Auth Required |
 |--------------------------|-------------------|---------|--------------|---------------|
 | Billing                  | `/v1/billing`     | Yes     | Yes          | Yes           |
+| Permits                  | `/v1/permits`     | Yes     | Yes          | Yes           |
+| Trust Receipts           | `/v1/receipts`    | Yes     | Yes          | Yes           |
+| Audit                    | `/v1/audit`       | Yes     | Yes          | Yes           |
 | Stripe Webhooks          | `/webhooks/stripe`| -       | -            | Yes           |
 | Telemetry                | `/v1/telemetry`   | Yes     | Yes          | Yes           |
 | Comms                    | `/v1/comms`       | Yes     | Yes          | Yes           |
