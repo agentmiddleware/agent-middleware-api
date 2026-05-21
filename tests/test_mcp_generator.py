@@ -376,6 +376,24 @@ class TestGlobalSingletons:
 class TestMcpInvokeRoute:
     """Test the HTTP MCP invoke route."""
 
+    async def _create_wallet(self, client: AsyncClient, name: str) -> str:
+        response = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={"sponsor_name": name, "email": f"{name}@test.example"},
+            headers={"X-API-Key": "test-key"},
+        )
+        assert response.status_code == 201
+        return response.json()["wallet_id"]
+
+    async def _create_db_key(self, client: AsyncClient, wallet_id: str) -> dict[str, str]:
+        response = await client.post(
+            "/v1/api-keys",
+            json={"wallet_id": wallet_id, "key_name": "mcp-jsonrpc-test"},
+            headers={"X-API-Key": "test-key"},
+        )
+        assert response.status_code == 201
+        return {"X-API-Key": response.json()["api_key"]}
+
     @pytest.mark.anyio
     async def test_invoke_tool_accepts_api_key_header(self):
         registry = get_service_registry()
@@ -425,3 +443,151 @@ class TestMcpInvokeRoute:
             )
 
         assert response.status_code == 401
+
+    @pytest.mark.anyio
+    async def test_jsonrpc_tool_call_requires_api_key_header(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/mcp/messages",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "anything",
+                        "arguments": {},
+                        "mcpContext": {"wallet_id": "wallet-test"},
+                    },
+                },
+            )
+
+        assert response.status_code == 401
+
+    @pytest.mark.anyio
+    async def test_jsonrpc_tool_call_rejects_cross_wallet_db_key(self):
+        registry = get_service_registry()
+
+        def echo_tool(value: str = "ok") -> dict:
+            return {"value": value}
+
+        registry.register_local(
+            service_id="jsonrpc-cross-wallet-echo",
+            name="JSON-RPC Cross Wallet Echo",
+            description="Echo for JSON-RPC auth testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=echo_tool,
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_a = await self._create_wallet(client, "mcp-wallet-a")
+                wallet_b = await self._create_wallet(client, "mcp-wallet-b")
+                db_headers = await self._create_db_key(client, wallet_a)
+
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-cross-wallet-echo",
+                            "arguments": {"value": "blocked"},
+                            "mcpContext": {"wallet_id": wallet_b},
+                        },
+                    },
+                    headers=db_headers,
+                )
+
+            assert response.status_code == 403
+        finally:
+            registry.unregister_local("jsonrpc-cross-wallet-echo")
+
+    @pytest.mark.anyio
+    async def test_jsonrpc_tool_call_accepts_matching_db_key_wallet(self):
+        registry = get_service_registry()
+
+        def echo_tool(value: str = "ok") -> dict:
+            return {"value": value}
+
+        registry.register_local(
+            service_id="jsonrpc-owned-wallet-echo",
+            name="JSON-RPC Owned Wallet Echo",
+            description="Echo for JSON-RPC auth testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=echo_tool,
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                wallet_id = await self._create_wallet(client, "mcp-wallet-owned")
+                db_headers = await self._create_db_key(client, wallet_id)
+
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-owned-wallet-echo",
+                            "arguments": {"value": "allowed"},
+                            "mcpContext": {"wallet_id": wallet_id},
+                        },
+                    },
+                    headers=db_headers,
+                )
+
+            assert response.status_code == 200
+            body = response.json()
+            assert body["result"]["isError"] is False
+            assert '"allowed"' in body["result"]["content"][0]["text"]
+        finally:
+            registry.unregister_local("jsonrpc-owned-wallet-echo")
+
+    @pytest.mark.anyio
+    async def test_jsonrpc_tool_call_allows_bootstrap_key_for_any_wallet_context(self):
+        registry = get_service_registry()
+
+        def echo_tool(value: str = "ok") -> dict:
+            return {"value": value}
+
+        registry.register_local(
+            service_id="jsonrpc-bootstrap-echo",
+            name="JSON-RPC Bootstrap Echo",
+            description="Echo for JSON-RPC auth testing",
+            category=ServiceCategory.AGENT_COMMS,
+            func=echo_tool,
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/mcp/messages",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "jsonrpc-bootstrap-echo",
+                            "arguments": {"value": "admin"},
+                            "mcpContext": {"wallet_id": "wallet-owned-elsewhere"},
+                        },
+                    },
+                    headers={"X-API-Key": "test-key"},
+                )
+
+            assert response.status_code == 200
+            body = response.json()
+            assert body["result"]["isError"] is False
+            assert '"admin"' in body["result"]["content"][0]["text"]
+        finally:
+            registry.unregister_local("jsonrpc-bootstrap-echo")

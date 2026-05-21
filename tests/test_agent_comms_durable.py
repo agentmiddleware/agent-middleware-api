@@ -12,6 +12,24 @@ from app.main import app
 HEADERS = {"X-API-Key": "test-key"}
 
 
+async def create_wallet_key(client: AsyncClient, name: str) -> dict[str, str]:
+    wallet_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": name, "email": f"{name}@test.example"},
+        headers=HEADERS,
+    )
+    assert wallet_resp.status_code == 201
+    wallet_id = wallet_resp.json()["wallet_id"]
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": name},
+        headers=HEADERS,
+    )
+    assert key_resp.status_code == 201
+    return {"X-API-Key": key_resp.json()["api_key"]}
+
+
 @pytest.fixture(autouse=True)
 def _restore_agent_comms_sim():
     settings = get_settings()
@@ -125,3 +143,38 @@ async def test_simulation_skips_db_row_for_send():
             )
         ).scalar_one_or_none()
     assert row is None
+
+
+@pytest.mark.anyio
+async def test_durable_send_rejects_sender_owned_by_another_key():
+    settings = get_settings()
+    settings.SIMULATION_MODE_AGENT_COMMS = False
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        headers_a = await create_wallet_key(client, "durable-send-a")
+        headers_b = await create_wallet_key(client, "durable-send-b")
+
+        sender = await client.post(
+            "/v1/comms/agents",
+            json={"name": "durable-owned-sender", "capabilities": ["x"]},
+            headers=headers_a,
+        )
+        receiver = await client.post(
+            "/v1/comms/agents",
+            json={"name": "durable-owned-receiver", "capabilities": ["y"]},
+            headers=headers_b,
+        )
+
+        send = await client.post(
+            "/v1/agent-comms/send",
+            json={
+                "from_agent": sender.json()["agent_id"],
+                "to_agent": receiver.json()["agent_id"],
+                "subject": "blocked",
+                "body": {"blocked": True},
+            },
+            headers=headers_b,
+        )
+
+    assert send.status_code == 403

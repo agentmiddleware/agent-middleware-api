@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 
 from ..audit.lightweight import record_audit
@@ -18,6 +18,7 @@ from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_agent_comms
 from ..core.runtime_mode import is_simulation
 from ..services.agent_comms import AgentComms, MessagePriority, MessageType
+from .agent_comms_auth import require_agent_owner
 
 router = APIRouter(
     prefix="/v1/agent-comms",
@@ -83,15 +84,6 @@ def _audit_hash(payload: dict) -> str:
     ).hexdigest()
 
 
-async def _require_inbox_access(auth: AuthContext, comms: AgentComms, agent_id: str) -> None:
-    agent = await comms.registry.get(agent_id)
-    if agent and agent.owner_key and agent.owner_key != auth.raw_key:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "access_denied", "message": "You do not own this agent."},
-        )
-
-
 @router.post(
     "/send",
     response_model=AgentCommsSendResponse,
@@ -103,6 +95,7 @@ async def agent_comms_send(
     auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
+    await require_agent_owner(auth, comms, request.from_agent)
     msg = await comms.send_message(
         from_agent=request.from_agent,
         to_agent=request.to_agent,
@@ -157,7 +150,7 @@ async def agent_comms_inbox(
     auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
-    await _require_inbox_access(auth, comms, agent_id)
+    await require_agent_owner(auth, comms, agent_id)
     audit_basis = {"agent_id": agent_id, "limit": limit, "offset": offset}
     audit_h = _audit_hash(audit_basis)
     rows, total, _ = await comms.list_inbox_for_http(agent_id, limit, offset)
