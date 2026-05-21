@@ -20,6 +20,24 @@ def api_headers():
     return {"X-API-Key": "test-key"}
 
 
+async def create_wallet_key(client, api_headers, name):
+    wallet_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": name, "email": f"{name}@test.example"},
+        headers=api_headers,
+    )
+    assert wallet_resp.status_code == 201
+    wallet_id = wallet_resp.json()["wallet_id"]
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": name},
+        headers=api_headers,
+    )
+    assert key_resp.status_code == 201
+    return {"X-API-Key": key_resp.json()["api_key"]}
+
+
 # --- Agent Registration ---
 
 @pytest.mark.anyio
@@ -125,8 +143,15 @@ async def test_poll_inbox(client, api_headers):
 
 @pytest.mark.anyio
 async def test_handoff_no_agent_found(client, api_headers):
+    sender = await client.post(
+        "/v1/comms/agents",
+        json={"name": "handoff-requester-no-match", "capabilities": ["requesting"]},
+        headers=api_headers,
+    )
+    sender_id = sender.json()["agent_id"]
+
     resp = await client.post(
-        "/v1/comms/handoff?from_agent=some-agent",
+        f"/v1/comms/handoff?from_agent={sender_id}",
         json={
             "capability": "nonexistent-capability",
             "context": {"task": "impossible"},
@@ -139,6 +164,13 @@ async def test_handoff_no_agent_found(client, api_headers):
 
 @pytest.mark.anyio
 async def test_handoff_with_matching_agent(client, api_headers):
+    sender = await client.post(
+        "/v1/comms/agents",
+        json={"name": "handoff-requester", "capabilities": ["requesting"]},
+        headers=api_headers,
+    )
+    sender_id = sender.json()["agent_id"]
+
     # Register specialist
     await client.post(
         "/v1/comms/agents",
@@ -147,7 +179,7 @@ async def test_handoff_with_matching_agent(client, api_headers):
     )
 
     resp = await client.post(
-        "/v1/comms/handoff?from_agent=requester",
+        f"/v1/comms/handoff?from_agent={sender_id}",
         json={
             "capability": "transcription",
             "context": {"video_id": "abc-123"},
@@ -157,3 +189,99 @@ async def test_handoff_with_matching_agent(client, api_headers):
     assert resp.status_code == 200
     assert resp.json()["status"] == "handoff_sent"
     assert resp.json()["target_agent_name"] == "transcriber"
+
+
+@pytest.mark.anyio
+async def test_db_key_cannot_send_as_agent_owned_by_another_key(client, api_headers):
+    headers_a = await create_wallet_key(client, api_headers, "comms-send-a")
+    headers_b = await create_wallet_key(client, api_headers, "comms-send-b")
+
+    sender = await client.post(
+        "/v1/comms/agents",
+        json={"name": "owned-sender", "capabilities": ["sending"]},
+        headers=headers_a,
+    )
+    receiver = await client.post(
+        "/v1/comms/agents",
+        json={"name": "owned-receiver", "capabilities": ["receiving"]},
+        headers=headers_b,
+    )
+
+    resp = await client.post(
+        f"/v1/comms/messages?from_agent={sender.json()['agent_id']}",
+        json={
+            "to_agent": receiver.json()["agent_id"],
+            "message_type": "request",
+            "subject": "Impersonated send",
+            "body": {"blocked": True},
+        },
+        headers=headers_b,
+    )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_db_key_cannot_handoff_as_agent_owned_by_another_key(client, api_headers):
+    headers_a = await create_wallet_key(client, api_headers, "comms-handoff-a")
+    headers_b = await create_wallet_key(client, api_headers, "comms-handoff-b")
+
+    sender = await client.post(
+        "/v1/comms/agents",
+        json={"name": "owned-handoff-sender", "capabilities": ["requesting"]},
+        headers=headers_a,
+    )
+    await client.post(
+        "/v1/comms/agents",
+        json={"name": "handoff-specialist", "capabilities": ["blocked-capability"]},
+        headers=headers_b,
+    )
+
+    resp = await client.post(
+        f"/v1/comms/handoff?from_agent={sender.json()['agent_id']}",
+        json={
+            "capability": "blocked-capability",
+            "context": {"blocked": True},
+        },
+        headers=headers_b,
+    )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_db_key_cannot_ack_agent_inbox_owned_by_another_key(client, api_headers):
+    headers_a = await create_wallet_key(client, api_headers, "comms-ack-a")
+    headers_b = await create_wallet_key(client, api_headers, "comms-ack-b")
+
+    sender = await client.post(
+        "/v1/comms/agents",
+        json={"name": "ack-sender", "capabilities": ["sending"]},
+        headers=headers_a,
+    )
+    receiver = await client.post(
+        "/v1/comms/agents",
+        json={"name": "ack-receiver", "capabilities": ["receiving"]},
+        headers=headers_a,
+    )
+    message = await client.post(
+        f"/v1/comms/messages?from_agent={sender.json()['agent_id']}",
+        json={
+            "to_agent": receiver.json()["agent_id"],
+            "message_type": "request",
+            "subject": "Needs ack",
+            "body": {"ok": True},
+        },
+        headers=headers_a,
+    )
+    assert message.status_code == 202
+
+    resp = await client.post(
+        (
+            f"/v1/comms/messages/{receiver.json()['agent_id']}/ack/"
+            f"{message.json()['message_id']}"
+        ),
+        headers=headers_b,
+    )
+
+    assert resp.status_code == 403

@@ -94,7 +94,10 @@ async def well_known_tools_json() -> JSONResponse:
 
 
 @router.post("/messages", name="MCP JSON-RPC Messages")
-async def handle_messages(request: Request) -> JSONResponse:
+async def handle_messages(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> JSONResponse:
     """
     Handle MCP JSON-RPC messages.
 
@@ -125,7 +128,7 @@ async def handle_messages(request: Request) -> JSONResponse:
 
     elif method == "tools/call":
         try:
-            result = await _handle_tools_call(params)
+            result = await _handle_tools_call(params, auth)
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -133,6 +136,8 @@ async def handle_messages(request: Request) -> JSONResponse:
                     "result": result,
                 }
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"MCP tool call failed: {e}")
             return JSONResponse(
@@ -173,7 +178,7 @@ async def _handle_tools_list(params: dict) -> dict:
     return {"tools": manifest["tools"]}
 
 
-async def _handle_tools_call(params: dict) -> dict:
+async def _handle_tools_call(params: dict, auth: AuthContext) -> dict:
     """
     Handle MCP tools/call request.
 
@@ -195,6 +200,7 @@ async def _handle_tools_call(params: dict) -> dict:
     wallet_id = mcp_context.get("wallet_id")
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
+    auth.require_wallet_access(wallet_id)
 
     ok = False
     err: str | None = None
@@ -235,6 +241,8 @@ async def _handle_tools_call(params: dict) -> dict:
             tool=tool_name,
             wallet_id=wallet_id,
             transport="jsonrpc",
+            auth_source=auth.source,
+            key_id=auth.key_id,
             ok=ok,
             error=err,
         )

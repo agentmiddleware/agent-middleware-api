@@ -12,8 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.dependencies import get_agent_comms
+from .agent_comms_auth import require_agent_owner
 from ..services.agent_comms import (
     AgentComms,
     MessageType,
@@ -154,14 +155,14 @@ class HandoffResponse(BaseModel):
 )
 async def register_agent(
     request: AgentRegistrationRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
     agent = await comms.register_agent(
         name=request.name,
         capabilities=request.capabilities,
         webhook_url=request.webhook_url,
-        owner_key=api_key,
+        owner_key=auth.raw_key,
     )
     return AgentRegistrationResponse(
         agent_id=agent.agent_id,
@@ -227,9 +228,10 @@ async def list_agents(
 async def send_message(
     from_agent: str,
     request: SendMessageRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
+    await require_agent_owner(auth, comms, from_agent)
     msg = await comms.send_message(
         from_agent=from_agent,
         to_agent=request.to_agent,
@@ -265,16 +267,10 @@ async def send_message(
 async def poll_inbox(
     agent_id: str,
     limit: int = Query(50, ge=1, le=200, description="Max messages to return"),
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
-    # RED TEAM FIX: Verify the requesting key owns this agent
-    agent = await comms.registry.get(agent_id)
-    if agent and agent.owner_key and agent.owner_key != api_key:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "access_denied", "message": "You do not own this agent."},
-        )
+    await require_agent_owner(auth, comms, agent_id)
     messages = await comms.router.poll(agent_id, limit=limit)
     return {
         "agent_id": agent_id,
@@ -304,9 +300,10 @@ async def poll_inbox(
 async def acknowledge_message(
     agent_id: str,
     message_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
+    await require_agent_owner(auth, comms, agent_id)
     acked = await comms.router.acknowledge(agent_id, message_id)
     if not acked:
         raise HTTPException(
@@ -333,9 +330,10 @@ async def acknowledge_message(
 async def request_handoff(
     from_agent: str,
     request: HandoffRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     comms: AgentComms = Depends(get_agent_comms),
 ):
+    await require_agent_owner(auth, comms, from_agent)
     msg = await comms.request_handoff(
         from_agent=from_agent,
         capability=request.capability,
