@@ -10,5 +10,10 @@ repos:
     rev: v1.14.0
     hooks:
       - id: mypy
-        args: [--config-file=mypy.ini, app/]
-        additional_dependencies: [types-all]
+        args: [--config-file=mypy.ini]
+        additional_dependencies:
+          - types-PyYAML
+          - types-requests
+          - types-python-dateutil
+          - types-redis
+          - types-passlib

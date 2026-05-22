@@ -5,8 +5,9 @@ Defines normalized tables for wallets, ledger entries, and billing alerts.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
+from sqlalchemy import Column, JSON
 from sqlmodel import SQLModel, Field
 
 
@@ -16,6 +17,7 @@ class WalletModel(SQLModel, table=True):
 
     Uses Decimal for all monetary fields to avoid floating-point errors.
     """
+
     __tablename__ = "wallets"
 
     wallet_id: str = Field(primary_key=True, max_length=50)
@@ -80,6 +82,7 @@ class LedgerEntryModel(SQLModel, table=True):
 
     All amounts are Decimal. Positive = credit, negative = debit.
     """
+
     __tablename__ = "ledger_entries"
 
     entry_id: str = Field(primary_key=True, max_length=50)
@@ -125,6 +128,7 @@ class BillingAlertModel(SQLModel, table=True):
     """
     Billing alert table for tracking wallet warnings and notifications.
     """
+
     __tablename__ = "billing_alerts"
 
     alert_id: str = Field(primary_key=True, max_length=50)
@@ -145,6 +149,7 @@ class DailyBalanceSnapshot(SQLModel, table=True):
     """
     Daily balance snapshots for reporting and auditing.
     """
+
     __tablename__ = "daily_balance_snapshots"
 
     snapshot_id: str = Field(primary_key=True, max_length=50)
@@ -167,6 +172,7 @@ class ServiceRegistryModel(SQLModel, table=True):
     Allows external developers to register billable services that agents
     can discover and pay for using the B2A billing infrastructure.
     """
+
     __tablename__ = "service_registry"
 
     service_id: str = Field(primary_key=True, max_length=100)
@@ -196,6 +202,7 @@ class KYCVerificationModel(SQLModel, table=True):
     Tracks Stripe Identity verification sessions and their status.
     Only verified wallets can perform fiat top-ups.
     """
+
     __tablename__ = "kyc_verifications"
 
     verification_id: str = Field(primary_key=True, max_length=100)
@@ -230,6 +237,7 @@ class APIKeyModel(SQLModel, table=True):
     Supports multiple keys per wallet with rotation tracking.
     Keys can be rotated manually or automatically on suspicious activity.
     """
+
     __tablename__ = "api_keys"
 
     key_id: str = Field(primary_key=True, max_length=50)
@@ -271,6 +279,7 @@ class TelemetryEventModel(SQLModel, table=True):
     fidelity — any field the application cares to filter on is promoted
     to a dedicated column for indexability.
     """
+
     __tablename__ = "telemetry_events"
 
     event_id: str = Field(primary_key=True, max_length=50)
@@ -297,6 +306,7 @@ class TelemetryEventModel(SQLModel, table=True):
 
 class IoTDeviceModel(SQLModel, table=True):
     """Registered IoT device state for the protocol bridge."""
+
     __tablename__ = "iot_devices"
 
     device_id: str = Field(primary_key=True, max_length=100)
@@ -315,6 +325,7 @@ class IoTDeviceModel(SQLModel, table=True):
 
 class IoTDeviceEventModel(SQLModel, table=True):
     """Append-only audit event for IoT bridge registry and message activity."""
+
     __tablename__ = "iot_device_events"
 
     event_id: str = Field(primary_key=True, max_length=64)
@@ -330,6 +341,7 @@ class IoTDeviceEventModel(SQLModel, table=True):
 
 class OracleCrawlTargetModel(SQLModel, table=True):
     """Crawl target lifecycle row (pending → crawling → indexed|failed)."""
+
     __tablename__ = "oracle_crawl_targets"
 
     target_id: str = Field(primary_key=True, max_length=64)
@@ -347,6 +359,7 @@ class OracleCrawlTargetModel(SQLModel, table=True):
 
 class OracleIndexedAPIModel(SQLModel, table=True):
     """An indexed external API with compatibility metadata."""
+
     __tablename__ = "oracle_indexed_apis"
 
     api_id: str = Field(primary_key=True, max_length=64)
@@ -367,6 +380,7 @@ class OracleIndexedAPIModel(SQLModel, table=True):
 
 class OracleRegistrationModel(SQLModel, table=True):
     """One row per attempt to register our API in an external directory."""
+
     __tablename__ = "oracle_registrations"
 
     registration_id: str = Field(primary_key=True, max_length=64)
@@ -382,6 +396,7 @@ class OracleRegistrationModel(SQLModel, table=True):
 
 class OracleDiscoveryHitModel(SQLModel, table=True):
     """One row per inbound discovery hit for top-referrer aggregation."""
+
     __tablename__ = "oracle_discovery_hits"
 
     hit_id: str = Field(primary_key=True, max_length=64)
@@ -417,6 +432,7 @@ class AgentCommsMessageModel(SQLModel, table=True):
 
 class SecurityScanModel(SQLModel, table=True):
     """Shared scan table for red_team (internal) and rtaas (external)."""
+
     __tablename__ = "security_scans"
 
     scan_id: str = Field(primary_key=True, max_length=64)
@@ -445,6 +461,7 @@ class SecurityScanModel(SQLModel, table=True):
 
 class SecurityVulnerabilityModel(SQLModel, table=True):
     """Shared vulnerability rows for both scan types."""
+
     __tablename__ = "security_vulnerabilities"
 
     vuln_id: str = Field(primary_key=True, max_length=64)
@@ -475,6 +492,7 @@ class SecurityVulnerabilityModel(SQLModel, table=True):
 
 class ContentPipelineModel(SQLModel, table=True):
     """Content factory pipeline instance."""
+
     __tablename__ = "content_pipelines"
 
     pipeline_id: str = Field(primary_key=True, max_length=64)
@@ -498,6 +516,7 @@ class ContentPipelineModel(SQLModel, table=True):
 
 class ContentPieceModel(SQLModel, table=True):
     """One generated content piece. download_url holds the blob ref."""
+
     __tablename__ = "content_pieces"
 
     content_id: str = Field(primary_key=True, max_length=64)
@@ -524,6 +543,7 @@ class ContentPieceModel(SQLModel, table=True):
 
 class ContentCampaignModel(SQLModel, table=True):
     """Top-level live campaign linking many pipelines + hooks."""
+
     __tablename__ = "content_campaigns"
 
     campaign_id: str = Field(primary_key=True, max_length=64)
@@ -541,6 +561,7 @@ class ContentCampaignModel(SQLModel, table=True):
 
 class ContentScheduleModel(SQLModel, table=True):
     """Persisted scheduler recommendations."""
+
     __tablename__ = "content_schedules"
 
     schedule_id: str = Field(primary_key=True, max_length=64)
@@ -584,6 +605,7 @@ class KeyRotationLogModel(SQLModel, table=True):
 
     Tracks rotation history for security auditing and compliance.
     """
+
     __tablename__ = "key_rotation_logs"
 
     log_id: str = Field(primary_key=True, max_length=50)
@@ -619,10 +641,12 @@ class OptimizerTelemetryModel(SQLModel, table=True):
     task_id: Optional[str] = Field(default=None, max_length=100, index=True)
     request_id: Optional[str] = Field(default=None, max_length=100, index=True)
     endpoint: str = Field(max_length=128, index=True)
-    action_features: Optional[str] = Field(default=None)
+    action_features: Optional[dict[str, Any]] = Field(
+        default=None, sa_column=Column(JSON)
+    )
     latency_ms: Optional[int] = Field(default=None)
     credits_delta: Optional[Decimal] = Field(default=None, decimal_places=8)
     success: bool = Field(default=True)
     error_class: Optional[str] = Field(default=None, max_length=64)
-    risk_flags: Optional[str] = Field(default=None)
+    risk_flags: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     payload_hash: Optional[str] = Field(default=None, max_length=64, index=True)

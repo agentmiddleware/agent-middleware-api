@@ -40,3 +40,7 @@ Thumbs.db
 
 # Docker
 *.log
+
+# cwinit
+.overmind.sock
+.envrc.local

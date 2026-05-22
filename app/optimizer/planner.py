@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from typing import Any
 
 from app.optimizer.policy import get_risk_budget, is_admissible
 from app.schemas.optimizer import OptimizerRequest, OptimizerState
 
-try:
-    import pulp
-except Exception:  # pragma: no cover
-    pulp = None
+
+def _get_pulp_module() -> Any | None:
+    if importlib.util.find_spec("pulp") is None:
+        return None
+    return importlib.import_module("pulp")
 
 
 def _score(action: dict[str, Any], lambdas: dict[str, float]) -> float:
@@ -20,7 +23,14 @@ def _score(action: dict[str, Any], lambdas: dict[str, float]) -> float:
     )
 
 
-def _pack_response(status: str, selected: list[dict], rejected: list[dict], state: OptimizerState, risk_budget: float, lambdas: dict[str, float]) -> dict:
+def _pack_response(
+    status: str,
+    selected: list[dict],
+    rejected: list[dict],
+    state: OptimizerState,
+    risk_budget: float,
+    lambdas: dict[str, float],
+) -> dict:
     total_cost = sum(a.get("credit_cost", 0.0) for a in selected)
     total_latency = sum(a.get("latency_ms", 0.0) for a in selected)
     total_risk = sum(a.get("risk_score", 0.0) for a in selected)
@@ -43,7 +53,13 @@ def _pack_response(status: str, selected: list[dict], rejected: list[dict], stat
     }
 
 
-def _greedy_heuristic(candidates: list[dict], state: OptimizerState, risk_budget: float, max_actions: int, lambdas: dict[str, float]) -> list[dict]:
+def _greedy_heuristic(
+    candidates: list[dict],
+    state: OptimizerState,
+    risk_budget: float,
+    max_actions: int,
+    lambdas: dict[str, float],
+) -> list[dict]:
     scored = sorted(candidates, key=lambda a: _score(a, lambdas), reverse=True)
     selected: list[dict] = []
     total_cost = 0.0
@@ -68,7 +84,11 @@ def _greedy_heuristic(candidates: list[dict], state: OptimizerState, risk_budget
     return selected
 
 
-def optimize_action_set(state: OptimizerState, candidates: list[dict], req: OptimizerRequest) -> dict:
+def optimize_action_set(
+    state: OptimizerState,
+    candidates: list[dict],
+    req: OptimizerRequest,
+) -> dict:
     lambdas = {"cost": 0.8, "latency": 0.3, "risk": 2.0}
     if req.objective_overrides:
         for k in lambdas:
@@ -89,25 +109,52 @@ def optimize_action_set(state: OptimizerState, candidates: list[dict], req: Opti
     if not admissible:
         return _pack_response("Infeasible", [], rejected, state, risk_budget, lambdas)
 
-    max_actions = 5 if req.max_actions is None else req.max_actions
+    max_actions = req.max_actions or 5
 
+    pulp = _get_pulp_module()
     if pulp is not None:
-        try:
-            prob = pulp.LpProblem("AgentPlanner", pulp.LpMaximize)
-            x = {i: pulp.LpVariable(f"x_{i}", cat="Binary") for i in range(len(admissible))}
-            prob += pulp.lpSum(x[i] * _score(action, lambdas) for i, action in enumerate(admissible))
-            prob += pulp.lpSum(x[i] * action.get("credit_cost", 0.0) for i, action in enumerate(admissible)) <= state.remaining_budget
-            prob += pulp.lpSum(x[i] * action.get("latency_ms", 0.0) for i, action in enumerate(admissible)) <= state.slo_window_seconds * 1000
-            prob += pulp.lpSum(x[i] * action.get("risk_score", 0.0) for i, action in enumerate(admissible)) <= risk_budget
-            prob += pulp.lpSum(x[i] for i in range(len(admissible))) <= max_actions
-            status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
-            if pulp.LpStatus[status] == "Optimal":
-                selected = [admissible[i] for i in range(len(admissible)) if x[i].value() and x[i].value() > 0.5]
-                if selected:
-                    return _pack_response("Optimal", selected, rejected, state, risk_budget, lambdas)
-                return _pack_response("Infeasible", [], rejected, state, risk_budget, lambdas)
-        except Exception:
-            pass
+        prob = pulp.LpProblem("AgentPlanner", pulp.LpMaximize)
+        x = {i: pulp.LpVariable(f"x_{i}", cat="Binary") for i in range(len(admissible))}
+        prob += pulp.lpSum(
+            x[i] * _score(action, lambdas) for i, action in enumerate(admissible)
+        )
+        prob += (
+            pulp.lpSum(
+                x[i] * action.get("credit_cost", 0.0)
+                for i, action in enumerate(admissible)
+            )
+            <= state.remaining_budget
+        )
+        prob += (
+            pulp.lpSum(
+                x[i] * action.get("latency_ms", 0.0)
+                for i, action in enumerate(admissible)
+            )
+            <= state.slo_window_seconds * 1000
+        )
+        prob += (
+            pulp.lpSum(
+                x[i] * action.get("risk_score", 0.0)
+                for i, action in enumerate(admissible)
+            )
+            <= risk_budget
+        )
+        prob += pulp.lpSum(x[i] for i in range(len(admissible))) <= max_actions
+        status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        if pulp.LpStatus[status] == "Optimal":
+            selected = [
+                admissible[i]
+                for i in range(len(admissible))
+                if x[i].value() and x[i].value() > 0.5
+            ]
+            return _pack_response(
+                "Optimal",
+                selected,
+                rejected,
+                state,
+                risk_budget,
+                lambdas,
+            )
 
     selected = _greedy_heuristic(admissible, state, risk_budget, max_actions, lambdas)
     status = "HeuristicFallback" if selected else "Infeasible"
