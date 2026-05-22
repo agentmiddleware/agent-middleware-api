@@ -249,3 +249,37 @@ async def test_mcp_tool_call_allowed_with_valid_permit(client, monkeypatch):
     body = resp.json()
     assert "error" in body
     assert "not found" in body["error"]["message"].lower()
+
+
+@pytest.mark.anyio
+async def test_http_invoke_path_also_enforces_permit(client, monkeypatch):
+    """The HTTP invoke endpoint must enforce permits too — not just JSON-RPC —
+    so PERMITS_ENFORCED cannot be bypassed by choosing the other path."""
+    from app.schemas.billing import ServiceCategory
+    from app.services.service_registry import get_service_registry
+
+    monkeypatch.setattr(mcp_module, "_permit_enforcement_enabled", lambda: True)
+    get_service_registry().register_local(
+        service_id="echo-tool",
+        name="Echo",
+        description="echo",
+        category=ServiceCategory.PLATFORM_FEE,
+        func=lambda **kw: {"ok": True},
+        credits_per_unit=1.0,
+    )
+    body = {"name": "echo-tool", "arguments": {}, "mcp_context": {"wallet_id": "w1"}}
+
+    denied = await client.post(
+        "/mcp/tools/echo-tool/invoke", json=body, headers={"X-API-Key": "test-key"}
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["error"] == "permit_denied"
+
+    token = get_permit_service().issue(wallet_id="w1", scope=["echo-tool"])["permit"]
+    allowed = await client.post(
+        "/mcp/tools/echo-tool/invoke",
+        json=body,
+        headers={"X-API-Key": "test-key", "X-Agent-Permit": token},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["isError"] is False

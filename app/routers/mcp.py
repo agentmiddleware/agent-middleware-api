@@ -284,6 +284,7 @@ async def _handle_tools_call(
 async def invoke_tool(
     service_id: str,
     request: ToolCallRequest,
+    raw_request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> ToolCallResponse:
     """
@@ -291,9 +292,10 @@ async def invoke_tool(
 
     This endpoint:
     1. Verifies the API key
-    2. Routes the call through the billing layer
-    3. Executes the service function (local) or forwards to API (persistent)
-    4. Returns the result
+    2. Enforces a capability permit when PERMITS_ENFORCED is set
+    3. Routes the call through the billing layer
+    4. Executes the service function (local) or forwards to API (persistent)
+    5. Returns the result
 
     For persistent services, see POST /v1/billing/services/{id}/invoke
     """
@@ -314,6 +316,26 @@ async def invoke_tool(
     if not mcp_context.wallet_id:
         raise HTTPException(status_code=400, detail="Missing wallet_id")
     auth.require_wallet_access(mcp_context.wallet_id)
+
+    if _permit_enforcement_enabled():
+        tool_cost = (
+            float(service.get("credits_per_unit", 1.0))
+            if isinstance(service, dict)
+            else 1.0
+        )
+        permit_token = raw_request.headers.get(get_settings().PERMIT_HEADER)
+        try:
+            await require_permit_for_tool(
+                permit_token,
+                wallet_id=mcp_context.wallet_id,
+                tool_name=service_id,
+                cost=tool_cost,
+            )
+        except PermitError as exc:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "permit_denied", "reason": str(exc)},
+            )
 
     func = registry.get_local_func(service_id)
     if func:

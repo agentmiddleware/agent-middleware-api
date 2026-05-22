@@ -6772,7 +6772,7 @@
           "MCP"
         ],
         "summary": "Invoke a registered MCP tool",
-        "description": "Invoke an MCP-enabled service.\n\nThis endpoint:\n1. Verifies the API key\n2. Routes the call through the billing layer\n3. Executes the service function (local) or forwards to API (persistent)\n4. Returns the result\n\nFor persistent services, see POST /v1/billing/services/{id}/invoke",
+        "description": "Invoke an MCP-enabled service.\n\nThis endpoint:\n1. Verifies the API key\n2. Enforces a capability permit when PERMITS_ENFORCED is set\n3. Routes the call through the billing layer\n4. Executes the service function (local) or forwards to API (persistent)\n5. Returns the result\n\nFor persistent services, see POST /v1/billing/services/{id}/invoke",
         "operationId": "Invoke_MCP_Tool_mcp_tools__service_id__invoke_post",
         "security": [
           {
