@@ -128,6 +128,18 @@ class ReceiptEvidenceResponse(BaseModel):
     ledger_entry: dict[str, Any] | None = None
 
 
+class EvidenceBundleResponse(BaseModel):
+    """Flat, buyer-facing trust artifact for a single receipt."""
+
+    receipt_id: str
+    valid: bool
+    receipt: ReceiptResponse
+    permit: PermitResponse | None = None
+    ledger_entry: dict[str, Any] | None = None
+    audit_event: dict[str, Any] | None = None
+    verification: dict[str, str] = Field(default_factory=dict)
+
+
 class TrustMcpMetadata(BaseModel):
     permit_id: str | None = None
     receipt_id: str | None = None

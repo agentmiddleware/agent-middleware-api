@@ -9537,6 +9537,54 @@
         ]
       }
     },
+    "/v1/evidence/{receipt_id}": {
+      "get": {
+        "tags": [
+          "Trust / Evidence"
+        ],
+        "summary": "Buyer-facing trust evidence bundle",
+        "description": "Returns the single, verifiable artifact for a receipt: the signed receipt, its permit, the linked ledger entry and audit event, and a `verification` map (receipt signature, permit signature, audit chain, request hash). This is the artifact a buyer can hand to an auditor.",
+        "operationId": "get_evidence_bundle_v1_evidence__receipt_id__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Receipt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceBundleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/webhooks/stripe": {
       "post": {
         "tags": [
@@ -16239,6 +16287,70 @@
         ],
         "title": "EvaluationResponse",
         "description": "Final generalization score for a completed environment."
+      },
+      "EvidenceBundleResponse": {
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "title": "Receipt Id"
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/ReceiptResponse"
+          },
+          "permit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermitResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ledger_entry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledger Entry"
+          },
+          "audit_event": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Event"
+          },
+          "verification": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "receipt_id",
+          "valid",
+          "receipt"
+        ],
+        "title": "EvidenceBundleResponse",
+        "description": "Flat, buyer-facing trust artifact for a single receipt."
       },
       "ExecutionStatus": {
         "type": "string",

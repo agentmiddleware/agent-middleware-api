@@ -8,9 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.auth import AuthContext, get_auth_context
 from app.schemas.audit import AuditEventListResponse, AuditEventResponse
 from app.schemas.trust import PermitListResponse, ReceiptListResponse
-from app.services.audit_log import count_audit_events, list_audit_events
-from app.services.permits import get_permit_service
-from app.services.receipts import get_receipt_service
+from app.trust import (
+    count_audit_events,
+    get_permit_service,
+    get_receipt_service,
+    list_audit_events,
+)
 
 router = APIRouter(prefix="/v1/me", tags=["Agent Self Inspection"])
 

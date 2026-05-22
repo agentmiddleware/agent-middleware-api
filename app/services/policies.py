@@ -135,32 +135,61 @@ async def patch_policy_bundle(
     return _to_response(row)
 
 
+def _as_decimal(value: float | int | Decimal | None) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
 async def evaluate_wallet_policy(
     *,
     wallet_id: str,
     tool_name: str | None = None,
     service_category: str | None = None,
-    estimated_cost: float | None = None,
-    daily_spend_used: float | None = None,
+    estimated_cost: float | Decimal | None = None,
+    daily_spend_used: float | Decimal | None = None,
     simulation: bool | None = None,
     risk_tier: str | None = None,
 ) -> PolicyEvaluation:
-    policies = [
-        policy
-        for policy in await list_policy_bundles(wallet_id=wallet_id)
-        if policy.is_active
-    ]
-    if not policies:
+    stmt = (
+        select(PolicyBundleModel)
+        .where(
+            PolicyBundleModel.wallet_id == wallet_id,
+            PolicyBundleModel.is_active == True,  # noqa: E712
+        )
+        .order_by(PolicyBundleModel.created_at)
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        models = (await session.execute(stmt)).scalars().all()
+    if not models:
         return PolicyEvaluation(True, "allowed", None, {"policy_count": 0})
 
+    # Money comparisons are done in Decimal end-to-end; thresholds are stored as
+    # Decimal and the incoming cost is normalized rather than compared as float.
+    est = _as_decimal(estimated_cost)
+    daily = _as_decimal(daily_spend_used)
+
     evaluated: list[dict[str, Any]] = []
-    for policy in policies:
+    for policy in models:
+        allowed_tools = _decode_list(policy.allowed_tools_json)
+        allowed_categories = _decode_list(policy.allowed_service_categories_json)
         constraints = {
             "policy_id": policy.policy_id,
-            "allowed_tools": policy.allowed_tools,
-            "allowed_service_categories": policy.allowed_service_categories,
-            "max_cost_per_action": policy.max_cost_per_action,
-            "daily_spend_limit": policy.daily_spend_limit,
+            "allowed_tools": allowed_tools,
+            "allowed_service_categories": allowed_categories,
+            "max_cost_per_action": (
+                float(policy.max_cost_per_action)
+                if policy.max_cost_per_action is not None
+                else None
+            ),
+            "daily_spend_limit": (
+                float(policy.daily_spend_limit)
+                if policy.daily_spend_limit is not None
+                else None
+            ),
             "require_real_effects": policy.require_real_effects,
             "risk_tier": policy.risk_tier,
             "human_approval_required": policy.human_approval_required,
@@ -168,24 +197,21 @@ async def evaluate_wallet_policy(
         evaluated.append(constraints)
         if policy.human_approval_required:
             return PolicyEvaluation(False, "human_approval_required", policy.policy_id, {"evaluated": evaluated})
-        if policy.allowed_tools is not None and tool_name not in policy.allowed_tools:
+        if allowed_tools is not None and tool_name not in allowed_tools:
             return PolicyEvaluation(False, "tool_not_allowed", policy.policy_id, {"evaluated": evaluated})
-        if (
-            policy.allowed_service_categories is not None
-            and service_category not in policy.allowed_service_categories
-        ):
+        if allowed_categories is not None and service_category not in allowed_categories:
             return PolicyEvaluation(False, "service_category_not_allowed", policy.policy_id, {"evaluated": evaluated})
         if (
             policy.max_cost_per_action is not None
-            and estimated_cost is not None
-            and estimated_cost > policy.max_cost_per_action
+            and est is not None
+            and est > policy.max_cost_per_action
         ):
             return PolicyEvaluation(False, "max_cost_per_action_exceeded", policy.policy_id, {"evaluated": evaluated})
         if (
             policy.daily_spend_limit is not None
-            and daily_spend_used is not None
-            and estimated_cost is not None
-            and daily_spend_used + estimated_cost > policy.daily_spend_limit
+            and daily is not None
+            and est is not None
+            and daily + est > policy.daily_spend_limit
         ):
             return PolicyEvaluation(False, "daily_spend_limit_exceeded", policy.policy_id, {"evaluated": evaluated})
         if policy.require_real_effects and simulation:
@@ -193,4 +219,4 @@ async def evaluate_wallet_policy(
         if risk_tier is not None and policy.risk_tier != risk_tier:
             constraints["requested_risk_tier"] = risk_tier
 
-    return PolicyEvaluation(True, "allowed", policies[0].policy_id, {"evaluated": evaluated})
+    return PolicyEvaluation(True, "allowed", models[0].policy_id, {"evaluated": evaluated})

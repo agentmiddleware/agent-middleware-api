@@ -14,6 +14,37 @@
 
 > **Production beta — agent-discoverable, not production complete.** Built on arXiv:2506.10953v1.
 
+**Agent Middleware API is a protocol-neutral trust plane for autonomous agent actions.** It lets agents discover tools, receive bounded authority, invoke tools through governed adapters, meter spend, generate signed receipts, and produce tamper-evident audit trails.
+
+## Core platform vs. example workloads
+
+The product is the trust plane. Everything else is a workload that exercises it.
+
+| Core platform (the product) | Example workloads (proof surfaces) |
+|-----------------------------|------------------------------------|
+| Trust plane (`app/trust/`)  | AWI                                |
+| Governed invocation (adapters) | Content factory                 |
+| Receipts                    | Sandbox                            |
+| Audit                       | Oracle                             |
+| Metering                    | Media                              |
+|                             | IoT                                |
+
+The frozen product spine is:
+
+```text
+permits -> governed invocation -> idempotency -> wallet ledger (metering) -> receipts -> audit verification -> discovery
+```
+
+`app/trust/` is the package boundary for that spine: `signing`, `permits`,
+`receipts`, `audit_chain`, `idempotency`, `policy`, `metering`, `evidence`, and
+the protocol-neutral `adapters` (`GovernedInvocationAdapter`). The core trust
+routers consume the spine through this facade, and an architectural test
+(`tests/test_trust_boundary.py`) enforces that the core depends only inward —
+never on routers or example workloads. MCP is the first adapter
+(`McpGovernedAdapter`) and the live `/mcp` request path runs through it; other
+protocols (AWI, browser, WebMCP) can be added by implementing the same
+interface.
+
 **Product:** Agent Middleware API is narrowing around an MCP governance and metering layer for agent tool calls. The current spine is wallet-scoped auth, billing, MCP invocation, signed permits, signed receipts, replay protection, and audit.
 
 **Platform:** A self-hostable infrastructure layer for wallet-scoped agents that need to discover capabilities, authenticate, invoke tools, meter usage, and operate inside enforceable boundaries.
@@ -32,19 +63,26 @@ Everything else in this repository exists to strengthen that loop or prove it in
 
 ### Trust Plane Demo
 
-Run the concrete local proof:
+Run the one-command, end-to-end proof:
 
 ```bash
-make demo-trust-plane
+make prove-trust-plane   # asserts the full loop; alias-friendly: make demo-trust-plane
 ```
 
-This creates a sponsor wallet, provisions an agent wallet and API key, issues a
-signed permit for one MCP tool, invokes that tool through governed MCP, charges
-the wallet once, returns a signed receipt, verifies the audit chain, proves
-idempotent replay, inspects the receipt evidence bundle, and denies an
-out-of-scope tool with a denial receipt. The
-sample proof artifact is in
+It proves, in a single run: (1) an agent discovers a tool, (2) a signed permit
+is issued, (3) a valid governed MCP call succeeds, (4) the wallet is charged
+once, (5) a receipt is signed, (6) the audit chain verifies, (7) replay returns
+the same receipt without a second charge, (8) an out-of-scope tool is denied,
+and (9) a tampered receipt and a tampered audit event both fail verification.
+It also inspects the buyer-facing evidence bundle at `GET /v1/evidence/{receipt_id}`.
+The sample proof artifact is in
 [`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md).
+
+Run the test suite with:
+
+```bash
+make test
+```
 
 For an operator-style walkthrough that prints the full control-plane timeline:
 
@@ -98,7 +136,7 @@ Before assuming real side effects, call `GET /health/dependencies` and read `sim
 - **Signed authorization** — `/v1/permits` issues Ed25519-signed tool permits with scopes, wallet binding, budget, expiry, nonce, and revocation.
 - **Policy-constrained execution** — MCP invocation can require signed permits and idempotency keys before billable tool calls.
 - **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
-- **Receipts and audit** — `/v1/receipts` verifies signed action receipts, `/v1/receipts/{receipt_id}/evidence` checks linked permit, ledger, and audit artifacts, and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
+- **Receipts and audit** — `/v1/receipts` verifies signed action receipts, `/v1/receipts/{receipt_id}/evidence` checks linked permit, ledger, and audit artifacts, `/v1/evidence/{receipt_id}` returns the flat buyer-facing evidence bundle (`receipt`, `permit`, `ledger_entry`, `audit_event`, and a `verification` map), and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
 - **Governance and readiness** — telemetry, dependency health, security posture, and operator preflight checks.
 
 ### Proof-of-usefulness surfaces
@@ -173,6 +211,7 @@ Not part of the autonomous-client contract — for people running this service:
 | Billing                  | `/v1/billing`     | Yes     | Yes          | Yes           |
 | Permits                  | `/v1/permits`     | Yes     | Yes          | Yes           |
 | Trust Receipts           | `/v1/receipts`    | Yes     | Yes          | Yes           |
+| Trust Evidence           | `/v1/evidence`    | Yes     | Yes          | Yes           |
 | Audit                    | `/v1/audit`       | Yes     | Yes          | Yes           |
 | Stripe Webhooks          | `/webhooks/stripe`| -       | -            | Yes           |
 | Telemetry                | `/v1/telemetry`   | Yes     | Yes          | Yes           |

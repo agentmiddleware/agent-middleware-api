@@ -96,12 +96,14 @@ async def _enforce_billing_policy(
     request_id: str | None,
     money: AgentMoney,
 ) -> tuple[float, str | None, dict]:
-    estimated_cost = float(Decimal(str(units)) * DEFAULT_PRICING[category][1])
+    cost = Decimal(str(units)) * DEFAULT_PRICING[category][1]
+    estimated_cost = float(cost)
     policy = await evaluate_wallet_policy(
         wallet_id=wallet_id,
         tool_name="billing",
         service_category=category.value,
-        estimated_cost=estimated_cost,
+        estimated_cost=cost,
+        daily_spend_used=await money.get_daily_spend(wallet_id),
         simulation=False,
     )
     if not policy.allowed:

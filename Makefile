@@ -1,4 +1,10 @@
-.PHONY: demo-trust-plane demo-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate
+.PHONY: test prove-trust-plane demo-trust-plane demo-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate
+
+test:
+	uv run pytest tests/ -q
+
+prove-trust-plane:
+	uv run python scripts/demo_trust_plane.py --assert
 
 demo-trust-plane:
 	uv run python scripts/demo_trust_plane.py

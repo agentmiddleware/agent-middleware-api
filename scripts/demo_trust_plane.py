@@ -41,9 +41,13 @@ def configure_environment() -> None:
 configure_environment()
 sys.path.insert(0, str(ROOT))
 
-from httpx import ASGITransport, AsyncClient  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-from app.db.database import close_db, init_db  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+
+from app.db.database import close_db, get_session_factory, init_db  # noqa: E402
+from app.db.models import ControlPlaneAuditEventModel, ReceiptModel  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas.billing import ServiceCategory  # noqa: E402
 from app.services.service_registry import get_service_registry  # noqa: E402
@@ -140,6 +144,35 @@ def unregister_demo_tools() -> None:
     registry = get_service_registry()
     registry.unregister_local(ALLOWED_TOOL)
     registry.unregister_local(BLOCKED_TOOL)
+
+
+async def _tamper_receipt(receipt_id: str) -> None:
+    """Mutate a signed field on a stored receipt so its signature no longer holds."""
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(ReceiptModel).where(ReceiptModel.receipt_id == receipt_id)
+        )
+        receipt = result.scalar_one()
+        receipt.credits_charged = receipt.credits_charged + Decimal("999")
+        session.add(receipt)
+        await session.commit()
+
+
+async def _tamper_audit_event(wallet_id: str) -> None:
+    """Mutate a stored audit event's payload so the chain hash no longer matches."""
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(ControlPlaneAuditEventModel)
+            .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+            .order_by(ControlPlaneAuditEventModel.created_at)
+        )
+        event = result.scalars().first()
+        require(event is not None, "no audit event to tamper")
+        event.metadata_json = '{"tampered": true}'
+        session.add(event)
+        await session.commit()
 
 
 def build_mcp_call(
@@ -345,7 +378,9 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 headers=agent_headers,
                 expected_status=200,
             )
-            require(receipt_list["total"] == 1, f"receipt filter failed: {receipt_list}")
+            require(
+                receipt_list["total"] == 1, f"receipt filter failed: {receipt_list}"
+            )
             permit_receipts = await get_json(
                 client,
                 f"/v1/permits/{permit['permit_id']}/receipts",
@@ -365,7 +400,8 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 expected_status=200,
             )
             echo_debits = [
-                entry for entry in ledger["entries"]
+                entry
+                for entry in ledger["entries"]
                 if entry["service_category"] == "agent_comms"
                 and ALLOWED_TOOL in entry.get("description", "")
             ]
@@ -434,7 +470,8 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 expected_status=200,
             )
             echo_debits_after_replay = [
-                entry for entry in ledger_after_replay["entries"]
+                entry
+                for entry in ledger_after_replay["entries"]
                 if entry["service_category"] == "agent_comms"
                 and ALLOWED_TOOL in entry.get("description", "")
             ]
@@ -494,6 +531,69 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 f"cross-wallet read was not denied: {cross_wallet.text}",
             )
 
+            step("inspecting buyer-facing evidence bundle")
+            bundle = await get_json(
+                client,
+                f"/v1/evidence/{receipt['receipt_id']}",
+                headers=agent_headers,
+                expected_status=200,
+            )
+            require(bundle["valid"] is True, f"evidence bundle invalid: {bundle}")
+            verification = bundle["verification"]
+            for field_name in (
+                "receipt_signature",
+                "permit_signature",
+                "audit_chain",
+                "request_hash",
+            ):
+                require(
+                    verification.get(field_name) == "ok",
+                    f"evidence verification {field_name} not ok: {verification}",
+                )
+            require(
+                bundle["permit"]["permit_id"] == permit["permit_id"],
+                f"evidence bundle missing permit linkage: {bundle}",
+            )
+            require(
+                bundle["ledger_entry"]
+                and bundle["ledger_entry"]["entry_id"] == receipt["ledger_entry_id"],
+                f"evidence bundle missing ledger linkage: {bundle}",
+            )
+
+            # The remaining proofs mutate stored rows, so they run last on the
+            # throwaway demo database.
+            step("proving a tampered receipt fails verification")
+            await _tamper_receipt(receipt["receipt_id"])
+            tampered_receipt_check = await post_json(
+                client,
+                "/v1/receipts/verify",
+                headers=admin_headers,
+                expected_status=200,
+                json_body={"receipt_id": receipt["receipt_id"]},
+            )
+            require(
+                tampered_receipt_check["valid"] is False,
+                f"tampered receipt still verified: {tampered_receipt_check}",
+            )
+            require(
+                tampered_receipt_check["reason"] == "receipt_signature_invalid",
+                f"unexpected tampered-receipt reason: {tampered_receipt_check}",
+            )
+
+            step("proving a tampered audit event fails chain verification")
+            await _tamper_audit_event(agent_wallet_id)
+            tampered_audit_check = await post_json(
+                client,
+                "/v1/audit/verify-chain",
+                headers=admin_headers,
+                expected_status=200,
+                json_body={"wallet_id": agent_wallet_id},
+            )
+            require(
+                tampered_audit_check["valid"] is False,
+                f"tampered audit chain still verified: {tampered_audit_check}",
+            )
+
             summary = {
                 "sponsor_wallet_id": sponsor_wallet_id,
                 "agent_wallet_id": agent_wallet_id,
@@ -512,6 +612,11 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 ],
                 "denial_reason": denial_error["message"],
                 "cross_wallet_status": cross_wallet.status_code,
+                "evidence_bundle_valid": bundle["valid"],
+                "tampered_receipt_valid": tampered_receipt_check["valid"],
+                "tampered_receipt_reason": tampered_receipt_check["reason"],
+                "tampered_audit_valid": tampered_audit_check["valid"],
+                "tampered_audit_reason": tampered_audit_check["reason"],
             }
 
         if json_output:

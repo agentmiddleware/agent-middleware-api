@@ -14,17 +14,15 @@ from app.schemas.trust import (
     PermitVerifyResponse,
     ReceiptListResponse,
 )
-from app.services.idempotency import (
+from app.trust import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
-    get_idempotency_service,
-)
-from app.services.permits import (
     PermitError,
+    get_idempotency_service,
     get_permit_service,
+    get_receipt_service,
     permit_model_to_response,
 )
-from app.services.receipts import get_receipt_service
 
 router = APIRouter(prefix="/v1/permits", tags=["Trust Permits"])
 
@@ -200,8 +198,15 @@ async def verify_permit(
         estimated_credits=estimated,
         key_id=auth.key_id,
     )
+    permit = validation.permit
+    # The validation result carries the full permit (issuer/subject wallets,
+    # scopes, budget). Only return it to a caller authorized for that permit —
+    # otherwise any authenticated agent could read any permit by id.
+    if permit is not None and not auth.is_bootstrap_admin:
+        if auth.wallet_id not in {permit.issuer_wallet_id, permit.subject_wallet_id}:
+            raise HTTPException(status_code=403, detail="permit_access_denied")
     return PermitVerifyResponse(
         valid=validation.allowed,
         reason=validation.reason,
-        permit=permit_model_to_response(validation.permit) if validation.permit else None,
+        permit=permit_model_to_response(permit) if permit else None,
     )

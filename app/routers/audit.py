@@ -12,11 +12,11 @@ from app.schemas.audit import (
     AuditSummaryResponse,
 )
 from app.schemas.trust import AuditChainVerifyRequest, AuditChainVerifyResponse
-from app.services.audit_chain import verify_audit_chain
-from app.services.audit_log import (
+from app.trust import (
     count_audit_events,
     list_audit_events,
     summarize_audit_events,
+    verify_audit_chain,
 )
 
 router = APIRouter(prefix="/v1/audit", tags=["Control Plane Audit"])

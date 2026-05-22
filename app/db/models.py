@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field
 
@@ -17,6 +18,7 @@ class WalletModel(SQLModel, table=True):
 
     Uses Decimal for all monetary fields to avoid floating-point errors.
     """
+
     __tablename__ = "wallets"
 
     wallet_id: str = Field(primary_key=True, max_length=50)
@@ -71,8 +73,7 @@ class WalletModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class LedgerEntryModel(SQLModel, table=True):
@@ -81,6 +82,7 @@ class LedgerEntryModel(SQLModel, table=True):
 
     All amounts are Decimal. Positive = credit, negative = debit.
     """
+
     __tablename__ = "ledger_entries"
 
     entry_id: str = Field(primary_key=True, max_length=50)
@@ -118,14 +120,14 @@ class LedgerEntryModel(SQLModel, table=True):
     # Timestamp
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class BillingAlertModel(SQLModel, table=True):
     """
     Billing alert table for tracking wallet warnings and notifications.
     """
+
     __tablename__ = "billing_alerts"
 
     alert_id: str = Field(primary_key=True, max_length=50)
@@ -138,14 +140,14 @@ class BillingAlertModel(SQLModel, table=True):
     acknowledged: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class DailyBalanceSnapshot(SQLModel, table=True):
     """
     Daily balance snapshots for reporting and auditing.
     """
+
     __tablename__ = "daily_balance_snapshots"
 
     snapshot_id: str = Field(primary_key=True, max_length=50)
@@ -157,8 +159,7 @@ class DailyBalanceSnapshot(SQLModel, table=True):
     total_debits: Decimal = Field(default=Decimal("0"), decimal_places=8)
     transaction_count: int = Field(default=0)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ServiceRegistryModel(SQLModel, table=True):
@@ -168,6 +169,7 @@ class ServiceRegistryModel(SQLModel, table=True):
     Allows external developers to register billable services that agents
     can discover and pay for using the B2A billing infrastructure.
     """
+
     __tablename__ = "service_registry"
 
     service_id: str = Field(primary_key=True, max_length=100)
@@ -186,8 +188,7 @@ class ServiceRegistryModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class KYCVerificationModel(SQLModel, table=True):
@@ -197,6 +198,7 @@ class KYCVerificationModel(SQLModel, table=True):
     Tracks Stripe Identity verification sessions and their status.
     Only verified wallets can perform fiat top-ups.
     """
+
     __tablename__ = "kyc_verifications"
 
     verification_id: str = Field(primary_key=True, max_length=100)
@@ -220,8 +222,7 @@ class KYCVerificationModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class APIKeyModel(SQLModel, table=True):
@@ -231,6 +232,7 @@ class APIKeyModel(SQLModel, table=True):
     Supports multiple keys per wallet with rotation tracking.
     Keys can be rotated manually or automatically on suspicious activity.
     """
+
     __tablename__ = "api_keys"
 
     key_id: str = Field(primary_key=True, max_length=50)
@@ -255,8 +257,7 @@ class APIKeyModel(SQLModel, table=True):
 
     metadata_json: Optional[str] = Field(default=None)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class TelemetryEventModel(SQLModel, table=True):
@@ -272,6 +273,7 @@ class TelemetryEventModel(SQLModel, table=True):
     fidelity — any field the application cares to filter on is promoted
     to a dedicated column for indexability.
     """
+
     __tablename__ = "telemetry_events"
 
     event_id: str = Field(primary_key=True, max_length=50)
@@ -292,12 +294,12 @@ class TelemetryEventModel(SQLModel, table=True):
     event_timestamp: Optional[datetime] = Field(default=None, index=True)
     ingested_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class IoTDeviceModel(SQLModel, table=True):
     """Registered IoT device state for the protocol bridge."""
+
     __tablename__ = "iot_devices"
 
     device_id: str = Field(primary_key=True, max_length=100)
@@ -310,12 +312,12 @@ class IoTDeviceModel(SQLModel, table=True):
     last_message_at: Optional[datetime] = Field(default=None)
     message_count: int = Field(default=0)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class IoTDeviceEventModel(SQLModel, table=True):
     """Append-only audit event for IoT bridge registry and message activity."""
+
     __tablename__ = "iot_device_events"
 
     event_id: str = Field(primary_key=True, max_length=64)
@@ -325,12 +327,12 @@ class IoTDeviceEventModel(SQLModel, table=True):
     payload_json: Optional[str] = Field(default=None)
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OracleCrawlTargetModel(SQLModel, table=True):
     """Crawl target lifecycle row (pending → crawling → indexed|failed)."""
+
     __tablename__ = "oracle_crawl_targets"
 
     target_id: str = Field(primary_key=True, max_length=64)
@@ -342,12 +344,12 @@ class OracleCrawlTargetModel(SQLModel, table=True):
     crawled_at: Optional[datetime] = Field(default=None)
     raw_payload_hash: Optional[str] = Field(default=None, max_length=128)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OracleIndexedAPIModel(SQLModel, table=True):
     """An indexed external API with compatibility metadata."""
+
     __tablename__ = "oracle_indexed_apis"
 
     api_id: str = Field(primary_key=True, max_length=64)
@@ -362,12 +364,12 @@ class OracleIndexedAPIModel(SQLModel, table=True):
     status: str = Field(max_length=20)
     last_crawled: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OracleRegistrationModel(SQLModel, table=True):
     """One row per attempt to register our API in an external directory."""
+
     __tablename__ = "oracle_registrations"
 
     registration_id: str = Field(primary_key=True, max_length=64)
@@ -377,20 +379,19 @@ class OracleRegistrationModel(SQLModel, table=True):
     message: str = Field(default="", max_length=2000)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OracleDiscoveryHitModel(SQLModel, table=True):
     """One row per inbound discovery hit for top-referrer aggregation."""
+
     __tablename__ = "oracle_discovery_hits"
 
     hit_id: str = Field(primary_key=True, max_length=64)
     referrer: str = Field(default="direct", max_length=2048, index=True)
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class AgentCommsMessageModel(SQLModel, table=True):
@@ -412,12 +413,12 @@ class AgentCommsMessageModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     delivered_at: Optional[datetime] = Field(default=None)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class SecurityScanModel(SQLModel, table=True):
     """Shared scan table for red_team (internal) and rtaas (external)."""
+
     __tablename__ = "security_scans"
 
     scan_id: str = Field(primary_key=True, max_length=64)
@@ -440,12 +441,12 @@ class SecurityScanModel(SQLModel, table=True):
     completed_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class SecurityVulnerabilityModel(SQLModel, table=True):
     """Shared vulnerability rows for both scan types."""
+
     __tablename__ = "security_vulnerabilities"
 
     vuln_id: str = Field(primary_key=True, max_length=64)
@@ -470,12 +471,12 @@ class SecurityVulnerabilityModel(SQLModel, table=True):
 
     discovered_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ContentPipelineModel(SQLModel, table=True):
     """Content factory pipeline instance."""
+
     __tablename__ = "content_pipelines"
 
     pipeline_id: str = Field(primary_key=True, max_length=64)
@@ -493,12 +494,12 @@ class ContentPipelineModel(SQLModel, table=True):
     aspect_ratio: str = Field(default="9:16", max_length=10)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ContentPieceModel(SQLModel, table=True):
     """One generated content piece. download_url holds the blob ref."""
+
     __tablename__ = "content_pieces"
 
     content_id: str = Field(primary_key=True, max_length=64)
@@ -519,12 +520,12 @@ class ContentPieceModel(SQLModel, table=True):
     metadata_json: Optional[str] = Field(default=None)
     generated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ContentCampaignModel(SQLModel, table=True):
     """Top-level live campaign linking many pipelines + hooks."""
+
     __tablename__ = "content_campaigns"
 
     campaign_id: str = Field(primary_key=True, max_length=64)
@@ -536,12 +537,12 @@ class ContentCampaignModel(SQLModel, table=True):
     owner_key: str = Field(default="", max_length=255, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ContentScheduleModel(SQLModel, table=True):
     """Persisted scheduler recommendations."""
+
     __tablename__ = "content_schedules"
 
     schedule_id: str = Field(primary_key=True, max_length=64)
@@ -557,8 +558,7 @@ class ContentScheduleModel(SQLModel, table=True):
     estimated_views: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ContentFactoryGenerationModel(SQLModel, table=True):
@@ -575,8 +575,7 @@ class ContentFactoryGenerationModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: Optional[datetime] = Field(default=None)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class KeyRotationLogModel(SQLModel, table=True):
@@ -585,6 +584,7 @@ class KeyRotationLogModel(SQLModel, table=True):
 
     Tracks rotation history for security auditing and compliance.
     """
+
     __tablename__ = "key_rotation_logs"
 
     log_id: str = Field(primary_key=True, max_length=50)
@@ -604,8 +604,7 @@ class KeyRotationLogModel(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class OptimizerTelemetryModel(SQLModel, table=True):
@@ -636,6 +635,9 @@ class ControlPlaneAuditEventModel(SQLModel, table=True):
 
     event_id: str = Field(primary_key=True, max_length=50)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    # Per-wallet monotonic sequence: a stable ordering key for the hash chain so
+    # equal/clock-skewed created_at values can't reorder the chain on read.
+    seq: int = Field(default=0, index=True)
     event: str = Field(max_length=128, index=True)
     wallet_id: Optional[str] = Field(default=None, max_length=64, index=True)
     tool: Optional[str] = Field(default=None, max_length=128, index=True)
@@ -657,6 +659,22 @@ class ControlPlaneAuditEventModel(SQLModel, table=True):
         foreign_key="signing_keys.key_id",
         index=True,
     )
+
+
+class AuditChainHeadModel(SQLModel, table=True):
+    """Per-wallet head pointer for the audit hash chain.
+
+    A single row per wallet, locked FOR UPDATE during an append, serializes
+    concurrent writers so they cannot read the same predecessor and fork the
+    chain. ``wallet_key`` is the wallet id, or "" for wallet-less events.
+    """
+
+    __tablename__ = "audit_chain_heads"
+
+    wallet_key: str = Field(primary_key=True, max_length=64)
+    last_chain_hash: Optional[str] = Field(default=None, max_length=64)
+    last_seq: int = Field(default=0)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class SigningKeyModel(SQLModel, table=True):
@@ -709,9 +727,11 @@ class PermitModel(SQLModel, table=True):
     key_id: str = Field(max_length=64, foreign_key="signing_keys.key_id", index=True)
     issued_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     revoked_at: Optional[datetime] = Field(default=None)
+    # Last time budget was reserved/released; used to distinguish a live
+    # in-flight reservation from one orphaned by a crash during reconciliation.
+    updated_at: Optional[datetime] = Field(default=None, index=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ReceiptModel(SQLModel, table=True):
@@ -749,8 +769,7 @@ class ReceiptModel(SQLModel, table=True):
         index=True,
     )
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class IdempotencyRecordModel(SQLModel, table=True):
@@ -797,5 +816,4 @@ class PolicyBundleModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)

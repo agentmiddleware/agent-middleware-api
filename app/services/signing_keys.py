@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.db.database import get_session_factory
@@ -92,12 +93,22 @@ class SigningKeyService:
 
     async def ensure_active_key(self) -> SigningKeyModel:
         factory = get_session_factory()
+        public_key_b64 = self._public_key_b64()
         async with factory() as session:
             result = await session.execute(
                 select(SigningKeyModel).where(SigningKeyModel.key_id == self._key_id)
             )
             key = result.scalar_one_or_none()
-            public_key_b64 = self._public_key_b64()
+            # Read-mostly fast path: when the active key already matches, do no
+            # write. This keeps the common (per-signature) call free of write
+            # contention and the first-time insert race below.
+            if (
+                key
+                and key.public_key_b64 == public_key_b64
+                and key.status == "active"
+                and key.retired_at is None
+            ):
+                return key
             if key:
                 if key.public_key_b64 != public_key_b64:
                     key.public_key_b64 = public_key_b64
@@ -113,7 +124,18 @@ class SigningKeyService:
                     activated_at=datetime.now(timezone.utc),
                 )
                 session.add(key)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                # A concurrent writer created the row first; adopt theirs.
+                await session.rollback()
+                key = (
+                    await session.execute(
+                        select(SigningKeyModel).where(
+                            SigningKeyModel.key_id == self._key_id
+                        )
+                    )
+                ).scalar_one()
             return key
 
     async def get_active_key(self) -> SigningKeyModel:
@@ -193,13 +215,26 @@ class SigningKeyService:
 
     async def sign_payload(self, payload: dict[str, Any]) -> tuple[str, str, str]:
         key = await self.ensure_active_key()
+        return self.sign_payload_with_key_id(payload, key.key_id)
+
+    def sign_payload_with_key_id(
+        self,
+        payload: dict[str, Any],
+        key_id: str,
+    ) -> tuple[str, str, str]:
+        """Sign with an already-provisioned key id, without touching the DB.
+
+        Use when the active key has been ensured beforehand and the caller is
+        holding an open transaction (so a nested ``ensure_active_key`` write
+        would otherwise contend for the connection / lock).
+        """
         signing_payload = dict(payload)
         signing_payload.setdefault("alg", "Ed25519")
-        signing_payload.setdefault("kid", key.key_id)
+        signing_payload.setdefault("kid", key_id)
         payload_hash = sha256_hex(signing_payload)
         signing_payload.setdefault("payload_hash", payload_hash)
         signature = self._load_private_key().sign(canonical_json(signing_payload).encode())
-        return base64.b64encode(signature).decode(), key.key_id, payload_hash
+        return base64.b64encode(signature).decode(), key_id, payload_hash
 
     async def verify_payload(
         self,

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import AuthContext, get_auth_context
 from app.schemas.trust import SigningKeyResponse
-from app.services.signing_keys import get_signing_key_service
+from app.trust import get_signing_key_service
 
 router = APIRouter(prefix="/v1/signing-keys", tags=["Trust Signing Keys"])
 

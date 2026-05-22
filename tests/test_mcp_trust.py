@@ -93,6 +93,75 @@ async def test_governed_mcp_invoke_returns_receipt_and_replay_does_not_double_ch
 
 
 @pytest.mark.anyio
+async def test_http_invoke_tool_governed_flow_returns_receipt(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    registry = get_service_registry()
+    registry.register_local(
+        service_id="http-invoke-tool",
+        name="HTTP Invoke Tool",
+        description="Governed HTTP invoke test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda message="ok": {"message": message},
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name="http-invoke-tool",
+        )
+        resp = await client.post(
+            "/mcp/tools/http-invoke-tool/invoke",
+            json={
+                "name": "http-invoke-tool",
+                "arguments": {"message": "hi"},
+                "mcp_context": {
+                    "wallet_id": provisioned["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "http-invoke-1",
+                },
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["isError"] is False
+        assert body["receipt"]["permit_id"] == permit["permit_id"]
+        assert body["receipt"]["outcome"] == "success"
+
+        # Out-of-scope tool over the same HTTP route is denied with 403.
+        registry.register_local(
+            service_id="http-blocked-tool",
+            name="HTTP Blocked Tool",
+            description="Outside the permit",
+            category=ServiceCategory.AGENT_COMMS,
+            func=lambda: {"ran": True},
+            credits_per_unit=2.0,
+            unit_name="call",
+        )
+        denied = await client.post(
+            "/mcp/tools/http-blocked-tool/invoke",
+            json={
+                "name": "http-blocked-tool",
+                "arguments": {},
+                "mcp_context": {
+                    "wallet_id": provisioned["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "http-denied-1",
+                },
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert denied.status_code == 403
+        assert denied.json()["detail"]["error"] == "permit_tool_not_allowed"
+    finally:
+        registry.unregister_local("http-invoke-tool")
+        registry.unregister_local("http-blocked-tool")
+
+
+@pytest.mark.anyio
 async def test_governed_mcp_requires_idempotency_key(client, clean_database):
     provisioned = await provision_agent_wallet(client)
     registry = get_service_registry()

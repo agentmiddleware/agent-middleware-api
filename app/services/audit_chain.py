@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import random
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import asc, desc, select
+from sqlalchemy import asc, desc, select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.db.database import get_session_factory
-from app.db.models import ControlPlaneAuditEventModel
+from app.db.models import AuditChainHeadModel, ControlPlaneAuditEventModel
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
 
@@ -46,17 +49,19 @@ def audit_payload(
     }
 
 
-async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
-    factory = get_session_factory()
-    async with factory() as session:
-        result = await session.execute(
-            select(ControlPlaneAuditEventModel)
-            .where(ControlPlaneAuditEventModel.wallet_id == model.wallet_id)
-            .order_by(desc(ControlPlaneAuditEventModel.created_at))
-            .limit(1)
-        )
-        previous = result.scalar_one_or_none()
-    previous_hash = previous.chain_hash if previous else None
+def _sign_with_previous(
+    model: ControlPlaneAuditEventModel,
+    previous_hash: str | None,
+    *,
+    signing_key_id: str,
+) -> None:
+    """Sign ``model`` as the successor of ``previous_hash`` (seq set by caller).
+
+    Pure (no DB I/O) so it can run inside an open chain-head transaction. The
+    active signing key must be ensured by the caller beforehand. seq is
+    deliberately NOT part of the signed payload, so events signed before that
+    column existed still verify.
+    """
     payload = audit_payload(
         event_id=model.event_id,
         created_at=model.created_at,
@@ -75,7 +80,9 @@ async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
     )
     payload_hash = sha256_hex(payload)
     payload["payload_hash"] = payload_hash
-    signature, signature_key_id, _ = await get_signing_key_service().sign_payload(payload)
+    signature, signature_key_id, _ = get_signing_key_service().sign_payload_with_key_id(
+        payload, signing_key_id
+    )
     model.payload_hash = payload_hash
     model.previous_hash = previous_hash
     model.chain_hash = sha256_hex(
@@ -87,6 +94,111 @@ async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
     )
     model.signature = signature
     model.signature_key_id = signature_key_id
+
+
+async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
+    """Sign an audit event by reading the current chain head (no insert).
+
+    Self-contained convenience used outside the append path; the persisted
+    write path uses :func:`append_chained_audit_event`, which serializes
+    concurrent writers.
+    """
+    key = await get_signing_key_service().ensure_active_key()
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(ControlPlaneAuditEventModel)
+            .where(ControlPlaneAuditEventModel.wallet_id == model.wallet_id)
+            .order_by(
+                desc(ControlPlaneAuditEventModel.seq),
+                desc(ControlPlaneAuditEventModel.created_at),
+            )
+            .limit(1)
+        )
+        previous = result.scalar_one_or_none()
+    previous_hash = previous.chain_hash if previous else None
+    model.seq = (previous.seq + 1) if previous else 1
+    _sign_with_previous(model, previous_hash, signing_key_id=key.key_id)
+
+
+class _HeadConflict(Exception):
+    """A concurrent writer advanced the chain head; the append must retry."""
+
+
+async def append_chained_audit_event(model: ControlPlaneAuditEventModel) -> None:
+    """Sign and persist ``model`` as the next link in its wallet's audit chain.
+
+    Concurrency is handled with optimistic control on the per-wallet head row:
+    the new ``seq``/``previous_hash`` are derived from the head, then the head
+    is advanced with a conditional ``UPDATE ... WHERE last_seq = <observed>``.
+    If a concurrent writer advanced the head first the update matches no rows
+    and the append retries against the new head. This works identically on
+    SQLite and Postgres (no reliance on ``SELECT ... FOR UPDATE``), so two
+    racing writers can never share a predecessor and fork the chain.
+    """
+    wallet_key = model.wallet_id or ""
+    # Provision the active signing key before the transaction so signing inside
+    # it is pure crypto (no nested DB write / lock).
+    key = await get_signing_key_service().ensure_active_key()
+    factory = get_session_factory()
+    # Optimistic-concurrency retry budget. Audit events are integrity records
+    # and must not be dropped, so the budget is generous; backoff is a small
+    # flat jitter (not growing) so contended writers reconverge quickly without
+    # inflating tail latency on slow/CPU-bound runners.
+    attempts = 64
+    for attempt in range(attempts):
+        session = factory()
+        try:
+            async with session.begin():
+                row = (
+                    await session.execute(
+                        select(
+                            AuditChainHeadModel.last_seq,
+                            AuditChainHeadModel.last_chain_hash,
+                        ).where(AuditChainHeadModel.wallet_key == wallet_key)
+                    )
+                ).first()
+                observed_seq = row[0] if row else 0
+                previous_hash = row[1] if row else None
+                model.seq = observed_seq + 1
+                _sign_with_previous(model, previous_hash, signing_key_id=key.key_id)
+                now = datetime.now(timezone.utc)
+                if row is None:
+                    # First event for this wallet; a unique PK collision means a
+                    # concurrent writer won the race — retry against their head.
+                    session.add(
+                        AuditChainHeadModel(
+                            wallet_key=wallet_key,
+                            last_seq=model.seq,
+                            last_chain_hash=model.chain_hash,
+                            updated_at=now,
+                        )
+                    )
+                    await session.flush()
+                else:
+                    result = await session.execute(
+                        update(AuditChainHeadModel)
+                        .where(
+                            AuditChainHeadModel.wallet_key == wallet_key,
+                            AuditChainHeadModel.last_seq == observed_seq,
+                        )
+                        .values(
+                            last_seq=model.seq,
+                            last_chain_hash=model.chain_hash,
+                            updated_at=now,
+                        )
+                    )
+                    if result.rowcount == 0:
+                        raise _HeadConflict()
+                session.add(model)
+            return
+        except (_HeadConflict, IntegrityError, OperationalError):
+            if attempt == attempts - 1:
+                raise
+            await asyncio.sleep(random.uniform(0.002, 0.02))
+        finally:
+            await session.close()
+    raise RuntimeError("audit_chain_head_contention")
 
 
 @dataclass(frozen=True)
@@ -136,7 +248,8 @@ async def verify_audit_chain(
         return AuditChainVerification(True, checked, first_event_id, last_event_id)
 
     stmt = select(ControlPlaneAuditEventModel).order_by(
-        asc(ControlPlaneAuditEventModel.created_at)
+        asc(ControlPlaneAuditEventModel.seq),
+        asc(ControlPlaneAuditEventModel.created_at),
     )
     if wallet_id:
         stmt = stmt.where(ControlPlaneAuditEventModel.wallet_id == wallet_id)

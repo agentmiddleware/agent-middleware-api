@@ -13,7 +13,11 @@ from app.main import app
 from app.schemas.trust import PermitCreateRequest
 from app.services.idempotency import get_idempotency_service
 from app.services.permits import PermitError, get_permit_service
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 
 @pytest.fixture
@@ -48,6 +52,115 @@ async def test_signed_permit_verifies_for_wallet_tool_and_budget(
     )
     assert verify_resp.status_code == 200
     assert verify_resp.json()["valid"] is True
+
+
+@pytest.mark.anyio
+async def test_reconcile_budgets_repairs_orphaned_reservation(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="trust-echo",
+    )
+
+    factory = get_session_factory()
+    # Simulate a crash that reserved budget but never produced a success
+    # receipt, and make the permit look idle (old updated_at).
+    async with factory() as session:
+        model = await session.get(PermitModel, permit["permit_id"])
+        model.spent_credits = Decimal("9")
+        model.updated_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        session.add(model)
+        await session.commit()
+
+    corrected = await get_permit_service().reconcile_budgets(idle_seconds=900)
+    assert corrected == 1
+
+    async with factory() as session:
+        model = await session.get(PermitModel, permit["permit_id"])
+        # No successful receipts exist, so the orphaned reservation is cleared.
+        assert model.spent_credits == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_reconcile_budgets_leaves_live_reservation_untouched(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="trust-echo",
+    )
+
+    factory = get_session_factory()
+    # A reservation made just now (recent updated_at) is in-flight, not orphaned.
+    async with factory() as session:
+        model = await session.get(PermitModel, permit["permit_id"])
+        model.spent_credits = Decimal("9")
+        model.updated_at = datetime.now(timezone.utc)
+        session.add(model)
+        await session.commit()
+
+    corrected = await get_permit_service().reconcile_budgets(idle_seconds=900)
+    assert corrected == 0
+
+    async with factory() as session:
+        model = await session.get(PermitModel, permit["permit_id"])
+        assert model.spent_credits == Decimal("9")
+
+
+@pytest.mark.anyio
+async def test_verify_does_not_leak_permit_to_unauthorized_caller(
+    client,
+    clean_database,
+):
+    owner = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=owner["agent_wallet_id"],
+        key_id=owner["key_id"],
+        tool_name="trust-echo",
+    )
+
+    # A second, unrelated agent provisions its own wallet/key.
+    other_sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Other",
+            "email": "other-verify@example.com",
+            "initial_credits": 5000,
+            "require_kyc": False,
+        },
+        headers=BOOTSTRAP_HEADERS,
+    )
+    other_agent = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": other_sponsor.json()["wallet_id"],
+            "agent_id": "other-verify-agent",
+            "budget_credits": 500,
+        },
+        headers=BOOTSTRAP_HEADERS,
+    )
+    other_key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": other_agent.json()["wallet_id"], "key_name": "rt"},
+        headers=BOOTSTRAP_HEADERS,
+    )
+    other_headers = {"X-API-Key": other_key.json()["api_key"]}
+
+    # Omitting wallet_id must NOT let an unrelated caller read the permit.
+    resp = await client.post(
+        "/v1/permits/verify",
+        json={"permit_id": permit["permit_id"], "tool": "trust-echo"},
+        headers=other_headers,
+    )
+    assert resp.status_code == 403
+    assert "permit" not in resp.text or resp.json().get("detail") == "permit_access_denied"
 
 
 @pytest.mark.anyio

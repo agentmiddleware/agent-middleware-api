@@ -155,6 +155,63 @@ async def test_mcp_policy_denies_disallowed_tool_before_charge(client, clean_dat
 
 
 @pytest.mark.anyio
+async def test_mcp_policy_enforces_daily_spend_limit(client, clean_database):
+    registry = get_service_registry()
+    registry.register_local(
+        service_id="daily-cap-tool",
+        name="Daily Cap Tool",
+        description="Allowed by tool list but over the daily spend cap",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ran": True},
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        wallet_id = await _wallet(client, "policy-daily")
+        policy = await client.post(
+            "/v1/policies",
+            json={
+                "wallet_id": wallet_id,
+                "name": "Tiny daily cap",
+                "allowed_tools": ["daily-cap-tool"],
+                "daily_spend_limit": 1,
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        assert policy.status_code == 201
+
+        # The tool costs 2 credits; the very first call (0 used + 2) exceeds the
+        # declared daily cap of 1, so it must be denied before any charge.
+        response = await client.post(
+            "/mcp/messages",
+            json={
+                "jsonrpc": "2.0",
+                "id": "daily-cap-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "daily-cap-tool",
+                    "arguments": {},
+                    "mcpContext": {"wallet_id": wallet_id},
+                },
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        assert response.status_code == 200
+        assert response.json()["error"]["message"] == "daily_spend_limit_exceeded"
+
+        ledger = await client.get(
+            f"/v1/billing/ledger/{wallet_id}",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert all(
+            "daily-cap-tool" not in entry.get("description", "")
+            for entry in ledger.json()["entries"]
+        )
+    finally:
+        registry.unregister_local("daily-cap-tool")
+
+
+@pytest.mark.anyio
 async def test_billing_policy_denies_disallowed_category(client, clean_database):
     wallet_id = await _wallet(client, "policy-billing")
     policy = await client.post(

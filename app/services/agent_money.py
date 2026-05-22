@@ -37,7 +37,7 @@ All monetary fields are Decimal for precision.
 import json
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -816,24 +816,22 @@ class AgentMoney:
                             message="Child wallet lifetime spend cap exceeded.",
                         )
 
-                # Check daily limit
-                today = datetime.now(timezone.utc).date()
-                if wallet.daily_reset_at and wallet.daily_reset_at.date() != today:
-                    wallet.daily_spent = Decimal("0")
-                    wallet.daily_reset_at = datetime.now(timezone.utc)
-
-                if wallet.daily_limit:
-                    if wallet.daily_spent + charge_amount > wallet.daily_limit:
-                        remaining = wallet.daily_limit - wallet.daily_spent
-                        shortfall = charge_amount - remaining
-                        return InsufficientFundsResponse(
-                            wallet_id=wallet_id,
-                            current_balance=wallet.balance,
-                            required_amount=charge_amount,
-                            shortfall=shortfall,
-                            top_up_url=f"/v1/billing/top-up?wallet_id={wallet_id}&amount={charge_amount}",
-                            message="Daily spending limit exceeded.",
-                        )
+                # Daily spend is tracked in exactly one place — the velocity
+                # monitor, which also owns the reset window and has already
+                # recorded this charge above. So wallet.daily_spent here already
+                # includes the current charge_amount.
+                if wallet.daily_limit and wallet.daily_spent > wallet.daily_limit:
+                    prior_daily_spent = wallet.daily_spent - charge_amount
+                    remaining = wallet.daily_limit - prior_daily_spent
+                    shortfall = charge_amount - remaining
+                    return InsufficientFundsResponse(
+                        wallet_id=wallet_id,
+                        current_balance=wallet.balance,
+                        required_amount=charge_amount,
+                        shortfall=shortfall,
+                        top_up_url=f"/v1/billing/top-up?wallet_id={wallet_id}&amount={charge_amount}",
+                        message="Daily spending limit exceeded.",
+                    )
 
                 # Check balance
                 if wallet.balance < charge_amount:
@@ -845,10 +843,10 @@ class AgentMoney:
                         top_up_url=f"/v1/billing/top-up?wallet_id={wallet_id}&amount={charge_amount}",
                     )
 
-                # Execute debit
+                # Execute debit. daily_spent is intentionally NOT incremented
+                # here; the velocity monitor already recorded it.
                 wallet.balance -= charge_amount
                 wallet.lifetime_debits += charge_amount
-                wallet.daily_spent += charge_amount
                 wallet.updated_at = datetime.now(timezone.utc)
 
                 entry_id = str(uuid.uuid4())
@@ -958,11 +956,11 @@ class AgentMoney:
                     charge_entry.timestamp,
                     wallet.daily_reset_at,
                 ):
-                    # charge() records daily spend once in the velocity precheck
-                    # and once when the debit posts; reverse both increments.
+                    # daily_spent is incremented exactly once per charge (by the
+                    # velocity monitor), so reverse exactly one increment.
                     wallet.daily_spent = max(
                         Decimal("0"),
-                        wallet.daily_spent - (refund_amount * Decimal("2")),
+                        wallet.daily_spent - refund_amount,
                     )
                 wallet.updated_at = datetime.now(timezone.utc)
 
@@ -1178,6 +1176,30 @@ class AgentMoney:
             if wallet:
                 return wallet_model_to_response(wallet)
             return None
+
+    async def get_daily_spend(self, wallet_id: str) -> Decimal:
+        """Return the wallet's spend in the current daily window.
+
+        Read-only and reset-aware: if the daily window has rolled over since the
+        last reset (mirroring the velocity monitor's rule), the effective spend
+        is 0 even though it hasn't been persisted yet. Returns 0 for unknown
+        wallets so callers can treat it as "no spend recorded".
+        """
+        async with self._session_factory()() as session:
+            result = await session.execute(
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            )
+            wallet = result.scalar_one_or_none()
+            if not wallet:
+                return Decimal("0")
+            reset_at = wallet.daily_reset_at
+            if reset_at is None:
+                return Decimal("0")
+            if reset_at.tzinfo is None:
+                reset_at = reset_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - reset_at >= timedelta(days=1):
+                return Decimal("0")
+            return wallet.daily_spent
 
     async def list_wallets(
         self,

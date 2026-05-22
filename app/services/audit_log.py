@@ -94,13 +94,11 @@ async def record_audit_event(
         error=error,
         metadata_json=json.dumps(metadata or {}, default=str),
     )
-    from app.services.audit_chain import sign_audit_model
+    from app.services.audit_chain import append_chained_audit_event
 
-    await sign_audit_model(model)
-    factory = get_session_factory()
-    async with factory() as session:
-        session.add(model)
-        await session.commit()
+    # Sign + persist under a per-wallet chain-head lock so concurrent writers
+    # cannot fork the hash chain.
+    await append_chained_audit_event(model)
     return _to_event(model)
 
 

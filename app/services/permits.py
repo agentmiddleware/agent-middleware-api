@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -238,6 +238,7 @@ class PermitService:
                 if model.spent_credits + amount > model.max_credits:
                     raise PermitError("permit_budget_exceeded")
                 model.spent_credits += amount
+                model.updated_at = datetime.now(timezone.utc)
                 session.add(model)
             await session.commit()
 
@@ -249,8 +250,63 @@ class PermitService:
                 if not model:
                     return
                 model.spent_credits = max(Decimal("0"), model.spent_credits - amount)
+                model.updated_at = datetime.now(timezone.utc)
                 session.add(model)
             await session.commit()
+
+    async def reconcile_budgets(self, *, idle_seconds: int = 900) -> int:
+        """Repair budget reservations orphaned by a crash mid-invocation.
+
+        A governed call reserves budget before charging and releases it on every
+        handled failure, so the only way ``spent_credits`` can drift above the
+        budget actually consumed is a process death between reserve and the
+        receipt write. For each active permit idle for at least ``idle_seconds``
+        (so live in-flight reservations are never touched), reset
+        ``spent_credits`` to the sum of its successful receipts. Returns the
+        number of permits corrected.
+        """
+        from app.db.models import ReceiptModel
+
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=idle_seconds)
+        factory = get_session_factory()
+        corrected = 0
+        async with factory() as session:
+            async with session.begin():
+                stale = (
+                    await session.execute(
+                        select(PermitModel)
+                        .where(
+                            PermitModel.status == "active",
+                            func.coalesce(
+                                PermitModel.updated_at, PermitModel.issued_at
+                            )
+                            < cutoff,
+                        )
+                        .with_for_update()
+                    )
+                ).scalars().all()
+                for permit in stale:
+                    consumed = (
+                        await session.execute(
+                            select(
+                                func.coalesce(
+                                    func.sum(ReceiptModel.credits_charged),
+                                    0,
+                                )
+                            ).where(
+                                ReceiptModel.permit_id == permit.permit_id,
+                                ReceiptModel.outcome == "success",
+                            )
+                        )
+                    ).scalar_one()
+                    consumed_decimal = Decimal(str(consumed))
+                    if permit.spent_credits != consumed_decimal:
+                        permit.spent_credits = consumed_decimal
+                        permit.updated_at = datetime.now(timezone.utc)
+                        session.add(permit)
+                        corrected += 1
+            await session.commit()
+        return corrected
 
     async def verify_signature(self, model: PermitModel) -> bool:
         payload = {

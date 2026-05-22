@@ -47,6 +47,7 @@ from .routers import (
     billing,
     permits,
     receipts,
+    evidence,
     launch,
     protocol,
     rtaas,
@@ -150,6 +151,18 @@ async def lifespan(app: FastAPI):
                         logger.info(
                             "cleanup_completed",
                             telemetry_events_removed=removed,
+                        )
+
+                # Repair permit budget reservations orphaned by a crash between
+                # reserve and the receipt write (only touches idle permits).
+                if settings.DATABASE_URL:
+                    from .services.permits import get_permit_service
+
+                    corrected = await get_permit_service().reconcile_budgets()
+                    if corrected:
+                        logger.info(
+                            "cleanup_completed",
+                            permit_budgets_reconciled=corrected,
                         )
 
             except asyncio.CancelledError:
@@ -294,6 +307,7 @@ CORE_TRUST_ROUTERS = (
     billing,
     permits,
     receipts,
+    evidence,
     webhooks,
     mcp,
     kyc,
@@ -363,6 +377,7 @@ async def root():
                 "billing",
                 "permits",
                 "receipts",
+                "evidence",
                 "mcp",
                 "api_keys",
                 "signing_keys",
