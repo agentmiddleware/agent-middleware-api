@@ -25,6 +25,7 @@ from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
 from .core.health import gather_dependency_report
 from .core.rate_limiter import RateLimitMiddleware
+from .core.replay_protection import ReplayProtectionMiddleware
 from .db.database import init_db, close_db
 from .services.mcp_phase9_tools import (
     ensure_phase9_registered,
@@ -62,6 +63,8 @@ from .routers import (
     well_known,
     static,
     planner,
+    receipts,
+    permits,
 )
 
 settings = get_settings()
@@ -263,6 +266,13 @@ app = FastAPI(
 )
 
 # --- Middleware Stack ---
+# add_middleware prepends, so the last added runs outermost. Adding replay
+# protection before the rate limiter yields inbound order:
+#   CORS -> RateLimit -> ReplayProtection -> app
+# i.e. abusive replay attempts are throttled before they reach the nonce store.
+
+# Replay protection (claim-once on Idempotency-Key for mutating requests)
+app.add_middleware(ReplayProtectionMiddleware)
 
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
@@ -306,6 +316,8 @@ app.include_router(awi.router)
 app.include_router(awi_enhanced.router)
 app.include_router(discover.router)
 app.include_router(planner.router)
+app.include_router(receipts.router)
+app.include_router(permits.router)
 app.include_router(well_known.router)
 app.include_router(static.router)
 
@@ -594,6 +606,7 @@ async def root():
                     "GET /v1/dashboard/economics",
                     "GET /v1/dashboard/security",
                     "GET /v1/dashboard/telemetry",
+                    "GET /v1/dashboard/planner",
                     "GET /v1/dashboard/genesis",
                 ],
             },

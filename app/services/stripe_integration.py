@@ -20,9 +20,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 
 from ..db.database import get_session_factory
-from ..db.models import WalletModel, LedgerEntryModel
+from ..db.models import WalletModel, LedgerEntryModel  # noqa: F401
 from ..core.config import get_settings
 from .agent_money import WalletNotFoundError
+from .receipts import build_signed_ledger_entry, get_receipt_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -40,14 +41,14 @@ class StripeIntegration:
 
     def __init__(self):
         self._session_factory = get_session_factory
+        self._receipts = get_receipt_service()
 
     @staticmethod
     def _is_duplicate_payment_intent_error(exc: IntegrityError) -> bool:
         """Return true only for the idempotency unique constraint."""
         message = str(getattr(exc, "orig", exc)).lower()
-        return (
-            "payment_intent_id" in message
-            and ("unique" in message or "duplicate" in message)
+        return "payment_intent_id" in message and (
+            "unique" in message or "duplicate" in message
         )
 
     async def create_top_up_intent(
@@ -173,8 +174,8 @@ class StripeIntegration:
         from ..services.notifications import get_notification_service
 
         wallet_id = payment_intent["metadata"].get("wallet_id")
-        error_msg = (
-            payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
+        error_msg = payment_intent.get("last_payment_error", {}).get(
+            "message", "Unknown error"
         )
 
         logger.warning(f"Payment failed for wallet {wallet_id}: {error_msg}")
@@ -246,9 +247,10 @@ class StripeIntegration:
                     wallet.balance += amount
                     wallet.lifetime_credits += amount
 
-                    entry = LedgerEntryModel(
+                    entry = build_signed_ledger_entry(
+                        self._receipts,
+                        wallet=wallet,
                         entry_id=str(uuid4()),
-                        wallet_id=wallet_id,
                         action="credit",
                         amount=amount,
                         balance_after=wallet.balance,
@@ -297,9 +299,10 @@ class StripeIntegration:
                 wallet.balance -= amount
                 wallet.lifetime_debits += amount
 
-                entry = LedgerEntryModel(
+                entry = build_signed_ledger_entry(
+                    self._receipts,
+                    wallet=wallet,
                     entry_id=str(uuid4()),
-                    wallet_id=wallet_id,
                     action="refund",
                     amount=-amount,
                     balance_after=wallet.balance,

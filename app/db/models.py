@@ -68,6 +68,12 @@ class WalletModel(SQLModel, table=True):
     kyc_verified_at: Optional[datetime] = Field(default=None)
     metadata_json: Optional[str] = Field(default=None)
 
+    # Signed-receipt chain head. Each ledger entry links to the previous via
+    # prev_hash; the wallet tracks the latest hash and sequence so new entries
+    # extend the chain without an extra query (the wallet row is already locked).
+    receipt_seq: int = Field(default=0)
+    last_receipt_hash: Optional[str] = Field(default=None, max_length=64)
+
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -116,6 +122,15 @@ class LedgerEntryModel(SQLModel, table=True):
         unique=True,  # Enforces idempotency at DB level
     )
     stripe_session_id: Optional[str] = Field(default=None, max_length=100, index=True)
+
+    # Signed-receipt fields. chain_seq orders entries within a wallet; prev_hash
+    # links to the prior entry's hash; entry_hash is sha256 over the canonical
+    # payload (which includes prev_hash); signature authenticates that payload.
+    chain_seq: Optional[int] = Field(default=None)
+    prev_hash: Optional[str] = Field(default=None, max_length=64)
+    entry_hash: Optional[str] = Field(default=None, max_length=64, index=True)
+    signature: Optional[str] = Field(default=None)
+    receipt_alg: Optional[str] = Field(default=None, max_length=20)
 
     # Timestamp
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)

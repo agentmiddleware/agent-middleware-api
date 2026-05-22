@@ -47,6 +47,28 @@ class Settings(BaseSettings):
     # Comma-separated list of valid API keys (use a secrets manager in production)
     VALID_API_KEYS: str = ""
 
+    # --- Signed Receipts ---
+    # Base64-encoded Ed25519 private key seed (32 bytes) used to sign ledger
+    # receipts. When set, receipts are independently verifiable with the public
+    # key from GET /v1/billing/receipts/public-key. If empty, an ephemeral key
+    # is generated at startup (dev only — receipts won't verify across restarts).
+    RECEIPT_SIGNING_KEY: str = ""
+    # Fallback HMAC secret used only when the cryptography library (Ed25519) is
+    # unavailable. HMAC receipts are tamper-evident but not independently
+    # verifiable by third parties.
+    RECEIPT_HMAC_SECRET: str = ""
+
+    # --- Signed Capability Permits ---
+    # Base64-encoded Ed25519 private key seed for signing scoped permits.
+    # If empty, an ephemeral key is generated at startup (dev only).
+    PERMIT_SIGNING_KEY: str = ""
+    PERMIT_HMAC_SECRET: str = ""
+    PERMIT_DEFAULT_TTL_SECONDS: int = 3600  # 1h
+    # When true, billable MCP tool calls require a valid permit covering the
+    # tool. Default false so existing API-key-only flows keep working.
+    PERMITS_ENFORCED: bool = False
+    PERMIT_HEADER: str = "X-Agent-Permit"
+
     # --- Stripe Payment Processing ---
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
@@ -90,6 +112,19 @@ class Settings(BaseSettings):
 
     # --- Rate Limiting ---
     RATE_LIMIT_PER_MINUTE: int = 120
+
+    # --- Replay Protection (idempotency / nonce) ---
+    # When enabled, a state-changing request that carries an Idempotency-Key
+    # header is claimed exactly once per (api key, method, path, key). A repeat
+    # within the TTL is rejected with 409 so a captured request cannot be
+    # replayed to double-charge or re-execute.
+    REPLAY_PROTECTION_ENABLED: bool = True
+    # When true, mutating requests from an authenticated caller MUST carry an
+    # Idempotency-Key header (otherwise 428). Default false for compatibility.
+    REPLAY_PROTECTION_REQUIRE_KEY: bool = False
+    REPLAY_PROTECTION_TTL_SECONDS: int = 86400  # 24h, matches common practice
+    # Header carrying the idempotency token (Stripe-compatible default).
+    IDEMPOTENCY_KEY_HEADER: str = "Idempotency-Key"
 
     # --- LLM / AI Agent Intelligence ---
     # Provider: openai, azure, anthropic, ollama

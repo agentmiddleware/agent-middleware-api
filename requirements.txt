@@ -15,6 +15,9 @@ aiocoap>=0.4.17          # CoAP protocol support
 # --- Telemetry / Autonomous PM ---
 httpx>=0.28.1           # Async HTTP client for git API calls
 
+# --- Planner Optimizer ---
+pulp>=2.8.0             # MILP solver for constrained action selection
+
 # --- Media Engine ---
 python-multipart>=0.0.27 # File upload support
 
@@ -24,6 +27,9 @@ redis>=7.4.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.30.0         # PostgreSQL-backed runtime persistence
 stripe>=15.1.0           # Stripe payment processing
 mcp>=1.0.0             # MCP (Model Context Protocol) SDK for tool servers
+
+# --- Signed Receipts ---
+cryptography>=44.0.0    # Ed25519 signing for independently verifiable receipts
 
 # --- Database ---
 sqlmodel>=0.0.38        # SQLAlchemy + Pydantic hybrid ORM

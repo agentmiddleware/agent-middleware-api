@@ -25,13 +25,19 @@ from pydantic import BaseModel, Field
 
 from ..audit.lightweight import record_audit
 from ..core.auth import AuthContext, get_auth_context
+from ..core.config import get_settings
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
+from ..services.permits import PermitError, require_permit_for_tool
 from ..schemas.billing import ServiceCategory
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["MCP"])
+
+
+def _permit_enforcement_enabled() -> bool:
+    return get_settings().PERMITS_ENFORCED
 
 
 class McpContext(BaseModel):
@@ -128,7 +134,8 @@ async def handle_messages(
 
     elif method == "tools/call":
         try:
-            result = await _handle_tools_call(params, auth)
+            permit_token = request.headers.get(get_settings().PERMIT_HEADER)
+            result = await _handle_tools_call(params, auth, permit_token)
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -178,14 +185,17 @@ async def _handle_tools_list(params: dict) -> dict:
     return {"tools": manifest["tools"]}
 
 
-async def _handle_tools_call(params: dict, auth: AuthContext) -> dict:
+async def _handle_tools_call(
+    params: dict, auth: AuthContext, permit_token: str | None = None
+) -> dict:
     """
     Handle MCP tools/call request.
 
     This routes through the existing billing layer:
     1. Extract wallet_id from mcp_context
-    2. Call the service via service registry
-    3. Return the result
+    2. Enforce a capability permit when PERMITS_ENFORCED is set
+    3. Call the service via service registry
+    4. Return the result
 
     For local services, we execute the function directly.
     For persistent services, we call the API endpoint.
@@ -201,6 +211,17 @@ async def _handle_tools_call(params: dict, auth: AuthContext) -> dict:
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
     auth.require_wallet_access(wallet_id)
+
+    if _permit_enforcement_enabled():
+        try:
+            await require_permit_for_tool(
+                permit_token, wallet_id=wallet_id, tool_name=tool_name
+            )
+        except PermitError as exc:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "permit_denied", "reason": str(exc)},
+            )
 
     ok = False
     err: str | None = None

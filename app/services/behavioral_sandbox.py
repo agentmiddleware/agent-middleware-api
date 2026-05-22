@@ -311,7 +311,10 @@ class BehavioralSandboxEngine:
                 image=settings.BEHAVIORAL_SANDBOX_DOCKER_IMAGE,
             )
 
-        if backend in ("unsafe_host", "host") or settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX:
+        if (
+            backend in ("unsafe_host", "host")
+            or settings.ALLOW_UNSAFE_HOST_PYTHON_SANDBOX
+        ):
             return await self._execute_python_host(
                 sandbox_code=sandbox_code,
                 timeout_seconds=timeout_seconds,
@@ -361,6 +364,68 @@ result = sandboxed_execute(context, dry_run)
 print(json.dumps(result))
 """
 
+    # Reserved environment names that callers may not override; these protect
+    # the container's isolation posture and Python startup behavior.
+    _RESERVED_ENV_NAMES = frozenset(
+        {"SANDBOX", "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED", "PATH", "HOME"}
+    )
+
+    @classmethod
+    def _build_docker_run_command(
+        cls,
+        *,
+        image: str,
+        sandbox_code: str,
+        memory_limit_mb: int,
+        env_vars: dict[str, str],
+    ) -> list[str]:
+        """Build the hardened ``docker run`` argv.
+
+        Every isolation flag here is load-bearing: dropping any one of them
+        weakens the container boundary. The ``test_sandbox_isolation`` suite
+        asserts their presence so they cannot be silently removed.
+        """
+        command = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",  # no network egress
+            "--memory",
+            f"{memory_limit_mb}m",
+            "--memory-swap",
+            f"{memory_limit_mb}m",  # forbid swap escape from the memory cap
+            "--cpus",
+            "1",
+            "--pids-limit",
+            "64",  # fork-bomb protection
+            "--ulimit",
+            "nofile=64:64",  # cap open file descriptors
+            "--ulimit",
+            "fsize=8388608:8388608",  # cap written file size to 8 MB
+            "--read-only",  # immutable root filesystem
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=16m",
+            "--security-opt",
+            "no-new-privileges",
+            "--cap-drop",
+            "ALL",  # drop all Linux capabilities
+            "--user",
+            "65534:65534",  # run as nobody, never root
+            "--env",
+            "SANDBOX=true",
+            "--env",
+            "PYTHONDONTWRITEBYTECODE=1",
+            "--env",
+            "PYTHONUNBUFFERED=1",
+        ]
+        for name, value in env_vars.items():
+            if name.isidentifier() and name not in cls._RESERVED_ENV_NAMES:
+                command.extend(["--env", f"{name}={value}"])
+        # -I isolated mode, -S no site: minimal interpreter surface.
+        command.extend([image, "python", "-I", "-S", "-c", sandbox_code])
+        return command
+
     async def _execute_python_docker(
         self,
         sandbox_code: str,
@@ -369,37 +434,13 @@ print(json.dumps(result))
         env_vars: dict[str, str],
         image: str,
     ) -> dict[str, Any]:
-        """Execute Python in an unprivileged Docker container."""
-        command = [
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--memory",
-            f"{memory_limit_mb}m",
-            "--cpus",
-            "1",
-            "--pids-limit",
-            "64",
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,size=16m",
-            "--security-opt",
-            "no-new-privileges",
-            "--cap-drop",
-            "ALL",
-            "--user",
-            "65534:65534",
-            "--env",
-            "SANDBOX=true",
-            "--env",
-            "PYTHONDONTWRITEBYTECODE=1",
-        ]
-        for name, value in env_vars.items():
-            if name.isidentifier():
-                command.extend(["--env", f"{name}={value}"])
-        command.extend([image, "python", "-I", "-S", "-c", sandbox_code])
+        """Execute Python in an unprivileged, network-isolated Docker container."""
+        command = self._build_docker_run_command(
+            image=image,
+            sandbox_code=sandbox_code,
+            memory_limit_mb=memory_limit_mb,
+            env_vars=env_vars,
+        )
 
         try:
             proc = await asyncio.create_subprocess_exec(

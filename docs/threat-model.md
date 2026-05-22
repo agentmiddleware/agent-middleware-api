@@ -47,6 +47,18 @@ and sandboxed execution.
 - Alembic migrations cover wallet/API-key/KYC/service registry schema drift.
 - Tests cover revoked/expired DB keys, cross-wallet denial, sandbox auth, MCP
   header auth, and migration creation.
+- A route-auth inventory test fails CI if any state-changing route lacks an
+  auth dependency (allowlisted exceptions require a documented reason).
+- Replay protection: mutating requests carrying an Idempotency-Key are claimed
+  once via the durable backend; replays return 409.
+- Signed receipts: every ledger entry is hash-chained per wallet and signed
+  (Ed25519 when available), so tampering is detectable and receipts are
+  independently verifiable via the published public key.
+- Signed capability permits: scoped, expiring, optionally single-use tokens can
+  gate billable MCP tool calls (enforced when PERMITS_ENFORCED is set).
+- Docker sandbox backend runs untrusted Python with no network, dropped
+  capabilities, a read-only root, non-root user, and memory/CPU/PID/file limits;
+  host execution stays disabled by default. Isolation flags are pinned by test.
 
 ## Primary Threats And Required Mitigations
 
@@ -139,6 +151,16 @@ Required controls:
 
 - Add structured audit events for every auth decision on sensitive routes.
 - Add admin-only audit export endpoints.
-- Replace subprocess sandbox execution with a hardened isolation provider.
-- Add a route inventory test that fails if a state-changing route lacks auth.
+- Enforce permit `max_spend` against per-call cost and track cumulative spend
+  (the allowance model); today permits enforce scope, expiry, and single-use.
+- Offer a stronger isolation provider (gVisor/Firecracker/managed) as an option
+  beyond the hardened Docker backend for multi-tenant untrusted execution.
 - Add ownership tests whenever new wallet-bound resources are introduced.
+
+### Recently closed
+
+- Route-auth inventory test guarding every state-changing route.
+- Replay protection (idempotency/nonce) on mutating requests.
+- Signed, hash-chained, independently verifiable ledger receipts.
+- Signed scoped capability permits with single-use replay protection.
+- Hardened, network-isolated Docker sandbox backend (host exec off by default).

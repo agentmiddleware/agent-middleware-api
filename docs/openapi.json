@@ -6758,7 +6758,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/mcp/tools/{service_id}/invoke": {
@@ -9096,6 +9101,247 @@
             }
           }
         }
+      }
+    },
+    "/v1/billing/receipts/public-key": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Receipt signing public key",
+        "description": "Public key (and algorithm) used to sign receipts. Public on purpose so\nthird parties can verify receipts offline.",
+        "operationId": "receipt_public_key_v1_billing_receipts_public_key_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Receipt Public Key V1 Billing Receipts Public Key Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/receipts/entry/{entry_id}": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Get a signed receipt for a ledger entry",
+        "operationId": "get_receipt_v1_billing_receipts_entry__entry_id__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Receipt V1 Billing Receipts Entry  Entry Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/receipts/wallet/{wallet_id}/verify": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Verify a wallet's receipt chain",
+        "operationId": "verify_chain_v1_billing_receipts_wallet__wallet_id__verify_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "wallet_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Wallet Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Verify Chain V1 Billing Receipts Wallet  Wallet Id  Verify Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/permits/issue": {
+      "post": {
+        "tags": [
+          "permits"
+        ],
+        "summary": "Issue a signed scoped capability permit",
+        "operationId": "issue_permit_v1_permits_issue_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermitIssueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Issue Permit V1 Permits Issue Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/v1/permits/public-key": {
+      "get": {
+        "tags": [
+          "permits"
+        ],
+        "summary": "Permit signing public key",
+        "operationId": "permit_public_key_v1_permits_public_key_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Permit Public Key V1 Permits Public Key Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/permits/introspect": {
+      "post": {
+        "tags": [
+          "permits"
+        ],
+        "summary": "Verify a permit and return its claims",
+        "operationId": "introspect_permit_v1_permits_introspect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermitIntrospectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Introspect Permit V1 Permits Introspect Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/.well-known/mcp/tools.json": {
@@ -16681,6 +16927,86 @@
         ],
         "title": "PasskeyVerifyResponse",
         "description": "Response after successful passkey verification."
+      },
+      "PermitIntrospectRequest": {
+        "properties": {
+          "permit": {
+            "type": "string",
+            "title": "Permit",
+            "description": "The permit token to verify"
+          }
+        },
+        "type": "object",
+        "required": [
+          "permit"
+        ],
+        "title": "PermitIntrospectRequest"
+      },
+      "PermitIssueRequest": {
+        "properties": {
+          "wallet_id": {
+            "type": "string",
+            "title": "Wallet Id",
+            "description": "Wallet the permit acts for"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scope",
+            "description": "Allowed tool names / service ids ('*' = any)"
+          },
+          "max_spend": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Spend",
+            "description": "Optional credit ceiling for the permit"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Seconds",
+            "description": "Lifetime in seconds (defaults to server setting)"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id",
+            "description": "Agent the permit is issued to"
+          },
+          "single_use": {
+            "type": "boolean",
+            "title": "Single Use",
+            "description": "If true, the permit can be redeemed only once",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_id",
+          "scope"
+        ],
+        "title": "PermitIssueRequest"
       },
       "PipelineListResponse": {
         "properties": {

@@ -59,6 +59,7 @@ from ..db.converters import (
 )
 from ..services.velocity_monitor import get_velocity_monitor, WalletFrozenError
 from ..services.shadow_ledger import get_shadow_ledger, SimulatedChargeResult
+from ..services.receipts import build_signed_ledger_entry, get_receipt_service
 from ..schemas.billing import (
     WalletType,
     WalletStatus,
@@ -175,8 +176,10 @@ EXCHANGE_RATE = Decimal("1000.0")  # 1000 credits per $1 USD
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class InsufficientFundsError(Exception):
     """Raised when a wallet has insufficient funds for a transaction."""
+
     def __init__(self, wallet_id: str, current: Decimal, required: Decimal):
         self.wallet_id = wallet_id
         self.current_balance = current
@@ -187,6 +190,7 @@ class InsufficientFundsError(Exception):
 
 class WalletNotFoundError(Exception):
     """Raised when a wallet is not found."""
+
     def __init__(self, wallet_id: str):
         self.wallet_id = wallet_id
         super().__init__(f"Wallet not found: {wallet_id}")
@@ -194,6 +198,7 @@ class WalletNotFoundError(Exception):
 
 class KYCVerificationRequiredError(Exception):
     """Raised when KYC verification is required but not completed."""
+
     def __init__(self, wallet_id: str, kyc_status: str):
         self.wallet_id = wallet_id
         self.kyc_status = kyc_status
@@ -206,6 +211,7 @@ class KYCVerificationRequiredError(Exception):
 # ---------------------------------------------------------------------------
 # Agent Money Engine
 # ---------------------------------------------------------------------------
+
 
 class AgentMoney:
     """
@@ -226,6 +232,7 @@ class AgentMoney:
     def __init__(self):
         self._session_factory = get_session_factory
         self._state = get_durable_state()
+        self._receipts = get_receipt_service()
 
     async def _get_session(self) -> AsyncSession:
         """Get a database session."""
@@ -263,7 +270,8 @@ class AgentMoney:
                     owner_key=owner_key,
                     metadata_json=_metadata_to_json(metadata),
                     kyc_status=(
-                        KYCStatus.PENDING.value if kyc_required
+                        KYCStatus.PENDING.value
+                        if kyc_required
                         else KYCStatus.NOT_REQUIRED.value
                     ),
                     status="pending_kyc" if kyc_required else "active",
@@ -271,15 +279,17 @@ class AgentMoney:
                 session.add(wallet)
 
                 if initial_credits > Decimal("0"):
-                    entry = LedgerEntryModel(
-                        entry_id=str(uuid.uuid4()),
-                        wallet_id=wallet_id,
-                        action=LedgerAction.CREDIT.value,
-                        amount=initial_credits,
-                        balance_after=initial_credits,
-                        description="Initial sponsor deposit",
+                    session.add(
+                        build_signed_ledger_entry(
+                            self._receipts,
+                            wallet=wallet,
+                            entry_id=str(uuid.uuid4()),
+                            action=LedgerAction.CREDIT.value,
+                            amount=initial_credits,
+                            balance_after=initial_credits,
+                            description="Initial sponsor deposit",
+                        )
                     )
-                    session.add(entry)
 
             await session.commit()
             logger.info(f"Created sponsor wallet {wallet_id} for {sponsor_name}")
@@ -343,24 +353,30 @@ class AgentMoney:
                 session.add(agent_wallet)
 
                 # Ledger entries
-                session.add(LedgerEntryModel(
-                    entry_id=str(uuid.uuid4()),
-                    wallet_id=sponsor_wallet_id,
-                    action=LedgerAction.TRANSFER.value,
-                    amount=-budget_credits,
-                    balance_after=sponsor.balance,
-                    description=(
-                        f"Provision agent wallet {agent_wallet_id} for {agent_id}"
-                    ),
-                ))
-                session.add(LedgerEntryModel(
-                    entry_id=str(uuid.uuid4()),
-                    wallet_id=agent_wallet_id,
-                    action=LedgerAction.TRANSFER.value,
-                    amount=budget_credits,
-                    balance_after=budget_credits,
-                    description=f"Provisioned from sponsor {sponsor_wallet_id}",
-                ))
+                session.add(
+                    build_signed_ledger_entry(
+                        self._receipts,
+                        wallet=sponsor,
+                        entry_id=str(uuid.uuid4()),
+                        action=LedgerAction.TRANSFER.value,
+                        amount=-budget_credits,
+                        balance_after=sponsor.balance,
+                        description=(
+                            f"Provision agent wallet {agent_wallet_id} for {agent_id}"
+                        ),
+                    )
+                )
+                session.add(
+                    build_signed_ledger_entry(
+                        self._receipts,
+                        wallet=agent_wallet,
+                        entry_id=str(uuid.uuid4()),
+                        action=LedgerAction.TRANSFER.value,
+                        amount=budget_credits,
+                        balance_after=budget_credits,
+                        description=f"Provisioned from sponsor {sponsor_wallet_id}",
+                    )
+                )
 
             await session.commit()
             logger.info(
@@ -395,9 +411,9 @@ class AgentMoney:
                 if not parent:
                     raise WalletNotFoundError(parent_wallet_id)
                 if parent.wallet_type not in (
-                        WalletType.AGENT.value,
-                        WalletType.CHILD.value,
-                    ):
+                    WalletType.AGENT.value,
+                    WalletType.CHILD.value,
+                ):
                     raise ValueError(
                         "Only agent or child wallets can spawn child wallets"
                     )
@@ -430,25 +446,31 @@ class AgentMoney:
                 session.add(child)
 
                 # Ledger entries
-                session.add(LedgerEntryModel(
-                    entry_id=str(uuid.uuid4()),
-                    wallet_id=parent_wallet_id,
-                    action=LedgerAction.TRANSFER.value,
-                    amount=-budget_credits,
-                    balance_after=parent.balance,
-                    description=(
-                        f"Delegate to child wallet {child_wallet_id} "
-                        f"({child_agent_id})"
-                    ),
-                ))
-                session.add(LedgerEntryModel(
-                    entry_id=str(uuid.uuid4()),
-                    wallet_id=child_wallet_id,
-                    action=LedgerAction.TRANSFER.value,
-                    amount=budget_credits,
-                    balance_after=budget_credits,
-                    description=f"Provisioned from parent {parent_wallet_id}",
-                ))
+                session.add(
+                    build_signed_ledger_entry(
+                        self._receipts,
+                        wallet=parent,
+                        entry_id=str(uuid.uuid4()),
+                        action=LedgerAction.TRANSFER.value,
+                        amount=-budget_credits,
+                        balance_after=parent.balance,
+                        description=(
+                            f"Delegate to child wallet {child_wallet_id} "
+                            f"({child_agent_id})"
+                        ),
+                    )
+                )
+                session.add(
+                    build_signed_ledger_entry(
+                        self._receipts,
+                        wallet=child,
+                        entry_id=str(uuid.uuid4()),
+                        action=LedgerAction.TRANSFER.value,
+                        amount=budget_credits,
+                        balance_after=budget_credits,
+                        description=f"Provisioned from parent {parent_wallet_id}",
+                    )
+                )
 
             await session.commit()
             logger.info(f"Spawned child wallet {child_wallet_id} for {child_agent_id}")
@@ -495,22 +517,28 @@ class AgentMoney:
                     parent.lifetime_credits += reclaim_amount
 
                     # Ledger entries
-                    session.add(LedgerEntryModel(
-                        entry_id=str(uuid.uuid4()),
-                        wallet_id=child_wallet_id,
-                        action=LedgerAction.TRANSFER.value,
-                        amount=-reclaim_amount,
-                        balance_after=Decimal("0"),
-                        description=f"Reclaimed to parent {parent.wallet_id}",
-                    ))
-                    session.add(LedgerEntryModel(
-                        entry_id=str(uuid.uuid4()),
-                        wallet_id=parent.wallet_id,
-                        action=LedgerAction.TRANSFER.value,
-                        amount=reclaim_amount,
-                        balance_after=parent.balance,
-                        description=f"Reclaimed from child {child_wallet_id}",
-                    ))
+                    session.add(
+                        build_signed_ledger_entry(
+                            self._receipts,
+                            wallet=child,
+                            entry_id=str(uuid.uuid4()),
+                            action=LedgerAction.TRANSFER.value,
+                            amount=-reclaim_amount,
+                            balance_after=Decimal("0"),
+                            description=f"Reclaimed to parent {parent.wallet_id}",
+                        )
+                    )
+                    session.add(
+                        build_signed_ledger_entry(
+                            self._receipts,
+                            wallet=parent,
+                            entry_id=str(uuid.uuid4()),
+                            action=LedgerAction.TRANSFER.value,
+                            amount=reclaim_amount,
+                            balance_after=parent.balance,
+                            description=f"Reclaimed from child {child_wallet_id}",
+                        )
+                    )
 
                 child.status = WalletStatus.CLOSED.value
 
@@ -591,24 +619,30 @@ class AgentMoney:
                 dest.lifetime_credits += amount
 
                 # Create ledger entries on both sides
-                session.add(LedgerEntryModel(
-                    entry_id=str(uuid.uuid4()),
-                    wallet_id=from_wallet_id,
-                    action=LedgerAction.TRANSFER.value,
-                    amount=-amount,
-                    balance_after=source.balance,
-                    description=description or f"Transfer to {to_wallet_id}",
-                    correlation_id=correlation_id,
-                ))
-                session.add(LedgerEntryModel(
-                    entry_id=str(uuid.uuid4()),
-                    wallet_id=to_wallet_id,
-                    action=LedgerAction.TRANSFER.value,
-                    amount=amount,
-                    balance_after=dest.balance,
-                    description=description or f"Transfer from {from_wallet_id}",
-                    correlation_id=correlation_id,
-                ))
+                session.add(
+                    build_signed_ledger_entry(
+                        self._receipts,
+                        wallet=source,
+                        entry_id=str(uuid.uuid4()),
+                        action=LedgerAction.TRANSFER.value,
+                        amount=-amount,
+                        balance_after=source.balance,
+                        description=description or f"Transfer to {to_wallet_id}",
+                        correlation_id=correlation_id,
+                    )
+                )
+                session.add(
+                    build_signed_ledger_entry(
+                        self._receipts,
+                        wallet=dest,
+                        entry_id=str(uuid.uuid4()),
+                        action=LedgerAction.TRANSFER.value,
+                        amount=amount,
+                        balance_after=dest.balance,
+                        description=description or f"Transfer from {from_wallet_id}",
+                        correlation_id=correlation_id,
+                    )
+                )
 
             await session.commit()
 
@@ -649,7 +683,8 @@ class AgentMoney:
             total_delegated = sum(w.lifetime_credits for w in children)
             total_reclaimed = sum(
                 w.lifetime_credits - w.balance - w.lifetime_debits
-                for w in children if w.status == WalletStatus.CLOSED.value
+                for w in children
+                if w.status == WalletStatus.CLOSED.value
             )
             active = [w for w in children if w.status == WalletStatus.ACTIVE.value]
             completed = [w for w in children if w.status == WalletStatus.CLOSED.value]
@@ -663,10 +698,7 @@ class AgentMoney:
                 "active_children": len(active),
                 "completed_children": len(completed),
                 "frozen_children": len(frozen),
-                "children": [
-                    wallet_model_to_response(w)
-                    for w in children
-                ],
+                "children": [wallet_model_to_response(w) for w in children],
             }
 
     async def _dry_run_charge(
@@ -718,7 +750,8 @@ class AgentMoney:
             simulated_balance_after=float(wallet.balance) - float(charge_amount),
             would_succeed=wallet.balance >= charge_amount,
             reason=(
-                None if wallet.balance >= charge_amount
+                None
+                if wallet.balance >= charge_amount
                 else "insufficient_simulated_funds"
             ),
             dry_run=True,
@@ -766,8 +799,8 @@ class AgentMoney:
         margin = charge_amount - compute_cost
 
         velocity_monitor = get_velocity_monitor()
-        velocity_result = (
-            await velocity_monitor.check_and_record_charge(wallet_id, charge_amount)
+        velocity_result = await velocity_monitor.check_and_record_charge(
+            wallet_id, charge_amount
         )
 
         if velocity_result.should_freeze:
@@ -837,9 +870,10 @@ class AgentMoney:
                 wallet.updated_at = datetime.now(timezone.utc)
 
                 entry_id = str(uuid.uuid4())
-                entry = LedgerEntryModel(
+                entry = build_signed_ledger_entry(
+                    self._receipts,
+                    wallet=wallet,
                     entry_id=entry_id,
-                    wallet_id=wallet_id,
                     action=LedgerAction.DEBIT.value,
                     amount=-charge_amount,
                     balance_after=wallet.balance,
@@ -862,8 +896,7 @@ class AgentMoney:
                         alert_type=AlertType.LOW_BALANCE.value,
                         current_balance=wallet.balance,
                         message=(
-                            f"Wallet balance low: "
-                            f"{wallet.balance} credits remaining."
+                            f"Wallet balance low: {wallet.balance} credits remaining."
                         ),
                         severity=AlertSeverity.WARNING.value,
                     )
@@ -913,9 +946,10 @@ class AgentMoney:
                 wallet.lifetime_credits += credits
                 wallet.updated_at = datetime.now(timezone.utc)
 
-                entry = LedgerEntryModel(
+                entry = build_signed_ledger_entry(
+                    self._receipts,
+                    wallet=wallet,
                     entry_id=str(uuid.uuid4()),
-                    wallet_id=wallet_id,
                     action=LedgerAction.CREDIT.value,
                     amount=credits,
                     balance_after=wallet.balance,
@@ -979,13 +1013,17 @@ class AgentMoney:
             for cat_data in by_service.values():
                 rev = cat_data["revenue"]
                 cat_data["margin_pct"] = (
-                    Decimal("100") * cat_data["margin"] / rev
-                ) if rev > 0 else Decimal("0")
+                    (Decimal("100") * cat_data["margin"] / rev)
+                    if rev > 0
+                    else Decimal("0")
+                )
 
             gross_margin = total_revenue - total_cost
             margin_pct = (
-                Decimal("100") * gross_margin / total_revenue
-            ) if total_revenue > 0 else Decimal("0")
+                (Decimal("100") * gross_margin / total_revenue)
+                if total_revenue > 0
+                else Decimal("0")
+            )
 
             # Top profitable actions
             top_actions = sorted(
@@ -1041,9 +1079,9 @@ class AgentMoney:
         async with self._session_factory()() as session:
             if wallet_id:
                 result = await session.execute(
-                    select(BillingAlertModel).where(
-                        BillingAlertModel.wallet_id == wallet_id
-                    ).order_by(BillingAlertModel.created_at.desc())
+                    select(BillingAlertModel)
+                    .where(BillingAlertModel.wallet_id == wallet_id)
+                    .order_by(BillingAlertModel.created_at.desc())
                 )
             else:
                 result = await session.execute(
@@ -1179,6 +1217,7 @@ class AgentMoney:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _metadata_to_json(metadata: dict | None) -> str | None:
     """Convert metadata dict to JSON string."""

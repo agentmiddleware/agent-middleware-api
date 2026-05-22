@@ -14,6 +14,7 @@ import aiosqlite
 import asyncio
 import json
 import logging
+import time as _time
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -62,6 +63,11 @@ class DurableStateStore:
         self._redis: redis.Redis | None = None
         self._pg_pool: asyncpg.Pool | None = None
         self._sqlite_conn: aiosqlite.Connection | None = None
+
+        # In-process nonce map for the memory backend (single-worker / tests).
+        # Maps nonce key -> monotonic expiry timestamp.
+        self._nonce_mem: dict[str, float] = {}
+        self._nonce_lock = asyncio.Lock()
 
     @property
     def backend(self) -> str:
@@ -120,6 +126,16 @@ class DurableStateStore:
                             )
                             """
                         )
+                        await conn.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS app_idempotency (
+                                namespace TEXT NOT NULL,
+                                nonce_key TEXT NOT NULL,
+                                expires_at TIMESTAMPTZ NOT NULL,
+                                PRIMARY KEY(namespace, nonce_key)
+                            )
+                            """
+                        )
                 elif self._backend == "redis":
                     self._redis = redis.from_url(
                         self._redis_url,
@@ -138,6 +154,16 @@ class DurableStateStore:
                             payload TEXT NOT NULL,
                             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                             PRIMARY KEY(namespace, state_key)
+                        )
+                        """
+                    )
+                    await self._sqlite_conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS app_idempotency (
+                            namespace TEXT NOT NULL,
+                            nonce_key TEXT NOT NULL,
+                            expires_at REAL NOT NULL,
+                            PRIMARY KEY(namespace, nonce_key)
                         )
                         """
                     )
@@ -305,6 +331,77 @@ class DurableStateStore:
             if key.startswith(f"{self.namespace}:"):
                 keys.append(key.split(":", 1)[1])
         return sorted(keys)
+
+    async def claim_once(self, key: str, ttl_seconds: int) -> bool:
+        """
+        Atomically claim a nonce / idempotency key for the first time.
+
+        Returns True if the key was newly claimed (the caller may proceed) or
+        False if it was already claimed within its TTL (a replay).
+
+        The claim is backed by the configured durable backend, so it holds
+        across workers when Postgres/Redis/SQLite is configured. With the
+        in-memory backend the claim is per-process only.
+        """
+        await self._ensure_ready()
+        ttl = max(1, int(ttl_seconds))
+
+        if self._backend == "postgres":
+            assert self._pg_pool is not None
+            async with self._pg_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    WITH expired AS (
+                        DELETE FROM app_idempotency
+                        WHERE namespace = $1 AND nonce_key = $2
+                          AND expires_at < NOW()
+                    )
+                    INSERT INTO app_idempotency (namespace, nonce_key, expires_at)
+                    VALUES ($1, $2, NOW() + make_interval(secs => $3))
+                    ON CONFLICT (namespace, nonce_key) DO NOTHING
+                    RETURNING nonce_key
+                    """,
+                    self.namespace,
+                    key,
+                    ttl,
+                )
+            return row is not None
+
+        if self._backend == "sqlite":
+            assert self._sqlite_conn is not None
+            now = _time.time()
+            await self._sqlite_conn.execute(
+                "DELETE FROM app_idempotency WHERE namespace = ? "
+                "AND nonce_key = ? AND expires_at < ?",
+                (self.namespace, key, now),
+            )
+            cursor = await self._sqlite_conn.execute(
+                "INSERT OR IGNORE INTO app_idempotency "
+                "(namespace, nonce_key, expires_at) VALUES (?, ?, ?)",
+                (self.namespace, key, now + ttl),
+            )
+            await self._sqlite_conn.commit()
+            return cursor.rowcount == 1
+
+        if self._backend == "redis":
+            assert self._redis is not None
+            was_set = await self._redis.set(
+                self._redis_key(f"nonce:{key}"), "1", nx=True, ex=ttl
+            )
+            return bool(was_set)
+
+        # memory backend: per-process claim map with lazy expiry purge.
+        now = _time.time()
+        async with self._nonce_lock:
+            if len(self._nonce_mem) > 10_000:
+                self._nonce_mem = {
+                    k: exp for k, exp in self._nonce_mem.items() if exp > now
+                }
+            existing = self._nonce_mem.get(key)
+            if existing is not None and existing > now:
+                return False
+            self._nonce_mem[key] = now + ttl
+            return True
 
     async def health_report(self) -> dict[str, Any]:
         await self._ensure_ready()
