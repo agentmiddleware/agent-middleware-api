@@ -160,8 +160,10 @@ class Settings(BaseSettings):
     PLAYWRIGHT_SESSION_TTL_SECONDS: int = 900
 
     # --- Behavioral Sandbox ---
-    # Python execution backend: disabled, docker, or unsafe_host. Docker is the
-    # only built-in backend intended to provide an actual process boundary.
+    # Python execution backend: disabled, docker, gvisor, or unsafe_host.
+    # docker and gvisor provide an actual process boundary (gvisor adds a
+    # user-space kernel via the runsc runtime — stronger multi-tenant isolation
+    # and requires gVisor installed on the host). unsafe_host is dev-only.
     BEHAVIORAL_SANDBOX_PYTHON_BACKEND: str = "disabled"
     BEHAVIORAL_SANDBOX_DOCKER_IMAGE: str = "python:3.12-slim"
 

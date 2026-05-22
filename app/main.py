@@ -65,6 +65,7 @@ from .routers import (
     planner,
     receipts,
     permits,
+    admin,
 )
 
 settings = get_settings()
@@ -318,6 +319,7 @@ app.include_router(discover.router)
 app.include_router(planner.router)
 app.include_router(receipts.router)
 app.include_router(permits.router)
+app.include_router(admin.router)
 app.include_router(well_known.router)
 app.include_router(static.router)
 

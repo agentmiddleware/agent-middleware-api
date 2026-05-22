@@ -149,18 +149,22 @@ Required controls:
 
 ## Open Security Work
 
-- Add structured audit events for every auth decision on sensitive routes.
-- Add admin-only audit export endpoints.
-- Enforce permit `max_spend` against per-call cost and track cumulative spend
-  (the allowance model); today permits enforce scope, expiry, and single-use.
-- Offer a stronger isolation provider (gVisor/Firecracker/managed) as an option
-  beyond the hardened Docker backend for multi-tenant untrusted execution.
-- Add ownership tests whenever new wallet-bound resources are introduced.
+- Persist audit events durably (a table or shipped log store); the in-memory
+  ring buffer behind the export endpoint only retains recent events per process.
+- Make `AgentMoney.charge` permit-aware so the spend allowance is enforced on
+  every billable path, not only MCP tool calls.
+- Offer Firecracker/microVM or a managed sandbox beyond the gVisor option for
+  the strictest multi-tenant untrusted execution.
+- Continue adding ownership tests whenever new wallet-bound resources appear.
 
 ### Recently closed
 
 - Route-auth inventory test guarding every state-changing route.
 - Replay protection (idempotency/nonce) on mutating requests.
 - Signed, hash-chained, independently verifiable ledger receipts.
-- Signed scoped capability permits with single-use replay protection.
-- Hardened, network-isolated Docker sandbox backend (host exec off by default).
+- Signed scoped capability permits with single-use replay protection and a
+  cumulative `max_spend` allowance enforced on MCP tool calls.
+- Structured audit events for auth denials + an admin-only audit export endpoint.
+- Hardened, network-isolated Docker sandbox backend plus an optional gVisor
+  (runsc) runtime; host exec off by default, isolation flags pinned by test.
+- Cross-wallet ownership tests for the receipts and permits endpoints.

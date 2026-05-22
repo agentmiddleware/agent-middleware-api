@@ -186,6 +186,56 @@ async def test_single_receipt_is_verified(client):
     assert receipt.json()["verified"] is True
 
 
+async def _sponsor_with_scoped_key(client, headers, credits=0):
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": f"own-{uuid.uuid4().hex[:6]}",
+            "email": "o@test.example",
+            "initial_credits": credits,
+        },
+        headers=headers,
+    )
+    wallet_id = sponsor.json()["wallet_id"]
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "scoped"},
+        headers=headers,
+    )
+    return wallet_id, {"X-API-Key": key_resp.json()["api_key"]}
+
+
+@pytest.mark.anyio
+async def test_cross_wallet_chain_verify_denied(client):
+    headers = {"X-API-Key": "test-key"}
+    wallet_a, key_a = await _sponsor_with_scoped_key(client, headers)
+    wallet_b, _ = await _sponsor_with_scoped_key(client, headers, credits=100)
+
+    # Wallet A's key may verify its own chain...
+    own = await client.get(
+        f"/v1/billing/receipts/wallet/{wallet_a}/verify", headers=key_a
+    )
+    assert own.status_code == 200
+    # ...but not wallet B's.
+    denied = await client.get(
+        f"/v1/billing/receipts/wallet/{wallet_b}/verify", headers=key_a
+    )
+    assert denied.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_cross_wallet_receipt_entry_denied(client):
+    headers = {"X-API-Key": "test-key"}
+    wallet_a, key_a = await _sponsor_with_scoped_key(client, headers)
+    wallet_b, _ = await _sponsor_with_scoped_key(client, headers, credits=100)
+
+    ledger = await client.get(f"/v1/billing/ledger/{wallet_b}", headers=headers)
+    entry_id = ledger.json()["entries"][0]["entry_id"]
+
+    denied = await client.get(f"/v1/billing/receipts/entry/{entry_id}", headers=key_a)
+    assert denied.status_code == 403
+
+
 @pytest.mark.anyio
 async def test_db_tamper_breaks_chain(client):
     headers = {"X-API-Key": "test-key"}

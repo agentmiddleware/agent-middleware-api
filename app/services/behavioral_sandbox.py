@@ -302,13 +302,14 @@ class BehavioralSandboxEngine:
         settings = get_settings()
         backend = settings.BEHAVIORAL_SANDBOX_PYTHON_BACKEND.strip().lower()
 
-        if backend == "docker":
+        if backend in ("docker", "gvisor"):
             return await self._execute_python_docker(
                 sandbox_code=sandbox_code,
                 timeout_seconds=timeout_seconds,
                 memory_limit_mb=memory_limit_mb,
                 env_vars=env_vars,
                 image=settings.BEHAVIORAL_SANDBOX_DOCKER_IMAGE,
+                runtime="runsc" if backend == "gvisor" else None,
             )
 
         if (
@@ -378,12 +379,16 @@ print(json.dumps(result))
         sandbox_code: str,
         memory_limit_mb: int,
         env_vars: dict[str, str],
+        runtime: str | None = None,
     ) -> list[str]:
         """Build the hardened ``docker run`` argv.
 
         Every isolation flag here is load-bearing: dropping any one of them
         weakens the container boundary. The ``test_sandbox_isolation`` suite
         asserts their presence so they cannot be silently removed.
+
+        ``runtime`` selects the OCI runtime (e.g. ``runsc`` for gVisor's
+        user-space kernel), giving a stronger boundary than the default runc.
         """
         command = [
             "docker",
@@ -419,6 +424,9 @@ print(json.dumps(result))
             "--env",
             "PYTHONUNBUFFERED=1",
         ]
+        if runtime:
+            # Insert right after "docker run" so it applies to the container.
+            command[2:2] = ["--runtime", runtime]
         for name, value in env_vars.items():
             if name.isidentifier() and name not in cls._RESERVED_ENV_NAMES:
                 command.extend(["--env", f"{name}={value}"])
@@ -433,6 +441,7 @@ print(json.dumps(result))
         memory_limit_mb: int,
         env_vars: dict[str, str],
         image: str,
+        runtime: str | None = None,
     ) -> dict[str, Any]:
         """Execute Python in an unprivileged, network-isolated Docker container."""
         command = self._build_docker_run_command(
@@ -440,6 +449,7 @@ print(json.dumps(result))
             sandbox_code=sandbox_code,
             memory_limit_mb=memory_limit_mb,
             env_vars=env_vars,
+            runtime=runtime,
         )
 
         try:

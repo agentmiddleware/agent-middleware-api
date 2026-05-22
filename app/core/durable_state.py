@@ -69,6 +69,10 @@ class DurableStateStore:
         self._nonce_mem: dict[str, float] = {}
         self._nonce_lock = asyncio.Lock()
 
+        # In-process budget map for the memory backend: key -> (spent, expiry).
+        self._budget_mem: dict[str, tuple[float, float]] = {}
+        self._budget_lock = asyncio.Lock()
+
     @property
     def backend(self) -> str:
         return self._backend
@@ -136,6 +140,17 @@ class DurableStateStore:
                             )
                             """
                         )
+                        await conn.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS app_budget (
+                                namespace TEXT NOT NULL,
+                                budget_key TEXT NOT NULL,
+                                spent DOUBLE PRECISION NOT NULL DEFAULT 0,
+                                expires_at TIMESTAMPTZ NOT NULL,
+                                PRIMARY KEY(namespace, budget_key)
+                            )
+                            """
+                        )
                 elif self._backend == "redis":
                     self._redis = redis.from_url(
                         self._redis_url,
@@ -164,6 +179,17 @@ class DurableStateStore:
                             nonce_key TEXT NOT NULL,
                             expires_at REAL NOT NULL,
                             PRIMARY KEY(namespace, nonce_key)
+                        )
+                        """
+                    )
+                    await self._sqlite_conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS app_budget (
+                            namespace TEXT NOT NULL,
+                            budget_key TEXT NOT NULL,
+                            spent REAL NOT NULL DEFAULT 0,
+                            expires_at REAL NOT NULL,
+                            PRIMARY KEY(namespace, budget_key)
                         )
                         """
                     )
@@ -402,6 +428,110 @@ class DurableStateStore:
                 return False
             self._nonce_mem[key] = now + ttl
             return True
+
+    async def consume_budget(
+        self, key: str, amount: float, cap: float, ttl_seconds: int
+    ) -> tuple[bool, float]:
+        """
+        Atomically add ``amount`` to a running total under ``key`` only if the
+        new total stays within ``cap``. Returns ``(allowed, total_after)``; on
+        rejection the stored total is left unchanged.
+
+        Backed by the durable backend so a spend allowance holds across workers
+        when Postgres/Redis/SQLite is configured.
+        """
+        await self._ensure_ready()
+        amount = float(amount)
+        cap = float(cap)
+        ttl = max(1, int(ttl_seconds))
+
+        if amount <= 0:
+            return True, 0.0
+        if amount > cap:
+            return False, 0.0
+
+        if self._backend == "postgres":
+            assert self._pg_pool is not None
+            async with self._pg_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        "DELETE FROM app_budget WHERE namespace = $1 "
+                        "AND budget_key = $2 AND expires_at < NOW()",
+                        self.namespace,
+                        key,
+                    )
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO app_budget
+                            (namespace, budget_key, spent, expires_at)
+                        VALUES ($1, $2, $3, NOW() + make_interval(secs => $4))
+                        ON CONFLICT (namespace, budget_key) DO UPDATE
+                            SET spent = app_budget.spent + $3
+                            WHERE app_budget.spent + $3 <= $5
+                        RETURNING spent
+                        """,
+                        self.namespace,
+                        key,
+                        amount,
+                        ttl,
+                        cap,
+                    )
+            if row is not None:
+                return True, float(row["spent"])
+            return False, cap
+
+        if self._backend == "sqlite":
+            assert self._sqlite_conn is not None
+            now = _time.time()
+            await self._sqlite_conn.execute(
+                "DELETE FROM app_budget WHERE namespace = ? AND budget_key = ? "
+                "AND expires_at < ?",
+                (self.namespace, key, now),
+            )
+            async with self._sqlite_conn.execute(
+                "SELECT spent FROM app_budget WHERE namespace = ? AND budget_key = ?",
+                (self.namespace, key),
+            ) as cursor:
+                existing = await cursor.fetchone()
+            current = float(existing["spent"]) if existing else 0.0
+            if current + amount > cap:
+                await self._sqlite_conn.commit()
+                return False, current
+            new_total = current + amount
+            await self._sqlite_conn.execute(
+                """
+                INSERT INTO app_budget (namespace, budget_key, spent, expires_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(namespace, budget_key)
+                DO UPDATE SET spent = ?
+                """,
+                (self.namespace, key, new_total, now + ttl, new_total),
+            )
+            await self._sqlite_conn.commit()
+            return True, new_total
+
+        if self._backend == "redis":
+            assert self._redis is not None
+            redis_key = self._redis_key(f"budget:{key}")
+            new_total = float(await self._redis.incrbyfloat(redis_key, amount))
+            if new_total == amount:
+                await self._redis.expire(redis_key, ttl)
+            if new_total > cap:
+                await self._redis.incrbyfloat(redis_key, -amount)
+                return False, new_total - amount
+            return True, new_total
+
+        # memory backend
+        now = _time.time()
+        async with self._budget_lock:
+            spent, expiry = self._budget_mem.get(key, (0.0, 0.0))
+            if expiry and expiry <= now:
+                spent = 0.0
+            if spent + amount > cap:
+                return False, spent
+            new_total = spent + amount
+            self._budget_mem[key] = (new_total, now + ttl)
+            return True, new_total
 
     async def health_report(self) -> dict[str, Any]:
         await self._ensure_ready()

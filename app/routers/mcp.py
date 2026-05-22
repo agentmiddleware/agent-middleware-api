@@ -213,9 +213,16 @@ async def _handle_tools_call(
     auth.require_wallet_access(wallet_id)
 
     if _permit_enforcement_enabled():
+        local_service = get_service_registry().get_local(tool_name)
+        tool_cost = (
+            float(local_service.get("credits_per_unit", 1.0)) if local_service else 0.0
+        )
         try:
             await require_permit_for_tool(
-                permit_token, wallet_id=wallet_id, tool_name=tool_name
+                permit_token,
+                wallet_id=wallet_id,
+                tool_name=tool_name,
+                cost=tool_cost,
             )
         except PermitError as exc:
             raise HTTPException(

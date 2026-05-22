@@ -65,6 +65,28 @@ def test_docker_command_runs_isolated_python_last():
     assert cmd[-6:] == ["custom:img", "python", "-I", "-S", "-c", "print(1)"]
 
 
+def test_default_docker_command_has_no_runtime_override():
+    cmd = _build()
+    assert "--runtime" not in cmd
+
+
+def test_gvisor_backend_selects_runsc_runtime_and_keeps_hardening():
+    cmd = BehavioralSandboxEngine._build_docker_run_command(
+        image="python:3.12-slim",
+        sandbox_code="print('x')",
+        memory_limit_mb=128,
+        env_vars={},
+        runtime="runsc",
+    )
+    assert _has_pair(cmd, "--runtime", "runsc")
+    # gVisor must not replace the existing isolation flags.
+    assert _has_pair(cmd, "--network", "none")
+    assert _has_pair(cmd, "--cap-drop", "ALL")
+    assert _has_pair(cmd, "--user", "65534:65534")
+    # Runtime flag precedes the image.
+    assert cmd.index("--runtime") < cmd.index("python:3.12-slim")
+
+
 def test_caller_env_vars_forwarded_but_reserved_and_invalid_blocked():
     cmd = _build(
         env_vars={

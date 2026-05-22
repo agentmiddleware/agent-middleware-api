@@ -109,6 +109,48 @@ async def test_single_use_permit_cannot_be_replayed():
     assert "permit_replayed" in str(exc.value)
 
 
+# --- spend allowance (max_spend) ---
+
+
+@pytest.mark.anyio
+async def test_consume_budget_accumulates_and_caps():
+    from app.core.durable_state import get_durable_state
+
+    store = get_durable_state()
+    key = f"budget-{uuid.uuid4()}"
+
+    ok, total = await store.consume_budget(key, 4.0, 10.0, 60)
+    assert ok is True and total == 4.0
+    ok, total = await store.consume_budget(key, 4.0, 10.0, 60)
+    assert ok is True and total == 8.0
+    # 8 + 4 = 12 > 10 -> rejected, total unchanged
+    ok, total = await store.consume_budget(key, 4.0, 10.0, 60)
+    assert ok is False and total == 8.0
+
+
+@pytest.mark.anyio
+async def test_permit_enforces_cumulative_spend_cap():
+    svc = get_permit_service()
+    token = svc.issue(wallet_id="w1", scope=["t"], max_spend=10)["permit"]
+
+    await require_permit_for_tool(token, wallet_id="w1", tool_name="t", cost=4)
+    await require_permit_for_tool(token, wallet_id="w1", tool_name="t", cost=4)
+    with pytest.raises(PermitError) as exc:
+        await require_permit_for_tool(token, wallet_id="w1", tool_name="t", cost=4)
+    assert "spend_cap_exceeded" in str(exc.value)
+
+
+@pytest.mark.anyio
+async def test_permit_without_max_spend_ignores_cost():
+    svc = get_permit_service()
+    token = svc.issue(wallet_id="w1", scope=["t"])["permit"]  # no max_spend
+    # Large cost is fine when no cap is set.
+    claims = await require_permit_for_tool(
+        token, wallet_id="w1", tool_name="t", cost=1000
+    )
+    assert claims["max_spend"] is None
+
+
 # --- HTTP endpoints ---
 
 

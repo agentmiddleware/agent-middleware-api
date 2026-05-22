@@ -159,11 +159,14 @@ async def require_permit_for_tool(
     *,
     wallet_id: str,
     tool_name: str,
+    cost: float = 0.0,
 ) -> dict[str, Any]:
     """Authorize a tool call against a permit. Raises PermitError on failure.
 
-    For single-use permits the jti is claimed once via the durable nonce store,
-    so a captured permit cannot be replayed.
+    Enforces, in order: signature/expiry, wallet match, tool scope, single-use
+    replay (jti claimed once via the durable nonce store), and — when the permit
+    carries ``max_spend`` and a positive ``cost`` is supplied — a cumulative
+    spend allowance tracked per permit across calls (the allowance model).
     """
     if not token:
         raise PermitError("permit_required")
@@ -178,15 +181,26 @@ async def require_permit_for_tool(
     if "*" not in scope and tool_name not in scope:
         raise PermitError("out_of_scope")
 
+    ttl = max(1, int(claims.get("exp", 0)) - int(time.time()))
+
     if claims.get("single_use"):
         from ..core.durable_state import get_durable_state
 
-        ttl = max(1, int(claims.get("exp", 0)) - int(time.time()))
         claimed = await get_durable_state().claim_once(
             f"permit:{claims.get('jti')}", ttl
         )
         if not claimed:
             raise PermitError("permit_replayed")
+
+    max_spend = claims.get("max_spend")
+    if max_spend is not None and cost and float(cost) > 0:
+        from ..core.durable_state import get_durable_state
+
+        allowed, _ = await get_durable_state().consume_budget(
+            f"permit_spend:{claims.get('jti')}", float(cost), float(max_spend), ttl
+        )
+        if not allowed:
+            raise PermitError("spend_cap_exceeded")
 
     return claims
 

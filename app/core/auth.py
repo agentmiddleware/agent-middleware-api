@@ -4,13 +4,22 @@ Agents pass their key via the X-API-Key header. No cookies, no sessions,
 no OAuth dance — just a key and a handshake.
 """
 
+import hashlib
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
+
+from ..audit.lightweight import record_audit
 from .config import get_settings
 
 settings = get_settings()
+
+
+def _key_fingerprint(raw_key: str) -> str:
+    """Short, non-reversible fingerprint of a key for audit logs (never the key)."""
+    return hashlib.sha256(raw_key.encode()).hexdigest()[:12]
+
 
 api_key_header = APIKeyHeader(
     name=settings.API_KEY_HEADER,
@@ -35,6 +44,13 @@ class AuthContext:
             return
         if self.wallet_id == wallet_id:
             return
+        record_audit(
+            "auth.wallet_access_denied",
+            source=self.source,
+            key_id=self.key_id,
+            caller_wallet=self.wallet_id,
+            target_wallet=wallet_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -48,6 +64,12 @@ class AuthContext:
         """Allow only trusted bootstrap/admin environment keys."""
         if self.is_bootstrap_admin:
             return
+        record_audit(
+            "auth.admin_access_denied",
+            source=self.source,
+            key_id=self.key_id,
+            caller_wallet=self.wallet_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -115,6 +137,11 @@ async def get_auth_context(
         )
 
     if valid_keys or not settings.DEBUG:
+        record_audit(
+            "auth.denied",
+            reason="unknown_api_key",
+            key_fp=_key_fingerprint(stripped),
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
