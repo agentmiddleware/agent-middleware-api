@@ -22,6 +22,7 @@ def api_headers():
 
 # --- Agent Registration ---
 
+
 @pytest.mark.anyio
 async def test_register_agent(client, api_headers):
     resp = await client.post(
@@ -70,6 +71,7 @@ async def test_filter_agents_by_capability(client, api_headers):
 
 
 # --- Messaging ---
+
 
 @pytest.mark.anyio
 async def test_send_message(client, api_headers):
@@ -123,6 +125,7 @@ async def test_poll_inbox(client, api_headers):
 
 # --- Handoff ---
 
+
 @pytest.mark.anyio
 async def test_handoff_no_agent_found(client, api_headers):
     resp = await client.post(
@@ -157,3 +160,77 @@ async def test_handoff_with_matching_agent(client, api_headers):
     assert resp.status_code == 200
     assert resp.json()["status"] == "handoff_sent"
     assert resp.json()["target_agent_name"] == "transcriber"
+
+
+# --- Cross-agent ownership (impersonation prevention) ---
+
+
+async def _register_foreign_owned_agent(client, api_headers, name: str) -> str:
+    """Register an agent and rewrite its owner_key so the caller no longer
+    owns it — sets up a 'caller does not own this agent' scenario without
+    needing two independently-valid API keys configured."""
+    from app.core.dependencies import get_agent_comms
+
+    resp = await client.post(
+        "/v1/comms/agents",
+        json={"name": name, "capabilities": ["x"]},
+        headers=api_headers,
+    )
+    assert resp.status_code == 201
+    agent_id = resp.json()["agent_id"]
+    comms = get_agent_comms()
+    agent = await comms.registry.get(agent_id)
+    agent.owner_key = "owner-from-some-other-tenant-key"
+    return agent_id
+
+
+@pytest.mark.anyio
+async def test_send_denied_when_caller_does_not_own_from_agent(client, api_headers):
+    from_agent = await _register_foreign_owned_agent(
+        client, api_headers, "foreign-sender"
+    )
+    receiver = await client.post(
+        "/v1/comms/agents",
+        json={"name": "rx-cross-send", "capabilities": ["y"]},
+        headers=api_headers,
+    )
+    receiver_id = receiver.json()["agent_id"]
+    resp = await client.post(
+        f"/v1/comms/messages?from_agent={from_agent}",
+        json={"to_agent": receiver_id, "subject": "spoof", "body": {"x": 1}},
+        headers=api_headers,
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "access_denied"
+
+
+@pytest.mark.anyio
+async def test_inbox_denied_when_caller_does_not_own_agent(client, api_headers):
+    agent_id = await _register_foreign_owned_agent(client, api_headers, "foreign-inbox")
+    resp = await client.get(f"/v1/comms/messages/{agent_id}/inbox", headers=api_headers)
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "access_denied"
+
+
+@pytest.mark.anyio
+async def test_ack_denied_when_caller_does_not_own_agent(client, api_headers):
+    agent_id = await _register_foreign_owned_agent(client, api_headers, "foreign-ack")
+    resp = await client.post(
+        f"/v1/comms/messages/{agent_id}/ack/any-msg-id", headers=api_headers
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "access_denied"
+
+
+@pytest.mark.anyio
+async def test_handoff_denied_when_caller_does_not_own_from_agent(client, api_headers):
+    from_agent = await _register_foreign_owned_agent(
+        client, api_headers, "foreign-handoff"
+    )
+    resp = await client.post(
+        f"/v1/comms/handoff?from_agent={from_agent}",
+        json={"capability": "x", "context": {"why": "spoof"}},
+        headers=api_headers,
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "access_denied"

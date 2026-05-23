@@ -125,3 +125,43 @@ async def test_simulation_skips_db_row_for_send():
             )
         ).scalar_one_or_none()
     assert row is None
+
+
+@pytest.mark.anyio
+async def test_durable_send_denied_when_caller_does_not_own_from_agent():
+    """Authenticated callers cannot impersonate an agent they do not own on
+    the durable send path."""
+    from app.core.dependencies import get_agent_comms
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        sender = await client.post(
+            "/v1/comms/agents",
+            json={"name": "durable-foreign-sender", "capabilities": ["x"]},
+            headers=HEADERS,
+        )
+        sender_id = sender.json()["agent_id"]
+        # Rewrite owner_key so test-key no longer owns this agent.
+        comms = get_agent_comms()
+        agent = await comms.registry.get(sender_id)
+        agent.owner_key = "owner-from-some-other-tenant-key"
+
+        receiver = await client.post(
+            "/v1/comms/agents",
+            json={"name": "durable-foreign-receiver", "capabilities": ["y"]},
+            headers=HEADERS,
+        )
+        receiver_id = receiver.json()["agent_id"]
+
+        resp = await client.post(
+            "/v1/agent-comms/send",
+            json={
+                "from_agent": sender_id,
+                "to_agent": receiver_id,
+                "subject": "spoof",
+                "body": {"a": 1},
+            },
+            headers=HEADERS,
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["error"] == "access_denied"

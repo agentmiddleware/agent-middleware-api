@@ -32,8 +32,10 @@ router = APIRouter(
 
 # --- Request/Response Schemas ---
 
+
 class AgentRegistrationRequest(BaseModel):
     """Register an agent in the communication network."""
+
     name: str = Field(
         ...,
         description="Human-readable agent name.",
@@ -61,8 +63,7 @@ class AgentRegistrationResponse(BaseModel):
     api_key: str = Field(
         ...,
         description=(
-            "Agent-specific API key for sending/receiving messages. "
-            "Store securely."
+            "Agent-specific API key for sending/receiving messages. Store securely."
         ),
     )
     webhook_url: str | None
@@ -72,6 +73,7 @@ class AgentRegistrationResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     """Send a message to another agent."""
+
     to_agent: str = Field(
         ...,
         description="Recipient agent ID.",
@@ -117,6 +119,7 @@ class MessageResponse(BaseModel):
 
 class HandoffRequest(BaseModel):
     """Request a task handoff to an agent with a specific capability."""
+
     capability: str = Field(
         ...,
         description="The capability needed. System finds the best available agent.",
@@ -139,7 +142,30 @@ class HandoffResponse(BaseModel):
     error: str | None = None
 
 
+# --- Auth helpers ---
+
+
+async def _require_agent_owner(comms: AgentComms, api_key: str, agent_id: str) -> None:
+    """Reject the request unless the calling API key owns this agent.
+
+    Applied to every endpoint that acts on behalf of an agent (send, ack,
+    handoff, inbox) so an authenticated caller cannot impersonate an agent
+    they do not own. Unregistered or owner-less agents pass through; the
+    underlying service handles "not found".
+    """
+    agent = await comms.registry.get(agent_id)
+    if agent and agent.owner_key and agent.owner_key != api_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "access_denied",
+                "message": "You do not own this agent.",
+            },
+        )
+
+
 # --- Endpoints ---
+
 
 @router.post(
     "/agents",
@@ -230,6 +256,7 @@ async def send_message(
     api_key: str = Depends(verify_api_key),
     comms: AgentComms = Depends(get_agent_comms),
 ):
+    await _require_agent_owner(comms, api_key, from_agent)
     msg = await comms.send_message(
         from_agent=from_agent,
         to_agent=request.to_agent,
@@ -268,13 +295,7 @@ async def poll_inbox(
     api_key: str = Depends(verify_api_key),
     comms: AgentComms = Depends(get_agent_comms),
 ):
-    # RED TEAM FIX: Verify the requesting key owns this agent
-    agent = await comms.registry.get(agent_id)
-    if agent and agent.owner_key and agent.owner_key != api_key:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "access_denied", "message": "You do not own this agent."},
-        )
+    await _require_agent_owner(comms, api_key, agent_id)
     messages = await comms.router.poll(agent_id, limit=limit)
     return {
         "agent_id": agent_id,
@@ -307,6 +328,7 @@ async def acknowledge_message(
     api_key: str = Depends(verify_api_key),
     comms: AgentComms = Depends(get_agent_comms),
 ):
+    await _require_agent_owner(comms, api_key, agent_id)
     acked = await comms.router.acknowledge(agent_id, message_id)
     if not acked:
         raise HTTPException(
@@ -336,6 +358,7 @@ async def request_handoff(
     api_key: str = Depends(verify_api_key),
     comms: AgentComms = Depends(get_agent_comms),
 ):
+    await _require_agent_owner(comms, api_key, from_agent)
     msg = await comms.request_handoff(
         from_agent=from_agent,
         capability=request.capability,
