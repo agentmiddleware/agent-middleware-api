@@ -9585,6 +9585,33 @@
         }
       }
     },
+    "/v1/trust/readiness": {
+      "get": {
+        "tags": [
+          "Trust Readiness"
+        ],
+        "summary": "Trust-plane readiness gap map",
+        "description": "Operator-only report that separates verified trust-plane capabilities from partially verified, demo-only, or not-yet-claimable gaps. This is not a certification of production readiness.",
+        "operationId": "get_trust_readiness_v1_trust_readiness_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustReadinessReport"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
     "/v1/webhooks/stripe": {
       "post": {
         "tags": [
@@ -22997,6 +23024,129 @@
           "expired"
         ],
         "title": "TopUpStatus"
+      },
+      "TrustReadinessItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "area": {
+            "type": "string",
+            "title": "Area"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "partially_verified",
+              "demo_only",
+              "not_verified",
+              "blocked"
+            ],
+            "title": "Status"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ],
+            "title": "Severity"
+          },
+          "claim": {
+            "type": "string",
+            "title": "Claim"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "gap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap"
+          },
+          "recommended_next_step": {
+            "type": "string",
+            "title": "Recommended Next Step"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "area",
+          "status",
+          "severity",
+          "claim",
+          "recommended_next_step"
+        ],
+        "title": "TrustReadinessItem"
+      },
+      "TrustReadinessReport": {
+        "properties": {
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pilot-ready",
+              "needs-work",
+              "blocked"
+            ],
+            "title": "Verdict"
+          },
+          "total_items": {
+            "type": "integer",
+            "title": "Total Items"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          },
+          "critical_gaps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Critical Gaps"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TrustReadinessItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checked_at",
+          "verdict",
+          "total_items",
+          "by_status",
+          "critical_gaps",
+          "items"
+        ],
+        "title": "TrustReadinessReport"
       },
       "ValidationError": {
         "properties": {

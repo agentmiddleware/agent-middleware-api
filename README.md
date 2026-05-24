@@ -137,7 +137,7 @@ Before assuming real side effects, call `GET /health/dependencies` and read `sim
 - **Policy-constrained execution** — MCP invocation can require signed permits and idempotency keys before billable tool calls.
 - **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
 - **Receipts and audit** — `/v1/receipts` verifies signed action receipts, `/v1/receipts/{receipt_id}/evidence` checks linked permit, ledger, and audit artifacts, `/v1/evidence/{receipt_id}` returns the flat buyer-facing evidence bundle (`receipt`, `permit`, `ledger_entry`, `audit_event`, and a `verification` map), and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
-- **Governance and readiness** — telemetry, dependency health, security posture, and operator preflight checks.
+- **Governance and readiness** — telemetry, dependency health, security posture, operator preflight checks, and `GET /v1/trust/readiness`, the bootstrap-admin gap map for verified, partial, demo-only, and not-yet-claimable trust-plane claims.
 
 ### Proof-of-usefulness surfaces
 
@@ -152,7 +152,7 @@ golden-path flow, and core API contracts are executable and tested.
 **Phase 1 (on `master`, simulation-gated "real" mode):** With PostgreSQL and the right env flags, these areas persist state and/or call external models instead of returning only synthetic payloads:
 
 - **Agent Oracle** — Durable crawl payload hashing and index surfaces (`SIMULATION_MODE_ORACLE=false`).
-- **Agent Comms** — SQL-backed send + inbox at **`/v1/agent-comms/send`** and **`/v1/agent-comms/inbox`** (`SIMULATION_MODE_AGENT_COMMS=false`). Legacy **`/v1/comms/*`** remains for compatibility.
+- **Agent Comms** — SQL-backed send + inbox at **`/v1/agent-comms/send`** and **`/v1/agent-comms/inbox`** (`SIMULATION_MODE_AGENT_COMMS=false`). The same real-mode path is exposed as paid-pilot MCP tool **`agent-comms-send`** for governed permit/receipt demos. Legacy **`/v1/comms/*`** remains for compatibility.
 - **Content Factory (text)** — **`POST /v1/content/generate`** and **`GET /v1/content/{content_id}`** with row persistence (`SIMULATION_MODE_CONTENT_FACTORY=false`) and OpenAI-compatible chat when **`LLM_BASE_URL`** + **`LLM_API_KEY`** are set.
 
 The planner optimizer is a stateless action-selection surface for agents: **`POST /v1/planner/optimize`** chooses candidate actions subject to budget, latency, risk, service health, scope, and simulation constraints.
@@ -280,6 +280,9 @@ curl -s "http://localhost:8000/v1/oracle/index?domain=example.com&limit=20" \
 ### Durable agent comms (`/v1/agent-comms`)
 
 These endpoints complement legacy **`/v1/comms`**. With `SIMULATION_MODE_AGENT_COMMS=false`, send and inbox are backed by SQL (and audited). Inbox listing requires access to the recipient agent (same rules as the comms registry).
+In the trust-plane demo, the `agent-comms-send` MCP tool writes to this same
+durable inbox path through signed permit enforcement, billing, receipt, and
+audit.
 
 ```bash
 curl -X POST http://localhost:8000/v1/agent-comms/send \

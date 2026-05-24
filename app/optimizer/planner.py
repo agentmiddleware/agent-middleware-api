@@ -135,6 +135,7 @@ def optimize_action_set(state: OptimizerState, candidates: list[dict], req: Opti
             prob += pulp.lpSum(x[i] * action.get("latency_ms", 0.0) for i, action in enumerate(admissible)) <= state.slo_window_seconds * 1000
             prob += pulp.lpSum(x[i] * action.get("risk_score", 0.0) for i, action in enumerate(admissible)) <= risk_budget
             prob += pulp.lpSum(x[i] for i in range(len(admissible))) <= max_actions
+            prob += pulp.lpSum(x[i] for i in range(len(admissible))) >= 1
             status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
             if pulp.LpStatus[status] == "Optimal":
                 selected = [admissible[i] for i in range(len(admissible)) if x[i].value() and x[i].value() > 0.5]

@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO_DB = ROOT / "data" / "demo_trust_plane.db"
 ADMIN_KEY = "demo-admin-key"
 DEMO_PRIVATE_KEY_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
-ALLOWED_TOOL = "trust-plane-echo"
-BLOCKED_TOOL = "trust-plane-admin-ledger"
+ALLOWED_TOOL = "agent-comms-send"
+BLOCKED_TOOL = "data-indexer"
 PRINT_STEPS = True
 
 
@@ -31,11 +31,13 @@ def configure_environment() -> None:
     """Set demo-safe defaults before importing the app."""
     DEMO_DB.parent.mkdir(parents=True, exist_ok=True)
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{DEMO_DB}"
+    os.environ["STATE_BACKEND"] = "memory"
     os.environ["VALID_API_KEYS"] = ADMIN_KEY
     os.environ["TRUST_MODE_ENABLED"] = "true"
     os.environ["ALLOW_LEGACY_UNPERMITTED_MCP"] = "false"
     os.environ["TRUST_SIGNING_KEY_ID"] = "demo-ed25519"
     os.environ["TRUST_SIGNING_PRIVATE_KEY_B64"] = DEMO_PRIVATE_KEY_B64
+    os.environ["SIMULATION_MODE_AGENT_COMMS"] = "false"
 
 
 configure_environment()
@@ -49,7 +51,6 @@ from sqlalchemy import select  # noqa: E402
 from app.db.database import close_db, get_session_factory, init_db  # noqa: E402
 from app.db.models import ControlPlaneAuditEventModel, ReceiptModel  # noqa: E402
 from app.main import app  # noqa: E402
-from app.schemas.billing import ServiceCategory  # noqa: E402
 from app.services.service_registry import get_service_registry  # noqa: E402
 
 
@@ -112,38 +113,12 @@ async def get_json(
 
 
 def register_demo_tools() -> None:
-    registry = get_service_registry()
-
-    def echo(message: str = "ok") -> dict[str, str]:
-        return {"message": message, "governed": "true"}
-
-    def admin_ledger_probe() -> dict[str, str]:
-        return {"should_not_execute": "true"}
-
-    registry.register_local(
-        service_id=ALLOWED_TOOL,
-        name="Trust Plane Echo",
-        description="Demo tool allowed by the signed permit",
-        category=ServiceCategory.AGENT_COMMS,
-        func=echo,
-        credits_per_unit=2.0,
-        unit_name="call",
-    )
-    registry.register_local(
-        service_id=BLOCKED_TOOL,
-        name="Trust Plane Blocked Admin Tool",
-        description="Demo tool intentionally outside the signed permit",
-        category=ServiceCategory.AGENT_COMMS,
-        func=admin_ledger_probe,
-        credits_per_unit=2.0,
-        unit_name="call",
-    )
+    """Paid-pilot MCP tools are registered by MCP discovery in real mode."""
 
 
 def unregister_demo_tools() -> None:
     registry = get_service_registry()
     registry.unregister_local(ALLOWED_TOOL)
-    registry.unregister_local(BLOCKED_TOOL)
 
 
 async def _tamper_receipt(receipt_id: str) -> None:
@@ -259,6 +234,19 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             )
             agent_headers = {"X-API-Key": key["api_key"]}
 
+            step("registering receiver agent for durable Agent Comms")
+            receiver = await post_json(
+                client,
+                "/v1/comms/agents",
+                headers=agent_headers,
+                expected_status=201,
+                json_body={
+                    "name": "trust-plane-demo-receiver",
+                    "capabilities": ["trust-intake"],
+                },
+            )
+            receiver_agent_id = receiver["agent_id"]
+
             step("discovering MCP tools")
             tools = await get_json(
                 client,
@@ -338,7 +326,11 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 wallet_id=agent_wallet_id,
                 permit_id=permit["permit_id"],
                 idempotency_key="demo-invoke-1",
-                arguments={"message": "hello trust plane"},
+                arguments={
+                    "to_agent": receiver_agent_id,
+                    "subject": "Trust-plane paid-pilot proof",
+                    "body": {"message": "hello trust plane"},
+                },
             )
 
             step("invoking governed MCP tool")
@@ -351,6 +343,17 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             )
             result = first_jsonrpc_result(first_call)
             require(result["isError"] is False, f"tool call failed: {result}")
+            tool_result = json.loads(result["content"][0]["text"])
+            require(
+                tool_result["from_agent"] == agent_wallet_id,
+                f"tool did not derive sender from wallet context: {tool_result}",
+            )
+            require(
+                tool_result["to_agent"] == receiver_agent_id,
+                f"tool sent to wrong receiver: {tool_result}",
+            )
+            require(tool_result["durable"] is True, "tool did not report durability")
+            require(tool_result["payload_hash"], "tool result missing payload hash")
             receipt = result["receipt"]
             require(receipt["outcome"] == "success", "success receipt missing")
             require(receipt["ledger_entry_id"], "receipt missing ledger entry")
@@ -407,6 +410,24 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             ]
             require(len(echo_debits) == 1, f"expected one debit, got {echo_debits}")
 
+            step("inspecting durable Agent Comms inbox")
+            inbox = await get_json(
+                client,
+                f"/v1/agent-comms/inbox?agent_id={receiver_agent_id}",
+                headers=agent_headers,
+                expected_status=200,
+            )
+            inbox_match = [
+                item
+                for item in inbox["messages"]
+                if item["message_id"] == tool_result["message_id"]
+            ]
+            require(inbox_match, f"durable inbox missing tool message: {inbox}")
+            require(
+                inbox_match[0]["payload_hash"] == tool_result["payload_hash"],
+                f"inbox payload hash mismatch: {inbox_match[0]}",
+            )
+
             step("verifying audit chain")
             audit_check = await post_json(
                 client,
@@ -458,10 +479,16 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 expected_status=200,
                 json_body=call_body,
             )
-            replay_receipt = first_jsonrpc_result(replay)["receipt"]
+            replay_result = first_jsonrpc_result(replay)
+            replay_receipt = replay_result["receipt"]
             require(
                 replay_receipt["receipt_id"] == receipt["receipt_id"],
                 "replay did not return original receipt",
+            )
+            replay_tool_result = json.loads(replay_result["content"][0]["text"])
+            require(
+                replay_tool_result["message_id"] == tool_result["message_id"],
+                "replay did not return original Agent Comms message",
             )
             ledger_after_replay = await get_json(
                 client,
@@ -478,6 +505,21 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             require(
                 len(echo_debits_after_replay) == 1,
                 "replay created a duplicate ledger debit",
+            )
+            inbox_after_replay = await get_json(
+                client,
+                f"/v1/agent-comms/inbox?agent_id={receiver_agent_id}",
+                headers=agent_headers,
+                expected_status=200,
+            )
+            matching_messages_after_replay = [
+                item
+                for item in inbox_after_replay["messages"]
+                if item["message_id"] == tool_result["message_id"]
+            ]
+            require(
+                len(matching_messages_after_replay) == 1,
+                "replay created a duplicate Agent Comms message",
             )
 
             step("attempting out-of-scope MCP tool")
@@ -598,6 +640,10 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 "sponsor_wallet_id": sponsor_wallet_id,
                 "agent_wallet_id": agent_wallet_id,
                 "agent_key_id": key["key_id"],
+                "receiver_agent_id": receiver_agent_id,
+                "paid_pilot_tool": ALLOWED_TOOL,
+                "message_id": tool_result["message_id"],
+                "payload_hash": tool_result["payload_hash"],
                 "permit_id": permit["permit_id"],
                 "success_receipt_id": receipt["receipt_id"],
                 "ledger_entry_id": receipt["ledger_entry_id"],

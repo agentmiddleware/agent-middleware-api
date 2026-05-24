@@ -89,7 +89,27 @@ echo "$AGENT_API_KEY"
 
 Store this key securely. It is shown once.
 
-## 5. Issue A Signed Tool Permit
+## 5. Register A Durable Agent Comms Receiver
+
+`agent-comms-send` is the paid-pilot MCP tool. It is discoverable when
+`SIMULATION_MODE_AGENT_COMMS=false` and writes a SQL-backed inbox message.
+
+```bash
+RECEIVER_JSON=$(
+  curl -s -X POST "$API_URL/v1/comms/agents" \
+    -H "X-API-Key: $AGENT_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"name\": \"golden-path-receiver\",
+      \"capabilities\": [\"trust-intake\"]
+    }"
+)
+
+export RECEIVER_AGENT_ID=$(echo "$RECEIVER_JSON" | jq -r '.agent_id')
+echo "$RECEIVER_AGENT_ID"
+```
+
+## 6. Issue A Signed Tool Permit
 
 Governed MCP calls use a signed permit plus an idempotency key. The permit
 binds the agent wallet, the runtime key, the allowed tool, scope, budget, and
@@ -106,8 +126,8 @@ export PERMIT_JSON=$(
       \"issuer_wallet_id\": \"$AGENT_WALLET_ID\",
       \"subject_wallet_id\": \"$AGENT_WALLET_ID\",
       \"subject_key_id\": \"$AGENT_KEY_ID\",
-      \"allowed_tools\": [\"golden-path-echo\"],
-      \"scopes\": [\"tool:golden-path-echo:invoke\", \"billing:charge\"],
+      \"allowed_tools\": [\"agent-comms-send\"],
+      \"scopes\": [\"tool:agent-comms-send:invoke\", \"billing:charge\"],
       \"max_credits\": 50,
       \"expires_at\": \"$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\"
     }"
@@ -117,7 +137,7 @@ export PERMIT_ID=$(echo "$PERMIT_JSON" | jq -r '.permit_id')
 echo "$PERMIT_ID"
 ```
 
-## 6. Verify Agent-Scoped Access
+## 7. Verify Agent-Scoped Access
 
 The agent key can read its own wallet:
 
@@ -135,7 +155,7 @@ curl -i "$API_URL/v1/billing/wallets/$SPONSOR_WALLET_ID" \
 
 Expected result: `403 Forbidden`.
 
-## 7. Simulate Cost Before Acting
+## 8. Simulate Cost Before Acting
 
 ```bash
 DRY_RUN_JSON=$(
@@ -159,7 +179,7 @@ curl -X POST "$API_URL/v1/billing/dry-run/charge" \
   }"
 ```
 
-## 6a. Optional: Attach A Wallet Policy
+## 9. Optional: Attach A Wallet Policy
 
 Operators can constrain the agent wallet before execution:
 
@@ -179,7 +199,7 @@ If an MCP invocation, billing charge, or planner action violates the active
 wallet policy, it is denied before execution or charge and the audit event
 includes the `policy_id` and evaluated constraints.
 
-## 7. Invoke Or Discover Tools
+## 10. Invoke Or Discover Tools
 
 Fetch the MCP manifest:
 
@@ -188,8 +208,8 @@ curl "$API_URL/mcp/tools.json" \
   -H "X-API-Key: $AGENT_API_KEY"
 ```
 
-For a registered local or persistent MCP service, invoke through JSON-RPC with
-wallet, permit, and replay context:
+Invoke the paid-pilot Agent Comms MCP tool through JSON-RPC with wallet,
+permit, and replay context:
 
 ```bash
 INVOKE_JSON=$(
@@ -201,8 +221,12 @@ INVOKE_JSON=$(
     \"id\": \"golden-call-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"golden-path-echo\",
-      \"arguments\": {\"message\": \"hello\"},
+      \"name\": \"agent-comms-send\",
+      \"arguments\": {
+        \"to_agent\": \"$RECEIVER_AGENT_ID\",
+        \"subject\": \"Golden path trust proof\",
+        \"body\": {\"message\": \"hello\"}
+      },
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
         \"permit_id\": \"$PERMIT_ID\",
@@ -213,10 +237,18 @@ INVOKE_JSON=$(
 )
 
 export RECEIPT_ID=$(echo "$INVOKE_JSON" | jq -r '.result.receipt.receipt_id')
+export MESSAGE_ID=$(echo "$INVOKE_JSON" | jq -r '.result.content[0].text | fromjson | .message_id')
 echo "$RECEIPT_ID"
+echo "$MESSAGE_ID"
 ```
 
-Replace `golden-path-echo` with a tool from `/mcp/tools.json`.
+Inspect the durable Agent Comms inbox row:
+
+```bash
+curl "$API_URL/v1/agent-comms/inbox?agent_id=$RECEIVER_AGENT_ID" \
+  -H "X-API-Key: $AGENT_API_KEY" |
+  jq --arg message_id "$MESSAGE_ID" '.messages[] | select(.message_id == $message_id)'
+```
 
 Replay the exact same request and confirm the receipt ID is unchanged:
 
@@ -230,8 +262,12 @@ REPLAY_JSON=$(
     \"id\": \"golden-call-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"golden-path-echo\",
-      \"arguments\": {\"message\": \"hello\"},
+      \"name\": \"agent-comms-send\",
+      \"arguments\": {
+        \"to_agent\": \"$RECEIVER_AGENT_ID\",
+        \"subject\": \"Golden path trust proof\",
+        \"body\": {\"message\": \"hello\"}
+      },
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
         \"permit_id\": \"$PERMIT_ID\",
@@ -256,7 +292,7 @@ curl -s -X POST "$API_URL/mcp/messages" \
     \"id\": \"golden-denial-1\",
     \"method\": \"tools/call\",
     \"params\": {
-      \"name\": \"another-registered-tool\",
+      \"name\": \"data-indexer\",
       \"arguments\": {},
       \"mcpContext\": {
         \"wallet_id\": \"$AGENT_WALLET_ID\",
@@ -267,7 +303,7 @@ curl -s -X POST "$API_URL/mcp/messages" \
   }" | jq '.error'
 ```
 
-## 8. Inspect The Operation Record
+## 11. Inspect The Operation Record
 
 After a scoped agent invokes a tool, operators can inspect the control-plane record:
 
@@ -328,7 +364,7 @@ curl -X POST "$API_URL/v1/audit/verify-chain" \
   -d "{\"wallet_id\": \"$AGENT_WALLET_ID\"}"
 ```
 
-## 9. Inspect Ledger And Velocity
+## 12. Inspect Ledger And Velocity
 
 ```bash
 curl "$API_URL/v1/billing/ledger/$AGENT_WALLET_ID" \
@@ -338,6 +374,19 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
   -H "X-API-Key: $AGENT_API_KEY"
 ```
 
+## 13. Inspect Trust Readiness Gaps
+
+Operators can inspect the current trust-plane gap map before claiming pilot or
+production readiness:
+
+```bash
+curl "$API_URL/v1/trust/readiness" \
+  -H "X-API-Key: $BOOTSTRAP_KEY"
+```
+
+The report separates verified trust-plane claims from partial, demo-only, and
+not-yet-claimable gaps. A wallet-scoped agent key should receive `403`.
+
 ## Success Criteria
 
 - Agent discovery endpoints respond.
@@ -346,8 +395,10 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Agent API key can access only its own wallet.
 - Dry-run simulation returns a cost estimate.
 - MCP manifest is available.
+- Paid-pilot `agent-comms-send` is discoverable in real Agent Comms mode.
 - Signed permit creation binds wallet, key, tool, budget, and expiry.
 - Governed MCP invocation returns a signed receipt.
+- Durable Agent Comms inbox contains the message produced by the MCP tool.
 - Receipt verification and audit-chain verification succeed.
 - Replaying the same governed invoke returns the same receipt without a second
   ledger debit.
@@ -356,3 +407,4 @@ curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
 - Operators can inspect the policy decision, audit event, ledger entry, and
   request/correlation ID for the scoped tool call.
 - Ledger and velocity endpoints are inspectable with the agent key.
+- Bootstrap/admin operators can inspect the trust-readiness gap map.

@@ -22,6 +22,9 @@ def test_demo_trust_plane_script_proves_core_loop():
     assert result.returncode == 0, result.stderr
     proof = json.loads(result.stdout)
     assert proof["permit_id"].startswith("permit-")
+    assert proof["paid_pilot_tool"] == "agent-comms-send"
+    assert proof["message_id"]
+    assert proof["payload_hash"]
     assert proof["success_receipt_id"].startswith("rcpt-")
     assert proof["signing_key_id"] == "demo-ed25519"
     assert proof["inspected_receipts"] == 1

@@ -34,6 +34,7 @@ from ..services.mcp_phase9_tools import (
     ensure_phase9_registered,
     register_default_mcp_services,
 )
+from ..services.paid_pilot_mcp_tools import sync_paid_pilot_mcp_tools
 from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 
 # Spine primitives are consumed through the trust-plane facade so the governed
@@ -70,6 +71,7 @@ def _ensure_local_mcp_tools_registered() -> None:
     """Keep discovery populated when tests or transports skip app lifespan startup."""
     ensure_phase9_registered()
     register_default_mcp_services()
+    sync_paid_pilot_mcp_tools()
 
 
 async def build_mcp_tools_manifest(
@@ -656,11 +658,23 @@ async def _execute_registered_tool(
             )
         raise ValueError("insufficient_funds")
 
+    tool_arguments = {
+        key: value for key, value in arguments.items() if key != "_mcp_context"
+    }
+    if "_mcp_context" in inspect.signature(func).parameters:
+        tool_arguments["_mcp_context"] = {
+            "wallet_id": wallet_id,
+            "key_id": auth.key_id,
+            "request_id": request_id,
+            "permit_id": permit_id,
+            "idempotency_key": idempotency_key,
+        }
+
     try:
         if inspect.iscoroutinefunction(func):
-            result = await func(**arguments)
+            result = await func(**tool_arguments)
         else:
-            result = func(**arguments)
+            result = func(**tool_arguments)
     except Exception as exc:
         try:
             await money.refund_charge(

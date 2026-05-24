@@ -87,7 +87,7 @@ def extract_schema_from_callable(
         required = []
 
         for param_name, param in sig.parameters.items():
-            if param_name in ("self", "cls"):
+            if param_name in ("self", "cls", "_mcp_context"):
                 continue
 
             if param_name in type_hints:

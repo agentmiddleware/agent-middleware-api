@@ -70,6 +70,10 @@ compete with it in product positioning.
   `scripts/trust_release_gate.sh`
 - Trust-plane changes pass the focused coverage gate:
   `scripts/trust_coverage_gate.sh`
+- Bootstrap/admin operators can call `GET /v1/trust/readiness` to see the
+  current trust-plane gap map. This report separates verified claims from
+  partial, demo-only, or not-yet-claimable gaps; it is not a certification of
+  production readiness.
 - Production env vars have a complete reference.
 - Migrations upgrade an empty database and the latest known production schema.
 - CI is green on `master`.
@@ -119,6 +123,17 @@ requirements, risk tier, and human-approval gates. MCP invocation, billing
 charges, and planner optimization now evaluate active wallet policies before
 execution or charge, and audit metadata records the matched `policy_id` and
 evaluated constraints.
+
+## Trust Readiness Gap Map Outcome
+
+The trust-readiness report gives operators a tested, machine-readable map of
+what the repo can honestly claim. It marks signed permits, governed MCP replay,
+metered ledger debits, signed receipt evidence, audit chains, and wallet-scoped
+inspection as verified. The paid-pilot proof now includes `agent-comms-send`, a
+real internal MCP tool that writes a durable Agent Comms inbox row in real mode.
+It still keeps unresolved gaps visible: AWI remains a draft proof surface,
+production settlement and compliance-grade ledger claims are not verified, and
+sandbox isolation depends on deployment configuration.
 
 ## Recommended Milestones
 

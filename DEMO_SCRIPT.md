@@ -12,6 +12,8 @@ The proof is intentionally narrow. It demonstrates that the governed MCP path
 can enforce scope, meter a call, produce verifiable artifacts, and reject misuse.
 It does not claim production readiness, settlement rails, or a complete
 autonomous economic actor infrastructure.
+The happy-path tool is `agent-comms-send`, an internal MCP tool that writes a
+SQL-backed Agent Comms inbox message when `SIMULATION_MODE_AGENT_COMMS=false`.
 
 ## Environment
 
@@ -22,6 +24,7 @@ export VALID_API_KEYS=dev-bootstrap-key
 export DATABASE_URL=sqlite+aiosqlite:///./trust-demo.db
 export TRUST_MODE_ENABLED=true
 export ALLOW_LEGACY_UNPERMITTED_MCP=false
+export SIMULATION_MODE_AGENT_COMMS=false
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -64,10 +67,10 @@ live demo flow below when walking a partner through the product story.
 2. Create a sponsor wallet with a bootstrap key.
 3. Create an agent wallet.
 4. Create an agent API key for the agent wallet.
-5. Register or use an MCP tool.
+5. Register an Agent Comms receiver and discover `agent-comms-send`.
 6. Create a signed permit with:
-   - `allowed_tools: ["tool-name"]`
-   - `scopes: ["tool:tool-name:invoke", "billing:charge"]`
+   - `allowed_tools: ["agent-comms-send"]`
+   - `scopes: ["tool:agent-comms-send:invoke", "billing:charge"]`
    - `max_credits`
    - `expires_at`
    - `Idempotency-Key`
@@ -76,7 +79,7 @@ live demo flow below when walking a partner through the product story.
    - `mcpContext.wallet_id`
    - `mcpContext.permit_id`
    - `mcpContext.idempotency_key`
-8. Show the wallet charge in the billing ledger.
+8. Show the wallet charge in the billing ledger and the durable inbox message.
 9. Verify the signed receipt with `/v1/receipts/verify`.
 10. Inspect the signed receipt with `/v1/receipts` and
     `/v1/permits/{permit_id}/receipts`.
@@ -107,6 +110,7 @@ live demo flow below when walking a partner through the product story.
 - Receipt JSON with Ed25519 signature.
 - Public signing-key metadata, with no private key material.
 - Ledger entry ID referenced by the receipt.
+- Agent Comms message ID and payload hash produced by `agent-comms-send`.
 - Audit event ID referenced by the receipt.
 - Permit and receipt inspection responses filtered to the agent wallet.
 - Audit-chain verification response.
