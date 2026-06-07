@@ -1,3 +1,8 @@
+import json
+import os
+import subprocess
+import sys
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -37,6 +42,38 @@ def _without_generated_at(manifest):
     return {key: value for key, value in manifest.items() if key != "generated_at"}
 
 
+_SURFACE_PAYLOAD_SCRIPT = """
+import json
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+payload = {
+    "agent": client.get("/.well-known/agent.json").json(),
+    "discover": client.get("/v1/discover").json(),
+    "root": client.get("/").json(),
+    "openapi_paths": sorted(client.get("/openapi.json").json()["paths"]),
+}
+print(json.dumps(payload))
+"""
+
+
+def _surface_payload(mode: str) -> dict:
+    env = os.environ.copy()
+    env["API_SURFACE_MODE"] = mode
+    env.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+    env.setdefault("VALID_API_KEYS", "test-key")
+    result = subprocess.run(
+        [sys.executable, "-c", _SURFACE_PAYLOAD_SCRIPT],
+        cwd=os.getcwd(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
@@ -69,7 +106,81 @@ async def test_discover_and_agent_manifest_share_agent_first_contract(client):
 
     assert agent_response.status_code == 200
     assert discover_response.status_code == 200
-    assert agent_response.json()["agent_first"] == discover_response.json()["agent_first"]
+    assert (
+        agent_response.json()["agent_first"] == discover_response.json()["agent_first"]
+    )
+
+
+def test_trust_plane_discovery_does_not_advertise_proof_surfaces():
+    payload = _surface_payload("trust_plane")
+
+    agent = payload["agent"]
+    discover = payload["discover"]
+    root = payload["root"]
+    openapi_paths = set(payload["openapi_paths"])
+
+    assert "/.well-known/awi.json" not in agent["agent_first"]["bootstrap_sequence"]
+    assert "awi" not in agent["endpoints"]
+    assert "telemetry" not in agent["endpoints"]
+    assert "ai" not in agent["endpoints"]
+    assert "awi_automation" not in agent["capabilities"]
+    assert "passkey_auth" not in agent["capabilities"]
+
+    proof_services = {
+        "iot_bridge",
+        "autonomous_pm",
+        "media_engine",
+        "agent_comms",
+        "content_factory",
+        "agent_oracle",
+        "red_team_security",
+        "rtaas",
+        "sandbox",
+        "awi_phase9",
+        "telemetry_scope",
+    }
+    assert set(root["services"]).isdisjoint(proof_services)
+    assert root["api_surface"]["mode"] == "trust_plane"
+
+    proof_capabilities = {
+        "awi",
+        "telemetry",
+        "sandbox",
+        "iot",
+        "passkey",
+        "dom_bridge",
+        "rag_memory",
+    }
+    assert {capability["name"] for capability in discover["capabilities"]}.isdisjoint(
+        proof_capabilities
+    )
+    assert discover["awi_endpoints"] == []
+    assert "awi_adoption" not in discover["integration_guides"]
+
+    proof_paths = {
+        "/.well-known/awi.json",
+        "/v1/awi/sessions",
+        "/v1/telemetry/events",
+        "/v1/sandbox/environments",
+        "/v1/oracle/crawl",
+        "/v1/content/generate",
+    }
+    assert openapi_paths.isdisjoint(proof_paths)
+
+
+def test_full_mode_discovery_preserves_proof_surfaces():
+    payload = _surface_payload("full")
+
+    assert (
+        "/.well-known/awi.json" in payload["agent"]["agent_first"]["bootstrap_sequence"]
+    )
+    assert "awi" in payload["agent"]["endpoints"]
+    assert "passkey_auth" in payload["agent"]["capabilities"]
+    assert "iot_bridge" in payload["root"]["services"]
+    assert payload["root"]["api_surface"]["mode"] == "full"
+    assert payload["discover"]["awi_endpoints"]
+    assert "awi_adoption" in payload["discover"]["integration_guides"]
+    assert "/.well-known/awi.json" in payload["openapi_paths"]
 
 
 @pytest.mark.anyio

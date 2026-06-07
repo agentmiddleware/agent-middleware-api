@@ -90,6 +90,11 @@ async def test_report_default_shape():
     # Simulation modes are surfaced for operators.
     assert "simulation_modes" in report
     assert report["simulation_modes"]["iot_bridge"] is True
+    assert report["api_surface"] == {
+        "mode": "full",
+        "proof_surfaces_enabled": True,
+        "mounted_surface": "full",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +206,11 @@ async def test_health_dependencies_endpoint_returns_report(client):
     body = resp.json()
     assert body["status"] == "healthy"
     assert "dependencies" in body
+    assert body["api_surface"] == {
+        "mode": "full",
+        "proof_surfaces_enabled": True,
+        "mounted_surface": "full",
+    }
     assert set(body["dependencies"].keys()) == {
         "postgres",
         "redis",

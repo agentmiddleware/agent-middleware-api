@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 
+from ..core.api_surface import proof_surfaces_enabled
 from ..core.auth import verify_api_key
 from ..core.config import get_settings
 from .well_known import get_agent_first_metadata
@@ -117,99 +118,118 @@ class DiscoveryManifest(BaseModel):
 
 def _build_capabilities() -> list[ServiceCapability]:
     """Build the list of service capabilities."""
-    return [
+    capabilities = [
         ServiceCapability(
             name="billing",
             version="1.0",
-            description="Two-tier wallet system with ACID transactions, Stripe integration, and spend velocity monitoring",
+            description="Wallet ledger, exact decimal accounting, spend limits, and charge records",
             category="financial",
         ),
         ServiceCapability(
-            name="telemetry",
+            name="permits",
             version="1.0",
-            description="Emit events, detect anomalies, and trigger autonomous responses",
-            category="observability",
+            description="Signed permit issuance and validation for scoped MCP tool calls",
+            category="authorization",
         ),
         ServiceCapability(
-            name="comms",
+            name="receipts",
             version="1.0",
-            description="Agent-to-agent messaging, registration, and swarm coordination",
-            category="communication",
+            description="Signed receipts for governed tool attempts and billing/audit linkage",
+            category="governance",
         ),
         ServiceCapability(
-            name="ai",
+            name="audit",
             version="1.0",
-            description="AI-powered decision making, self-healing, natural language queries, and memory",
-            category="intelligence",
+            description="Wallet-scoped audit inspection and tamper-evident audit-chain verification",
+            category="governance",
         ),
         ServiceCapability(
             name="mcp",
             version="1.0",
-            description="Model Context Protocol server for tool discovery and execution",
+            description="Model Context Protocol server for governed tool discovery and execution",
             category="tooling",
-        ),
-        ServiceCapability(
-            name="awi",
-            version="1.0",
-            description="Agentic Web Interface - standardized web automation with human pause/steer",
-            category="automation",
-        ),
-        ServiceCapability(
-            name="sandbox",
-            version="1.0",
-            description="Dry-run sandbox and behavioral sandbox for safe tool testing",
-            category="testing",
         ),
         ServiceCapability(
             name="kyc",
             version="1.0",
-            description="Stripe Identity KYC verification for sponsor wallets",
+            description="Stripe Identity KYC hooks for sponsor wallets",
             category="compliance",
         ),
         ServiceCapability(
             name="api_keys",
             version="1.0",
-            description="Automated API key rotation and management",
+            description="Wallet-scoped API key rotation and management",
             category="security",
-        ),
-        ServiceCapability(
-            name="iot",
-            version="1.0",
-            description="Secure IoT protocol bridge with MQTT and CoAP support",
-            category="iot",
-        ),
-        ServiceCapability(
-            name="passkey",
-            version="1.0",
-            description="FIDO2/WebAuthn passkey verification for high-risk AWI actions like checkout and payments",
-            category="security",
-        ),
-        ServiceCapability(
-            name="dom_bridge",
-            version="1.0",
-            description="Bidirectional DOM↔AWI translation via Playwright for real browser automation on any website",
-            category="automation",
-        ),
-        ServiceCapability(
-            name="rag_memory",
-            version="1.0",
-            description="Semantic memory over AWI sessions with vector store and retrieval for long-term agent reasoning",
-            category="intelligence",
         ),
     ]
+
+    if not proof_surfaces_enabled(settings):
+        return capabilities
+
+    capabilities.extend(
+        [
+            ServiceCapability(
+                name="telemetry",
+                version="1.0",
+                description="Emit events, detect anomalies, and trigger autonomous responses",
+                category="observability",
+            ),
+            ServiceCapability(
+                name="comms",
+                version="1.0",
+                description="Agent-to-agent messaging, registration, and swarm coordination",
+                category="communication",
+            ),
+            ServiceCapability(
+                name="ai",
+                version="1.0",
+                description="AI-powered decision making, self-healing, natural language queries, and memory",
+                category="intelligence",
+            ),
+            ServiceCapability(
+                name="awi",
+                version="1.0",
+                description="Agentic Web Interface - standardized web automation with human pause/steer",
+                category="automation",
+            ),
+            ServiceCapability(
+                name="sandbox",
+                version="1.0",
+                description="Dry-run sandbox and behavioral sandbox for safe tool testing",
+                category="testing",
+            ),
+            ServiceCapability(
+                name="iot",
+                version="1.0",
+                description="Secure IoT protocol bridge with MQTT and CoAP support",
+                category="iot",
+            ),
+            ServiceCapability(
+                name="passkey",
+                version="1.0",
+                description="FIDO2/WebAuthn passkey verification for high-risk AWI actions like checkout and payments",
+                category="security",
+            ),
+            ServiceCapability(
+                name="dom_bridge",
+                version="1.0",
+                description="Bidirectional DOM↔AWI translation via Playwright for real browser automation on any website",
+                category="automation",
+            ),
+            ServiceCapability(
+                name="rag_memory",
+                version="1.0",
+                description="Semantic memory over AWI sessions with vector store and retrieval for long-term agent reasoning",
+                category="intelligence",
+            ),
+        ]
+    )
+    return capabilities
 
 
 def _build_mcp_tools() -> list[MCPToolInfo]:
     """Build the list of available MCP tools."""
-    return [
-        MCPToolInfo(
-            service_id="telemetry",
-            name="emit_telemetry_event",
-            description="Emit a telemetry event with custom properties",
-            category="observability",
-            credits_per_call=1.0,
-            unit_name="event",
-        ),
+    tools = [
         MCPToolInfo(
             service_id="billing",
             name="charge_wallet",
@@ -219,86 +239,111 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
             unit_name="transaction",
         ),
         MCPToolInfo(
-            service_id="comms",
-            name="send_agent_message",
-            description="Send a message to another agent",
+            service_id="agent-comms-send",
+            name="agent-comms-send",
+            description="Paid-pilot governed MCP tool for durable agent message delivery",
             category="communication",
             credits_per_call=1.0,
             unit_name="message",
         ),
-        MCPToolInfo(
-            service_id="ai",
-            name="decide",
-            description="Use AI to make autonomous decisions",
-            category="intelligence",
-            credits_per_call=10.0,
-            unit_name="decision",
-        ),
-        MCPToolInfo(
-            service_id="ai",
-            name="heal",
-            description="AI-powered self-healing diagnostics",
-            category="intelligence",
-            credits_per_call=15.0,
-            unit_name="diagnosis",
-        ),
-        MCPToolInfo(
-            service_id="awi",
-            name="create_session",
-            description="Create an AWI session for web automation",
-            category="automation",
-            credits_per_call=5.0,
-            unit_name="session",
-        ),
-        MCPToolInfo(
-            service_id="passkey",
-            name="create_passkey_challenge",
-            description="Create WebAuthn challenge for high-risk action verification (checkout, payment, etc.)",
-            category="security",
-            credits_per_call=2.0,
-            unit_name="challenge",
-        ),
-        MCPToolInfo(
-            service_id="passkey",
-            name="verify_passkey",
-            description="Verify WebAuthn credential response from biometric authentication",
-            category="security",
-            credits_per_call=1.0,
-            unit_name="verification",
-        ),
-        MCPToolInfo(
-            service_id="dom_bridge",
-            name="create_dom_session",
-            description="Create browser session for DOM automation via Playwright",
-            category="automation",
-            credits_per_call=5.0,
-            unit_name="session",
-        ),
-        MCPToolInfo(
-            service_id="dom_bridge",
-            name="sync_dom_action",
-            description="Execute AWI action via real browser DOM",
-            category="automation",
-            credits_per_call=3.0,
-            unit_name="action",
-        ),
-        MCPToolInfo(
-            service_id="rag_memory",
-            name="query_memories",
-            description="Semantic search over past AWI session memories",
-            category="intelligence",
-            credits_per_call=2.0,
-            unit_name="query",
-        ),
-        MCPToolInfo(
-            service_id="rag_memory",
-            name="get_session_context",
-            description="Get relevant context from past sessions for current session",
-            category="intelligence",
-            credits_per_call=2.0,
-            unit_name="context",
-        ),
     ]
+
+    if not proof_surfaces_enabled(settings):
+        return tools
+
+    tools.extend(
+        [
+            MCPToolInfo(
+                service_id="telemetry",
+                name="emit_telemetry_event",
+                description="Emit a telemetry event with custom properties",
+                category="observability",
+                credits_per_call=1.0,
+                unit_name="event",
+            ),
+            MCPToolInfo(
+                service_id="comms",
+                name="send_agent_message",
+                description="Send a message to another agent",
+                category="communication",
+                credits_per_call=1.0,
+                unit_name="message",
+            ),
+            MCPToolInfo(
+                service_id="ai",
+                name="decide",
+                description="Use AI to make autonomous decisions",
+                category="intelligence",
+                credits_per_call=10.0,
+                unit_name="decision",
+            ),
+            MCPToolInfo(
+                service_id="ai",
+                name="heal",
+                description="AI-powered self-healing diagnostics",
+                category="intelligence",
+                credits_per_call=15.0,
+                unit_name="diagnosis",
+            ),
+            MCPToolInfo(
+                service_id="awi",
+                name="create_session",
+                description="Create an AWI session for web automation",
+                category="automation",
+                credits_per_call=5.0,
+                unit_name="session",
+            ),
+            MCPToolInfo(
+                service_id="passkey",
+                name="create_passkey_challenge",
+                description="Create WebAuthn challenge for high-risk action verification (checkout, payment, etc.)",
+                category="security",
+                credits_per_call=2.0,
+                unit_name="challenge",
+            ),
+            MCPToolInfo(
+                service_id="passkey",
+                name="verify_passkey",
+                description="Verify WebAuthn credential response from biometric authentication",
+                category="security",
+                credits_per_call=1.0,
+                unit_name="verification",
+            ),
+            MCPToolInfo(
+                service_id="dom_bridge",
+                name="create_dom_session",
+                description="Create browser session for DOM automation via Playwright",
+                category="automation",
+                credits_per_call=5.0,
+                unit_name="session",
+            ),
+            MCPToolInfo(
+                service_id="dom_bridge",
+                name="sync_dom_action",
+                description="Execute AWI action via real browser DOM",
+                category="automation",
+                credits_per_call=3.0,
+                unit_name="action",
+            ),
+            MCPToolInfo(
+                service_id="rag_memory",
+                name="query_memories",
+                description="Semantic search over past AWI session memories",
+                category="intelligence",
+                credits_per_call=2.0,
+                unit_name="query",
+            ),
+            MCPToolInfo(
+                service_id="rag_memory",
+                name="get_session_context",
+                description="Get relevant context from past sessions for current session",
+                category="intelligence",
+                credits_per_call=2.0,
+                unit_name="context",
+            ),
+        ]
+    )
+    return tools
 
 
 def _build_awi_endpoints() -> list[AWIEndpoint]:
@@ -399,6 +444,23 @@ def _build_awi_endpoints() -> list[AWIEndpoint]:
 
 def _build_pricing() -> list[PricingTier]:
     """Build pricing tiers."""
+    pro_features = [
+        "Unlimited credits",
+        "Governed MCP invokes",
+        "Signed permits and receipts",
+        "Priority support",
+    ]
+    enterprise_features = [
+        "Unlimited governed invokes",
+        "Custom MCP tools",
+        "Multi-tenant isolation",
+        "Dedicated support",
+        "SLA guarantees",
+    ]
+    if proof_surfaces_enabled(settings):
+        pro_features.extend(["AI decision making", "AWI sessions"])
+        enterprise_features.insert(0, "Proof-surface access")
+
     return [
         PricingTier(
             tier_name="free",
@@ -406,34 +468,34 @@ def _build_pricing() -> list[PricingTier]:
             minimum_purchase=0.0,
             features=[
                 "1000 credits/month",
-                "Basic telemetry",
-                "Agent messaging",
+                "Trust-plane discovery",
+                "Governed MCP tool calls",
             ],
         ),
         PricingTier(
             tier_name="pro",
             price_per_credit=0.001,
             minimum_purchase=10.0,
-            features=[
-                "Unlimited credits",
-                "AI decision making",
-                "AWI sessions",
-                "Priority support",
-            ],
+            features=pro_features,
         ),
         PricingTier(
             tier_name="enterprise",
             price_per_credit=0.0008,
             minimum_purchase=1000.0,
-            features=[
-                "Unlimited everything",
-                "Custom MCP tools",
-                "Multi-tenant isolation",
-                "Dedicated support",
-                "SLA guarantees",
-            ],
+            features=enterprise_features,
         ),
     ]
+
+
+def _integration_guides() -> dict[str, str]:
+    guides = {
+        "python_sdk": "pip install b2a-sdk",
+        "typescript_sdk": "npm install @b2a/sdk",
+        "mcp_server": "/mcp",
+    }
+    if proof_surfaces_enabled(settings):
+        guides["awi_adoption"] = "/docs/awi-adoption-guide.md"
+    return guides
 
 
 @router.get(
@@ -464,8 +526,11 @@ async def get_discovery_manifest():
         ),
         capabilities=_build_capabilities(),
         mcp_tools=_build_mcp_tools(),
-        awi_endpoints=_build_awi_endpoints(),
+        awi_endpoints=(
+            _build_awi_endpoints() if proof_surfaces_enabled(settings) else []
+        ),
         pricing=_build_pricing(),
+        integration_guides=_integration_guides(),
     )
 
 
@@ -489,23 +554,25 @@ async def list_mcp_tools(api_key: str = Depends(verify_api_key)):
     }
 
 
-@router.get(
-    "/discover/awi",
-    summary="List AWI Endpoints",
-    description="Returns all Agentic Web Interface endpoints and the action vocabulary.",
-)
-async def list_awi_endpoints(api_key: str = Depends(verify_api_key)):
-    """
-    List all AWI endpoints and the action vocabulary.
+if proof_surfaces_enabled(settings):
 
-    This enables agents to understand:
-    - How to create AWI sessions
-    - What actions are available
-    - How to request different representations
-    - How to implement human pause/steer
-    """
-    return {
-        "endpoints": _build_awi_endpoints(),
-        "vocabulary_endpoint": "/v1/awi/vocabulary",
-        "reference": "/docs/awi-adoption-guide.md",
-    }
+    @router.get(
+        "/discover/awi",
+        summary="List AWI Endpoints",
+        description="Returns all Agentic Web Interface endpoints and the action vocabulary.",
+    )
+    async def list_awi_endpoints(api_key: str = Depends(verify_api_key)):
+        """
+        List all AWI endpoints and the action vocabulary.
+
+        This enables agents to understand:
+        - How to create AWI sessions
+        - What actions are available
+        - How to request different representations
+        - How to implement human pause/steer
+        """
+        return {
+            "endpoints": _build_awi_endpoints(),
+            "vocabulary_endpoint": "/v1/awi/vocabulary",
+            "reference": "/docs/awi-adoption-guide.md",
+        }

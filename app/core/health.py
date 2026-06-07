@@ -18,8 +18,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
+from .api_surface import api_surface_status
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
 
@@ -40,7 +42,7 @@ async def _run_check(
     start = time.monotonic()
     try:
         result = await asyncio.wait_for(check(), timeout=CHECK_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         result = {
             "status": "down",
             "error": f"timeout after {CHECK_TIMEOUT_SECONDS}s",
@@ -230,6 +232,7 @@ async def gather_dependency_report() -> dict[str, Any]:
     return {
         "status": overall,
         "version": settings.APP_VERSION,
+        "api_surface": api_surface_status(settings),
         "dependencies": dependencies,
         "simulation_modes": sim_modes,
         "unhealthy": unhealthy,
