@@ -8,10 +8,13 @@ DB-created key scoped to its own wallet.
 
 ## Prerequisites
 
-Start the API with a local bootstrap key:
+Start the API with a local bootstrap key. This guide uses direct agent-comms
+setup and inbox inspection, so it intentionally opts into the proof/demo route
+surface:
 
 ```bash
 export VALID_API_KEYS=dev-bootstrap-key
+export API_SURFACE_MODE=full
 export DATABASE_URL=sqlite+aiosqlite:///./test.db
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -91,8 +94,11 @@ Store this key securely. It is shown once.
 
 ## 5. Register A Durable Agent Comms Receiver
 
-`agent-comms-send` is the paid-pilot MCP tool. It is discoverable when
-`SIMULATION_MODE_AGENT_COMMS=false` and writes a SQL-backed inbox message.
+`agent-comms-send` is the paid-pilot MCP tool. It is discoverable through MCP
+when the paid-pilot tool registry is active. The direct `/v1/comms/*` setup
+route below requires `API_SURFACE_MODE=full`; with
+`SIMULATION_MODE_AGENT_COMMS=false`, the governed MCP invoke writes a SQL-backed
+inbox message.
 
 ```bash
 RECEIVER_JSON=$(

@@ -16,11 +16,17 @@ env/
 # IDE
 .idea/
 .vscode/
+.agents/
+.claude/
 *.swp
 *.swo
 
 # Environment & Secrets
 .env
+.env.*
+!.env.example
+!*.example
+.envrc
 *.pem
 *.key
 

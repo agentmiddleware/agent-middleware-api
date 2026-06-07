@@ -33,6 +33,7 @@ def configure_environment() -> None:
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{DEMO_DB}"
     os.environ["STATE_BACKEND"] = "memory"
     os.environ["VALID_API_KEYS"] = ADMIN_KEY
+    os.environ["API_SURFACE_MODE"] = "full"
     os.environ["TRUST_MODE_ENABLED"] = "true"
     os.environ["ALLOW_LEGACY_UNPERMITTED_MCP"] = "false"
     os.environ["TRUST_SIGNING_KEY_ID"] = "demo-ed25519"
@@ -637,6 +638,69 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             )
 
             summary = {
+                "control_loop_verified": [
+                    {
+                        "stage": "discover",
+                        "verified": True,
+                        "evidence": f"/mcp/tools.json includes {ALLOWED_TOOL}",
+                    },
+                    {
+                        "stage": "authenticate",
+                        "verified": True,
+                        "evidence": (
+                            "wallet-bound agent API key created; cross-wallet "
+                            f"read returned {cross_wallet.status_code}"
+                        ),
+                    },
+                    {
+                        "stage": "authorize",
+                        "verified": True,
+                        "evidence": (
+                            f"signed permit {permit['permit_id']} verified for "
+                            f"{ALLOWED_TOOL}"
+                        ),
+                    },
+                    {
+                        "stage": "invoke",
+                        "verified": True,
+                        "evidence": (
+                            f"governed MCP call wrote durable message "
+                            f"{tool_result['message_id']}"
+                        ),
+                    },
+                    {
+                        "stage": "meter",
+                        "verified": True,
+                        "evidence": (
+                            "exactly one agent_comms ledger debit was created; "
+                            "replay did not duplicate it"
+                        ),
+                    },
+                    {
+                        "stage": "receipt",
+                        "verified": True,
+                        "evidence": (
+                            f"success receipt {receipt['receipt_id']} verified; "
+                            "tampered receipt failed verification"
+                        ),
+                    },
+                    {
+                        "stage": "audit",
+                        "verified": True,
+                        "evidence": (
+                            "wallet audit chain verified; tampered audit event "
+                            "failed verification"
+                        ),
+                    },
+                    {
+                        "stage": "govern",
+                        "verified": True,
+                        "evidence": (
+                            f"out-of-scope tool {BLOCKED_TOOL} denied with "
+                            "no ledger debit"
+                        ),
+                    },
+                ],
                 "sponsor_wallet_id": sponsor_wallet_id,
                 "agent_wallet_id": agent_wallet_id,
                 "agent_key_id": key["key_id"],

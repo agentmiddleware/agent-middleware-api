@@ -21,6 +21,17 @@ def test_demo_trust_plane_script_proves_core_loop():
 
     assert result.returncode == 0, result.stderr
     proof = json.loads(result.stdout)
+    assert [item["stage"] for item in proof["control_loop_verified"]] == [
+        "discover",
+        "authenticate",
+        "authorize",
+        "invoke",
+        "meter",
+        "receipt",
+        "audit",
+        "govern",
+    ]
+    assert all(item["verified"] is True for item in proof["control_loop_verified"])
     assert proof["permit_id"].startswith("permit-")
     assert proof["paid_pilot_tool"] == "agent-comms-send"
     assert proof["message_id"]
@@ -34,4 +45,8 @@ def test_demo_trust_plane_script_proves_core_loop():
     assert proof["denial_replay_receipt_id"] == proof["denial_receipt_id"]
     assert proof["denial_reason"] == "permit_tool_not_allowed"
     assert proof["cross_wallet_status"] == 403
+    assert proof["evidence_bundle_valid"] is True
+    assert proof["tampered_receipt_valid"] is False
+    assert proof["tampered_receipt_reason"] == "receipt_signature_invalid"
+    assert proof["tampered_audit_valid"] is False
     assert proof["audit_chain_checked_events"] >= 1

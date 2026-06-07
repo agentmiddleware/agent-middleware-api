@@ -74,7 +74,10 @@ is issued, (3) a valid governed MCP call succeeds, (4) the wallet is charged
 once, (5) a receipt is signed, (6) the audit chain verifies, (7) replay returns
 the same receipt without a second charge, (8) an out-of-scope tool is denied,
 and (9) a tampered receipt and a tampered audit event both fail verification.
-It also inspects the buyer-facing evidence bundle at `GET /v1/evidence/{receipt_id}`.
+It also inspects the buyer-facing evidence bundle at
+`GET /v1/evidence/{receipt_id}` and emits a `control_loop_verified` checklist
+that maps the proof back to
+`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`.
 The sample proof artifact is in
 [`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md).
 
@@ -115,6 +118,7 @@ Bootstrap in the order given in `GET /.well-known/agent.json` → field `agent_f
 curl http://localhost:8000/.well-known/agent.json
 
 # AWI-over-MCP discovery profile
+# Present only when API_SURFACE_MODE=full
 curl http://localhost:8000/.well-known/awi.json
 
 # Canonical prose for agents
@@ -127,21 +131,25 @@ curl http://localhost:8000/mcp/tools.json
 curl http://localhost:8000/openapi.json
 ```
 
-Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes`. Optional index: `GET /v1/discover`.
+Before assuming real side effects, call `GET /health/dependencies` and read
+`api_surface` plus `simulation_modes`. Optional index: `GET /v1/discover`.
+The default `API_SURFACE_MODE=trust_plane` mounts the paid-pilot trust plane.
+Set `API_SURFACE_MODE=full` to mount proof/demo surfaces such as AWI,
+telemetry, oracle, sandbox, media, IoT, content generation, and red-team routes.
 
 ### Core trust primitives
 
 - **Identity and authority** — wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks, and cross-wallet isolation.
-- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `.well-known/awi.json`, `llm.txt`, OpenAPI, and `/v1/discover`.
+- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `llm.txt`, OpenAPI, and `/v1/discover`; `.well-known/awi.json` is mounted only in `API_SURFACE_MODE=full`.
 - **Signed authorization** — `/v1/permits` issues Ed25519-signed tool permits with scopes, wallet binding, budget, expiry, nonce, and revocation.
 - **Policy-constrained execution** — MCP invocation can require signed permits and idempotency keys before billable tool calls.
 - **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
 - **Receipts and audit** — `/v1/receipts` verifies signed action receipts, `/v1/receipts/{receipt_id}/evidence` checks linked permit, ledger, and audit artifacts, `/v1/evidence/{receipt_id}` returns the flat buyer-facing evidence bundle (`receipt`, `permit`, `ledger_entry`, `audit_event`, and a `verification` map), and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
-- **Governance and readiness** — telemetry, dependency health, security posture, operator preflight checks, and `GET /v1/trust/readiness`, the bootstrap-admin gap map for verified, partial, demo-only, and not-yet-claimable trust-plane claims.
+- **Governance and readiness** — dependency health, security posture, operator preflight checks, and `GET /v1/trust/readiness`, the bootstrap-admin gap map for verified, partial, demo-only, and not-yet-claimable trust-plane claims.
 
 ### Proof-of-usefulness surfaces
 
-AWI, browser control, content generation, oracle crawls, sandbox demos, media utilities, IoT bridges, and red-team services are examples of agent workflows that exercise the control plane. They are useful, but they are not the core product surface. The durable substrate is identity, policy, economics, orchestration, and governance.
+AWI, browser control, content generation, oracle crawls, sandbox demos, media utilities, IoT bridges, and red-team services are examples of agent workflows that exercise the control plane. They are useful, but they are not the core product surface. Mount them explicitly with `API_SURFACE_MODE=full`; the default production-beta surface is the governed MCP trust plane.
 
 ### Current Implementation Status
 
@@ -149,7 +157,7 @@ This repository is a production-beta control plane, not a finished production
 platform. The wallet/key auth path, billing ledger, MCP discovery, health checks,
 golden-path flow, and core API contracts are executable and tested.
 
-**Phase 1 (on `master`, simulation-gated "real" mode):** With PostgreSQL and the right env flags, these areas persist state and/or call external models instead of returning only synthetic payloads:
+**Phase 1 (simulation-gated proof routes):** With `API_SURFACE_MODE=full`, PostgreSQL, and the right env flags, these areas persist state and/or call external models instead of returning only synthetic payloads:
 
 - **Agent Oracle** — Durable crawl payload hashing and index surfaces (`SIMULATION_MODE_ORACLE=false`).
 - **Agent Comms** — SQL-backed send + inbox at **`/v1/agent-comms/send`** and **`/v1/agent-comms/inbox`** (`SIMULATION_MODE_AGENT_COMMS=false`). The same real-mode path is exposed as paid-pilot MCP tool **`agent-comms-send`** for governed permit/receipt demos. Legacy **`/v1/comms/*`** remains for compatibility.
@@ -165,9 +173,10 @@ Other pillars still default to simulation-first behavior until their production 
 - IoT bridge
 - autonomous telemetry PM
 
-Autonomous clients **must** inspect `GET /health/dependencies` (`simulation_modes`) and
-`SIMULATION_MODE_*` configuration before treating an endpoint as real external
-work. Public arbitrary Python execution is disabled by default. Set
+Autonomous clients **must** inspect `GET /health/dependencies` (`api_surface`
+and `simulation_modes`) plus `SIMULATION_MODE_*` configuration before treating
+an endpoint as mounted or real external work. Public arbitrary Python execution
+is disabled by default. Set
 `BEHAVIORAL_SANDBOX_PYTHON_BACKEND=docker` to run Python in an unprivileged
 Docker container; `ALLOW_UNSAFE_HOST_PYTHON_SANDBOX=true` is a
 local-development escape hatch and is not a production sandbox.
@@ -214,17 +223,17 @@ Not part of the autonomous-client contract — for people running this service:
 | Trust Evidence           | `/v1/evidence`    | Yes     | Yes          | Yes           |
 | Audit                    | `/v1/audit`       | Yes     | Yes          | Yes           |
 | Stripe Webhooks          | `/webhooks/stripe`| -       | -            | Yes           |
-| Telemetry                | `/v1/telemetry`   | Yes     | Yes          | Yes           |
-| Comms                    | `/v1/comms`       | Yes     | Yes          | Yes           |
-| **Agent Comms (Phase 1)**| `/v1/agent-comms` | When sim off | Yes     | Yes           |
-| **Content Factory (text)**| `/v1/content`    | When sim off | Yes     | Yes           |
-| **Agent Oracle**         | `/v1/oracle`      | When sim off | Yes     | Yes           |
-| **Planner Optimizer**    | `/v1/planner`     | Telemetry table | Yes  | No            |
-| IoT Bridge               | `/v1/iot`         | Optional| Yes          | Yes           |
-| Security                 | `/v1/security`    | Partial | Yes          | Yes           |
-| **Agent Intelligence**   | `/v1/ai`          | Yes     | Yes          | Yes           |
-| **Agentic Web Interface** | `/v1/awi`         | Yes     | Yes          | Yes           |
-| **Behavioral Sandbox**    | `/v1/sandbox`     | Yes     | Yes          | Yes           |
+| **Planner Optimizer**    | `/v1/planner`     | Telemetry table | Yes  | Yes           |
+| Telemetry                | `/v1/telemetry`   | Yes     | Yes          | Yes; full surface only |
+| Comms                    | `/v1/comms`       | Yes     | Yes          | Yes; full surface only |
+| **Agent Comms (Phase 1)**| `/v1/agent-comms` | When sim off | Yes     | Yes; full surface only |
+| **Content Factory (text)**| `/v1/content`    | When sim off | Yes     | Yes; full surface only |
+| **Agent Oracle**         | `/v1/oracle`      | When sim off | Yes     | Yes; full surface only |
+| IoT Bridge               | `/v1/iot`         | Optional| Yes          | Yes; full surface only |
+| Security                 | `/v1/security`    | Partial | Yes          | Yes; full surface only |
+| **Agent Intelligence**   | `/v1/ai`          | Yes     | Yes          | Yes; full surface only |
+| **Agentic Web Interface** | `/v1/awi`         | Yes     | Yes          | Yes; full surface only |
+| **Behavioral Sandbox**    | `/v1/sandbox`     | Yes     | Yes          | Yes; full surface only |
 
 *(Additional modules include programmatic media, legacy content factory MCP tooling, and protocol generation.)*
 
@@ -232,13 +241,19 @@ Not part of the autonomous-client contract — for people running this service:
 
 ## Phase 1: Durable oracle, comms, and content
 
-Routes are always registered; **whether work hits the database or an external LLM** depends on `SIMULATION_MODE_*`, `DATABASE_URL` / `STATE_BACKEND`, and (for text generation) `LLM_*`. Use `GET /health/dependencies` for `simulation_modes` and integration hints before you trust responses.
+Default deployments register the trust plane only. Set `API_SURFACE_MODE=full`
+to mount proof routes; **whether work hits the database or an external LLM**
+then depends on `SIMULATION_MODE_*`, `DATABASE_URL` / `STATE_BACKEND`, and
+(for text generation) `LLM_*`. Use `GET /health/dependencies` for
+`api_surface`, `simulation_modes`, and integration hints before you trust
+responses.
 
 ### Environment checklist (non-simulation)
 
 ```bash
 export STATE_BACKEND=postgres
 export DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
+export API_SURFACE_MODE=full
 
 # Defaults are all true (synthetic / in-memory behavior preserved for dev)
 export SIMULATION_MODE_ORACLE=false
@@ -1225,7 +1240,10 @@ string companions for programmatic reconciliation, for example `balance_exact`,
 
 ## Configuration & Development
 
-Use `.env.example` as local template and `.env.production` as production reference.
+Use `.env.example` as the local template and `.env.production.example` as the
+production reference. Copy `.env.production.example` to an untracked
+`.env.production` on the host and keep `API_SURFACE_MODE=trust_plane` unless
+you intentionally need proof/demo routes.
 
 **Run tests:**
 ```bash
