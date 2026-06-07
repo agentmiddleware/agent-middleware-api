@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from app.optimizer.candidates import get_candidate_actions
 from app.optimizer.planner import optimize_action_set
-from app.core.auth import AuthContext
-from app.core.config import get_settings
+from app.core.auth import AuthContext, get_auth_context
 from app.policy.decisions import evaluate_governed_action
 from app.schemas.optimizer import OptimizerRequest, OptimizerResponse
 from app.services.audit_log import record_audit_event
@@ -14,22 +13,12 @@ from app.services.policies import evaluate_wallet_policy
 router = APIRouter(prefix="/v1/planner", tags=["optimizer"])
 
 
-def _planner_auth_context(request: Request) -> AuthContext | None:
-    api_key = request.headers.get("X-API-Key")
-    if not api_key:
-        return None
-    valid_keys = [
-        key.strip()
-        for key in get_settings().VALID_API_KEYS.split(",")
-        if key.strip()
-    ]
-    if api_key.strip() in valid_keys:
-        return AuthContext(source="env", raw_key=api_key.strip(), is_bootstrap_admin=True)
-    return AuthContext(source="unknown", raw_key=api_key.strip())
-
-
 @router.post("/optimize", response_model=OptimizerResponse)
-async def optimize_endpoint(req: OptimizerRequest, request: Request) -> OptimizerResponse:
+async def optimize_endpoint(
+    req: OptimizerRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> OptimizerResponse:
     candidates = get_candidate_actions(req.state)
     policy_rejected: list[dict] = []
     policy_ids: set[str] = set()
@@ -62,15 +51,11 @@ async def optimize_endpoint(req: OptimizerRequest, request: Request) -> Optimize
     if policy_rejected:
         plan["rejected_actions"] = policy_rejected + plan["rejected_actions"]
         plan["policy_reasons"].update(
-            {
-                item["id"]: item["reason"]
-                for item in policy_rejected
-                if item.get("id")
-            }
+            {item["id"]: item["reason"] for item in policy_rejected if item.get("id")}
         )
     request_id = request.headers.get("X-Request-ID") or req.state.request_id
     decision = evaluate_governed_action(
-        auth=_planner_auth_context(request),
+        auth=auth,
         wallet_id=req.state.wallet_id,
         action_type="planner.optimize",
         target="planner",

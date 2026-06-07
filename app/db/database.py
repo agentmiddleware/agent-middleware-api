@@ -6,15 +6,15 @@ Supports SQLite fallback for testing when DATABASE_URL is not configured.
 """
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlmodel import SQLModel
 
@@ -33,6 +33,7 @@ def _get_database_url() -> str | None:
         return settings.DATABASE_URL
 
     import os
+
     return os.environ.get("DATABASE_URL")
 
 

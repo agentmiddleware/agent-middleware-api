@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
+
 from .config import get_settings
 
 settings = get_settings()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -213,9 +213,7 @@ def _static_items() -> list[TrustReadinessItem]:
                 "app/routers/mcp.py:150",
                 "tests/test_discovery_drift.py:48",
             ],
-            recommended_next_step=(
-                "Keep discovery drift tests in the release gate."
-            ),
+            recommended_next_step=("Keep discovery drift tests in the release gate."),
         ),
         _item(
             id="signed_permits",
@@ -416,7 +414,10 @@ def _verdict(items: list[TrustReadinessItem]) -> TrustReadinessVerdict:
     if any(item.status == "blocked" and item.severity == "critical" for item in items):
         return "blocked"
     unresolved = {"partially_verified", "demo_only", "not_verified", "blocked"}
-    if any(item.status in unresolved and item.severity in {"critical", "high"} for item in items):
+    if any(
+        item.status in unresolved and item.severity in {"critical", "high"}
+        for item in items
+    ):
         return "needs-work"
     return "pilot-ready"
 
@@ -439,7 +440,7 @@ def build_trust_readiness_report(
     ]
 
     return TrustReadinessReport(
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
         verdict=_verdict(items),
         total_items=len(items),
         by_status=dict(sorted(by_status.items())),

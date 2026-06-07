@@ -5,14 +5,15 @@ Enforces per-API-key request limits using a sliding window counter.
 Returns standard rate limit headers on every response.
 """
 
-import time
 import asyncio
 import logging
+import time
 from collections import defaultdict
+
+import redis.asyncio as redis
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-import redis.asyncio as redis
 
 from .config import get_settings
 
@@ -127,8 +128,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         api_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
 
         # Skip rate limiting for docs, health, and test clients
-        skip_paths = ("/docs", "/redoc", "/openapi.json", "/health", "/",
-                       "/.well-known/agent.json", "/llm.txt", "/docs/index")
+        skip_paths = (
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/health",
+            "/",
+            "/.well-known/agent.json",
+            "/llm.txt",
+            "/docs/index",
+        )
         if request.url.path in skip_paths:
             response = await call_next(request)
             return response  # type: ignore[no-any-return]

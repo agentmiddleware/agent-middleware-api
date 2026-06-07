@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from .config import get_settings
 
-
 # Service name -> Settings attribute.
 # Adding a service here without also adding the Settings field will raise
 # at startup on first lookup — intentional, so drift is loud.

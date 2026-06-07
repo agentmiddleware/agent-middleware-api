@@ -21,21 +21,21 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..audit.lightweight import record_audit
-from ..core.config import get_settings
 from ..core.auth import AuthContext, get_auth_context
-from ..services.service_registry import get_service_registry
+from ..core.config import get_settings
+from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 from ..services.mcp_generator import get_mcp_generator
 from ..services.mcp_phase9_tools import (
     ensure_phase9_registered,
     register_default_mcp_services,
 )
 from ..services.paid_pilot_mcp_tools import sync_paid_pilot_mcp_tools
-from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
+from ..services.service_registry import get_service_registry
 
 # Spine primitives are consumed through the trust-plane facade so the governed
 # invocation path depends on the product core by its public boundary.
@@ -187,7 +187,7 @@ async def handle_messages(
     try:
         body = await request.json()
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
 
     method = body.get("method")
     request_id = body.get("id")
@@ -480,7 +480,7 @@ async def _execute_registered_tool(
                     "request_hash": sha256_hex(request_payload or arguments),
                 },
             )
-            raise ValueError(str(exc))
+            raise ValueError(str(exc)) from exc
         if replay and replay.response_json:
             _raise_replayed_error(replay)
             return replay.response_json
@@ -1099,23 +1099,23 @@ async def invoke_tool(
         detail: dict[str, Any] = {"error": str(exc)}
         if exc.receipt:
             detail["receipt"] = exc.receipt
-        raise HTTPException(status_code=403, detail=detail)
+        raise HTTPException(status_code=403, detail=detail) from exc
     except GovernedToolError as exc:
         detail = {"error": str(exc)}
         if exc.receipt:
             detail["receipt"] = exc.receipt
-        raise HTTPException(status_code=exc.status_code, detail=detail)
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         message = str(exc)
         if message == "insufficient_funds":
-            raise HTTPException(status_code=402, detail=message)
+            raise HTTPException(status_code=402, detail=message) from exc
         if message.startswith("Tool not found"):
-            raise HTTPException(status_code=404, detail=message)
+            raise HTTPException(status_code=404, detail=message) from exc
         if message.startswith("Tool not executable"):
-            raise HTTPException(status_code=501, detail=message)
-        raise HTTPException(status_code=400, detail=message)
+            raise HTTPException(status_code=501, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
     except Exception as exc:
         logger.error(f"Tool invocation failed: {exc}")
         return ToolCallResponse(

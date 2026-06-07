@@ -13,6 +13,20 @@ PUBLIC_PATH_PREFIXES = (
     "/.well-known",
 )
 PUBLIC_PATHS = {"/", "/openapi.json", "/mcp/tools", "/mcp/tools.json"}
+CORE_STATE_CHANGING_PREFIXES = (
+    "/v1/api-keys",
+    "/v1/audit",
+    "/v1/billing",
+    "/v1/kyc",
+    "/v1/permits",
+    "/v1/planner",
+    "/v1/policies",
+    "/v1/receipts",
+    "/v1/signing-keys",
+    "/v1/trust",
+    "/mcp",
+)
+AUTH_DEPENDENCIES = {"get_auth_context", "verify_api_key"}
 
 
 def test_state_changing_core_trust_routes_have_auth_dependencies():
@@ -30,7 +44,7 @@ def test_state_changing_core_trust_routes_have_auth_dependencies():
             getattr(dependency.call, "__name__", "")
             for dependency in route.dependant.dependencies
         }
-        if route.path.startswith(("/v1/permits", "/v1/receipts", "/v1/audit", "/mcp")):
+        if route.path.startswith(CORE_STATE_CHANGING_PREFIXES):
             checked += 1
-            assert "get_auth_context" in dependency_names
-    assert checked >= 4
+            assert dependency_names & AUTH_DEPENDENCIES, route.path
+    assert checked >= 20

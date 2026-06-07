@@ -10,10 +10,10 @@ Tests for:
 - SDK simulate_session context manager
 """
 
-import asyncio
-import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
+
+import pytest
 
 from app.services.shadow_ledger import (
     ShadowLedger,
@@ -31,13 +31,12 @@ class TestShadowLedger:
     def ledger(self):
         return ShadowLedger()
 
-    def test_create_session(self, ledger):
+    @pytest.mark.anyio
+    async def test_create_session(self, ledger):
         """Creating a session returns a DryRunSession with unique ID."""
-        session = asyncio.get_event_loop().run_until_complete(
-            ledger.create_session(
-                wallet_id="test-wallet",
-                real_balance=Decimal("1000"),
-            )
+        session = await ledger.create_session(
+            wallet_id="test-wallet",
+            real_balance=Decimal("1000"),
         )
 
         assert session is not None
@@ -47,96 +46,77 @@ class TestShadowLedger:
         assert len(session.simulated_charges) == 0
         assert session.virtual_balance == Decimal("1000")
 
-    def test_session_tracks_cumulative_charges(self, ledger):
+    @pytest.mark.anyio
+    async def test_session_tracks_cumulative_charges(self, ledger):
         """Simulated charges accumulate in the session."""
-        loop = asyncio.get_event_loop()
-
-        session = loop.run_until_complete(
-            ledger.create_session(
-                wallet_id="test-wallet",
-                real_balance=Decimal("1000"),
-            )
+        session = await ledger.create_session(
+            wallet_id="test-wallet",
+            real_balance=Decimal("1000"),
         )
 
-        result1 = loop.run_until_complete(
-            ledger.simulate_charge(
-                session_id=session.session_id,
-                service_category=ServiceCategory.CONTENT_FACTORY,
-                units=10.0,
-                description="First charge",
-            )
+        result1 = await ledger.simulate_charge(
+            session_id=session.session_id,
+            service_category=ServiceCategory.CONTENT_FACTORY,
+            units=10.0,
+            description="First charge",
         )
 
         assert result1.would_succeed is True
         assert result1.simulated_balance_after == 500.0
 
-        result2 = loop.run_until_complete(
-            ledger.simulate_charge(
-                session_id=session.session_id,
-                service_category=ServiceCategory.IOT_BRIDGE,
-                units=5.0,
-                description="Second charge",
-            )
+        result2 = await ledger.simulate_charge(
+            session_id=session.session_id,
+            service_category=ServiceCategory.IOT_BRIDGE,
+            units=5.0,
+            description="Second charge",
         )
 
         assert result2.would_succeed is True
         assert result2.simulated_balance_after == 490.0
 
-        final_session = loop.run_until_complete(
-            ledger.get_session(session.session_id)
-        )
+        final_session = await ledger.get_session(session.session_id)
 
         assert len(final_session.simulated_charges) == 2
         assert final_session.virtual_balance == Decimal("490")
         assert final_session.total_simulated == Decimal("510")
 
-    def test_session_returns_insufficient_funds_when_exceeding_balance(self, ledger):
+    @pytest.mark.anyio
+    async def test_session_returns_insufficient_funds_when_exceeding_balance(
+        self, ledger
+    ):
         """Simulated charges return would_succeed=False when exceeding virtual balance."""
-        loop = asyncio.get_event_loop()
-
-        session = loop.run_until_complete(
-            ledger.create_session(
-                wallet_id="test-wallet",
-                real_balance=Decimal("100"),
-            )
+        session = await ledger.create_session(
+            wallet_id="test-wallet",
+            real_balance=Decimal("100"),
         )
 
-        result = loop.run_until_complete(
-            ledger.simulate_charge(
-                session_id=session.session_id,
-                service_category=ServiceCategory.CONTENT_FACTORY,
-                units=50.0,
-                description="Large charge",
-            )
+        result = await ledger.simulate_charge(
+            session_id=session.session_id,
+            service_category=ServiceCategory.CONTENT_FACTORY,
+            units=50.0,
+            description="Large charge",
         )
 
         assert result.would_succeed is False
         assert result.simulated_balance_after < 0
         assert result.reason == "insufficient_simulated_funds"
 
-    def test_session_end_returns_summary(self, ledger):
+    @pytest.mark.anyio
+    async def test_session_end_returns_summary(self, ledger):
         """Ending a session returns a complete summary."""
-        loop = asyncio.get_event_loop()
-
-        session = loop.run_until_complete(
-            ledger.create_session(
-                wallet_id="test-wallet",
-                real_balance=Decimal("500"),
-            )
+        session = await ledger.create_session(
+            wallet_id="test-wallet",
+            real_balance=Decimal("500"),
         )
 
-        loop.run_until_complete(
-            ledger.simulate_charge(
-                session_id=session.session_id,
-                service_category=ServiceCategory.TELEMETRY_PM,
-                units=100.0,
-                description="Test charge",
-            )
+        await ledger.simulate_charge(
+            session_id=session.session_id,
+            service_category=ServiceCategory.TELEMETRY_PM,
+            units=100.0,
+            description="Test charge",
         )
 
-        summary = loop.run_until_complete(
-            ledger.end_session(session.session_id)
-        )
+        summary = await ledger.end_session(session.session_id)
 
         assert summary is not None
         assert summary.wallet_id == "test-wallet"
@@ -144,44 +124,35 @@ class TestShadowLedger:
         assert summary.charge_count == 1
         assert summary.virtual_balance_after == Decimal("400")
 
-    def test_nonexistent_session_returns_none(self, ledger):
+    @pytest.mark.anyio
+    async def test_nonexistent_session_returns_none(self, ledger):
         """Getting a nonexistent session returns None."""
-        result = asyncio.get_event_loop().run_until_complete(
-            ledger.get_session("nonexistent-id")
-        )
+        result = await ledger.get_session("nonexistent-id")
         assert result is None
 
-    def test_nonexistent_session_end_returns_none(self, ledger):
+    @pytest.mark.anyio
+    async def test_nonexistent_session_end_returns_none(self, ledger):
         """Ending a nonexistent session returns None."""
-        result = asyncio.get_event_loop().run_until_complete(
-            ledger.end_session("nonexistent-id")
-        )
+        result = await ledger.end_session("nonexistent-id")
         assert result is None
 
-    def test_virtual_balance_calculation(self, ledger):
+    @pytest.mark.anyio
+    async def test_virtual_balance_calculation(self, ledger):
         """Virtual balance correctly reflects real balance minus charges."""
-        loop = asyncio.get_event_loop()
-
-        session = loop.run_until_complete(
-            ledger.create_session(
-                wallet_id="test-wallet",
-                real_balance=Decimal("1000"),
-            )
+        session = await ledger.create_session(
+            wallet_id="test-wallet",
+            real_balance=Decimal("1000"),
         )
 
         for i in range(5):
-            loop.run_until_complete(
-                ledger.simulate_charge(
-                    session_id=session.session_id,
-                    service_category=ServiceCategory.IOT_BRIDGE,
-                    units=1.0,
-                    description=f"Charge {i}",
-                )
+            await ledger.simulate_charge(
+                session_id=session.session_id,
+                service_category=ServiceCategory.IOT_BRIDGE,
+                units=1.0,
+                description=f"Charge {i}",
             )
 
-        final_session = loop.run_until_complete(
-            ledger.get_session(session.session_id)
-        )
+        final_session = await ledger.get_session(session.session_id)
 
         assert final_session.virtual_balance == Decimal("990")
         assert final_session.total_simulated == Decimal("10")
@@ -237,14 +208,16 @@ class TestDryRunSession:
         )
 
         for i in range(3):
-            session.add_charge(SimulatedCharge(
-                charge_id=f"ch-{i}",
-                service_category="content_factory",
-                units=10.0,
-                credits=Decimal("100"),
-                description=f"Charge {i}",
-                timestamp=datetime.now(timezone.utc),
-            ))
+            session.add_charge(
+                SimulatedCharge(
+                    charge_id=f"ch-{i}",
+                    service_category="content_factory",
+                    units=10.0,
+                    credits=Decimal("100"),
+                    description=f"Charge {i}",
+                    timestamp=datetime.now(timezone.utc),
+                )
+            )
 
         assert session.total_simulated == Decimal("300")
         assert session.virtual_balance == Decimal("700")
@@ -267,6 +240,7 @@ class TestBillingRouterDryRun:
     async def client(self):
         from httpx import AsyncClient, ASGITransport
         from app.main import app
+
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
@@ -299,7 +273,11 @@ class TestBillingRouterDryRun:
         """POST /v1/billing/dry-run/charge simulates a charge."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Test Sponsor", "email": "test@example.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Test Sponsor",
+                "email": "test@example.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -323,7 +301,11 @@ class TestBillingRouterDryRun:
         """DELETE /v1/billing/dry-run/session/{id} ends session."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Test Sponsor", "email": "test@example.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Test Sponsor",
+                "email": "test@example.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -337,7 +319,12 @@ class TestBillingRouterDryRun:
 
         await client.post(
             "/v1/billing/dry-run/charge",
-            json={"wallet_id": wallet_id, "service": "iot_bridge", "units": 1.0, "dry_run_session_id": session_id},
+            json={
+                "wallet_id": wallet_id,
+                "service": "iot_bridge",
+                "units": 1.0,
+                "dry_run_session_id": session_id,
+            },
             headers={"X-API-Key": "test-key"},
         )
 
@@ -357,7 +344,11 @@ class TestBillingRouterDryRun:
         """POST /v1/billing/dry-run/session/{id}/commit commits charges to billing."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Commit Test", "email": "commit@test.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Commit Test",
+                "email": "commit@test.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -398,7 +389,11 @@ class TestBillingRouterDryRun:
         """POST /v1/billing/dry-run/session/{id}/revert discards charges."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Revert Test", "email": "revert@test.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Revert Test",
+                "email": "revert@test.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]
@@ -455,7 +450,11 @@ class TestBillingRouterDryRun:
         """Committing session with no charges succeeds with message."""
         wallet_resp = await client.post(
             "/v1/billing/wallets/sponsor",
-            json={"sponsor_name": "Empty Commit", "email": "empty@test.com", "initial_credits": 10000},
+            json={
+                "sponsor_name": "Empty Commit",
+                "email": "empty@test.com",
+                "initial_credits": 10000,
+            },
             headers={"X-API-Key": "test-key"},
         )
         wallet_id = wallet_resp.json()["wallet_id"]

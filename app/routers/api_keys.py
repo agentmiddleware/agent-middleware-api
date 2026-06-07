@@ -7,21 +7,21 @@ Handles API key creation, rotation, and revocation for wallet security.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from ..core.auth import AuthContext, get_auth_context
-from ..services.api_key_service import (
-    get_api_key_service,
-    KeyNotFoundError,
-    WalletNotFoundError,
-)
 from ..schemas.billing import (
-    CreateAPIKeyRequest,
+    APIKeyListResponse,
     APIKeyResponse,
     APIKeyWithSecret,
-    APIKeyListResponse,
+    CreateAPIKeyRequest,
+    EmergencyKeyRevocationRequest,
+    KeyRotationLogEntry,
     RotateAPIKeyRequest,
     RotationResponse,
-    KeyRotationLogEntry,
-    EmergencyKeyRevocationRequest,
     RotationType,
+)
+from ..services.api_key_service import (
+    KeyNotFoundError,
+    WalletNotFoundError,
+    get_api_key_service,
 )
 
 router = APIRouter(
@@ -74,7 +74,7 @@ async def create_api_key(
             expires_at=result["expires_at"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.get(
@@ -100,7 +100,7 @@ async def list_api_keys(
             total_revoked=result["total_revoked"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.post(
@@ -160,9 +160,9 @@ async def rotate_api_key(
             created_at=result["created_at"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except KeyNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.delete(
@@ -184,9 +184,9 @@ async def revoke_api_key(
     try:
         await service.revoke_key(wallet_id, key_id, reason)
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except KeyNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.post(
@@ -236,7 +236,7 @@ async def emergency_revoke(
             "created_at": result["created_at"].isoformat(),
         }
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.get(
@@ -258,4 +258,4 @@ async def get_rotation_logs(
         logs = await service.get_rotation_logs(wallet_id, limit)
         return [KeyRotationLogEntry(**log) for log in logs]
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e

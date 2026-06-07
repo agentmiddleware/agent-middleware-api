@@ -10,7 +10,6 @@ Priority order:
 
 from __future__ import annotations
 
-import aiosqlite
 import asyncio
 import json
 import logging
@@ -21,6 +20,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Any
 
+import aiosqlite
 import asyncpg
 import redis.asyncio as redis
 
@@ -383,7 +383,7 @@ class DurableStateStore:
         self._backend = "memory"
 
 
-@lru_cache()
+@lru_cache
 def get_durable_state() -> DurableStateStore:
     return DurableStateStore()
 

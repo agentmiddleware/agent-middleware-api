@@ -30,7 +30,6 @@ import os
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 from .config import get_settings
 
@@ -69,7 +68,7 @@ class LocalFilesystemBlob(BlobBackend):
     original key is recorded in a sidecar for debugging.
     """
 
-    def __init__(self, root: Optional[Path] = None):
+    def __init__(self, root: Path | None = None):
         self.root = Path(root or "./data/blobs").resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -151,7 +150,7 @@ class _UnimplementedBlob(BlobBackend):
         )
 
 
-@lru_cache()
+@lru_cache
 def get_blob_backend() -> BlobBackend:
     """Resolve the configured blob backend. Cached per-process."""
     backend_name = os.environ.get("BLOB_BACKEND", "local").strip().lower()
@@ -161,7 +160,9 @@ def get_blob_backend() -> BlobBackend:
         return LocalFilesystemBlob(Path(root) if root else None)
 
     if backend_name == "s3":
-        logger.warning("S3 blob backend selected but not implemented; falling back to local")
+        logger.warning(
+            "S3 blob backend selected but not implemented; falling back to local"
+        )
         return _UnimplementedBlob("s3")
 
     if backend_name == "vercel":

@@ -96,14 +96,14 @@ async def create_permit(
             request_payload=request.model_dump(mode="json"),
         )
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
-        raise HTTPException(status_code=409, detail=exc.args[0])
+        raise HTTPException(status_code=409, detail=exc.args[0]) from exc
     if replay and replay.response_json:
         return PermitResponse(**replay.response_json)
 
     try:
         permit = await get_permit_service().create_permit(request)
     except PermitError as exc:
-        raise HTTPException(status_code=400, detail=exc.reason)
+        raise HTTPException(status_code=400, detail=exc.reason) from exc
     await idem.complete(
         wallet_id=request.issuer_wallet_id,
         endpoint="/v1/permits",
@@ -179,7 +179,7 @@ async def revoke_permit(
     try:
         permit = await service.revoke_permit(permit_id)
     except PermitError as exc:
-        raise HTTPException(status_code=404, detail=exc.reason)
+        raise HTTPException(status_code=404, detail=exc.reason) from exc
     return permit
 
 

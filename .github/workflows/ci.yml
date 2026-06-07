@@ -58,6 +58,10 @@ jobs:
         if: matrix.python-version == '3.12'
         run: scripts/trust_coverage_gate.sh
 
+      - name: Run core quality gate
+        if: matrix.python-version == '3.12'
+        run: scripts/core_quality_gate.sh
+
       - name: Run trust-plane demo smoke test
         run: python scripts/demo_trust_plane.py --assert
 

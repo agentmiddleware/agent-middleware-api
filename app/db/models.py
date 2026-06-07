@@ -5,11 +5,10 @@ Defines normalized tables for wallets, ledger entries, and billing alerts.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import ConfigDict
 from sqlalchemy import UniqueConstraint
-from sqlmodel import SQLModel, Field
+from sqlmodel import Field, SQLModel
 
 
 class WalletModel(SQLModel, table=True):
@@ -23,9 +22,9 @@ class WalletModel(SQLModel, table=True):
 
     wallet_id: str = Field(primary_key=True, max_length=50)
     wallet_type: str = Field(max_length=20, index=True)
-    owner_name: Optional[str] = Field(default=None, max_length=255)
-    owner_key: Optional[str] = Field(default=None, max_length=255, index=True)
-    email: Optional[str] = Field(default=None, max_length=255)
+    owner_name: str | None = Field(default=None, max_length=255)
+    owner_key: str | None = Field(default=None, max_length=255, index=True)
+    email: str | None = Field(default=None, max_length=255)
 
     # Monetary fields - all Decimal for precision
     balance: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), decimal_places=8)
@@ -33,29 +32,29 @@ class WalletModel(SQLModel, table=True):
     lifetime_debits: Decimal = Field(default=Decimal("0"), decimal_places=8)
 
     # Hierarchy fields (for agent/child wallets)
-    parent_wallet_id: Optional[str] = Field(
+    parent_wallet_id: str | None = Field(
         default=None, foreign_key="wallets.wallet_id", index=True
     )
-    agent_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    agent_id: str | None = Field(default=None, max_length=100, index=True)
 
     # Child wallet specific fields
-    child_agent_id: Optional[str] = Field(default=None, max_length=100)
-    max_spend: Optional[Decimal] = Field(default=None, decimal_places=8)
-    task_description: Optional[str] = Field(default=None, max_length=500)
-    ttl_seconds: Optional[int] = Field(default=None)
+    child_agent_id: str | None = Field(default=None, max_length=100)
+    max_spend: Decimal | None = Field(default=None, decimal_places=8)
+    task_description: str | None = Field(default=None, max_length=500)
+    ttl_seconds: int | None = Field(default=None)
 
     # Spending controls
-    daily_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
+    daily_limit: Decimal | None = Field(default=None, decimal_places=8)
     daily_spent: Decimal = Field(default=Decimal("0"), decimal_places=8)
-    daily_reset_at: Optional[datetime] = Field(default=None)
+    daily_reset_at: datetime | None = Field(default=None)
 
     # Velocity monitoring (spend per hour for anomaly detection)
-    hourly_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
+    hourly_limit: Decimal | None = Field(default=None, decimal_places=8)
     hourly_spent: Decimal = Field(default=Decimal("0"), decimal_places=8)
-    hourly_reset_at: Optional[datetime] = Field(default=None)
+    hourly_reset_at: datetime | None = Field(default=None)
 
     # Velocity anomaly detection
-    last_charge_at: Optional[datetime] = Field(default=None)
+    last_charge_at: datetime | None = Field(default=None)
     velocity_alerts_triggered: int = Field(default=0)
 
     # Auto-refill settings
@@ -66,8 +65,8 @@ class WalletModel(SQLModel, table=True):
     # Status and metadata
     status: str = Field(default="active", max_length=20)
     kyc_status: str = Field(default="not_required", max_length=30)
-    kyc_verified_at: Optional[datetime] = Field(default=None)
-    metadata_json: Optional[str] = Field(default=None)
+    kyc_verified_at: datetime | None = Field(default=None)
+    metadata_json: str | None = Field(default=None)
 
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -94,28 +93,28 @@ class LedgerEntryModel(SQLModel, table=True):
     balance_after: Decimal = Field(ge=Decimal("0"), decimal_places=8)
 
     # Service categorization
-    service_category: Optional[str] = Field(default=None, max_length=50, index=True)
+    service_category: str | None = Field(default=None, max_length=50, index=True)
 
     # Description and context
     description: str = Field(default="", max_length=500)
-    request_path: Optional[str] = Field(default=None, max_length=255)
+    request_path: str | None = Field(default=None, max_length=255)
 
     # Cost accounting for arbitrage
-    compute_cost: Optional[Decimal] = Field(default=None, decimal_places=8)
-    margin: Optional[Decimal] = Field(default=None, decimal_places=8)
+    compute_cost: Decimal | None = Field(default=None, decimal_places=8)
+    margin: Decimal | None = Field(default=None, decimal_places=8)
 
     # Metadata
-    metadata_json: Optional[str] = Field(default=None)
-    correlation_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    metadata_json: str | None = Field(default=None)
+    correlation_id: str | None = Field(default=None, max_length=100, index=True)
 
     # Stripe payment fields (for fiat top-up idempotency)
-    payment_intent_id: Optional[str] = Field(
+    payment_intent_id: str | None = Field(
         default=None,
         max_length=100,
         index=True,
         unique=True,  # Enforces idempotency at DB level
     )
-    stripe_session_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    stripe_session_id: str | None = Field(default=None, max_length=100, index=True)
 
     # Timestamp
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
@@ -133,8 +132,8 @@ class BillingAlertModel(SQLModel, table=True):
     alert_id: str = Field(primary_key=True, max_length=50)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
     alert_type: str = Field(max_length=30, index=True)
-    threshold_amount: Optional[Decimal] = Field(default=None, decimal_places=8)
-    current_balance: Optional[Decimal] = Field(default=None, decimal_places=8)
+    threshold_amount: Decimal | None = Field(default=None, decimal_places=8)
+    current_balance: Decimal | None = Field(default=None, decimal_places=8)
     message: str = Field(max_length=500)
     severity: str = Field(default="info", max_length=20)
     acknowledged: bool = Field(default=False)
@@ -182,9 +181,9 @@ class ServiceRegistryModel(SQLModel, table=True):
     category: str = Field(max_length=50, index=True)
     credits_per_unit: Decimal = Field(decimal_places=8)
     unit_name: str = Field(default="request", max_length=50)
-    mcp_manifest: Optional[str] = Field(default=None)
+    mcp_manifest: str | None = Field(default=None)
     is_active: bool = Field(default=True)
-    metadata_json: Optional[str] = Field(default=None)
+    metadata_json: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -210,14 +209,14 @@ class KYCVerificationModel(SQLModel, table=True):
 
     verification_type: str = Field(max_length=20, default="identity")
 
-    document_type: Optional[str] = Field(default=None, max_length=30)
+    document_type: str | None = Field(default=None, max_length=30)
 
-    first_verified_at: Optional[datetime] = Field(default=None)
-    last_verified_at: Optional[datetime] = Field(default=None)
+    first_verified_at: datetime | None = Field(default=None)
+    last_verified_at: datetime | None = Field(default=None)
 
-    rejection_reason: Optional[str] = Field(default=None, max_length=500)
+    rejection_reason: str | None = Field(default=None, max_length=500)
 
-    metadata_json: Optional[str] = Field(default=None)
+    metadata_json: str | None = Field(default=None)
 
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -244,18 +243,18 @@ class APIKeyModel(SQLModel, table=True):
     status: str = Field(default="active", max_length=20)
 
     rotation_count: int = Field(default=0)
-    last_rotated_at: Optional[datetime] = Field(default=None)
+    last_rotated_at: datetime | None = Field(default=None)
 
-    last_used_at: Optional[datetime] = Field(default=None)
-    last_used_ip: Optional[str] = Field(default=None, max_length=45)
+    last_used_at: datetime | None = Field(default=None)
+    last_used_ip: str | None = Field(default=None, max_length=45)
 
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    expires_at: Optional[datetime] = Field(default=None)
+    expires_at: datetime | None = Field(default=None)
 
-    revoked_at: Optional[datetime] = Field(default=None)
-    revoke_reason: Optional[str] = Field(default=None, max_length=255)
+    revoked_at: datetime | None = Field(default=None)
+    revoke_reason: str | None = Field(default=None, max_length=255)
 
-    metadata_json: Optional[str] = Field(default=None)
+    metadata_json: str | None = Field(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -284,14 +283,14 @@ class TelemetryEventModel(SQLModel, table=True):
     severity: str = Field(max_length=20, index=True)
     source: str = Field(max_length=100, index=True)
     message: str = Field(default="", max_length=1000)
-    stack_trace: Optional[str] = Field(default=None)
+    stack_trace: str | None = Field(default=None)
 
     # Full metadata dict preserved as JSON for anything not promoted.
-    payload_json: Optional[str] = Field(default=None)
+    payload_json: str | None = Field(default=None)
 
     # Two timestamps: when the event actually happened (from the client)
     # vs when we stored it (authoritative for retention).
-    event_timestamp: Optional[datetime] = Field(default=None, index=True)
+    event_timestamp: datetime | None = Field(default=None, index=True)
     ingested_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -304,12 +303,12 @@ class IoTDeviceModel(SQLModel, table=True):
 
     device_id: str = Field(primary_key=True, max_length=100)
     protocol: str = Field(max_length=20, index=True)
-    broker_url: Optional[str] = Field(default=None, max_length=500)
-    topic_acl_json: Optional[str] = Field(default=None)
-    metadata_json: Optional[str] = Field(default=None)
+    broker_url: str | None = Field(default=None, max_length=500)
+    topic_acl_json: str | None = Field(default=None)
+    metadata_json: str | None = Field(default=None)
     status: str = Field(default="registered", max_length=30, index=True)
     registered_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    last_message_at: Optional[datetime] = Field(default=None)
+    last_message_at: datetime | None = Field(default=None)
     message_count: int = Field(default=0)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -323,8 +322,8 @@ class IoTDeviceEventModel(SQLModel, table=True):
     event_id: str = Field(primary_key=True, max_length=64)
     device_id: str = Field(max_length=100, index=True)
     event_type: str = Field(max_length=30, index=True)
-    topic: Optional[str] = Field(default=None, max_length=500)
-    payload_json: Optional[str] = Field(default=None)
+    topic: str | None = Field(default=None, max_length=500)
+    payload_json: str | None = Field(default=None)
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -339,10 +338,10 @@ class OracleCrawlTargetModel(SQLModel, table=True):
     url: str = Field(max_length=2048, index=True)
     directory_type: str = Field(max_length=30, index=True)
     status: str = Field(max_length=20, index=True)
-    api_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    api_id: str | None = Field(default=None, max_length=64, index=True)
     queued_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    crawled_at: Optional[datetime] = Field(default=None)
-    raw_payload_hash: Optional[str] = Field(default=None, max_length=128)
+    crawled_at: datetime | None = Field(default=None)
+    raw_payload_hash: str | None = Field(default=None, max_length=128)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -359,8 +358,8 @@ class OracleIndexedAPIModel(SQLModel, table=True):
     directory_type: str = Field(max_length=30, index=True)
     compatibility_tier: str = Field(max_length=20, index=True)
     compatibility_score: float = Field(default=0.0, index=True)
-    capabilities_json: Optional[str] = Field(default=None)
-    tags_json: Optional[str] = Field(default=None)
+    capabilities_json: str | None = Field(default=None)
+    tags_json: str | None = Field(default=None)
     status: str = Field(max_length=20)
     last_crawled: datetime = Field(default_factory=datetime.utcnow, index=True)
 
@@ -405,13 +404,13 @@ class AgentCommsMessageModel(SQLModel, table=True):
     message_type: str = Field(max_length=30)
     priority: str = Field(max_length=20)
     subject: str = Field(default="", max_length=500)
-    body_json: Optional[str] = Field(default=None)
-    correlation_id: Optional[str] = Field(default=None, max_length=100, index=True)
-    reply_to: Optional[str] = Field(default=None, max_length=64)
+    body_json: str | None = Field(default=None)
+    correlation_id: str | None = Field(default=None, max_length=100, index=True)
+    reply_to: str | None = Field(default=None, max_length=64)
     status: str = Field(max_length=20, index=True)
-    payload_hash: Optional[str] = Field(default=None, max_length=128)
+    payload_hash: str | None = Field(default=None, max_length=128)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    delivered_at: Optional[datetime] = Field(default=None)
+    delivered_at: datetime | None = Field(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -423,22 +422,22 @@ class SecurityScanModel(SQLModel, table=True):
 
     scan_id: str = Field(primary_key=True, max_length=64)
     scan_type: str = Field(max_length=20, index=True)
-    tenant_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    tenant_id: str | None = Field(default=None, max_length=100, index=True)
 
-    targets_json: Optional[str] = Field(default=None)
-    attack_categories_json: Optional[str] = Field(default=None)
+    targets_json: str | None = Field(default=None)
+    attack_categories_json: str | None = Field(default=None)
     intensity: str = Field(default="standard", max_length=20)
 
     status: str = Field(max_length=20, index=True)
     total_tests_run: int = Field(default=0)
-    total_passed: Optional[int] = Field(default=None)
-    total_failed: Optional[int] = Field(default=None)
+    total_passed: int | None = Field(default=None)
+    total_failed: int | None = Field(default=None)
     security_score: float = Field(default=0.0)
 
-    recommendations_json: Optional[str] = Field(default=None)
+    recommendations_json: str | None = Field(default=None)
 
-    started_at: Optional[datetime] = Field(default=None)
-    completed_at: Optional[datetime] = Field(default=None)
+    started_at: datetime | None = Field(default=None)
+    completed_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -462,12 +461,12 @@ class SecurityVulnerabilityModel(SQLModel, table=True):
     description: str = Field(default="", max_length=4000)
 
     endpoint: str = Field(max_length=2048)
-    method: Optional[str] = Field(default=None, max_length=10)
+    method: str | None = Field(default=None, max_length=10)
 
-    evidence_json: Optional[str] = Field(default=None)
+    evidence_json: str | None = Field(default=None)
     remediation: str = Field(default="", max_length=4000)
     remediation_status: str = Field(default="open", max_length=30)
-    cwe_id: Optional[str] = Field(default=None, max_length=20)
+    cwe_id: str | None = Field(default=None, max_length=20)
 
     discovered_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
@@ -481,15 +480,15 @@ class ContentPipelineModel(SQLModel, table=True):
 
     pipeline_id: str = Field(primary_key=True, max_length=64)
     title: str = Field(max_length=500)
-    source_clip_id: Optional[str] = Field(default=None, max_length=100)
-    source_url: Optional[str] = Field(default=None, max_length=2048)
-    target_formats_json: Optional[str] = Field(default=None)
-    brand_config_json: Optional[str] = Field(default=None)
+    source_clip_id: str | None = Field(default=None, max_length=100)
+    source_url: str | None = Field(default=None, max_length=2048)
+    target_formats_json: str | None = Field(default=None)
+    brand_config_json: str | None = Field(default=None)
     language: str = Field(default="en", max_length=10)
     auto_schedule: bool = Field(default=True)
     owner_key: str = Field(default="", max_length=255, index=True)
     status: str = Field(default="queued", max_length=30, index=True)
-    hook_json: Optional[str] = Field(default=None)
+    hook_json: str | None = Field(default=None)
     caption_style: str = Field(default="bold_impact", max_length=30)
     aspect_ratio: str = Field(default="9:16", max_length=10)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
@@ -510,14 +509,14 @@ class ContentPieceModel(SQLModel, table=True):
     )
     format: str = Field(max_length=30, index=True)
     title: str = Field(max_length=500)
-    description: Optional[str] = Field(default=None, max_length=2000)
+    description: str | None = Field(default=None, max_length=2000)
     download_url: str = Field(max_length=2048)
-    thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
-    duration_seconds: Optional[float] = Field(default=None)
-    dimensions: Optional[str] = Field(default=None, max_length=30)
-    file_size_bytes: Optional[int] = Field(default=None)
+    thumbnail_url: str | None = Field(default=None, max_length=2048)
+    duration_seconds: float | None = Field(default=None)
+    dimensions: str | None = Field(default=None, max_length=30)
+    file_size_bytes: int | None = Field(default=None)
     status: str = Field(max_length=20, index=True)
-    metadata_json: Optional[str] = Field(default=None)
+    metadata_json: str | None = Field(default=None)
     generated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -531,8 +530,8 @@ class ContentCampaignModel(SQLModel, table=True):
     campaign_id: str = Field(primary_key=True, max_length=64)
     campaign_title: str = Field(max_length=500)
     source_url: str = Field(max_length=2048)
-    hooks_json: Optional[str] = Field(default=None)
-    pipeline_ids_json: Optional[str] = Field(default=None)
+    hooks_json: str | None = Field(default=None)
+    pipeline_ids_json: str | None = Field(default=None)
     status: str = Field(default="running", max_length=30, index=True)
     owner_key: str = Field(default="", max_length=255, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
@@ -555,7 +554,7 @@ class ContentScheduleModel(SQLModel, table=True):
     recommended_time: datetime = Field(index=True)
     confidence: float = Field(default=0.0)
     reasoning: str = Field(default="", max_length=2000)
-    estimated_views: Optional[int] = Field(default=None)
+    estimated_views: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -567,13 +566,13 @@ class ContentFactoryGenerationModel(SQLModel, table=True):
     __tablename__ = "content_factory_generations"
 
     content_id: str = Field(primary_key=True, max_length=36)
-    prompt_hash: Optional[str] = Field(default=None, max_length=64, index=True)
-    output_hash: Optional[str] = Field(default=None, max_length=64)
-    model: Optional[str] = Field(default=None, max_length=128)
-    provenance_json: Optional[str] = Field(default=None)
-    output_text: Optional[str] = Field(default=None)
+    prompt_hash: str | None = Field(default=None, max_length=64, index=True)
+    output_hash: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=128)
+    provenance_json: str | None = Field(default=None)
+    output_text: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    updated_at: Optional[datetime] = Field(default=None)
+    updated_at: datetime | None = Field(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -593,14 +592,14 @@ class KeyRotationLogModel(SQLModel, table=True):
 
     rotation_type: str = Field(max_length=30)
 
-    old_key_id: Optional[str] = Field(default=None, max_length=50)
-    new_key_id: Optional[str] = Field(default=None, max_length=50)
+    old_key_id: str | None = Field(default=None, max_length=50)
+    new_key_id: str | None = Field(default=None, max_length=50)
 
     trigger_reason: str = Field(max_length=255)
     triggered_by: str = Field(max_length=50)
 
-    ip_address: Optional[str] = Field(default=None, max_length=45)
-    user_agent: Optional[str] = Field(default=None, max_length=500)
+    ip_address: str | None = Field(default=None, max_length=45)
+    user_agent: str | None = Field(default=None, max_length=500)
 
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
@@ -612,20 +611,20 @@ class OptimizerTelemetryModel(SQLModel, table=True):
 
     __tablename__ = "optimizer_telemetry"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     ts: datetime = Field(default_factory=datetime.utcnow, index=True)
     wallet_id: str = Field(max_length=64, index=True)
     agent_id: str = Field(max_length=64, index=True)
-    task_id: Optional[str] = Field(default=None, max_length=100, index=True)
-    request_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    task_id: str | None = Field(default=None, max_length=100, index=True)
+    request_id: str | None = Field(default=None, max_length=100, index=True)
     endpoint: str = Field(max_length=128, index=True)
-    action_features: Optional[str] = Field(default=None)
-    latency_ms: Optional[int] = Field(default=None)
-    credits_delta: Optional[Decimal] = Field(default=None, decimal_places=8)
+    action_features: str | None = Field(default=None)
+    latency_ms: int | None = Field(default=None)
+    credits_delta: Decimal | None = Field(default=None, decimal_places=8)
     success: bool = Field(default=True)
-    error_class: Optional[str] = Field(default=None, max_length=64)
-    risk_flags: Optional[str] = Field(default=None)
-    payload_hash: Optional[str] = Field(default=None, max_length=64, index=True)
+    error_class: str | None = Field(default=None, max_length=64)
+    risk_flags: str | None = Field(default=None)
+    payload_hash: str | None = Field(default=None, max_length=64, index=True)
 
 
 class ControlPlaneAuditEventModel(SQLModel, table=True):
@@ -639,21 +638,21 @@ class ControlPlaneAuditEventModel(SQLModel, table=True):
     # equal/clock-skewed created_at values can't reorder the chain on read.
     seq: int = Field(default=0, index=True)
     event: str = Field(max_length=128, index=True)
-    wallet_id: Optional[str] = Field(default=None, max_length=64, index=True)
-    tool: Optional[str] = Field(default=None, max_length=128, index=True)
-    endpoint: Optional[str] = Field(default=None, max_length=256, index=True)
-    auth_source: Optional[str] = Field(default=None, max_length=32)
-    key_id: Optional[str] = Field(default=None, max_length=64, index=True)
-    policy_decision_id: Optional[str] = Field(default=None, max_length=64, index=True)
-    request_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    wallet_id: str | None = Field(default=None, max_length=64, index=True)
+    tool: str | None = Field(default=None, max_length=128, index=True)
+    endpoint: str | None = Field(default=None, max_length=256, index=True)
+    auth_source: str | None = Field(default=None, max_length=32)
+    key_id: str | None = Field(default=None, max_length=64, index=True)
+    policy_decision_id: str | None = Field(default=None, max_length=64, index=True)
+    request_id: str | None = Field(default=None, max_length=100, index=True)
     ok: bool = Field(default=True, index=True)
-    error: Optional[str] = Field(default=None)
-    metadata_json: Optional[str] = Field(default=None)
-    payload_hash: Optional[str] = Field(default=None, max_length=64, index=True)
-    previous_hash: Optional[str] = Field(default=None, max_length=64)
-    chain_hash: Optional[str] = Field(default=None, max_length=64, index=True)
-    signature: Optional[str] = Field(default=None)
-    signature_key_id: Optional[str] = Field(
+    error: str | None = Field(default=None)
+    metadata_json: str | None = Field(default=None)
+    payload_hash: str | None = Field(default=None, max_length=64, index=True)
+    previous_hash: str | None = Field(default=None, max_length=64)
+    chain_hash: str | None = Field(default=None, max_length=64, index=True)
+    signature: str | None = Field(default=None)
+    signature_key_id: str | None = Field(
         default=None,
         max_length=64,
         foreign_key="signing_keys.key_id",
@@ -672,7 +671,7 @@ class AuditChainHeadModel(SQLModel, table=True):
     __tablename__ = "audit_chain_heads"
 
     wallet_key: str = Field(primary_key=True, max_length=64)
-    last_chain_hash: Optional[str] = Field(default=None, max_length=64)
+    last_chain_hash: str | None = Field(default=None, max_length=64)
     last_seq: int = Field(default=0)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -687,8 +686,8 @@ class SigningKeyModel(SQLModel, table=True):
     public_key_b64: str
     status: str = Field(default="active", max_length=20, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    activated_at: Optional[datetime] = Field(default=None)
-    retired_at: Optional[datetime] = Field(default=None)
+    activated_at: datetime | None = Field(default=None)
+    retired_at: datetime | None = Field(default=None)
 
 
 class PermitModel(SQLModel, table=True):
@@ -710,7 +709,7 @@ class PermitModel(SQLModel, table=True):
         foreign_key="wallets.wallet_id",
         index=True,
     )
-    subject_key_id: Optional[str] = Field(
+    subject_key_id: str | None = Field(
         default=None,
         max_length=50,
         foreign_key="api_keys.key_id",
@@ -726,10 +725,10 @@ class PermitModel(SQLModel, table=True):
     signature: str
     key_id: str = Field(max_length=64, foreign_key="signing_keys.key_id", index=True)
     issued_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    revoked_at: Optional[datetime] = Field(default=None)
+    revoked_at: datetime | None = Field(default=None)
     # Last time budget was reserved/released; used to distinguish a live
     # in-flight reservation from one orphaned by a crash during reconciliation.
-    updated_at: Optional[datetime] = Field(default=None, index=True)
+    updated_at: datetime | None = Field(default=None, index=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -742,11 +741,11 @@ class ReceiptModel(SQLModel, table=True):
     receipt_id: str = Field(primary_key=True, max_length=64)
     permit_id: str = Field(max_length=64, foreign_key="permits.permit_id", index=True)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
-    key_id: Optional[str] = Field(default=None, max_length=50, index=True)
+    key_id: str | None = Field(default=None, max_length=50, index=True)
     tool: str = Field(max_length=128, index=True)
     request_hash: str = Field(max_length=64, index=True)
-    response_hash: Optional[str] = Field(default=None, max_length=64)
-    ledger_entry_id: Optional[str] = Field(
+    response_hash: str | None = Field(default=None, max_length=64)
+    ledger_entry_id: str | None = Field(
         default=None,
         max_length=50,
         foreign_key="ledger_entries.entry_id",
@@ -755,7 +754,7 @@ class ReceiptModel(SQLModel, table=True):
     credits_authorized: Decimal = Field(decimal_places=8)
     credits_charged: Decimal = Field(default=Decimal("0"), decimal_places=8)
     outcome: str = Field(max_length=32, index=True)
-    audit_event_id: Optional[str] = Field(
+    audit_event_id: str | None = Field(
         default=None,
         max_length=50,
         foreign_key="control_plane_audit_events.event_id",
@@ -790,11 +789,11 @@ class IdempotencyRecordModel(SQLModel, table=True):
     endpoint: str = Field(max_length=256, index=True)
     idempotency_key: str = Field(max_length=128, index=True)
     request_hash: str = Field(max_length=64)
-    response_reference: Optional[str] = Field(default=None, max_length=128)
-    response_json: Optional[str] = Field(default=None)
+    response_reference: str | None = Field(default=None, max_length=128)
+    response_json: str | None = Field(default=None)
     status_code: int = Field(default=200)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-    expires_at: Optional[datetime] = Field(default=None)
+    expires_at: datetime | None = Field(default=None)
 
 
 class PolicyBundleModel(SQLModel, table=True):
@@ -805,10 +804,10 @@ class PolicyBundleModel(SQLModel, table=True):
     policy_id: str = Field(primary_key=True, max_length=64)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
     name: str = Field(max_length=255)
-    allowed_tools_json: Optional[str] = Field(default=None)
-    allowed_service_categories_json: Optional[str] = Field(default=None)
-    max_cost_per_action: Optional[Decimal] = Field(default=None, decimal_places=8)
-    daily_spend_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
+    allowed_tools_json: str | None = Field(default=None)
+    allowed_service_categories_json: str | None = Field(default=None)
+    max_cost_per_action: Decimal | None = Field(default=None, decimal_places=8)
+    daily_spend_limit: Decimal | None = Field(default=None, decimal_places=8)
     require_real_effects: bool = Field(default=False)
     risk_tier: str = Field(default="medium", max_length=20)
     human_approval_required: bool = Field(default=False)

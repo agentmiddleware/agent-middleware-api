@@ -6,18 +6,18 @@ Handles identity verification for sponsor wallets.
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.auth import verify_api_key
-from ..services.kyc_service import (
-    get_kyc_service,
-    KYCNotRequiredError,
-    KYCVerificationError,
-)
-from ..services.agent_money import WalletNotFoundError
 from ..schemas.billing import (
     CreateKYCSessionRequest,
     KYCSessionResponse,
+    KYCStatus,
     KYCStatusResponse,
     KYCVerificationDetails,
-    KYCStatus,
+)
+from ..services.agent_money import WalletNotFoundError
+from ..services.kyc_service import (
+    KYCNotRequiredError,
+    KYCVerificationError,
+    get_kyc_service,
 )
 
 router = APIRouter(
@@ -75,17 +75,17 @@ async def create_kyc_session(
             expires_at=result["expires_at"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except KYCNotRequiredError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "kyc_not_required", "message": str(e)},
-        )
+        ) from e
     except KYCVerificationError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "verification_error", "message": str(e)},
-        )
+        ) from e
 
 
 @router.get(
@@ -121,7 +121,7 @@ async def get_kyc_status(
             message=result["message"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.get(

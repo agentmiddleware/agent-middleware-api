@@ -8,47 +8,49 @@ Swarm arbitrage silently books margin on every transaction.
 This is how the API generates revenue autonomously.
 """
 
+from datetime import UTC
 from decimal import Decimal
 from typing import ClassVar
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
 from ..core.dependencies import get_agent_money
+from ..schemas.billing import (
+    AlertListResponse,
+    ArbitrageReport,
+    ChildWalletResponse,
+    CreateAgentWalletRequest,
+    CreateChildWalletRequest,
+    CreateSponsorWalletRequest,
+    ExactDecimalFieldsMixin,
+    InsufficientFundsResponse,
+    LedgerResponse,
+    PricingTableResponse,
+    ReclaimResponse,
+    RegisterServiceRequest,
+    ServiceCategory,
+    ServiceRegistration,
+    SwarmBudgetSummary,
+    TopUpRequest,
+    TopUpResponse,
+    WalletListResponse,
+    WalletResponse,
+)
 from ..services.agent_money import (
-    AgentMoney,
     DEFAULT_PRICING,
     EXCHANGE_RATE,
+    AgentMoney,
     InsufficientFundsError,
-    WalletNotFoundError,
     KYCVerificationRequiredError,
+    WalletNotFoundError,
 )
 from ..services.governance import record_governed_action
 from ..services.policies import evaluate_wallet_policy
-from ..services.velocity_monitor import WalletFrozenError
-from ..services.stripe_integration import get_stripe_integration
 from ..services.shadow_ledger import get_shadow_ledger
-from ..schemas.billing import (
-    CreateSponsorWalletRequest,
-    CreateAgentWalletRequest,
-    CreateChildWalletRequest,
-    ChildWalletResponse,
-    SwarmBudgetSummary,
-    ReclaimResponse,
-    WalletResponse,
-    WalletListResponse,
-    LedgerResponse,
-    TopUpRequest,
-    TopUpResponse,
-    InsufficientFundsResponse,
-    ServiceCategory,
-    PricingTableResponse,
-    ArbitrageReport,
-    AlertListResponse,
-    RegisterServiceRequest,
-    ServiceRegistration,
-    ExactDecimalFieldsMixin,
-)
+from ..services.stripe_integration import get_stripe_integration
+from ..services.velocity_monitor import WalletFrozenError
 
 
 def _require_wallet_access(auth: AuthContext, wallet_id: str) -> None:
@@ -146,6 +148,7 @@ router = APIRouter(
 
 # --- Wallet Management ---
 
+
 @router.post(
     "/wallets/sponsor",
     response_model=WalletResponse,
@@ -203,9 +206,7 @@ async def create_agent_wallet(
             agent_id=request.agent_id,
             budget_credits=Decimal(str(request.budget_credits)),
             daily_limit=(
-                Decimal(str(request.daily_limit))
-                if request.daily_limit
-                else None
+                Decimal(str(request.daily_limit)) if request.daily_limit else None
             ),
             auto_refill=request.auto_refill,
             auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),
@@ -213,7 +214,7 @@ async def create_agent_wallet(
             owner_key=auth.raw_key,
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except InsufficientFundsError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -228,12 +229,12 @@ async def create_agent_wallet(
                 "required_amount": float(e.required_amount),
                 "shortfall": float(e.shortfall),
             },
-        )
+        ) from e
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "wallet_error", "message": str(e)},
-        )
+        ) from e
 
 
 @router.post(
@@ -280,7 +281,7 @@ async def create_child_wallet(
             created_at=response.created_at,
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except InsufficientFundsError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -291,12 +292,12 @@ async def create_child_wallet(
                 "required_amount": str(e.required_amount),
                 "shortfall": str(e.shortfall),
             },
-        )
+        ) from e
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "child_wallet_error", "message": str(e)},
-        )
+        ) from e
 
 
 @router.post(
@@ -324,12 +325,12 @@ async def reclaim_child_wallet(
             child_status=result["child_status"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "reclaim_error", "message": str(e)},
-        )
+        ) from e
 
 
 @router.get(
@@ -357,7 +358,7 @@ async def get_swarm_budget(
             children=result["children"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.get(
@@ -399,6 +400,7 @@ async def list_wallets(
 
 # --- Ledger ---
 
+
 @router.get(
     "/ledger/{wallet_id}",
     response_model=LedgerResponse,
@@ -426,6 +428,7 @@ async def get_ledger(
 
 
 # --- Charging ---
+
 
 @router.post(
     "/charge",
@@ -542,10 +545,11 @@ async def charge_wallet(
                     "Contact sponsor."
                 ),
             },
-        )
+        ) from e
 
 
 # --- Top-Up ---
+
 
 @router.post(
     "/top-up",
@@ -592,7 +596,7 @@ async def top_up_wallet(
             error="wallet_not_found",
             metadata={"amount_fiat": request.amount_fiat},
         )
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except KYCVerificationRequiredError as e:
         await _record_billing_governance(
             event="billing.top_up",
@@ -613,7 +617,7 @@ async def top_up_wallet(
                 "message": str(e),
                 "verification_url": f"/v1/kyc/sessions?wallet_id={e.wallet_id}",
             },
-        )
+        ) from e
     except ValueError as e:
         await _record_billing_governance(
             event="billing.top_up",
@@ -628,7 +632,7 @@ async def top_up_wallet(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "topup_error", "message": str(e)},
-        )
+        ) from e
 
 
 @router.post(
@@ -666,10 +670,12 @@ async def prepare_top_up(
         }
     """
     from ..core.config import get_settings
+
     settings = get_settings()
 
     if settings.KYC_REQUIRED_FOR_TOPUP:
         from ..services.kyc_service import get_kyc_service
+
         kyc_service = get_kyc_service()
         kyc_status = await kyc_service.get_verification_status(wallet_id)
         if kyc_status["kyc_status"] != "verified":
@@ -697,12 +703,12 @@ async def prepare_top_up(
         )
         return result
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "topup_prepare_error", "message": str(e)},
-        )
+        ) from e
 
 
 @router.post(
@@ -767,7 +773,7 @@ async def transfer_wallets(
             error="wallet_not_found",
             metadata={"to_wallet_id": to_wallet_id},
         )
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except InsufficientFundsError as e:
         await _record_billing_governance(
             event="billing.transfer",
@@ -788,7 +794,7 @@ async def transfer_wallets(
                 "wallet_id": e.wallet_id,
                 "shortfall": float(e.shortfall),
             },
-        )
+        ) from e
     except ValueError as e:
         await _record_billing_governance(
             event="billing.transfer",
@@ -805,10 +811,11 @@ async def transfer_wallets(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "transfer_error", "message": str(e)},
-        )
+        ) from e
 
 
 # --- Pricing ---
+
 
 @router.get(
     "/pricing",
@@ -819,15 +826,17 @@ async def get_pricing(
     api_key: str = Depends(verify_api_key),
     money: AgentMoney = Depends(get_agent_money),
 ):
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     return PricingTableResponse(
         pricing=money.get_pricing_table(),
         exchange_rate=EXCHANGE_RATE,
-        last_updated=datetime.now(timezone.utc),
+        last_updated=datetime.now(UTC),
     )
 
 
 # --- Arbitrage ---
+
 
 @router.get(
     "/arbitrage",
@@ -842,6 +851,7 @@ async def get_arbitrage_report(
 
 
 # --- Alerts ---
+
 
 @router.get(
     "/alerts",
@@ -903,7 +913,7 @@ async def register_service(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "service_registration_error", "message": str(e)},
-        )
+        ) from e
 
 
 @router.get(
@@ -941,13 +951,16 @@ async def get_velocity_status(
 
 # --- Dry-Run Sandbox Endpoints ---
 
+
 class CreateDryRunSessionRequest(BaseModel):
     """Start a dry-run session for simulating billing operations."""
+
     wallet_id: str = Field(..., description="Wallet to simulate charges against")
 
 
 class DryRunSessionResponse(ExactDecimalFieldsMixin):
     """Response when creating a dry-run session."""
+
     _decimal_exact_fields: ClassVar[dict[str, str]] = {
         "real_balance": "real_balance_exact",
         "virtual_balance": "virtual_balance_exact",
@@ -965,6 +978,7 @@ class DryRunSessionResponse(ExactDecimalFieldsMixin):
 
 class SimulatedChargeRequest(BaseModel):
     """Simulate a charge without affecting real balance."""
+
     wallet_id: str = Field(..., description="Wallet being simulated")
     service: ServiceCategory = Field(..., description="Service category to simulate")
     units: float = Field(default=1.0, description="Number of units")
@@ -977,6 +991,7 @@ class SimulatedChargeRequest(BaseModel):
 
 class SimulatedChargeResponse(ExactDecimalFieldsMixin):
     """Result of a simulated charge."""
+
     _decimal_exact_fields: ClassVar[dict[str, str]] = {
         "credits_would_charge": "credits_would_charge_exact",
         "simulated_balance_before": "simulated_balance_before_exact",
@@ -1313,11 +1328,11 @@ async def simulate_charge(
             wallet_id=getattr(result, "wallet_id", request.wallet_id),
             service_category=getattr(result, "service_category", request.service.value),
             endpoint="/v1/billing/dry-run/charge",
-            estimated_cost=float(
-                getattr(result, "credits_would_charge", Decimal("0"))
-            ),
+            estimated_cost=float(getattr(result, "credits_would_charge", Decimal("0"))),
             ok=getattr(result, "would_succeed", True),
-            error=None if getattr(result, "would_succeed", True) else getattr(result, "reason", None),
+            error=None
+            if getattr(result, "would_succeed", True)
+            else getattr(result, "reason", None),
             metadata={"units": getattr(result, "units", request.units)},
         )
         return SimulatedChargeResponse(

@@ -9,7 +9,8 @@ These validations ensure tenant isolation by verifying that:
 3. Resource ownership is properly validated
 """
 
-from typing import Any, Optional
+from typing import Any
+
 from fastapi import HTTPException, status
 
 
@@ -31,9 +32,7 @@ class TenantIsolationError(HTTPException):
 class TenantResource:
     """Represents a resource that belongs to a specific tenant."""
 
-    def __init__(
-        self, resource_id: str, owner_key: str, tenant_id: Optional[str] = None
-    ):
+    def __init__(self, resource_id: str, owner_key: str, tenant_id: str | None = None):
         self.resource_id = resource_id
         self.owner_key = owner_key
         self.tenant_id = tenant_id or owner_key
@@ -43,7 +42,7 @@ def validate_tenant_access(
     resource_owner_key: str,
     requester_api_key: str,
     resource_type: str = "resource",
-    resource_id: Optional[str] = None,
+    resource_id: str | None = None,
 ) -> None:
     """
     Validate that the requester has access to the resource.

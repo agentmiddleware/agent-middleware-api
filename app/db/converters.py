@@ -3,21 +3,20 @@ Conversion utilities between SQLModel database rows and Pydantic API schemas.
 """
 
 import json
+from datetime import datetime
 from typing import Any
 
-from datetime import datetime, timezone
-
 from ..schemas.billing import (
-    WalletResponse,
-    WalletType,
-    WalletStatus,
-    LedgerEntry,
-    LedgerAction,
-    ServiceCategory,
-    BillingAlert,
-    AlertType,
     AlertSeverity,
+    AlertType,
+    BillingAlert,
     KYCStatus,
+    LedgerAction,
+    LedgerEntry,
+    ServiceCategory,
+    WalletResponse,
+    WalletStatus,
+    WalletType,
 )
 from ..schemas.content_factory import (
     ContentFormat,
@@ -38,28 +37,27 @@ from ..schemas.red_team import (
     RemediationStatus,
     ScanReport,
     ScanStatus,
-    Severity as RTSeverity,
     Vulnerability,
 )
+from ..schemas.red_team import (
+    Severity as RTSeverity,
+)
 from ..schemas.telemetry import (
+    Severity,
     TelemetryEvent,
     TelemetryEventType,
-    Severity,
 )
 from .models import (
-    WalletModel,
-    LedgerEntryModel,
     BillingAlertModel,
-    ContentCampaignModel,
     ContentPieceModel,
-    ContentPipelineModel,
     ContentScheduleModel,
-    OracleCrawlTargetModel,
+    LedgerEntryModel,
     OracleIndexedAPIModel,
     OracleRegistrationModel,
     SecurityScanModel,
     SecurityVulnerabilityModel,
     TelemetryEventModel,
+    WalletModel,
 )
 
 
@@ -123,9 +121,7 @@ def ledger_entry_model_to_schema(
         amount=entry.amount,
         balance_after=entry.balance_after,
         service_category=(
-            ServiceCategory(entry.service_category)
-            if entry.service_category
-            else None
+            ServiceCategory(entry.service_category) if entry.service_category else None
         ),
         description=entry.description,
         request_path=entry.request_path,
@@ -174,6 +170,7 @@ def parse_metadata_json(metadata_json: str | None) -> dict[str, Any]:
 # Telemetry
 # ---------------------------------------------------------------------------
 
+
 def telemetry_event_to_model(
     event_id: str,
     batch_id: str,
@@ -211,6 +208,7 @@ def telemetry_event_model_to_schema(row: TelemetryEventModel) -> TelemetryEvent:
 # ---------------------------------------------------------------------------
 # Oracle
 # ---------------------------------------------------------------------------
+
 
 def indexed_api_to_model(api: IndexedAPI) -> OracleIndexedAPIModel:
     """Flatten an IndexedAPI schema into its stored row."""
@@ -293,6 +291,7 @@ def registration_model_to_schema(
 # ---------------------------------------------------------------------------
 # Security scans (shared by red_team + rtaas)
 # ---------------------------------------------------------------------------
+
 
 def _str_list_to_json(values: list | None) -> str | None:
     if not values:
@@ -412,9 +411,7 @@ def scan_model_to_report(
         vulnerabilities_found=len(vulnerabilities),
         severity_breakdown=severity_breakdown,
         vulnerabilities=vulnerabilities,
-        recommendations=[
-            str(r) for r in _parse_json_list(scan.recommendations_json)
-        ],
+        recommendations=[str(r) for r in _parse_json_list(scan.recommendations_json)],
         score=scan.security_score,
     )
 
@@ -422,6 +419,7 @@ def scan_model_to_report(
 # ---------------------------------------------------------------------------
 # Content factory
 # ---------------------------------------------------------------------------
+
 
 def content_piece_to_model(piece: GeneratedContent) -> ContentPieceModel:
     return ContentPieceModel(
