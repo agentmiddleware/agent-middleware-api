@@ -21,6 +21,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .core.api_surface import api_surface_status, proof_surfaces_enabled
 from .core.config import get_settings
 from .core.durable_state import close_durable_state, get_durable_state
 from .core.health import gather_dependency_report
@@ -66,6 +67,7 @@ from .routers import (
     me,
     awi,
     awi_enhanced,
+    awi_well_known,
     discover,
     well_known,
     static,
@@ -74,6 +76,35 @@ from .routers import (
 )
 
 settings = get_settings()
+
+_ROOT_PROOF_SERVICE_KEYS = {
+    "iot_bridge",
+    "autonomous_pm",
+    "media_engine",
+    "agent_comms",
+    "content_factory",
+    "agent_oracle",
+    "red_team_security",
+    "launch_sequence",
+    "protocol_engine",
+    "rtaas",
+    "sandbox",
+    "awi_phase9",
+    "telemetry_scope",
+    "dashboard",
+    "oracle_broadcast",
+}
+
+
+def _visible_root_services(services: dict[str, Any]) -> dict[str, Any]:
+    if proof_surfaces_enabled(settings):
+        return services
+    return {
+        service_id: service
+        for service_id, service in services.items()
+        if service_id not in _ROOT_PROOF_SERVICE_KEYS
+    }
+
 
 # Try structured logging, fall back to standard logging
 try:
@@ -344,9 +375,16 @@ PROOF_SURFACE_ROUTERS = (
     docs,
     awi,
     awi_enhanced,
+    awi_well_known,
 )
 
-for router_module in (*PROOF_SURFACE_ROUTERS, *CORE_TRUST_ROUTERS):
+_ROUTERS_TO_MOUNT = (
+    (*PROOF_SURFACE_ROUTERS, *CORE_TRUST_ROUTERS)
+    if proof_surfaces_enabled(settings)
+    else CORE_TRUST_ROUTERS
+)
+
+for router_module in _ROUTERS_TO_MOUNT:
     app.include_router(router_module.router)
 
 
@@ -364,9 +402,10 @@ for router_module in (*PROOF_SURFACE_ROUTERS, *CORE_TRUST_ROUTERS):
     ),
 )
 async def root():
-    return {
+    payload = {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
+        "api_surface": api_surface_status(settings),
         "agent_first": get_agent_first_metadata(),
         "description": (
             "Operational control plane for autonomous agents: identity, billing, "
@@ -706,6 +745,13 @@ async def root():
             "dependency_truth": "/health/dependencies",
         },
     }
+    payload["services"] = _visible_root_services(payload["services"])
+    if not proof_surfaces_enabled(settings):
+        payload["surface_boundaries"]["proof_surface"] = []
+        payload["surface_boundaries"]["proof_surface_requires"] = (
+            "API_SURFACE_MODE=full"
+        )
+    return payload
 
 
 @app.get(
