@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 # Set up SQLite for testing before any imports
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+os.environ.setdefault("API_SURFACE_MODE", "full")
 # Configure auth so tests don't hit the fail-safe 503 in verify_api_key.
 # Tests authenticate with X-API-Key: test-key (see RateLimitMiddleware, which
 # also special-cases this value to bypass rate limiting).

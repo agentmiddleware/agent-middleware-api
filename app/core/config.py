@@ -4,8 +4,9 @@ All settings are loaded from environment variables for zero-GUI deployment.
 """
 
 from decimal import Decimal
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -24,6 +25,12 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     CORS_ORIGINS: str = "*"
+
+    # --- API Surface ---
+    # trust_plane mounts only the paid-pilot governed MCP trust plane. full
+    # additionally mounts proof/demo surfaces such as AWI, telemetry, oracle,
+    # sandbox, media, IoT, and content generation.
+    API_SURFACE_MODE: str = "trust_plane"
 
     # --- Public URL ---
     # Used for agent manifests and documentation links
@@ -171,6 +178,6 @@ class Settings(BaseSettings):
     )
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     return Settings()
