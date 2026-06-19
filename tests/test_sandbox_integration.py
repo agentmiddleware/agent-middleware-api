@@ -33,7 +33,7 @@ class TestShadowLedger:
 
     def test_create_session(self, ledger):
         """Creating a session returns a DryRunSession with unique ID."""
-        session = asyncio.get_event_loop().run_until_complete(
+        session = asyncio.run(
             ledger.create_session(
                 wallet_id="test-wallet",
                 real_balance=Decimal("1000"),
@@ -49,142 +49,122 @@ class TestShadowLedger:
 
     def test_session_tracks_cumulative_charges(self, ledger):
         """Simulated charges accumulate in the session."""
-        loop = asyncio.get_event_loop()
 
-        session = loop.run_until_complete(
-            ledger.create_session(
+        async def scenario():
+            session = await ledger.create_session(
                 wallet_id="test-wallet",
                 real_balance=Decimal("1000"),
             )
-        )
 
-        result1 = loop.run_until_complete(
-            ledger.simulate_charge(
+            result1 = await ledger.simulate_charge(
                 session_id=session.session_id,
                 service_category=ServiceCategory.CONTENT_FACTORY,
                 units=10.0,
                 description="First charge",
             )
-        )
 
-        assert result1.would_succeed is True
-        assert result1.simulated_balance_after == 500.0
+            assert result1.would_succeed is True
+            assert result1.simulated_balance_after == 500.0
 
-        result2 = loop.run_until_complete(
-            ledger.simulate_charge(
+            result2 = await ledger.simulate_charge(
                 session_id=session.session_id,
                 service_category=ServiceCategory.IOT_BRIDGE,
                 units=5.0,
                 description="Second charge",
             )
-        )
 
-        assert result2.would_succeed is True
-        assert result2.simulated_balance_after == 490.0
+            assert result2.would_succeed is True
+            assert result2.simulated_balance_after == 490.0
 
-        final_session = loop.run_until_complete(
-            ledger.get_session(session.session_id)
-        )
+            final_session = await ledger.get_session(session.session_id)
 
-        assert len(final_session.simulated_charges) == 2
-        assert final_session.virtual_balance == Decimal("490")
-        assert final_session.total_simulated == Decimal("510")
+            assert len(final_session.simulated_charges) == 2
+            assert final_session.virtual_balance == Decimal("490")
+            assert final_session.total_simulated == Decimal("510")
+
+        asyncio.run(scenario())
 
     def test_session_returns_insufficient_funds_when_exceeding_balance(self, ledger):
         """Simulated charges return would_succeed=False when exceeding virtual balance."""
-        loop = asyncio.get_event_loop()
 
-        session = loop.run_until_complete(
-            ledger.create_session(
+        async def scenario():
+            session = await ledger.create_session(
                 wallet_id="test-wallet",
                 real_balance=Decimal("100"),
             )
-        )
 
-        result = loop.run_until_complete(
-            ledger.simulate_charge(
+            result = await ledger.simulate_charge(
                 session_id=session.session_id,
                 service_category=ServiceCategory.CONTENT_FACTORY,
                 units=50.0,
                 description="Large charge",
             )
-        )
 
-        assert result.would_succeed is False
-        assert result.simulated_balance_after < 0
-        assert result.reason == "insufficient_simulated_funds"
+            assert result.would_succeed is False
+            assert result.simulated_balance_after < 0
+            assert result.reason == "insufficient_simulated_funds"
+
+        asyncio.run(scenario())
 
     def test_session_end_returns_summary(self, ledger):
         """Ending a session returns a complete summary."""
-        loop = asyncio.get_event_loop()
 
-        session = loop.run_until_complete(
-            ledger.create_session(
+        async def scenario():
+            session = await ledger.create_session(
                 wallet_id="test-wallet",
                 real_balance=Decimal("500"),
             )
-        )
 
-        loop.run_until_complete(
-            ledger.simulate_charge(
+            await ledger.simulate_charge(
                 session_id=session.session_id,
                 service_category=ServiceCategory.TELEMETRY_PM,
                 units=100.0,
                 description="Test charge",
             )
-        )
 
-        summary = loop.run_until_complete(
-            ledger.end_session(session.session_id)
-        )
+            summary = await ledger.end_session(session.session_id)
 
-        assert summary is not None
-        assert summary.wallet_id == "test-wallet"
-        assert summary.total_simulated_credits == Decimal("100")
-        assert summary.charge_count == 1
-        assert summary.virtual_balance_after == Decimal("400")
+            assert summary is not None
+            assert summary.wallet_id == "test-wallet"
+            assert summary.total_simulated_credits == Decimal("100")
+            assert summary.charge_count == 1
+            assert summary.virtual_balance_after == Decimal("400")
+
+        asyncio.run(scenario())
 
     def test_nonexistent_session_returns_none(self, ledger):
         """Getting a nonexistent session returns None."""
-        result = asyncio.get_event_loop().run_until_complete(
-            ledger.get_session("nonexistent-id")
-        )
+        result = asyncio.run(ledger.get_session("nonexistent-id"))
         assert result is None
 
     def test_nonexistent_session_end_returns_none(self, ledger):
         """Ending a nonexistent session returns None."""
-        result = asyncio.get_event_loop().run_until_complete(
-            ledger.end_session("nonexistent-id")
-        )
+        result = asyncio.run(ledger.end_session("nonexistent-id"))
         assert result is None
 
     def test_virtual_balance_calculation(self, ledger):
         """Virtual balance correctly reflects real balance minus charges."""
-        loop = asyncio.get_event_loop()
 
-        session = loop.run_until_complete(
-            ledger.create_session(
+        async def scenario():
+            session = await ledger.create_session(
                 wallet_id="test-wallet",
                 real_balance=Decimal("1000"),
             )
-        )
 
-        for i in range(5):
-            loop.run_until_complete(
-                ledger.simulate_charge(
+            for i in range(5):
+                await ledger.simulate_charge(
                     session_id=session.session_id,
                     service_category=ServiceCategory.IOT_BRIDGE,
                     units=1.0,
                     description=f"Charge {i}",
                 )
-            )
 
-        final_session = loop.run_until_complete(
-            ledger.get_session(session.session_id)
-        )
+            final_session = await ledger.get_session(session.session_id)
 
-        assert final_session.virtual_balance == Decimal("990")
-        assert final_session.total_simulated == Decimal("10")
+            assert final_session.virtual_balance == Decimal("990")
+            assert final_session.total_simulated == Decimal("10")
+
+        asyncio.run(scenario())
 
 
 class TestDryRunSession:

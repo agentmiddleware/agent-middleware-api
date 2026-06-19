@@ -33,6 +33,19 @@ If the partner wants the operator narrative instead of the compact proof, run:
 make agent-ops-war-room
 ```
 
+If the partner is from a security team and wants to see the boundary hold
+under attack rather than just on the happy path, run the adversarial battery:
+
+```bash
+make red-team-trust-plane
+```
+
+It drives one valid permit and attacks it ten ways — no permit, unknown
+permit, out-of-scope tool, missing scope, over-budget, stolen permit (wrong
+wallet), wrong key, expired, revoked, and tampered signature — and asserts
+each is denied with a concrete reason code, that none produces a ledger debit,
+and that a final valid call still charges exactly once.
+
 Then walk the partner through the live flow:
 
 1. Create a sponsor wallet.
@@ -48,6 +61,9 @@ Then walk the partner through the live flow:
 9. Replay the same request and show the same receipt ID with no second debit.
 10. Attempt a different tool under the same permit and show out-of-scope
     denial.
+11. Attempt the same allowed tool with no permit at all and show the
+    `permit_required` denial, proving the trust plane fails closed when
+    `ALLOW_LEGACY_UNPERMITTED_MCP=false`.
 
 ## What To Listen For
 

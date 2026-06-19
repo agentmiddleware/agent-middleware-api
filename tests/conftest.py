@@ -9,6 +9,23 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
+
+def iter_routes(routes):
+    """Yield every leaf route from an app/router route list.
+
+    Newer FastAPI versions wrap `app.include_router()` results in an
+    `_IncludedRouter` that has no `.path` of its own. Walk into its
+    `original_router.routes` so callers see the real `APIRoute` instances.
+    """
+    for route in routes:
+        if hasattr(route, "path"):
+            yield route
+            continue
+        original = getattr(route, "original_router", None)
+        if original is not None and hasattr(original, "routes"):
+            yield from iter_routes(original.routes)
+
+
 # Set up SQLite for testing before any imports
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 # Configure auth so tests don't hit the fail-safe 503 in verify_api_key.

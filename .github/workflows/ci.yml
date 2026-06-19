@@ -61,6 +61,9 @@ jobs:
       - name: Run trust-plane demo smoke test
         run: python scripts/demo_trust_plane.py --assert
 
+      - name: Run trust-plane adversarial (red-team) smoke test
+        run: python scripts/red_team_trust_plane.py --assert
+
       - name: Validate OpenAPI spec generates
         run: |
           python -c "

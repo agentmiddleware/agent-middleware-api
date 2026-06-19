@@ -31,6 +31,8 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
 
+from app.core.time import utc_now
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,8 +108,8 @@ class BridgeSession:
     current_url: Optional[str] = None
     page_title: Optional[str] = None
     elements_cache: dict[str, DOMElement] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    last_activity: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=utc_now)
+    last_activity: datetime = field(default_factory=utc_now)
 
     # Real Playwright objects (not dataclass fields, set at runtime)
     _page: Optional["Page"] = field(default=None, repr=False)
@@ -454,7 +456,7 @@ class AWIPlaywrightBridge:
         if self._session_ttl_seconds <= 0:
             return {"expired": 0, "active": len(self._sessions)}
 
-        cutoff = datetime.utcnow() - timedelta(seconds=self._session_ttl_seconds)
+        cutoff = utc_now() - timedelta(seconds=self._session_ttl_seconds)
         expired_session_ids = [
             session_id
             for session_id, session in self._sessions.items()
@@ -521,7 +523,7 @@ class AWIPlaywrightBridge:
 
         try:
             commands = await handler(session, parameters)
-            session.last_activity = datetime.utcnow()
+            session.last_activity = utc_now()
             return commands
         except Exception as e:
             logger.error(f"Action translation failed for {action}: {e}")
@@ -600,7 +602,7 @@ class AWIPlaywrightBridge:
                 error=f"Session {session_id} not found",
             )
 
-        start_time = datetime.utcnow()
+        start_time = utc_now()
         executed = 0
         error = None
 
@@ -617,8 +619,8 @@ class AWIPlaywrightBridge:
                 logger.error(f"Command {cmd.command_type.value} failed: {e}")
                 break
 
-        session.last_activity = datetime.utcnow()
-        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        session.last_activity = utc_now()
+        duration_ms = int((utc_now() - start_time).total_seconds() * 1000)
 
         return ExecutionResult(
             success=error is None,
@@ -1755,7 +1757,7 @@ class AWIPlaywrightBridge:
             # Update session state after execution
             session.current_url = page.url
             session.page_title = await page.title()
-            session.last_activity = datetime.utcnow()
+            session.last_activity = utc_now()
 
             logger.debug(
                 f"Executed {cmd_type.value} on {command.target} for session {session.session_id}"

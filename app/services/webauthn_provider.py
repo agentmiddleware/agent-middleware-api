@@ -32,6 +32,8 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
 
+from app.core.time import utc_now
+
 logger = logging.getLogger(__name__)
 
 PY_WEBAUTHN_AVAILABLE = False
@@ -114,7 +116,7 @@ class CredentialRecord:
     user_id: str
     public_key: bytes
     sign_count: int = 0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=utc_now)
     name: str = ""
 
 
@@ -234,7 +236,7 @@ class WebAuthnProvider:
             base64.urlsafe_b64encode(challenge_bytes).decode("ascii").rstrip("=")
         )
 
-        now = datetime.utcnow()
+        now = utc_now()
         challenge = WebAuthnChallenge(
             challenge_id=challenge_id,
             session_id=session_id,
@@ -356,7 +358,7 @@ class WebAuthnProvider:
         if challenge.status == ChallengeStatus.FAILED:
             raise ValueError("Challenge verification previously failed")
 
-        if datetime.utcnow() > challenge.expires_at:
+        if utc_now() > challenge.expires_at:
             challenge.status = ChallengeStatus.EXPIRED
             raise ValueError("Challenge expired")
 
@@ -374,7 +376,7 @@ class WebAuthnProvider:
 
         challenge.status = ChallengeStatus.VERIFIED
 
-        now = datetime.utcnow()
+        now = utc_now()
         verification_key = self._make_verification_key(
             challenge.session_id, challenge.action
         )
@@ -424,7 +426,7 @@ class WebAuthnProvider:
         if not verification:
             return False
 
-        if datetime.utcnow() > verification.expires_at:
+        if utc_now() > verification.expires_at:
             del self._verifications[verification_key]
             return False
 
@@ -457,7 +459,7 @@ class WebAuthnProvider:
                 "expires_in_seconds": None,
             }
 
-        now = datetime.utcnow()
+        now = utc_now()
         remaining = (verification.expires_at - now).total_seconds()
 
         if remaining <= 0:
@@ -583,7 +585,7 @@ class WebAuthnProvider:
         Returns:
             Dict with counts of removed items.
         """
-        now = datetime.utcnow()
+        now = utc_now()
 
         expired_challenges = [
             cid for cid, c in self._challenges.items() if now > c.expires_at

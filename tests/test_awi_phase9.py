@@ -11,6 +11,7 @@ Tests for:
 import pytest
 from datetime import datetime, timedelta
 
+from app.core.time import utc_now
 from app.services.webauthn_provider import WebAuthnProvider, ChallengeStatus
 from app.services.awi_playwright_bridge import (
     AWIPlaywrightBridge,
@@ -332,7 +333,7 @@ class TestAWIPlaywrightBridge:
             session_ttl_seconds=1,
         )
         session = await bridge.create_session("https://example.com")
-        session.last_activity = datetime.utcnow() - timedelta(seconds=5)
+        session.last_activity = utc_now() - timedelta(seconds=5)
 
         replacement = await bridge.create_session("https://example.org")
 
@@ -796,8 +797,8 @@ class TestAWIRAGEngine:
                 action_sequence=["search", "add_to_cart", "checkout"],
                 key_entities=[],
                 similarity_score=0.9,
-                created_at=datetime.utcnow(),
-                accessed_at=datetime.utcnow(),
+                created_at=utc_now(),
+                accessed_at=utc_now(),
                 access_count=1,
             ),
             SearchResult(
@@ -808,8 +809,8 @@ class TestAWIRAGEngine:
                 action_sequence=["search", "add_to_cart"],
                 key_entities=[],
                 similarity_score=0.8,
-                created_at=datetime.utcnow(),
-                accessed_at=datetime.utcnow(),
+                created_at=utc_now(),
+                accessed_at=utc_now(),
                 access_count=1,
             ),
         ]

@@ -106,14 +106,18 @@ class TestHealthEndpoints:
         """Verify /health endpoint exists."""
         from app.main import app
 
-        routes = [r.path for r in app.routes]
+        from tests.conftest import iter_routes
+
+        routes = [r.path for r in iter_routes(app.routes)]
         assert "/health" in routes
 
     def test_health_ready_endpoint_exists(self):
         """Verify /health/ready endpoint exists."""
         from app.main import app
 
-        routes = [r.path for r in app.routes]
+        from tests.conftest import iter_routes
+
+        routes = [r.path for r in iter_routes(app.routes)]
         assert "/health/ready" in routes
 
 

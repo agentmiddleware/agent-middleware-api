@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from app.core.time import utc_now
 from decimal import Decimal
 import json
 from typing import Any
@@ -128,7 +128,7 @@ async def patch_policy_bundle(
                 setattr(row, field, Decimal(str(value)) if value is not None else None)
             else:
                 setattr(row, field, value)
-        row.updated_at = datetime.utcnow()
+        row.updated_at = utc_now()
         session.add(row)
         await session.commit()
         await session.refresh(row)

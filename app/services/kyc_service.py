@@ -19,6 +19,7 @@ from uuid import uuid4
 import stripe
 from sqlalchemy import select
 
+from ..core.time import utc_now
 from ..db.database import get_session_factory
 from ..db.models import KYCVerificationModel, WalletModel
 from ..core.config import get_settings
@@ -130,7 +131,7 @@ class KYCService:
             raise KYCVerificationError(f"Failed to create verification session: {e}")
 
         verification_id = str(uuid4())
-        expires_at = datetime.utcnow() + timedelta(days=self.SESSION_EXPIRY_DAYS)
+        expires_at = utc_now() + timedelta(days=self.SESSION_EXPIRY_DAYS)
 
         async with self._session_factory()() as session:
             verification = KYCVerificationModel(
@@ -160,7 +161,7 @@ class KYCService:
             "session_id": verification_session.id,
             "session_url": verification_session.url,
             "status": "pending",
-            "created_at": datetime.utcnow(),
+            "created_at": utc_now(),
             "expires_at": expires_at,
         }
 
@@ -313,10 +314,11 @@ class KYCService:
                 logger.error(f"Verification not found for session {session_id}")
                 return
 
+            verified_at = utc_now()
             verification.status = "verified"
-            verification.last_verified_at = datetime.utcnow()
+            verification.last_verified_at = verified_at
             if not verification.first_verified_at:
-                verification.first_verified_at = datetime.utcnow()
+                verification.first_verified_at = verified_at
             verification.rejection_reason = None
 
             result = await session.execute(
@@ -328,7 +330,7 @@ class KYCService:
 
             if wallet:
                 wallet.kyc_status = "verified"
-                wallet.kyc_verified_at = datetime.utcnow()
+                wallet.kyc_verified_at = verified_at
                 if wallet.status == "pending_kyc":
                     wallet.status = "active"
                 session.add(wallet)
@@ -423,7 +425,7 @@ class KYCService:
             if verification:
                 verification.status = "rejected"
                 verification.rejection_reason = reason
-                verification.last_verified_at = datetime.utcnow()
+                verification.last_verified_at = utc_now()
 
             result = await session.execute(
                 select(WalletModel)
