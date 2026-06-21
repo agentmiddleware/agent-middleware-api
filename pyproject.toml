@@ -5,7 +5,7 @@ description = "Operational control plane for autonomous agents"
 requires-python = ">=3.11"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.0.0"]
+mcp = ["mcp>=1.28.0,<2"]
 playwright = ["playwright>=1.40.0"]
 browser = ["playwright>=1.40.0"]
 webauthn = ["webauthn>=1.0.0"]
