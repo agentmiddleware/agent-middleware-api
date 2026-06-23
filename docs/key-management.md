@@ -170,7 +170,8 @@ scope for the trust-plane key-management story.
 
 Until the KMS integration ships, the production posture is:
 
-- `TRUST_MODE_ENABLED=true`
+- `TRUST_MODE_ENABLED=true` and `ALLOW_LEGACY_UNPERMITTED_MCP=false` are the
+  shipped defaults; nothing extra to configure
 - `TRUST_SIGNING_PRIVATE_KEY_B64` injected at deploy time from the hosting
   platform secret manager
 - Rotation by redeploy with a new env var and a follow-up

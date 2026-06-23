@@ -49,12 +49,20 @@ class Settings(BaseSettings):
     VALID_API_KEYS: str = ""
 
     # --- Trust Plane ---
-    # Strict trust mode requires both TRUST_MODE_ENABLED=true and
-    # ALLOW_LEGACY_UNPERMITTED_MCP=false. This lets local demos keep
-    # wallet-only MCP compatibility while production-like environments
-    # fail closed via app.core.trust_mode guardrails.
-    TRUST_MODE_ENABLED: bool = False
-    ALLOW_LEGACY_UNPERMITTED_MCP: bool = True
+    # Strict trust mode is the default and the only supported production
+    # posture: every governed MCP invocation must present a signed permit,
+    # legacy unpermitted calls are denied with `permit_required`, and a
+    # signing private key is required.
+    #
+    # To run a local demo or a legacy integration without permits, set both
+    # `TRUST_MODE_ENABLED=false` and `ALLOW_LEGACY_UNPERMITTED_MCP=true`
+    # explicitly in the environment. The startup banner in
+    # `app.core.trust_mode.warn_if_trust_mode_permissive` makes it loud when
+    # this opt-out is in effect, and the
+    # `app.core.trust_mode.validate_trust_mode_guardrails` check refuses to
+    # boot a production-like environment under any permissive combination.
+    TRUST_MODE_ENABLED: bool = True
+    ALLOW_LEGACY_UNPERMITTED_MCP: bool = False
     TRUST_SIGNING_KEY_ID: str = "local-dev-ed25519"
     TRUST_SIGNING_PRIVATE_KEY_B64: str = ""
 

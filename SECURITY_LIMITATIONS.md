@@ -22,8 +22,12 @@ and audit-chain primitives.
 
 ## Required Production Posture
 
-- Set `TRUST_MODE_ENABLED=true`.
-- Set `ALLOW_LEGACY_UNPERMITTED_MCP=false`.
+- `TRUST_MODE_ENABLED=true` and `ALLOW_LEGACY_UNPERMITTED_MCP=false` are the
+  shipped defaults. A production-like environment cannot boot under any
+  permissive combination — `app.core.trust_mode.validate_trust_mode_guardrails`
+  refuses to start. Local/dev/test deployments that need legacy behavior must
+  set both env vars explicitly; the startup log emits a `trust_mode_permissive`
+  warning so the opt-out is loud.
 - Configure `TRUST_SIGNING_PRIVATE_KEY_B64` from a secret manager or KMS-backed
   runtime injection.
 - Disable or isolate proof surfaces that execute code, drive browsers, generate

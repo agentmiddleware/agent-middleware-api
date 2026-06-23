@@ -32,6 +32,14 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 # Tests authenticate with X-API-Key: test-key (see RateLimitMiddleware, which
 # also special-cases this value to bypass rate limiting).
 os.environ.setdefault("VALID_API_KEYS", "test-key")
+# Production now defaults to strict trust mode (TRUST_MODE_ENABLED=true,
+# ALLOW_LEGACY_UNPERMITTED_MCP=false). Many tests predate that flip and
+# exercise MCP paths without supplying permits; opt the test suite back into
+# legacy/permissive behavior unless an individual test explicitly monkeypatches
+# strict mode (see test_mcp_trust_mode.py and test_trust_negative_security.py
+# for examples that flip back to strict at the test boundary).
+os.environ.setdefault("TRUST_MODE_ENABLED", "false")
+os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
 
 
 @pytest.fixture(scope="session")
