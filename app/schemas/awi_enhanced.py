@@ -14,6 +14,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.core.time import utc_now
+
 
 class PasskeyStatus(str, Enum):
     """Status of a passkey verification."""
@@ -302,7 +304,7 @@ class MemoryIndexResponse(BaseModel):
 
     memory_id: str = Field(..., description="Unique memory identifier")
     session_id: str = Field(..., description="AWI session ID")
-    indexed_at: datetime = Field(default_factory=datetime.utcnow)
+    indexed_at: datetime = Field(default_factory=utc_now)
     entities_extracted: int = Field(..., description="Number of entities extracted")
     intent_inferred: str = Field(..., description="Inferred user intent")
 

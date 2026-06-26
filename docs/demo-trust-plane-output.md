@@ -78,12 +78,9 @@ Example proof artifact:
   "receiver_agent_id": "agent-c4071325b605",
   "replay_receipt_id": "rcpt-16b6e8fddbf64053",
   "signing_key_id": "demo-ed25519",
-  "sponsor_wallet_id": "spn-50e05ceb01d5",
-  "success_receipt_id": "rcpt-16b6e8fddbf64053",
-  "tampered_audit_reason": "audit_payload_hash_mismatch",
-  "tampered_audit_valid": false,
-  "tampered_receipt_reason": "receipt_signature_invalid",
-  "tampered_receipt_valid": false
+  "sponsor_wallet_id": "spn-54322a836193",
+  "success_receipt_id": "rcpt-26e46941ba4a4bb6",
+  "ungoverned_denial_reason": "permit_required"
 }
 ```
 
@@ -97,6 +94,8 @@ What this proves:
   create a second debit.
 - An out-of-scope MCP tool is denied and produces a denial receipt.
 - Replaying that denial returns the same denial receipt and response semantics.
+- An MCP call with no permit at all is denied with `permit_required`, proving
+  the trust plane fails closed when `ALLOW_LEGACY_UNPERMITTED_MCP=false`.
 - The agent API key cannot read the sponsor wallet.
 - The wallet-scoped audit chain verifies after the governed action, and the
   audit event links back to permit, idempotency key, request hash, and ledger

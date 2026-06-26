@@ -564,6 +564,51 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 "denied replay did not return original denial receipt",
             )
 
+            step("attempting MCP call with no permit (trust-mode fail-closed)")
+            unpermitted_body = {
+                "jsonrpc": "2.0",
+                "id": "demo-unpermitted-1",
+                "method": "tools/call",
+                "params": {
+                    "name": ALLOWED_TOOL,
+                    "arguments": {"message": "should never reach the tool"},
+                    "mcpContext": {
+                        "wallet_id": agent_wallet_id,
+                        "idempotency_key": "demo-unpermitted-1",
+                    },
+                },
+            }
+            unpermitted_call = await post_json(
+                client,
+                "/mcp/messages",
+                headers=agent_headers,
+                expected_status=200,
+                json_body=unpermitted_body,
+            )
+            unpermitted_error = first_jsonrpc_error(unpermitted_call)
+            require(
+                unpermitted_error["message"] == "permit_required",
+                f"ungoverned call was not denied: {unpermitted_error}",
+            )
+            ledger_after_unpermitted = await get_json(
+                client,
+                f"/v1/billing/ledger/{agent_wallet_id}",
+                headers=agent_headers,
+                expected_status=200,
+            )
+            require(
+                len(
+                    [
+                        entry
+                        for entry in ledger_after_unpermitted["entries"]
+                        if entry["service_category"] == "agent_comms"
+                        and ALLOWED_TOOL in entry.get("description", "")
+                    ]
+                )
+                == 1,
+                "ungoverned call produced a ledger debit",
+            )
+
             step("proving tenant isolation")
             cross_wallet = await client.get(
                 f"/v1/billing/wallets/{sponsor_wallet_id}",
@@ -721,6 +766,7 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                     "receipt_id"
                 ],
                 "denial_reason": denial_error["message"],
+                "ungoverned_denial_reason": unpermitted_error["message"],
                 "cross_wallet_status": cross_wallet.status_code,
                 "evidence_bundle_valid": bundle["valid"],
                 "tampered_receipt_valid": tampered_receipt_check["valid"],

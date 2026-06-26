@@ -11,55 +11,21 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
-# --- Proof-surface test classification -------------------------------------
-# The product is the trust plane (app/trust + the core trust routers). Everything
-# else is a "proof surface" — example workloads that exercise the spine but are
-# NOT the product (see README "Core platform vs. example workloads"). Tests for
-# these are auto-marked `proof` so the inner dev loop can skip them:
-#     make test       -> fast, core only  (pytest -m "not proof")
-#     make test-all   -> full suite       (what CI runs)
-# Conservative by design: when a test's surface is ambiguous, leave it OUT of
-# this set so it stays in the fast (core) loop and is never silently skipped.
-PROOF_SURFACE_TEST_MODULES = frozenset(
-    {
-        "test_awi",
-        "test_awi_adoption",
-        "test_awi_dom_bridge_integration",
-        "test_awi_phase9",
-        "test_behavioral_sandbox",
-        "test_broadcast",
-        "test_comms",
-        "test_agent_comms_durable",
-        "test_content_factory_generation_durable",
-        "test_content_store",
-        "test_dashboard",
-        "test_factory",
-        "test_iot",
-        "test_iot_registry",
-        "test_launch",
-        "test_media",
-        "test_oracle",
-        "test_oracle_durable_crawl",
-        "test_oracle_store",
-        "test_protocol",
-        "test_red_team",
-        "test_rtaas",
-        "test_sandbox",
-        "test_sandbox_integration",
-        "test_telemetry",
-        "test_telemetry_scope",
-        "test_telemetry_store",
-    }
-)
 
+def iter_routes(routes):
+    """Yield every leaf route from an app/router route list.
 
-def pytest_collection_modifyitems(config, items):
-    """Auto-apply the `proof` marker to proof-surface test modules."""
-    proof = pytest.mark.proof
-    for item in items:
-        stem = Path(item.nodeid.split("::", 1)[0]).stem
-        if stem in PROOF_SURFACE_TEST_MODULES:
-            item.add_marker(proof)
+    Newer FastAPI versions wrap `app.include_router()` results in an
+    `_IncludedRouter` that has no `.path` of its own. Walk into its
+    `original_router.routes` so callers see the real `APIRoute` instances.
+    """
+    for route in routes:
+        if hasattr(route, "path"):
+            yield route
+            continue
+        original = getattr(route, "original_router", None)
+        if original is not None and hasattr(original, "routes"):
+            yield from iter_routes(original.routes)
 
 
 # Set up SQLite for testing before any imports
@@ -69,6 +35,14 @@ os.environ.setdefault("API_SURFACE_MODE", "full")
 # Tests authenticate with X-API-Key: test-key (see RateLimitMiddleware, which
 # also special-cases this value to bypass rate limiting).
 os.environ.setdefault("VALID_API_KEYS", "test-key")
+# Production now defaults to strict trust mode (TRUST_MODE_ENABLED=true,
+# ALLOW_LEGACY_UNPERMITTED_MCP=false). Many tests predate that flip and
+# exercise MCP paths without supplying permits; opt the test suite back into
+# legacy/permissive behavior unless an individual test explicitly monkeypatches
+# strict mode (see test_mcp_trust_mode.py and test_trust_negative_security.py
+# for examples that flip back to strict at the test boundary).
+os.environ.setdefault("TRUST_MODE_ENABLED", "false")
+os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
 
 
 @pytest.fixture(scope="session")

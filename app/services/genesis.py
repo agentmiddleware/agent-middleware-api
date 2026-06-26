@@ -134,7 +134,7 @@ class GenesisReport:
 GENESIS_SERVICE_CODE = '''
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/v1/widgets", tags=["Widgets"])
 
@@ -144,7 +144,7 @@ class Widget(BaseModel):
     name: str = Field(..., description="Widget display name")
     category: str = Field(default="general", description="Widget category")
     status: str = Field(default="active", description="Widget status")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict = Field(default_factory=dict)
 
 class CreateWidgetRequest(BaseModel):

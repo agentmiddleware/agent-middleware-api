@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from app.core.time import utc_now
+
 from ..core.config import get_settings
 from ..core.runtime_mode import is_simulation
 from ..db.database import get_session_factory, is_database_configured
@@ -56,7 +58,7 @@ class ContentGenerationStore:
             model=model,
             provenance_json=json.dumps(provenance, sort_keys=True, default=str),
             output_text=output_text,
-            created_at=datetime.now(UTC).replace(tzinfo=None),
+            created_at=utc_now(),
         )
         async with factory() as session:
             session.add(row)

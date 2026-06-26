@@ -44,6 +44,7 @@ def test_demo_trust_plane_script_proves_core_loop():
     assert proof["denial_receipt_id"].startswith("rcpt-")
     assert proof["denial_replay_receipt_id"] == proof["denial_receipt_id"]
     assert proof["denial_reason"] == "permit_tool_not_allowed"
+    assert proof["ungoverned_denial_reason"] == "permit_required"
     assert proof["cross_wallet_status"] == 403
     assert proof["evidence_bundle_valid"] is True
     assert proof["tampered_receipt_valid"] is False

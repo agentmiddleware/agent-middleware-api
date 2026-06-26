@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.core.config import Settings
+
+
+logger = logging.getLogger(__name__)
 
 
 PRODUCTION_LIKE_ENVIRONMENTS = frozenset(
@@ -83,4 +87,52 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         trust_mode_enabled=settings.TRUST_MODE_ENABLED,
         signing_private_key_b64=settings.TRUST_SIGNING_PRIVATE_KEY_B64,
         allow_legacy_unpermitted_mcp=settings.ALLOW_LEGACY_UNPERMITTED_MCP,
+    )
+
+
+def describe_permissive_trust_mode(
+    *,
+    trust_mode_enabled: bool,
+    allow_legacy_unpermitted_mcp: bool,
+) -> str | None:
+    """Describe a permissive trust-mode posture, or return None when strict.
+
+    The shipped defaults are `TRUST_MODE_ENABLED=true` and
+    `ALLOW_LEGACY_UNPERMITTED_MCP=false`. Any deviation is an explicit
+    operator opt-out and should be surfaced at startup so demos and
+    incremental migrations cannot drift into permissive territory by
+    accident.
+    """
+    if trust_mode_enabled and not allow_legacy_unpermitted_mcp:
+        return None
+    parts: list[str] = []
+    if not trust_mode_enabled:
+        parts.append("TRUST_MODE_ENABLED=false (no permit validation)")
+    if allow_legacy_unpermitted_mcp:
+        parts.append(
+            "ALLOW_LEGACY_UNPERMITTED_MCP=true (ungoverned MCP calls accepted)"
+        )
+    return "; ".join(parts)
+
+
+def warn_if_trust_mode_permissive(settings: Settings) -> None:
+    """Log a loud warning when the trust plane is running in opt-out mode.
+
+    Called once at startup, after `validate_trust_mode_guardrails`. In
+    production-like environments the validator has already refused to boot
+    under a permissive posture, so this only fires in local/dev/test
+    environments that explicitly opted out — exactly when we want a visible
+    reminder that ungoverned MCP calls are accepted.
+    """
+    description = describe_permissive_trust_mode(
+        trust_mode_enabled=settings.TRUST_MODE_ENABLED,
+        allow_legacy_unpermitted_mcp=settings.ALLOW_LEGACY_UNPERMITTED_MCP,
+    )
+    if description is None:
+        return
+    logger.warning(
+        "trust_mode_permissive: %s. The trust plane is in legacy/opt-out "
+        "mode; production deployments must set TRUST_MODE_ENABLED=true and "
+        "ALLOW_LEGACY_UNPERMITTED_MCP=false.",
+        description,
     )

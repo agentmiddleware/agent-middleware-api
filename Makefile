@@ -1,5 +1,4 @@
-PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null)
-PYTEST ?= $(PYTHON) -m pytest
+.PHONY: test prove-trust-plane demo-trust-plane demo-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate
 
 .PHONY: test test-all test-proof prove-trust-plane demo-trust-plane demo-trust-plane-check agent-ops-war-room agent-ops-war-room-check core-quality-gate trust-coverage-gate trust-release-gate
 
@@ -22,6 +21,12 @@ demo-trust-plane:
 
 demo-trust-plane-check:
 	$(PYTHON) scripts/demo_trust_plane.py --assert
+
+red-team-trust-plane:
+	uv run python scripts/red_team_trust_plane.py
+
+red-team-trust-plane-check:
+	uv run python scripts/red_team_trust_plane.py --assert
 
 agent-ops-war-room:
 	$(PYTHON) scripts/agent_ops_war_room_demo.py

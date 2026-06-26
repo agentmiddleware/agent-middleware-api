@@ -18,14 +18,16 @@ Example Usage:
         ...
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __author__ = "Agent-Native Middleware"
 
 from .client import B2AClient, InsufficientFundsError
 from .decorators import billable, combined, monitored
+from .edge_client import B2AEdgeClient
 
 __all__ = [
     "B2AClient",
+    "B2AEdgeClient",
     "InsufficientFundsError",
     "monitored",
     "billable",

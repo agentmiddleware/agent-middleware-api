@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.routing import APIRoute
 
 from app.main import app
+from tests.conftest import iter_routes
 
 
 PUBLIC_PATH_PREFIXES = (
@@ -31,7 +32,7 @@ AUTH_DEPENDENCIES = {"get_auth_context", "verify_api_key"}
 
 def test_state_changing_core_trust_routes_have_auth_dependencies():
     checked = 0
-    for route in app.routes:
+    for route in iter_routes(app.routes):
         if not isinstance(route, APIRoute):
             continue
         if not (set(route.methods or set()) & {"POST", "PUT", "PATCH", "DELETE"}):
