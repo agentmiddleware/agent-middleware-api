@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 import json
 from typing import Any
@@ -11,7 +11,11 @@ from sqlalchemy import select
 
 from app.db.database import get_session_factory
 from app.db.models import PolicyBundleModel
-from app.schemas.policies import PolicyBundleCreate, PolicyBundlePatch, PolicyBundleResponse
+from app.schemas.policies import (
+    PolicyBundleCreate,
+    PolicyBundlePatch,
+    PolicyBundleResponse,
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +72,9 @@ async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleRespo
         wallet_id=request.wallet_id,
         name=request.name,
         allowed_tools_json=_encode_list(request.allowed_tools),
-        allowed_service_categories_json=_encode_list(request.allowed_service_categories),
+        allowed_service_categories_json=_encode_list(
+            request.allowed_service_categories
+        ),
         max_cost_per_action=(
             Decimal(str(request.max_cost_per_action))
             if request.max_cost_per_action is not None
@@ -92,7 +98,9 @@ async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleRespo
     return _to_response(model)
 
 
-async def list_policy_bundles(wallet_id: str | None = None) -> list[PolicyBundleResponse]:
+async def list_policy_bundles(
+    wallet_id: str | None = None,
+) -> list[PolicyBundleResponse]:
     stmt = select(PolicyBundleModel).order_by(PolicyBundleModel.created_at)
     if wallet_id:
         stmt = stmt.where(PolicyBundleModel.wallet_id == wallet_id)
@@ -128,7 +136,7 @@ async def patch_policy_bundle(
                 setattr(row, field, Decimal(str(value)) if value is not None else None)
             else:
                 setattr(row, field, value)
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(UTC).replace(tzinfo=None)
         session.add(row)
         await session.commit()
         await session.refresh(row)
@@ -196,27 +204,59 @@ async def evaluate_wallet_policy(
         }
         evaluated.append(constraints)
         if policy.human_approval_required:
-            return PolicyEvaluation(False, "human_approval_required", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "human_approval_required",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if allowed_tools is not None and tool_name not in allowed_tools:
-            return PolicyEvaluation(False, "tool_not_allowed", policy.policy_id, {"evaluated": evaluated})
-        if allowed_categories is not None and service_category not in allowed_categories:
-            return PolicyEvaluation(False, "service_category_not_allowed", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False, "tool_not_allowed", policy.policy_id, {"evaluated": evaluated}
+            )
+        if (
+            allowed_categories is not None
+            and service_category not in allowed_categories
+        ):
+            return PolicyEvaluation(
+                False,
+                "service_category_not_allowed",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if (
             policy.max_cost_per_action is not None
             and est is not None
             and est > policy.max_cost_per_action
         ):
-            return PolicyEvaluation(False, "max_cost_per_action_exceeded", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "max_cost_per_action_exceeded",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if (
             policy.daily_spend_limit is not None
             and daily is not None
             and est is not None
             and daily + est > policy.daily_spend_limit
         ):
-            return PolicyEvaluation(False, "daily_spend_limit_exceeded", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "daily_spend_limit_exceeded",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if policy.require_real_effects and simulation:
-            return PolicyEvaluation(False, "real_effects_required", policy.policy_id, {"evaluated": evaluated})
+            return PolicyEvaluation(
+                False,
+                "real_effects_required",
+                policy.policy_id,
+                {"evaluated": evaluated},
+            )
         if risk_tier is not None and policy.risk_tier != risk_tier:
             constraints["requested_risk_tier"] = risk_tier
 
-    return PolicyEvaluation(True, "allowed", models[0].policy_id, {"evaluated": evaluated})
+    return PolicyEvaluation(
+        True, "allowed", models[0].policy_id, {"evaluated": evaluated}
+    )

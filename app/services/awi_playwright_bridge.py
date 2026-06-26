@@ -26,7 +26,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
@@ -454,7 +454,9 @@ class AWIPlaywrightBridge:
         if self._session_ttl_seconds <= 0:
             return {"expired": 0, "active": len(self._sessions)}
 
-        cutoff = datetime.utcnow() - timedelta(seconds=self._session_ttl_seconds)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
+            seconds=self._session_ttl_seconds
+        )
         expired_session_ids = [
             session_id
             for session_id, session in self._sessions.items()
@@ -521,7 +523,7 @@ class AWIPlaywrightBridge:
 
         try:
             commands = await handler(session, parameters)
-            session.last_activity = datetime.utcnow()
+            session.last_activity = datetime.now(UTC).replace(tzinfo=None)
             return commands
         except Exception as e:
             logger.error(f"Action translation failed for {action}: {e}")
@@ -600,7 +602,7 @@ class AWIPlaywrightBridge:
                 error=f"Session {session_id} not found",
             )
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC).replace(tzinfo=None)
         executed = 0
         error = None
 
@@ -617,8 +619,10 @@ class AWIPlaywrightBridge:
                 logger.error(f"Command {cmd.command_type.value} failed: {e}")
                 break
 
-        session.last_activity = datetime.utcnow()
-        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        session.last_activity = datetime.now(UTC).replace(tzinfo=None)
+        duration_ms = int(
+            (datetime.now(UTC).replace(tzinfo=None) - start_time).total_seconds() * 1000
+        )
 
         return ExecutionResult(
             success=error is None,
@@ -1755,7 +1759,7 @@ class AWIPlaywrightBridge:
             # Update session state after execution
             session.current_url = page.url
             session.page_title = await page.title()
-            session.last_activity = datetime.utcnow()
+            session.last_activity = datetime.now(UTC).replace(tzinfo=None)
 
             logger.debug(
                 f"Executed {cmd_type.value} on {command.target} for session {session.session_id}"
@@ -1835,9 +1839,7 @@ class AWIPlaywrightBridge:
                 url, wait_until="networkidle", timeout=self._default_timeout_ms
             )
             navigated_url = session._page.url
-            session.current_url = (
-                url if navigated_url == f"{url}/" else navigated_url
-            )
+            session.current_url = url if navigated_url == f"{url}/" else navigated_url
             session.page_title = await session._page.title()
             logger.info(f"Navigated to {url} for session {session.session_id}")
         except Exception as e:

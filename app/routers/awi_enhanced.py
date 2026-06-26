@@ -11,7 +11,7 @@ Based on arXiv:2506.10953v1 gap analysis.
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -687,7 +687,9 @@ async def index_session(
         return MemoryIndexResponse(
             memory_id=memory_id,
             session_id=request.session_id,
-            indexed_at=memory.created_at if memory else datetime.utcnow(),
+            indexed_at=memory.created_at
+            if memory
+            else datetime.now(UTC).replace(tzinfo=None),
             entities_extracted=len(memory.key_entities) if memory else 0,
             intent_inferred=memory.user_intent if memory else "",
         )
@@ -722,7 +724,7 @@ async def query_memories(
     rag = get_awi_rag_engine()
 
     try:
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC).replace(tzinfo=None)
 
         results = await rag.search(
             query=request.query,
@@ -732,7 +734,9 @@ async def query_memories(
             include_raw_state=request.include_raw_state,
         )
 
-        search_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        search_time_ms = int(
+            (datetime.now(UTC).replace(tzinfo=None) - start_time).total_seconds() * 1000
+        )
 
         return RAGQueryResponse(
             query=request.query,

@@ -12,7 +12,7 @@ Architecture:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 from uuid import uuid4
 
@@ -33,11 +33,13 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 class KYCNotRequiredError(Exception):
     """Raised when KYC is not required for a wallet."""
+
     pass
 
 
 class KYCVerificationError(Exception):
     """Raised when KYC verification fails."""
+
     pass
 
 
@@ -130,7 +132,9 @@ class KYCService:
             raise KYCVerificationError(f"Failed to create verification session: {e}")
 
         verification_id = str(uuid4())
-        expires_at = datetime.utcnow() + timedelta(days=self.SESSION_EXPIRY_DAYS)
+        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
+            days=self.SESSION_EXPIRY_DAYS
+        )
 
         async with self._session_factory()() as session:
             verification = KYCVerificationModel(
@@ -160,7 +164,7 @@ class KYCService:
             "session_id": verification_session.id,
             "session_url": verification_session.url,
             "status": "pending",
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(UTC).replace(tzinfo=None),
             "expires_at": expires_at,
         }
 
@@ -238,8 +242,9 @@ class KYCService:
         """
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.verification_id == verification_id)
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.verification_id == verification_id
+                )
             )
             verification = result.scalar_one_or_none()
 
@@ -304,8 +309,9 @@ class KYCService:
 
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.stripe_session_id == session_id
+                )
             )
             verification = result.scalar_one_or_none()
 
@@ -314,9 +320,9 @@ class KYCService:
                 return
 
             verification.status = "verified"
-            verification.last_verified_at = datetime.utcnow()
+            verification.last_verified_at = datetime.now(UTC).replace(tzinfo=None)
             if not verification.first_verified_at:
-                verification.first_verified_at = datetime.utcnow()
+                verification.first_verified_at = datetime.now(UTC).replace(tzinfo=None)
             verification.rejection_reason = None
 
             result = await session.execute(
@@ -328,7 +334,7 @@ class KYCService:
 
             if wallet:
                 wallet.kyc_status = "verified"
-                wallet.kyc_verified_at = datetime.utcnow()
+                wallet.kyc_verified_at = datetime.now(UTC).replace(tzinfo=None)
                 if wallet.status == "pending_kyc":
                     wallet.status = "active"
                 session.add(wallet)
@@ -341,6 +347,7 @@ class KYCService:
         )
 
         from .notifications import get_notification_service
+
         notifications = get_notification_service()
         await notifications.send_kyc_approved_alert(wallet_id=verification.wallet_id)
 
@@ -350,8 +357,9 @@ class KYCService:
 
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.stripe_session_id == session_id
+                )
             )
             verification = result.scalar_one_or_none()
 
@@ -369,8 +377,9 @@ class KYCService:
 
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.stripe_session_id == session_id
+                )
             )
             verification = result.scalar_one_or_none()
 
@@ -423,7 +432,7 @@ class KYCService:
             if verification:
                 verification.status = "rejected"
                 verification.rejection_reason = reason
-                verification.last_verified_at = datetime.utcnow()
+                verification.last_verified_at = datetime.now(UTC).replace(tzinfo=None)
 
             result = await session.execute(
                 select(WalletModel)
@@ -442,6 +451,7 @@ class KYCService:
         logger.warning(f"KYC rejected for wallet {wallet_id}: {reason}")
 
         from .notifications import get_notification_service
+
         notifications = get_notification_service()
         await notifications.send_kyc_rejected_alert(wallet_id=wallet_id, reason=reason)
 

@@ -27,7 +27,7 @@ import logging
 import os
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
@@ -234,7 +234,7 @@ class WebAuthnProvider:
             base64.urlsafe_b64encode(challenge_bytes).decode("ascii").rstrip("=")
         )
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         challenge = WebAuthnChallenge(
             challenge_id=challenge_id,
             session_id=session_id,
@@ -356,7 +356,7 @@ class WebAuthnProvider:
         if challenge.status == ChallengeStatus.FAILED:
             raise ValueError("Challenge verification previously failed")
 
-        if datetime.utcnow() > challenge.expires_at:
+        if datetime.now(UTC).replace(tzinfo=None) > challenge.expires_at:
             challenge.status = ChallengeStatus.EXPIRED
             raise ValueError("Challenge expired")
 
@@ -374,7 +374,7 @@ class WebAuthnProvider:
 
         challenge.status = ChallengeStatus.VERIFIED
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         verification_key = self._make_verification_key(
             challenge.session_id, challenge.action
         )
@@ -424,7 +424,7 @@ class WebAuthnProvider:
         if not verification:
             return False
 
-        if datetime.utcnow() > verification.expires_at:
+        if datetime.now(UTC).replace(tzinfo=None) > verification.expires_at:
             del self._verifications[verification_key]
             return False
 
@@ -457,7 +457,7 @@ class WebAuthnProvider:
                 "expires_in_seconds": None,
             }
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         remaining = (verification.expires_at - now).total_seconds()
 
         if remaining <= 0:
@@ -583,7 +583,7 @@ class WebAuthnProvider:
         Returns:
             Dict with counts of removed items.
         """
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         expired_challenges = [
             cid for cid, c in self._challenges.items() if now > c.expires_at

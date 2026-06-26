@@ -8,7 +8,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 import httpx
@@ -56,7 +56,7 @@ class ContentGenerationStore:
             model=model,
             provenance_json=json.dumps(provenance, sort_keys=True, default=str),
             output_text=output_text,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC).replace(tzinfo=None),
         )
         async with factory() as session:
             session.add(row)
@@ -120,7 +120,7 @@ async def openai_compatible_chat_completion(
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError("LLM response missing choices")
-    msg = (choices[0].get("message") or {})
+    msg = choices[0].get("message") or {}
     text = msg.get("content") or ""
     if not isinstance(text, str):
         text = str(text)

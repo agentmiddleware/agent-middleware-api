@@ -28,7 +28,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -267,8 +267,8 @@ class AWIRAGEngine:
                 "metadata": metadata or {},
             },
             embedding=embedding,
-            created_at=datetime.utcnow(),
-            accessed_at=datetime.utcnow(),
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+            accessed_at=datetime.now(UTC).replace(tzinfo=None),
             relevance_tags=[final_type]
             + self._generate_tags(action_sequence, key_entities),
         )
@@ -362,7 +362,7 @@ class AWIRAGEngine:
 
             if similarity >= similarity_threshold:
                 memory.access_count += 1
-                memory.accessed_at = datetime.utcnow()
+                memory.accessed_at = datetime.now(UTC).replace(tzinfo=None)
 
                 result = SearchResult(
                     memory_id=memory_id,
@@ -423,7 +423,7 @@ class AWIRAGEngine:
                 score = round(score, 4)
 
                 memory.access_count += 1
-                memory.accessed_at = datetime.utcnow()
+                memory.accessed_at = datetime.now(UTC).replace(tzinfo=None)
 
                 result = SearchResult(
                     memory_id=memory_id,
@@ -478,7 +478,7 @@ class AWIRAGEngine:
 
             if similarity >= 0.5:
                 memory.access_count += 1
-                memory.accessed_at = datetime.utcnow()
+                memory.accessed_at = datetime.now(UTC).replace(tzinfo=None)
 
                 result = SearchResult(
                     memory_id=memory_id,
@@ -555,7 +555,11 @@ class AWIRAGEngine:
                         "user_intent": result.user_intent,
                         "relevance": result.similarity_score,
                         "age_minutes": int(
-                            (datetime.utcnow() - result.created_at).total_seconds() / 60
+                            (
+                                datetime.now(UTC).replace(tzinfo=None)
+                                - result.created_at
+                            ).total_seconds()
+                            / 60
                         ),
                     }
                 )
@@ -965,7 +969,7 @@ class AWIRAGEngine:
                 continue
 
             memory.access_count += 1
-            memory.accessed_at = datetime.utcnow()
+            memory.accessed_at = datetime.now(UTC).replace(tzinfo=None)
 
             search_results.append(
                 SearchResult(
@@ -979,7 +983,10 @@ class AWIRAGEngine:
                     key_entities=json.loads(metadata.get("key_entities", "[]"))[:20],
                     similarity_score=round(similarity, 4),
                     created_at=datetime.fromisoformat(
-                        metadata.get("created_at", datetime.utcnow().isoformat())
+                        metadata.get(
+                            "created_at",
+                            datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                        )
                     ),
                     accessed_at=memory.accessed_at,
                     access_count=memory.access_count,
