@@ -22,7 +22,7 @@ python-multipart>=0.0.32 # File upload support (>=0.0.30 fixes CVE-2026-53538/53
 # --- Utilities ---
 python-dotenv>=1.2.2    # .env file loading
 cryptography>=49.0.0    # Ed25519 trust-plane signatures (>=48.0.1 fixes GHSA-537c-gmf6-5ccf)
-redis>=7.4.0            # Redis-backed rate limiting and runtime persistence
+redis>=8.0.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
 greenlet>=3.5.1         # SQLAlchemy async engine support
 stripe>=15.1.0           # Stripe payment processing
