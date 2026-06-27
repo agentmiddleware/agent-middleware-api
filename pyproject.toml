@@ -17,3 +17,13 @@ resilience = ["tenacity>=8.0.0"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "proof: exercises an example proof-surface workload, not the trust-plane product. Skipped by `make test`; run the full suite with `make test-all`.",
+]
+filterwarnings = [
+    # Pydantic v2 calls the deprecated datetime.utcnow() internally
+    # (pydantic/_internal/_fields.py), emitting ~1,600 warnings that bury real
+    # signal. Scoped to pydantic so any utcnow reintroduction in our own code
+    # still surfaces.
+    "ignore::DeprecationWarning:pydantic._internal._fields",
+]

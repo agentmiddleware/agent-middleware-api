@@ -1,7 +1,15 @@
-.PHONY: test prove-trust-plane demo-trust-plane demo-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate
+.PHONY: test test-all test-proof prove-trust-plane demo-trust-plane demo-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate
 
+# Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
+# are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.
 test:
+	uv run pytest tests/ -q -m "not proof"
+
+test-all:
 	uv run pytest tests/ -q
+
+test-proof:
+	uv run pytest tests/ -q -m proof
 
 prove-trust-plane:
 	uv run python scripts/demo_trust_plane.py --assert
