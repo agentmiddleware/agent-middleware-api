@@ -16,6 +16,19 @@ pip install -r requirements.txt
 pytest -q
 ```
 
+### Dependencies
+
+`requirements.txt` is the **single source of truth** for dependencies. CI,
+Docker, and `make test` (`uv run --with-requirements requirements.txt`) all
+install from it, and Dependabot updates it.
+
+`uv.lock` is gitignored — `uv run` may regenerate it locally, but it must
+never be committed, and there is no `pyproject` `[project.dependencies]`.
+Keeping a committed lock alongside `requirements.txt` let the two drift, which
+once left a patched CVE unfixed (the lock pinned the vulnerable version while
+`requirements.txt` already required the fix). Don't reintroduce a committed
+lock without wiring the build/CI to consume it.
+
 ## Branching
 
 - Default branch: `master`

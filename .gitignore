@@ -13,6 +13,10 @@ venv/
 .venv/
 env/
 
+# uv — requirements.txt is the single source of truth (see CONTRIBUTING).
+# uv may regenerate uv.lock locally, but it must not be committed or it drifts.
+uv.lock
+
 # IDE
 .idea/
 .vscode/
