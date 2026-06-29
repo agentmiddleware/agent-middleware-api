@@ -72,13 +72,21 @@ def _individual_constraint_rejections(
         if action.get("credit_cost", 0.0) > state.remaining_budget:
             rejected.append({"id": action.get("id"), "reason": "budget_exceeded"})
         elif action.get("latency_ms", 0.0) > latency_budget:
-            rejected.append({"id": action.get("id"), "reason": "latency_budget_exceeded"})
+            rejected.append(
+                {"id": action.get("id"), "reason": "latency_budget_exceeded"}
+            )
         elif action.get("risk_score", 0.0) > risk_budget:
             rejected.append({"id": action.get("id"), "reason": "risk_budget_exceeded"})
     return rejected
 
 
-def _greedy_heuristic(candidates: list[dict], state: OptimizerState, risk_budget: float, max_actions: int, lambdas: dict[str, float]) -> list[dict]:
+def _greedy_heuristic(
+    candidates: list[dict],
+    state: OptimizerState,
+    risk_budget: float,
+    max_actions: int,
+    lambdas: dict[str, float],
+) -> list[dict]:
     scored = sorted(candidates, key=lambda a: _score(a, lambdas), reverse=True)
     selected: list[dict] = []
     total_cost = 0.0
@@ -103,7 +111,9 @@ def _greedy_heuristic(candidates: list[dict], state: OptimizerState, risk_budget
     return selected
 
 
-def optimize_action_set(state: OptimizerState, candidates: list[dict], req: OptimizerRequest) -> dict:
+def optimize_action_set(
+    state: OptimizerState, candidates: list[dict], req: OptimizerRequest
+) -> dict:
     lambdas = {"cost": 0.8, "latency": 0.3, "risk": 2.0}
     if req.objective_overrides:
         for k in lambdas:
@@ -122,32 +132,95 @@ def optimize_action_set(state: OptimizerState, candidates: list[dict], req: Opti
             rejected.append({"id": action.get("id"), "reason": reason})
 
     if not admissible:
-        return _pack_response("Infeasible", [], rejected, state, risk_budget, lambdas, _policy_reasons(rejected))
+        return _pack_response(
+            "Infeasible",
+            [],
+            rejected,
+            state,
+            risk_budget,
+            lambdas,
+            _policy_reasons(rejected),
+        )
 
     max_actions = 5 if req.max_actions is None else req.max_actions
 
     if pulp is not None:
         try:
             prob = pulp.LpProblem("AgentPlanner", pulp.LpMaximize)
-            x = {i: pulp.LpVariable(f"x_{i}", cat="Binary") for i in range(len(admissible))}
-            prob += pulp.lpSum(x[i] * _score(action, lambdas) for i, action in enumerate(admissible))
-            prob += pulp.lpSum(x[i] * action.get("credit_cost", 0.0) for i, action in enumerate(admissible)) <= state.remaining_budget
-            prob += pulp.lpSum(x[i] * action.get("latency_ms", 0.0) for i, action in enumerate(admissible)) <= state.slo_window_seconds * 1000
-            prob += pulp.lpSum(x[i] * action.get("risk_score", 0.0) for i, action in enumerate(admissible)) <= risk_budget
+            x = {
+                i: pulp.LpVariable(f"x_{i}", cat="Binary")
+                for i in range(len(admissible))
+            }
+            prob += pulp.lpSum(
+                x[i] * _score(action, lambdas) for i, action in enumerate(admissible)
+            )
+            prob += (
+                pulp.lpSum(
+                    x[i] * action.get("credit_cost", 0.0)
+                    for i, action in enumerate(admissible)
+                )
+                <= state.remaining_budget
+            )
+            prob += (
+                pulp.lpSum(
+                    x[i] * action.get("latency_ms", 0.0)
+                    for i, action in enumerate(admissible)
+                )
+                <= state.slo_window_seconds * 1000
+            )
+            prob += (
+                pulp.lpSum(
+                    x[i] * action.get("risk_score", 0.0)
+                    for i, action in enumerate(admissible)
+                )
+                <= risk_budget
+            )
             prob += pulp.lpSum(x[i] for i in range(len(admissible))) <= max_actions
             status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
             if pulp.LpStatus[status] == "Optimal":
-                selected = [admissible[i] for i in range(len(admissible)) if x[i].value() and x[i].value() > 0.5]
-                constraint_rejected = _individual_constraint_rejections(admissible, selected, state, risk_budget)
+                selected = [
+                    admissible[i]
+                    for i in range(len(admissible))
+                    if x[i].value() and x[i].value() > 0.5
+                ]
+                constraint_rejected = _individual_constraint_rejections(
+                    admissible, selected, state, risk_budget
+                )
                 all_rejected = rejected + constraint_rejected
                 if selected:
-                    return _pack_response("Optimal", selected, all_rejected, state, risk_budget, lambdas, _policy_reasons(all_rejected))
-                return _pack_response("Infeasible", [], all_rejected, state, risk_budget, lambdas, _policy_reasons(all_rejected))
+                    return _pack_response(
+                        "Optimal",
+                        selected,
+                        all_rejected,
+                        state,
+                        risk_budget,
+                        lambdas,
+                        _policy_reasons(all_rejected),
+                    )
+                return _pack_response(
+                    "Infeasible",
+                    [],
+                    all_rejected,
+                    state,
+                    risk_budget,
+                    lambdas,
+                    _policy_reasons(all_rejected),
+                )
         except Exception:
             pass
 
     selected = _greedy_heuristic(admissible, state, risk_budget, max_actions, lambdas)
-    constraint_rejected = _individual_constraint_rejections(admissible, selected, state, risk_budget)
+    constraint_rejected = _individual_constraint_rejections(
+        admissible, selected, state, risk_budget
+    )
     all_rejected = rejected + constraint_rejected
     status = "HeuristicFallback" if selected else "Infeasible"
-    return _pack_response(status, selected, all_rejected, state, risk_budget, lambdas, _policy_reasons(all_rejected))
+    return _pack_response(
+        status,
+        selected,
+        all_rejected,
+        state,
+        risk_budget,
+        lambdas,
+        _policy_reasons(all_rejected),
+    )

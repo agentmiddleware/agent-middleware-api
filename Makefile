@@ -2,14 +2,18 @@
 
 # Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
 # are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.
+# `--with-requirements` makes these self-contained: uv installs the runtime +
+# test deps for the run, so `make test` works on a fresh checkout without a
+# separate `pip install -r requirements.txt` (deps live in requirements.txt,
+# not pyproject [project.dependencies]).
 test:
-	uv run pytest tests/ -q -m "not proof"
+	uv run --with-requirements requirements.txt pytest tests/ -q -m "not proof"
 
 test-all:
-	uv run pytest tests/ -q
+	uv run --with-requirements requirements.txt pytest tests/ -q
 
 test-proof:
-	uv run pytest tests/ -q -m proof
+	uv run --with-requirements requirements.txt pytest tests/ -q -m proof
 
 prove-trust-plane:
 	uv run python scripts/demo_trust_plane.py --assert
