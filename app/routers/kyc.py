@@ -5,7 +5,7 @@ Handles identity verification for sponsor wallets.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..services.kyc_service import (
     get_kyc_service,
     KYCNotRequiredError,
@@ -45,7 +45,7 @@ router = APIRouter(
 )
 async def create_kyc_session(
     request: CreateKYCSessionRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Create a Stripe Identity verification session.
@@ -57,6 +57,7 @@ async def create_kyc_session(
     4. After completion, Stripe redirects to return_url
     5. Stripe sends webhook with verification result
     """
+    auth.require_wallet_access(request.wallet_id)
     kyc_service = get_kyc_service()
 
     try:
@@ -96,7 +97,7 @@ async def create_kyc_session(
 )
 async def get_kyc_status(
     wallet_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Get the current KYC verification status for a wallet.
@@ -106,6 +107,7 @@ async def get_kyc_status(
     - requires_verification: Whether KYC is needed for top-ups
     - message: Human-readable status message
     """
+    auth.require_wallet_access(wallet_id)
     kyc_service = get_kyc_service()
 
     try:
@@ -132,7 +134,7 @@ async def get_kyc_status(
 )
 async def get_verification_details(
     verification_id: str,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Get detailed information about a verification session."""
     kyc_service = get_kyc_service()
@@ -147,6 +149,8 @@ async def get_verification_details(
                 "message": f"Verification {verification_id} not found",
             },
         )
+
+    auth.require_wallet_access(result["wallet_id"])
 
     return KYCVerificationDetails(
         verification_id=result["verification_id"],

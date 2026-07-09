@@ -17,7 +17,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-RUN chmod +x scripts/docker_entrypoint.sh
+RUN chmod +x scripts/docker_entrypoint.sh \
+    && groupadd --system app \
+    && useradd --system --gid app --no-create-home --home-dir /app app \
+    && chown -R app:app /app
+
+USER app
 
 # Expose port
 EXPOSE 8000

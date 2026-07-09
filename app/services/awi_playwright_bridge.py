@@ -24,14 +24,16 @@ Architecture:
 import asyncio
 import hashlib
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from uuid import uuid4
 
 from app.core.time import utc_now
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page, BrowserContext
 
 logger = logging.getLogger(__name__)
 
@@ -549,6 +551,7 @@ class AWIPlaywrightBridge:
             Dict with commands and element counts.
         """
         commands = await self.translate_action(session_id, action, parameters)
+        session = self._sessions.get(session_id)
 
         elements_found = {}
         for semantic_type in self.SEMANTIC_PATTERNS.keys():
@@ -1268,12 +1271,6 @@ class AWIPlaywrightBridge:
                     except Exception:
                         pass
 
-                is_visible = (
-                    bounding_box
-                    and bounding_box["width"] > 0
-                    and bounding_box["height"] > 0
-                )
-
                 css_selector = await el.evaluate("""
                     el => {
                         if (el.id) return '#' + el.id;
@@ -1328,7 +1325,6 @@ class AWIPlaywrightBridge:
     def _infer_field_type(self, field_name: str, value: Any) -> str:
         """Infer semantic field type from field name."""
         name_lower = field_name.lower()
-        value_str = str(value).lower()
 
         if "email" in name_lower or "@" in str(value):
             return "email_input"

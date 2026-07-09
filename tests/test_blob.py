@@ -6,14 +6,11 @@ S3 and Vercel backends raise NotImplementedError until #39 wires them
 up — tests pin that contract so the stubs don't silently succeed.
 """
 
-import os
 from pathlib import Path
 
 import pytest
 
-from app.core import blob as blob_module
 from app.core.blob import (
-    BlobBackend,
     LocalFilesystemBlob,
     _UnimplementedBlob,
     blob_backend_name,

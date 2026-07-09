@@ -5,7 +5,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import func, or_, select
 

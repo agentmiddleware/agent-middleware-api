@@ -9,7 +9,6 @@ surface that consumers read the state from.
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from app.core import runtime_mode
 from app.core.config import get_settings
 from app.core.runtime_mode import (
     SERVICE_NAMES,

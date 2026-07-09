@@ -4,7 +4,6 @@ Sets up pytest-asyncio, database, and common fixtures.
 """
 
 import os
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -102,7 +101,7 @@ def anyio_backend():
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_database():
     """Set up database tables before any tests run."""
-    from app.db.database import init_db, close_db, get_engine
+    from app.db.database import init_db, close_db
 
     # Close any existing connection
     await close_db()

@@ -12,7 +12,7 @@ Architecture:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 from uuid import uuid4
 

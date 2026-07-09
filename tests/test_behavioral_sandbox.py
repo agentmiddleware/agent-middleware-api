@@ -5,7 +5,6 @@ Tests for the Behavioral Sandbox Engine — Phase 6
 import asyncio
 import os
 import pytest
-from datetime import datetime, timezone
 
 from httpx import ASGITransport, AsyncClient
 

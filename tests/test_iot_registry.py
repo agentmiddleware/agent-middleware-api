@@ -7,7 +7,6 @@ registry directly: state persistence, audit event shape, list
 pagination, cache hit/miss behavior with a fake Redis.
 """
 
-from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio

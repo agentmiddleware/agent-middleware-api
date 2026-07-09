@@ -23,9 +23,6 @@ from ..services.telemetry_scope import TelemetryScope
 from ..services.genesis import GenesisAgent
 from ..services.dashboard import DashboardEngine
 from ..services.oracle_broadcast import OracleBroadcastEngine
-from ..services.webauthn_provider import WebAuthnProvider, get_webauthn_provider
-from ..services.awi_playwright_bridge import AWIPlaywrightBridge, get_playwright_bridge
-from ..services.awi_rag_engine import AWIRAGEngine, get_awi_rag_engine
 
 settings = get_settings()
 
@@ -147,41 +144,3 @@ def get_dashboard_engine() -> DashboardEngine:
 def get_broadcast_engine() -> OracleBroadcastEngine:
     """Singleton Oracle Broadcast — pushes APIs into agent directories."""
     return OracleBroadcastEngine(oracle_service=get_agent_oracle())
-
-
-@lru_cache()
-def get_webauthn_provider() -> WebAuthnProvider:
-    """Singleton WebAuthn provider for passkey verification."""
-    allowed_origins = [
-        origin.strip()
-        for origin in settings.WEBAUTHN_ALLOWED_ORIGINS.split(",")
-        if origin.strip()
-    ]
-    return WebAuthnProvider(
-        rp_id=settings.WEBAUTHN_RP_ID,
-        rp_name=settings.WEBAUTHN_RP_NAME,
-        timeout_ms=settings.WEBAUTHN_TIMEOUT_MS,
-        challenge_expiry_seconds=settings.WEBAUTHN_CHALLENGE_EXPIRY,
-        verification_validity_seconds=settings.WEBAUTHN_VERIFICATION_VALIDITY,
-        allowed_origins=allowed_origins,
-    )
-
-
-@lru_cache()
-def get_playwright_bridge() -> AWIPlaywrightBridge:
-    """Singleton Playwright bridge for DOM translation."""
-    return AWIPlaywrightBridge(
-        headless=settings.PLAYWRIGHT_HEADLESS,
-        browser_type=settings.PLAYWRIGHT_BROWSER_TYPE,
-        default_timeout_ms=settings.PLAYWRIGHT_TIMEOUT_MS,
-        max_sessions=settings.PLAYWRIGHT_MAX_SESSIONS,
-    )
-
-
-@lru_cache()
-def get_awi_rag_engine() -> AWIRAGEngine:
-    """Singleton RAG engine for AWI session memories."""
-    return AWIRAGEngine(
-        vector_store_path=settings.RAG_VECTOR_STORE_PATH,
-        embedding_model=settings.RAG_EMBEDDING_MODEL,
-    )

@@ -49,10 +49,10 @@ services:
     restart: unless-stopped
 
   # --- Redis (Rate Limiting, Caching, Crawl Queue) ---
+  # No host port published: only the `api` service needs to reach this, over
+  # the internal compose network at redis:6379.
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
@@ -64,14 +64,16 @@ services:
       retries: 3
 
   # --- PostgreSQL (ACID Ledger, Wallet Store, Content Store) ---
+  # No host port published: only the `api` service needs to reach this, over
+  # the internal compose network at postgres:5432.
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: middleware
       POSTGRES_USER: middleware
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
-    ports:
-      - "5432:5432"
+      # Required, no insecure fallback: `docker compose up` fails fast with a
+      # clear error instead of silently starting with a known password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped

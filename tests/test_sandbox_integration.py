@@ -374,6 +374,69 @@ class TestBillingRouterDryRun:
         assert data["success"] is True
 
     @pytest.mark.anyio
+    async def test_commit_reports_failure_when_real_balance_drained_before_commit(
+        self, client
+    ):
+        """If the real wallet balance drops below a charge's cost between
+        simulate and commit (e.g. another real charge lands first), the
+        commit must report that charge as not committed instead of silently
+        counting it as a successful debit."""
+        wallet_resp = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={"sponsor_name": "Drained Commit Test", "email": "drained-commit@test.com", "initial_credits": 10},
+            headers={"X-API-Key": "test-key"},
+        )
+        wallet_id = wallet_resp.json()["wallet_id"]
+
+        create_resp = await client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_id},
+            headers={"X-API-Key": "test-key"},
+        )
+        session_id = create_resp.json()["session_id"]
+
+        # Simulated against a virtual balance of 10 credits: 1 unit of
+        # iot_bridge costs 2 credits, so this is simulated as succeeding.
+        charge_resp = await client.post(
+            "/v1/billing/dry-run/charge",
+            json={
+                "wallet_id": wallet_id,
+                "service": "iot_bridge",
+                "units": 1.0,
+                "dry_run_session_id": session_id,
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+        assert charge_resp.status_code == 200
+        assert charge_resp.json()["would_succeed"] is True
+
+        # Drain the real wallet down to 1 credit with an unrelated real
+        # charge before the dry-run session is committed.
+        drain_resp = await client.post(
+            f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=4.5",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert drain_resp.status_code == 200
+        assert drain_resp.json()["balance_after"] == 1.0
+
+        commit_resp = await client.post(
+            f"/v1/billing/dry-run/session/{session_id}/commit",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert commit_resp.status_code == 200
+        data = commit_resp.json()
+        assert data["committed_charges"] == 0
+        assert data["total_credits_deducted"] == 0.0
+        assert data["success"] is False
+        assert data["ledger_entries"][0]["committed"] is False
+        assert data["ledger_entries"][0]["error"] == "insufficient_funds"
+
+        wallet_resp = await client.get(
+            f"/v1/billing/wallets/{wallet_id}", headers={"X-API-Key": "test-key"}
+        )
+        assert wallet_resp.json()["balance"] == 1.0
+
+    @pytest.mark.anyio
     async def test_revert_dry_run_session(self, client):
         """POST /v1/billing/dry-run/session/{id}/revert discards charges."""
         wallet_resp = await client.post(

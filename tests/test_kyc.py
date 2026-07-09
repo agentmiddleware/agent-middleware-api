@@ -4,11 +4,9 @@ Validates the KYC verification flow for sponsor wallets.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 from httpx import AsyncClient, ASGITransport
 from app.main import app
-from app.db.models import WalletModel, KYCVerificationModel
-from app.db.database import get_session_factory
 
 
 @pytest.fixture
@@ -226,6 +224,123 @@ async def test_kyc_status_includes_all_fields(client, api_headers, sponsor_walle
     ]
     for field in required_fields:
         assert field in data, f"Missing field: {field}"
+
+
+@pytest.mark.anyio
+async def test_db_key_cannot_read_other_wallet_kyc_status(client, api_headers):
+    """A DB-backed key scoped to wallet A must not read wallet B's KYC status."""
+    wallet_a_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "KYC Tenant A", "email": "kyc-a@test.com", "initial_credits": 1000},
+        headers=api_headers,
+    )
+    wallet_b_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "KYC Tenant B", "email": "kyc-b@test.com", "initial_credits": 1000},
+        headers=api_headers,
+    )
+    wallet_a = wallet_a_resp.json()["wallet_id"]
+    wallet_b = wallet_b_resp.json()["wallet_id"]
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_a},
+        headers=api_headers,
+    )
+    db_headers = {"X-API-Key": key_resp.json()["api_key"]}
+
+    resp = await client.get(f"/v1/kyc/status/{wallet_b}", headers=db_headers)
+    assert resp.status_code == 403
+
+    own_resp = await client.get(f"/v1/kyc/status/{wallet_a}", headers=db_headers)
+    assert own_resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_db_key_cannot_create_kyc_session_for_other_wallet(client, api_headers):
+    """A DB-backed key scoped to wallet A must not start a KYC session for wallet B."""
+    wallet_a_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "KYC Session A", "email": "kyc-session-a@test.com", "initial_credits": 1000},
+        headers=api_headers,
+    )
+    wallet_b_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "KYC Session B",
+            "email": "kyc-session-b@test.com",
+            "initial_credits": 1000,
+            "require_kyc": True,
+        },
+        headers=api_headers,
+    )
+    wallet_a = wallet_a_resp.json()["wallet_id"]
+    wallet_b = wallet_b_resp.json()["wallet_id"]
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_a},
+        headers=api_headers,
+    )
+    db_headers = {"X-API-Key": key_resp.json()["api_key"]}
+
+    resp = await client.post(
+        "/v1/kyc/sessions",
+        json={"wallet_id": wallet_b, "return_url": "https://example.com/callback"},
+        headers=db_headers,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+@patch("app.services.kyc_service.stripe.identity.VerificationSession.create")
+async def test_db_key_cannot_read_other_wallet_verification_details(
+    mock_stripe_create, client, api_headers
+):
+    """A DB-backed key scoped to wallet A must not read wallet B's verification details."""
+    wallet_a_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "KYC Verify A", "email": "kyc-verify-a@test.com", "initial_credits": 1000},
+        headers=api_headers,
+    )
+    wallet_b_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "KYC Verify B",
+            "email": "kyc-verify-b@test.com",
+            "initial_credits": 1000,
+            "require_kyc": True,
+        },
+        headers=api_headers,
+    )
+    wallet_a = wallet_a_resp.json()["wallet_id"]
+    wallet_b = wallet_b_resp.json()["wallet_id"]
+
+    mock_session = MagicMock()
+    mock_session.id = "vs_test_other_wallet"
+    mock_session.url = "https://verify.stripe.com/test_session"
+    mock_stripe_create.return_value = mock_session
+
+    session_resp = await client.post(
+        "/v1/kyc/sessions",
+        json={"wallet_id": wallet_b, "return_url": "https://example.com/callback"},
+        headers=api_headers,
+    )
+    assert session_resp.status_code == 201
+    verification_id = session_resp.json()["verification_id"]
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_a},
+        headers=api_headers,
+    )
+    db_headers = {"X-API-Key": key_resp.json()["api_key"]}
+
+    resp = await client.get(
+        f"/v1/kyc/verifications/{verification_id}",
+        headers=db_headers,
+    )
+    assert resp.status_code == 403
 
 
 @pytest.mark.anyio

@@ -39,11 +39,18 @@ permits -> governed invocation -> idempotency -> wallet ledger (metering) -> rec
 `receipts`, `audit_chain`, `idempotency`, `policy`, `metering`, `evidence`, and
 the protocol-neutral `adapters` (`GovernedInvocationAdapter`). The core trust
 routers consume the spine through this facade, and an architectural test
-(`tests/test_trust_boundary.py`) enforces that the core depends only inward —
-never on routers or example workloads. MCP is the first adapter
-(`McpGovernedAdapter`) and the live `/mcp` request path runs through it; other
-protocols (AWI, browser, WebMCP) can be added by implementing the same
-interface.
+(`tests/test_trust_boundary.py`) enforces that the core depends only inward at
+module scope — never on routers or example workloads. The one documented
+exception is `McpGovernedAdapter`, which lazily imports
+`app.routers.mcp._execute_registered_tool` at call time: the governed-invocation
+orchestration (permit check, policy, idempotency, charge, execute, receipt,
+audit) is implemented once in that router function, and the adapter delegates
+to it rather than duplicating it, so there is exactly one source of truth for
+governance. MCP is the first adapter (`McpGovernedAdapter`) and the live
+`/mcp` request path runs through it; other protocols (AWI, browser, WebMCP)
+can be added by implementing the same interface — either by moving their
+shared orchestration into `app/trust/` outright, or by delegating the same
+way `McpGovernedAdapter` does today.
 
 **Product:** Agent Middleware API is narrowing around an MCP governance and metering layer for agent tool calls. The current spine is wallet-scoped auth, billing, MCP invocation, signed permits, signed receipts, replay protection, and audit.
 

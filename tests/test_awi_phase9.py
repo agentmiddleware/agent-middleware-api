@@ -9,10 +9,10 @@ Tests for:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from app.core.time import utc_now
-from app.services.webauthn_provider import WebAuthnProvider, ChallengeStatus
+from app.services.webauthn_provider import WebAuthnProvider
 from app.services.awi_playwright_bridge import (
     AWIPlaywrightBridge,
     BrowserSessionLimitExceeded,
@@ -517,7 +517,7 @@ class TestAWIPlaywrightBridge:
         """Test extracting state representation (skipped if Playwright not installed)."""
         # Check if Playwright is available
         try:
-            from playwright.async_api import async_playwright
+            from playwright.async_api import async_playwright  # noqa: F401
         except ImportError:
             pytest.skip("Playwright not installed")
 

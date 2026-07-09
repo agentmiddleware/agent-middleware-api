@@ -22,16 +22,17 @@ class TestAWIManifestGenerator:
         assert gen.actions == []
 
     def test_generate_empty_manifest(self):
-        """Test generating empty manifest."""
+        """Test generating a manifest from a FastAPI app with no routes."""
+        from fastapi import FastAPI
+
         gen = ManifestGenerator()
-        manifest = {
-            "name": "Test API",
-            "version": "1.0.0",
-            "awi_version": "1.0.0",
-            "framework": "fastapi",
-            "actions": [],
-        }
+        empty_app = FastAPI(title="Test API", version="1.0.0")
+        manifest = gen.scan_fastapi_app(empty_app)
+
+        assert manifest["name"] == "Test API"
         assert manifest["awi_version"] == "1.0.0"
+        assert manifest["framework"] == "fastapi"
+        assert manifest["actions"] == []
 
     def test_generate_from_openapi(self):
         """Test generating manifest from OpenAPI spec."""

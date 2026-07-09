@@ -22,8 +22,6 @@ Features:
 - Context augmentation for current sessions
 """
 
-import asyncio
-import hashlib
 import logging
 import math
 import os
@@ -738,13 +736,13 @@ class AWIRAGEngine:
         if "checkout" in actions_set and "add_to_cart" in actions_set:
             return f"Complete purchase of {', '.join(entities[:3])}"
         elif "login" in actions_set or "logout" in actions_set:
-            return f"Account authentication task"
+            return "Account authentication task"
         elif "fill_form" in actions_set:
             return f"Submit form with {len(entities)} items of data"
         elif "search_and_sort" in actions_set:
             return f"Research and compare {', '.join(entities[:2]) if entities else 'products'}"
         elif "navigate_to" in actions_set:
-            return f"Browse and explore content"
+            return "Browse and explore content"
 
         return f"{session_type.replace('_', ' ').title()} task"
 

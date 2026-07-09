@@ -6,12 +6,11 @@ Validates velocity tracking, anomaly detection, and auto-freeze.
 import pytest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 from app.services.velocity_monitor import (
     VelocityMonitor,
     VelocityCheckResult,
-    WalletFrozenError,
 )
 
 

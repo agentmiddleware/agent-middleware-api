@@ -11,8 +11,6 @@ Based on arXiv:2506.10953v1 gap analysis.
 """
 
 import logging
-from datetime import datetime
-from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,11 +22,9 @@ from ..schemas.awi_enhanced import (
     DOMBridgeSessionRequest,
     DOMBridgeSessionResponse,
     DOMRepresentationType,
-    DOMStateRequest,
     DOMStateResponse,
     DOMSyncRequest,
     DOMSyncResponse,
-    MemoryDeleteRequest,
     MemoryIndexRequest,
     MemoryIndexResponse,
     PasskeyChallengeRequest,
@@ -38,7 +34,6 @@ from ..schemas.awi_enhanced import (
     PasskeyVerifyResponse,
     RAGQueryRequest,
     RAGQueryResponse,
-    SessionContextRequest,
     SessionContextResponse,
 )
 from ..services.awi_playwright_bridge import BrowserSessionLimitExceeded

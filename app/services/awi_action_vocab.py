@@ -10,7 +10,6 @@ Provides a unified vocabulary of web actions that abstract away DOM manipulation
 """
 
 import re
-import uuid
 from typing import Any
 
 from ..schemas.awi import (

@@ -10,7 +10,8 @@ This is how the API generates revenue autonomously.
 
 from decimal import Decimal
 from typing import ClassVar
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
@@ -24,6 +25,11 @@ from ..services.agent_money import (
     KYCVerificationRequiredError,
 )
 from ..services.governance import record_governed_action
+from ..services.idempotency import (
+    IdempotencyConflictError,
+    IdempotencyInProgressError,
+    get_idempotency_service,
+)
 from ..services.policies import evaluate_wallet_policy
 from ..services.velocity_monitor import WalletFrozenError
 from ..services.stripe_integration import get_stripe_integration
@@ -442,6 +448,7 @@ async def charge_wallet(
     units: float = Query(1.0, gt=0, description="Number of units consumed"),
     request_path: str | None = None,
     description: str | None = None,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
@@ -456,6 +463,53 @@ async def charge_wallet(
             },
         )
     request_id = request.headers.get("X-Request-ID")
+    endpoint = "/v1/billing/charge"
+
+    # Idempotency is opt-in via the Idempotency-Key header: a client that
+    # retries a charge (e.g. after a timeout) with the same key gets the
+    # original outcome replayed instead of being billed twice.
+    idem = get_idempotency_service() if idempotency_key else None
+    if idem:
+        try:
+            replay = await idem.begin(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key,
+                request_payload={
+                    "wallet_id": wallet_id,
+                    "service_category": category.value,
+                    "units": units,
+                    "request_path": request_path,
+                    "description": description,
+                },
+            )
+        except IdempotencyConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "idempotency_key_reused", "message": str(exc)},
+            ) from exc
+        except IdempotencyInProgressError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "idempotency_in_progress", "message": str(exc)},
+            ) from exc
+        if replay is not None:
+            return JSONResponse(
+                status_code=replay.status_code, content=replay.response_json
+            )
+
+    async def _complete_idempotency(response_json: dict, status_code: int) -> None:
+        if not idem:
+            return
+        await idem.complete(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            response_reference=response_json.get("entry_id"),
+            response_json=response_json,
+            status_code=status_code,
+        )
+
     (
         policy_estimated_cost,
         policy_id,
@@ -465,7 +519,7 @@ async def charge_wallet(
         wallet_id=wallet_id,
         category=category,
         units=units,
-        endpoint="/v1/billing/charge",
+        endpoint=endpoint,
         request_id=request_id,
         money=money,
     )
@@ -484,7 +538,7 @@ async def charge_wallet(
                 auth=auth,
                 wallet_id=wallet_id,
                 service_category=category.value,
-                endpoint="/v1/billing/charge",
+                endpoint=endpoint,
                 request_id=request_id,
                 estimated_cost=float(result.required_amount),
                 ok=False,
@@ -495,6 +549,7 @@ async def charge_wallet(
                     "shortfall": float(result.shortfall),
                 },
             )
+            await _complete_idempotency(result.model_dump(mode="json"), 402)
             raise HTTPException(status_code=402, detail=result.model_dump())
 
         await _record_billing_governance(
@@ -502,7 +557,7 @@ async def charge_wallet(
             auth=auth,
             wallet_id=wallet_id,
             service_category=category.value,
-            endpoint="/v1/billing/charge",
+            endpoint=endpoint,
             request_id=request_id,
             estimated_cost=policy_estimated_cost,
             committed_cost=abs(float(result.amount)),
@@ -517,6 +572,7 @@ async def charge_wallet(
                 "evaluated_constraints": evaluated_constraints,
             },
         )
+        await _complete_idempotency(result.model_dump(mode="json"), 200)
         return result
     except WalletFrozenError as e:
         if category:
@@ -525,23 +581,25 @@ async def charge_wallet(
                 auth=auth,
                 wallet_id=wallet_id,
                 service_category=category.value,
-                endpoint="/v1/billing/charge",
+                endpoint=endpoint,
                 request_id=request_id,
                 ok=False,
                 error="wallet_frozen",
                 metadata={"reason": e.reason, "units": units},
             )
+        frozen_detail = {
+            "error": "wallet_frozen",
+            "wallet_id": e.wallet_id,
+            "reason": e.reason,
+            "message": (
+                "Wallet has been frozen due to anomalous spend velocity. "
+                "Contact sponsor."
+            ),
+        }
+        await _complete_idempotency(frozen_detail, status.HTTP_403_FORBIDDEN)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "wallet_frozen",
-                "wallet_id": e.wallet_id,
-                "reason": e.reason,
-                "message": (
-                    "Wallet has been frozen due to anomalous spend velocity. "
-                    "Contact sponsor."
-                ),
-            },
+            detail=frozen_detail,
         )
 
 

@@ -22,7 +22,6 @@ Architecture:
 """
 
 import base64
-import hashlib
 import logging
 import os
 import secrets
@@ -658,8 +657,9 @@ class WebAuthnProvider:
         )
 
         try:
-            # Parse the credential ID as bytes
-            parsed_credential_id = parse_credential_id(credential_id)
+            # Validate the credential ID is well-formed base64 before verifying;
+            # verify_authentication_response takes the raw dict, not this value.
+            parse_credential_id(credential_id)
 
             # Verify using py_webauthn
             result = verify_authentication_response(

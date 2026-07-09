@@ -5,7 +5,7 @@ Conversion utilities between SQLModel database rows and Pydantic API schemas.
 import json
 from typing import Any
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from ..schemas.billing import (
     WalletResponse,
@@ -50,11 +50,8 @@ from .models import (
     WalletModel,
     LedgerEntryModel,
     BillingAlertModel,
-    ContentCampaignModel,
     ContentPieceModel,
-    ContentPipelineModel,
     ContentScheduleModel,
-    OracleCrawlTargetModel,
     OracleIndexedAPIModel,
     OracleRegistrationModel,
     SecurityScanModel,

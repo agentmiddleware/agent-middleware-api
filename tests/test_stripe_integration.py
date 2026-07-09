@@ -3,8 +3,6 @@ Tests for Stripe Integration Service.
 Validates fiat top-up flow, webhook handling, and idempotency.
 """
 
-import json
-import time
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 

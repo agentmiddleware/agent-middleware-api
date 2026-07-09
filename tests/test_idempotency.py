@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
+    IdempotencyReplay,
     get_idempotency_service,
 )
 from app.services.agent_money import get_agent_money
@@ -76,3 +79,41 @@ async def test_idempotency_fails_closed_for_in_progress_record(clean_database):
             request_payload={"amount": 1},
         )
     assert str(exc_info.value) == "idempotency_in_progress"
+
+
+@pytest.mark.anyio
+async def test_concurrent_begin_with_same_key_never_raises_unhandled_error(
+    clean_database,
+):
+    """Two requests racing on the same idempotency key must not surface a raw
+    IntegrityError (500) to either caller — one starts, the other observes
+    either the in-progress state or a completed replay."""
+    service = get_idempotency_service()
+    wallet = await get_agent_money().create_sponsor_wallet(
+        sponsor_name="Concurrent Idempotency Sponsor",
+        email="idem-concurrent@example.com",
+    )
+
+    results = await asyncio.gather(
+        *[
+            service.begin(
+                wallet_id=wallet.wallet_id,
+                endpoint="/v1/test",
+                idempotency_key="race-key",
+                request_payload={"amount": 1},
+            )
+            for _ in range(5)
+        ],
+        return_exceptions=True,
+    )
+
+    for result in results:
+        if isinstance(result, Exception):
+            assert isinstance(
+                result, (IdempotencyInProgressError, IdempotencyConflictError)
+            )
+        else:
+            assert result is None or isinstance(result, IdempotencyReplay)
+
+    started = [r for r in results if r is None]
+    assert len(started) == 1

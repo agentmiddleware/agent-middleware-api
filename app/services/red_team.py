@@ -17,7 +17,6 @@ Production wiring:
 - Custom MQTT/CoAP protocol fuzzers
 """
 
-import asyncio
 import uuid
 import logging
 from collections import defaultdict

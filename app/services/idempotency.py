@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel
@@ -25,6 +26,25 @@ class IdempotencyReplay:
     response_reference: str | None
     response_json: dict[str, Any] | None
     status_code: int
+
+
+def _replay_from_record(
+    existing: IdempotencyRecordModel, request_hash: str
+) -> IdempotencyReplay | None:
+    if existing.request_hash != request_hash:
+        raise IdempotencyConflictError("idempotency_key_reused")
+    if existing.response_json:
+        try:
+            decoded = json.loads(existing.response_json)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, dict):
+            return IdempotencyReplay(
+                response_reference=existing.response_reference,
+                response_json=decoded,
+                status_code=existing.status_code,
+            )
+    raise IdempotencyInProgressError("idempotency_in_progress")
 
 
 class IdempotencyService:
@@ -48,20 +68,7 @@ class IdempotencyService:
             )
             existing = result.scalar_one_or_none()
             if existing:
-                if existing.request_hash != request_hash:
-                    raise IdempotencyConflictError("idempotency_key_reused")
-                if existing.response_json:
-                    try:
-                        decoded = json.loads(existing.response_json)
-                    except json.JSONDecodeError:
-                        decoded = None
-                    if isinstance(decoded, dict):
-                        return IdempotencyReplay(
-                            response_reference=existing.response_reference,
-                            response_json=decoded,
-                            status_code=existing.status_code,
-                        )
-                raise IdempotencyInProgressError("idempotency_in_progress")
+                return _replay_from_record(existing, request_hash)
 
             session.add(
                 IdempotencyRecordModel(
@@ -72,7 +79,25 @@ class IdempotencyService:
                     request_hash=request_hash,
                 )
             )
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                # Lost a race to a concurrent identical request: the other
+                # request's row already landed under the unique constraint.
+                # Treat it the same as finding it on the initial SELECT
+                # instead of surfacing a raw 500 to the caller.
+                await session.rollback()
+                result = await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id == wallet_id,
+                        IdempotencyRecordModel.endpoint == endpoint,
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+                existing = result.scalar_one_or_none()
+                if existing is None:
+                    raise
+                return _replay_from_record(existing, request_hash)
             return None
 
     async def complete(

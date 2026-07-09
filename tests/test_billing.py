@@ -598,6 +598,69 @@ async def test_charge_requires_api_key(client):
 
 
 @pytest.mark.anyio
+async def test_charge_retry_with_same_idempotency_key_does_not_double_charge(
+    client, api_headers, clean_database
+):
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Idempotent Charge", "email": "idem-charge@t.com", "initial_credits": 10000},
+        headers=api_headers,
+    )
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={"sponsor_wallet_id": sponsor_id, "agent_id": "idem-bot", "budget_credits": 5000},
+        headers=api_headers,
+    )
+    agent_wallet_id = agent_resp.json()["wallet_id"]
+
+    headers = {**api_headers, "Idempotency-Key": "retry-key-1"}
+    url = f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=iot_bridge&units=10"
+
+    first = await client.post(url, headers=headers)
+    assert first.status_code == 200
+    first_entry_id = first.json()["entry_id"]
+
+    # Simulate a client retry after e.g. a dropped response, same key + same params.
+    second = await client.post(url, headers=headers)
+    assert second.status_code == 200
+    assert second.json()["entry_id"] == first_entry_id
+
+    ledger_resp = await client.get(f"/v1/billing/ledger/{agent_wallet_id}", headers=api_headers)
+    debit_entries = [e for e in ledger_resp.json()["entries"] if e["action"] == "debit"]
+    assert len(debit_entries) == 1
+
+
+@pytest.mark.anyio
+async def test_charge_reused_idempotency_key_with_different_payload_conflicts(
+    client, api_headers, clean_database
+):
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Idempotent Conflict", "email": "idem-conflict@t.com", "initial_credits": 10000},
+        headers=api_headers,
+    )
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={"sponsor_wallet_id": sponsor_id, "agent_id": "idem-conflict-bot", "budget_credits": 5000},
+        headers=api_headers,
+    )
+    agent_wallet_id = agent_resp.json()["wallet_id"]
+
+    headers = {**api_headers, "Idempotency-Key": "retry-key-2"}
+    await client.post(
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=iot_bridge&units=10",
+        headers=headers,
+    )
+    conflict = await client.post(
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=iot_bridge&units=20",
+        headers=headers,
+    )
+    assert conflict.status_code == 409
+
+
+@pytest.mark.anyio
 async def test_db_key_cannot_operate_on_other_wallet(client, api_headers):
     wallet_a_resp = await client.post(
         "/v1/billing/wallets/sponsor",

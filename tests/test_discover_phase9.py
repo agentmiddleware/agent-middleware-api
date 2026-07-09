@@ -9,8 +9,6 @@ Verifies that all discovery surfaces include Phase 9 features:
 - /llm.txt
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestWellKnownAgentJson:

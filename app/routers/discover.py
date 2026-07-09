@@ -8,7 +8,6 @@ capabilities, tools, pricing, and how to integrate.
 """
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 

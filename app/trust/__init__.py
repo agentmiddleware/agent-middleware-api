@@ -11,8 +11,12 @@ The modules here re-export the canonical implementations that live under
 ``app.services`` / ``app.policy`` so callers can depend on the product core
 through one obvious namespace without coupling to internal module layout.
 
-No behavior lives here that is not also reachable through the underlying
-service modules; this is a facade, not a fork.
+This is a facade, not a fork: it re-exports rather than reimplements. One
+exception is worth naming plainly: ``McpGovernedAdapter`` (in ``.adapters``)
+delegates the governed-invocation orchestration itself to
+``app.routers.mcp._execute_registered_tool`` — that orchestration is not
+duplicated under ``app.services`` today. See ``tests/test_trust_boundary.py``
+and ``adapters.py`` for the documented reasoning.
 """
 
 from __future__ import annotations

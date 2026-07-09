@@ -28,7 +28,7 @@ from decimal import Decimal
 import redis.asyncio as redis
 
 from ..core.config import get_settings
-from ..schemas.billing import ServiceCategory
+from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 
 logger = logging.getLogger(__name__)
 
@@ -534,6 +534,19 @@ class ShadowLedger:
                     description=f"[COMMITTED] {charge.description}",
                     dry_run=False,
                 )
+
+                if isinstance(result, InsufficientFundsResponse):
+                    errors.append(f"{charge.service_category}: insufficient_funds")
+                    ledger_entries.append({
+                        "charge_id": charge.charge_id,
+                        "service_category": charge.service_category,
+                        "units": charge.units,
+                        "credits": float(charge.credits),
+                        "description": charge.description,
+                        "committed": False,
+                        "error": "insufficient_funds",
+                    })
+                    continue
 
                 total_deducted += charge.credits
                 committed_count += 1

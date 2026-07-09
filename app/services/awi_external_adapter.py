@@ -15,7 +15,6 @@ import httpx
 from ..schemas.awi import (
     AWIStandardAction,
 )
-from .awi_session import get_awi_session_manager
 
 logger = logging.getLogger(__name__)
 
