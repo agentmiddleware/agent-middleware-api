@@ -19,8 +19,11 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from typing import Any, cast
 
 from sqlalchemy import select, delete, func
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.durable_state import get_durable_state
 from ..core.runtime_mode import require_simulation
@@ -133,31 +136,43 @@ class EventStore:
 
         stmt = select(TelemetryEventModel)
         if event_type:
-            stmt = stmt.where(TelemetryEventModel.event_type == event_type.value)
+            stmt = stmt.where(
+                cast(ColumnElement[bool], TelemetryEventModel.event_type == event_type.value)
+            )
         if severity:
-            stmt = stmt.where(TelemetryEventModel.severity == severity.value)
+            stmt = stmt.where(
+                cast(ColumnElement[bool], TelemetryEventModel.severity == severity.value)
+            )
         if source:
-            stmt = stmt.where(TelemetryEventModel.source == source)
+            stmt = stmt.where(cast(ColumnElement[bool], TelemetryEventModel.source == source))
         if since:
             # Compare against the client-supplied event_timestamp when
             # present, else fall back to ingested_at so rows without a
             # client ts still match.
             stmt = stmt.where(
-                func.coalesce(
-                    TelemetryEventModel.event_timestamp,
-                    TelemetryEventModel.ingested_at,
+                cast(
+                    ColumnElement[bool],
+                    func.coalesce(
+                        TelemetryEventModel.event_timestamp,
+                        TelemetryEventModel.ingested_at,
+                    )
+                    >= since,
                 )
-                >= since
             )
         if until:
             stmt = stmt.where(
-                func.coalesce(
-                    TelemetryEventModel.event_timestamp,
-                    TelemetryEventModel.ingested_at,
+                cast(
+                    ColumnElement[bool],
+                    func.coalesce(
+                        TelemetryEventModel.event_timestamp,
+                        TelemetryEventModel.ingested_at,
+                    )
+                    <= until,
                 )
-                <= until
             )
-        stmt = stmt.order_by(TelemetryEventModel.ingested_at.desc()).limit(limit)
+        stmt = stmt.order_by(
+            cast(ColumnElement[Any], TelemetryEventModel.ingested_at).desc()
+        ).limit(limit)
 
         async with factory() as session:
             result = await session.execute(stmt)
@@ -181,9 +196,9 @@ class EventStore:
 
             result = await session.execute(
                 select(
-                    TelemetryEventModel.event_type,
-                    TelemetryEventModel.severity,
-                    TelemetryEventModel.source,
+                    cast(ColumnElement[str], TelemetryEventModel.event_type),
+                    cast(ColumnElement[str], TelemetryEventModel.severity),
+                    cast(ColumnElement[str], TelemetryEventModel.source),
                     func.count().label("n"),
                 ).group_by(
                     TelemetryEventModel.event_type,
@@ -212,11 +227,14 @@ class EventStore:
         async with factory() as session:
             result = await session.execute(
                 delete(TelemetryEventModel).where(
-                    TelemetryEventModel.ingested_at < cutoff
+                    cast(ColumnElement[bool], TelemetryEventModel.ingested_at < cutoff)
                 )
             )
             await session.commit()
-            return int(result.rowcount or 0)
+            # `execute()` on a DELETE returns a CursorResult at runtime (rowcount
+            # is always present for DML), but the generic `Result[Any]` return
+            # type doesn't expose it statically.
+            return int(cast(CursorResult, result).rowcount or 0)
 
 
 # ---------------------------------------------------------------------------

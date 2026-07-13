@@ -356,9 +356,24 @@ class PreflightEngine:
         """Validate that agent directory registration URLs look reachable."""
         results = []
 
-        from ..services.launch_sequence import LaunchConfig
-        launch_config = LaunchConfig()
-        directories = launch_config.registration_directories
+        directories = [
+            {
+                "directory_url": "https://agentindex.dev/register",
+                "directory_type": "agent_registry",
+            },
+            {
+                "directory_url": "https://agentprotocol.ai/registry",
+                "directory_type": "well_known",
+            },
+            {
+                "directory_url": "https://mcphub.io/servers",
+                "directory_type": "mcp_server",
+            },
+            {
+                "directory_url": "https://pluginstore.ai/register",
+                "directory_type": "plugin_store",
+            },
+        ]
 
         reachable = 0
         for dir_entry in directories:
@@ -409,9 +424,9 @@ class PreflightEngine:
         """Validate that campaign source URLs are not placeholder values."""
         results = []
 
-        from ..services.launch_sequence import LaunchConfig
-        launch_config = LaunchConfig()
-        source_url = launch_config.campaign_source_url
+        source_url = config.get(
+            "campaign_source_url", "https://yourdomain.com/content/b2a-launch-video"
+        )
 
         if _is_placeholder_domain(source_url):
             results.append(CheckResult(
@@ -430,7 +445,14 @@ class PreflightEngine:
             ))
 
         # Check crawl targets
-        crawl_targets = launch_config.crawl_targets
+        crawl_targets = [
+            "https://api.openai.com",
+            "https://api.anthropic.com",
+            "https://api.stripe.com",
+            "https://api.twilio.com",
+            "https://api.github.com",
+            "https://api.cloudflare.com",
+        ]
         external_count = sum(1 for t in crawl_targets if not _is_placeholder_domain(t))
         results.append(CheckResult(
             name="crawl_targets_configured",

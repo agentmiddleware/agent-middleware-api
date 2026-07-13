@@ -9,7 +9,7 @@ This is how the API generates revenue autonomously.
 """
 
 from decimal import Decimal
-from typing import ClassVar
+from typing import ClassVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -33,7 +33,7 @@ from ..services.idempotency import (
 from ..services.policies import evaluate_wallet_policy
 from ..services.velocity_monitor import WalletFrozenError
 from ..services.stripe_integration import get_stripe_integration
-from ..services.shadow_ledger import get_shadow_ledger
+from ..services.shadow_ledger import SimulatedChargeResult, get_shadow_ledger
 from ..schemas.billing import (
     CreateSponsorWalletRequest,
     CreateAgentWalletRequest,
@@ -468,13 +468,16 @@ async def charge_wallet(
     # Idempotency is opt-in via the Idempotency-Key header: a client that
     # retries a charge (e.g. after a timeout) with the same key gets the
     # original outcome replayed instead of being billed twice.
-    idem = get_idempotency_service() if idempotency_key else None
-    if idem:
+    idem = None
+    idem_key: str | None = None
+    if idempotency_key:
+        idem = get_idempotency_service()
+        idem_key = idempotency_key
         try:
             replay = await idem.begin(
                 wallet_id=wallet_id,
                 endpoint=endpoint,
-                idempotency_key=idempotency_key,
+                idempotency_key=idem_key,
                 request_payload={
                     "wallet_id": wallet_id,
                     "service_category": category.value,
@@ -499,12 +502,12 @@ async def charge_wallet(
             )
 
     async def _complete_idempotency(response_json: dict, status_code: int) -> None:
-        if not idem:
+        if not idem or not idem_key:
             return
         await idem.complete(
             wallet_id=wallet_id,
             endpoint=endpoint,
-            idempotency_key=idempotency_key,
+            idempotency_key=idem_key,
             response_reference=response_json.get("entry_id"),
             response_json=response_json,
             status_code=status_code,
@@ -531,6 +534,17 @@ async def charge_wallet(
             request_path=request_path,
             description=description or "",
         )
+
+        if isinstance(result, SimulatedChargeResult):
+            # This endpoint never passes dry_run=True, so a SimulatedChargeResult
+            # here would mean money.charge()'s behavior changed underneath us.
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": "unexpected_simulated_result",
+                    "message": "Real charge unexpectedly returned a simulated result.",
+                },
+            )
 
         if isinstance(result, InsufficientFundsResponse):
             await _record_billing_governance(
@@ -880,7 +894,7 @@ async def get_pricing(
     from datetime import datetime, timezone
     return PricingTableResponse(
         pricing=money.get_pricing_table(),
-        exchange_rate=EXCHANGE_RATE,
+        exchange_rate=float(EXCHANGE_RATE),
         last_updated=datetime.now(timezone.utc),
     )
 
@@ -911,6 +925,7 @@ async def get_alerts(
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
+    wallet_filter: str | None
     if wallet_id:
         _require_wallet_access(auth, wallet_id)
         wallet_filter = wallet_id
@@ -1174,6 +1189,16 @@ async def end_dry_run_session(
         )
     _require_wallet_access(auth, session.wallet_id)
     summary = await shadow_ledger.end_session(session_id)
+    if summary is None:
+        # Session existed above but is gone by the time we tried to end it
+        # (e.g. concurrent request already ended/expired it).
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found",
+            },
+        )
 
     return {
         "session_id": summary.session_id,
@@ -1337,9 +1362,15 @@ async def simulate_charge(
             wallet_id=result.wallet_id,
             service_category=result.service_category,
             units=result.units,
-            credits_would_charge=float(result.credits_would_charge),
-            simulated_balance_before=result.simulated_balance_before,
-            simulated_balance_after=result.simulated_balance_after,
+            # Pass the Decimals through as-is (cast(float, ...) is a type-hint
+            # only, zero runtime effect): ExactDecimalFieldsMixin derives the
+            # *_exact string fields from these raw values before pydantic
+            # coerces them to float for display. Pre-converting to float here
+            # would make the "exact" fields derive from an already-rounded
+            # float instead of the real Decimal.
+            credits_would_charge=cast(float, result.credits_would_charge),
+            simulated_balance_before=cast(float, result.simulated_balance_before),
+            simulated_balance_after=cast(float, result.simulated_balance_after),
             would_succeed=result.would_succeed,
             reason=result.reason,
         )
@@ -1355,7 +1386,7 @@ async def simulate_charge(
             },
         )
 
-    result = await money.charge(
+    charge_result = await money.charge(
         wallet_id=request.wallet_id,
         service_category=request.service,
         units=Decimal(str(request.units)),
@@ -1364,57 +1395,35 @@ async def simulate_charge(
         dry_run_session_id=None,
     )
 
-    if hasattr(result, "credits_would_charge"):
-        await _record_billing_governance(
-            event="billing.dry_run",
-            auth=auth,
-            wallet_id=getattr(result, "wallet_id", request.wallet_id),
-            service_category=getattr(result, "service_category", request.service.value),
-            endpoint="/v1/billing/dry-run/charge",
-            estimated_cost=float(
-                getattr(result, "credits_would_charge", Decimal("0"))
-            ),
-            ok=getattr(result, "would_succeed", True),
-            error=None if getattr(result, "would_succeed", True) else getattr(result, "reason", None),
-            metadata={"units": getattr(result, "units", request.units)},
-        )
-        return SimulatedChargeResponse(
-            dry_run=True,
-            session_id=getattr(result, "session_id", ""),
-            wallet_id=getattr(result, "wallet_id", request.wallet_id),
-            service_category=getattr(result, "service_category", request.service.value),
-            units=getattr(result, "units", request.units),
-            credits_would_charge=float(
-                getattr(result, "credits_would_charge", Decimal("0"))
-            ),
-            simulated_balance_before=float(
-                getattr(result, "simulated_balance_before", wallet.balance)
-            ),
-            simulated_balance_after=float(
-                getattr(result, "simulated_balance_after", wallet.balance)
-            ),
-            would_succeed=getattr(result, "would_succeed", True),
-            reason=getattr(result, "reason", None),
-        )
+    # AgentMoney._dry_run_charge (which charge(dry_run=True) always delegates
+    # to) is typed to return SimulatedChargeResult unconditionally -- there is
+    # no code path here that returns anything else, so narrow to that type
+    # directly instead of hasattr/getattr-with-defaults that can never fire.
+    assert isinstance(charge_result, SimulatedChargeResult)
 
     await _record_billing_governance(
         event="billing.dry_run",
         auth=auth,
-        wallet_id=request.wallet_id,
-        service_category=request.service.value,
+        wallet_id=charge_result.wallet_id,
+        service_category=charge_result.service_category,
         endpoint="/v1/billing/dry-run/charge",
-        estimated_cost=float(wallet.balance),
-        ok=True,
-        metadata={"units": request.units},
+        estimated_cost=float(charge_result.credits_would_charge),
+        ok=charge_result.would_succeed,
+        error=None if charge_result.would_succeed else charge_result.reason,
+        metadata={"units": charge_result.units},
     )
     return SimulatedChargeResponse(
         dry_run=True,
-        session_id="",
-        wallet_id=request.wallet_id,
-        service_category=request.service.value,
-        units=request.units,
-        credits_would_charge=float(wallet.balance),
-        simulated_balance_before=float(wallet.balance),
-        simulated_balance_after=float(wallet.balance),
-        would_succeed=True,
+        session_id=charge_result.session_id,
+        wallet_id=charge_result.wallet_id,
+        service_category=charge_result.service_category,
+        units=charge_result.units,
+        # Pass Decimals through as-is (see the session-based branch above
+        # for why): ExactDecimalFieldsMixin needs the raw Decimal, not an
+        # already-rounded float, to populate the *_exact fields.
+        credits_would_charge=cast(float, charge_result.credits_would_charge),
+        simulated_balance_before=cast(float, charge_result.simulated_balance_before),
+        simulated_balance_after=cast(float, charge_result.simulated_balance_after),
+        would_succeed=charge_result.would_succeed,
+        reason=charge_result.reason,
     )

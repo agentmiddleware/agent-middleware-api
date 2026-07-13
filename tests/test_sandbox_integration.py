@@ -299,6 +299,51 @@ class TestBillingRouterDryRun:
         assert data["credits_would_charge"] == 500.0
 
     @pytest.mark.anyio
+    async def test_simulate_charge_exact_field_preserves_decimal_precision(self, client):
+        """credits_would_charge_exact must come from the real Decimal math,
+        not from round-tripping through a float first (which loses precision
+        for values beyond float64's ~15-17 significant digits). This exercises
+        the session-based dry-run path (ShadowLedger.simulate_charge)."""
+        wallet_resp = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={"sponsor_name": "Precision Sponsor", "email": "precision@example.com", "initial_credits": 10000000},
+            headers={"X-API-Key": "test-key"},
+        )
+        wallet_id = wallet_resp.json()["wallet_id"]
+
+        session_resp = await client.post(
+            "/v1/billing/dry-run/session",
+            json={"wallet_id": wallet_id},
+            headers={"X-API-Key": "test-key"},
+        )
+        session_id = session_resp.json()["session_id"]
+
+        # red_team is priced at 100.0 credits/unit; this specific units value
+        # is chosen so units * 100.0 has more significant digits than a
+        # float64 round-trip preserves (verified against the actual formula
+        # shadow_ledger.py uses: Decimal(str(units)) * credits_per_unit).
+        units = 32383.276483316236
+        expected_exact = Decimal(str(units)) * Decimal("100.0")
+        # Sanity check this really is an adversarial value in this test env,
+        # so the test can't silently pass for the wrong reason.
+        assert Decimal(str(float(expected_exact))) != expected_exact
+
+        response = await client.post(
+            "/v1/billing/dry-run/charge",
+            json={
+                "wallet_id": wallet_id,
+                "service": "red_team",
+                "units": units,
+                "dry_run_session_id": session_id,
+            },
+            headers={"X-API-Key": "test-key"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert Decimal(data["credits_would_charge_exact"]) == expected_exact
+
+    @pytest.mark.anyio
     async def test_end_dry_run_session(self, client):
         """DELETE /v1/billing/dry-run/session/{id} ends session."""
         wallet_resp = await client.post(

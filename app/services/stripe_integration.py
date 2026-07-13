@@ -75,7 +75,10 @@ class StripeIntegration:
         """
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                # SQLModel fields are plain Python types (not Mapped[...]), so mypy
+                # sees this comparison as bool rather than a ColumnElement[bool].
+                # Root cause lives in app/db/models.py (out of scope here).
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]
             )
             wallet = result.scalar_one_or_none()
             if not wallet:
@@ -88,7 +91,7 @@ class StripeIntegration:
             currency=currency.lower(),
             metadata={
                 "wallet_id": wallet_id,
-                "credits": credits,
+                "credits": str(credits),
                 "idempotency_key": str(uuid4()),
             },
         )
@@ -234,7 +237,7 @@ class StripeIntegration:
                 async with session.begin():
                     result = await session.execute(
                         select(WalletModel)
-                        .where(WalletModel.wallet_id == wallet_id)
+                        .where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
                         .with_for_update()
                     )
                     wallet = result.scalar_one_or_none()
@@ -285,7 +288,7 @@ class StripeIntegration:
             async with session.begin():
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == wallet_id)
+                    .where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
                     .with_for_update()
                 )
                 wallet = result.scalar_one_or_none()

@@ -222,7 +222,7 @@ class LLMService:
         """
         if not self._circuit_breaker.is_allowed():
             logger.warning(
-                "llm_circuit_breaker_open", state=self._circuit_breaker.state
+                "llm_circuit_breaker_open state=%s", self._circuit_breaker.state
             )
             raise Exception("LLM circuit breaker is open")
 
@@ -244,21 +244,25 @@ class LLMService:
             data = response.json()
 
             self._circuit_breaker.record_success()
-            logger.debug("llm_response_received", model=data.get("model", "unknown"))
+            logger.debug(
+                "llm_response_received model=%s", data.get("model", "unknown")
+            )
 
             return self._parse_response(data, self._get_provider())
 
         except httpx.TimeoutException as e:
             self._circuit_breaker.record_failure()
-            logger.warning("llm_timeout", error=str(e))
+            logger.warning("llm_timeout error=%s", e)
             raise
         except httpx.HTTPStatusError as e:
             self._circuit_breaker.record_failure()
-            logger.error("llm_http_error", status=e.response.status_code, error=str(e))
+            logger.error(
+                "llm_http_error status=%s error=%s", e.response.status_code, e
+            )
             raise
         except Exception as e:
             self._circuit_breaker.record_failure()
-            logger.exception("llm_request_failed", error=str(e))
+            logger.exception("llm_request_failed error=%s", e)
             raise
 
     async def generate(

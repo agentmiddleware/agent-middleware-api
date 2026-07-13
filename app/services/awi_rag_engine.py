@@ -191,8 +191,10 @@ class AWIRAGEngine:
         self._session_index: dict[str, list[str]] = {}
         self._type_index: dict[str, set[str]] = {}
 
-        self._chroma_client = None
-        self._chroma_collection = None
+        # Typed Any: populated lazily from the optional `chromadb` package,
+        # which may not be installed (see init_chroma's ImportError guard).
+        self._chroma_client: Any = None
+        self._chroma_collection: Any = None
         self._use_chroma = False
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -865,7 +867,7 @@ class AWIRAGEngine:
         if not similar_sessions:
             return []
 
-        action_counts = {}
+        action_counts: dict[str, float] = {}
 
         for session in similar_sessions:
             for action in session.action_sequence:

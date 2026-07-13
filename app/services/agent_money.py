@@ -39,9 +39,11 @@ import uuid
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.durable_state import get_durable_state
 from ..core.config import get_settings
@@ -243,8 +245,15 @@ class AgentMoney:
         self._state = get_durable_state()
 
     async def _get_session(self) -> AsyncSession:
-        """Get a database session."""
-        return self._session_factory()
+        """Get a database session.
+
+        Bug fix: this previously returned ``self._session_factory()``, which
+        is the *sessionmaker* itself (an ``async_sessionmaker[AsyncSession]``),
+        not an actual session instance — calling code expecting an
+        ``AsyncSession`` would break. The factory must be invoked twice: once
+        to get the (cached) sessionmaker, once to open a session from it.
+        """
+        return self._session_factory()()
 
     # --- Wallet Management ---
 
@@ -317,7 +326,9 @@ class AgentMoney:
                 # Lock sponsor wallet for update
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == sponsor_wallet_id)
+                    .where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == sponsor_wallet_id)
+                    )
                     .with_for_update()
                 )
                 sponsor = result.scalar_one_or_none()
@@ -402,7 +413,9 @@ class AgentMoney:
                 # Lock parent wallet
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == parent_wallet_id)
+                    .where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == parent_wallet_id)
+                    )
                     .with_for_update()
                 )
                 parent = result.scalar_one_or_none()
@@ -476,7 +489,9 @@ class AgentMoney:
                 # Lock both wallets
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == child_wallet_id)
+                    .where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == child_wallet_id)
+                    )
                     .with_for_update()
                 )
                 child = result.scalar_one_or_none()
@@ -494,7 +509,9 @@ class AgentMoney:
 
                 parent_result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == child.parent_wallet_id)
+                    .where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == child.parent_wallet_id)
+                    )
                     .with_for_update()
                 )
                 parent = parent_result.scalar_one_or_none()
@@ -583,7 +600,16 @@ class AgentMoney:
 
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id.in_(wallet_ids))
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            # SQLModel exposes wallet_id as a plain `str` at
+                            # the class level to mypy, but at runtime it's an
+                            # InstrumentedAttribute with SQL comparator
+                            # methods like `.in_()`.
+                            cast(Any, WalletModel.wallet_id).in_(wallet_ids),
+                        )
+                    )
                     .with_for_update()
                 )
                 wallets = {w.wallet_id: w for w in result.scalars().all()}
@@ -646,7 +672,9 @@ class AgentMoney:
         async with self._session_factory()() as session:
             # Get parent
             parent_result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == parent_wallet_id)
+                select(WalletModel).where(
+                    cast(ColumnElement[bool], WalletModel.wallet_id == parent_wallet_id)
+                )
             )
             parent = parent_result.scalar_one_or_none()
 
@@ -656,7 +684,10 @@ class AgentMoney:
             # Get children
             children_result = await session.execute(
                 select(WalletModel).where(
-                    WalletModel.parent_wallet_id == parent_wallet_id
+                    cast(
+                        ColumnElement[bool],
+                        WalletModel.parent_wallet_id == parent_wallet_id,
+                    )
                 )
             )
             children = list(children_result.scalars().all())
@@ -723,17 +754,28 @@ class AgentMoney:
         if not wallet:
             raise WalletNotFoundError(wallet_id)
 
+        # Bug fix: SimulatedChargeResult declares these fields as Decimal for
+        # monetary precision. `wallet` here is the WalletResponse schema,
+        # whose `balance` is already a display float; use the paired
+        # `balance_exact` decimal string (falling back to the float only if
+        # it's somehow absent) instead of round-tripping through float twice.
+        wallet_balance = (
+            Decimal(wallet.balance_exact)
+            if wallet.balance_exact is not None
+            else Decimal(str(wallet.balance))
+        )
+
         return SimulatedChargeResult(
             session_id=session_id or "",
             wallet_id=wallet_id,
             service_category=service_category.value,
             units=float(units),
             credits_would_charge=charge_amount,
-            simulated_balance_before=float(wallet.balance),
-            simulated_balance_after=float(wallet.balance) - float(charge_amount),
-            would_succeed=wallet.balance >= charge_amount,
+            simulated_balance_before=wallet_balance,
+            simulated_balance_after=wallet_balance - charge_amount,
+            would_succeed=wallet_balance >= charge_amount,
             reason=(
-                None if wallet.balance >= charge_amount
+                None if wallet_balance >= charge_amount
                 else "insufficient_simulated_funds"
             ),
             dry_run=True,
@@ -793,7 +835,7 @@ class AgentMoney:
                 # Lock wallet row
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == wallet_id)
+                    .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
                     .with_for_update()
                 )
                 wallet = result.scalar_one_or_none()
@@ -809,9 +851,12 @@ class AgentMoney:
                         shortfall = charge_amount - remaining
                         return InsufficientFundsResponse(
                             wallet_id=wallet_id,
-                            current_balance=wallet.balance,
-                            required_amount=charge_amount,
-                            shortfall=shortfall,
+                            current_balance=float(wallet.balance),
+                            current_balance_exact=str(wallet.balance),
+                            required_amount=float(charge_amount),
+                            required_amount_exact=str(charge_amount),
+                            shortfall=float(shortfall),
+                            shortfall_exact=str(shortfall),
                             top_up_url=f"/v1/billing/top-up?wallet_id={wallet_id}&amount={charge_amount}",
                             message="Child wallet lifetime spend cap exceeded.",
                         )
@@ -826,20 +871,27 @@ class AgentMoney:
                     shortfall = charge_amount - remaining
                     return InsufficientFundsResponse(
                         wallet_id=wallet_id,
-                        current_balance=wallet.balance,
-                        required_amount=charge_amount,
-                        shortfall=shortfall,
+                        current_balance=float(wallet.balance),
+                        current_balance_exact=str(wallet.balance),
+                        required_amount=float(charge_amount),
+                        required_amount_exact=str(charge_amount),
+                        shortfall=float(shortfall),
+                        shortfall_exact=str(shortfall),
                         top_up_url=f"/v1/billing/top-up?wallet_id={wallet_id}&amount={charge_amount}",
                         message="Daily spending limit exceeded.",
                     )
 
                 # Check balance
                 if wallet.balance < charge_amount:
+                    shortfall = charge_amount - wallet.balance
                     return InsufficientFundsResponse(
                         wallet_id=wallet_id,
-                        current_balance=wallet.balance,
-                        required_amount=charge_amount,
-                        shortfall=charge_amount - wallet.balance,
+                        current_balance=float(wallet.balance),
+                        current_balance_exact=str(wallet.balance),
+                        required_amount=float(charge_amount),
+                        required_amount_exact=str(charge_amount),
+                        shortfall=float(shortfall),
+                        shortfall_exact=str(shortfall),
                         top_up_url=f"/v1/billing/top-up?wallet_id={wallet_id}&amount={charge_amount}",
                     )
 
@@ -898,7 +950,7 @@ class AgentMoney:
                 refund_entry_id = f"refund-{charge_entry_id}"
                 wallet_result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == wallet_id)
+                    .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
                     .with_for_update()
                 )
                 wallet = wallet_result.scalar_one_or_none()
@@ -907,9 +959,9 @@ class AgentMoney:
 
                 charge_result = await session.execute(
                     select(LedgerEntryModel).where(
-                        LedgerEntryModel.entry_id == charge_entry_id,
-                        LedgerEntryModel.wallet_id == wallet_id,
-                        LedgerEntryModel.action == LedgerAction.DEBIT.value,
+                        cast(ColumnElement[bool], LedgerEntryModel.entry_id == charge_entry_id),
+                        cast(ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id),
+                        cast(ColumnElement[bool], LedgerEntryModel.action == LedgerAction.DEBIT.value),
                     )
                 )
                 charge_entry = charge_result.scalar_one_or_none()
@@ -918,9 +970,9 @@ class AgentMoney:
 
                 existing_refund_result = await session.execute(
                     select(LedgerEntryModel).where(
-                        LedgerEntryModel.wallet_id == wallet_id,
-                        LedgerEntryModel.action == LedgerAction.REFUND.value,
-                        LedgerEntryModel.correlation_id == charge_entry_id,
+                        cast(ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id),
+                        cast(ColumnElement[bool], LedgerEntryModel.action == LedgerAction.REFUND.value),
+                        cast(ColumnElement[bool], LedgerEntryModel.correlation_id == charge_entry_id),
                     )
                 )
                 existing_refund = existing_refund_result.scalar_one_or_none()
@@ -929,9 +981,9 @@ class AgentMoney:
 
                 existing_refund_result = await session.execute(
                     select(LedgerEntryModel).where(
-                        LedgerEntryModel.entry_id == refund_entry_id,
-                        LedgerEntryModel.wallet_id == wallet_id,
-                        LedgerEntryModel.action == LedgerAction.REFUND.value,
+                        cast(ColumnElement[bool], LedgerEntryModel.entry_id == refund_entry_id),
+                        cast(ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id),
+                        cast(ColumnElement[bool], LedgerEntryModel.action == LedgerAction.REFUND.value),
                     )
                 )
                 existing_refund = existing_refund_result.scalar_one_or_none()
@@ -996,7 +1048,7 @@ class AgentMoney:
             async with session.begin():
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == wallet_id)
+                    .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
                     .with_for_update()
                 )
                 wallet = result.scalar_one_or_none()
@@ -1042,9 +1094,12 @@ class AgentMoney:
             return TopUpResponse(
                 top_up_id=top_up_id,
                 wallet_id=wallet_id,
-                amount_fiat=amount_fiat,
-                credits_added=credits,
-                exchange_rate=EXCHANGE_RATE,
+                amount_fiat=float(amount_fiat),
+                amount_fiat_exact=str(amount_fiat),
+                credits_added=float(credits),
+                credits_added_exact=str(credits),
+                exchange_rate=float(EXCHANGE_RATE),
+                exchange_rate_exact=str(EXCHANGE_RATE),
                 status=TopUpStatus.COMPLETED,
             )
 
@@ -1055,7 +1110,7 @@ class AgentMoney:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(LedgerEntryModel).where(
-                    LedgerEntryModel.action == LedgerAction.DEBIT.value
+                    cast(ColumnElement[bool], LedgerEntryModel.action == LedgerAction.DEBIT.value)
                 )
             )
             entries = list(result.scalars().all())
@@ -1112,10 +1167,14 @@ class AgentMoney:
 
             return ArbitrageReport(
                 period=f"{yesterday} to {today}",
-                total_revenue=total_revenue,
-                total_compute_cost=total_cost,
-                gross_margin=gross_margin,
-                margin_percentage=margin_pct,
+                total_revenue=float(total_revenue),
+                total_revenue_exact=str(total_revenue),
+                total_compute_cost=float(total_cost),
+                total_compute_cost_exact=str(total_cost),
+                gross_margin=float(gross_margin),
+                gross_margin_exact=str(gross_margin),
+                margin_percentage=float(margin_pct),
+                margin_percentage_exact=str(margin_pct),
                 by_service=by_service,
                 top_profitable_actions=[
                     {
@@ -1138,7 +1197,8 @@ class AgentMoney:
             ServicePricing(
                 service_category=cat,
                 unit=unit,
-                credits_per_unit=price,
+                credits_per_unit=float(price),
+                credits_per_unit_exact=str(price),
                 description=desc,
             )
             for cat, (unit, price, desc) in DEFAULT_PRICING.items()
@@ -1152,13 +1212,13 @@ class AgentMoney:
             if wallet_id:
                 result = await session.execute(
                     select(BillingAlertModel).where(
-                        BillingAlertModel.wallet_id == wallet_id
-                    ).order_by(BillingAlertModel.created_at.desc())
+                        cast(ColumnElement[bool], BillingAlertModel.wallet_id == wallet_id)
+                    ).order_by(cast(ColumnElement[Any], BillingAlertModel.created_at).desc())
                 )
             else:
                 result = await session.execute(
                     select(BillingAlertModel).order_by(
-                        BillingAlertModel.created_at.desc()
+                        cast(ColumnElement[Any], BillingAlertModel.created_at).desc()
                     )
                 )
             alerts = list(result.scalars().all())
@@ -1170,7 +1230,9 @@ class AgentMoney:
         """Get a wallet by ID."""
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                select(WalletModel).where(
+                    cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+                )
             )
             wallet = result.scalar_one_or_none()
             if wallet:
@@ -1187,7 +1249,9 @@ class AgentMoney:
         """
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                select(WalletModel).where(
+                    cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+                )
             )
             wallet = result.scalar_one_or_none()
             if not wallet:
@@ -1212,9 +1276,13 @@ class AgentMoney:
             if wallet_type:
                 enum_val = WalletType(wallet_type).value if wallet_type else None
                 if enum_val:
-                    query = query.where(WalletModel.wallet_type == enum_val)
+                    query = query.where(
+                        cast(ColumnElement[bool], WalletModel.wallet_type == enum_val)
+                    )
             if owner_key:
-                query = query.where(WalletModel.owner_key == owner_key)
+                query = query.where(
+                    cast(ColumnElement[bool], WalletModel.owner_key == owner_key)
+                )
 
             result = await session.execute(query)
             wallets = list(result.scalars().all())
@@ -1225,8 +1293,8 @@ class AgentMoney:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(LedgerEntryModel)
-                .where(LedgerEntryModel.wallet_id == wallet_id)
-                .order_by(LedgerEntryModel.timestamp.desc())
+                .where(cast(ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id))
+                .order_by(cast(ColumnElement[Any], LedgerEntryModel.timestamp).desc())
                 .limit(limit)
             )
             entries = list(result.scalars().all())
@@ -1270,7 +1338,8 @@ class AgentMoney:
             description=description,
             owner_wallet_id="",  # Will be populated when wallet is linked
             category=category,
-            credits_per_unit=credits_per_unit,
+            credits_per_unit=float(credits_per_unit),
+            credits_per_unit_exact=str(credits_per_unit),
             unit_name=unit_name,
             mcp_manifest=mcp_manifest,
             is_active=True,
@@ -1286,9 +1355,20 @@ class AgentMoney:
         async with self._session_factory()() as session:
             query = select(ServiceRegistryModel)
             if category:
-                query = query.where(ServiceRegistryModel.category == category.value)
+                query = query.where(
+                    cast(ColumnElement[bool], ServiceRegistryModel.category == category.value)
+                )
             if active_only:
-                query = query.where(ServiceRegistryModel.is_active.is_(True))
+                query = query.where(
+                    cast(
+                        ColumnElement[bool],
+                        # SQLModel exposes is_active as a plain `bool` at the
+                        # class level to mypy, but at runtime it's an
+                        # InstrumentedAttribute with SQL comparator methods
+                        # like `.is_()`.
+                        cast(Any, ServiceRegistryModel.is_active).is_(True),
+                    )
+                )
 
             result = await session.execute(query)
             services = result.scalars().all()
@@ -1300,7 +1380,8 @@ class AgentMoney:
                     description=s.description,
                     owner_wallet_id=s.owner_wallet_id,
                     category=ServiceCategory(s.category),
-                    credits_per_unit=s.credits_per_unit,
+                    credits_per_unit=float(s.credits_per_unit),
+                    credits_per_unit_exact=str(s.credits_per_unit),
                     unit_name=s.unit_name,
                     mcp_manifest=json.loads(s.mcp_manifest) if s.mcp_manifest else None,
                     is_active=s.is_active,

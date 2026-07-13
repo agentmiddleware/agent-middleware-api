@@ -7,7 +7,6 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import ConfigDict
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field
 
@@ -30,7 +29,7 @@ class WalletModel(SQLModel, table=True):
     email: Optional[str] = Field(default=None, max_length=255)
 
     # Monetary fields - all Decimal for precision
-    balance: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), decimal_places=8)
+    balance: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=8)
     lifetime_credits: Decimal = Field(default=Decimal("0"), decimal_places=8)
     lifetime_debits: Decimal = Field(default=Decimal("0"), decimal_places=8)
 
@@ -75,7 +74,7 @@ class WalletModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class LedgerEntryModel(SQLModel, table=True):
@@ -93,7 +92,7 @@ class LedgerEntryModel(SQLModel, table=True):
     # Transaction details
     action: str = Field(max_length=20)
     amount: Decimal = Field(decimal_places=8)  # Positive = credit, negative = debit
-    balance_after: Decimal = Field(ge=Decimal("0"), decimal_places=8)
+    balance_after: Decimal = Field(ge=0, decimal_places=8)
 
     # Service categorization
     service_category: Optional[str] = Field(default=None, max_length=50, index=True)
@@ -122,7 +121,7 @@ class LedgerEntryModel(SQLModel, table=True):
     # Timestamp
     timestamp: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class BillingAlertModel(SQLModel, table=True):
@@ -142,7 +141,7 @@ class BillingAlertModel(SQLModel, table=True):
     acknowledged: bool = Field(default=False)
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class DailyBalanceSnapshot(SQLModel, table=True):
@@ -161,7 +160,7 @@ class DailyBalanceSnapshot(SQLModel, table=True):
     total_debits: Decimal = Field(default=Decimal("0"), decimal_places=8)
     transaction_count: int = Field(default=0)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ServiceRegistryModel(SQLModel, table=True):
@@ -190,7 +189,7 @@ class ServiceRegistryModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class KYCVerificationModel(SQLModel, table=True):
@@ -224,7 +223,7 @@ class KYCVerificationModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, index=True)
     updated_at: datetime = Field(default_factory=utc_now)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class APIKeyModel(SQLModel, table=True):
@@ -259,7 +258,7 @@ class APIKeyModel(SQLModel, table=True):
 
     metadata_json: Optional[str] = Field(default=None)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class TelemetryEventModel(SQLModel, table=True):
@@ -296,7 +295,7 @@ class TelemetryEventModel(SQLModel, table=True):
     event_timestamp: Optional[datetime] = Field(default=None, index=True)
     ingested_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class IoTDeviceModel(SQLModel, table=True):
@@ -314,7 +313,7 @@ class IoTDeviceModel(SQLModel, table=True):
     last_message_at: Optional[datetime] = Field(default=None)
     message_count: int = Field(default=0)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class IoTDeviceEventModel(SQLModel, table=True):
@@ -329,7 +328,7 @@ class IoTDeviceEventModel(SQLModel, table=True):
     payload_json: Optional[str] = Field(default=None)
     timestamp: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class OracleCrawlTargetModel(SQLModel, table=True):
@@ -346,7 +345,7 @@ class OracleCrawlTargetModel(SQLModel, table=True):
     crawled_at: Optional[datetime] = Field(default=None)
     raw_payload_hash: Optional[str] = Field(default=None, max_length=128)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class OracleIndexedAPIModel(SQLModel, table=True):
@@ -366,7 +365,7 @@ class OracleIndexedAPIModel(SQLModel, table=True):
     status: str = Field(max_length=20)
     last_crawled: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class OracleRegistrationModel(SQLModel, table=True):
@@ -381,7 +380,7 @@ class OracleRegistrationModel(SQLModel, table=True):
     message: str = Field(default="", max_length=2000)
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class OracleDiscoveryHitModel(SQLModel, table=True):
@@ -393,7 +392,7 @@ class OracleDiscoveryHitModel(SQLModel, table=True):
     referrer: str = Field(default="direct", max_length=2048, index=True)
     timestamp: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class AgentCommsMessageModel(SQLModel, table=True):
@@ -415,7 +414,7 @@ class AgentCommsMessageModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, index=True)
     delivered_at: Optional[datetime] = Field(default=None)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class SecurityScanModel(SQLModel, table=True):
@@ -443,7 +442,7 @@ class SecurityScanModel(SQLModel, table=True):
     completed_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class SecurityVulnerabilityModel(SQLModel, table=True):
@@ -473,7 +472,7 @@ class SecurityVulnerabilityModel(SQLModel, table=True):
 
     discovered_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ContentPipelineModel(SQLModel, table=True):
@@ -496,7 +495,7 @@ class ContentPipelineModel(SQLModel, table=True):
     aspect_ratio: str = Field(default="9:16", max_length=10)
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ContentPieceModel(SQLModel, table=True):
@@ -522,7 +521,7 @@ class ContentPieceModel(SQLModel, table=True):
     metadata_json: Optional[str] = Field(default=None)
     generated_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ContentCampaignModel(SQLModel, table=True):
@@ -539,7 +538,7 @@ class ContentCampaignModel(SQLModel, table=True):
     owner_key: str = Field(default="", max_length=255, index=True)
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ContentScheduleModel(SQLModel, table=True):
@@ -560,7 +559,7 @@ class ContentScheduleModel(SQLModel, table=True):
     estimated_views: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ContentFactoryGenerationModel(SQLModel, table=True):
@@ -577,7 +576,7 @@ class ContentFactoryGenerationModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, index=True)
     updated_at: Optional[datetime] = Field(default=None)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class KeyRotationLogModel(SQLModel, table=True):
@@ -606,7 +605,7 @@ class KeyRotationLogModel(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class OptimizerTelemetryModel(SQLModel, table=True):
@@ -733,7 +732,7 @@ class PermitModel(SQLModel, table=True):
     # in-flight reservation from one orphaned by a crash during reconciliation.
     updated_at: Optional[datetime] = Field(default=None, index=True)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ReceiptModel(SQLModel, table=True):
@@ -771,7 +770,7 @@ class ReceiptModel(SQLModel, table=True):
         index=True,
     )
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class IdempotencyRecordModel(SQLModel, table=True):
@@ -818,4 +817,4 @@ class PolicyBundleModel(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, index=True)
     updated_at: datetime = Field(default_factory=utc_now)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = {"arbitrary_types_allowed": True}

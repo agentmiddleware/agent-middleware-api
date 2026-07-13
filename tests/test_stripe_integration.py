@@ -71,7 +71,7 @@ async def test_prepare_top_up_creates_payment_intent(client, sponsor_wallet, api
         assert call_kwargs["amount"] == 5000  # 50.0 * 100 cents
         assert call_kwargs["currency"] == "usd"
         assert call_kwargs["metadata"]["wallet_id"] == wallet_id
-        assert call_kwargs["metadata"]["credits"] == 50000
+        assert call_kwargs["metadata"]["credits"] == "50000"
 
 
 @pytest.mark.anyio

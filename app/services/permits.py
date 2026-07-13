@@ -5,8 +5,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.database import get_session_factory
 from app.db.models import PermitModel, WalletModel
@@ -78,32 +80,55 @@ class PermitService:
         stmt = select(PermitModel)
         count_stmt = select(func.count()).select_from(PermitModel)
 
-        filters = []
+        filters: list[ColumnElement[bool]] = []
         if wallet_id:
             filters.append(
-                or_(
-                    PermitModel.issuer_wallet_id == wallet_id,
-                    PermitModel.subject_wallet_id == wallet_id,
+                cast(
+                    ColumnElement[bool],
+                    or_(
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.issuer_wallet_id == wallet_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.subject_wallet_id == wallet_id,
+                        ),
+                    ),
                 )
             )
         if status:
-            filters.append(PermitModel.status == status)
+            filters.append(cast(ColumnElement[bool], PermitModel.status == status))
         if subject_key_id:
-            filters.append(PermitModel.subject_key_id == subject_key_id)
+            filters.append(
+                cast(ColumnElement[bool], PermitModel.subject_key_id == subject_key_id)
+            )
         if created_after:
-            filters.append(PermitModel.issued_at >= created_after)
+            filters.append(
+                cast(ColumnElement[bool], PermitModel.issued_at >= created_after)
+            )
         if created_before:
-            filters.append(PermitModel.issued_at <= created_before)
+            filters.append(
+                cast(ColumnElement[bool], PermitModel.issued_at <= created_before)
+            )
         if expires_after:
-            filters.append(PermitModel.expires_at >= expires_after)
+            filters.append(
+                cast(ColumnElement[bool], PermitModel.expires_at >= expires_after)
+            )
         if expires_before:
-            filters.append(PermitModel.expires_at <= expires_before)
+            filters.append(
+                cast(ColumnElement[bool], PermitModel.expires_at <= expires_before)
+            )
 
         if filters:
             stmt = stmt.where(*filters)
             count_stmt = count_stmt.where(*filters)
 
-        stmt = stmt.order_by(PermitModel.issued_at.desc()).limit(limit).offset(offset)
+        stmt = (
+            stmt.order_by(cast(ColumnElement[Any], PermitModel.issued_at).desc())
+            .limit(limit)
+            .offset(offset)
+        )
 
         factory = get_session_factory()
         async with factory() as session:
@@ -275,11 +300,14 @@ class PermitService:
                     await session.execute(
                         select(PermitModel)
                         .where(
-                            PermitModel.status == "active",
-                            func.coalesce(
-                                PermitModel.updated_at, PermitModel.issued_at
-                            )
-                            < cutoff,
+                            cast(ColumnElement[bool], PermitModel.status == "active"),
+                            cast(
+                                ColumnElement[bool],
+                                func.coalesce(
+                                    PermitModel.updated_at, PermitModel.issued_at
+                                )
+                                < cutoff,
+                            ),
                         )
                         .with_for_update()
                     )
@@ -293,8 +321,14 @@ class PermitService:
                                     0,
                                 )
                             ).where(
-                                ReceiptModel.permit_id == permit.permit_id,
-                                ReceiptModel.outcome == "success",
+                                cast(
+                                    ColumnElement[bool],
+                                    ReceiptModel.permit_id == permit.permit_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    ReceiptModel.outcome == "success",
+                                ),
                             )
                         )
                     ).scalar_one()

@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import json
-from typing import Any
+from typing import Any, cast
 import uuid
 
 from sqlalchemy import desc, select
 from sqlalchemy import func
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.database import get_session_factory
 from app.db.models import ControlPlaneAuditEventModel
@@ -119,7 +120,7 @@ async def list_audit_events(
 ) -> list[AuditEvent]:
     stmt = (
         select(ControlPlaneAuditEventModel)
-        .order_by(desc(ControlPlaneAuditEventModel.created_at))
+        .order_by(desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)))
         .limit(limit)
         .offset(offset)
     )

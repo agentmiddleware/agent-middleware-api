@@ -352,8 +352,10 @@ class AWIPlaywrightBridge:
 
         self._sessions: dict[str, BridgeSession] = {}
 
-        self._playwright = None
-        self._browser = None
+        # Typed Any: populated lazily from the optional `playwright` package,
+        # which may not be installed (see _init_playwright's ImportError guard).
+        self._playwright: Any = None
+        self._browser: Any = None
         self._playwright_initialized = False
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -554,13 +556,14 @@ class AWIPlaywrightBridge:
         session = self._sessions.get(session_id)
 
         elements_found = {}
-        for semantic_type in self.SEMANTIC_PATTERNS.keys():
-            try:
-                element = await self._find_semantic_element(session, semantic_type)
-                if element:
-                    elements_found[semantic_type] = 1
-            except Exception:
-                pass
+        if session is not None:
+            for semantic_type in self.SEMANTIC_PATTERNS.keys():
+                try:
+                    element = await self._find_semantic_element(session, semantic_type)
+                    if element:
+                        elements_found[semantic_type] = 1
+                except Exception:
+                    pass
 
         estimated_duration = sum(c.estimated_duration_ms for c in commands)
 

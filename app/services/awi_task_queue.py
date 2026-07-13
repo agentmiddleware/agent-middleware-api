@@ -110,6 +110,7 @@ class AWITaskQueue:
             priority=request.priority,
             created_at=datetime.now(timezone.utc),
             total_actions=len(request.action_sequence),
+            action_sequence=request.action_sequence,
         )
 
         self._tasks[task_id] = task
@@ -304,6 +305,8 @@ class AWITaskQueue:
 
         if task.status == AWITaskStatus.PAUSED:
             task.action_sequence = [{"type": "steer", "instructions": new_instructions}]
+            task.total_actions = len(task.action_sequence)
+            task.current_action_index = 0
             task.status = AWITaskStatus.PENDING
             self._insert_into_priority_queue(task_id)
             await self._save_task(task_id)

@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.database import get_session_factory
 from app.db.models import ReceiptModel
@@ -122,21 +123,25 @@ class ReceiptService:
         stmt = select(ReceiptModel)
         count_stmt = select(func.count()).select_from(ReceiptModel)
 
-        filters = []
+        filters: list[ColumnElement[bool]] = []
         if permit_id:
-            filters.append(ReceiptModel.permit_id == permit_id)
+            filters.append(cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id))
         if wallet_id:
-            filters.append(ReceiptModel.wallet_id == wallet_id)
+            filters.append(cast(ColumnElement[bool], ReceiptModel.wallet_id == wallet_id))
         if tool:
-            filters.append(ReceiptModel.tool == tool)
+            filters.append(cast(ColumnElement[bool], ReceiptModel.tool == tool))
         if outcome:
-            filters.append(ReceiptModel.outcome == outcome)
+            filters.append(cast(ColumnElement[bool], ReceiptModel.outcome == outcome))
 
         if filters:
             stmt = stmt.where(*filters)
             count_stmt = count_stmt.where(*filters)
 
-        stmt = stmt.order_by(ReceiptModel.created_at.desc()).limit(limit).offset(offset)
+        stmt = (
+            stmt.order_by(cast(ColumnElement[Any], ReceiptModel.created_at).desc())
+            .limit(limit)
+            .offset(offset)
+        )
 
         factory = get_session_factory()
         async with factory() as session:

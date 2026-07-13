@@ -13,7 +13,9 @@ Wrapper functions provide schema information for MCP discovery.
 
 import logging
 from threading import Lock
-from typing import Any
+from typing import Any, Callable, TypedDict
+
+from pydantic import BaseModel
 
 from .service_registry import get_service_registry
 from ..schemas.billing import ServiceCategory
@@ -62,7 +64,7 @@ async def awi_dom_bridge_session(
 
 
 async def awi_dom_sync(
-    session_id: str, action: str, parameters: dict = None, **kwargs
+    session_id: str, action: str, parameters: dict | None = None, **kwargs
 ) -> dict[str, Any]:
     """Wrapper for DOM sync execution."""
     return {
@@ -84,7 +86,7 @@ async def awi_dom_state(
 
 
 async def awi_dom_action_preview(
-    session_id: str, action: str, parameters: dict = None, **kwargs
+    session_id: str, action: str, parameters: dict | None = None, **kwargs
 ) -> dict[str, Any]:
     """Wrapper for DOM action preview."""
     return {
@@ -95,7 +97,7 @@ async def awi_dom_action_preview(
 
 
 async def awi_memory_index(
-    session_id: str, session_type: str, action_history: list = None, **kwargs
+    session_id: str, session_type: str, action_history: list | None = None, **kwargs
 ) -> dict[str, Any]:
     """Wrapper for memory indexing."""
     return {
@@ -111,7 +113,7 @@ async def awi_rag_query(query: str, top_k: int = 5, **kwargs) -> dict[str, Any]:
 
 
 async def awi_session_context(
-    current_session_id: str, current_state: dict = None, **kwargs
+    current_session_id: str, current_state: dict | None = None, **kwargs
 ) -> dict[str, Any]:
     """Wrapper for session context retrieval."""
     return {
@@ -121,7 +123,20 @@ async def awi_session_context(
     }
 
 
-MCP_PHASE9_TOOLS = [
+class Phase9ToolDef(TypedDict):
+    """Registration payload for a Phase 9 MCP tool."""
+
+    service_id: str
+    name: str
+    description: str
+    category: ServiceCategory
+    credits_per_unit: float
+    unit_name: str
+    func: Callable[..., Any]
+    input_model: type[BaseModel]
+
+
+MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
     {
         "service_id": "awi_passkey_challenge",
         "name": "AWI Passkey Challenge",
@@ -215,17 +230,22 @@ MCP_PHASE9_TOOLS = [
 ]
 
 
-def register_phase9_tools():
+def register_phase9_tools() -> None:
     """Register all Phase 9 tools with the service registry."""
     registry = get_service_registry()
 
     for tool in MCP_PHASE9_TOOLS:
-        tool_def = tool.copy()
-        func = tool_def.pop("func")
-        input_model = tool_def.pop("input_model", None)
-
-        registry.register_local(func=func, input_model=input_model, **tool_def)
-        logger.info(f"Registered Phase 9 MCP tool: {tool_def['service_id']}")
+        registry.register_local(
+            service_id=tool["service_id"],
+            name=tool["name"],
+            description=tool["description"],
+            category=tool["category"],
+            func=tool["func"],
+            input_model=tool["input_model"],
+            credits_per_unit=tool["credits_per_unit"],
+            unit_name=tool["unit_name"],
+        )
+        logger.info(f"Registered Phase 9 MCP tool: {tool['service_id']}")
 
 
 _registered = False
@@ -247,7 +267,20 @@ def ensure_phase9_registered():
 _default_services_registered = False
 
 
-def _make_default_service_handler(service_def: dict[str, Any]):
+class DefaultServiceDef(TypedDict):
+    """Registration payload for a default control-plane MCP service."""
+
+    service_id: str
+    name: str
+    description: str
+    category: ServiceCategory
+    credits_per_unit: float
+    unit_name: str
+    input_model: type[BaseModel] | None
+    output_model: type[BaseModel] | None
+
+
+def _make_default_service_handler(service_def: DefaultServiceDef):
     """Create a deterministic preview handler for a default control-plane tool."""
     category = service_def["category"].value
     service_id = service_def["service_id"]
@@ -286,7 +319,7 @@ def register_default_mcp_services():
 
         registry = get_service_registry()
 
-        default_services = [
+        default_services: list[DefaultServiceDef] = [
             {
                 "service_id": "data-indexer",
                 "name": "Data Indexer",
@@ -332,8 +365,15 @@ def register_default_mcp_services():
         for service_def in default_services:
             try:
                 registry.register_local(
+                    service_id=service_def["service_id"],
+                    name=service_def["name"],
+                    description=service_def["description"],
+                    category=service_def["category"],
                     func=_make_default_service_handler(service_def),
-                    **service_def,
+                    input_model=service_def["input_model"],
+                    output_model=service_def["output_model"],
+                    credits_per_unit=service_def["credits_per_unit"],
+                    unit_name=service_def["unit_name"],
                 )
                 logger.info(
                     f"Registered default MCP service: {service_def['service_id']}"

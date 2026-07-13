@@ -36,13 +36,14 @@ async def optimize_endpoint(req: OptimizerRequest, request: Request) -> Optimize
     allowed_candidates: list[dict] = []
     for action in candidates:
         service = action.get("service")
+        service_key = service if isinstance(service, str) else ""
         evaluation = await evaluate_wallet_policy(
             wallet_id=req.state.wallet_id,
             tool_name=action.get("id"),
             service_category=action.get("category") or service,
             estimated_cost=action.get("credit_cost"),
             daily_spend_used=req.state.daily_spend_used,
-            simulation=req.state.simulation_flags.get(service, False),
+            simulation=req.state.simulation_flags.get(service_key, False),
             risk_tier=req.state.task_context.get("tier"),
         )
         if evaluation.policy_id:

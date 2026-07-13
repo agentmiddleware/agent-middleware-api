@@ -13,7 +13,7 @@ Architecture:
 
 import logging
 from datetime import timedelta
-from typing import Optional
+from typing import Literal, Optional, cast
 from uuid import uuid4
 
 import stripe
@@ -51,7 +51,7 @@ class KYCService:
     """
 
     SESSION_EXPIRY_DAYS = 7
-    VERIFICATION_TYPE = "document"
+    VERIFICATION_TYPE: Literal["document", "id_number"] = "document"
 
     def __init__(self):
         self._session_factory = get_session_factory
@@ -84,7 +84,10 @@ class KYCService:
         """
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                # SQLModel fields are plain Python types (not Mapped[...]), so mypy
+                # sees this comparison as bool rather than a ColumnElement[bool].
+                # Root cause lives in app/db/models.py (out of scope here).
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]
             )
             wallet = result.scalar_one_or_none()
 
@@ -118,7 +121,13 @@ class KYCService:
                 metadata=metadata,
                 options={
                     "document": {
-                        "allowed_types": [document_type],
+                        # document_type is caller-supplied (from the request body) and
+                        # is validated by Stripe's API at request time, not locally;
+                        # narrow it to the SDK's expected Literal shape here.
+                        "allowed_types": cast(
+                            "list[Literal['driving_license', 'id_card', 'passport']]",
+                            [document_type],
+                        ),
                         "require_id_number": False,
                         "require_live_capture": True,
                         "require_matching_selfie": True,
@@ -185,10 +194,13 @@ class KYCService:
             }
         """
         async with self._session_factory()() as session:
-            result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            wallet_result = await session.execute(
+                # SQLModel fields are plain Python types (not Mapped[...]), so mypy
+                # sees this comparison as bool rather than a ColumnElement[bool].
+                # Root cause lives in app/db/models.py (out of scope here).
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]
             )
-            wallet = result.scalar_one_or_none()
+            wallet = wallet_result.scalar_one_or_none()
 
             if not wallet:
                 raise WalletNotFoundError(wallet_id)
@@ -199,12 +211,12 @@ class KYCService:
                 and kyc_status not in ["verified", "not_required"]
             )
 
-            result = await session.execute(
+            verification_result = await session.execute(
                 select(KYCVerificationModel)
-                .where(KYCVerificationModel.wallet_id == wallet_id)
-                .order_by(KYCVerificationModel.created_at.desc())
+                .where(KYCVerificationModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
+                .order_by(KYCVerificationModel.created_at.desc())  # type: ignore[attr-defined]  # see app/db/models.py
             )
-            verification = result.scalars().first()
+            verification = verification_result.scalars().first()
 
             message = self._get_status_message(kyc_status, requires_verification)
 
@@ -240,7 +252,7 @@ class KYCService:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(KYCVerificationModel)
-                .where(KYCVerificationModel.verification_id == verification_id)
+                .where(KYCVerificationModel.verification_id == verification_id)  # type: ignore[arg-type]  # see app/db/models.py
             )
             verification = result.scalar_one_or_none()
 
@@ -304,11 +316,11 @@ class KYCService:
         session_id = verification_session["id"]
 
         async with self._session_factory()() as session:
-            result = await session.execute(
+            verification_result = await session.execute(
                 select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)
+                .where(KYCVerificationModel.stripe_session_id == session_id)  # type: ignore[arg-type]  # see app/db/models.py
             )
-            verification = result.scalar_one_or_none()
+            verification = verification_result.scalar_one_or_none()
 
             if not verification:
                 logger.error(f"Verification not found for session {session_id}")
@@ -321,12 +333,12 @@ class KYCService:
                 verification.first_verified_at = verified_at
             verification.rejection_reason = None
 
-            result = await session.execute(
+            wallet_result = await session.execute(
                 select(WalletModel)
-                .where(WalletModel.wallet_id == verification.wallet_id)
+                .where(WalletModel.wallet_id == verification.wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
                 .with_for_update()
             )
-            wallet = result.scalar_one_or_none()
+            wallet = wallet_result.scalar_one_or_none()
 
             if wallet:
                 wallet.kyc_status = "verified"
@@ -353,7 +365,7 @@ class KYCService:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)
+                .where(KYCVerificationModel.stripe_session_id == session_id)  # type: ignore[arg-type]  # see app/db/models.py
             )
             verification = result.scalar_one_or_none()
 
@@ -370,11 +382,11 @@ class KYCService:
         session_id = verification_session["id"]
 
         async with self._session_factory()() as session:
-            result = await session.execute(
+            verification_result = await session.execute(
                 select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)
+                .where(KYCVerificationModel.stripe_session_id == session_id)  # type: ignore[arg-type]  # see app/db/models.py
             )
-            verification = result.scalar_one_or_none()
+            verification = verification_result.scalar_one_or_none()
 
             if not verification:
                 return
@@ -383,12 +395,12 @@ class KYCService:
                 verification.status = "expired"
                 verification.rejection_reason = "Verification session expired"
 
-                result = await session.execute(
+                wallet_result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == verification.wallet_id)
+                    .where(WalletModel.wallet_id == verification.wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
                     .with_for_update()
                 )
-                wallet = result.scalar_one_or_none()
+                wallet = wallet_result.scalar_one_or_none()
 
                 if wallet and wallet.status == "pending_kyc":
                     wallet.kyc_status = "expired"
@@ -415,24 +427,24 @@ class KYCService:
             reason: Reason for rejection
         """
         async with self._session_factory()() as session:
-            result = await session.execute(
+            verification_result = await session.execute(
                 select(KYCVerificationModel)
-                .where(KYCVerificationModel.wallet_id == wallet_id)
-                .order_by(KYCVerificationModel.created_at.desc())
+                .where(KYCVerificationModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
+                .order_by(KYCVerificationModel.created_at.desc())  # type: ignore[attr-defined]  # see app/db/models.py
             )
-            verification = result.scalars().first()
+            verification = verification_result.scalars().first()
 
             if verification:
                 verification.status = "rejected"
                 verification.rejection_reason = reason
                 verification.last_verified_at = utc_now()
 
-            result = await session.execute(
+            wallet_result = await session.execute(
                 select(WalletModel)
-                .where(WalletModel.wallet_id == wallet_id)
+                .where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
                 .with_for_update()
             )
-            wallet = result.scalar_one_or_none()
+            wallet = wallet_result.scalar_one_or_none()
 
             if wallet:
                 wallet.kyc_status = "rejected"

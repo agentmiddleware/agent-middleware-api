@@ -23,8 +23,10 @@ import uuid
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from sqlalchemy import select
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.runtime_mode import require_simulation
 from ..db.database import get_session_factory, is_database_configured
@@ -154,7 +156,7 @@ class RTaaSEngine:
         scan: SecurityScanModel,
         vulns: list[SecurityVulnerabilityModel],
     ) -> RTaaSJob:
-        target_records = []
+        target_records: list[object] = []
         if scan.targets_json:
             try:
                 target_records = json.loads(scan.targets_json) or []
@@ -252,7 +254,10 @@ class RTaaSEngine:
 
             await session.execute(
                 sa_delete(SecurityVulnerabilityModel).where(
-                    SecurityVulnerabilityModel.scan_id == job.job_id
+                    cast(
+                        ColumnElement[bool],
+                        SecurityVulnerabilityModel.scan_id == job.job_id,
+                    )
                 )
             )
             session.add_all(vuln_rows)
@@ -437,7 +442,7 @@ class RTaaSEngine:
                 return None
             vuln_result = await session.execute(
                 select(SecurityVulnerabilityModel).where(
-                    SecurityVulnerabilityModel.scan_id == job_id
+                    cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == job_id)
                 )
             )
             vulns = list(vuln_result.scalars().all())
@@ -448,11 +453,13 @@ class RTaaSEngine:
         factory = get_session_factory()
 
         stmt = select(SecurityScanModel).where(
-            SecurityScanModel.scan_type == "rtaas"
+            cast(ColumnElement[bool], SecurityScanModel.scan_type == "rtaas")
         )
         if tenant_id:
-            stmt = stmt.where(SecurityScanModel.tenant_id == tenant_id)
-        stmt = stmt.order_by(SecurityScanModel.created_at.desc())
+            stmt = stmt.where(
+                cast(ColumnElement[bool], SecurityScanModel.tenant_id == tenant_id)
+            )
+        stmt = stmt.order_by(cast(ColumnElement[Any], SecurityScanModel.created_at).desc())
 
         async with factory() as session:
             result = await session.execute(stmt)
@@ -462,7 +469,10 @@ class RTaaSEngine:
             for scan in scans:
                 vuln_result = await session.execute(
                     select(SecurityVulnerabilityModel).where(
-                        SecurityVulnerabilityModel.scan_id == scan.scan_id
+                        cast(
+                            ColumnElement[bool],
+                            SecurityVulnerabilityModel.scan_id == scan.scan_id,
+                        )
                     )
                 )
                 vulns = list(vuln_result.scalars().all())

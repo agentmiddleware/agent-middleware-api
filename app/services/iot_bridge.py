@@ -22,9 +22,10 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select, func
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.runtime_mode import require_simulation
 from ..db.database import get_session_factory, is_database_configured
@@ -379,7 +380,7 @@ class DeviceRegistry:
             ) or 0
             result = await session.execute(
                 select(IoTDeviceModel)
-                .order_by(IoTDeviceModel.registered_at.asc())
+                .order_by(cast(ColumnElement[Any], IoTDeviceModel.registered_at).asc())
                 .offset(offset)
                 .limit(per_page)
             )
@@ -438,7 +439,7 @@ class DeviceRegistry:
         async with factory() as session:
             result = await session.execute(
                 select(IoTDeviceEventModel)
-                .order_by(IoTDeviceEventModel.timestamp.desc())
+                .order_by(cast(ColumnElement[Any], IoTDeviceEventModel.timestamp).desc())
                 .limit(limit)
             )
             rows = list(result.scalars().all())

@@ -17,8 +17,10 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from decimal import Decimal
+from typing import cast
 
 from sqlalchemy import select
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.auth import AuthContext
 from app.db.converters import ledger_entry_model_to_schema
@@ -116,8 +118,11 @@ async def _get_permit_model(
     async with factory() as session:
         result = await session.execute(
             select(PermitModel).where(
-                PermitModel.permit_id == permit_id,
-                PermitModel.subject_wallet_id == receipt_wallet_id,
+                cast(ColumnElement[bool], PermitModel.permit_id == permit_id),
+                cast(
+                    ColumnElement[bool],
+                    PermitModel.subject_wallet_id == receipt_wallet_id,
+                ),
             )
         )
         return result.scalar_one_or_none()
@@ -132,8 +137,14 @@ async def _get_audit_event_model(
     async with factory() as session:
         result = await session.execute(
             select(ControlPlaneAuditEventModel).where(
-                ControlPlaneAuditEventModel.event_id == audit_event_id,
-                ControlPlaneAuditEventModel.wallet_id == receipt_wallet_id,
+                cast(
+                    ColumnElement[bool],
+                    ControlPlaneAuditEventModel.event_id == audit_event_id,
+                ),
+                cast(
+                    ColumnElement[bool],
+                    ControlPlaneAuditEventModel.wallet_id == receipt_wallet_id,
+                ),
             )
         )
         return result.scalar_one_or_none()
@@ -148,8 +159,11 @@ async def _get_ledger_entry_model(
     async with factory() as session:
         result = await session.execute(
             select(LedgerEntryModel).where(
-                LedgerEntryModel.entry_id == ledger_entry_id,
-                LedgerEntryModel.wallet_id == receipt_wallet_id,
+                cast(ColumnElement[bool], LedgerEntryModel.entry_id == ledger_entry_id),
+                cast(
+                    ColumnElement[bool],
+                    LedgerEntryModel.wallet_id == receipt_wallet_id,
+                ),
             )
         )
         return result.scalar_one_or_none()
@@ -164,9 +178,15 @@ async def _refund_exists(
     async with factory() as session:
         result = await session.execute(
             select(LedgerEntryModel).where(
-                LedgerEntryModel.wallet_id == wallet_id,
-                LedgerEntryModel.action == LedgerAction.REFUND.value,
-                LedgerEntryModel.correlation_id == ledger_entry_id,
+                cast(ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id),
+                cast(
+                    ColumnElement[bool],
+                    LedgerEntryModel.action == LedgerAction.REFUND.value,
+                ),
+                cast(
+                    ColumnElement[bool],
+                    LedgerEntryModel.correlation_id == ledger_entry_id,
+                ),
             )
         )
         return result.scalar_one_or_none() is not None

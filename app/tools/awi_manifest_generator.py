@@ -20,12 +20,12 @@ class ManifestGenerator:
 
     def __init__(self, framework: str = "fastapi"):
         self.framework = framework
-        self.actions = []
-        self.route_mappings = {}
+        self.actions: list[dict[str, Any]] = []
+        self.route_mappings: dict[str, str] = {}
 
     def scan_fastapi_app(self, app) -> dict[str, Any]:
         """Scan a FastAPI application and extract routes for AWI mapping."""
-        manifest = {
+        manifest: dict[str, Any] = {
             "name": getattr(app, "title", "Unknown API"),
             "version": getattr(app, "version", "1.0.0"),
             "awi_version": "1.0.0",

@@ -197,17 +197,6 @@ async def get_doc_index():
                 "quickstart_endpoint": "POST /v1/security/scans/quick",
             },
             {
-                "id": "launch-sequence",
-                "name": "Day 1 Launch Sequence",
-                "base_path": "/v1/launch",
-                "capabilities": [
-                    "preflight-readiness-check",
-                    "four-phase-atomic-bootstrap",
-                    "launch-report-generation",
-                ],
-                "quickstart_endpoint": "POST /v1/launch/preflight",
-            },
-            {
                 "id": "protocol-engine",
                 "name": "Protocol Generation Engine",
                 "base_path": "/v1/protocol",
@@ -257,20 +246,6 @@ async def get_doc_index():
                     "latency-monitoring",
                 ],
                 "quickstart_endpoint": "POST /v1/telemetry-scope/pipelines",
-            },
-            {
-                "id": "dashboard",
-                "name": "Real-Time Platform Dashboard",
-                "base_path": "/v1/dashboard",
-                "capabilities": [
-                    "full-platform-snapshot",
-                    "wallet-hierarchy-visualization",
-                    "credit-burn-tracking",
-                    "security-posture-aggregation",
-                    "telemetry-health-overview",
-                    "genesis-launch-history",
-                ],
-                "quickstart_endpoint": "GET /v1/dashboard",
             },
             {
                 "id": "oracle-broadcast",

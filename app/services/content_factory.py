@@ -24,9 +24,10 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.runtime_mode import require_simulation
 from ..db.converters import (
@@ -270,8 +271,8 @@ class ContentStore:
                 return None
             pieces_result = await session.execute(
                 select(ContentPieceModel)
-                .where(ContentPieceModel.pipeline_id == pipeline_id)
-                .order_by(ContentPieceModel.generated_at.asc())
+                .where(cast(ColumnElement[bool], ContentPieceModel.pipeline_id == pipeline_id))
+                .order_by(cast(ColumnElement[Any], ContentPieceModel.generated_at).asc())
             )
             pieces = list(pieces_result.scalars().all())
         return _row_to_pipeline(row, pieces)
@@ -322,8 +323,8 @@ class ContentStore:
         async with factory() as session:
             result = await session.execute(
                 select(ContentPieceModel)
-                .where(ContentPieceModel.pipeline_id == pipeline_id)
-                .order_by(ContentPieceModel.generated_at.asc())
+                .where(cast(ColumnElement[bool], ContentPieceModel.pipeline_id == pipeline_id))
+                .order_by(cast(ColumnElement[Any], ContentPieceModel.generated_at).asc())
             )
             rows = list(result.scalars().all())
         return [content_piece_model_to_schema(r) for r in rows]
@@ -362,7 +363,7 @@ class ContentStore:
         async with factory() as session:
             result = await session.execute(
                 select(ContentCampaignModel).order_by(
-                    ContentCampaignModel.created_at.desc()
+                    cast(ColumnElement[Any], ContentCampaignModel.created_at).desc()
                 )
             )
             rows = list(result.scalars().all())

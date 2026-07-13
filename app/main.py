@@ -51,13 +51,12 @@ from .routers import (
     permits,
     receipts,
     evidence,
-    launch,
+    preflight,
     protocol,
     rtaas,
     sandbox,
     sandbox_behavioral,
     telemetry_scope,
-    dashboard,
     broadcast,
     ai,
     webhooks,
@@ -312,6 +311,7 @@ CORE_TRUST_ROUTERS = (
     permits,
     receipts,
     evidence,
+    preflight,
     webhooks,
     mcp,
     kyc,
@@ -334,13 +334,11 @@ PROOF_SURFACE_ROUTERS = (
     content_generation,
     red_team,
     oracle,
-    launch,
     protocol,
     rtaas,
     sandbox,
     sandbox_behavioral,
     telemetry_scope,
-    dashboard,
     broadcast,
     ai,
     docs,
@@ -559,20 +557,6 @@ async def root():
                     "POST /v1/security/scans/quick",
                 ],
             },
-            "launch_sequence": {
-                "base_path": "/v1/launch",
-                "description": (
-                    "Day 1 production bootstrap. One POST funds wallets, "
-                    "infiltrates agent networks, ignites content campaigns, "
-                    "and arms the Red Team perimeter."
-                ),
-                "endpoints": [
-                    "POST /v1/launch/preflight",
-                    "POST /v1/launch",
-                    "POST /v1/launch/genesis",
-                    "GET /v1/launch/reports",
-                ],
-            },
             "protocol_engine": {
                 "base_path": "/v1/protocol",
                 "description": (
@@ -651,20 +635,6 @@ async def root():
                     "GET /v1/telemetry-scope/pipelines/{pipeline_id}/stats",
                     "GET /v1/telemetry-scope/pipelines/{pipeline_id}",
                     "GET /v1/telemetry-scope/pipelines",
-                ],
-            },
-            "dashboard": {
-                "base_path": "/v1/dashboard",
-                "description": (
-                    "Real-time platform monitoring. Full snapshot of "
-                    "economics, security, telemetry, and Genesis lifecycle."
-                ),
-                "endpoints": [
-                    "GET /v1/dashboard",
-                    "GET /v1/dashboard/economics",
-                    "GET /v1/dashboard/security",
-                    "GET /v1/dashboard/telemetry",
-                    "GET /v1/dashboard/genesis",
                 ],
             },
             "oracle_broadcast": {

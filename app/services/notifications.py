@@ -10,7 +10,7 @@ Used for:
 
 import logging
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -279,7 +279,7 @@ This is an automated notification from the Agent-Native Middleware Platform.
             "low": ":information_source:",
         }.get(urgency, "")
 
-        payload = {
+        payload: dict[str, Any] = {
             "text": f"{urgency_emoji} {title}",
             "blocks": [
                 {

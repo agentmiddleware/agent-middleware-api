@@ -23,10 +23,11 @@ import uuid
 import logging
 import hashlib
 from collections import defaultdict
-from typing import Any
+from typing import Any, cast
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..audit.lightweight import record_audit
 from ..core.runtime_mode import is_simulation, require_simulation
@@ -629,7 +630,9 @@ class OracleStore:
         if filters:
             count_stmt = count_stmt.where(*filters)
             stmt = stmt.where(*filters)
-        stmt = stmt.order_by(OracleIndexedAPIModel.compatibility_score.desc())
+        stmt = stmt.order_by(
+            cast(ColumnElement[Any], OracleIndexedAPIModel.compatibility_score).desc()
+        )
         if limit is not None:
             stmt = stmt.limit(limit).offset(offset)
         async with factory() as session:
@@ -651,7 +654,7 @@ class OracleStore:
         self._require_db()
         factory = get_session_factory()
         needle = f"%{domain.strip()}%"
-        filt = OracleCrawlTargetModel.url.ilike(needle)
+        filt = cast(ColumnElement[str], OracleCrawlTargetModel.url).ilike(needle)
         count_stmt = (
             select(func.count())
             .select_from(OracleCrawlTargetModel)
@@ -660,7 +663,7 @@ class OracleStore:
         stmt = (
             select(OracleCrawlTargetModel)
             .where(filt)
-            .order_by(OracleCrawlTargetModel.queued_at.desc())
+            .order_by(cast(ColumnElement[Any], OracleCrawlTargetModel.queued_at).desc())
             .limit(limit)
             .offset(offset)
         )
@@ -704,7 +707,7 @@ class OracleStore:
         async with factory() as session:
             result = await session.execute(
                 select(OracleRegistrationModel).order_by(
-                    OracleRegistrationModel.created_at.desc()
+                    cast(ColumnElement[Any], OracleRegistrationModel.created_at).desc()
                 )
             )
             rows = list(result.scalars().all())
@@ -741,7 +744,7 @@ class OracleStore:
 
             referrer_rows = await session.execute(
                 select(
-                    OracleDiscoveryHitModel.referrer,
+                    cast(ColumnElement[str], OracleDiscoveryHitModel.referrer),
                     func.count().label("n"),
                 )
                 .group_by(OracleDiscoveryHitModel.referrer)

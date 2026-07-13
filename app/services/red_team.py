@@ -22,8 +22,10 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from sqlalchemy import select
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.runtime_mode import require_simulation
 from ..db.converters import (
@@ -765,16 +767,11 @@ class ScanStore:
                     setattr(existing, field, getattr(new_row, field))
 
             # Replace vulnerabilities for idempotent re-save.
-            await session.execute(
-                select(SecurityVulnerabilityModel).where(
-                    SecurityVulnerabilityModel.scan_id == report.scan_id
-                )
-            )
             from sqlalchemy import delete as sa_delete
 
             await session.execute(
                 sa_delete(SecurityVulnerabilityModel).where(
-                    SecurityVulnerabilityModel.scan_id == report.scan_id
+                    cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == report.scan_id)
                 )
             )
             for vuln in report.vulnerabilities:
@@ -791,7 +788,7 @@ class ScanStore:
                 return None
             result = await session.execute(
                 select(SecurityVulnerabilityModel).where(
-                    SecurityVulnerabilityModel.scan_id == scan_id
+                    cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == scan_id)
                 )
             )
             vulns = list(result.scalars().all())
@@ -803,8 +800,8 @@ class ScanStore:
         async with factory() as session:
             result = await session.execute(
                 select(SecurityScanModel)
-                .where(SecurityScanModel.scan_type == "internal")
-                .order_by(SecurityScanModel.created_at.desc())
+                .where(cast(ColumnElement[bool], SecurityScanModel.scan_type == "internal"))
+                .order_by(cast(ColumnElement[Any], SecurityScanModel.created_at).desc())
             )
             scans = list(result.scalars().all())
 
@@ -812,7 +809,7 @@ class ScanStore:
             for scan in scans:
                 vuln_result = await session.execute(
                     select(SecurityVulnerabilityModel).where(
-                        SecurityVulnerabilityModel.scan_id == scan.scan_id
+                        cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == scan.scan_id)
                     )
                 )
                 vulns = list(vuln_result.scalars().all())

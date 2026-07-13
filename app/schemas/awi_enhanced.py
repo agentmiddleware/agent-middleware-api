@@ -222,7 +222,7 @@ class DOMSyncResponse(BaseModel):
     )
     error: Optional[str] = Field(None, description="Error message if failed")
     screenshot_url: Optional[str] = Field(
-        None, description="Screenshot URL if requested"
+        default=None, description="Screenshot URL if requested"
     )
 
 

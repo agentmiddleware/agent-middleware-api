@@ -32,7 +32,7 @@ import random
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -295,6 +295,15 @@ class AdversarialEnvironmentGenerator:
 # Sandbox Engine
 # ---------------------------------------------------------------------------
 
+
+class EnvironmentGenerator(Protocol):
+    """Structural type shared by all environment generators registered on
+    SandboxEngine, so `self._generators` has a precise value type instead of
+    inferring the join of unrelated classes as `object`."""
+
+    def generate(self, difficulty: Difficulty, seed: int) -> SandboxEnvironment: ...
+
+
 class SandboxEngine:
     """
     Headless environment manager for testing agent generalization.
@@ -307,7 +316,7 @@ class SandboxEngine:
 
     def __init__(self):
         self._environments: dict[str, SandboxEnvironment] = {}
-        self._generators = {
+        self._generators: dict[EnvironmentType, EnvironmentGenerator] = {
             EnvironmentType.PATTERN: PatternEnvironmentGenerator(),
             EnvironmentType.NAVIGATION: NavigationEnvironmentGenerator(),
             EnvironmentType.API_MOCK: ApiMockEnvironmentGenerator(),
@@ -330,7 +339,7 @@ class SandboxEngine:
 
         self._environments[env.env_id] = env
         logger.info(f"Created sandbox {env.env_id}: {env_type} / {difficulty}")
-        return env  # type: ignore[no-any-return]
+        return env
 
     async def submit_action(
         self,

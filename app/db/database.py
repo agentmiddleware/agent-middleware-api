@@ -7,15 +7,17 @@ Supports SQLite fallback for testing when DATABASE_URL is not configured.
 
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from sqlalchemy import event
+from sqlalchemy.engine import Result
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     create_async_engine,
     async_sessionmaker,
 )
+from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel
 
 from ..core.config import get_settings
@@ -197,7 +199,7 @@ class DatabaseManager:
                 await session.rollback()
                 raise
 
-    async def execute(self, query) -> any:
+    async def execute(self, query: Executable) -> Result[Any]:
         """Execute a query and return results."""
         async with self.session() as session:
             result = await session.execute(query)

@@ -366,8 +366,11 @@ class ShadowLedger:
             service_category=service_category.value,
             units=units,
             credits_would_charge=charge_amount,
-            simulated_balance_before=float(simulated_before),
-            simulated_balance_after=float(simulated_after),
+            # Bug fix: this field is declared Decimal for monetary
+            # precision; converting to float here silently discarded
+            # precision on every dry-run charge.
+            simulated_balance_before=simulated_before,
+            simulated_balance_after=simulated_after,
             would_succeed=would_succeed,
             reason=reason,
             charge_id=charge_id,
@@ -653,7 +656,12 @@ class ShadowLedger:
             )
             sessions = []
             for sid in session_ids:
-                session = await self.get_session(sid)
+                # redis-py's smembers is typed as returning bytes|str even
+                # though decode_responses=True guarantees str at runtime;
+                # normalize explicitly rather than relying on that.
+                session = await self.get_session(
+                    sid.decode() if isinstance(sid, bytes) else sid
+                )
                 if session:
                     sessions.append(session)
             return sessions

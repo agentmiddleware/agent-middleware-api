@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlmodel import col
 
 from ..db.database import get_session_factory, is_database_configured
 from ..db.models import AgentCommsMessageModel
@@ -112,14 +113,14 @@ class CommsMessageStore:
         """
         self._require_db()
         factory = get_session_factory()
-        filt = AgentCommsMessageModel.to_agent == to_agent
+        filt = col(AgentCommsMessageModel.to_agent) == to_agent
         count_stmt = (
             select(func.count()).select_from(AgentCommsMessageModel).where(filt)
         )
         stmt = (
             select(AgentCommsMessageModel)
             .where(filt)
-            .order_by(AgentCommsMessageModel.created_at.asc())
+            .order_by(col(AgentCommsMessageModel.created_at).asc())
             .limit(limit)
             .offset(offset)
         )

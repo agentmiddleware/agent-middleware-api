@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel
@@ -26,6 +27,19 @@ class IdempotencyReplay:
     response_reference: str | None
     response_json: dict[str, Any] | None
     status_code: int
+
+
+def _idempotency_predicates(
+    wallet_id: str, endpoint: str, idempotency_key: str
+) -> tuple[ColumnElement[bool], ...]:
+    return (
+        cast(ColumnElement[bool], IdempotencyRecordModel.wallet_id == wallet_id),
+        cast(ColumnElement[bool], IdempotencyRecordModel.endpoint == endpoint),
+        cast(
+            ColumnElement[bool],
+            IdempotencyRecordModel.idempotency_key == idempotency_key,
+        ),
+    )
 
 
 def _replay_from_record(
@@ -61,9 +75,7 @@ class IdempotencyService:
         async with factory() as session:
             result = await session.execute(
                 select(IdempotencyRecordModel).where(
-                    IdempotencyRecordModel.wallet_id == wallet_id,
-                    IdempotencyRecordModel.endpoint == endpoint,
-                    IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
                 )
             )
             existing = result.scalar_one_or_none()
@@ -89,9 +101,7 @@ class IdempotencyService:
                 await session.rollback()
                 result = await session.execute(
                     select(IdempotencyRecordModel).where(
-                        IdempotencyRecordModel.wallet_id == wallet_id,
-                        IdempotencyRecordModel.endpoint == endpoint,
-                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                        *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
                     )
                 )
                 existing = result.scalar_one_or_none()
@@ -114,9 +124,7 @@ class IdempotencyService:
         async with factory() as session:
             result = await session.execute(
                 select(IdempotencyRecordModel).where(
-                    IdempotencyRecordModel.wallet_id == wallet_id,
-                    IdempotencyRecordModel.endpoint == endpoint,
-                    IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
                 )
             )
             record = result.scalar_one_or_none()

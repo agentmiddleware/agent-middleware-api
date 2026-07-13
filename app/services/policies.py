@@ -93,9 +93,12 @@ async def create_policy_bundle(request: PolicyBundleCreate) -> PolicyBundleRespo
 
 
 async def list_policy_bundles(wallet_id: str | None = None) -> list[PolicyBundleResponse]:
-    stmt = select(PolicyBundleModel).order_by(PolicyBundleModel.created_at)
+    # SQLModel fields are typed as plain Python types (not Mapped[...]), so mypy
+    # sees `.created_at`/`==` comparisons as datetime/bool rather than SQLAlchemy
+    # ColumnElement expressions. Root cause lives in app/db/models.py (out of scope here).
+    stmt = select(PolicyBundleModel).order_by(PolicyBundleModel.created_at)  # type: ignore[arg-type]
     if wallet_id:
-        stmt = stmt.where(PolicyBundleModel.wallet_id == wallet_id)
+        stmt = stmt.where(PolicyBundleModel.wallet_id == wallet_id)  # type: ignore[arg-type]
     factory = get_session_factory()
     async with factory() as session:
         result = await session.execute(stmt)
@@ -156,10 +159,10 @@ async def evaluate_wallet_policy(
     stmt = (
         select(PolicyBundleModel)
         .where(
-            PolicyBundleModel.wallet_id == wallet_id,
-            PolicyBundleModel.is_active == True,  # noqa: E712
+            PolicyBundleModel.wallet_id == wallet_id,  # type: ignore[arg-type]
+            PolicyBundleModel.is_active == True,  # type: ignore[arg-type]  # noqa: E712
         )
-        .order_by(PolicyBundleModel.created_at)
+        .order_by(PolicyBundleModel.created_at)  # type: ignore[arg-type]
     )
     factory = get_session_factory()
     async with factory() as session:

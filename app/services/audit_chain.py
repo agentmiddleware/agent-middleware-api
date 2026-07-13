@@ -4,10 +4,12 @@ import asyncio
 import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import asc, desc, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.database import get_session_factory
 from app.db.models import AuditChainHeadModel, ControlPlaneAuditEventModel
@@ -108,10 +110,15 @@ async def sign_audit_model(model: ControlPlaneAuditEventModel) -> None:
     async with factory() as session:
         result = await session.execute(
             select(ControlPlaneAuditEventModel)
-            .where(ControlPlaneAuditEventModel.wallet_id == model.wallet_id)
+            .where(
+                cast(
+                    ColumnElement[bool],
+                    ControlPlaneAuditEventModel.wallet_id == model.wallet_id,
+                )
+            )
             .order_by(
-                desc(ControlPlaneAuditEventModel.seq),
-                desc(ControlPlaneAuditEventModel.created_at),
+                desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)),
+                desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)),
             )
             .limit(1)
         )
@@ -153,9 +160,14 @@ async def append_chained_audit_event(model: ControlPlaneAuditEventModel) -> None
                 row = (
                     await session.execute(
                         select(
-                            AuditChainHeadModel.last_seq,
-                            AuditChainHeadModel.last_chain_hash,
-                        ).where(AuditChainHeadModel.wallet_key == wallet_key)
+                            cast(Any, AuditChainHeadModel.last_seq),
+                            cast(Any, AuditChainHeadModel.last_chain_hash),
+                        ).where(
+                            cast(
+                                ColumnElement[bool],
+                                AuditChainHeadModel.wallet_key == wallet_key,
+                            )
+                        )
                     )
                 ).first()
                 observed_seq = row[0] if row else 0
@@ -176,17 +188,29 @@ async def append_chained_audit_event(model: ControlPlaneAuditEventModel) -> None
                     )
                     await session.flush()
                 else:
-                    result = await session.execute(
-                        update(AuditChainHeadModel)
-                        .where(
-                            AuditChainHeadModel.wallet_key == wallet_key,
-                            AuditChainHeadModel.last_seq == observed_seq,
-                        )
-                        .values(
-                            last_seq=model.seq,
-                            last_chain_hash=model.chain_hash,
-                            updated_at=now,
-                        )
+                    # An UPDATE statement always yields a CursorResult at runtime;
+                    # the cast()-wrapped where() clauses above erase that from the
+                    # static type, so make it explicit for `.rowcount` below.
+                    result = cast(
+                        CursorResult[Any],
+                        await session.execute(
+                            update(AuditChainHeadModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    AuditChainHeadModel.wallet_key == wallet_key,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    AuditChainHeadModel.last_seq == observed_seq,
+                                ),
+                            )
+                            .values(
+                                last_seq=model.seq,
+                                last_chain_hash=model.chain_hash,
+                                updated_at=now,
+                            )
+                        ),
                     )
                     if result.rowcount == 0:
                         raise _HeadConflict()
@@ -220,43 +244,57 @@ async def verify_audit_chain(
     if wallet_id is None:
         factory = get_session_factory()
         async with factory() as session:
-            result = await session.execute(
-                select(ControlPlaneAuditEventModel.wallet_id).distinct()
+            wallet_ids_result = await session.execute(
+                select(cast(Any, ControlPlaneAuditEventModel.wallet_id)).distinct()
             )
-            wallet_ids = [row[0] for row in result.all() if row[0] is not None]
+            wallet_ids = [
+                row[0] for row in wallet_ids_result.all() if row[0] is not None
+            ]
         checked = 0
         first_event_id: str | None = None
         last_event_id: str | None = None
         for current_wallet_id in wallet_ids:
-            result = await verify_audit_chain(
+            chain_result = await verify_audit_chain(
                 wallet_id=current_wallet_id,
                 created_after=created_after,
                 created_before=created_before,
             )
-            checked += result.checked_events
-            first_event_id = first_event_id or result.first_event_id
-            last_event_id = result.last_event_id or last_event_id
-            if not result.valid:
+            checked += chain_result.checked_events
+            first_event_id = first_event_id or chain_result.first_event_id
+            last_event_id = chain_result.last_event_id or last_event_id
+            if not chain_result.valid:
                 return AuditChainVerification(
                     False,
                     checked,
                     first_event_id,
                     last_event_id,
-                    result.reason,
-                    result.broken_event_id,
+                    chain_result.reason,
+                    chain_result.broken_event_id,
                 )
         return AuditChainVerification(True, checked, first_event_id, last_event_id)
 
     stmt = select(ControlPlaneAuditEventModel).order_by(
-        asc(ControlPlaneAuditEventModel.seq),
-        asc(ControlPlaneAuditEventModel.created_at),
+        asc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)),
+        asc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)),
     )
     if wallet_id:
-        stmt = stmt.where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+        stmt = stmt.where(
+            cast(ColumnElement[bool], ControlPlaneAuditEventModel.wallet_id == wallet_id)
+        )
     if created_after:
-        stmt = stmt.where(ControlPlaneAuditEventModel.created_at >= created_after)
+        stmt = stmt.where(
+            cast(
+                ColumnElement[bool],
+                ControlPlaneAuditEventModel.created_at >= created_after,
+            )
+        )
     if created_before:
-        stmt = stmt.where(ControlPlaneAuditEventModel.created_at <= created_before)
+        stmt = stmt.where(
+            cast(
+                ColumnElement[bool],
+                ControlPlaneAuditEventModel.created_at <= created_before,
+            )
+        )
 
     factory = get_session_factory()
     async with factory() as session:

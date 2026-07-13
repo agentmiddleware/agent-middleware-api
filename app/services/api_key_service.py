@@ -20,6 +20,7 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import select, update
+from sqlmodel import col
 
 from ..db.database import get_session_factory
 from ..db.models import APIKeyModel, KeyRotationLogModel, WalletModel
@@ -125,7 +126,7 @@ class APIKeyService:
         """
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
             wallet = result.scalar_one_or_none()
             if not wallet:
@@ -182,13 +183,13 @@ class APIKeyService:
         """
         async with self._session_factory()() as session:
             wallet_result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
             if not wallet_result.scalar_one_or_none():
                 raise WalletNotFoundError(wallet_id)
 
             result = await session.execute(
-                select(APIKeyModel).where(APIKeyModel.wallet_id == wallet_id)
+                select(APIKeyModel).where(col(APIKeyModel.wallet_id) == wallet_id)
             )
             keys = list(result.scalars().all())
 
@@ -248,8 +249,8 @@ class APIKeyService:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(APIKeyModel).where(
-                    APIKeyModel.key_prefix == key_prefix,
-                    APIKeyModel.status == APIKeyStatus.ACTIVE.value,
+                    col(APIKeyModel.key_prefix) == key_prefix,
+                    col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
             )
             key = result.scalar_one_or_none()
@@ -314,7 +315,7 @@ class APIKeyService:
 
         async with self._session_factory()() as session:
             wallet_result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
             if not wallet_result.scalar_one_or_none():
                 raise WalletNotFoundError(wallet_id)
@@ -322,8 +323,8 @@ class APIKeyService:
             if key_id:
                 result = await session.execute(
                     select(APIKeyModel).where(
-                        APIKeyModel.key_id == key_id,
-                        APIKeyModel.wallet_id == wallet_id,
+                        col(APIKeyModel.key_id) == key_id,
+                        col(APIKeyModel.wallet_id) == wallet_id,
                     )
                 )
                 old_key = result.scalar_one_or_none()
@@ -354,7 +355,7 @@ class APIKeyService:
             if old_key_id:
                 await session.execute(
                     update(APIKeyModel)
-                    .where(APIKeyModel.key_id == old_key_id)
+                    .where(col(APIKeyModel.key_id) == old_key_id)
                     .values(
                         rotation_count=APIKeyModel.rotation_count + 1,
                         last_rotated_at=now,
@@ -423,8 +424,8 @@ class APIKeyService:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(APIKeyModel).where(
-                    APIKeyModel.key_id == key_id,
-                    APIKeyModel.wallet_id == wallet_id,
+                    col(APIKeyModel.key_id) == key_id,
+                    col(APIKeyModel.wallet_id) == wallet_id,
                 )
             )
             key = result.scalar_one_or_none()
@@ -467,15 +468,15 @@ class APIKeyService:
 
         async with self._session_factory()() as session:
             wallet_result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
             if not wallet_result.scalar_one_or_none():
                 raise WalletNotFoundError(wallet_id)
 
             result = await session.execute(
                 select(APIKeyModel).where(
-                    APIKeyModel.wallet_id == wallet_id,
-                    APIKeyModel.status == APIKeyStatus.ACTIVE.value,
+                    col(APIKeyModel.wallet_id) == wallet_id,
+                    col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
             )
             active_keys = list(result.scalars().all())
@@ -563,8 +564,8 @@ class APIKeyService:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(KeyRotationLogModel)
-                .where(KeyRotationLogModel.wallet_id == wallet_id)
-                .order_by(KeyRotationLogModel.created_at.desc())
+                .where(col(KeyRotationLogModel.wallet_id) == wallet_id)
+                .order_by(col(KeyRotationLogModel.created_at).desc())
                 .limit(limit)
             )
             logs = list(result.scalars().all())
@@ -602,24 +603,24 @@ class APIKeyService:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(APIKeyModel).where(
-                    APIKeyModel.wallet_id == wallet_id,
-                    APIKeyModel.status == APIKeyStatus.ACTIVE.value,
+                    col(APIKeyModel.wallet_id) == wallet_id,
+                    col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
                 )
             )
             active_key = result.scalars().first()
 
         key_id = active_key.key_id if active_key else None
 
-        result = await self.rotate_key(
+        rotation_result = await self.rotate_key(
             wallet_id=wallet_id,
             key_id=key_id,
             revoke_old=True,
             reason=f"AUTOMATIC: {reason}",
             triggered_by="security_system",
         )
-        result["rotation_type"] = RotationType.AUTOMATIC.value
+        rotation_result["rotation_type"] = RotationType.AUTOMATIC.value
 
-        return result
+        return rotation_result
 
 
 _api_key_service: Optional[APIKeyService] = None

@@ -303,7 +303,10 @@ class ServiceRegistry:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(ServiceRegistryModel).where(
-                    ServiceRegistryModel.service_id == service_id
+                    # ServiceRegistryModel fields are plain Python types (SQLModel),
+                    # not Mapped[...], so mypy sees this as a bool comparison rather
+                    # than a SQLAlchemy ColumnElement. Root cause: app/db/models.py.
+                    ServiceRegistryModel.service_id == service_id  # type: ignore[arg-type]
                 )
             )
             service = result.scalar_one_or_none()
@@ -348,9 +351,10 @@ class ServiceRegistry:
         async with self._session_factory()() as session:
             query = select(ServiceRegistryModel)
             if category:
-                query = query.where(ServiceRegistryModel.category == category.value)
+                # Same plain-Python-type SQLModel field issue as above.
+                query = query.where(ServiceRegistryModel.category == category.value)  # type: ignore[arg-type]
             if active_only:
-                query = query.where(ServiceRegistryModel.is_active.is_(True))
+                query = query.where(ServiceRegistryModel.is_active == True)  # type: ignore[arg-type]  # noqa: E712
 
             result = await session.execute(query)
             services = result.scalars().all()

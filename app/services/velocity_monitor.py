@@ -12,9 +12,10 @@ Architecture:
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import select
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..db.database import get_session_factory
 from ..db.models import WalletModel
@@ -91,7 +92,7 @@ class VelocityMonitor:
             async with session.begin():
                 result = await session.execute(
                     select(WalletModel)
-                    .where(WalletModel.wallet_id == wallet_id)
+                    .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
                     .with_for_update()
                 )
                 wallet = result.scalar_one_or_none()
@@ -231,7 +232,9 @@ class VelocityMonitor:
         """Get current velocity status for a wallet."""
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                select(WalletModel).where(
+                    cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+                )
             )
             wallet = result.scalar_one_or_none()
 

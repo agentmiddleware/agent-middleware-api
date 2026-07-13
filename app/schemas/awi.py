@@ -289,6 +289,10 @@ class AWITask(BaseModel):
     completed_at: datetime | None = None
     current_action_index: int = 0
     total_actions: int
+    action_sequence: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Sequence of AWI actions to execute",
+    )
     result: dict[str, Any] | None = None
     error: str | None = None
 

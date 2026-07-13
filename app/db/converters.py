@@ -82,19 +82,32 @@ def wallet_model_to_response(
         wallet_type=WalletType(wallet.wallet_type),
         owner_name=wallet.owner_name,
         email=wallet.email,
-        balance=wallet.balance,
-        lifetime_credits=wallet.lifetime_credits,
-        lifetime_debits=wallet.lifetime_debits,
+        # Decimal -> float for the display field; the paired *_exact field
+        # keeps the full-precision decimal string so no precision is lost.
+        balance=float(wallet.balance),
+        balance_exact=str(wallet.balance),
+        lifetime_credits=float(wallet.lifetime_credits),
+        lifetime_credits_exact=str(wallet.lifetime_credits),
+        lifetime_debits=float(wallet.lifetime_debits),
+        lifetime_debits_exact=str(wallet.lifetime_debits),
         sponsor_wallet_id=wallet.parent_wallet_id,
         agent_id=wallet.agent_id,
         child_agent_id=wallet.child_agent_id,
-        max_spend=wallet.max_spend,
+        max_spend=float(wallet.max_spend) if wallet.max_spend is not None else None,
+        max_spend_exact=str(wallet.max_spend) if wallet.max_spend is not None else None,
         task_description=wallet.task_description,
         ttl_seconds=wallet.ttl_seconds,
-        daily_limit=wallet.daily_limit,
+        daily_limit=(
+            float(wallet.daily_limit) if wallet.daily_limit is not None else None
+        ),
+        daily_limit_exact=(
+            str(wallet.daily_limit) if wallet.daily_limit is not None else None
+        ),
         auto_refill=wallet.auto_refill,
-        auto_refill_threshold=wallet.auto_refill_threshold,
-        auto_refill_amount=wallet.auto_refill_amount,
+        auto_refill_threshold=float(wallet.auto_refill_threshold),
+        auto_refill_threshold_exact=str(wallet.auto_refill_threshold),
+        auto_refill_amount=float(wallet.auto_refill_amount),
+        auto_refill_amount_exact=str(wallet.auto_refill_amount),
         status=WalletStatus(wallet.status),
         kyc_status=kyc_status,
         created_at=wallet.created_at,
@@ -117,8 +130,12 @@ def ledger_entry_model_to_schema(
         entry_id=entry.entry_id,
         wallet_id=entry.wallet_id,
         action=LedgerAction(entry.action),
-        amount=entry.amount,
-        balance_after=entry.balance_after,
+        # Decimal -> float for the display field; the paired *_exact field
+        # keeps the full-precision decimal string so no precision is lost.
+        amount=float(entry.amount),
+        amount_exact=str(entry.amount),
+        balance_after=float(entry.balance_after),
+        balance_after_exact=str(entry.balance_after),
         service_category=(
             ServiceCategory(entry.service_category)
             if entry.service_category
@@ -126,8 +143,12 @@ def ledger_entry_model_to_schema(
         ),
         description=entry.description,
         request_path=entry.request_path,
-        compute_cost=entry.compute_cost,
-        margin=entry.margin,
+        compute_cost=float(entry.compute_cost) if entry.compute_cost is not None else None,
+        compute_cost_exact=(
+            str(entry.compute_cost) if entry.compute_cost is not None else None
+        ),
+        margin=float(entry.margin) if entry.margin is not None else None,
+        margin_exact=str(entry.margin) if entry.margin is not None else None,
         timestamp=entry.timestamp,
         metadata=metadata,
     )
@@ -141,8 +162,20 @@ def billing_alert_model_to_schema(
         alert_id=alert.alert_id,
         wallet_id=alert.wallet_id,
         alert_type=AlertType(alert.alert_type),
-        threshold_amount=alert.threshold_amount,
-        current_balance=alert.current_balance,
+        # Decimal -> float for the display field; the paired *_exact field
+        # keeps the full-precision decimal string so no precision is lost.
+        threshold_amount=(
+            float(alert.threshold_amount) if alert.threshold_amount is not None else None
+        ),
+        threshold_amount_exact=(
+            str(alert.threshold_amount) if alert.threshold_amount is not None else None
+        ),
+        current_balance=(
+            float(alert.current_balance) if alert.current_balance is not None else None
+        ),
+        current_balance_exact=(
+            str(alert.current_balance) if alert.current_balance is not None else None
+        ),
         message=alert.message,
         severity=AlertSeverity(alert.severity),
         acknowledged=alert.acknowledged,

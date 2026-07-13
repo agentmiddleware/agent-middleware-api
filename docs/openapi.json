@@ -2842,182 +2842,6 @@
         }
       }
     },
-    "/v1/launch": {
-      "post": {
-        "tags": [
-          "Launch Sequence"
-        ],
-        "summary": "Execute Day 1 Launch Sequence",
-        "description": "The ignition key. Executes all four launch phases in sequence:\n\n1. **FUND** — Create sponsor wallet, inject seed capital, provision agent wallets\n2. **INFILTRATE** — Crawl 6 major APIs, register in 4 agent directories\n3. **IGNITE** — Launch B2A content campaign (3 hooks × N formats = 40+ pieces)\n4. **ARM** — Activate Red Team perimeter scanning across all API paths\n\nReturns a LaunchResponse (the system's birth certificate) with full metrics.",
-        "operationId": "execute_launch_v1_launch_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LaunchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LaunchResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/launch/preflight": {
-      "post": {
-        "tags": [
-          "Launch Sequence"
-        ],
-        "summary": "Pre-flight Readiness Check",
-        "description": "Runs a comprehensive validation sweep before Day 1 launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details. Fix all critical failures before calling POST /v1/launch.",
-        "operationId": "run_preflight_v1_launch_preflight_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PreflightRequest",
-                "default": {
-                  "base_url": "",
-                  "stripe_secret_key": ""
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreflightResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/launch/genesis": {
-      "post": {
-        "tags": [
-          "Launch Sequence"
-        ],
-        "summary": "Meta-Launch: Spawn the Genesis Builder Agent",
-        "description": "The ultimate proof of infrastructure autonomy. Executes a 6-phase lifecycle:\n\n1. **FUND** — Create sponsor wallet, spawn Genesis Builder child wallet with spend cap\n2. **BUILD** — Genesis Agent writes a micro-service API\n3. **SECURE** — RTaaS attacks the new service (thorough intensity)\n4. **TEST** — Sandbox validates the agent's generalization ability\n5. **PUBLISH** — Protocol Engine generates llm.txt + OpenAPI + agent.json\n6. **MONITOR** — Telemetry Scope pipeline watches the new service\n\nReturns a GenesisReport — proof that the infrastructure can self-replicate.",
-        "operationId": "execute_genesis_v1_launch_genesis_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GenesisRequest",
-                "default": {
-                  "sponsor_name": "Genesis Sponsor",
-                  "sponsor_email": "genesis@b2a.dev",
-                  "seed_capital_usd": 100.0,
-                  "genesis_budget_credits": 50000.0,
-                  "genesis_max_spend": 50000.0,
-                  "target_service_name": "genesis-widget-api"
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenesisResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/launch/reports": {
-      "get": {
-        "tags": [
-          "Launch Sequence"
-        ],
-        "summary": "Get all launch reports",
-        "description": "Returns historical launch reports (birth certificates).",
-        "operationId": "list_launch_reports_v1_launch_reports_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
     "/v1/protocol/generate": {
       "post": {
         "tags": [
@@ -4173,141 +3997,6 @@
             }
           }
         }
-      }
-    },
-    "/v1/dashboard": {
-      "get": {
-        "tags": [
-          "Real-Time Dashboard"
-        ],
-        "summary": "Full Platform Snapshot",
-        "description": "Returns the complete real-time state of all 15 pillars:\neconomics, security posture, telemetry health, sandbox scores, protocol coverage, and Genesis launch history.",
-        "operationId": "get_dashboard_v1_dashboard_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DashboardResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/dashboard/economics": {
-      "get": {
-        "tags": [
-          "Real-Time Dashboard"
-        ],
-        "summary": "Wallet Economics & Hierarchy",
-        "description": "Credit metrics + full wallet tree (Sponsor → Agent → Child).",
-        "operationId": "get_economics_v1_dashboard_economics_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EconomicsResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/dashboard/security": {
-      "get": {
-        "tags": [
-          "Real-Time Dashboard"
-        ],
-        "summary": "Security Posture",
-        "description": "Aggregate vulnerability metrics across all RTaaS jobs.",
-        "operationId": "get_security_v1_dashboard_security_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SecurityResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/dashboard/telemetry": {
-      "get": {
-        "tags": [
-          "Real-Time Dashboard"
-        ],
-        "summary": "Telemetry Health Overview",
-        "description": "Pipeline health, error rates, latencies, anomaly counts.",
-        "operationId": "get_telemetry_v1_dashboard_telemetry_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TelemetryResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
-      }
-    },
-    "/v1/dashboard/genesis": {
-      "get": {
-        "tags": [
-          "Real-Time Dashboard"
-        ],
-        "summary": "Genesis Launch History",
-        "description": "All Genesis Builder Agent lifecycle reports.",
-        "operationId": "get_genesis_history_v1_dashboard_genesis_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenesisHistoryResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
       }
     },
     "/v1/broadcast": {
@@ -9601,6 +9290,57 @@
         }
       }
     },
+    "/v1/launch/preflight": {
+      "post": {
+        "tags": [
+          "Preflight"
+        ],
+        "summary": "Pre-flight Readiness Check",
+        "description": "Runs a comprehensive validation sweep before production launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details.",
+        "operationId": "run_preflight_v1_launch_preflight_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreflightRequest",
+                "default": {
+                  "base_url": "",
+                  "stripe_secret_key": "",
+                  "campaign_source_url": ""
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreflightResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    },
     "/v1/webhooks/stripe": {
       "post": {
         "tags": [
@@ -12199,6 +11939,15 @@
           "total_actions": {
             "type": "integer",
             "title": "Total Actions"
+          },
+          "action_sequence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Action Sequence",
+            "description": "Sequence of AWI actions to execute"
           },
           "result": {
             "anyOf": [
@@ -15394,89 +15143,6 @@
         "title": "DOMSyncResponse",
         "description": "Response from DOM sync execution."
       },
-      "DashboardResponse": {
-        "properties": {
-          "snapshot_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Snapshot At"
-          },
-          "platform_status": {
-            "type": "string",
-            "title": "Platform Status"
-          },
-          "pillars_active": {
-            "type": "integer",
-            "title": "Pillars Active"
-          },
-          "total_api_routes": {
-            "type": "integer",
-            "title": "Total Api Routes"
-          },
-          "economics": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Economics"
-          },
-          "wallet_tree": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Wallet Tree"
-          },
-          "security": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Security"
-          },
-          "telemetry": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Telemetry"
-          },
-          "sandbox": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Sandbox"
-          },
-          "protocol": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Protocol"
-          },
-          "genesis_launches": {
-            "type": "integer",
-            "title": "Genesis Launches"
-          },
-          "genesis_alive": {
-            "type": "integer",
-            "title": "Genesis Alive"
-          },
-          "genesis_failed": {
-            "type": "integer",
-            "title": "Genesis Failed"
-          }
-        },
-        "type": "object",
-        "required": [
-          "snapshot_at",
-          "platform_status",
-          "pillars_active",
-          "total_api_routes",
-          "economics",
-          "wallet_tree",
-          "security",
-          "telemetry",
-          "sandbox",
-          "protocol",
-          "genesis_launches",
-          "genesis_alive",
-          "genesis_failed"
-        ],
-        "title": "DashboardResponse"
-      },
       "DecisionRequest": {
         "properties": {
           "agent_id": {
@@ -16068,59 +15734,6 @@
         "title": "DryRunSessionResponse",
         "description": "Response when creating a dry-run session."
       },
-      "EconomicsResponse": {
-        "properties": {
-          "total_sponsors": {
-            "type": "integer",
-            "title": "Total Sponsors"
-          },
-          "total_agent_wallets": {
-            "type": "integer",
-            "title": "Total Agent Wallets"
-          },
-          "total_child_wallets": {
-            "type": "integer",
-            "title": "Total Child Wallets"
-          },
-          "total_credits_in_system": {
-            "type": "number",
-            "title": "Total Credits In System"
-          },
-          "total_credits_spent": {
-            "type": "number",
-            "title": "Total Credits Spent"
-          },
-          "total_delegated_to_children": {
-            "type": "number",
-            "title": "Total Delegated To Children"
-          },
-          "credit_velocity": {
-            "type": "number",
-            "title": "Credit Velocity",
-            "description": "Ratio of spent/total credits. Higher = faster burn."
-          },
-          "wallet_tree": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Wallet Tree",
-            "description": "Hierarchical wallet tree: Sponsor → Agent → Child"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total_sponsors",
-          "total_agent_wallets",
-          "total_child_wallets",
-          "total_credits_in_system",
-          "total_credits_spent",
-          "total_delegated_to_children",
-          "credit_velocity"
-        ],
-        "title": "EconomicsResponse"
-      },
       "EmergencyKeyRevocationRequest": {
         "properties": {
           "wallet_id": {
@@ -16689,223 +16302,6 @@
         ],
         "title": "GenerationListResponse",
         "description": "List of all generations."
-      },
-      "GenesisHistoryResponse": {
-        "properties": {
-          "total_launches": {
-            "type": "integer",
-            "title": "Total Launches"
-          },
-          "alive": {
-            "type": "integer",
-            "title": "Alive"
-          },
-          "failed": {
-            "type": "integer",
-            "title": "Failed"
-          },
-          "reports": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Reports"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total_launches",
-          "alive",
-          "failed",
-          "reports"
-        ],
-        "title": "GenesisHistoryResponse"
-      },
-      "GenesisRequest": {
-        "properties": {
-          "sponsor_name": {
-            "type": "string",
-            "title": "Sponsor Name",
-            "description": "Human sponsor name.",
-            "default": "Genesis Sponsor"
-          },
-          "sponsor_email": {
-            "type": "string",
-            "title": "Sponsor Email",
-            "description": "Sponsor email.",
-            "default": "genesis@b2a.dev"
-          },
-          "seed_capital_usd": {
-            "type": "number",
-            "title": "Seed Capital Usd",
-            "description": "Seed capital in USD.",
-            "default": 100.0
-          },
-          "genesis_budget_credits": {
-            "type": "number",
-            "title": "Genesis Budget Credits",
-            "description": "Genesis Agent budget (credits).",
-            "default": 50000.0
-          },
-          "genesis_max_spend": {
-            "type": "number",
-            "title": "Genesis Max Spend",
-            "description": "Hard lifetime spend cap (credits).",
-            "default": 50000.0
-          },
-          "target_service_name": {
-            "type": "string",
-            "title": "Target Service Name",
-            "description": "Name of the micro-service the Genesis Agent will build.",
-            "default": "genesis-widget-api"
-          }
-        },
-        "type": "object",
-        "title": "GenesisRequest",
-        "description": "Configuration for the Genesis Agent Meta-Launch."
-      },
-      "GenesisResponse": {
-        "properties": {
-          "genesis_id": {
-            "type": "string",
-            "title": "Genesis Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "description": "ALIVE or FAILED"
-          },
-          "task": {
-            "type": "string",
-            "title": "Task"
-          },
-          "phases_completed": {
-            "type": "integer",
-            "title": "Phases Completed"
-          },
-          "phases_total": {
-            "type": "integer",
-            "title": "Phases Total"
-          },
-          "total_credits_spent": {
-            "type": "number",
-            "title": "Total Credits Spent"
-          },
-          "credits_remaining": {
-            "type": "number",
-            "title": "Credits Remaining"
-          },
-          "fund": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fund"
-          },
-          "build": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Build"
-          },
-          "secure": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Secure"
-          },
-          "test": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test"
-          },
-          "publish": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Publish"
-          },
-          "monitor": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Monitor"
-          },
-          "errors": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Errors"
-          },
-          "started_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Started At"
-          },
-          "completed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "genesis_id",
-          "status",
-          "task",
-          "phases_completed",
-          "phases_total",
-          "total_credits_spent",
-          "credits_remaining",
-          "started_at"
-        ],
-        "title": "GenesisResponse",
-        "description": "The proof of autonomous self-replication."
       },
       "HTTPValidationError": {
         "properties": {
@@ -17886,163 +17282,6 @@
         ],
         "title": "KeyRotationLogEntry",
         "description": "Audit log entry for key rotation."
-      },
-      "LaunchRequest": {
-        "properties": {
-          "sponsor_name": {
-            "type": "string",
-            "title": "Sponsor Name",
-            "description": "Human sponsor name for the liability-sink root account.",
-            "default": "B2A Seed Fund"
-          },
-          "sponsor_email": {
-            "type": "string",
-            "title": "Sponsor Email",
-            "description": "Contact email for billing alerts.",
-            "default": "founder@yourdomain.com"
-          },
-          "seed_capital_usd": {
-            "type": "number",
-            "exclusiveMinimum": 0.0,
-            "title": "Seed Capital Usd",
-            "description": "Seed capital in USD. At $0.001/credit, $50 = 50,000 credits.",
-            "default": 50.0
-          },
-          "agent_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Agent Ids",
-            "description": "Agent IDs to provision with funded wallets.",
-            "default": [
-              "content-swarm-alpha",
-              "oracle-crawler-01",
-              "red-team-sentinel"
-            ]
-          },
-          "agent_budget_credits": {
-            "type": "number",
-            "exclusiveMinimum": 0.0,
-            "title": "Agent Budget Credits",
-            "description": "Credits per agent wallet.",
-            "default": 10000.0
-          },
-          "platforms": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Platforms",
-            "description": "Content distribution platforms.",
-            "default": [
-              "youtube_shorts",
-              "tiktok",
-              "instagram_reels"
-            ]
-          },
-          "max_posts_per_day": {
-            "type": "integer",
-            "maximum": 10.0,
-            "minimum": 1.0,
-            "title": "Max Posts Per Day",
-            "description": "Max posts per platform per day (audience fatigue cap).",
-            "default": 3
-          }
-        },
-        "type": "object",
-        "title": "LaunchRequest",
-        "description": "Day 1 launch configuration. All fields have battle-tested defaults."
-      },
-      "LaunchResponse": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "description": "LIVE or FAILED"
-          },
-          "launched_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Launched At"
-          },
-          "sponsor_wallet_id": {
-            "type": "string",
-            "title": "Sponsor Wallet Id"
-          },
-          "agent_wallet_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Agent Wallet Ids"
-          },
-          "total_credits_seeded": {
-            "type": "number",
-            "title": "Total Credits Seeded"
-          },
-          "apis_crawled": {
-            "type": "integer",
-            "title": "Apis Crawled"
-          },
-          "directories_registered": {
-            "type": "integer",
-            "title": "Directories Registered"
-          },
-          "visibility_score": {
-            "type": "number",
-            "title": "Visibility Score"
-          },
-          "campaign_id": {
-            "type": "string",
-            "title": "Campaign Id"
-          },
-          "total_content_pieces": {
-            "type": "integer",
-            "title": "Total Content Pieces"
-          },
-          "scheduled_posts": {
-            "type": "integer",
-            "title": "Scheduled Posts"
-          },
-          "estimated_total_views": {
-            "type": "integer",
-            "title": "Estimated Total Views"
-          },
-          "security_score": {
-            "type": "number",
-            "title": "Security Score"
-          },
-          "attack_vectors_tested": {
-            "type": "integer",
-            "title": "Attack Vectors Tested"
-          },
-          "summary": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Summary",
-            "description": "Complete launch metrics."
-          }
-        },
-        "type": "object",
-        "required": [
-          "status",
-          "launched_at",
-          "sponsor_wallet_id",
-          "agent_wallet_ids",
-          "total_credits_seeded",
-          "apis_crawled",
-          "directories_registered",
-          "visibility_score",
-          "campaign_id",
-          "total_content_pieces",
-          "scheduled_posts",
-          "estimated_total_views",
-          "security_score",
-          "attack_vectors_tested"
-        ],
-        "title": "LaunchResponse",
-        "description": "Birth certificate of the autonomous system."
       },
       "LearnRequest": {
         "properties": {
@@ -20287,6 +19526,12 @@
             "title": "Stripe Secret Key",
             "description": "Stripe secret key to validate (sk_live_... for production).",
             "default": ""
+          },
+          "campaign_source_url": {
+            "type": "string",
+            "title": "Campaign Source Url",
+            "description": "Campaign content source URL to validate (e.g., a real launch video URL).",
+            "default": ""
           }
         },
         "type": "object",
@@ -21873,68 +21118,6 @@
         "title": "ScheduleResponse",
         "description": "Full schedule with per-content, per-platform recommendations."
       },
-      "SecurityResponse": {
-        "properties": {
-          "total_jobs": {
-            "type": "integer",
-            "title": "Total Jobs"
-          },
-          "total_targets_scanned": {
-            "type": "integer",
-            "title": "Total Targets Scanned"
-          },
-          "total_vulnerabilities": {
-            "type": "integer",
-            "title": "Total Vulnerabilities"
-          },
-          "critical_count": {
-            "type": "integer",
-            "title": "Critical Count"
-          },
-          "high_count": {
-            "type": "integer",
-            "title": "High Count"
-          },
-          "medium_count": {
-            "type": "integer",
-            "title": "Medium Count"
-          },
-          "low_count": {
-            "type": "integer",
-            "title": "Low Count"
-          },
-          "avg_security_score": {
-            "type": "number",
-            "title": "Avg Security Score"
-          },
-          "most_common_category": {
-            "type": "string",
-            "title": "Most Common Category"
-          },
-          "recent_jobs": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Recent Jobs"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total_jobs",
-          "total_targets_scanned",
-          "total_vulnerabilities",
-          "critical_count",
-          "high_count",
-          "medium_count",
-          "low_count",
-          "avg_security_score",
-          "most_common_category",
-          "recent_jobs"
-        ],
-        "title": "SecurityResponse"
-      },
       "SendMessageRequest": {
         "properties": {
           "to_agent": {
@@ -22633,53 +21816,6 @@
         ],
         "title": "TelemetryEventType",
         "description": "Categories of telemetry events the system can ingest."
-      },
-      "TelemetryResponse": {
-        "properties": {
-          "total_pipelines": {
-            "type": "integer",
-            "title": "Total Pipelines"
-          },
-          "total_events": {
-            "type": "integer",
-            "title": "Total Events"
-          },
-          "total_anomalies": {
-            "type": "integer",
-            "title": "Total Anomalies"
-          },
-          "total_auto_prs": {
-            "type": "integer",
-            "title": "Total Auto Prs"
-          },
-          "avg_error_rate": {
-            "type": "number",
-            "title": "Avg Error Rate"
-          },
-          "avg_latency_ms": {
-            "type": "number",
-            "title": "Avg Latency Ms"
-          },
-          "pipelines": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Pipelines"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total_pipelines",
-          "total_events",
-          "total_anomalies",
-          "total_auto_prs",
-          "avg_error_rate",
-          "avg_latency_ms",
-          "pipelines"
-        ],
-        "title": "TelemetryResponse"
       },
       "ToolCallRequest": {
         "properties": {

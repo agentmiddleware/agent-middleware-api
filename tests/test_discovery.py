@@ -66,7 +66,7 @@ async def test_doc_index(client):
     assert "services" in data
     assert data["agent_first"]["design_principle"] == "agent_first"
     assert data["sections"][0]["path"] == "/.well-known/agent.json"
-    assert len(data["services"]) >= 15  # 13 pillars + dashboard + broadcast
+    assert len(data["services"]) >= 13  # 11 pillars + preflight + broadcast
 
 
 @pytest.mark.anyio

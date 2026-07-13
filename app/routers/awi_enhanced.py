@@ -27,6 +27,7 @@ from ..schemas.awi_enhanced import (
     DOMSyncResponse,
     MemoryIndexRequest,
     MemoryIndexResponse,
+    MemorySearchResult,
     PasskeyChallengeRequest,
     PasskeyChallengeResponse,
     PasskeySessionStatus,
@@ -733,19 +734,19 @@ async def query_memories(
         return RAGQueryResponse(
             query=request.query,
             results=[
-                {
-                    "memory_id": r.memory_id,
-                    "session_id": r.session_id,
-                    "session_type": r.session_type,
-                    "user_intent": r.user_intent,
-                    "action_sequence": r.action_sequence,
-                    "key_entities": r.key_entities,
-                    "similarity_score": r.similarity_score,
-                    "created_at": r.created_at,
-                    "accessed_at": r.accessed_at,
-                    "access_count": r.access_count,
-                    "raw_state": r.raw_state,
-                }
+                MemorySearchResult(
+                    memory_id=r.memory_id,
+                    session_id=r.session_id,
+                    session_type=r.session_type,
+                    user_intent=r.user_intent,
+                    action_sequence=r.action_sequence,
+                    key_entities=r.key_entities,
+                    similarity_score=r.similarity_score,
+                    created_at=r.created_at,
+                    accessed_at=r.accessed_at,
+                    access_count=r.access_count,
+                    raw_state=r.raw_state,
+                )
                 for r in results
             ],
             total_found=len(results),

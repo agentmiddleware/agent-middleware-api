@@ -15,13 +15,10 @@ from ..services.content_factory import ContentFactory
 from ..services.red_team import RedTeamSwarm
 from ..services.oracle import AgentOracle
 from ..services.agent_money import AgentMoney
-from ..services.launch_sequence import LaunchSequence
 from ..services.protocol_engine import ProtocolEngine
 from ..services.rtaas import RTaaSEngine
 from ..services.sandbox import SandboxEngine
 from ..services.telemetry_scope import TelemetryScope
-from ..services.genesis import GenesisAgent
-from ..services.dashboard import DashboardEngine
 from ..services.oracle_broadcast import OracleBroadcastEngine
 
 settings = get_settings()
@@ -83,16 +80,6 @@ def get_agent_money() -> AgentMoney:
     return AgentMoney()
 
 
-def get_launch_sequence() -> LaunchSequence:
-    """Launch Sequence engine — NOT cached, creates fresh state each launch."""
-    return LaunchSequence(
-        agent_money=get_agent_money(),
-        oracle=get_agent_oracle(),
-        factory=get_content_factory(),
-        red_team=get_red_team_swarm(),
-    )
-
-
 @lru_cache()
 def get_protocol_engine() -> ProtocolEngine:
     """Singleton Protocol Generation Engine — code-to-discovery pipeline."""
@@ -115,29 +102,6 @@ def get_sandbox_engine() -> SandboxEngine:
 def get_telemetry_scope() -> TelemetryScope:
     """Singleton Telemetry Scoping engine — multi-tenant autonomous PM."""
     return TelemetryScope()
-
-
-def get_genesis_agent() -> GenesisAgent:
-    """Genesis Agent — NOT cached, creates fresh lifecycle each execution."""
-    return GenesisAgent(
-        agent_money=get_agent_money(),
-        rtaas=get_rtaas_engine(),
-        sandbox=get_sandbox_engine(),
-        protocol_engine=get_protocol_engine(),
-        telemetry_scope=get_telemetry_scope(),
-    )
-
-
-@lru_cache()
-def get_dashboard_engine() -> DashboardEngine:
-    """Singleton Dashboard — aggregates all pillar data in real-time."""
-    return DashboardEngine(
-        money=get_agent_money(),
-        rtaas=get_rtaas_engine(),
-        telemetry=get_telemetry_scope(),
-        sandbox=get_sandbox_engine(),
-        protocol=get_protocol_engine(),
-    )
 
 
 @lru_cache()

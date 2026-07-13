@@ -5,7 +5,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
 from app.db.database import get_session_factory
@@ -96,7 +97,9 @@ class SigningKeyService:
         public_key_b64 = self._public_key_b64()
         async with factory() as session:
             result = await session.execute(
-                select(SigningKeyModel).where(SigningKeyModel.key_id == self._key_id)
+                select(SigningKeyModel).where(
+                    cast(ColumnElement[bool], SigningKeyModel.key_id == self._key_id)
+                )
             )
             key = result.scalar_one_or_none()
             # Read-mostly fast path: when the active key already matches, do no
@@ -132,7 +135,10 @@ class SigningKeyService:
                 key = (
                     await session.execute(
                         select(SigningKeyModel).where(
-                            SigningKeyModel.key_id == self._key_id
+                            cast(
+                                ColumnElement[bool],
+                                SigningKeyModel.key_id == self._key_id,
+                            )
                         )
                     )
                 ).scalar_one()
@@ -147,7 +153,9 @@ class SigningKeyService:
         factory = get_session_factory()
         async with factory() as session:
             result = await session.execute(
-                select(SigningKeyModel).where(SigningKeyModel.key_id == key_id)
+                select(SigningKeyModel).where(
+                    cast(ColumnElement[bool], SigningKeyModel.key_id == key_id)
+                )
             )
             return result.scalar_one_or_none()
 

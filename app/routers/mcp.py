@@ -34,7 +34,7 @@ from ..services.mcp_phase9_tools import (
     ensure_phase9_registered,
     register_default_mcp_services,
 )
-from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
+from ..schemas.billing import InsufficientFundsResponse, LedgerEntry, ServiceCategory
 
 # Spine primitives are consumed through the trust-plane facade so the governed
 # invocation path depends on the product core by its public boundary.
@@ -318,7 +318,7 @@ async def _execute_registered_tool(
     *,
     tool_name: str,
     arguments: dict[str, Any],
-    wallet_id: str,
+    wallet_id: str | None,
     auth: AuthContext,
     money: AgentMoney,
     transport: str,
@@ -655,6 +655,13 @@ async def _execute_registered_tool(
                 jsonrpc_code=-32004,
             )
         raise ValueError("insufficient_funds")
+
+    # money.charge() is only ever invoked here without dry_run=True, so a real
+    # (non-simulated) LedgerEntry is the only non-error outcome; this also
+    # narrows the type for the ledger_entry_id/entry_id accesses below.
+    assert isinstance(charge_result, LedgerEntry), (
+        f"Expected LedgerEntry from non-dry-run charge, got {type(charge_result).__name__}"
+    )
 
     try:
         if inspect.iscoroutinefunction(func):
@@ -1053,7 +1060,12 @@ async def invoke_tool(
     """
     mcp_context = request.mcp_context
     if not mcp_context:
-        mcp_context = McpContext(wallet_id=request.arguments.get("wallet_id", ""))
+        mcp_context = McpContext(
+            wallet_id=request.arguments.get("wallet_id", ""),
+            request_path=None,
+            permit_id=None,
+            idempotency_key=None,
+        )
 
     if not mcp_context.wallet_id:
         raise HTTPException(status_code=400, detail="Missing wallet_id")

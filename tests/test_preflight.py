@@ -157,7 +157,24 @@ async def test_preflight_checks_content_source_url(client):
     content_checks = [c for c in data["checks"] if c["name"] == "content_source_url"]
     assert len(content_checks) == 1
     assert content_checks[0]["passed"] is False
-    assert content_checks[0]["severity"] == "critical"
+
+
+@pytest.mark.anyio
+async def test_preflight_accepts_real_campaign_source_url(client):
+    """An operator-supplied real content URL should pass the check instead of
+    permanently failing on the unconfigurable placeholder default."""
+    resp = await client.post(
+        "/v1/launch/preflight",
+        json={"campaign_source_url": "https://cdn.myrealdomain.com/launch-video.mp4"},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    content_checks = [c for c in data["checks"] if c["name"] == "content_source_url"]
+    assert len(content_checks) == 1
+    assert content_checks[0]["passed"] is True
+    assert content_checks[0]["severity"] == "info"
 
 
 @pytest.mark.anyio

@@ -35,6 +35,9 @@ def _authorize_audit_events_request(
     if summary or not wallet_id:
         auth.require_bootstrap_admin()
 
+    # require_bootstrap_admin() above raises for non-admins, so the only way
+    # to reach this point is the branch where wallet_id was truthy.
+    assert wallet_id is not None
     auth.require_wallet_access(wallet_id)
     return wallet_id, None
 
