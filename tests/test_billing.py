@@ -741,3 +741,130 @@ async def test_bootstrap_key_can_manage_multiple_wallets(client, api_headers):
             headers=api_headers,
         )
         assert key_resp.status_code == 201
+
+
+@pytest.mark.anyio
+async def test_topup_retry_with_same_idempotency_key_does_not_double_credit(
+    client, api_headers, clean_database
+):
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Idem Topup", "email": "idem-topup@t.com", "initial_credits": 0},
+        headers=api_headers,
+    )
+    wallet_id = sponsor.json()["wallet_id"]
+
+    headers = {**api_headers, "Idempotency-Key": "topup-retry-1"}
+    body = {"wallet_id": wallet_id, "amount_fiat": 50.0}
+
+    first = await client.post("/v1/billing/top-up", json=body, headers=headers)
+    assert first.status_code == 202
+    first_id = first.json()["top_up_id"]
+
+    # Retry with the same key replays the original outcome, no second credit.
+    second = await client.post("/v1/billing/top-up", json=body, headers=headers)
+    assert second.status_code == 202
+    assert second.json()["top_up_id"] == first_id
+
+    wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+    assert wallet.json()["balance"] == 50000.0  # credited once, not twice
+
+
+@pytest.mark.anyio
+async def test_topup_reused_key_different_amount_conflicts(
+    client, api_headers, clean_database
+):
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Idem Topup Conflict", "email": "idem-topup-c@t.com", "initial_credits": 0},
+        headers=api_headers,
+    )
+    wallet_id = sponsor.json()["wallet_id"]
+    headers = {**api_headers, "Idempotency-Key": "topup-conflict-1"}
+
+    await client.post(
+        "/v1/billing/top-up", json={"wallet_id": wallet_id, "amount_fiat": 50.0}, headers=headers
+    )
+    conflict = await client.post(
+        "/v1/billing/top-up", json={"wallet_id": wallet_id, "amount_fiat": 99.0}, headers=headers
+    )
+    assert conflict.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_transfer_retry_with_same_idempotency_key_does_not_double_spend(
+    client, api_headers, clean_database
+):
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Xfer Src", "email": "xfer-src@t.com", "initial_credits": 10000},
+        headers=api_headers,
+    )
+    src = sponsor.json()["wallet_id"]
+    agent_a = await client.post(
+        "/v1/billing/wallets/agent",
+        json={"sponsor_wallet_id": src, "agent_id": "xfer-a", "budget_credits": 5000},
+        headers=api_headers,
+    )
+    agent_b = await client.post(
+        "/v1/billing/wallets/agent",
+        json={"sponsor_wallet_id": src, "agent_id": "xfer-b", "budget_credits": 100},
+        headers=api_headers,
+    )
+    a = agent_a.json()["wallet_id"]
+    b = agent_b.json()["wallet_id"]
+
+    headers = {**api_headers, "Idempotency-Key": "xfer-retry-1"}
+    url = f"/v1/billing/transfer?from_wallet_id={a}&to_wallet_id={b}&amount=1000"
+
+    first = await client.post(url, headers=headers)
+    assert first.status_code == 200
+
+    # Retry with the same key must not move credits again.
+    second = await client.post(url, headers=headers)
+    assert second.status_code == 200
+
+    wallet_a = await client.get(f"/v1/billing/wallets/{a}", headers=api_headers)
+    wallet_b = await client.get(f"/v1/billing/wallets/{b}", headers=api_headers)
+    # Exactly one transfer of 1000 applied.
+    assert wallet_a.json()["balance"] == 4000.0
+    assert wallet_b.json()["balance"] == 1100.0  # 100 initial + 1000 transferred once
+
+
+@pytest.mark.anyio
+async def test_rejected_charge_does_not_inflate_velocity_counters(
+    client, api_headers, clean_database
+):
+    """A charge rejected for insufficient funds must not leave the wallet's
+    hourly/daily spend counters inflated (which would trip false daily-limit
+    rejections and velocity auto-freeze despite zero real spend)."""
+    from decimal import Decimal as _D
+    from app.db.database import get_session_factory
+    from app.db.models import WalletModel
+
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Velo", "email": "velo@t.com", "initial_credits": 10000},
+        headers=api_headers,
+    )
+    agent = await client.post(
+        "/v1/billing/wallets/agent",
+        json={"sponsor_wallet_id": sponsor.json()["wallet_id"], "agent_id": "velo-a", "budget_credits": 5},
+        headers=api_headers,
+    )
+    wallet_id = agent.json()["wallet_id"]
+
+    # red_team costs 100 credits/unit; wallet has 5 -> insufficient funds.
+    for _ in range(3):
+        resp = await client.post(
+            f"/v1/billing/charge?wallet_id={wallet_id}&service=red_team&units=1",
+            headers=api_headers,
+        )
+        assert resp.status_code == 402
+
+    factory = get_session_factory()
+    async with factory() as session:
+        wallet = await session.get(WalletModel, wallet_id)
+        # All three rejected charges were reversed out of the counters.
+        assert wallet.daily_spent == _D("0")
+        assert wallet.hourly_spent == _D("0")

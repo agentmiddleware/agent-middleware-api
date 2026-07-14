@@ -136,17 +136,20 @@ class StripeIntegration:
             logger.error(f"Invalid Stripe signature: {e}")
             return False
 
+        # The refund handler is dispatched separately because it also needs the
+        # event id for idempotent debiting; the rest take just the event object.
         handler_map = {
             "payment_intent.succeeded": self._handle_payment_success,
             "payment_intent.payment_failed": self._handle_payment_failed,
-            "charge.refunded": self._handle_refund,
         }
 
-        handler = handler_map.get(event["type"])
-        if handler:
-            await handler(event["data"]["object"])
+        event_type = event["type"]
+        if event_type == "charge.refunded":
+            await self._handle_refund(event["data"]["object"], event.get("id"))
+        elif event_type in handler_map:
+            await handler_map[event_type](event["data"]["object"])
         else:
-            logger.debug(f"Ignoring unhandled event type: {event['type']}")
+            logger.debug(f"Ignoring unhandled event type: {event_type}")
 
         return True
 
@@ -190,7 +193,9 @@ class StripeIntegration:
                 payment_intent_id=payment_intent["id"],
             )
 
-    async def _handle_refund(self, charge: dict) -> None:
+    async def _handle_refund(
+        self, charge: dict, event_id: str | None = None
+    ) -> None:
         """Debit wallet when Stripe issues a refund."""
         payment_intent_id = charge.get("payment_intent")
         if not payment_intent_id:
@@ -216,6 +221,11 @@ class StripeIntegration:
                 wallet_id=entry.wallet_id,
                 amount=Decimal(credits),
                 description=f"Refund for PaymentIntent {payment_intent_id}",
+                # Idempotency key for the refund: a redelivered charge.refunded
+                # event has the same id, so its debit is rejected as a
+                # duplicate instead of taking credits twice. Fall back to the
+                # charge id when the event id is unavailable.
+                stripe_event_id=event_id or charge.get("id"),
             )
 
     async def _mint_credits(
@@ -277,40 +287,69 @@ class StripeIntegration:
             )
             return
 
+    @staticmethod
+    def _is_duplicate_stripe_event_error(exc: IntegrityError) -> bool:
+        """Return true only for the refund-idempotency unique constraint."""
+        message = str(getattr(exc, "orig", exc)).lower()
+        return "stripe_event_id" in message and (
+            "unique" in message or "duplicate" in message
+        )
+
     async def _debit_wallet(
         self,
         wallet_id: str,
         amount: Decimal,
         description: str,
+        stripe_event_id: str | None = None,
     ) -> None:
-        """Debit wallet for refunds."""
-        async with self._session_factory()() as session:
-            async with session.begin():
-                result = await session.execute(
-                    select(WalletModel)
-                    .where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
-                    .with_for_update()
+        """Debit wallet for refunds.
+
+        When ``stripe_event_id`` is set, the unique constraint on that column
+        makes a redelivered refund event a no-op instead of a second debit.
+        """
+        try:
+            async with self._session_factory()() as session:
+                async with session.begin():
+                    result = await session.execute(
+                        select(WalletModel)
+                        .where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
+                        .with_for_update()
+                    )
+                    wallet = result.scalar_one_or_none()
+
+                    if not wallet:
+                        logger.error(f"Wallet not found: {wallet_id}")
+                        return
+
+                    wallet.balance -= amount
+                    wallet.lifetime_debits += amount
+
+                    entry = LedgerEntryModel(
+                        entry_id=str(uuid4()),
+                        wallet_id=wallet_id,
+                        action="refund",
+                        amount=-amount,
+                        balance_after=wallet.balance,
+                        description=description,
+                        stripe_event_id=stripe_event_id,
+                    )
+                    session.add(entry)
+
+                await session.commit()
+        except IntegrityError as exc:
+            if not self._is_duplicate_stripe_event_error(exc):
+                logger.exception(
+                    "Stripe refund debit failed with non-idempotency integrity "
+                    "error for event %s",
+                    stripe_event_id,
                 )
-                wallet = result.scalar_one_or_none()
-
-                if not wallet:
-                    logger.error(f"Wallet not found: {wallet_id}")
-                    return
-
-                wallet.balance -= amount
-                wallet.lifetime_debits += amount
-
-                entry = LedgerEntryModel(
-                    entry_id=str(uuid4()),
-                    wallet_id=wallet_id,
-                    action="refund",
-                    amount=-amount,
-                    balance_after=wallet.balance,
-                    description=description,
-                )
-                session.add(entry)
-
-            await session.commit()
+                raise
+            logger.info(
+                "Idempotency catch: refund event %s already processed. "
+                "Swallowing duplicate to avoid a second debit.",
+                stripe_event_id,
+            )
+            return
 
 
 _stripe_integration: Optional[StripeIntegration] = None

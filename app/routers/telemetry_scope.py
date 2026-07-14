@@ -10,15 +10,35 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..core.auth import verify_api_key
+from ..core.auth import AuthContext, get_auth_context
 from ..core.dependencies import get_telemetry_scope
-from ..services.telemetry_scope import TelemetryScope
+from ..services.telemetry_scope import TelemetryPipeline, TelemetryScope
 
 router = APIRouter(
     prefix="/v1/telemetry-scope",
     tags=["Telemetry Scoping"],
-    dependencies=[Depends(verify_api_key)],
 )
+
+
+async def _load_owned_pipeline(
+    pipeline_id: str,
+    scope: TelemetryScope,
+    auth: AuthContext,
+) -> TelemetryPipeline:
+    """Fetch a pipeline and enforce that the caller owns its tenant.
+
+    Pipelines are wallet-scoped: ``tenant_id`` is the owning wallet. Every
+    pipeline-scoped handler must go through this so one tenant cannot read,
+    mutate, or trigger auto-PRs against another tenant's pipeline.
+    """
+    pipeline = await scope.get_pipeline(pipeline_id)
+    if not pipeline:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "pipeline_not_found"},
+        )
+    auth.require_wallet_access(pipeline.tenant_id)
+    return pipeline
 
 
 # --- Schemas ---
@@ -101,8 +121,12 @@ class PipelineListResponse(BaseModel):
 )
 async def create_pipeline(
     request: CreatePipelineRequest,
+    auth: AuthContext = Depends(get_auth_context),
     scope: TelemetryScope = Depends(get_telemetry_scope),
 ):
+    # A caller may only create a pipeline for its own wallet; bootstrap admins
+    # may target any tenant.
+    auth.require_wallet_access(request.tenant_id)
     pipeline = await scope.create_pipeline(
         tenant_id=request.tenant_id,
         service_name=request.service_name,
@@ -124,16 +148,12 @@ async def create_pipeline(
 async def ingest_events(
     pipeline_id: str,
     request: IngestRequest,
+    auth: AuthContext = Depends(get_auth_context),
     scope: TelemetryScope = Depends(get_telemetry_scope),
 ):
-    try:
-        result = await scope.ingest_events(pipeline_id, request.events)
-        return IngestResponse(**result)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "pipeline_not_found", "message": str(e)},
-        )
+    await _load_owned_pipeline(pipeline_id, scope, auth)
+    result = await scope.ingest_events(pipeline_id, request.events)
+    return IngestResponse(**result)
 
 
 @router.get(
@@ -143,20 +163,16 @@ async def ingest_events(
 )
 async def get_anomalies(
     pipeline_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     scope: TelemetryScope = Depends(get_telemetry_scope),
 ):
-    try:
-        anomalies = await scope.get_anomalies(pipeline_id)
-        return {
-            "pipeline_id": pipeline_id,
-            "anomalies": anomalies,
-            "total": len(anomalies),
-        }
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "pipeline_not_found", "message": str(e)},
-        )
+    await _load_owned_pipeline(pipeline_id, scope, auth)
+    anomalies = await scope.get_anomalies(pipeline_id)
+    return {
+        "pipeline_id": pipeline_id,
+        "anomalies": anomalies,
+        "total": len(anomalies),
+    }
 
 
 @router.post(
@@ -170,8 +186,10 @@ async def get_anomalies(
 async def generate_auto_pr(
     pipeline_id: str,
     request: AutoPrRequest,
+    auth: AuthContext = Depends(get_auth_context),
     scope: TelemetryScope = Depends(get_telemetry_scope),
 ):
+    await _load_owned_pipeline(pipeline_id, scope, auth)
     try:
         pr = await scope.generate_auto_pr(pipeline_id, request.anomaly_id)
         return pr
@@ -190,16 +208,12 @@ async def generate_auto_pr(
 )
 async def get_stats(
     pipeline_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     scope: TelemetryScope = Depends(get_telemetry_scope),
 ):
-    try:
-        stats = await scope.get_pipeline_stats(pipeline_id)
-        return PipelineStatsResponse(**stats)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "pipeline_not_found", "message": str(e)},
-        )
+    await _load_owned_pipeline(pipeline_id, scope, auth)
+    stats = await scope.get_pipeline_stats(pipeline_id)
+    return PipelineStatsResponse(**stats)
 
 
 @router.get(
@@ -209,14 +223,10 @@ async def get_stats(
 )
 async def get_pipeline(
     pipeline_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     scope: TelemetryScope = Depends(get_telemetry_scope),
 ):
-    pipeline = await scope.get_pipeline(pipeline_id)
-    if not pipeline:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "pipeline_not_found"},
-        )
+    pipeline = await _load_owned_pipeline(pipeline_id, scope, auth)
     return _pipeline_to_response(pipeline)
 
 
@@ -227,8 +237,15 @@ async def get_pipeline(
 )
 async def list_pipelines(
     tenant_id: str | None = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
     scope: TelemetryScope = Depends(get_telemetry_scope),
 ):
+    # A wallet-scoped key may only ever list its own pipelines -- ignore any
+    # client-supplied tenant_id and force it to the caller's wallet, so this
+    # can't be used to enumerate other tenants. Bootstrap admins may filter by
+    # any tenant_id (or omit it to list all).
+    if not auth.is_bootstrap_admin:
+        tenant_id = auth.wallet_id
     pipelines = await scope.list_pipelines(tenant_id)
     return PipelineListResponse(
         pipelines=[

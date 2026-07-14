@@ -8,8 +8,9 @@ Swarm arbitrage silently books margin on every transaction.
 This is how the API generates revenue autonomously.
 """
 
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -28,6 +29,7 @@ from ..services.governance import record_governed_action
 from ..services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
+    IdempotencyService,
     get_idempotency_service,
 )
 from ..services.policies import evaluate_wallet_policy
@@ -59,6 +61,78 @@ from ..schemas.billing import (
 
 def _require_wallet_access(auth: AuthContext, wallet_id: str) -> None:
     auth.require_wallet_access(wallet_id)
+
+
+@dataclass
+class _IdempotencyGuard:
+    """Opt-in replay protection for a state-changing money endpoint.
+
+    Mirrors the flow already used inline by ``/v1/billing/charge``: begin a
+    record on the way in (replaying a stored response, or 409-ing on a
+    conflicting reuse), and complete it with the terminal outcome so a retry
+    with the same ``Idempotency-Key`` gets the original result instead of
+    charging/crediting/transferring twice.
+    """
+
+    service: IdempotencyService | None
+    wallet_id: str
+    endpoint: str
+    key: str | None
+
+    async def complete(
+        self,
+        response_json: dict,
+        status_code: int,
+        *,
+        response_reference: str | None = None,
+    ) -> None:
+        if not self.service or not self.key:
+            return
+        await self.service.complete(
+            wallet_id=self.wallet_id,
+            endpoint=self.endpoint,
+            idempotency_key=self.key,
+            response_reference=response_reference,
+            response_json=response_json,
+            status_code=status_code,
+        )
+
+
+async def _begin_idempotency(
+    *,
+    idempotency_key: str | None,
+    wallet_id: str,
+    endpoint: str,
+    request_payload: dict[str, Any],
+) -> tuple[_IdempotencyGuard, JSONResponse | None]:
+    """Start (or replay) an idempotent operation. Returns the guard plus an
+    optional replay response to return immediately."""
+    if not idempotency_key:
+        return _IdempotencyGuard(None, wallet_id, endpoint, None), None
+    idem = get_idempotency_service()
+    try:
+        replay = await idem.begin(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            request_payload=request_payload,
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "idempotency_key_reused", "message": str(exc)},
+        ) from exc
+    except IdempotencyInProgressError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "idempotency_in_progress", "message": str(exc)},
+        ) from exc
+    guard = _IdempotencyGuard(idem, wallet_id, endpoint, idempotency_key)
+    if replay is not None:
+        return guard, JSONResponse(
+            status_code=replay.status_code, content=replay.response_json
+        )
+    return guard, None
 
 
 async def _record_billing_governance(
@@ -627,10 +701,28 @@ async def charge_wallet(
 )
 async def top_up_wallet(
     request: TopUpRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, request.wallet_id)
+    endpoint = "/v1/billing/top-up"
+    # Opt-in idempotency: a retried top-up (e.g. after a client timeout) with
+    # the same Idempotency-Key replays the original result instead of minting
+    # credits twice.
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=request.wallet_id,
+        endpoint=endpoint,
+        request_payload={
+            "wallet_id": request.wallet_id,
+            "amount_fiat": str(request.amount_fiat),
+            "payment_method": request.payment_method,
+            "payment_token": request.payment_token,
+        },
+    )
+    if replay is not None:
+        return replay
     try:
         result = await money.top_up(
             wallet_id=request.wallet_id,
@@ -643,7 +735,7 @@ async def top_up_wallet(
             auth=auth,
             wallet_id=request.wallet_id,
             service_category="top_up",
-            endpoint="/v1/billing/top-up",
+            endpoint=endpoint,
             committed_cost=float(result.credits_added),
             ok=True,
             metadata={
@@ -651,6 +743,11 @@ async def top_up_wallet(
                 "payment_method": request.payment_method,
                 "top_up_id": result.top_up_id,
             },
+        )
+        await guard.complete(
+            result.model_dump(mode="json"),
+            status.HTTP_202_ACCEPTED,
+            response_reference=result.top_up_id,
         )
         return result
     except WalletNotFoundError as e:
@@ -664,6 +761,7 @@ async def top_up_wallet(
             error="wallet_not_found",
             metadata={"amount_fiat": request.amount_fiat},
         )
+        await guard.complete({"error": "wallet_not_found", "message": str(e)}, 404)
         raise HTTPException(status_code=404, detail=str(e))
     except KYCVerificationRequiredError as e:
         await _record_billing_governance(
@@ -676,6 +774,14 @@ async def top_up_wallet(
             error="kyc_required",
             metadata={"amount_fiat": request.amount_fiat, "kyc_status": e.kyc_status},
         )
+        kyc_detail = {
+            "error": "kyc_required",
+            "wallet_id": e.wallet_id,
+            "kyc_status": e.kyc_status,
+            "message": str(e),
+            "verification_url": f"/v1/kyc/sessions?wallet_id={e.wallet_id}",
+        }
+        await guard.complete(kyc_detail, status.HTTP_403_FORBIDDEN)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -696,6 +802,10 @@ async def top_up_wallet(
             ok=False,
             error="topup_error",
             metadata={"amount_fiat": request.amount_fiat, "message": str(e)},
+        )
+        await guard.complete(
+            {"error": "topup_error", "message": str(e)},
+            status.HTTP_400_BAD_REQUEST,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -791,6 +901,7 @@ async def transfer_wallets(
         None,
         description="Optional ID to link related transfers",
     ),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
@@ -801,6 +912,23 @@ async def transfer_wallets(
     Both wallets are locked during the transaction for ACID compliance.
     """
     _require_wallet_access(auth, from_wallet_id)
+    endpoint = "/v1/billing/transfer"
+    # Opt-in idempotency: a retried transfer with the same Idempotency-Key
+    # replays the original result instead of moving credits twice. Keyed on
+    # the source wallet (the debited side).
+    guard, replay = await _begin_idempotency(
+        idempotency_key=idempotency_key,
+        wallet_id=from_wallet_id,
+        endpoint=endpoint,
+        request_payload={
+            "from_wallet_id": from_wallet_id,
+            "to_wallet_id": to_wallet_id,
+            "amount": str(amount),
+            "description": description,
+        },
+    )
+    if replay is not None:
+        return replay
     try:
         result = await money.transfer(
             from_wallet_id=from_wallet_id,
@@ -825,6 +953,9 @@ async def transfer_wallets(
                 "description": description,
             },
         )
+        await guard.complete(
+            result, 200, response_reference=result.get("transfer_id")
+        )
         return result
     except WalletNotFoundError as e:
         await _record_billing_governance(
@@ -839,6 +970,7 @@ async def transfer_wallets(
             error="wallet_not_found",
             metadata={"to_wallet_id": to_wallet_id},
         )
+        await guard.complete({"error": "wallet_not_found", "message": str(e)}, 404)
         raise HTTPException(status_code=404, detail=str(e))
     except InsufficientFundsError as e:
         await _record_billing_governance(
@@ -853,13 +985,15 @@ async def transfer_wallets(
             error="insufficient_funds",
             metadata={"to_wallet_id": to_wallet_id, "shortfall": float(e.shortfall)},
         )
+        insufficient_detail = {
+            "error": "insufficient_funds",
+            "wallet_id": e.wallet_id,
+            "shortfall": float(e.shortfall),
+        }
+        await guard.complete(insufficient_detail, 402)
         raise HTTPException(
             status_code=402,
-            detail={
-                "error": "insufficient_funds",
-                "wallet_id": e.wallet_id,
-                "shortfall": float(e.shortfall),
-            },
+            detail=insufficient_detail,
         )
     except ValueError as e:
         await _record_billing_governance(
@@ -873,6 +1007,10 @@ async def transfer_wallets(
             ok=False,
             error="transfer_error",
             metadata={"to_wallet_id": to_wallet_id, "message": str(e)},
+        )
+        await guard.complete(
+            {"error": "transfer_error", "message": str(e)},
+            status.HTTP_400_BAD_REQUEST,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

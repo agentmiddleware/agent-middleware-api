@@ -11,7 +11,7 @@ from app.db.models import SigningKeyModel
 from app.main import app
 from app.services.audit_log import record_audit_event
 from app.services.receipts import get_receipt_service
-from app.services.signing_keys import get_signing_key_service
+from app.services.signing_keys import SigningKeyService, get_signing_key_service
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
     create_tool_permit,
@@ -66,6 +66,39 @@ async def test_retired_signing_key_metadata_still_verifies_payload(clean_databas
         assert key is not None
         assert key.status == "retired"
         assert key.retired_at is not None
+
+
+@pytest.mark.anyio
+async def test_ephemeral_key_restart_does_not_clobber_prior_public_metadata(
+    clean_database,
+):
+    """A restarted (or second) instance generating a fresh ephemeral key must
+    publish its public metadata under its own content-addressed key_id rather
+    than overwriting the row the previous key signed under -- so signatures
+    made before the restart still verify afterwards."""
+    first = SigningKeyService()
+    signature, first_key_id, payload_hash = await first.sign_payload(
+        {"purpose": "before-restart"}
+    )
+
+    # Simulate a process restart: a brand-new instance mints a different
+    # ephemeral key and ensures its own active metadata.
+    second = SigningKeyService()
+    second_key = await second.ensure_active_key()
+
+    assert second_key.key_id != first_key_id
+    assert second_key.public_key_b64 != (await first.get_active_key()).public_key_b64
+
+    # The pre-restart signature is still verifiable against its own key_id.
+    payload = {
+        "purpose": "before-restart",
+        "alg": "Ed25519",
+        "kid": first_key_id,
+        "payload_hash": payload_hash,
+    }
+    assert await second.verify_payload(
+        payload, signature=signature, key_id=first_key_id
+    )
 
 
 @pytest.mark.anyio

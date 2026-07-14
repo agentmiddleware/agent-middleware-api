@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.db.database import get_session_factory
 from app.db.models import AuditChainHeadModel, ControlPlaneAuditEventModel
 from app.main import app
+from app.services.audit_chain import verify_audit_chain
 from app.services.audit_log import record_audit_event
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
@@ -129,3 +130,67 @@ async def test_audit_chain_verifies_and_detects_tampering(client, clean_database
     assert tampered_resp.status_code == 200
     assert tampered_resp.json()["valid"] is False
     assert tampered_resp.json()["reason"] == "audit_payload_hash_mismatch"
+
+
+@pytest.mark.anyio
+async def test_global_verify_covers_wallet_less_null_chain(clean_database):
+    """Global verification must walk the wallet-less (wallet_id IS NULL) chain
+    too. Tampering a system/denied-action record used to return valid=True
+    because the NULL chain was dropped from the distinct list."""
+    await record_audit_event(event="system.denied", wallet_id=None, metadata={"n": 1})
+    await record_audit_event(event="system.denied", wallet_id=None, metadata={"n": 2})
+
+    ok = await verify_audit_chain(wallet_id=None)
+    assert ok.valid is True
+    assert ok.checked_events == 2
+
+    # Tamper the first wallet-less event.
+    factory = get_session_factory()
+    async with factory() as session:
+        event = (
+            await session.execute(
+                select(ControlPlaneAuditEventModel)
+                .where(ControlPlaneAuditEventModel.wallet_id.is_(None))
+                .order_by(ControlPlaneAuditEventModel.seq)
+            )
+        ).scalars().first()
+        event.metadata_json = '{"n": 6660}'
+        session.add(event)
+        await session.commit()
+
+    tampered = await verify_audit_chain(wallet_id=None)
+    assert tampered.valid is False
+    assert tampered.reason == "audit_payload_hash_mismatch"
+
+
+@pytest.mark.anyio
+async def test_verify_detects_tail_truncation(clean_database):
+    """Deleting the last events of a chain must be detected via the head
+    anchor -- a valid prefix must not verify as a valid whole chain."""
+    wallet_id = "wlt-truncation-test"
+    for n in range(3):
+        await record_audit_event(event="trust.trunc", wallet_id=wallet_id, metadata={"n": n})
+
+    assert (await verify_audit_chain(wallet_id=wallet_id)).valid is True
+
+    # Delete the last event (seq=3); head still says last_seq=3.
+    factory = get_session_factory()
+    async with factory() as session:
+        last = (
+            await session.execute(
+                select(ControlPlaneAuditEventModel)
+                .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+                .order_by(ControlPlaneAuditEventModel.seq.desc())
+            )
+        ).scalars().first()
+        await session.delete(last)
+        await session.commit()
+
+    result = await verify_audit_chain(wallet_id=wallet_id)
+    assert result.valid is False
+    assert result.reason == "audit_chain_truncated"
+
+    # And the global path surfaces it too.
+    global_result = await verify_audit_chain(wallet_id=None)
+    assert global_result.valid is False
+    assert global_result.reason == "audit_chain_truncated"

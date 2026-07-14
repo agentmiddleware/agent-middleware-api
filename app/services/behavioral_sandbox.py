@@ -28,6 +28,7 @@ import redis.asyncio as redis
 
 from ..core.config import get_settings
 from ..core.durable_state import get_durable_state
+from ..core.url_guard import check_outbound_url
 from ..schemas.sandbox_behavioral import (
     ExecutionStatus,
     SandboxEnvironment,
@@ -225,6 +226,7 @@ class BehavioralSandboxEngine:
                     request.tool_input,
                     request.dry_run,
                     env.timeout_seconds,
+                    network_access=env.network_access,
                 )
 
             execution.status = (
@@ -583,6 +585,8 @@ print(json.dumps(result))
         tool_input: dict[str, Any],
         dry_run: bool,
         timeout_seconds: int,
+        *,
+        network_access: bool = False,
     ) -> dict[str, Any]:
         """Execute an HTTP request in proxy mode."""
         url = tool_input.get("url")
@@ -604,12 +608,33 @@ print(json.dumps(result))
                 "cost_estimate": 0.0001,
             }
 
+        # The environment's network_access flag (default False) gates every
+        # real request, and the URL guard blocks SSRF targets (loopback,
+        # RFC1918, link-local metadata, non-http schemes) even when it's on.
+        if not network_access:
+            return {
+                "success": False,
+                "error": "network_access is disabled for this environment",
+            }
+        block_reason = await check_outbound_url(url)
+        if block_reason:
+            return {
+                "success": False,
+                "error": f"request blocked ({block_reason}): {url}",
+            }
+
         try:
             import aiohttp
 
             async with aiohttp.ClientSession() as session:
+                # Don't follow redirects: the URL guard only vetted the
+                # original target, so a 3xx to a loopback/metadata address
+                # would otherwise slip past it.
                 async with session.request(
-                    method, url, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+                    method,
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                    allow_redirects=False,
                 ) as resp:
                     return {
                         "success": True,
@@ -631,6 +656,17 @@ print(json.dumps(result))
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def get_environment_owner(self, env_id: str) -> tuple[bool, str | None]:
+        """Return ``(found, owner_wallet_id)`` for tenant-isolation checks.
+
+        Lets a router enforce that the caller owns an environment before
+        reading or destroying it, without exposing the internal env-data shape.
+        """
+        env_data = await self._load_environment(env_id)
+        if env_data is None:
+            return False, None
+        return True, env_data["env"].wallet_id
 
     async def get_environment_state(self, env_id: str) -> dict[str, Any]:
         """Get current state of a sandbox environment."""

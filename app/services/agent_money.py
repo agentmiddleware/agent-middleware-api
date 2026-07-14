@@ -255,6 +255,32 @@ class AgentMoney:
         """
         return self._session_factory()()
 
+    async def _lock_wallets_in_order(
+        self, session: AsyncSession, wallet_ids: list[str]
+    ) -> dict[str, WalletModel]:
+        """Lock each wallet row ``FOR UPDATE`` in a globally consistent order
+        (sorted by wallet_id) via one statement per row.
+
+        Every multi-wallet money operation (transfer, child reclaim) must
+        acquire its locks through this helper so two operations touching the
+        same pair can never deadlock by taking the locks in opposite orders.
+        A single ``WHERE wallet_id IN (...)`` does NOT guarantee lock order --
+        Postgres locks rows in scan order, not in the IN-list order -- which is
+        why the locks are taken one at a time here.
+        """
+        locked: dict[str, WalletModel] = {}
+        for wid in sorted(set(wallet_ids)):
+            row = (
+                await session.execute(
+                    select(WalletModel)
+                    .where(cast(ColumnElement[bool], WalletModel.wallet_id == wid))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if row is not None:
+                locked[wid] = row
+        return locked
+
     # --- Wallet Management ---
 
     async def create_sponsor_wallet(
@@ -486,15 +512,32 @@ class AgentMoney:
         """Reclaim unspent credits from a child wallet back to its parent."""
         async with self._session_factory()() as session:
             async with session.begin():
-                # Lock both wallets
-                result = await session.execute(
-                    select(WalletModel)
-                    .where(
-                        cast(ColumnElement[bool], WalletModel.wallet_id == child_wallet_id)
+                # Discover the (immutable) parent id with an unlocked read, so
+                # both rows can then be locked in the same globally consistent
+                # sorted order that transfer() uses -- otherwise reclaim would
+                # lock child-then-parent while a concurrent transfer locks the
+                # sorted order, and the two could deadlock.
+                child_peek = (
+                    await session.execute(
+                        select(WalletModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                WalletModel.wallet_id == child_wallet_id,
+                            )
+                        )
                     )
-                    .with_for_update()
+                ).scalar_one_or_none()
+                if not child_peek:
+                    raise WalletNotFoundError(child_wallet_id)
+                if not child_peek.parent_wallet_id:
+                    raise ValueError("Child wallet has no parent")
+                parent_wallet_id = child_peek.parent_wallet_id
+
+                locked = await self._lock_wallets_in_order(
+                    session, [child_wallet_id, parent_wallet_id]
                 )
-                child = result.scalar_one_or_none()
+                child = locked.get(child_wallet_id)
+                parent = locked.get(parent_wallet_id)
 
                 if not child:
                     raise WalletNotFoundError(child_wallet_id)
@@ -502,22 +545,8 @@ class AgentMoney:
                     raise ValueError("Can only reclaim from child wallets")
                 if child.status == WalletStatus.CLOSED.value:
                     raise ValueError("Wallet already closed")
-
-                # Get parent
-                if not child.parent_wallet_id:
-                    raise ValueError("Child wallet has no parent")
-
-                parent_result = await session.execute(
-                    select(WalletModel)
-                    .where(
-                        cast(ColumnElement[bool], WalletModel.wallet_id == child.parent_wallet_id)
-                    )
-                    .with_for_update()
-                )
-                parent = parent_result.scalar_one_or_none()
-
                 if not parent:
-                    raise WalletNotFoundError(child.parent_wallet_id)
+                    raise WalletNotFoundError(parent_wallet_id)
 
                 reclaim_amount = child.balance
 
@@ -595,24 +624,12 @@ class AgentMoney:
 
         async with self._session_factory()() as session:
             async with session.begin():
-                # Lock both wallets in consistent order to prevent deadlocks
-                wallet_ids = sorted([from_wallet_id, to_wallet_id])
-
-                result = await session.execute(
-                    select(WalletModel)
-                    .where(
-                        cast(
-                            ColumnElement[bool],
-                            # SQLModel exposes wallet_id as a plain `str` at
-                            # the class level to mypy, but at runtime it's an
-                            # InstrumentedAttribute with SQL comparator
-                            # methods like `.in_()`.
-                            cast(Any, WalletModel.wallet_id).in_(wallet_ids),
-                        )
-                    )
-                    .with_for_update()
+                # Lock both wallets in a globally consistent (sorted) order via
+                # one FOR UPDATE per row, so a concurrent transfer/reclaim on
+                # the same pair cannot deadlock.
+                wallets = await self._lock_wallets_in_order(
+                    session, [from_wallet_id, to_wallet_id]
                 )
-                wallets = {w.wallet_id: w for w in result.scalars().all()}
 
                 source = wallets.get(from_wallet_id)
                 dest = wallets.get(to_wallet_id)
@@ -841,7 +858,25 @@ class AgentMoney:
                 wallet = result.scalar_one_or_none()
 
                 if not wallet:
+                    # The velocity monitor returns early without recording when
+                    # the wallet is absent, so there is nothing to reverse here.
                     raise WalletNotFoundError(wallet_id)
+
+                def _reverse_velocity_record() -> None:
+                    # The velocity monitor already committed
+                    # hourly_spent/daily_spent += charge_amount before these
+                    # checks ran. On any path that rejects the charge (and thus
+                    # never debits), undo that increment so a rejected charge
+                    # doesn't permanently inflate the spend counters and trip a
+                    # false daily-limit / velocity-freeze. We already hold the
+                    # wallet's FOR UPDATE lock, so this mutation commits with the
+                    # surrounding transaction on return.
+                    wallet.hourly_spent = max(
+                        Decimal("0"), wallet.hourly_spent - charge_amount
+                    )
+                    wallet.daily_spent = max(
+                        Decimal("0"), wallet.daily_spent - charge_amount
+                    )
 
                 # Check child wallet lifetime spend cap
                 if wallet.wallet_type == WalletType.CHILD.value and wallet.max_spend:
@@ -849,6 +884,7 @@ class AgentMoney:
                     if new_debits > wallet.max_spend:
                         remaining = wallet.max_spend - wallet.lifetime_debits
                         shortfall = charge_amount - remaining
+                        _reverse_velocity_record()
                         return InsufficientFundsResponse(
                             wallet_id=wallet_id,
                             current_balance=float(wallet.balance),
@@ -869,6 +905,7 @@ class AgentMoney:
                     prior_daily_spent = wallet.daily_spent - charge_amount
                     remaining = wallet.daily_limit - prior_daily_spent
                     shortfall = charge_amount - remaining
+                    _reverse_velocity_record()
                     return InsufficientFundsResponse(
                         wallet_id=wallet_id,
                         current_balance=float(wallet.balance),
@@ -884,6 +921,7 @@ class AgentMoney:
                 # Check balance
                 if wallet.balance < charge_amount:
                     shortfall = charge_amount - wallet.balance
+                    _reverse_velocity_record()
                     return InsufficientFundsResponse(
                         wallet_id=wallet_id,
                         current_balance=float(wallet.balance),

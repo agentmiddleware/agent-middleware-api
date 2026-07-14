@@ -3446,6 +3446,11 @@
         "summary": "Get environment state",
         "description": "Get the current state of a sandbox environment.",
         "operationId": "get_environment_v1_sandbox_behavioral_environments__env_id__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "env_id",
@@ -3485,6 +3490,11 @@
         "summary": "Destroy environment",
         "description": "Destroy a sandbox environment and release resources.",
         "operationId": "destroy_environment_v1_sandbox_behavioral_environments__env_id__delete",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "env_id",
@@ -7436,15 +7446,38 @@
         ],
         "summary": "Top up a sponsor wallet",
         "operationId": "top_up_wallet_v1_billing_top_up_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TopUpRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "202": {
@@ -7480,12 +7513,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
+        }
       }
     },
     "/v1/billing/top-up/prepare": {
@@ -7654,6 +7682,22 @@
               "title": "Correlation Id"
             },
             "description": "Optional ID to link related transfers"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "responses": {
@@ -10772,7 +10816,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/.well-known/agent.json": {

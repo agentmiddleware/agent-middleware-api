@@ -27,10 +27,12 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 from uuid import uuid4
 
 from app.core.time import utc_now
+from app.core.url_guard import check_outbound_url
 
 if TYPE_CHECKING:
     from playwright.async_api import Page, BrowserContext
@@ -379,6 +381,10 @@ class AWIPlaywrightBridge:
         Returns:
             BridgeSession with session_id and initial state.
         """
+        block_reason = await check_outbound_url(target_url)
+        if block_reason:
+            raise ValueError(f"navigation blocked ({block_reason}): {target_url}")
+
         await self.cleanup_expired_sessions()
 
         if len(self._sessions) >= self._max_sessions:
@@ -907,6 +913,10 @@ class AWIPlaywrightBridge:
         if not url:
             raise ValueError("URL required for navigate_to")
 
+        block_reason = await check_outbound_url(url)
+        if block_reason:
+            raise ValueError(f"navigation blocked ({block_reason}): {url}")
+
         return [
             PlaywrightCommand(
                 command_type=CommandType.GOTO,
@@ -982,7 +992,13 @@ class AWIPlaywrightBridge:
     ) -> list[PlaywrightCommand]:
         """Handle scroll action."""
         direction = params.get("direction", "down")
-        amount = params.get("amount", 300)
+        # The amount is interpolated into a JS expression executed via
+        # page.evaluate — anything but a plain integer is script injection.
+        try:
+            amount = int(params.get("amount", 300))
+        except (TypeError, ValueError):
+            raise ValueError("scroll amount must be an integer")
+        amount = max(-20000, min(20000, amount))
 
         if direction == "down":
             scroll_expr = f"window.scrollBy(0, {amount})"
@@ -1016,6 +1032,8 @@ class AWIPlaywrightBridge:
         if not file_path:
             raise ValueError("file_path required for upload_file")
 
+        file_path = self._confine_upload_path(file_path)
+
         file_input = await self._find_element_by_label(session, field_name)
 
         if not file_input:
@@ -1035,6 +1053,30 @@ class AWIPlaywrightBridge:
                 estimated_duration_ms=500,
             )
         ]
+
+    @staticmethod
+    def _confine_upload_path(file_path: str) -> str:
+        """Resolve an upload path and require it to stay inside AWI_UPLOAD_DIR.
+
+        The path feeds Playwright's set_input_files, which reads the file
+        from OUR filesystem and sends it to the remote page — without
+        confinement any host file (keys, credentials) is one action away
+        from exfiltration. Relative paths are interpreted against the
+        configured upload directory; absolute paths must resolve inside it.
+        """
+        from app.core.config import get_settings
+
+        upload_dir = get_settings().AWI_UPLOAD_DIR
+        if not upload_dir:
+            raise ValueError(
+                "file uploads are disabled (AWI_UPLOAD_DIR is not configured)"
+            )
+        root = Path(upload_dir).resolve()
+        candidate = Path(file_path)
+        resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        if not resolved.is_relative_to(root):
+            raise ValueError("upload path escapes the configured upload directory")
+        return str(resolved)
 
     async def _handle_click_element(
         self,

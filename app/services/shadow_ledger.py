@@ -320,6 +320,32 @@ class ShadowLedger:
 
         return self._memory_store.get(session_id, {}).get("session")
 
+    async def _claim_session(self, session_id: str) -> DryRunSession | None:
+        """Atomically fetch-and-remove a session so exactly one caller can
+        commit it.
+
+        Without this, two concurrent commits of the same session both read it
+        and both apply every simulated charge to the real wallet -- a
+        double-charge. Claiming (GETDEL on Redis, dict.pop in memory) makes the
+        commit exclusive: the loser gets ``None`` and does nothing.
+        """
+        redis_client = await self._get_redis()
+        if redis_client:
+            raw = await redis_client.getdel(await self._session_key(session_id))
+            if not raw:
+                return None
+            await redis_client.delete(await self._balance_key(session_id))
+            session = self._deserialize_session(json.loads(raw))
+            await redis_client.srem(
+                await self._wallet_sessions_key(session.wallet_id),
+                session_id,
+            )
+            return session
+        entry = self._memory_store.pop(session_id, None)
+        if not entry:
+            return None
+        return entry.get("session")
+
     async def simulate_charge(
         self,
         session_id: str,
@@ -491,7 +517,11 @@ class ShadowLedger:
         Returns:
             CommitResult with applied charges and new balance
         """
-        session = await self.get_session(session_id)
+        # Claim the session atomically so a concurrent commit of the same
+        # session cannot also charge the wallet. The loser of the race sees no
+        # session and returns "Session not found" (the winner already applied
+        # the charges).
+        session = await self._claim_session(session_id)
         if not session:
             return CommitResult(
                 session_id=session_id,
@@ -506,7 +536,6 @@ class ShadowLedger:
             )
 
         if not session.simulated_charges:
-            await self.end_session(session_id)
             return CommitResult(
                 session_id=session_id,
                 wallet_id=session.wallet_id,
@@ -580,7 +609,7 @@ class ShadowLedger:
         wallet = await agent_money.get_wallet(session.wallet_id)
         real_balance_after = wallet.balance if wallet else real_balance_before
 
-        await self.end_session(session_id)
+        # Session was already removed by _claim_session above; nothing to end.
 
         success = committed_count == len(session.simulated_charges)
         message = (

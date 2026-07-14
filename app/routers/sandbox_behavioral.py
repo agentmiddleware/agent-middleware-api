@@ -49,6 +49,13 @@ async def create_environment(
     without affecting production systems. Each environment has its own Redis
     namespace for state isolation when Redis is available.
     """
+    # Bind the environment to the caller's wallet when they don't specify one,
+    # so ownership is well-defined for the get/destroy access checks below. A
+    # caller may only create an environment for its own wallet.
+    if request.wallet_id is None:
+        request.wallet_id = auth.wallet_id
+    else:
+        auth.require_wallet_access(request.wallet_id)
     try:
         engine = get_behavioral_sandbox()
         env = await engine.create_environment(request)
@@ -80,11 +87,23 @@ async def create_environment(
     summary="Get environment state",
     description="Get the current state of a sandbox environment.",
 )
-async def get_environment(env_id: str):
+async def get_environment(
+    env_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Get the current state of a sandbox environment."""
     try:
         engine = get_behavioral_sandbox()
+        found, owner = await engine.get_environment_owner(env_id)
+        if not found:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "not_found", "message": f"Environment {env_id} not found"},
+            )
+        auth.require_wallet_access(owner)
         return await engine.get_environment_state(env_id)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -104,10 +123,23 @@ async def get_environment(env_id: str):
     summary="Destroy environment",
     description="Destroy a sandbox environment and release resources.",
 )
-async def destroy_environment(env_id: str):
+async def destroy_environment(
+    env_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Destroy a sandbox environment."""
     try:
         engine = get_behavioral_sandbox()
+        found, owner = await engine.get_environment_owner(env_id)
+        if not found:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "not_found",
+                    "message": f"Environment {env_id} not found",
+                },
+            )
+        auth.require_wallet_access(owner)
         destroyed = await engine.destroy_environment(env_id)
         if not destroyed:
             raise HTTPException(
@@ -150,6 +182,13 @@ async def execute_tool(
     """
     try:
         engine = get_behavioral_sandbox()
+        found, owner = await engine.get_environment_owner(request.env_id)
+        if not found:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "not_found", "message": f"Environment {request.env_id} not found"},
+            )
+        auth.require_wallet_access(owner)
         result = await engine.execute_tool(request)
         settings = get_settings()
         await record_governed_action(
@@ -173,6 +212,8 @@ async def execute_tool(
             },
         )
         return result
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

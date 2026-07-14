@@ -85,6 +85,16 @@ class SigningKeyService:
         # Development/test fallback is deliberately process-ephemeral. It lets
         # local tests verify signatures without silently persisting a private key.
         self._private_key = Ed25519PrivateKey.generate()
+        # Content-address the ephemeral key's id so a restart (or a second
+        # instance) publishes its distinct public key under its own key_id
+        # instead of overwriting the durable metadata a previous ephemeral key
+        # signed under. Old signatures keep verifying against their own stored
+        # public key rather than being silently invalidated.
+        raw_public = self._private_key.public_key().public_bytes(
+            Encoding.Raw, PublicFormat.Raw
+        )
+        fingerprint = hashlib.sha256(raw_public).hexdigest()[:16]
+        self._key_id = f"{self._settings.TRUST_SIGNING_KEY_ID}-ephemeral-{fingerprint}"
         return self._private_key
 
     def _public_key_b64(self) -> str:

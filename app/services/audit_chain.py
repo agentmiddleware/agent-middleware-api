@@ -242,19 +242,22 @@ async def verify_audit_chain(
     created_before: datetime | None = None,
 ) -> AuditChainVerification:
     if wallet_id is None:
+        # Global verification: walk every per-wallet chain, INCLUDING the
+        # wallet-less chain (events whose wallet_id IS NULL -- system and
+        # denied-action records, chained under wallet_key ""). Previously the
+        # NULL chain was silently dropped from the distinct list, so tampering
+        # a wallet-less event returned valid=True.
         factory = get_session_factory()
         async with factory() as session:
             wallet_ids_result = await session.execute(
                 select(cast(Any, ControlPlaneAuditEventModel.wallet_id)).distinct()
             )
-            wallet_ids = [
-                row[0] for row in wallet_ids_result.all() if row[0] is not None
-            ]
+            distinct_wallets = [row[0] for row in wallet_ids_result.all()]
         checked = 0
         first_event_id: str | None = None
         last_event_id: str | None = None
-        for current_wallet_id in wallet_ids:
-            chain_result = await verify_audit_chain(
+        for current_wallet_id in distinct_wallets:
+            chain_result = await _verify_single_chain(
                 wallet_id=current_wallet_id,
                 created_after=created_after,
                 created_before=created_before,
@@ -273,11 +276,30 @@ async def verify_audit_chain(
                 )
         return AuditChainVerification(True, checked, first_event_id, last_event_id)
 
+    return await _verify_single_chain(
+        wallet_id=wallet_id,
+        created_after=created_after,
+        created_before=created_before,
+    )
+
+
+async def _verify_single_chain(
+    *,
+    wallet_id: str | None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+) -> AuditChainVerification:
+    """Verify one wallet's audit chain (``wallet_id=None`` -> the wallet-less
+    chain of ``wallet_id IS NULL`` events)."""
     stmt = select(ControlPlaneAuditEventModel).order_by(
         asc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)),
         asc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)),
     )
-    if wallet_id:
+    if wallet_id is None:
+        stmt = stmt.where(
+            cast(Any, ControlPlaneAuditEventModel.wallet_id).is_(None)
+        )
+    else:
         stmt = stmt.where(
             cast(ColumnElement[bool], ControlPlaneAuditEventModel.wallet_id == wallet_id)
         )
@@ -300,6 +322,23 @@ async def verify_audit_chain(
     async with factory() as session:
         result = await session.execute(stmt)
         events = list(result.scalars().all())
+        # Anchor a full-chain verification against the head pointer so tail
+        # truncation (deleting the last K events) is detected -- otherwise a
+        # valid prefix verifies as valid. Only meaningful without a time window,
+        # where the last loaded event must equal the recorded head.
+        head = None
+        if created_after is None and created_before is None:
+            wallet_key = wallet_id or ""
+            head = (
+                await session.execute(
+                    select(AuditChainHeadModel).where(
+                        cast(
+                            ColumnElement[bool],
+                            AuditChainHeadModel.wallet_key == wallet_key,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
 
     previous_hash: str | None = None
     first_event_id = events[0].event_id if events else None
@@ -386,6 +425,24 @@ async def verify_audit_chain(
                 event.event_id,
             )
         previous_hash = event.chain_hash
+
+    # Tail-truncation check: the last verified event must match the head the
+    # append path recorded. If the head says seq=N/chain_hash=H but the loaded
+    # chain ends earlier (or is empty), the tail was deleted.
+    if head is not None:
+        last_event = events[-1] if events else None
+        if last_event is None or (
+            last_event.seq != head.last_seq
+            or last_event.chain_hash != head.last_chain_hash
+        ):
+            return AuditChainVerification(
+                False,
+                len(events),
+                first_event_id,
+                last_event_id,
+                "audit_chain_truncated",
+                last_event.event_id if last_event else None,
+            )
 
     return AuditChainVerification(
         True,

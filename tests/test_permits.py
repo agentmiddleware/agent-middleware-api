@@ -55,7 +55,12 @@ async def test_signed_permit_verifies_for_wallet_tool_and_budget(
 
 
 @pytest.mark.anyio
-async def test_reconcile_budgets_repairs_orphaned_reservation(client, clean_database):
+async def test_reconcile_budgets_repairs_orphaned_reservation_on_terminal_permit(
+    client, clean_database
+):
+    """A crashed reservation is reclaimed once the permit can no longer admit a
+    charge (here: expired). Resetting a terminal permit can't cause over-spend
+    because validate_for_action already rejects it."""
     provisioned = await provision_agent_wallet(client)
     permit = await create_tool_permit(
         client,
@@ -65,11 +70,11 @@ async def test_reconcile_budgets_repairs_orphaned_reservation(client, clean_data
     )
 
     factory = get_session_factory()
-    # Simulate a crash that reserved budget but never produced a success
-    # receipt, and make the permit look idle (old updated_at).
+    # Reserved budget with no success receipt, permit now expired and idle.
     async with factory() as session:
         model = await session.get(PermitModel, permit["permit_id"])
         model.spent_credits = Decimal("9")
+        model.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         model.updated_at = datetime.now(timezone.utc) - timedelta(hours=1)
         session.add(model)
         await session.commit()
@@ -79,12 +84,45 @@ async def test_reconcile_budgets_repairs_orphaned_reservation(client, clean_data
 
     async with factory() as session:
         model = await session.get(PermitModel, permit["permit_id"])
-        # No successful receipts exist, so the orphaned reservation is cleared.
         assert model.spent_credits == Decimal("0")
 
 
 @pytest.mark.anyio
-async def test_reconcile_budgets_leaves_live_reservation_untouched(
+async def test_reconcile_budgets_never_resets_a_live_active_permit(
+    client, clean_database
+):
+    """Safety property: an idle-but-still-chargeable (active, unexpired) permit
+    is NEVER downward-reset, even past the idle window -- a long-running
+    governed call looks identical to a crash, and resetting its live
+    reservation would let a concurrent request over-spend past max_credits."""
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="trust-echo",
+    )
+
+    factory = get_session_factory()
+    # Active, unexpired, but idle for over an hour (mimicking a slow call).
+    async with factory() as session:
+        model = await session.get(PermitModel, permit["permit_id"])
+        model.spent_credits = Decimal("9")
+        model.updated_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        session.add(model)
+        await session.commit()
+
+    corrected = await get_permit_service().reconcile_budgets(idle_seconds=900)
+    assert corrected == 0
+
+    async with factory() as session:
+        model = await session.get(PermitModel, permit["permit_id"])
+        # Reservation preserved -> no over-spend window.
+        assert model.spent_credits == Decimal("9")
+
+
+@pytest.mark.anyio
+async def test_reconcile_budgets_leaves_recent_reservation_untouched(
     client,
     clean_database,
 ):

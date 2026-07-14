@@ -114,6 +114,60 @@ async def test_webhook_missing_signature(client):
 class TestStripeWebhookIdempotency:
     """Tests for webhook idempotency via UNIQUE constraint."""
 
+    def test_only_stripe_event_unique_errors_are_idempotent_for_refunds(self):
+        """Only the refund event-id unique constraint is swallowed."""
+        duplicate = IntegrityError(
+            "insert",
+            {},
+            Exception("UNIQUE constraint failed: ledger_entries.stripe_event_id"),
+        )
+        foreign_key = IntegrityError(
+            "insert",
+            {},
+            Exception("FOREIGN KEY constraint failed"),
+        )
+        assert StripeIntegration._is_duplicate_stripe_event_error(duplicate) is True
+        assert StripeIntegration._is_duplicate_stripe_event_error(foreign_key) is False
+
+    @pytest.mark.anyio
+    async def test_redelivered_refund_debits_only_once(
+        self, client, sponsor_wallet, api_headers
+    ):
+        """A redelivered charge.refunded event (same event id) must not debit
+        the wallet twice."""
+        from app.services.stripe_integration import get_stripe_integration
+        from app.core.dependencies import get_agent_money
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        money = get_agent_money()
+
+        # Mint 50000 credits so there is a payment-intent ledger entry to refund.
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_refund_test",
+            description="topup",
+        )
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("50000")
+
+        refund_charge = {
+            "payment_intent": "pi_refund_test",
+            "amount": 5000,  # $50 -> 50000 credits at EXCHANGE_RATE
+            "id": "ch_refund_test",
+        }
+        # First delivery debits.
+        await integration._handle_refund(refund_charge, "evt_refund_1")
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("0")
+
+        # Redelivery of the SAME event is a no-op, not a second debit.
+        await integration._handle_refund(refund_charge, "evt_refund_1")
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("0")
+
+        ledger = await money.get_ledger(wallet_id, 50)
+        refunds = [e for e in ledger if e.action == "refund"]
+        assert len(refunds) == 1
+
     def test_only_payment_intent_unique_errors_are_idempotent(self):
         """Non-idempotency integrity errors must not be swallowed."""
         duplicate = IntegrityError(

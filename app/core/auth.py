@@ -4,6 +4,7 @@ Agents pass their key via the X-API-Key header. No cookies, no sessions,
 no OAuth dance — just a key and a handshake.
 """
 
+import hmac
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Security, status
@@ -29,11 +30,17 @@ class AuthContext:
     wallet_id: str | None = None
     is_bootstrap_admin: bool = False
 
-    def require_wallet_access(self, wallet_id: str) -> None:
-        """Allow bootstrap admins or the exact wallet owning a DB-backed key."""
+    def require_wallet_access(self, wallet_id: str | None) -> None:
+        """Allow bootstrap admins or the exact wallet owning a DB-backed key.
+
+        ``wallet_id`` may be ``None`` for a resource with no owning wallet (e.g.
+        a sandbox environment created by a bootstrap admin). A non-admin caller
+        always has a concrete ``self.wallet_id``, so an ownerless resource is
+        correctly denied to everyone but bootstrap admins.
+        """
         if self.is_bootstrap_admin:
             return
-        if self.wallet_id == wallet_id:
+        if self.wallet_id is not None and self.wallet_id == wallet_id:
             return
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -91,7 +98,11 @@ async def get_auth_context(
 
     valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
 
-    if stripped in valid_keys:
+    # Constant-time compare against every configured key so that a timing
+    # side channel can't be used to recover a bootstrap-admin key byte by
+    # byte. `any()` short-circuits on the first match but each individual
+    # comparison is itself constant-time, which is what matters here.
+    if any(hmac.compare_digest(stripped, key) for key in valid_keys):
         return AuthContext(
             source="env",
             raw_key=stripped,

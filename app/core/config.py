@@ -154,6 +154,21 @@ class Settings(BaseSettings):
     # such as a container runtime, gVisor, or Firecracker owns the boundary.
     ALLOW_UNSAFE_HOST_PYTHON_SANDBOX: bool = False
 
+    # Local-development escape hatch for the outbound-URL guard
+    # (app.core.url_guard): allows agent-supplied navigation/proxy targets to
+    # reach loopback/RFC1918/link-local addresses (e.g. a mock server on
+    # localhost). Never enable in production — it re-opens SSRF against
+    # cloud metadata endpoints and internal services. Non-http(s) schemes
+    # stay blocked regardless.
+    ALLOW_PRIVATE_NETWORK_TARGETS: bool = False
+
+    # Directory that AWI upload_file actions may read from. Empty (the
+    # default) disables file uploads entirely; when set, requested paths are
+    # resolved and must stay inside this directory, so an agent can only
+    # upload files that were deliberately staged for it — not arbitrary
+    # host files like credentials or keys.
+    AWI_UPLOAD_DIR: str = ""
+
     # --- Phase 9: RAG Engine ---
     RAG_VECTOR_STORE_PATH: str = "./data/awi_vectors"
     RAG_EMBEDDING_MODEL: str = "text-embedding-3-small"

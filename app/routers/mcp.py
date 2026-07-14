@@ -15,6 +15,7 @@ This enables agents to:
 3. Receive results in real-time via SSE
 """
 
+import asyncio
 import inspect
 import json
 import logging
@@ -663,6 +664,19 @@ async def _execute_registered_tool(
         f"Expected LedgerEntry from non-dry-run charge, got {type(charge_result).__name__}"
     )
 
+    if governed_call and idempotency_key:
+        # Checkpoint the charge before attempting finalization (tool result,
+        # audit, receipt, idempotency-complete) below, so a crash in that
+        # window is repairable later instead of leaving this record stuck
+        # "in progress" forever with no trace of the charge that landed. See
+        # IdempotencyService.reconcile_stuck_records.
+        await idem.mark_charged(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            ledger_entry_id=charge_result.entry_id,
+        )
+
     try:
         if inspect.iscoroutinefunction(func):
             result = await func(**arguments)
@@ -756,46 +770,87 @@ async def _execute_registered_tool(
         "content": [{"type": "text", "text": json.dumps(result, default=str)}],
         "isError": False,
     }
-    audit_event = await _audit_mcp_invocation(
-        decision=decision,
-        endpoint=endpoint,
-        transport=transport,
-        ok=True,
-        error=None,
-        extra_metadata={
-            **policy_metadata,
-            **_trust_metadata(
-                permit_id=permit_id,
-                idempotency_key=idempotency_key,
-                request_payload=request_payload,
-                arguments=arguments,
-                ledger_entry_id=charge_result.entry_id,
-            ),
-        },
-    )
-    if governed_call and permit_model:
-        receipt = await get_receipt_service().create_receipt(
-            permit_id=permit_model.permit_id,
-            wallet_id=wallet_id,
-            key_id=auth.key_id,
-            tool=tool_name,
-            request_payload=request_payload or arguments,
-            response_payload=response_payload,
-            ledger_entry_id=charge_result.entry_id,
-            credits_authorized=registered_cost,
-            credits_charged=registered_cost,
-            outcome="success",
-            audit_event_id=audit_event.event_id,
+
+    # Finalization (audit write, receipt, idempotency-complete) is retried as
+    # a unit on transient failure -- the wallet was already charged above (and
+    # checkpointed via mark_charged for governed calls), so a crash here must
+    # not silently report success without ever finishing these writes. Each
+    # step only runs once it hasn't already succeeded in an earlier attempt,
+    # so a retry can't create a duplicate audit event or receipt for the same
+    # tool call. If all attempts are exhausted the original exception
+    # propagates (never silently swallowed); reconcile_stuck_records is the
+    # repair path for a governed record left stuck after that.
+    finalize_attempts = 3
+    audit_event = None
+    receipt = None
+    last_exc: Exception | None = None
+    for attempt in range(1, finalize_attempts + 1):
+        try:
+            if audit_event is None:
+                audit_event = await _audit_mcp_invocation(
+                    decision=decision,
+                    endpoint=endpoint,
+                    transport=transport,
+                    ok=True,
+                    error=None,
+                    extra_metadata={
+                        **policy_metadata,
+                        **_trust_metadata(
+                            permit_id=permit_id,
+                            idempotency_key=idempotency_key,
+                            request_payload=request_payload,
+                            arguments=arguments,
+                            ledger_entry_id=charge_result.entry_id,
+                        ),
+                    },
+                )
+            if governed_call and permit_model:
+                if receipt is None:
+                    receipt = await get_receipt_service().create_receipt(
+                        permit_id=permit_model.permit_id,
+                        wallet_id=wallet_id,
+                        key_id=auth.key_id,
+                        tool=tool_name,
+                        request_payload=request_payload or arguments,
+                        response_payload=response_payload,
+                        ledger_entry_id=charge_result.entry_id,
+                        credits_authorized=registered_cost,
+                        credits_charged=registered_cost,
+                        outcome="success",
+                        audit_event_id=audit_event.event_id,
+                    )
+                    response_payload["receipt"] = _receipt_response_payload(receipt)
+                assert receipt is not None
+                await idem.complete(
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key or "",
+                    response_reference=receipt.receipt_id,
+                    response_json=response_payload,
+                    status_code=200,
+                )
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt == finalize_attempts:
+                break
+            logger.warning(
+                "mcp_finalize_retry attempt=%d/%d ledger_entry_id=%s error=%s",
+                attempt,
+                finalize_attempts,
+                charge_result.entry_id,
+                exc,
+            )
+            await asyncio.sleep(0.05 * attempt)
+    if last_exc is not None:
+        logger.error(
+            "mcp_finalize_failed_after_retries ledger_entry_id=%s wallet_id=%s error=%s",
+            charge_result.entry_id,
+            wallet_id,
+            last_exc,
         )
-        response_payload["receipt"] = _receipt_response_payload(receipt)
-        await idem.complete(
-            wallet_id=wallet_id,
-            endpoint=endpoint,
-            idempotency_key=idempotency_key or "",
-            response_reference=receipt.receipt_id,
-            response_json=response_payload,
-            status_code=200,
-        )
+        raise last_exc
     return response_payload
 
 
