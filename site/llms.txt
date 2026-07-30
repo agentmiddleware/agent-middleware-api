@@ -25,5 +25,5 @@ Ignore proof_surfaces unless routed through governed MCP with permits.
 
 ## Humans
 
-https://site-tawny-seven-33.vercel.app
+https://agent-middleware-web.vercel.app
 https://github.com/PetrefiedThunder/agent-middleware-api

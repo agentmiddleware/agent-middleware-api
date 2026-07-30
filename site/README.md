@@ -37,4 +37,33 @@ This host should help machines find the API:
 Canonical machine base URL:
 `https://api-service-production-433c.up.railway.app`
 
-Redeploy the Vercel project after changing these files for them to go live.
+Marketing host (Vercel):
+`https://agent-middleware-web.vercel.app`
+(legacy alias still live: `https://site-tawny-seven-33.vercel.app`)
+
+Redeploy Vercel project `agent-middleware-web` after changing these files for them to go live.
+
+## Cross-tool naming convention
+
+Prefix everything with **`agent-middleware-`** so GitHub, Vercel, Railway, and local paths read as one product. Brand wordmarks (e.g. PERMIT) stay provisional and do **not** drive infra names.
+
+| Surface | Name | Notes |
+| --- | --- | --- |
+| GitHub repo | `PetrefiedThunder/agent-middleware-api` | Canonical product slug |
+| Local API / app | repo root (`app/`, …) | Python API |
+| Local marketing | `site/` | Keep folder name; maps to Vercel project below |
+| Vercel team | `petrefiedthunders-projects` | Account scope |
+| Vercel project | `agent-middleware-web` | Static marketing + discovery redirects |
+| Vercel production URL | `https://agent-middleware-web.vercel.app` | Prefer this; older `site-*` aliases retained |
+| Railway project | `agent-middleware-api` | Matches GitHub |
+| Railway service | `api-service` *(legacy)* | Prefer rename to `agent-middleware-api` when safe; do not break `*.up.railway.app` without updating redirects |
+| Railway public URL | `https://api-service-production-433c.up.railway.app` | Live API; update `site/vercel.json` redirects if this changes |
+| Docker / GHCR | `ghcr.io/petrefiedthunder/agent-middleware-api` | Matches repo |
+
+**Rules**
+
+- Use `agent-middleware-{role}`: `api` (backend), `web` (marketing). Avoid generic names (`site`, `frontend`, `api-service`) for new resources.
+- Do not rename the `site/` directory solely for cosmetics — link it to the Vercel project named `agent-middleware-web`.
+- Deploy marketing with CLI from `site/` (`vercel --prod --scope petrefiedthunders-projects`). GitHub is **not** linked yet; if linking, set Root Directory to `site` (expect preview URLs like `agent-middleware-web-git-<branch>-petrefiedthunders-projects.vercel.app`).
+- Leave Railway service `api-service` until a coordinated rename updates `PUBLIC_URL` + `site/vercel.json` redirects.
+- Custom domains later: prefer product DNS (not `site-*.vercel.app` leftovers).
