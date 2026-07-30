@@ -114,7 +114,7 @@
 
 - [x] Production-like boot cannot silently use memory for intended postgres/sqlite-file backend.
 - [x] Single DATABASE_URL works for SQLAlchemy + asyncpg consumers.
-- [ ] Live health shows no durable_state memory fallback (or ready fails closed). *(ops: set Railway `STATE_BACKEND=postgres`, redeploy with `railway up`, confirm `/health/dependencies`)*
+- [x] Live health shows no durable_state memory fallback (or ready fails closed). *(verified on Railway after `railway up` of #178 / `c5811ea`: `/health/dependencies` healthy, `fell_back_to_memory=false`)*
 - [x] Tests for invalid/missing URL and production fail-closed.
 
 ### Stop if
@@ -168,9 +168,13 @@
 - [ ] `llm.txt` does not tell agents `localhost:8000` as the production base.
 - [ ] Dogfood / prove-trust-plane still green.
 
+### Partner prep (before code)
+
+Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 will stop advertising Phase9 AWI / marketplace-style discovery stubs; dogfood path stays `partner.notes.write`. Ask partners to inventory any dependency on those stub tool ids **before** merging the gate — see [`DESIGN_PARTNER_GUIDE.md`](../DESIGN_PARTNER_GUIDE.md#upcoming-mcp-discovery-gate-phase-2).
+
 ### Stop if
 
-- External partners depend on a listed stub tool id — report before removing.
+- A partner still depends on a listed stub tool id after inventory — report before removing; do not silently drop their path.
 
 ---
 
@@ -276,7 +280,7 @@ Only if requested after Phases 1–5:
 
 ```text
 [ ] Phase 0  Baseline (health endpoint confirmed; curls still for PR body)
-[x] Phase 1  Durable state + URL normalize     ← code complete; live verify pending
+[x] Phase 1  Durable state + URL normalize     ← complete (live verify OK on Railway after #178 / c5811ea)
 [ ] Phase 2  Gate MCP tools + llm.txt
 [ ] Phase 3  Deploy posture + image SOP
 [ ] Phase 4  Migrations
