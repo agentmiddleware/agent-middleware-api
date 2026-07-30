@@ -32,6 +32,9 @@ proxy, not a broad migration of every agent workflow.
 Reference proof tool (local demo only): `trust-plane-echo` via
 `make prove-trust-plane` / [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
 
+Partner swap checklist:
+[`docs/partner-first-tool-runbook.md`](docs/partner-first-tool-runbook.md).
+
 Partner motion:
 
 1. Keep `ENABLE_PROOF_SURFACES=false` in the partner environment.
