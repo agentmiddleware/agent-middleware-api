@@ -34,10 +34,7 @@ from .core.trust_mode import (
     warn_if_trust_mode_permissive,
 )
 from .db.database import init_db, close_db
-from .services.mcp_phase9_tools import (
-    ensure_phase9_registered,
-    register_default_mcp_services,
-)
+from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from .routers.well_known import get_agent_first_metadata
 from .routers import (
     iot,
@@ -214,18 +211,11 @@ async def lifespan(app: FastAPI):
         raise
 
     startup_time = time.monotonic()
-    ensure_phase9_registered()
+    sync_proof_surface_mcp_registration()
     logger.info(
         "app_startup",
-        phase="phase9_tools_registered",
-        startup_time_s=time.monotonic() - startup_time,
-    )
-
-    startup_time = time.monotonic()
-    register_default_mcp_services()
-    logger.info(
-        "app_startup",
-        phase="default_mcp_services_registered",
+        phase="mcp_proof_surface_registration_synced",
+        enable_proof_surfaces=bool(settings.ENABLE_PROOF_SURFACES),
         startup_time_s=time.monotonic() - startup_time,
     )
 
@@ -393,7 +383,7 @@ else:
     ),
 )
 async def root():
-    return {
+    payload: dict[str, Any] = {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "agent_first": get_agent_first_metadata(),
@@ -429,6 +419,7 @@ async def root():
                 "sandbox",
                 "telemetry_pm",
             ],
+            "proof_surfaces_mounted": bool(get_settings().ENABLE_PROOF_SURFACES),
         },
         "services": {
             "iot_bridge": {
@@ -559,8 +550,8 @@ async def root():
             "mcp_server": {
                 "base_path": "/mcp",
                 "description": (
-                    "Model Context Protocol (MCP) server for B2A tool "
-                    "discovery and execution."
+                    "Model Context Protocol (MCP) server for governed tool "
+                    "discovery and execution (permit → meter → receipt)."
                 ),
                 "endpoints": [
                     "GET /mcp/tools.json",
@@ -707,6 +698,14 @@ async def root():
             "dependency_truth": "/health/dependencies",
         },
     }
+    if not get_settings().ENABLE_PROOF_SURFACES:
+        # Only advertise mounted core trust services when proof surfaces are off.
+        payload["services"] = {
+            key: value
+            for key, value in payload["services"].items()
+            if key in {"agent_billing", "mcp_server"}
+        }
+    return payload
 
 
 @app.get(

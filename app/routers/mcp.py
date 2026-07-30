@@ -31,10 +31,7 @@ from ..core.config import get_settings
 from ..core.auth import AuthContext, get_auth_context
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
-from ..services.mcp_phase9_tools import (
-    ensure_phase9_registered,
-    register_default_mcp_services,
-)
+from ..services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from ..schemas.billing import InsufficientFundsResponse, LedgerEntry, ServiceCategory
 
 # Spine primitives are consumed through the trust-plane facade so the governed
@@ -68,9 +65,8 @@ _mcp_adapter = McpGovernedAdapter()
 
 
 def _ensure_local_mcp_tools_registered() -> None:
-    """Keep discovery populated when tests or transports skip app lifespan startup."""
-    ensure_phase9_registered()
-    register_default_mcp_services()
+    """Align local MCP stubs with ENABLE_PROOF_SURFACES (lazy startup + flag flips)."""
+    sync_proof_surface_mcp_registration()
 
 
 async def build_mcp_tools_manifest(

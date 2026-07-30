@@ -38,14 +38,14 @@ For the live engagement checklist that replaces `trust-plane-echo` /
 `partner.notes.write` with the partner's real tool id, use
 [`docs/partner-first-tool-runbook.md`](docs/partner-first-tool-runbook.md).
 
-### Upcoming MCP discovery gate (Phase 2)
+### MCP discovery gate (Phase 2)
 
 Live trust mode keeps `ENABLE_PROOF_SURFACES=false`. Phase9 AWI and
-marketplace-style discovery stubs are **not** part of the wedge; when Phase 2
-lands they will be gated/removed from `/mcp/tools.json` and MCP registration.
-The dogfood path remains `partner.notes.write` (or your one registered
-internal tool). **Before that change:** inventory any dependency on Phase9 /
-AWI / marketplace stub tool ids and plan a swap to a real registered tool.
+marketplace-style discovery stubs are **not** part of the wedge; with Phase 2
+they are gated/removed from `/mcp/tools.json` and MCP registration when proof
+surfaces are off. The dogfood path remains `partner.notes.write` (or your one
+registered internal tool). Inventory any dependency on Phase9 / AWI /
+marketplace stub tool ids and plan a swap to a real registered tool.
 Details: [`docs/tech-debt-remediation-plan.md`](docs/tech-debt-remediation-plan.md)
 (Phase 2).
 

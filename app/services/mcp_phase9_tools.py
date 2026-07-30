@@ -48,6 +48,19 @@ ALWAYS_GOVERNED_AWI_TOOLS = frozenset(
     }
 )
 
+# Marketplace-style preview stubs registered only when proof surfaces are on.
+DEFAULT_MCP_STUB_SERVICE_IDS = frozenset(
+    {
+        "data-indexer",
+        "content-generator",
+        "telemetry-processor",
+        "semantic-search",
+    }
+)
+
+# Discovery must not advertise these when ENABLE_PROOF_SURFACES=false.
+PROOF_SURFACE_MCP_STUB_IDS = ALWAYS_GOVERNED_AWI_TOOLS | DEFAULT_MCP_STUB_SERVICE_IDS
+
 
 async def awi_passkey_challenge(session_id: str, action: str) -> dict[str, Any]:
     """Create a WebAuthn challenge via the real provider (governed MCP path)."""
@@ -339,7 +352,12 @@ _registration_lock = Lock()
 
 
 def ensure_phase9_registered():
-    """Ensure Phase 9 tools are registered exactly once."""
+    """Ensure Phase 9 tools are registered exactly once when proof surfaces are on."""
+    from ..core.config import get_settings
+
+    if not get_settings().ENABLE_PROOF_SURFACES:
+        return
+
     global _registered
     if _registered:
         return
@@ -351,6 +369,32 @@ def ensure_phase9_registered():
 
 
 _default_services_registered = False
+
+
+def unregister_proof_surface_mcp_stubs() -> None:
+    """Remove Phase9 AWI / marketplace stub tools from the local registry.
+
+    Used when ``ENABLE_PROOF_SURFACES=false`` so discovery stays honest even if
+    an earlier process path registered the stubs (e.g. tests flipping the flag).
+    """
+    global _registered, _default_services_registered
+    registry = get_service_registry()
+    with _registration_lock:
+        for service_id in PROOF_SURFACE_MCP_STUB_IDS:
+            registry.unregister_local(service_id)
+        _registered = False
+        _default_services_registered = False
+
+
+def sync_proof_surface_mcp_registration() -> None:
+    """Register or unregister proof-surface MCP stubs to match the flag."""
+    from ..core.config import get_settings
+
+    if get_settings().ENABLE_PROOF_SURFACES:
+        ensure_phase9_registered()
+        register_default_mcp_services()
+    else:
+        unregister_proof_surface_mcp_stubs()
 
 
 class DefaultServiceDef(TypedDict):
@@ -394,7 +438,12 @@ def _make_default_service_handler(service_def: DefaultServiceDef):
 
 
 def register_default_mcp_services():
-    """Register default MCP services for the marketplace."""
+    """Register marketplace preview stubs when proof surfaces are enabled."""
+    from ..core.config import get_settings
+
+    if not get_settings().ENABLE_PROOF_SURFACES:
+        return
+
     global _default_services_registered
     if _default_services_registered:
         return

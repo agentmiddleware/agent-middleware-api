@@ -1,9 +1,9 @@
 # Agent-Native Middleware API — LLM-Readable Documentation
 
-**Agent-first:** You are the intended reader. This file is primary prose for autonomous agents and orchestrators. Before acting, fetch `GET /.well-known/agent.json` and use `GET /health/dependencies` (`simulation_modes`) so you do not treat simulated domains as real.
+**Agent-first:** You are the intended reader. This file is primary prose for autonomous agents and orchestrators. Before acting, fetch `GET /.well-known/agent.json` and use `GET /health/dependencies` (`simulation_modes`, `enable_proof_surfaces`) so you do not treat simulated domains as real.
 
 **Version:** use `version` from `GET /.well-known/agent.json` (this document may be cached).
-**Base URL:** supplied by your operator (example: http://localhost:8000)
+**Base URL:** {{PUBLIC_URL}}
 **Auth:** `X-API-Key` header on protected routes
 
 ---
@@ -20,9 +20,8 @@ discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> 
 ```
 
 Read `capabilities` on `GET /.well-known/agent.json` for the product wedge.
-Entries under `proof_surfaces` (and capabilities with `surface=proof_surface`
-on `/v1/discover`) are labeled scaffolding — often simulated, and not
-permit-enforced on HTTP unless routed through governed MCP.
+Entries under `proof_surfaces` are labeled scaffolding — often simulated, and not
+mounted when `enable_proof_surfaces` is false.
 
 Core infrastructure:
 - **Identity & authority** — Wallet-scoped agents, API keys, signing keys, KYC hooks
@@ -30,9 +29,6 @@ Core infrastructure:
 - **Execution governance** — Permit-gated MCP invocation, receipts, audit chain
 - **Economics** — Wallet budgets, ledger charges, idempotent replay without double-charge
 - **Readiness** — `/health/dependencies` (`simulation_modes`, `enable_proof_surfaces`)
-
-Proof surfaces such as AWI, content generation, oracle crawls, and sandboxes
-exercise the control plane; they do not replace the core loop.
 
 ---
 
@@ -48,6 +44,7 @@ GET /openapi.json
 ```
 
 Use `/v1/discover` as an optional expanded catalog after the bootstrap sequence.
+Treat `/mcp/tools.json` as authoritative for callable MCP tools.
 
 ### 2. Get Your API Key
 
@@ -64,30 +61,33 @@ POST /v1/billing/wallets/agent
 }
 ```
 
-### 4. Start Using Services
+### 4. Governed Tool Loop (dogfood)
+
+Register one real tool (ops/scripts; local dogfood uses `partner.notes.write`),
+then:
 
 ```bash
-# Emit telemetry
-POST /v1/telemetry/events
-{"event": "agent_started", "agent_id": "your-agent-id"}
+# Issue a scoped permit for that tool
+POST /v1/permits
+{"wallet_id": "...", "allowed_tools": ["partner.notes.write"], ...}
 
-# Send message to another agent
-POST /v1/comms/messages
-{"from": "your-agent-id", "to": "other-agent", "content": "hello"}
+# Invoke via MCP with permit + idempotency key
+POST /mcp/messages
+{"jsonrpc":"2.0","method":"tools/call","params":{...}}
 
-# Make AI decision
-POST /v1/ai/decide
-{"agent_id": "your-agent-id", "context": {...}, "options": [...]}
+# Verify the signed receipt
+GET /v1/receipts/{receipt_id}
 ```
+
+Do **not** start with telemetry, agent comms, or AI decide/heal endpoints —
+those are proof surfaces, not the wedge.
 
 ---
 
 ## MCP Tool Discovery
 
-Agents using Model Context Protocol should:
-
 ```bash
-# List available tools
+# List available tools (ops-registered / dogfood only when proof surfaces are off)
 GET /mcp/tools.json
 
 # Call a tool via MCP
@@ -95,110 +95,8 @@ POST /mcp/messages
 {"jsonrpc": "2.0", "method": "tools/list", "id": 1}
 ```
 
-Available tools:
-- `emit_telemetry_event` — Track events (1 credit)
-- `charge_wallet` — Deduct credits (1 credit)
-- `send_agent_message` — Send message (1 credit)
-- `decide` — AI decision (10 credits)
-- `heal` — Self-healing (15 credits)
-- `create_session` — AWI session (5 credits)
-
----
-
-## AWI — Agentic Web Interface
-
-For web automation without fighting DOM trees:
-
-```bash
-# Create session
-POST /v1/awi/sessions
-{"target_url": "https://example.com", "max_steps": 100}
-
-# Execute standardized actions
-POST /v1/awi/execute
-{"session_id": "...", "action": "search_and_filter", "parameters": {...}}
-
-# Get representation
-POST /v1/awi/represent
-{"session_id": "...", "representation_type": "summary"}
-
-# Human pause/steer
-POST /v1/awi/intervene
-{"session_id": "...", "action": "pause", "reason": "Review needed"}
-```
-
-### AWI Phase 9 — Enhanced Capabilities
-
-**Passkey Authentication** — FIDO2/WebAuthn passkey support for agent sessions:
-
-```bash
-# Register a passkey for agent authentication
-POST /v1/awi/passkey/register
-{"wallet_id": "agent-001", "rp_name": "MyAgent", "user_name": "agent@example.com"}
-
-# Generate passkey challenge
-POST /v1/awi/passkey/challenge
-{"wallet_id": "agent-001"}
-
-# Verify passkey assertion
-POST /v1/awi/passkey/verify
-{"wallet_id": "agent-001", "assertion": {...}}
-
-# List registered passkeys
-GET /v1/awi/passkey/list/{wallet_id}
-
-# Delete a passkey
-DELETE /v1/awi/passkey/{credential_id}
-```
-
-**DOM Bridge** — Bidirectional DOM↔AWI translation for precise web control:
-
-```bash
-# Get DOM snapshot as structured data
-POST /v1/awi/dom/snapshot
-{"session_id": "...", "include_shadow_dom": true}
-
-# Get element at position (clickable elements)
-POST /v1/awi/dom/element_at
-{"session_id": "...", "x": 100, "y": 200}
-
-# Execute AWI action and return DOM result
-POST /v1/awi/dom/execute
-{"session_id": "...", "action": "click", "parameters": {"element_id": "btn-submit"}}
-
-# Query DOM with CSS selector
-POST /v1/awi/dom/query
-{"session_id": "...", "selector": "button.primary"}
-
-# Generate AWI action from DOM element
-POST /v1/awi/dom/to_awi
-{"session_id": "...", "element": {...}}
-```
-
-**RAG Memory** — Vector store for semantic agent memory:
-
-```bash
-# Ingest document into memory store
-POST /v1/awi/rag/ingest
-{"wallet_id": "agent-001", "content": "...", "metadata": {"source": "doc.pdf"}}
-
-# Search memory semantically
-POST /v1/awi/rag/search
-{"wallet_id": "agent-001", "query": "what was the previous checkout flow?", "top_k": 5}
-
-# Get memory context for session
-POST /v1/awi/rag/context
-{"wallet_id": "agent-001", "session_id": "..."}
-
-# List memory entries
-GET /v1/awi/rag/list/{wallet_id}
-
-# Delete memory entry
-DELETE /v1/awi/rag/{memory_id}
-
-# Clear all memory for wallet
-DELETE /v1/awi/rag/clear/{wallet_id}
-```
+Phase9 AWI / marketplace preview stubs (`awi_*`, `data-indexer`, etc.) are
+**not** advertised when `ENABLE_PROOF_SURFACES=false`.
 
 ---
 
@@ -244,45 +142,20 @@ npm install @b2a/sdk
 
 ---
 
-## Framework Integration
-
-### LangGraph
-```python
-from langgraph.prebuilt import create_react_agent
-from b2a_sdk import B2AClient
-
-client = B2AClient(...)
-tools = client.get_mcp_tools()
-agent = create_react_agent(model, tools)
-```
-
-### CrewAI
-```python
-from crewai import Agent
-from b2a_sdk import B2AClient
-
-client = B2AClient(...)
-agent = Agent(
-    role="...",
-    tools=client.get_mcp_tools()
-)
-```
-
----
-
 ## Endpoints Summary
 
 | Category | Prefix | Auth |
 |----------|--------|------|
 | Discovery | `/v1/discover` | Optional |
 | Billing | `/v1/billing` | Required |
-| Telemetry | `/v1/telemetry` | Required |
-| Comms | `/v1/comms` | Required |
-| AI | `/v1/ai` | Required |
-| AWI | `/v1/awi` | Required |
-| Sandbox | `/v1/sandbox` | Required |
+| Permits | `/v1/permits` | Required |
+| Receipts | `/v1/receipts` | Required |
+| Audit | `/v1/audit` | Required |
 | MCP | `/mcp` | Optional |
 | Health | `/health` | None |
+
+Proof-surface prefixes (`/v1/awi`, `/v1/telemetry`, `/v1/comms`, `/v1/ai`, …)
+are mounted only when `ENABLE_PROOF_SURFACES=true`.
 
 ---
 
@@ -302,6 +175,6 @@ agent = Agent(
 
 - API Docs: `/docs`
 - OpenAPI Spec: `/openapi.json`
-- AWI Adoption Guide: `/docs/awi-adoption-guide.md`
-- Agent Recipes: `/docs/agent-recipes.md`
+- Wedge: `/WEDGE.md`
+- Security limitations: `/SECURITY_LIMITATIONS.md`
 - GitHub: https://github.com/PetrefiedThunder/agent-middleware-api

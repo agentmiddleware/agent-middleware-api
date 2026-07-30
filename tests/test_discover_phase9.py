@@ -10,7 +10,6 @@ Verifies that all discovery surfaces include Phase 9 features:
 """
 
 
-
 class TestWellKnownAgentJson:
     """Test agent.json separates trust-plane product from Phase 9 proof surfaces."""
 
@@ -179,33 +178,27 @@ class TestMcpToolsManifest:
 
 
 class TestLlmTxt:
-    """Test /llm.txt includes Phase 9 documentation."""
+    """Test /llm.txt documents the trust-plane wedge (Phase 2 honesty)."""
 
-    def test_llm_txt_has_phase9_section(self):
-        """Verify llm.txt includes Phase 9 documentation."""
+    def test_llm_txt_has_trust_plane_quickstart(self):
+        """Verify llm.txt points at permit → invoke → receipt, not proof stubs."""
         with open("static/llm.txt", "r") as f:
             content = f.read()
 
         assert "Agent-first" in content, "Missing agent-first preamble"
-        assert "Passkey" in content, "Missing passkey documentation"
-        assert "DOM Bridge" in content, "Missing DOM bridge documentation"
-        assert "RAG Memory" in content, "Missing RAG memory documentation"
+        assert "{{PUBLIC_URL}}" in content, "Missing PUBLIC_URL placeholder"
+        assert "**Base URL:** http://localhost:8000" not in content
+        assert "partner.notes.write" in content
+        assert "POST /v1/telemetry/events" not in content
 
-    def test_llm_txt_has_phase9_endpoints(self):
-        """Verify llm.txt includes Phase 9 endpoint examples."""
+    def test_llm_txt_notes_proof_surface_gate(self):
+        """Verify llm.txt discloses the Phase9/AWI discovery gate."""
         with open("static/llm.txt", "r") as f:
             content = f.read()
 
-        phase9_endpoints = [
-            "/v1/awi/passkey/register",
-            "/v1/awi/passkey/challenge",
-            "/v1/awi/dom/snapshot",
-            "/v1/awi/dom/element_at",
-            "/v1/awi/rag/ingest",
-            "/v1/awi/rag/search",
-        ]
-        for endpoint in phase9_endpoints:
-            assert endpoint in content, f"Missing Phase 9 endpoint example: {endpoint}"
+        assert "ENABLE_PROOF_SURFACES" in content
+        assert "awi_" in content
+        assert "/v1/permits" in content
 
 
 class TestPhase9ToolsRegistration:
