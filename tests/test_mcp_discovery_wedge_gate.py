@@ -24,13 +24,30 @@ async def client():
 
 @pytest.fixture
 def proof_surfaces_off(monkeypatch):
-    """Force proof surfaces off and sync MCP stub registration."""
-    settings = get_settings()
-    previous = settings.ENABLE_PROOF_SURFACES
-    monkeypatch.setattr(settings, "ENABLE_PROOF_SURFACES", False)
+    """Force proof surfaces off and sync MCP stub registration.
+
+    Clears the settings cache and rebinds module-level ``settings`` aliases so
+    this stays honest after other tests call ``get_settings.cache_clear()``.
+    """
+    import app.main as main_mod
+    import app.routers.discover as discover_mod
+    import app.routers.well_known as well_known_mod
+
+    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
+    get_settings.cache_clear()
+    cfg = get_settings()
+    assert cfg.ENABLE_PROOF_SURFACES is False
+    monkeypatch.setattr(main_mod, "settings", cfg)
+    monkeypatch.setattr(discover_mod, "settings", cfg)
+    monkeypatch.setattr(well_known_mod, "settings", cfg)
     sync_proof_surface_mcp_registration()
     yield
-    monkeypatch.setattr(settings, "ENABLE_PROOF_SURFACES", previous)
+    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "true")
+    get_settings.cache_clear()
+    restored = get_settings()
+    monkeypatch.setattr(main_mod, "settings", restored)
+    monkeypatch.setattr(discover_mod, "settings", restored)
+    monkeypatch.setattr(well_known_mod, "settings", restored)
     sync_proof_surface_mcp_registration()
 
 

@@ -419,7 +419,7 @@ async def root():
                 "sandbox",
                 "telemetry_pm",
             ],
-            "proof_surfaces_mounted": bool(settings.ENABLE_PROOF_SURFACES),
+            "proof_surfaces_mounted": bool(get_settings().ENABLE_PROOF_SURFACES),
         },
         "services": {
             "iot_bridge": {
@@ -698,7 +698,7 @@ async def root():
             "dependency_truth": "/health/dependencies",
         },
     }
-    if not settings.ENABLE_PROOF_SURFACES:
+    if not get_settings().ENABLE_PROOF_SURFACES:
         # Only advertise mounted core trust services when proof surfaces are off.
         payload["services"] = {
             key: value

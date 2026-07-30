@@ -272,7 +272,7 @@ def _build_capabilities() -> list[ServiceCapability]:
         ),
     ]
 
-    if settings.ENABLE_PROOF_SURFACES:
+    if get_settings().ENABLE_PROOF_SURFACES:
         return product + proof
     return product
 
@@ -283,7 +283,7 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
     When proof surfaces are off, return an empty catalog and point agents at
     ``/mcp/tools.json`` (ops-registered / dogfood tools only).
     """
-    if not settings.ENABLE_PROOF_SURFACES:
+    if not get_settings().ENABLE_PROOF_SURFACES:
         return []
 
     return [
@@ -549,7 +549,9 @@ async def get_discovery_manifest():
         ),
         capabilities=_build_capabilities(),
         mcp_tools=_build_mcp_tools(),
-        awi_endpoints=_build_awi_endpoints() if settings.ENABLE_PROOF_SURFACES else [],
+        awi_endpoints=_build_awi_endpoints()
+        if get_settings().ENABLE_PROOF_SURFACES
+        else [],
         pricing=_build_pricing(),
     )
 
@@ -589,7 +591,7 @@ async def list_awi_endpoints(api_key: str = Depends(verify_api_key)):
     - How to request different representations
     - How to implement human pause/steer
     """
-    if not settings.ENABLE_PROOF_SURFACES:
+    if not get_settings().ENABLE_PROOF_SURFACES:
         return {
             "endpoints": [],
             "mounted": False,

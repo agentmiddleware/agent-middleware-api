@@ -107,13 +107,14 @@ def get_agent_first_metadata() -> dict[str, Any]:
     Single source of truth for agent-first bootstrap hints.
     Used by /.well-known/agent.json and GET /v1/discover.
     """
+    cfg = get_settings()
     bootstrap = [
         "/.well-known/agent.json",
         "/llm.txt",
         "/mcp/tools.json",
         "/openapi.json",
     ]
-    if settings.ENABLE_PROOF_SURFACES:
+    if cfg.ENABLE_PROOF_SURFACES:
         # Insert AWI manifest after agent.json when proof surfaces are mounted.
         bootstrap.insert(1, "/.well-known/awi.json")
 
@@ -133,7 +134,7 @@ def get_agent_first_metadata() -> dict[str, Any]:
         ],
         "bootstrap_sequence": bootstrap,
         "simulation_and_dependency_truth": "/health/dependencies",
-        "proof_surfaces_enabled": bool(settings.ENABLE_PROOF_SURFACES),
+        "proof_surfaces_enabled": bool(cfg.ENABLE_PROOF_SURFACES),
         "proof_surface_note": (
             "Entries under proof_surfaces are demo/workload scaffolding. "
             "They do not define the product unless they consume the same "
@@ -268,7 +269,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
         "agent_recipes": "/docs/agent-recipes.md",
     }
 
-    if settings.ENABLE_PROOF_SURFACES:
+    if get_settings().ENABLE_PROOF_SURFACES:
         endpoints = {**endpoints, **_proof_surface_endpoints()}
         documentation = {
             **documentation,
@@ -397,7 +398,7 @@ async def get_agent_json(request: Request):
 )
 async def get_awi_json():
     """Serve the draft AWI-over-MCP manifest (only when proof surfaces are on)."""
-    if not settings.ENABLE_PROOF_SURFACES:
+    if not get_settings().ENABLE_PROOF_SURFACES:
         return JSONResponse(
             status_code=404,
             content={
