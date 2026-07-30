@@ -9,8 +9,7 @@
     "restartPolicyMaxRetries": 10
   },
   "variables": {
-    "STATE_BACKEND": "sqlite",
-    "VALID_API_KEYS": "change-me",
+    "STATE_BACKEND": "postgres",
     "PUBLIC_URL": "https://api-service-production-433c.up.railway.app"
   }
 }

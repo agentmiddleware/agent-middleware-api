@@ -1,11 +1,14 @@
 """
 Durable state backend abstraction for runtime service stores.
 
-Priority order:
+Priority order (STATE_BACKEND=auto):
 1) PostgreSQL (DATABASE_URL)
 2) Redis (REDIS_URL)
-3) SQLite (SQLITE_URL)
-4) In-memory fallback
+3) SQLite file (SQLITE_URL)
+4) In-memory (dev/test only)
+
+Production-like environments refuse silent memory fallback when an explicit
+backend is configured or when the resolved backend fails to initialize.
 """
 
 from __future__ import annotations
@@ -25,9 +28,15 @@ import asyncpg
 import redis.asyncio as redis
 
 from .config import get_settings
+from .db_urls import as_asyncpg_url
 from .runtime_degradation import mark_durable_state_fell_back
+from .trust_mode import is_production_like_environment
 
 logger = logging.getLogger(__name__)
+
+
+class DurableStateConfigError(RuntimeError):
+    """Raised when durable state cannot be configured safely."""
 
 
 def _json_default(value: Any) -> Any:
@@ -56,6 +65,7 @@ class DurableStateStore:
         self._redis_url = settings.REDIS_URL.strip()
         self._database_url = settings.DATABASE_URL.strip()
         self._sqlite_url = settings.SQLITE_URL.strip()
+        self._production_like = is_production_like_environment(settings.ENVIRONMENT)
 
         self._init_lock = asyncio.Lock()
         self._initialized = False
@@ -74,12 +84,23 @@ class DurableStateStore:
 
     def _resolve_backend(self) -> str:
         if self._state_backend in ("postgres", "postgresql"):
-            return "postgres" if self._database_url else "memory"
+            if self._database_url:
+                return "postgres"
+            return self._missing_explicit_backend("postgres", "DATABASE_URL")
         if self._state_backend == "redis":
-            return "redis" if self._redis_url else "memory"
+            if self._redis_url:
+                return "redis"
+            return self._missing_explicit_backend("redis", "REDIS_URL")
         if self._state_backend == "sqlite":
-            return "sqlite" if self._sqlite_url else "memory"
+            if self._sqlite_url:
+                return "sqlite"
+            return self._missing_explicit_backend("sqlite", "SQLITE_URL")
         if self._state_backend == "memory":
+            if self._production_like:
+                raise DurableStateConfigError(
+                    "STATE_BACKEND=memory is not allowed in production-like "
+                    "environments"
+                )
             return "memory"
 
         # auto/default
@@ -89,6 +110,19 @@ class DurableStateStore:
             return "redis"
         if self._sqlite_url:
             return "sqlite"
+        if self._production_like:
+            raise DurableStateConfigError(
+                "Production-like environments require DATABASE_URL, REDIS_URL, "
+                "or SQLITE_URL for durable state"
+            )
+        return "memory"
+
+    def _missing_explicit_backend(self, intended: str, missing_var: str) -> str:
+        message = f"STATE_BACKEND={intended} requires {missing_var} to be set"
+        if self._production_like:
+            raise DurableStateConfigError(message)
+        logger.warning("%s; falling back to in-memory for non-production.", message)
+        mark_durable_state_fell_back(intended)
         return "memory"
 
     async def _ensure_ready(self) -> None:
@@ -103,8 +137,9 @@ class DurableStateStore:
 
             try:
                 if self._backend == "postgres":
+                    pg_url = as_asyncpg_url(self._database_url)
                     self._pg_pool = await asyncpg.create_pool(
-                        self._database_url,
+                        pg_url,
                         min_size=1,
                         max_size=5,
                         timeout=10,
@@ -143,14 +178,26 @@ class DurableStateStore:
                         """
                     )
                     await self._sqlite_conn.commit()
-            except Exception:
+            except DurableStateConfigError:
+                raise
+            except Exception as exc:
+                intended = self._backend
                 logger.exception(
-                    "Failed to initialize durable state backend '%s'; falling "
-                    "back to in-memory.",
-                    self._backend,
+                    "Failed to initialize durable state backend '%s'",
+                    intended,
                 )
-                mark_durable_state_fell_back(self._backend)
+                mark_durable_state_fell_back(intended)
                 await self.close()
+                if self._production_like:
+                    raise DurableStateConfigError(
+                        f"Durable state backend '{intended}' failed to initialize "
+                        f"in production-like environment: {exc}"
+                    ) from exc
+                logger.warning(
+                    "Falling back to in-memory durable state after '%s' failure "
+                    "(non-production).",
+                    intended,
+                )
                 self._backend = "memory"
 
             self._initialized = True
@@ -265,7 +312,7 @@ class DurableStateStore:
         await self._redis.delete(self._redis_key(key))
         return True
 
-    async def list_keys(self, prefix: str) -> list[str]:
+    async def list_keys(self, prefix: str = "") -> list[str]:
         """List durable state keys by prefix for row-keyed service state."""
         await self._ensure_ready()
         if self._backend == "memory":
@@ -313,10 +360,11 @@ class DurableStateStore:
 
         if self._backend == "memory":
             return {
-                "ok": True,
+                "ok": not self._production_like,
                 "backend": "memory",
                 "enabled": False,
-                "reason": "No DATABASE_URL/REDIS_URL/SQLITE_URL configured",
+                "reason": "No DATABASE_URL/REDIS_URL/SQLITE_URL configured "
+                "or durable backend unavailable",
             }
 
         if self._backend == "postgres":
@@ -380,7 +428,6 @@ class DurableStateStore:
                 logger.debug("Failed to close SQLite connection cleanly", exc_info=True)
             self._sqlite_conn = None
 
-        # Keep init state so this instance can re-initialize if needed.
         self._initialized = False
         self._backend = "memory"
 
@@ -390,5 +437,11 @@ def get_durable_state() -> DurableStateStore:
     return DurableStateStore()
 
 
+def reset_durable_state_for_tests() -> None:
+    """Drop the cached store so the next get_durable_state() rebuilds."""
+    get_durable_state.cache_clear()
+
+
 async def close_durable_state() -> None:
     await get_durable_state().close()
+    reset_durable_state_for_tests()
