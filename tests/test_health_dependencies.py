@@ -19,6 +19,7 @@ from app.core.health import (
     _run_check,
     gather_dependency_report,
 )
+from app.core.runtime_degradation import reset_runtime_degradation
 from app.main import app
 
 
@@ -44,9 +45,11 @@ def _restore_env():
         "SIMULATION_MODE_TELEMETRY_PM",
     ]
     saved = {f: getattr(settings, f) for f in fields}
+    reset_runtime_degradation()
     yield
     for f, v in saved.items():
         setattr(settings, f, v)
+    reset_runtime_degradation()
 
 
 # ---------------------------------------------------------------------------
