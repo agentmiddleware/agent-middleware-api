@@ -73,8 +73,9 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 
 `app/trust/` is the package boundary for that spine (`permits`, `receipts`,
 `audit_chain`, `idempotency`, `metering`, `evidence`, `adapters`). MCP is the
-first and only live adapter (`McpGovernedAdapter`). HTTP AWI and other proof
-routers do **not** enforce permits unless the call goes through governed MCP.
+first and only live adapter (`McpGovernedAdapter`). High-risk HTTP AWI routes
+(`execute`, passkey, rag, `dom/sync`) also require permits and emit receipts;
+prefer governed MCP for agent integrations.
 
 **Product:** Govern and meter agent tool calls with wallet budgets, scoped permits, idempotent retries, signed receipts, and auditable denial.
 
