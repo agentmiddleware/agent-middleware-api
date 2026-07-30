@@ -27,6 +27,10 @@ Run the focused one-command proof first:
 make demo-trust-plane
 ```
 
+For the live engagement checklist that replaces `trust-plane-echo` with the
+partner's real tool id, use
+[`docs/partner-first-tool-runbook.md`](docs/partner-first-tool-runbook.md).
+
 If the partner wants the operator narrative instead of the compact proof, run:
 
 ```bash
