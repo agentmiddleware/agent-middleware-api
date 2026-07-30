@@ -38,6 +38,11 @@ test.db
 *.db-shm
 *.db-wal
 
+# Local dogfood / demo throwaway state
+data/dogfood_partner_notes.jsonl
+data/dogfood_trust_plane.db*
+data/demo_trust_plane.db*
+
 # OS
 .DS_Store
 Thumbs.db

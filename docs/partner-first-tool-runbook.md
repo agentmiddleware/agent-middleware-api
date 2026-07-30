@@ -91,6 +91,7 @@ broad migration before the single-tool loop is trusted. Point to
 ## Commands
 
 ```bash
+make dogfood-trust-plane        # partner.notes.write playground (real side effect)
 make prove-trust-plane          # local echo proof
 make agent-ops-war-room         # narrated operator timeline
 make red-team-trust-plane       # adversarial deny battery
