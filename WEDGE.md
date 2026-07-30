@@ -107,6 +107,9 @@ primitives.
 
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
 
+Agent-executable remediation of known spine/discovery/deploy debt:
+[`docs/tech-debt-remediation-plan.md`](docs/tech-debt-remediation-plan.md).
+
 ## What Not To Claim Yet
 
 - Production-ready payments or settlement.

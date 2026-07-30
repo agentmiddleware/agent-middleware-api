@@ -21,6 +21,7 @@ from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel
 
 from ..core.config import get_settings
+from ..core.db_urls import as_sqlalchemy_url
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +30,16 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def _get_database_url() -> str | None:
-    """Get database URL from settings or environment."""
+    """Get database URL from settings or environment (SQLAlchemy async form)."""
     settings = get_settings()
-    if settings.DATABASE_URL:
-        return settings.DATABASE_URL
+    raw = settings.DATABASE_URL or None
+    if not raw:
+        import os
 
-    import os
-    return os.environ.get("DATABASE_URL")
+        raw = os.environ.get("DATABASE_URL")
+    if not raw:
+        return None
+    return as_sqlalchemy_url(raw)
 
 
 def get_engine() -> AsyncEngine | None:

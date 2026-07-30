@@ -112,7 +112,7 @@ settlement, or public arbitrary-code execution without strong isolation.
 
 **Do this:**
 
-- [ ] Set **`DATABASE_URL`** to a URL your app and Alembic can use (PostgreSQL in production: prefer **`postgresql+asyncpg://`** so async SQLAlchemy matches Alembic’s async `env.py`).
+- [ ] Set **`DATABASE_URL`** to a URL your app and Alembic can use (PostgreSQL: either `postgresql://…` or `postgresql+asyncpg://…` — the app normalizes for SQLAlchemy and raw asyncpg). Set **`STATE_BACKEND=postgres`** in production-like deploys so durable state does not silently fall back to memory.
 - [ ] **Before or on first deploy**, bring the schema to head:
   - **One-off (any host):** `alembic upgrade head` with the same `DATABASE_URL` in the environment.
   - **Docker / Railway using this repo’s image:** set **`RUN_MIGRATIONS_ON_START=true`** so the container entrypoint runs migrations then starts uvicorn. If `DATABASE_URL` is missing, migrations are skipped (see `scripts/docker_entrypoint.sh`).

@@ -22,7 +22,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
-from .core.durable_state import close_durable_state, get_durable_state
+from .core.durable_state import (
+    DurableStateConfigError,
+    close_durable_state,
+    get_durable_state,
+)
 from .core.health import gather_dependency_report
 from .core.rate_limiter import RateLimitMiddleware
 from .core.trust_mode import (
@@ -192,6 +196,22 @@ async def lifespan(app: FastAPI):
             )
         except Exception as e:
             logger.warning("app_startup", phase="database_init_failed", error=str(e))
+
+    # Fail closed at boot in production-like envs (DurableStateConfigError)
+    # rather than waiting for the first request that touches durable state.
+    startup_time = time.monotonic()
+    try:
+        state_report = await get_durable_state().health_report()
+        logger.info(
+            "app_startup",
+            phase="durable_state_ready",
+            backend=state_report.get("backend"),
+            enabled=state_report.get("enabled"),
+            startup_time_s=time.monotonic() - startup_time,
+        )
+    except DurableStateConfigError:
+        logger.error("app_startup", phase="durable_state_failed")
+        raise
 
     startup_time = time.monotonic()
     ensure_phase9_registered()

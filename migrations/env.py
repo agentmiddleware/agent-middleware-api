@@ -25,9 +25,12 @@ target_metadata = SQLModel.metadata
 
 
 def get_url():
-    """Get database URL from config or environment."""
+    """Get database URL from config or environment (SQLAlchemy async form)."""
     import os
-    return os.getenv("DATABASE_URL", "")
+
+    from app.core.db_urls import as_sqlalchemy_url
+
+    return as_sqlalchemy_url(os.getenv("DATABASE_URL", ""))
 
 
 def run_migrations_offline() -> None:
