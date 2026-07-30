@@ -55,11 +55,17 @@ async def test_agent_manifest_points_to_canonical_control_plane_surfaces(client)
 
     assert endpoints["billing"] == "/v1/billing"
     assert endpoints["mcp"] == "/mcp"
+    assert endpoints["permits"] == "/v1/permits"
+    assert endpoints["receipts"] == "/v1/receipts"
     assert endpoints["health"] == "/health"
     assert endpoints["agent_manifest"] == "/.well-known/agent.json"
     assert endpoints["llm_docs"] == "/llm.txt"
     assert "/mcp/tools.json" in agent_first["bootstrap_sequence"]
     assert agent_first["simulation_and_dependency_truth"] == "/health/dependencies"
+    assert agent_first["product_wedge"] == "governed_mcp_trust_plane"
+    assert "permits" in data["capabilities"]
+    assert "passkey_auth" not in data["capabilities"]
+    assert any(p["id"] == "passkey_auth" for p in data["proof_surfaces"])
 
 
 @pytest.mark.anyio
@@ -69,7 +75,9 @@ async def test_discover_and_agent_manifest_share_agent_first_contract(client):
 
     assert agent_response.status_code == 200
     assert discover_response.status_code == 200
-    assert agent_response.json()["agent_first"] == discover_response.json()["agent_first"]
+    assert (
+        agent_response.json()["agent_first"] == discover_response.json()["agent_first"]
+    )
 
 
 @pytest.mark.anyio

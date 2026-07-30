@@ -5,13 +5,13 @@ MCP Phase 9 Tools Registration
 Registers Phase 9 enhanced capabilities (passkey auth, DOM bridge, RAG memory)
 as discoverable MCP tools.
 
-These tools are automatically included in /mcp/tools.json and /v1/discover responses.
-
-Note: These are HTTP-based services exposed via /v1/awi/* endpoints.
-Wrapper functions provide schema information for MCP discovery.
+All Phase 9 AWI tools are marked ``require_permit=True`` so they always run
+the governed MCP path (permit → meter → receipt) even when legacy
+unpermitted MCP is enabled.
 """
 
 import logging
+from dataclasses import asdict
 from threading import Lock
 from typing import Any, Callable, TypedDict
 
@@ -33,18 +33,41 @@ from ..schemas.awi_enhanced import (
 
 logger = logging.getLogger(__name__)
 
+# All Phase 9 AWI tools must stay on the trust spine (no legacy bypass).
+ALWAYS_GOVERNED_AWI_TOOLS = frozenset(
+    {
+        "awi_passkey_challenge",
+        "awi_passkey_verify",
+        "awi_dom_bridge_session",
+        "awi_dom_sync",
+        "awi_dom_state",
+        "awi_dom_action_preview",
+        "awi_memory_index",
+        "awi_rag_query",
+        "awi_session_context",
+    }
+)
+
 
 async def awi_passkey_challenge(session_id: str, action: str) -> dict[str, Any]:
-    """Wrapper for passkey challenge generation."""
+    """Create a WebAuthn challenge via the real provider (governed MCP path)."""
+    from .webauthn_provider import get_webauthn_provider
+
+    provider = get_webauthn_provider()
+    challenge = await provider.create_challenge(
+        session_id=session_id,
+        action=action,
+    )
     return {
-        "endpoint": "/v1/awi/passkey/challenge",
-        "method": "POST",
-        "requires": ["session_id", "action"],
+        "status": "ok",
+        "governed": True,
+        "tool": "awi_passkey_challenge",
+        **challenge,
     }
 
 
 async def awi_passkey_verify(challenge_id: str, credential: dict) -> dict[str, Any]:
-    """Wrapper for passkey verification."""
+    """Wrapper for passkey verification (endpoint pointer; not always-governed)."""
     return {
         "endpoint": "/v1/awi/passkey/verify",
         "method": "POST",
@@ -108,8 +131,33 @@ async def awi_memory_index(
 
 
 async def awi_rag_query(query: str, top_k: int = 5, **kwargs) -> dict[str, Any]:
-    """Wrapper for RAG semantic search."""
-    return {"endpoint": "/v1/awi/rag/search", "method": "POST", "requires": ["query"]}
+    """Semantic search via the RAG engine (governed MCP path)."""
+    from .awi_rag_engine import get_awi_rag_engine
+
+    engine = get_awi_rag_engine()
+    results = await engine.search(
+        query=query,
+        top_k=top_k,
+        session_type=kwargs.get("session_type"),
+    )
+    serialized = []
+    for item in results:
+        if hasattr(item, "model_dump"):
+            serialized.append(item.model_dump(mode="json"))
+        else:
+            payload = asdict(item)
+            for key, value in list(payload.items()):
+                if hasattr(value, "isoformat"):
+                    payload[key] = value.isoformat()
+            serialized.append(payload)
+    return {
+        "status": "ok",
+        "governed": True,
+        "tool": "awi_rag_query",
+        "query": query,
+        "count": len(serialized),
+        "results": serialized,
+    }
 
 
 async def awi_session_context(
@@ -134,98 +182,135 @@ class Phase9ToolDef(TypedDict):
     unit_name: str
     func: Callable[..., Any]
     input_model: type[BaseModel]
+    require_permit: bool
 
 
 MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
     {
         "service_id": "awi_passkey_challenge",
         "name": "AWI Passkey Challenge",
-        "description": "Generate a passkey challenge for high-risk action verification using FIDO2/WebAuthn.",
+        "description": (
+            "Generate a passkey challenge for high-risk action verification "
+            "using FIDO2/WebAuthn. Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 1.0,
         "unit_name": "challenge",
         "func": awi_passkey_challenge,
         "input_model": PasskeyChallengeRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_passkey_verify",
         "name": "AWI Passkey Verify",
-        "description": "Verify a passkey assertion response from the client authenticator.",
+        "description": (
+            "Verify a passkey assertion response from the client authenticator. "
+            "Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 2.0,
         "unit_name": "verification",
         "func": awi_passkey_verify,
         "input_model": PasskeyVerifyRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_dom_bridge_session",
         "name": "AWI DOM Bridge Session",
-        "description": "Create a new Playwright bridge session for real browser automation.",
+        "description": (
+            "Create a new Playwright bridge session for real browser automation. "
+            "Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 5.0,
         "unit_name": "session",
         "func": awi_dom_bridge_session,
         "input_model": DOMBridgeSessionRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_dom_sync",
         "name": "AWI DOM Sync",
-        "description": "Execute an AWI action against real browser DOM and return state representation.",
+        "description": (
+            "Execute an AWI action against real browser DOM and return state "
+            "representation. Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 3.0,
         "unit_name": "execution",
         "func": awi_dom_sync,
         "input_model": DOMSyncRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_dom_state",
         "name": "AWI DOM State",
-        "description": "Get current DOM state as AWI representation (summary, accessibility tree, etc.).",
+        "description": (
+            "Get current DOM state as AWI representation (summary, accessibility "
+            "tree, etc.). Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 2.0,
         "unit_name": "query",
         "func": awi_dom_state,
         "input_model": DOMStateRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_dom_action_preview",
         "name": "AWI DOM Action Preview",
-        "description": "Preview what Playwright commands will be generated for an AWI action.",
+        "description": (
+            "Preview what Playwright commands will be generated for an AWI action. "
+            "Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 2.0,
         "unit_name": "preview",
         "func": awi_dom_action_preview,
         "input_model": DOMActionPreviewRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_memory_index",
         "name": "AWI Memory Index",
-        "description": "Index a completed AWI session for semantic search over session history.",
+        "description": (
+            "Index a completed AWI session for semantic search over session history. "
+            "Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 5.0,
         "unit_name": "indexing",
         "func": awi_memory_index,
         "input_model": MemoryIndexRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_rag_query",
         "name": "AWI RAG Query",
-        "description": "Semantic search query over session memories using vector similarity.",
+        "description": (
+            "Semantic search query over session memories using vector "
+            "similarity. Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 3.0,
         "unit_name": "search",
         "func": awi_rag_query,
         "input_model": RAGQueryRequest,
+        "require_permit": True,
     },
     {
         "service_id": "awi_session_context",
         "name": "AWI Session Context",
-        "description": "Get relevant context from past sessions for the current session.",
+        "description": (
+            "Get relevant context from past sessions for the current session. "
+            "Always requires a signed permit."
+        ),
         "category": ServiceCategory.AGENT_COMMS,
         "credits_per_unit": 2.0,
         "unit_name": "context",
         "func": awi_session_context,
         "input_model": SessionContextRequest,
+        "require_permit": True,
     },
 ]
 
@@ -244,6 +329,7 @@ def register_phase9_tools() -> None:
             input_model=tool["input_model"],
             credits_per_unit=tool["credits_per_unit"],
             unit_name=tool["unit_name"],
+            require_permit=bool(tool.get("require_permit", False)),
         )
         logger.info(f"Registered Phase 9 MCP tool: {tool['service_id']}")
 

@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Video Store
 # ---------------------------------------------------------------------------
 
+
 class VideoStatus(str, Enum):
     PENDING = "pending"
     AWAITING_UPLOAD = "awaiting_upload"
@@ -51,6 +52,7 @@ class VideoStatus(str, Enum):
 @dataclass
 class StoredVideo:
     """Internal video representation."""
+
     video_id: str
     title: str
     source_url: str | None
@@ -88,13 +90,15 @@ class VideoStore:
 # Hook Detector
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HookSignal:
     """A raw signal that contributes to hook detection."""
+
     timestamp: float  # seconds into video
     signal_type: str  # speech_pattern, emotional_peak, visual_surprise, etc.
-    strength: float   # 0.0 - 1.0
-    context: str      # what was happening
+    strength: float  # 0.0 - 1.0
+    context: str  # what was happening
 
 
 class HookDetector:
@@ -121,8 +125,7 @@ class HookDetector:
         require_simulation("media_engine", issue="#39")
         if not video.transcript:
             logger.warning(
-                f"No transcript for {video.video_id}, "
-                "using duration-based detection"
+                f"No transcript for {video.video_id}, using duration-based detection"
             )
 
         # Production: run ML pipeline
@@ -143,6 +146,7 @@ class HookDetector:
 
         # Simulate 3-5 hooks per video
         import random
+
         num_hooks = random.randint(3, 5)
 
         trigger_types = [
@@ -157,14 +161,16 @@ class HookDetector:
             hook_dur = random.uniform(self._min_hook_duration, self._max_hook_duration)
             trigger = random.choice(trigger_types)
 
-            hooks.append(ViralHook(
-                hook_id=str(uuid.uuid4()),
-                start_time_seconds=round(start, 1),
-                end_time_seconds=round(start + hook_dur, 1),
-                confidence_score=round(random.uniform(0.4, 0.95), 2),
-                trigger_type=trigger[0],
-                transcript_snippet=trigger[1],
-            ))
+            hooks.append(
+                ViralHook(
+                    hook_id=str(uuid.uuid4()),
+                    start_time_seconds=round(start, 1),
+                    end_time_seconds=round(start + hook_dur, 1),
+                    confidence_score=round(random.uniform(0.4, 0.95), 2),
+                    trigger_type=trigger[0],
+                    transcript_snippet=trigger[1],
+                )
+            )
 
         return hooks
 
@@ -172,6 +178,7 @@ class HookDetector:
 # ---------------------------------------------------------------------------
 # Clip Renderer
 # ---------------------------------------------------------------------------
+
 
 class ClipRenderer:
     """
@@ -232,9 +239,7 @@ class ClipRenderer:
         tasks = []
         for hook in hooks[:max_clips]:
             for ratio in aspect_ratios:
-                tasks.append(
-                    self.render_clip(video, hook, ratio, caption_style)
-                )
+                tasks.append(self.render_clip(video, hook, ratio, caption_style))
 
         clips = await asyncio.gather(*tasks)
         return list(clips)
@@ -243,6 +248,7 @@ class ClipRenderer:
 # ---------------------------------------------------------------------------
 # Platform Distributor
 # ---------------------------------------------------------------------------
+
 
 class PlatformDistributor:
     """
@@ -267,21 +273,22 @@ class PlatformDistributor:
     ) -> DistributionResult:
         """Distribute a single clip to a platform."""
 
-        # Production: call platform API
-        # Stub: simulate success
+        # Stub path only — real platform APIs are not wired (#39).
+        require_simulation("media_engine", issue="#39")
+
         post_id = uuid.uuid4().hex[:12]
 
         result = DistributionResult(
             clip_id=clip.clip_id,
             platform=platform,
-            status="scheduled" if schedule_at else "published",
+            status="simulated_scheduled" if schedule_at else "simulated",
             platform_post_id=post_id,
             platform_url=self._build_platform_url(platform, post_id),
             scheduled_at=schedule_at,
         )
 
         logger.info(
-            f"Distributed {clip.clip_id} to {platform.value}: "
+            f"Simulated distribute {clip.clip_id} to {platform.value}: "
             f"{result.platform_url}"
         )
         return result
@@ -302,6 +309,7 @@ class PlatformDistributor:
 # Scheduling Engine
 # ---------------------------------------------------------------------------
 
+
 class SchedulingEngine:
     """
     Determines optimal posting times based on historical engagement data.
@@ -310,11 +318,11 @@ class SchedulingEngine:
 
     # Default optimal windows (UTC) — production would learn these per-account
     _default_windows: dict[Platform, list[int]] = {
-        Platform.YOUTUBE_SHORTS: [14, 17, 20],     # 2PM, 5PM, 8PM UTC
-        Platform.TIKTOK: [11, 15, 19, 22],          # High engagement windows
+        Platform.YOUTUBE_SHORTS: [14, 17, 20],  # 2PM, 5PM, 8PM UTC
+        Platform.TIKTOK: [11, 15, 19, 22],  # High engagement windows
         Platform.INSTAGRAM_REELS: [12, 17, 21],
         Platform.X_VIDEO: [13, 17, 20],
-        Platform.LINKEDIN_VIDEO: [8, 12, 17],       # Business hours
+        Platform.LINKEDIN_VIDEO: [8, 12, 17],  # Business hours
     }
 
     async def get_optimal_time(
@@ -336,14 +344,13 @@ class SchedulingEngine:
 
         # All windows passed today — use first window tomorrow
         tomorrow = now + timedelta(days=1)
-        return tomorrow.replace(
-            hour=windows[0], minute=0, second=0, microsecond=0
-        )
+        return tomorrow.replace(hour=windows[0], minute=0, second=0, microsecond=0)
 
 
 # ---------------------------------------------------------------------------
 # Media Engine Orchestrator
 # ---------------------------------------------------------------------------
+
 
 class MediaEngine:
     """
@@ -373,8 +380,7 @@ class MediaEngine:
             source_url=source_url,
             language=language,
             status=(
-                VideoStatus.PROCESSING if source_url
-                else VideoStatus.AWAITING_UPLOAD
+                VideoStatus.PROCESSING if source_url else VideoStatus.AWAITING_UPLOAD
             ),
             metadata=metadata or {},
             created_at=datetime.now(timezone.utc),
@@ -410,8 +416,7 @@ class MediaEngine:
             # Done
             await self.video_store.update_status(video_id, VideoStatus.READY)
             logger.info(
-                f"Video {video_id} processed: "
-                f"{len(video.hooks)} hooks detected"
+                f"Video {video_id} processed: {len(video.hooks)} hooks detected"
             )
 
         except Exception as e:
@@ -467,12 +472,14 @@ class MediaEngine:
             clip = self._clip_store.get(clip_id)
             if not clip:
                 for platform in platforms:
-                    results.append(DistributionResult(
-                        clip_id=clip_id,
-                        platform=platform,
-                        status="failed",
-                        error=f"Clip '{clip_id}' not found",
-                    ))
+                    results.append(
+                        DistributionResult(
+                            clip_id=clip_id,
+                            platform=platform,
+                            status="failed",
+                            error=f"Clip '{clip_id}' not found",
+                        )
+                    )
                 continue
 
             for platform in platforms:

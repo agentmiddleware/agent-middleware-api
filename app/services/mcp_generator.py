@@ -161,6 +161,9 @@ class McpGenerator:
         if truth.get("runtime_service"):
             annotations["runtimeService"] = truth["runtime_service"]
 
+        if service.get("require_permit"):
+            annotations["requirePermit"] = True
+
         if service.get("owner_wallet_id"):
             annotations["providerWallet"] = service["owner_wallet_id"]
 

@@ -27,6 +27,19 @@ idempotent retries, signed receipts, and auditable denial.
 The first design-partner motion should be one real internal tool behind the
 proxy, not a broad migration of every agent workflow.
 
+## Design Partner First Tool
+
+Reference proof tool (local demo only): `trust-plane-echo` via
+`make prove-trust-plane` / [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
+
+Partner motion:
+
+1. Keep `ENABLE_PROOF_SURFACES=false` in the partner environment.
+2. Register **one** internal MCP tool (replace echo; do not mount AWI/media/etc.).
+3. Issue a wallet-scoped permit for that tool only.
+4. Walk permit → invoke → charge → receipt → replay → out-of-scope deny.
+5. Stop. Do not expand surface until that loop is trusted in their stack.
+
 ## What Is Core
 
 - Wallet-scoped API keys.
@@ -58,6 +71,15 @@ IoT bridges, red-team services, RTaaS, telemetry auto-PR, and sandbox demos are
 proof surfaces. They may exercise the control plane, but they do not define the
 product until they consume the same permit, receipt, idempotency, and audit
 primitives.
+
+## What To Freeze
+
+- New proof-surface features and ungated HTTP demos.
+- Broad multi-tool migrations before one partner tool is live.
+- KMS, settlement, transparency logs, and non-MCP adapters (see
+  [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
+
+Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
 
 ## What Not To Claim Yet
 

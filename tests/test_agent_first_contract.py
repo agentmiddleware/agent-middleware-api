@@ -32,3 +32,15 @@ async def test_simulation_truth_endpoint_has_simulation_modes(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "simulation_modes" in data
+    assert "enable_proof_surfaces" in data
+
+
+@pytest.mark.anyio
+async def test_agent_first_declares_product_wedge(client):
+    meta = get_agent_first_metadata()
+    assert meta["product_wedge"] == "governed_mcp_trust_plane"
+    assert meta["product_loop"][0] == "discover"
+    assert "receipt" in meta["product_loop"]
+    assert "proof_surface_note" in meta
+    resp = await client.get("/.well-known/agent.json")
+    assert resp.json()["agent_first"] == meta

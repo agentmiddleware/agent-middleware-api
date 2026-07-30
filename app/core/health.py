@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable
 
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
+from .runtime_degradation import get_runtime_degradation
 
 logger = logging.getLogger(__name__)
 
@@ -225,12 +226,20 @@ async def gather_dependency_report() -> dict[str, Any]:
     unhealthy = [
         name for name, r in dependencies.items() if r.get("status") not in _OK_STATUSES
     ]
-    overall = "healthy" if not unhealthy else "degraded"
+    runtime_degradation = get_runtime_degradation()
+    if runtime_degradation.get("degraded"):
+        overall = "degraded"
+        if "runtime_degradation" not in unhealthy:
+            unhealthy = [*unhealthy, "runtime_degradation"]
+    else:
+        overall = "healthy" if not unhealthy else "degraded"
 
     return {
         "status": overall,
         "version": settings.APP_VERSION,
         "dependencies": dependencies,
         "simulation_modes": sim_modes,
+        "enable_proof_surfaces": bool(settings.ENABLE_PROOF_SURFACES),
+        "runtime_degradation": runtime_degradation,
         "unhealthy": unhealthy,
     }

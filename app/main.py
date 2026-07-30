@@ -89,7 +89,7 @@ try:
         ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         cache_logger_on_first_use=True,
     )
     logger = structlog.get_logger()
@@ -346,8 +346,17 @@ PROOF_SURFACE_ROUTERS = (
     awi_enhanced,
 )
 
-for router_module in (*PROOF_SURFACE_ROUTERS, *CORE_TRUST_ROUTERS):
+for router_module in CORE_TRUST_ROUTERS:
     app.include_router(router_module.router)
+
+if settings.ENABLE_PROOF_SURFACES:
+    for router_module in PROOF_SURFACE_ROUTERS:
+        app.include_router(router_module.router)
+else:
+    logger.info(
+        "proof_surfaces_disabled: ENABLE_PROOF_SURFACES=false; "
+        "only CORE_TRUST_ROUTERS are mounted"
+    )
 
 
 # --- Discovery & Health Endpoints ---

@@ -29,6 +29,17 @@ class ServiceCapability(BaseModel):
     description: str
     category: str
     requires_auth: bool = True
+    surface: str = Field(
+        default="product",
+        description=(
+            "'product' = MCP trust-plane wedge; 'proof_surface' = labeled "
+            "demo/workload scaffolding (often simulated)."
+        ),
+    )
+    simulation_default: bool | None = Field(
+        default=None,
+        description="When true, this surface defaults to simulation mode.",
+    )
 
 
 class MCPToolInfo(BaseModel):
@@ -115,87 +126,155 @@ class DiscoveryManifest(BaseModel):
 
 
 def _build_capabilities() -> list[ServiceCapability]:
-    """Build the list of service capabilities."""
-    return [
+    """Build the list of service capabilities with product vs proof labels."""
+    product = [
         ServiceCapability(
             name="billing",
             version="1.0",
-            description="Two-tier wallet system with ACID transactions, Stripe integration, and spend velocity monitoring",
+            description=(
+                "Wallet metering with ledger charges used by governed MCP invokes"
+            ),
             category="financial",
-        ),
-        ServiceCapability(
-            name="telemetry",
-            version="1.0",
-            description="Emit events, detect anomalies, and trigger autonomous responses",
-            category="observability",
-        ),
-        ServiceCapability(
-            name="comms",
-            version="1.0",
-            description="Agent-to-agent messaging, registration, and swarm coordination",
-            category="communication",
-        ),
-        ServiceCapability(
-            name="ai",
-            version="1.0",
-            description="AI-powered decision making, self-healing, natural language queries, and memory",
-            category="intelligence",
+            surface="product",
         ),
         ServiceCapability(
             name="mcp",
             version="1.0",
-            description="Model Context Protocol server for tool discovery and execution",
+            description=(
+                "Governed Model Context Protocol: permit validation, metering, "
+                "signed receipts, and audit"
+            ),
             category="tooling",
+            surface="product",
         ),
         ServiceCapability(
-            name="awi",
+            name="permits",
             version="1.0",
-            description="Agentic Web Interface - standardized web automation with human pause/steer",
-            category="automation",
+            description="Scoped signed permits for tool, wallet, budget, and expiry",
+            category="authorization",
+            surface="product",
         ),
         ServiceCapability(
-            name="sandbox",
+            name="receipts",
             version="1.0",
-            description="Dry-run sandbox and behavioral sandbox for safe tool testing",
-            category="testing",
+            description="Signed receipts for governed tool attempts",
+            category="evidence",
+            surface="product",
+        ),
+        ServiceCapability(
+            name="audit",
+            version="1.0",
+            description="Wallet-scoped tamper-evident audit chain",
+            category="governance",
+            surface="product",
+        ),
+        ServiceCapability(
+            name="policies",
+            version="1.0",
+            description="Policy bundles evaluated on governed invocations",
+            category="governance",
+            surface="product",
+        ),
+        ServiceCapability(
+            name="api_keys",
+            version="1.0",
+            description="Wallet-scoped API key issuance and rotation",
+            category="security",
+            surface="product",
         ),
         ServiceCapability(
             name="kyc",
             version="1.0",
             description="Stripe Identity KYC verification for sponsor wallets",
             category="compliance",
+            surface="product",
+        ),
+    ]
+
+    proof = [
+        ServiceCapability(
+            name="telemetry",
+            version="1.0",
+            description="Emit events, detect anomalies, and trigger autonomous responses",
+            category="observability",
+            surface="proof_surface",
+            simulation_default=True,
         ),
         ServiceCapability(
-            name="api_keys",
+            name="comms",
             version="1.0",
-            description="Automated API key rotation and management",
-            category="security",
+            description="Agent-to-agent messaging (webhook delivery simulated by default)",
+            category="communication",
+            surface="proof_surface",
+            simulation_default=True,
+        ),
+        ServiceCapability(
+            name="ai",
+            version="1.0",
+            description="AI-powered decision making, self-healing, and memory demos",
+            category="intelligence",
+            surface="proof_surface",
+            simulation_default=True,
+        ),
+        ServiceCapability(
+            name="awi",
+            version="1.0",
+            description=(
+                "Agentic Web Interface proof surface — not permit-enforced on HTTP "
+                "unless routed through governed MCP"
+            ),
+            category="automation",
+            surface="proof_surface",
+            simulation_default=True,
+        ),
+        ServiceCapability(
+            name="sandbox",
+            version="1.0",
+            description="Dry-run and behavioral sandbox demos (not production isolation)",
+            category="testing",
+            surface="proof_surface",
+            simulation_default=True,
         ),
         ServiceCapability(
             name="iot",
             version="1.0",
-            description="Secure IoT protocol bridge with MQTT and CoAP support",
+            description="IoT protocol bridge (MQTT/CoAP simulated by default)",
             category="iot",
+            surface="proof_surface",
+            simulation_default=True,
         ),
         ServiceCapability(
             name="passkey",
             version="1.0",
-            description="FIDO2/WebAuthn passkey verification for high-risk AWI actions like checkout and payments",
+            description=(
+                "FIDO2/WebAuthn for high-risk AWI actions; mock path refused in "
+                "production-like environments"
+            ),
             category="security",
+            surface="proof_surface",
+            simulation_default=True,
         ),
         ServiceCapability(
             name="dom_bridge",
             version="1.0",
-            description="Bidirectional DOM↔AWI translation via Playwright for real browser automation on any website",
+            description="Playwright DOM↔AWI bridge proof surface",
             category="automation",
+            surface="proof_surface",
+            simulation_default=True,
         ),
         ServiceCapability(
             name="rag_memory",
             version="1.0",
-            description="Semantic memory over AWI sessions with vector store and retrieval for long-term agent reasoning",
+            description="Semantic memory over AWI sessions (may use mock embeddings)",
             category="intelligence",
+            surface="proof_surface",
+            simulation_default=True,
         ),
     ]
+
+    if settings.ENABLE_PROOF_SURFACES:
+        return product + proof
+    return product
 
 
 def _build_mcp_tools() -> list[MCPToolInfo]:
@@ -457,13 +536,13 @@ async def get_discovery_manifest():
         name=settings.APP_NAME,
         version=settings.APP_VERSION,
         description=(
-            "Operational control plane for autonomous agents: identity, billing, "
-            "discovery, policy, and execution governance for machine-native "
-            "software tenants."
+            "Governed MCP trust plane for autonomous agents: scoped permits, "
+            "metered tool invocation, signed receipts, and wallet audit chains. "
+            "Capabilities with surface=proof_surface are labeled scaffolding."
         ),
         capabilities=_build_capabilities(),
         mcp_tools=_build_mcp_tools(),
-        awi_endpoints=_build_awi_endpoints(),
+        awi_endpoints=_build_awi_endpoints() if settings.ENABLE_PROOF_SURFACES else [],
         pricing=_build_pricing(),
     )
 

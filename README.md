@@ -8,28 +8,28 @@
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Tests](https://img.shields.io/badge/Tests-670%20passing-brightgreen)
 ![MCP](https://img.shields.io/badge/MCP-Native-orange)
-![AWI](https://img.shields.io/badge/AWI-v1.0- purple)
+![AWI](https://img.shields.io/badge/AWI-proof%20surface-lightgrey)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
 
-> **Production beta — agent-discoverable, not production complete.** Built on arXiv:2506.10953v1.
+> **Production beta — agent-discoverable, not production complete.** Credible wedge: a governed trust plane for scoped, metered MCP tool calls ([WEDGE.md](WEDGE.md)).
 
-**Agent Middleware API is a protocol-neutral trust plane for autonomous agent actions.** It lets agents discover tools, receive bounded authority, invoke tools through governed adapters, meter spend, generate signed receipts, and produce tamper-evident audit trails.
+**Agent Middleware API is an MCP trust plane for autonomous agent actions** — not a full agent middleware platform. Agents discover tools, receive bounded permits, invoke through governed MCP, meter spend, get signed receipts, and leave wallet-scoped audit trails.
 
-## Core platform vs. example workloads
+## Core vs proof surfaces
 
-The product is the trust plane. Everything else is a workload that exercises it.
+The product is the trust plane. Everything else is labeled scaffolding.
 
-| Core platform (the product) | Example workloads (proof surfaces) |
-|-----------------------------|------------------------------------|
-| Trust plane (`app/trust/`)  | AWI                                |
-| Governed invocation (adapters) | Content factory                 |
-| Receipts                    | Sandbox                            |
-| Audit                       | Oracle                             |
-| Metering                    | Media                              |
-|                             | IoT                                |
+| Core (product — `capabilities` in `agent.json`) | Proof surfaces (`proof_surfaces` in `agent.json`) |
+|-------------------------------------------------|---------------------------------------------------|
+| Wallet-scoped API keys                          | AWI / browser / DOM bridge                        |
+| Governed MCP invoke (`McpGovernedAdapter`)      | Content factory, media, IoT                       |
+| Signed permits + idempotency                    | Oracle crawls, red-team, RTaaS                    |
+| Wallet metering / ledger                        | Telemetry auto-PR, agent comms                    |
+| Signed receipts + evidence                      | Sandboxes, AI decide/heal demos                   |
+| Wallet audit chain                              | Passkey / RAG (often simulated)                   |
 
-The frozen product spine is:
+Discovery honesty: `GET /.well-known/agent.json` lists product ids under `capabilities` and demo workloads under `proof_surfaces`. `/v1/discover` marks each entry with `surface=product|proof_surface`. Production-like deploys should set `ENABLE_PROOF_SURFACES=false` (see [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md)).
 
 ```text
 permits -> governed invocation -> idempotency -> wallet ledger (metering) -> receipts -> audit verification -> discovery
@@ -64,9 +64,24 @@ The target trust loop is:
 discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
 ```
 
-The governed MCP invocation path can now validate a signed permit, enforce idempotency, charge the wallet, write a ledger entry, generate a signed receipt, persist a signed audit-chain event, and expose receipt evidence linked to permit, ledger, and audit artifacts.
+Concrete MCP path (what `make prove-trust-plane` asserts):
 
-Everything else in this repository exists to strengthen that loop or prove it in realistic agent workflows.
+```text
+scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
+-> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+```
+
+`app/trust/` is the package boundary for that spine (`permits`, `receipts`,
+`audit_chain`, `idempotency`, `metering`, `evidence`, `adapters`). MCP is the
+first and only live adapter (`McpGovernedAdapter`). High-risk HTTP AWI routes
+(`execute`, passkey, rag, `dom/sync`) also require permits and emit receipts;
+prefer governed MCP for agent integrations.
+
+**Product:** Govern and meter agent tool calls with wallet budgets, scoped permits, idempotent retries, signed receipts, and auditable denial.
+
+**Not yet:** Production settlement, KMS, transparency logs, or universal policy across every agent framework — see [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md).
+
+**Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery matters more than narrative docs. Human hosting is in [Operators (deployment only)](#operators-deployment-only) below.
 
 ### Trust Plane Demo
 
@@ -97,10 +112,6 @@ For an operator-style walkthrough that prints the full control-plane timeline:
 make agent-ops-war-room
 ```
 
-That proof walks discovery, bounded authority, governed MCP invocation, receipt
-verification, receipt-evidence inspection, ledger inspection, audit-chain
-verification, replay safety, and out-of-scope denial in one run.
-
 To prove the trust core has measurable test coverage before a release:
 
 ```bash
@@ -111,17 +122,15 @@ The gate enforces at least 80% coverage over the trust-plane control modules:
 governed MCP, permits, receipts, signing-key metadata, idempotency, audit
 verification, trust-mode guardrails, and the wallet self-inspection ledger.
 
-**Agent-first:** Autonomous clients are the primary audience. Machine-readable discovery and API contracts matter more than narrative docs. Human hosting concerns are in [Operators (deployment only)](#operators-deployment-only) below.
-
 ### Primary interface (autonomous clients)
 
 Bootstrap in the order given in `GET /.well-known/agent.json` → field `agent_first.bootstrap_sequence`. Minimally:
 
 ```bash
-# Capability manifest (start here)
+# Capability manifest (start here — read capabilities vs proof_surfaces)
 curl http://localhost:8000/.well-known/agent.json
 
-# AWI-over-MCP discovery profile
+# AWI-over-MCP profile (proof surface — not the product wedge)
 curl http://localhost:8000/.well-known/awi.json
 
 # Canonical prose for agents
@@ -134,29 +143,28 @@ curl http://localhost:8000/mcp/tools.json
 curl http://localhost:8000/openapi.json
 ```
 
-Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes`. Optional index: `GET /v1/discover`.
+Before assuming real side effects, call `GET /health/dependencies` and read `simulation_modes` and `enable_proof_surfaces`. Optional index: `GET /v1/discover`.
 
 ### Core trust primitives
 
-- **Identity and authority** — wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks, and cross-wallet isolation.
-- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `.well-known/awi.json`, `llm.txt`, OpenAPI, and `/v1/discover`.
+- **Identity and authority** — wallet-scoped agents, API-key rotation, KYC hooks, and cross-wallet isolation.
+- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json` (`capabilities` vs `proof_surfaces`), `llm.txt`, OpenAPI, and `/v1/discover`.
 - **Signed authorization** — `/v1/permits` issues Ed25519-signed tool permits with scopes, wallet binding, budget, expiry, nonce, and revocation.
-- **Policy-constrained execution** — MCP invocation can require signed permits and idempotency keys before billable tool calls.
-- **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
-- **Receipts and audit** — `/v1/receipts` verifies signed action receipts, `/v1/receipts/{receipt_id}/evidence` checks linked permit, ledger, and audit artifacts, `/v1/evidence/{receipt_id}` returns the flat buyer-facing evidence bundle (`receipt`, `permit`, `ledger_entry`, `audit_event`, and a `verification` map), and `/v1/audit/verify-chain` checks tamper-evident wallet audit chains.
-- **Governance and readiness** — telemetry, dependency health, security posture, and operator preflight checks.
+- **Policy-constrained execution** — MCP invocation requires signed permits and idempotency keys before billable tool calls (strict trust mode).
+- **Economics and accounting** — spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows.
+- **Receipts and audit** — `/v1/receipts`, `/v1/evidence/{receipt_id}`, and `/v1/audit/verify-chain` for signed receipts and wallet audit chains.
 
-### Proof-of-usefulness surfaces
+### Proof surfaces (not the product)
 
-AWI, browser control, content generation, oracle crawls, sandbox demos, media utilities, IoT bridges, and red-team services are examples of agent workflows that exercise the control plane. They are useful, but they are not the core product surface. The durable substrate is identity, policy, economics, orchestration, and governance.
+AWI, browser control, content generation, oracle crawls, sandbox demos, media utilities, IoT bridges, red-team, RTaaS, and telemetry auto-PR may exercise the control plane. They do not define the product until they consume the same permit, receipt, idempotency, and audit primitives via governed MCP. Most default to `SIMULATION_MODE_*=true`.
 
 ### Current Implementation Status
 
-This repository is a production-beta control plane, not a finished production
-platform. The wallet/key auth path, billing ledger, MCP discovery, health checks,
+This repository is a production-beta trust plane, not a finished production
+platform. The wallet/key auth path, billing ledger, governed MCP path, health checks,
 golden-path flow, and core API contracts are executable and tested.
 
-**Phase 1 (on `master`, simulation-gated "real" mode):** With PostgreSQL and the right env flags, these areas persist state and/or call external models instead of returning only synthetic payloads:
+**Phase 1 (on `master`, simulation-gated "real" mode):** With PostgreSQL and the right env flags, these *proof* areas persist state and/or call external models instead of returning only synthetic payloads:
 
 - **Agent Oracle** — Durable crawl payload hashing and index surfaces (`SIMULATION_MODE_ORACLE=false`).
 - **Agent Comms** — SQL-backed send + inbox at **`/v1/agent-comms/send`** and **`/v1/agent-comms/inbox`** (`SIMULATION_MODE_AGENT_COMMS=false`). Legacy **`/v1/comms/*`** remains for compatibility.
@@ -172,7 +180,7 @@ Other pillars still default to simulation-first behavior until their production 
 - IoT bridge
 - autonomous telemetry PM
 
-Autonomous clients **must** inspect `GET /health/dependencies` (`simulation_modes`) and
+Autonomous clients **must** inspect `GET /health/dependencies` (`simulation_modes`, `enable_proof_surfaces`) and
 `SIMULATION_MODE_*` configuration before treating an endpoint as real external
 work. Public arbitrary Python execution is disabled by default. Set
 `BEHAVIORAL_SANDBOX_PYTHON_BACKEND=docker` to run Python in an unprivileged

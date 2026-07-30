@@ -21,7 +21,7 @@ from enum import Enum
 from typing import Any
 
 from ..core.durable_state import get_durable_state
-from ..core.runtime_mode import is_simulation
+from ..core.runtime_mode import is_simulation, require_simulation
 from .agent_comms_store import CommsMessageStore, compute_payload_hash
 
 logger = logging.getLogger(__name__)
@@ -31,20 +31,22 @@ logger = logging.getLogger(__name__)
 # Message Types
 # ---------------------------------------------------------------------------
 
+
 class MessagePriority(str, Enum):
-    CRITICAL = "critical"   # Immediate delivery, retry aggressively
-    HIGH = "high"           # Deliver within 1 minute
-    NORMAL = "normal"       # Deliver within 5 minutes
-    LOW = "low"             # Batch delivery, best effort
+    CRITICAL = "critical"  # Immediate delivery, retry aggressively
+    HIGH = "high"  # Deliver within 1 minute
+    NORMAL = "normal"  # Deliver within 5 minutes
+    LOW = "low"  # Batch delivery, best effort
 
 
 class MessageType(str, Enum):
     """Standard message types for agent-to-agent communication."""
-    REQUEST = "request"         # Asking another agent to do something
-    RESPONSE = "response"       # Reply to a request
-    EVENT = "event"             # Notification of something that happened
-    HEARTBEAT = "heartbeat"     # Liveness check
-    HANDOFF = "handoff"         # Transfer responsibility to another agent
+
+    REQUEST = "request"  # Asking another agent to do something
+    RESPONSE = "response"  # Reply to a request
+    EVENT = "event"  # Notification of something that happened
+    HEARTBEAT = "heartbeat"  # Liveness check
+    HANDOFF = "handoff"  # Transfer responsibility to another agent
 
 
 class DeliveryStatus(str, Enum):
@@ -59,18 +61,20 @@ class DeliveryStatus(str, Enum):
 # Messages
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AgentMessage:
     """A single agent-to-agent message."""
+
     message_id: str
-    from_agent: str          # Sender agent identifier
-    to_agent: str            # Recipient agent identifier
+    from_agent: str  # Sender agent identifier
+    to_agent: str  # Recipient agent identifier
     message_type: MessageType
     priority: MessagePriority
     subject: str
-    body: dict               # Structured payload (always JSON-serializable)
+    body: dict  # Structured payload (always JSON-serializable)
     correlation_id: str | None = None  # Links request/response pairs
-    reply_to: str | None = None        # Message ID this replies to
+    reply_to: str | None = None  # Message ID this replies to
     metadata: dict = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime | None = None
@@ -83,15 +87,17 @@ class AgentMessage:
 # Agent Registry
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RegisteredAgent:
     """An agent registered in the communications network."""
+
     agent_id: str
     name: str
-    capabilities: list[str]   # What this agent can do
-    webhook_url: str | None    # Where to deliver messages
-    api_key: str               # Auth for sending/receiving
-    owner_key: str = ""        # RED TEAM FIX: API key of the registering tenant
+    capabilities: list[str]  # What this agent can do
+    webhook_url: str | None  # Where to deliver messages
+    api_key: str  # Auth for sending/receiving
+    owner_key: str = ""  # RED TEAM FIX: API key of the registering tenant
     status: str = "active"
     registered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_seen: datetime | None = None
@@ -194,7 +200,8 @@ class AgentRegistry:
         """Find agents that advertise a specific capability."""
         await self._hydrate_if_needed()
         return [
-            a for a in self._agents.values()
+            a
+            for a in self._agents.values()
             if capability in a.capabilities and a.status == "active"
         ]
 
@@ -206,6 +213,7 @@ class AgentRegistry:
 # ---------------------------------------------------------------------------
 # Message Router
 # ---------------------------------------------------------------------------
+
 
 class MessageRouter:
     """
@@ -241,8 +249,8 @@ class MessageRouter:
         payload["message_type"] = MessageType(payload["message_type"])
         payload["priority"] = MessagePriority(payload["priority"])
         payload["delivery_status"] = DeliveryStatus(payload["delivery_status"])
-        payload["created_at"] = (
-            _parse_dt(payload.get("created_at")) or datetime.now(timezone.utc)
+        payload["created_at"] = _parse_dt(payload.get("created_at")) or datetime.now(
+            timezone.utc
         )
         payload["expires_at"] = _parse_dt(payload.get("expires_at"))
         payload["delivered_at"] = _parse_dt(payload.get("delivered_at"))
@@ -461,10 +469,15 @@ class MessageRouter:
     async def _deliver_webhook(
         self, message: AgentMessage, recipient: RegisteredAgent
     ) -> bool:
-        """Deliver message via webhook. Production: use httpx with retry."""
-        # Simulation flag gates DB-backed message rows, not this stub delivery (#35).
+        """Deliver message via webhook.
+
+        Real HTTP delivery is not implemented (#35). Under simulation this
+        logs and returns True as an explicitly simulated success; flipping
+        SIMULATION_MODE_AGENT_COMMS off raises until a real client lands.
+        """
+        require_simulation("agent_comms", issue="#35")
         logger.info(
-            f"Webhook delivery to {recipient.webhook_url} for "
+            f"Simulated webhook delivery to {recipient.webhook_url} for "
             f"{message.message_id}"
         )
         return True
@@ -473,6 +486,7 @@ class MessageRouter:
 # ---------------------------------------------------------------------------
 # Agent Comms Orchestrator
 # ---------------------------------------------------------------------------
+
 
 class AgentComms:
     """

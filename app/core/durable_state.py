@@ -25,6 +25,7 @@ import asyncpg
 import redis.asyncio as redis
 
 from .config import get_settings
+from .runtime_degradation import mark_durable_state_fell_back
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,7 @@ class DurableStateStore:
                     "back to in-memory.",
                     self._backend,
                 )
+                mark_durable_state_fell_back(self._backend)
                 await self.close()
                 self._backend = "memory"
 

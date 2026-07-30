@@ -9,13 +9,20 @@ The implemented trust boundary is governed MCP tool invocation. Other modules
 are proof surfaces unless they consume the same permit, receipt, idempotency,
 and audit-chain primitives.
 
-## Not Yet Solved
+High-risk AWI HTTP routes (`/v1/awi/execute`, passkey, rag index/query,
+`dom/sync`) also require `X-Permit-Id` + `Idempotency-Key` and emit receipts
+when invoked over HTTP. Prefer MCP for agent integrations.
+
+## Not Yet Solved (Deferred By Design)
+
+Keep these out of the wedge until a design partner requires them:
 
 - No external KMS integration is implemented.
 - No settlement, dispute, or compliance reporting workflow is implemented.
 - Receipt signatures are verifiable, but no external transparency log exists.
 - Audit chains are wallet-scoped, but database administrators can still delete
   rows unless append-only storage or external anchoring is added.
+- Multi-protocol governed adapters beyond MCP are not implemented (MCP only).
 - Sandbox and AWI/browser automation are not production isolation boundaries.
 - Auto-PR and agentic workflow automation must treat GitHub issues, PRs,
   comments, webhook bodies, tool outputs, and generated scripts as untrusted.
@@ -30,7 +37,17 @@ and audit-chain primitives.
   warning so the opt-out is loud.
 - Configure `TRUST_SIGNING_PRIVATE_KEY_B64` from a secret manager or KMS-backed
   runtime injection.
+- Production-like boots also refuse `DEBUG=true`, `WEBAUTHN_ALLOW_MOCK=true`,
+  and `ENABLE_PROOF_SURFACES=true`. Set `ENABLE_PROOF_SURFACES=false` so only
+  core trust routers and MCP are mounted. Leave proof surfaces frozen unless a
+  partner demo explicitly needs them.
 - Disable or isolate proof surfaces that execute code, drive browsers, generate
   patches, crawl external URLs, or touch third-party systems.
+- When `REDIS_URL` is set, production-like environments fail closed on Redis
+  rate-limiter outage (HTTP 503) instead of silently using per-process memory.
+  `/health/dependencies` exposes `runtime_degradation` when any configured
+  backend has fallen back to in-memory.
+- All Phase 9 AWI MCP tools always require signed permits (`requirePermit` in
+  `/mcp/tools.json`), even if legacy unpermitted MCP is enabled.
 - Run migrations instead of relying on `SQLModel.metadata.create_all`.
 - Keep CI trust invariant tests required before merge.

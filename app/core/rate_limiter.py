@@ -15,9 +15,15 @@ from starlette.responses import JSONResponse
 import redis.asyncio as redis
 
 from .config import get_settings
+from .runtime_degradation import mark_rate_limiter_memory_fallback
+from .trust_mode import is_production_like_environment
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+
+class RateLimiterUnavailable(RuntimeError):
+    """Raised when Redis rate limiting is required but unavailable."""
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -43,6 +49,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: dict[str, list[float]] = defaultdict(list)
         self._lock = asyncio.Lock()
 
+    def _fail_closed_on_redis_outage(self) -> bool:
+        """Production-like + REDIS_URL configured → no silent memory fallback."""
+        return bool(
+            self._redis_url and is_production_like_environment(settings.ENVIRONMENT)
+        )
+
     async def _get_redis(self) -> redis.Redis | None:
         if not self._redis_url:
             return None
@@ -61,10 +73,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 await client.ping()
                 self._redis = client
             except Exception:
+                mark_rate_limiter_memory_fallback()
                 if not self._redis_warned:
                     logger.exception(
-                        "Redis rate limiter unavailable; falling back "
-                        "to in-memory limiter."
+                        "Redis rate limiter unavailable; %s.",
+                        (
+                            "failing closed (production-like)"
+                            if self._fail_closed_on_redis_outage()
+                            else "falling back to in-memory limiter"
+                        ),
                     )
                     self._redis_warned = True
                 self._redis = None
@@ -80,6 +97,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         """
         client = await self._get_redis()
         if client is None:
+            if self._fail_closed_on_redis_outage():
+                raise RateLimiterUnavailable("redis_rate_limiter_unavailable")
+            if self._redis_url:
+                mark_rate_limiter_memory_fallback()
             return await self._check_limit_in_memory(api_key, now)
 
         window_size = int(self.window)
@@ -127,8 +148,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         api_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
 
         # Skip rate limiting for docs, health, and test clients
-        skip_paths = ("/docs", "/redoc", "/openapi.json", "/health", "/",
-                       "/.well-known/agent.json", "/llm.txt", "/docs/index")
+        skip_paths = (
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/health",
+            "/",
+            "/.well-known/agent.json",
+            "/llm.txt",
+            "/docs/index",
+        )
         if request.url.path in skip_paths:
             response = await call_next(request)
             return response  # type: ignore[no-any-return]
@@ -147,7 +176,46 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             limited, remaining, reset_in = await self._check_limit_with_redis(
                 api_key, now
             )
+        except RateLimiterUnavailable:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": {
+                        "error": "rate_limiter_unavailable",
+                        "message": (
+                            "Shared rate limiter (Redis) is unavailable. "
+                            "In-memory fallback is refused in production-like "
+                            "environments."
+                        ),
+                    }
+                },
+                headers={
+                    "X-RateLimit-Limit": str(self.limit),
+                    "X-RateLimit-Remaining": "0",
+                    "Retry-After": "30",
+                },
+            )
         except Exception:
+            mark_rate_limiter_memory_fallback()
+            if self._fail_closed_on_redis_outage():
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": {
+                            "error": "rate_limiter_unavailable",
+                            "message": (
+                                "Shared rate limiter (Redis) failed. "
+                                "In-memory fallback is refused in "
+                                "production-like environments."
+                            ),
+                        }
+                    },
+                    headers={
+                        "X-RateLimit-Limit": str(self.limit),
+                        "X-RateLimit-Remaining": "0",
+                        "Retry-After": "30",
+                    },
+                )
             logger.exception(
                 "Redis rate limiter failed; using in-memory rate limiter "
                 "for this request."

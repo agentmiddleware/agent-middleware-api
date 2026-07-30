@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # Comma-separated list of valid API keys (use a secrets manager in production)
     VALID_API_KEYS: str = ""
 
+    # --- Proof surfaces ---
+    # When false, only CORE_TRUST_ROUTERS (+ MCP) are mounted. Production-like
+    # environments must set this false — see validate_trust_mode_guardrails.
+    ENABLE_PROOF_SURFACES: bool = True
+
+    # --- Phase 9: WebAuthn mock (tests/local only) ---
+    # When true and py_webauthn is absent, verification can short-circuit.
+    # Production-like environments must keep this false.
+    WEBAUTHN_ALLOW_MOCK: bool = False
+
     # --- Trust Plane ---
     # Strict trust mode is the default and the only supported production
     # posture: every governed MCP invocation must present a signed permit,

@@ -13,6 +13,16 @@ can enforce scope, meter a call, produce verifiable artifacts, and reject misuse
 It does not claim production readiness, settlement rails, or a complete
 autonomous economic actor infrastructure.
 
+## Design Partner Tool
+
+Local reference tool id: **`trust-plane-echo`** (registered by
+`scripts/demo_trust_plane.py`).
+
+For a real partner, register **one** of their internal tools under the same
+MCP path, issue a permit scoped only to that tool, and keep
+`ENABLE_PROOF_SURFACES=false`. Do not demo AWI/media/oracle until that single
+tool loop is trusted. See [`WEDGE.md`](WEDGE.md).
+
 ## Environment
 
 Run the API in trust mode:
@@ -22,6 +32,7 @@ export VALID_API_KEYS=dev-bootstrap-key
 export DATABASE_URL=sqlite+aiosqlite:///./trust-demo.db
 export TRUST_MODE_ENABLED=true
 export ALLOW_LEGACY_UNPERMITTED_MCP=false
+export ENABLE_PROOF_SURFACES=false
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -64,10 +75,11 @@ live demo flow below when walking a partner through the product story.
 2. Create a sponsor wallet with a bootstrap key.
 3. Create an agent wallet.
 4. Create an agent API key for the agent wallet.
-5. Register or use an MCP tool.
+5. Register or use an MCP tool (`trust-plane-echo` in the one-command proof;
+   replace with the partner's real tool id in a live engagement).
 6. Create a signed permit with:
-   - `allowed_tools: ["tool-name"]`
-   - `scopes: ["tool:tool-name:invoke", "billing:charge"]`
+   - `allowed_tools: ["trust-plane-echo"]` (or the partner tool id)
+   - `scopes: ["tool:trust-plane-echo:invoke", "billing:charge"]`
    - `max_credits`
    - `expires_at`
    - `Idempotency-Key`

@@ -33,7 +33,7 @@ async def get_llm_txt():
 
     fallback_content = """# Agent-Native Middleware API — LLM-Readable Documentation
 
-**Agent-first:** Intended reader = autonomous agents. Fetch GET /.well-known/agent.json first; use GET /health/dependencies (simulation_modes) before assuming real side effects.
+**Agent-first:** Intended reader = autonomous agents. Fetch GET /.well-known/agent.json first (use `capabilities` vs `proof_surfaces`); use GET /health/dependencies (`simulation_modes`, `enable_proof_surfaces`) before assuming real side effects.
 
 **Version:** from GET /.well-known/agent.json
 **Base URL:** operator-supplied (e.g. http://localhost:8000)
@@ -41,7 +41,7 @@ async def get_llm_txt():
 
 ## Quick Start
 
-1. GET /.well-known/agent.json — Bootstrap manifest (includes agent_first.bootstrap_sequence)
+1. GET /.well-known/agent.json — Bootstrap manifest (product wedge + labeled proof surfaces)
 2. GET /llm.txt — Full prose (if this fallback appears, static/llm.txt is missing on disk)
 3. GET /mcp/tools.json — MCP tools
 4. GET /openapi.json — API contract

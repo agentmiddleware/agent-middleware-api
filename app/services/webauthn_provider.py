@@ -60,13 +60,18 @@ def _mock_verification_allowed() -> bool:
     absent: a security provider that silently degrades to mock
     verification emits a false "verified" signal, which is worse than
     having no provider at all. Test config may opt in by setting
-    WEBAUTHN_ALLOW_MOCK=true.
+    WEBAUTHN_ALLOW_MOCK=true. Production-like boots refuse that flag via
+    validate_trust_mode_guardrails.
     """
-    return os.getenv("WEBAUTHN_ALLOW_MOCK", "false").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    # Prefer live env so test monkeypatch.setenv works even when
+    # get_settings() is already cached.
+    env = os.getenv("WEBAUTHN_ALLOW_MOCK")
+    if env is not None and env.strip() != "":
+        return env.strip().lower() in ("1", "true", "yes")
+
+    from app.core.config import get_settings
+
+    return bool(get_settings().WEBAUTHN_ALLOW_MOCK)
 
 
 class ChallengeStatus(str, Enum):

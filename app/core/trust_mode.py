@@ -61,21 +61,46 @@ def validate_trust_mode_config(
     trust_mode_enabled: bool,
     signing_private_key_b64: str | None,
     allow_legacy_unpermitted_mcp: bool,
+    debug: bool = False,
+    webauthn_allow_mock: bool = False,
+    enable_proof_surfaces: bool = True,
 ) -> None:
-    if not trust_mode_enabled or not is_production_like_environment(environment):
-        return
+    """Refuse unsafe deploy postures in production-like environments.
 
+    Trust-mode signing/legacy checks only apply when trust mode is enabled.
+    DEBUG bootstrap, WebAuthn mock, and proof-surface mounts are always
+    forbidden in production-like environments regardless of trust mode.
+    """
+    production_like = is_production_like_environment(environment)
     violations: list[str] = []
-    if not (signing_private_key_b64 or "").strip():
-        violations.append(
-            "TRUST_SIGNING_PRIVATE_KEY_B64 is required when "
-            "TRUST_MODE_ENABLED=true in production-like environments"
-        )
-    if allow_legacy_unpermitted_mcp:
-        violations.append(
-            "ALLOW_LEGACY_UNPERMITTED_MCP must be false when "
-            "TRUST_MODE_ENABLED=true in production-like environments"
-        )
+
+    if production_like:
+        if debug:
+            violations.append(
+                "DEBUG must be false in production-like environments "
+                "(DEBUG empty-key auth bootstrap is a deploy footgun)"
+            )
+        if webauthn_allow_mock:
+            violations.append(
+                "WEBAUTHN_ALLOW_MOCK must be false in production-like environments"
+            )
+        if enable_proof_surfaces:
+            violations.append(
+                "ENABLE_PROOF_SURFACES must be false in production-like "
+                "environments (mount only CORE_TRUST_ROUTERS + MCP)"
+            )
+
+    if trust_mode_enabled and production_like:
+        if not (signing_private_key_b64 or "").strip():
+            violations.append(
+                "TRUST_SIGNING_PRIVATE_KEY_B64 is required when "
+                "TRUST_MODE_ENABLED=true in production-like environments"
+            )
+        if allow_legacy_unpermitted_mcp:
+            violations.append(
+                "ALLOW_LEGACY_UNPERMITTED_MCP must be false when "
+                "TRUST_MODE_ENABLED=true in production-like environments"
+            )
 
     if violations:
         raise TrustModeGuardrailError("; ".join(violations))
@@ -87,6 +112,9 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         trust_mode_enabled=settings.TRUST_MODE_ENABLED,
         signing_private_key_b64=settings.TRUST_SIGNING_PRIVATE_KEY_B64,
         allow_legacy_unpermitted_mcp=settings.ALLOW_LEGACY_UNPERMITTED_MCP,
+        debug=settings.DEBUG,
+        webauthn_allow_mock=settings.WEBAUTHN_ALLOW_MOCK,
+        enable_proof_surfaces=settings.ENABLE_PROOF_SURFACES,
     )
 
 
