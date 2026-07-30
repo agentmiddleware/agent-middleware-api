@@ -21,7 +21,9 @@ Local reference tool id: **`trust-plane-echo`** (registered by
 For a real partner, register **one** of their internal tools under the same
 MCP path, issue a permit scoped only to that tool, and keep
 `ENABLE_PROOF_SURFACES=false`. Do not demo AWI/media/oracle until that single
-tool loop is trusted. See [`WEDGE.md`](WEDGE.md).
+tool loop is trusted. Checklist:
+[`docs/partner-first-tool-runbook.md`](docs/partner-first-tool-runbook.md).
+See [`WEDGE.md`](WEDGE.md).
 
 ## Environment
 
