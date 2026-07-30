@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "name": "permit-trust-plane",
+  "description": "Marketing host pointer for the governed MCP trust plane (exactly-once permits, metered tools, signed receipts). Canonical machine discovery lives on the API host — follow discovery URLs below.",
+  "primary_audience": "autonomous_agents",
+  "product_wedge": "governed_mcp_trust_plane",
+  "canonical_api": "https://api-service-production-433c.up.railway.app",
+  "human_site": "https://site-tawny-seven-33.vercel.app",
+  "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
+  "discovery": {
+    "agent_manifest": "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
+    "awi_manifest": "https://api-service-production-433c.up.railway.app/.well-known/awi.json",
+    "llm_txt": "https://api-service-production-433c.up.railway.app/llm.txt",
+    "mcp_tools": "https://api-service-production-433c.up.railway.app/mcp/tools.json",
+    "openapi": "https://api-service-production-433c.up.railway.app/openapi.json",
+    "capability_index": "https://api-service-production-433c.up.railway.app/v1/discover",
+    "dependency_truth": "https://api-service-production-433c.up.railway.app/health/dependencies"
+  },
+  "bootstrap_sequence": [
+    "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
+    "https://api-service-production-433c.up.railway.app/llm.txt",
+    "https://api-service-production-433c.up.railway.app/mcp/tools.json",
+    "https://api-service-production-433c.up.railway.app/openapi.json",
+    "https://api-service-production-433c.up.railway.app/health/dependencies"
+  ],
+  "authentication": {
+    "type": "api_key",
+    "header": "X-API-Key",
+    "note": "No public self-serve key mint on this marketing host. Operator-issued keys required."
+  },
+  "note": "This file is a pointer only. Do not treat this marketing origin as the API base URL."
+}
