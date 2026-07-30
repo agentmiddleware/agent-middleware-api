@@ -16,25 +16,25 @@ test-proof:
 	uv run --with-requirements requirements.txt pytest tests/ -q -m proof
 
 prove-trust-plane:
-	uv run python scripts/demo_trust_plane.py --assert
+	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert
 
 demo-trust-plane:
-	uv run python scripts/demo_trust_plane.py
+	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py
 
 demo-trust-plane-check:
-	uv run python scripts/demo_trust_plane.py --assert
+	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert
 
 red-team-trust-plane:
-	uv run python scripts/red_team_trust_plane.py
+	uv run --with-requirements requirements.txt python scripts/red_team_trust_plane.py
 
 red-team-trust-plane-check:
-	uv run python scripts/red_team_trust_plane.py --assert
+	uv run --with-requirements requirements.txt python scripts/red_team_trust_plane.py --assert
 
 agent-ops-war-room:
-	uv run python scripts/agent_ops_war_room_demo.py
+	uv run --with-requirements requirements.txt python scripts/agent_ops_war_room_demo.py
 
 agent-ops-war-room-check:
-	uv run python scripts/agent_ops_war_room_demo.py --assert --json
+	uv run --with-requirements requirements.txt python scripts/agent_ops_war_room_demo.py --assert --json
 
 trust-coverage-gate:
 	scripts/trust_coverage_gate.sh

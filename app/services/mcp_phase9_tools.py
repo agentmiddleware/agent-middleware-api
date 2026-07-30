@@ -182,6 +182,7 @@ class Phase9ToolDef(TypedDict):
     unit_name: str
     func: Callable[..., Any]
     input_model: type[BaseModel]
+    require_permit: bool
 
 
 MCP_PHASE9_TOOLS: list[Phase9ToolDef] = [
@@ -328,6 +329,7 @@ def register_phase9_tools() -> None:
             input_model=tool["input_model"],
             credits_per_unit=tool["credits_per_unit"],
             unit_name=tool["unit_name"],
+            require_permit=bool(tool.get("require_permit", False)),
         )
         logger.info(f"Registered Phase 9 MCP tool: {tool['service_id']}")
 
