@@ -278,7 +278,14 @@ def _build_capabilities() -> list[ServiceCapability]:
 
 
 def _build_mcp_tools() -> list[MCPToolInfo]:
-    """Build the list of available MCP tools."""
+    """Build the list of available MCP tools for the discover catalog.
+
+    When proof surfaces are off, return an empty catalog and point agents at
+    ``/mcp/tools.json`` (ops-registered / dogfood tools only).
+    """
+    if not settings.ENABLE_PROOF_SURFACES:
+        return []
+
     return [
         MCPToolInfo(
             service_id="telemetry",
@@ -582,6 +589,13 @@ async def list_awi_endpoints(api_key: str = Depends(verify_api_key)):
     - How to request different representations
     - How to implement human pause/steer
     """
+    if not settings.ENABLE_PROOF_SURFACES:
+        return {
+            "endpoints": [],
+            "mounted": False,
+            "note": "AWI is a proof surface and is not mounted (ENABLE_PROOF_SURFACES=false).",
+            "mcp_tools_json": "/mcp/tools.json",
+        }
     return {
         "endpoints": _build_awi_endpoints(),
         "vocabulary_endpoint": "/v1/awi/vocabulary",

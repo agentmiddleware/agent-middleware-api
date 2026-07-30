@@ -49,8 +49,8 @@ Keep these out of the wedge until a design partner requires them:
   backend has fallen back to in-memory.
 - All Phase 9 AWI MCP tools always require signed permits (`requirePermit` in
   `/mcp/tools.json`), even if legacy unpermitted MCP is enabled. Those stubs
-  are not wedge product; Phase 2 will drop them from discovery when proof
+  are not wedge product; Phase 2 drops them from discovery when proof
   surfaces are off — see partner inventory note in
-  [`DESIGN_PARTNER_GUIDE.md`](DESIGN_PARTNER_GUIDE.md#upcoming-mcp-discovery-gate-phase-2).
+  [`DESIGN_PARTNER_GUIDE.md`](DESIGN_PARTNER_GUIDE.md#mcp-discovery-gate-phase-2).
 - Run migrations instead of relying on `SQLModel.metadata.create_all`.
 - Keep CI trust invariant tests required before merge.

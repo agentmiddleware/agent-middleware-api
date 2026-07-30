@@ -1,0 +1,137 @@
+"""Phase 2: MCP discovery honesty when ENABLE_PROOF_SURFACES=false."""
+
+from __future__ import annotations
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.core.config import get_settings
+from app.main import app
+from app.services.mcp_phase9_tools import (
+    DEFAULT_MCP_STUB_SERVICE_IDS,
+    PROOF_SURFACE_MCP_STUB_IDS,
+    sync_proof_surface_mcp_registration,
+)
+from tests.test_trust_helpers import provision_agent_wallet
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.fixture
+def proof_surfaces_off(monkeypatch):
+    """Force proof surfaces off and sync MCP stub registration."""
+    settings = get_settings()
+    previous = settings.ENABLE_PROOF_SURFACES
+    monkeypatch.setattr(settings, "ENABLE_PROOF_SURFACES", False)
+    sync_proof_surface_mcp_registration()
+    yield
+    monkeypatch.setattr(settings, "ENABLE_PROOF_SURFACES", previous)
+    sync_proof_surface_mcp_registration()
+
+
+@pytest.mark.anyio
+async def test_tools_json_omits_phase9_and_marketplace_stubs_when_proof_off(
+    client, proof_surfaces_off
+):
+    resp = await client.get("/mcp/tools.json")
+    assert resp.status_code == 200
+    names = {tool["name"] for tool in resp.json()["tools"]}
+    assert names.isdisjoint(PROOF_SURFACE_MCP_STUB_IDS)
+    assert not any(name.startswith("awi_") for name in names)
+    assert names.isdisjoint(DEFAULT_MCP_STUB_SERVICE_IDS)
+
+
+@pytest.mark.anyio
+async def test_well_known_tools_json_matches_gate(client, proof_surfaces_off):
+    well_known = await client.get("/.well-known/mcp/tools.json")
+    canonical = await client.get("/mcp/tools.json")
+    assert well_known.status_code == 200
+    assert canonical.status_code == 200
+    wk_names = {t["name"] for t in well_known.json()["tools"]}
+    can_names = {t["name"] for t in canonical.json()["tools"]}
+    assert wk_names == can_names
+    assert wk_names.isdisjoint(PROOF_SURFACE_MCP_STUB_IDS)
+
+
+@pytest.mark.anyio
+async def test_invoke_unregistered_awi_stub_not_found(
+    client, proof_surfaces_off, clean_database
+):
+    provisioned = await provision_agent_wallet(client)
+    resp = await client.post(
+        "/mcp/messages",
+        json={
+            "jsonrpc": "2.0",
+            "id": "missing-stub",
+            "method": "tools/call",
+            "params": {
+                "name": "awi_passkey_challenge",
+                "arguments": {"session_id": "s1", "action": "checkout"},
+                "mcpContext": {"wallet_id": provisioned["agent_wallet_id"]},
+            },
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "error" in payload
+    assert "Tool not found" in payload["error"]["message"]
+
+
+@pytest.mark.anyio
+async def test_root_and_discover_hide_unmounted_proof_services(
+    client, proof_surfaces_off
+):
+    root = await client.get("/")
+    assert root.status_code == 200
+    root_data = root.json()
+    assert set(root_data["services"].keys()) == {"agent_billing", "mcp_server"}
+    assert root_data["surface_boundaries"]["proof_surfaces_mounted"] is False
+    assert "/.well-known/awi.json" not in root_data["agent_first"]["bootstrap_sequence"]
+
+    discover = await client.get("/v1/discover")
+    assert discover.status_code == 200
+    discover_data = discover.json()
+    assert discover_data["awi_endpoints"] == []
+    assert discover_data["mcp_tools"] == []
+    assert all(c["surface"] == "product" for c in discover_data["capabilities"])
+
+
+@pytest.mark.anyio
+async def test_awi_manifest_404_when_proof_off(client, proof_surfaces_off):
+    resp = await client.get("/.well-known/awi.json")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_llm_txt_uses_public_url_and_wedge_quickstart(client, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(
+        settings, "PUBLIC_URL", "https://api-service-production-433c.up.railway.app"
+    )
+    resp = await client.get("/llm.txt")
+    assert resp.status_code == 200
+    text = resp.text
+    assert "https://api-service-production-433c.up.railway.app" in text
+    assert "**Base URL:** http://localhost:8000" not in text
+    assert "partner.notes.write" in text
+    assert "POST /v1/telemetry/events" not in text
+    assert "{{PUBLIC_URL}}" not in text
+
+
+@pytest.mark.anyio
+async def test_tools_json_still_lists_awi_when_proof_on(client):
+    settings = get_settings()
+    if not settings.ENABLE_PROOF_SURFACES:
+        pytest.skip("suite default expects proof surfaces on")
+    sync_proof_surface_mcp_registration()
+    resp = await client.get("/mcp/tools.json")
+    assert resp.status_code == 200
+    names = {tool["name"] for tool in resp.json()["tools"]}
+    assert "awi_passkey_challenge" in names
+    assert "data-indexer" in names
