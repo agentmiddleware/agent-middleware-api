@@ -7,6 +7,44 @@
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "X-Frame-Options", "value": "SAMEORIGIN" }
       ]
+    },
+    {
+      "source": "/.well-known/agent.json",
+      "headers": [
+        { "key": "Content-Type", "value": "application/json; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
+      "source": "/llm.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
+      "source": "/llms.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/mcp/tools.json",
+      "destination": "https://api-service-production-433c.up.railway.app/mcp/tools.json",
+      "permanent": false
+    },
+    {
+      "source": "/v1/discover",
+      "destination": "https://api-service-production-433c.up.railway.app/v1/discover",
+      "permanent": false
+    },
+    {
+      "source": "/openapi.json",
+      "destination": "https://api-service-production-433c.up.railway.app/openapi.json",
+      "permanent": false
     }
   ]
 }

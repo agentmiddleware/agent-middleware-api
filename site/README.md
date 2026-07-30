@@ -24,3 +24,17 @@ Signature on the page is a base64 placeholder; run dogfood +
 `/v1/receipts/verify` for a real signature.
 
 No live metering, signup, or API keys on this page.
+
+## Agent discovery (not human SEO)
+
+This host should help machines find the API:
+
+- `/.well-known/agent.json` — pointer with absolute API discovery URLs
+- `/llm.txt` and `/llms.txt` — short bootstrap prose pointing at the API
+- Footer / nav links to the live Railway discovery surfaces
+- Vercel redirects for `/mcp/tools.json`, `/v1/discover`, `/openapi.json` → API
+
+Canonical machine base URL:
+`https://api-service-production-433c.up.railway.app`
+
+Redeploy the Vercel project after changing these files for them to go live.
