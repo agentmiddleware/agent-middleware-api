@@ -680,13 +680,30 @@ async def _execute_registered_tool(
         )
 
     # Permit reserved / ledger debit / receipt credits must share one number.
-    from app.services.governed_metering import aligned_credits_charged
-
-    credits_charged = aligned_credits_charged(
-        ledger_amount=charge_result.amount,
-        authorized_credits=registered_cost,
-        context=f"mcp:{tool_name}",
+    from app.services.governed_metering import (
+        ChargeCreditMismatchError,
+        aligned_credits_charged,
     )
+
+    try:
+        credits_charged = aligned_credits_charged(
+            ledger_amount=charge_result.amount,
+            authorized_credits=registered_cost,
+            context=f"mcp:{tool_name}",
+        )
+    except ChargeCreditMismatchError as mismatch_exc:
+        # Charge is checkpointed; close the key so clients are not stuck
+        # in-progress. Leave permit budget reserved (wallet was debited).
+        if governed_call and idempotency_key:
+            await idem.complete(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key,
+                response_reference=None,
+                response_json=_governed_error_payload(str(mismatch_exc), None),
+                status_code=500,
+            )
+        raise
 
     try:
         if inspect.iscoroutinefunction(func):

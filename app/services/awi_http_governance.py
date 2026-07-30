@@ -246,18 +246,17 @@ async def complete_awi_http_governed(
             request_path=ctx.endpoint,
             description=f"AWI HTTP {ctx.tool_name}",
         )
-    except Exception:
+    except Exception as exc:
         await permits.release_budget(ctx.permit_id, ctx.credits)
-        await abort_awi_http_governed(
-            ctx,
-            status_code=500,
-            error_payload={
-                "error": "charge_failed",
-                "message": "Wallet charge failed for governed AWI action.",
-                "tool": ctx.tool_name,
-            },
-        )
-        raise
+        detail = {
+            "error": "charge_failed",
+            "message": "Wallet charge failed for governed AWI action.",
+            "tool": ctx.tool_name,
+        }
+        await abort_awi_http_governed(ctx, status_code=500, error_payload=detail)
+        # Raise HTTPException so route handlers do not re-abort with a
+        # different detail (except HTTPException: raise).
+        raise HTTPException(status_code=500, detail=detail) from exc
 
     if isinstance(charge_result, InsufficientFundsResponse):
         await permits.release_budget(ctx.permit_id, ctx.credits)
@@ -282,7 +281,7 @@ async def complete_awi_http_governed(
             authorized_credits=ctx.credits,
             context=f"awi_http:{ctx.tool_name}",
         )
-    except ChargeCreditMismatchError:
+    except ChargeCreditMismatchError as mismatch_exc:
         if ledger_entry_id:
             await idem.mark_charged(
                 wallet_id=ctx.wallet_id,
@@ -290,7 +289,14 @@ async def complete_awi_http_governed(
                 idempotency_key=ctx.idempotency_key,
                 ledger_entry_id=str(ledger_entry_id),
             )
-        raise
+        # Wallet was debited: keep permit budget reserved; close the key.
+        detail = {
+            "error": "charge_credit_mismatch",
+            "message": str(mismatch_exc),
+            "tool": ctx.tool_name,
+        }
+        await abort_awi_http_governed(ctx, status_code=500, error_payload=detail)
+        raise HTTPException(status_code=500, detail=detail) from mismatch_exc
 
     if ledger_entry_id:
         await idem.mark_charged(
@@ -301,8 +307,14 @@ async def complete_awi_http_governed(
         )
 
     # Finalization is retried as a unit — charge is already checkpointed.
+    # Re-load any receipt already written for this ledger entry so a failed
+    # refresh/return after commit cannot create a duplicate on retry.
     finalize_attempts = 3
     receipt = None
+    if ledger_entry_id:
+        receipt = await get_receipt_service().get_receipt_by_ledger_entry_id(
+            str(ledger_entry_id)
+        )
     response_with_receipt: dict[str, Any] | None = None
     last_exc: Exception | None = None
     for attempt in range(1, finalize_attempts + 1):
@@ -345,6 +357,11 @@ async def complete_awi_http_governed(
             break
         except Exception as exc:
             last_exc = exc
+            if receipt is None and ledger_entry_id:
+                # Commit may have succeeded even if create_receipt raised later.
+                receipt = await get_receipt_service().get_receipt_by_ledger_entry_id(
+                    str(ledger_entry_id)
+                )
             if attempt == finalize_attempts:
                 break
             logger.warning(
