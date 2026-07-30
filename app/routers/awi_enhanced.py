@@ -11,6 +11,7 @@ Based on arXiv:2506.10953v1 gap analysis.
 """
 
 import logging
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -121,6 +122,7 @@ async def create_passkey_challenge(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        raise_awi_http_error,
     )
     from ..services.awi_session import get_awi_session_manager
     from ..services.webauthn_provider import get_webauthn_provider
@@ -149,11 +151,14 @@ async def create_passkey_challenge(
 
     requires = await webauthn.requires_passkey(request.session_id, request.action)
     if not requires:
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "passkey_not_required",
-                "message": f"Action '{request.action}' does not require passkey verification",
+                "message": (
+                    f"Action '{request.action}' does not require passkey verification"
+                ),
             },
         )
 
@@ -169,7 +174,8 @@ async def create_passkey_challenge(
             response_payload=body,
         )
     except ValueError as e:
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "challenge_failed", "message": str(e)},
         )
@@ -177,7 +183,8 @@ async def create_passkey_challenge(
         raise
     except Exception as e:
         logger.exception("Failed to create passkey challenge")
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "challenge_creation_failed", "message": str(e)},
         )
@@ -852,8 +859,10 @@ async def query_memories(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        raise_awi_http_error,
     )
     from ..services.awi_rag_engine import get_awi_rag_engine
+    from ..services.awi_session import get_awi_session_manager
 
     request_payload = {
         "query": request.query,
@@ -873,6 +882,7 @@ async def query_memories(
         return gov.replay_response
 
     rag = get_awi_rag_engine()
+    sessions = get_awi_session_manager()
 
     try:
         start_time = utc_now()
@@ -884,6 +894,18 @@ async def query_memories(
             similarity_threshold=request.similarity_threshold,
             include_raw_state=request.include_raw_state,
         )
+
+        # Tenant isolation: only return memories for sessions owned by this wallet.
+        scoped: list[Any] = []
+        for r in results:
+            session = await sessions.get_session(r.session_id)
+            if session is None:
+                continue
+            if session.wallet_id and session.wallet_id != gov.wallet_id:
+                continue
+            if not session.wallet_id and not auth.is_bootstrap_admin:
+                continue
+            scoped.append(r)
 
         search_time_ms = int((utc_now() - start_time).total_seconds() * 1000)
 
@@ -903,9 +925,9 @@ async def query_memories(
                     access_count=r.access_count,
                     raw_state=r.raw_state if request.include_raw_state else None,
                 )
-                for r in results
+                for r in scoped
             ],
-            total_found=len(results),
+            total_found=len(scoped),
             search_time_ms=search_time_ms,
         ).model_dump(mode="json")
         return await complete_awi_http_governed(
@@ -917,7 +939,8 @@ async def query_memories(
         raise
     except Exception as e:
         logger.exception("RAG query failed")
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "query_failed", "message": str(e)},
         )

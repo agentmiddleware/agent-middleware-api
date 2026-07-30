@@ -69,6 +69,15 @@ async def test_production_like_redis_outage_fails_closed(monkeypatch):
 
     starlette_app = Starlette(routes=[Route("/v1/ping", ok)])
     limited = RateLimitMiddleware(starlette_app, requests_per_minute=100)
+    # Force the Redis path without relying on OS-level connection refusal
+    # (CI runners can behave differently for 127.0.0.1:1).
+    limited._redis_url = "redis://127.0.0.1:1/0"
+
+    async def _redis_unavailable():
+        mark_rate_limiter_memory_fallback()
+        return None
+
+    limited._get_redis = _redis_unavailable  # type: ignore[method-assign]
 
     async def call_next(request):
         return PlainTextResponse("ok")

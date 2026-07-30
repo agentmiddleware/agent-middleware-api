@@ -177,17 +177,21 @@ async def complete_awi_http_governed(
     if ctx.replay_response is not None:
         return ctx.replay_response
 
-    from app.services.agent_money import InsufficientFundsResponse
+    from app.services.agent_money import DEFAULT_PRICING, InsufficientFundsResponse
 
     money = money or get_agent_money()
     permits = get_permit_service()
+    idem = get_idempotency_service()
     await permits.reserve_budget(ctx.permit_id, ctx.credits)
+
+    unit_price = DEFAULT_PRICING[ServiceCategory.AGENT_COMMS][1]
+    charge_units = ctx.credits / unit_price if unit_price else Decimal("1")
 
     try:
         charge_result = await money.charge(
             wallet_id=ctx.wallet_id,
             service_category=ServiceCategory.AGENT_COMMS,
-            units=Decimal("1"),
+            units=charge_units,
             request_path=ctx.endpoint,
             description=f"AWI HTTP {ctx.tool_name}",
         )
@@ -209,6 +213,16 @@ async def complete_awi_http_governed(
     ledger_entry_id = getattr(charge_result, "entry_id", None)
     raw_amount = getattr(charge_result, "amount", ctx.credits)
     charged = abs(Decimal(str(raw_amount)))
+    # Align receipt with permit budget (same as governed MCP registered_cost).
+    credits_charged = ctx.credits if charged > 0 else Decimal("0")
+
+    if ledger_entry_id:
+        await idem.mark_charged(
+            wallet_id=ctx.wallet_id,
+            endpoint=ctx.endpoint,
+            idempotency_key=ctx.idempotency_key,
+            ledger_entry_id=str(ledger_entry_id),
+        )
 
     receipt = await get_receipt_service().create_receipt(
         permit_id=ctx.permit_id,
@@ -219,7 +233,7 @@ async def complete_awi_http_governed(
         response_payload=response_payload,
         ledger_entry_id=ledger_entry_id,
         credits_authorized=ctx.credits,
-        credits_charged=charged,
+        credits_charged=credits_charged,
         outcome="success",
         audit_event_id=None,
     )
@@ -236,7 +250,7 @@ async def complete_awi_http_governed(
         "receipt": receipt_payload,
     }
 
-    await get_idempotency_service().complete(
+    await idem.complete(
         wallet_id=ctx.wallet_id,
         endpoint=ctx.endpoint,
         idempotency_key=ctx.idempotency_key,
@@ -245,6 +259,36 @@ async def complete_awi_http_governed(
         status_code=200,
     )
     return response_with_receipt
+
+
+async def abort_awi_http_governed(
+    ctx: AwiHttpGovernedContext,
+    *,
+    status_code: int,
+    error_payload: dict[str, Any],
+) -> None:
+    """Close an in-progress idempotency key after a failed governed AWI attempt."""
+    if ctx.replay_response is not None:
+        return
+    await get_idempotency_service().complete(
+        wallet_id=ctx.wallet_id,
+        endpoint=ctx.endpoint,
+        idempotency_key=ctx.idempotency_key,
+        response_reference=None,
+        response_json={"detail": error_payload},
+        status_code=status_code,
+    )
+
+
+async def raise_awi_http_error(
+    ctx: AwiHttpGovernedContext,
+    *,
+    status_code: int,
+    detail: dict[str, Any],
+) -> None:
+    """Abort idempotency then raise HTTPException (never returns)."""
+    await abort_awi_http_governed(ctx, status_code=status_code, error_payload=detail)
+    raise HTTPException(status_code=status_code, detail=detail)
 
 
 def parse_governed_headers(

@@ -21,7 +21,6 @@ from ..schemas.awi import (
     AWIRepresentationRequest,
     AWIRepresentationResponse,
     AWIExecutionRequest,
-    AWIExecutionResponse,
     AWISession,
     AWISessionCreate,
     AWITask,
@@ -151,8 +150,10 @@ async def execute_action(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        raise_awi_http_error,
     )
 
+    gov = None
     try:
         session = await _require_session_access(request.session_id, auth)
         request_payload = {
@@ -191,9 +192,16 @@ async def execute_action(
         raise
     except Exception as e:
         logger.exception(f"AWI execution failed: {request.session_id}")
+        detail = {"error": "execution_failed", "message": str(e)}
+        if gov is not None and gov.replay_response is None:
+            await raise_awi_http_error(
+                gov,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=detail,
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "execution_failed", "message": str(e)},
+            detail=detail,
         )
 
 
