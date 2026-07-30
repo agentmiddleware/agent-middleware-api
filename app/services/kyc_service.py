@@ -13,7 +13,7 @@ Architecture:
 
 import logging
 from datetime import timedelta
-from typing import Literal, Optional, cast
+from typing import Any, Literal, Optional, cast
 from uuid import uuid4
 
 import stripe
@@ -34,11 +34,13 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 class KYCNotRequiredError(Exception):
     """Raised when KYC is not required for a wallet."""
+
     pass
 
 
 class KYCVerificationError(Exception):
     """Raised when KYC verification fails."""
+
     pass
 
 
@@ -119,20 +121,22 @@ class KYCService:
             verification_session = stripe.identity.VerificationSession.create(
                 type=self.VERIFICATION_TYPE,
                 metadata=metadata,
-                options={
-                    "document": {
-                        # document_type is caller-supplied (from the request body) and
-                        # is validated by Stripe's API at request time, not locally;
-                        # narrow it to the SDK's expected Literal shape here.
-                        "allowed_types": cast(
-                            "list[Literal['driving_license', 'id_card', 'passport']]",
-                            [document_type],
-                        ),
-                        "require_id_number": False,
-                        "require_live_capture": True,
-                        "require_matching_selfie": True,
-                    }
-                },
+                options=cast(
+                    Any,
+                    {
+                        "document": {
+                            # document_type is caller-supplied (from the request body)
+                            # and is validated by Stripe's API at request time.
+                            "allowed_types": cast(
+                                "list[Literal['driving_license', 'id_card', 'passport']]",
+                                [document_type],
+                            ),
+                            "require_id_number": False,
+                            "require_live_capture": True,
+                            "require_matching_selfie": True,
+                        }
+                    },
+                ),
                 return_url=return_url,
             )
         except stripe.error.StripeError as e:
@@ -251,8 +255,9 @@ class KYCService:
         """
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.verification_id == verification_id)  # type: ignore[arg-type]  # see app/db/models.py
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.verification_id == verification_id
+                )  # type: ignore[arg-type]  # see app/db/models.py
             )
             verification = result.scalar_one_or_none()
 
@@ -317,8 +322,9 @@ class KYCService:
 
         async with self._session_factory()() as session:
             verification_result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)  # type: ignore[arg-type]  # see app/db/models.py
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.stripe_session_id == session_id
+                )  # type: ignore[arg-type]  # see app/db/models.py
             )
             verification = verification_result.scalar_one_or_none()
 
@@ -355,6 +361,7 @@ class KYCService:
         )
 
         from .notifications import get_notification_service
+
         notifications = get_notification_service()
         await notifications.send_kyc_approved_alert(wallet_id=verification.wallet_id)
 
@@ -364,8 +371,9 @@ class KYCService:
 
         async with self._session_factory()() as session:
             result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)  # type: ignore[arg-type]  # see app/db/models.py
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.stripe_session_id == session_id
+                )  # type: ignore[arg-type]  # see app/db/models.py
             )
             verification = result.scalar_one_or_none()
 
@@ -383,8 +391,9 @@ class KYCService:
 
         async with self._session_factory()() as session:
             verification_result = await session.execute(
-                select(KYCVerificationModel)
-                .where(KYCVerificationModel.stripe_session_id == session_id)  # type: ignore[arg-type]  # see app/db/models.py
+                select(KYCVerificationModel).where(
+                    KYCVerificationModel.stripe_session_id == session_id
+                )  # type: ignore[arg-type]  # see app/db/models.py
             )
             verification = verification_result.scalar_one_or_none()
 
@@ -456,6 +465,7 @@ class KYCService:
         logger.warning(f"KYC rejected for wallet {wallet_id}: {reason}")
 
         from .notifications import get_notification_service
+
         notifications = get_notification_service()
         await notifications.send_kyc_rejected_alert(wallet_id=wallet_id, reason=reason)
 
