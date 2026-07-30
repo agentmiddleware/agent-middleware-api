@@ -12,7 +12,7 @@
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 ![Stars](https://img.shields.io/github/stars/PetrefiedThunder/agent-middleware-api?style=social)
 
-> **Production beta — agent-discoverable, not production complete.** Credible wedge: a governed trust plane for scoped, metered MCP tool calls ([WEDGE.md](WEDGE.md)).
+> **Production beta — agent-discoverable, not production complete.** Credible wedge: exactly-once permits and receipts for metered MCP calls ([WEDGE.md](WEDGE.md)).
 
 **Agent Middleware API is an MCP trust plane for autonomous agent actions** — not a full agent middleware platform. Agents discover tools, receive bounded permits, invoke through governed MCP, meter spend, get signed receipts, and leave wallet-scoped audit trails.
 

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Exactly-once MCP permits (draft)</title>
+    <meta
+      name="description"
+      content="Authorize one agent action. Charge it once. Prove what happened. Exactly-once permits and receipts for metered MCP calls."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <nav class="site-nav" aria-label="Primary">
+      <a
+        href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/WEDGE.md"
+        >Docs</a
+      >
+      <a href="https://github.com/PetrefiedThunder/agent-middleware-api"
+        >GitHub</a
+      >
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy">
+        <h1 class="brand">Permit</h1>
+        <p class="tagline">Scoped permit. Metered MCP call. Signed receipt.</p>
+        <p class="lede">
+          Authorize one agent action. Charge it once. Prove what happened.
+        </p>
+        <div class="cta-row">
+          <a class="btn-primary" href="#proof">See the proof</a>
+          <a
+            class="link-secondary"
+            href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/partner-first-tool-runbook.md"
+            >Partner runbook</a
+          >
+        </div>
+        <p class="draft-note">
+          Provisional brand (not Permit.io) · marketing draft · not a product
+          console
+        </p>
+      </div>
+
+      <div class="receipt-stage" aria-hidden="false">
+        <article class="receipt" aria-label="Example signed receipt shaped like dogfood output">
+          <div class="receipt-head">
+            <span class="receipt-title">RECEIPT</span>
+            <span class="receipt-meta">2026-07-29T21:14:02Z</span>
+          </div>
+          <p class="receipt-protocol">
+            Illustrative shape · run <code>make dogfood-trust-plane</code> for a
+            live signature
+          </p>
+          <dl>
+            <div class="row">
+              <dt>receipt_id</dt>
+              <dd>rcpt-c3bc248a2f514e5a</dd>
+            </div>
+            <div class="row">
+              <dt>tool</dt>
+              <dd>partner.notes.write</dd>
+            </div>
+            <div class="row">
+              <dt>outcome</dt>
+              <dd class="ok">success</dd>
+            </div>
+            <div class="row">
+              <dt>credits_charged</dt>
+              <dd>2.00000000</dd>
+            </div>
+            <div class="row">
+              <dt>permit_id</dt>
+              <dd>permit-0f62fdfee59640e4</dd>
+            </div>
+            <div class="row">
+              <dt>ledger_entry_id</dt>
+              <dd>543e21a1-5056-4df8-8773-fbf6ba9c720c</dd>
+            </div>
+          </dl>
+          <dl class="receipt-sig">
+            <dt>signature (placeholder)</dt>
+            <dd>
+              dGVzdC1vbmx5LWVkMjU1MTktc2lnLWJhc2U2NC1ub3QtdmVyaWZpYWJsZQ==
+            </dd>
+          </dl>
+        </article>
+        <span class="stamp">EXAMPLE</span>
+      </div>
+    </header>
+
+    <section class="section" id="proof">
+      <p class="section-kicker">01 / The proof</p>
+      <h2 class="section-title">The proof</h2>
+      <p class="section-body proof-intro">
+        Matches <code>make dogfood-trust-plane</code>:
+        <code>partner.notes.write</code> at
+        <code>credits_per_unit=2.0</code>, idempotency
+        <code>dogfood-invoke-1</code>. IDs below are illustrative; shapes match
+        live receipts (<code>rcpt-</code>, <code>permit-</code>, UUID ledger).
+      </p>
+      <div class="proof-grid">
+        <div class="proof-col">
+          <div class="proof-label">
+            <span>First request</span>
+            <span class="badge">Success</span>
+          </div>
+          <dl>
+            <div class="row">
+              <dt>idempotency</dt>
+              <dd>dogfood-invoke-1</dd>
+            </div>
+            <div class="row">
+              <dt>tool</dt>
+              <dd>partner.notes.write</dd>
+            </div>
+            <div class="row">
+              <dt>outcome</dt>
+              <dd>success</dd>
+            </div>
+            <div class="row">
+              <dt>credits_charged</dt>
+              <dd>2.0</dd>
+            </div>
+            <div class="row">
+              <dt>receipt</dt>
+              <dd>rcpt-c3bc248a2f514e5a</dd>
+            </div>
+          </dl>
+          <p class="proof-foot">Wallet charged</p>
+        </div>
+        <div class="proof-col muted">
+          <div class="proof-label">
+            <span>Replay (same key)</span>
+          </div>
+          <dl>
+            <div class="row">
+              <dt>idempotency</dt>
+              <dd>dogfood-invoke-1</dd>
+            </div>
+            <div class="row">
+              <dt>tool</dt>
+              <dd>partner.notes.write</dd>
+            </div>
+            <div class="row">
+              <dt>outcome</dt>
+              <dd>success</dd>
+            </div>
+            <div class="row">
+              <dt>credits_charged</dt>
+              <dd>2.0</dd>
+            </div>
+            <div class="row">
+              <dt>receipt</dt>
+              <dd>rcpt-c3bc248a2f514e5a</dd>
+            </div>
+          </dl>
+          <p class="proof-foot">Same receipt · no second debit</p>
+        </div>
+        <div class="proof-col deny">
+          <div class="proof-label">
+            <span>Out of scope</span>
+            <span class="badge">Denied</span>
+          </div>
+          <dl>
+            <div class="row">
+              <dt>tool</dt>
+              <dd>partner.notes.admin</dd>
+            </div>
+            <div class="row">
+              <dt>outcome</dt>
+              <dd>denied</dd>
+            </div>
+            <div class="row">
+              <dt>reason</dt>
+              <dd>permit_tool_not_allowed</dd>
+            </div>
+            <div class="row">
+              <dt>credits_charged</dt>
+              <dd>0</dd>
+            </div>
+          </dl>
+          <p class="proof-foot">Denied</p>
+        </div>
+      </div>
+      <p class="proof-aside">
+        Also proven in dogfood: invoke with no permit →
+        <code>permit_required</code>.
+      </p>
+    </section>
+
+    <section class="section" id="gate">
+      <p class="section-kicker">02 / One tool behind the gate</p>
+      <h2 class="section-title">One tool behind the gate</h2>
+      <p class="section-body">
+        Bring one internal MCP tool. Issue a wallet-scoped permit for that tool
+        only. Walk permit → invoke → charge → receipt → replay → out-of-scope
+        deny. Stop there until the loop is trusted in your stack.
+      </p>
+      <pre class="cli" tabindex="0"><code><span class="prompt">$</span> make dogfood-trust-plane</code></pre>
+    </section>
+
+    <section class="section" id="not">
+      <p class="section-kicker">03 / What this is not</p>
+      <h2 class="section-title">What this is not</h2>
+      <ul class="not-list">
+        <li>Production settlement or payments rails</li>
+        <li>Compliance-grade ledger storage</li>
+        <li>Enterprise IAM or secrets replacement</li>
+        <li>Universal governance across every agent framework</li>
+      </ul>
+    </section>
+
+    <footer class="site-footer">
+      <div>
+        <div class="footer-brand">PERMIT</div>
+        <p class="footer-sub">Exactly-once MCP permits · draft</p>
+      </div>
+      <div class="footer-meta">
+        Design partners welcome.<br />
+        <a href="https://github.com/PetrefiedThunder/agent-middleware-api"
+          >github.com/PetrefiedThunder/agent-middleware-api</a
+        ><br />
+        <a
+          href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DESIGN_PARTNER_GUIDE.md"
+          >Design partner guide</a
+        >
+      </div>
+    </footer>
+  </body>
+</html>

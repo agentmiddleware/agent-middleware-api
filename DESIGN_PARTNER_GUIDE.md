@@ -98,17 +98,19 @@ Then walk the partner through the live flow:
 
 Use:
 
-- "Governed MCP trust plane for scoped, metered tool calls."
-- "Signed proof of authorization and execution for a single tool boundary."
-- "Replay-safe billing and audit artifacts for partner evaluation."
+- "Authorize one agent action. Charge it once. Prove what happened."
+- "Exactly-once permits and receipts for metered MCP calls."
+- "Signed proof of authorization, execution, and credit debit for one tool."
+- "Replay-safe metering: same idempotency key, same receipt, no second debit."
 
 Avoid:
 
+- Leading with "trust plane" or "MCP gateway" as the product (category is crowded).
 - "Production-ready agent payments."
 - "Autonomous economic actor infrastructure."
 - "Complete policy layer for all agent frameworks."
 - "Compliance-grade ledger or audit storage."
-
+- Claiming a marketing-page signature is live cryptographic proof.
 ## Do Not Promise Yet
 
 - Settlement rails.

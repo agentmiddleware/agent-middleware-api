@@ -1,17 +1,40 @@
-# Wedge: MCP Trust Plane
+# Wedge: Exactly-once MCP permits
 
 Agent Middleware API should not initially sell itself as a full platform for
 autonomous economic actors. The credible wedge is narrower:
 
-> A governed trust plane for scoped, metered MCP tool calls.
+> Exactly-once permits and receipts for metered MCP calls.
 
-The core job is to put one enforceable boundary between autonomous agents and
-tools:
+Or in one line:
+
+> Authorize one agent action. Charge it once. Prove what happened.
+
+The core job is to put one enforceable **economic** boundary between autonomous
+agents and tools:
 
 ```text
 scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 -> ledger -> audit chain -> replay no double charge -> out-of-scope denial
 ```
+
+Category language (“MCP trust plane,” “governance gateway”) is occupied. The
+differentiating primitive is exactly-once economic authorization: one
+idempotency key returns the original receipt without a second tool execution or
+debit.
+
+## Positioning vs nearby products
+
+Stay a **closed-loop credit and delegated-authority** system for internal AI
+platform teams—not a general MCP gateway and not merchant settlement.
+
+| Nearby | Their center of gravity | Our difference |
+|--------|-------------------------|----------------|
+| MCP “trust” gateways (e.g. signed receipts + replay) | Policy / evidence | Wallet debit + economic idempotency |
+| MCP monetization / pay-per-tool | Payments rails | Internal budgets; no settlement claim |
+| Enterprise authz for MCP | Who may call | Meter + receipt + charge-once |
+
+Do not pitch as production payments, compliance-grade ledger, or IAM
+replacement (see [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
 
 ## Core User
 
