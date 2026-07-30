@@ -12,42 +12,52 @@ Verifies that all discovery surfaces include Phase 9 features:
 
 
 class TestWellKnownAgentJson:
-    """Test the agent.json manifest includes Phase 9 capabilities."""
+    """Test agent.json separates trust-plane product from Phase 9 proof surfaces."""
 
-    def test_well_known_agent_json_has_phase9_capabilities(self):
-        """Verify agent.json includes passkey_auth, dom_bridge, rag_memory."""
-        from app.routers.well_known import _build_agent_manifest
+    def test_well_known_agent_json_keeps_phase9_out_of_product_capabilities(self):
+        """Phase 9 items are proof_surfaces, not product capabilities."""
+        from app.routers.well_known import PRODUCT_CAPABILITIES, _build_agent_manifest
 
         manifest = _build_agent_manifest()
         data = manifest.model_dump()
 
-        assert "capabilities" in data
-        phase9_capabilities = ["passkey_auth", "dom_bridge", "rag_memory"]
-        for cap in phase9_capabilities:
-            assert cap in data["capabilities"], f"Missing Phase 9 capability: {cap}"
+        assert data["capabilities"] == PRODUCT_CAPABILITIES
+        for cap in ("passkey_auth", "dom_bridge", "rag_memory", "awi_automation"):
+            assert cap not in data["capabilities"]
 
-    def test_well_known_agent_json_has_phase9_endpoints(self):
-        """Verify agent.json endpoints include Phase 9 routes."""
+        proof_ids = {entry["id"] for entry in data["proof_surfaces"]}
+        for cap in ("passkey_auth", "dom_bridge", "rag_memory"):
+            assert cap in proof_ids
+            entry = next(e for e in data["proof_surfaces"] if e["id"] == cap)
+            assert entry["status"] == "proof_surface"
+            assert entry["simulation"] is True
+
+    def test_well_known_agent_json_has_phase9_endpoints_when_proof_mounted(self):
+        """When proof surfaces are enabled, Phase 9 routes appear in endpoints."""
         from app.routers.well_known import _build_agent_manifest
 
         manifest = _build_agent_manifest()
         data = manifest.model_dump()
 
         assert "endpoints" in data
+        assert data["endpoints"]["permits"] == "/v1/permits"
+        assert data["endpoints"]["mcp"] == "/mcp"
         phase9_endpoints = ["awi_passkey", "awi_dom", "awi_rag"]
         for endpoint in phase9_endpoints:
             assert endpoint in data["endpoints"], (
                 f"Missing Phase 9 endpoint: {endpoint}"
             )
 
-    def test_well_known_agent_json_has_phase9_docs(self):
-        """Verify agent.json documentation includes Phase 9 links."""
+    def test_well_known_agent_json_has_phase9_docs_when_proof_mounted(self):
+        """Phase 9 doc links are present when proof surfaces are mounted."""
         from app.routers.well_known import _build_agent_manifest
 
         manifest = _build_agent_manifest()
         data = manifest.model_dump()
 
         assert "documentation" in data
+        assert "wedge" in data["documentation"]
+        assert "security_limitations" in data["documentation"]
         phase9_docs = ["phase9_passkey", "phase9_dom_bridge", "phase9_rag"]
         for doc in phase9_docs:
             assert doc in data["documentation"], f"Missing Phase 9 doc link: {doc}"
@@ -61,12 +71,18 @@ class TestWellKnownAgentJson:
         af = data["agent_first"]
         assert af.get("primary_audience") == "autonomous_agents"
         assert af.get("design_principle") == "agent_first"
+        assert af.get("product_wedge") == "governed_mcp_trust_plane"
+        assert "invoke" in af.get("product_loop", [])
         assert "/.well-known/agent.json" in af.get("bootstrap_sequence", [])
         assert af.get("simulation_and_dependency_truth") == "/health/dependencies"
+        assert "proof_surfaces_enabled" in af
 
     def test_agent_first_metadata_matches_manifest_field(self):
         """agent_first in manifest equals get_agent_first_metadata()."""
-        from app.routers.well_known import _build_agent_manifest, get_agent_first_metadata
+        from app.routers.well_known import (
+            _build_agent_manifest,
+            get_agent_first_metadata,
+        )
 
         assert (
             _build_agent_manifest().model_dump()["agent_first"]
@@ -78,14 +94,19 @@ class TestDiscoverEndpoint:
     """Test /v1/discover includes Phase 9."""
 
     def test_discover_has_phase9_capabilities(self):
-        """Verify discover endpoint includes Phase 9 capabilities."""
+        """Phase 9 capabilities are listed as labeled proof surfaces."""
         from app.routers.discover import _build_capabilities
 
         capabilities = _build_capabilities()
-        cap_names = [c.name for c in capabilities]
+        by_name = {c.name: c for c in capabilities}
         phase9_caps = ["passkey", "dom_bridge", "rag_memory"]
         for cap in phase9_caps:
-            assert cap in cap_names, f"Missing Phase 9 capability: {cap}"
+            assert cap in by_name, f"Missing Phase 9 capability: {cap}"
+            assert by_name[cap].surface == "proof_surface"
+            assert by_name[cap].simulation_default is True
+
+        for name in ("billing", "mcp", "permits", "receipts", "audit"):
+            assert by_name[name].surface == "product"
 
     def test_discover_has_phase9_mcp_tools(self):
         """Verify discover endpoint includes Phase 9 MCP tools."""

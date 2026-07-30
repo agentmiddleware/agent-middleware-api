@@ -102,12 +102,16 @@ def extract_schema_from_callable(
                 if param.default is inspect.Parameter.empty:
                     required.append(param_name)
 
-        input_schema = {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-            "additionalProperties": False,
-        } if properties else None
+        input_schema = (
+            {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": False,
+            }
+            if properties
+            else None
+        )
 
         return_type = type_hints.get("return")
         output_schema = None
@@ -140,6 +144,9 @@ def _service_to_mcp_tool(service: dict) -> dict:
         "unitName": service.get("unit_name", "call"),
         "category": service.get("category", "custom"),
     }
+
+    if service.get("require_permit"):
+        annotations["requirePermit"] = True
 
     if service.get("owner_wallet_id"):
         annotations["providerWallet"] = service["owner_wallet_id"]
@@ -187,12 +194,17 @@ class ServiceRegistry:
         unit_name: str = "call",
         owner_key: str | None = None,
         owner_wallet_id: str | None = None,
+        require_permit: bool = False,
     ) -> dict:
         """
         Register a service locally (in-memory) for immediate use.
 
         This is useful for services defined in the same codebase
         that want MCP-enabled tool exposure without DB persistence.
+
+        When ``require_permit`` is True, governed MCP invocation always
+        requires a signed permit + idempotency key — even if legacy
+        unpermitted MCP is otherwise allowed.
         """
         input_schema = pydantic_to_mcp_schema(input_model)
         output_schema = pydantic_to_mcp_schema(output_model)
@@ -211,6 +223,7 @@ class ServiceRegistry:
             "output_schema": output_schema,
             "owner_key": owner_key,
             "owner_wallet_id": owner_wallet_id,
+            "require_permit": bool(require_permit),
             "is_active": True,
             "is_local": True,
             "func": func,
@@ -368,20 +381,22 @@ class ServiceRegistry:
                     except json.JSONDecodeError:
                         pass
 
-                results.append({
-                    "service_id": service.service_id,
-                    "name": service.name,
-                    "description": service.description,
-                    "category": service.category,
-                    "credits_per_unit": float(service.credits_per_unit),
-                    "unit_name": service.unit_name,
-                    "input_schema": manifest.get("inputSchema"),
-                    "output_schema": manifest.get("outputSchema"),
-                    "owner_wallet_id": service.owner_wallet_id,
-                    "is_active": service.is_active,
-                    "is_local": False,
-                    "created_at": service.created_at,
-                })
+                results.append(
+                    {
+                        "service_id": service.service_id,
+                        "name": service.name,
+                        "description": service.description,
+                        "category": service.category,
+                        "credits_per_unit": float(service.credits_per_unit),
+                        "unit_name": service.unit_name,
+                        "input_schema": manifest.get("inputSchema"),
+                        "output_schema": manifest.get("outputSchema"),
+                        "owner_wallet_id": service.owner_wallet_id,
+                        "is_active": service.is_active,
+                        "is_local": False,
+                        "created_at": service.created_at,
+                    }
+                )
 
             return results
 
@@ -393,9 +408,7 @@ class ServiceRegistry:
         all_services = local + persistent
         if category:
             all_services = [
-                s
-                for s in all_services
-                if s.get("category") == category.value
+                s for s in all_services if s.get("category") == category.value
             ]
 
         return [s for s in all_services if s.get("is_active", True)]

@@ -13,7 +13,7 @@ Based on arXiv:2506.10953v1 gap analysis.
 import logging
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 
 from ..core.auth import AuthContext, get_auth_context
@@ -100,23 +100,50 @@ async def _require_memory_access(session_id: str, auth: AuthContext) -> None:
 
 @router.post(
     "/passkey/challenge",
-    response_model=PasskeyChallengeResponse,
     summary="Create passkey challenge",
-    description="Create a WebAuthn challenge for high-risk AWI action verification.",
+    description=(
+        "Create a WebAuthn challenge for high-risk AWI action verification. "
+        "Governed: requires X-Permit-Id and Idempotency-Key."
+    ),
 )
 async def create_passkey_challenge(
     request: PasskeyChallengeRequest,
     auth: AuthContext = Depends(get_auth_context),
+    x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Create a WebAuthn registration/authentication challenge.
 
-    The client should use navigator.credentials.get() with the returned
-    options, then call /passkey/verify with the credential response.
+    Governed: requires ``X-Permit-Id`` + ``Idempotency-Key`` (tool
+    ``awi_passkey_challenge``). Prefer MCP when integrating agents.
     """
+    from ..services.awi_http_governance import (
+        begin_awi_http_governed,
+        complete_awi_http_governed,
+    )
+    from ..services.awi_session import get_awi_session_manager
     from ..services.webauthn_provider import get_webauthn_provider
 
     await _require_awi_session_access(request.session_id, auth)
+    session = await get_awi_session_manager().get_session(request.session_id)
+    wallet_id = session.wallet_id if session else None
+
+    request_payload = {
+        "session_id": request.session_id,
+        "action": request.action,
+    }
+    gov = await begin_awi_http_governed(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name="awi_passkey_challenge",
+        endpoint="POST /v1/awi/passkey/challenge",
+        permit_id=x_permit_id,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+    )
+    if gov.replay_response is not None:
+        return gov.replay_response
 
     webauthn = get_webauthn_provider()
 
@@ -135,12 +162,19 @@ async def create_passkey_challenge(
             session_id=request.session_id,
             action=request.action,
         )
-        return PasskeyChallengeResponse(**challenge)
+        body = PasskeyChallengeResponse(**challenge).model_dump(mode="json")
+        return await complete_awi_http_governed(
+            gov,
+            request_payload=request_payload,
+            response_payload=body,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "challenge_failed", "message": str(e)},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to create passkey challenge")
         raise HTTPException(
@@ -151,13 +185,17 @@ async def create_passkey_challenge(
 
 @router.post(
     "/passkey/verify",
-    response_model=PasskeyVerifyResponse,
     summary="Verify passkey response",
-    description="Verify the WebAuthn credential response from the client.",
+    description=(
+        "Verify the WebAuthn credential response from the client. "
+        "Governed: requires X-Permit-Id and Idempotency-Key."
+    ),
 )
 async def verify_passkey(
     request: PasskeyVerifyRequest,
     auth: AuthContext = Depends(get_auth_context),
+    x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Verify WebAuthn assertion response.
@@ -165,6 +203,11 @@ async def verify_passkey(
     After successful verification, the action is marked as verified
     for 5 minutes (configurable).
     """
+    from ..services.awi_http_governance import (
+        begin_awi_http_governed,
+        complete_awi_http_governed,
+    )
+    from ..services.awi_session import get_awi_session_manager
     from ..services.webauthn_provider import get_webauthn_provider
 
     webauthn = get_webauthn_provider()
@@ -176,18 +219,39 @@ async def verify_passkey(
         )
 
     await _require_awi_session_access(challenge.session_id, auth)
+    session = await get_awi_session_manager().get_session(challenge.session_id)
+    wallet_id = session.wallet_id if session else None
+    request_payload = {"challenge_id": request.challenge_id}
+    gov = await begin_awi_http_governed(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name="awi_passkey_verify",
+        endpoint="POST /v1/awi/passkey/verify",
+        permit_id=x_permit_id,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+    )
+    if gov.replay_response is not None:
+        return gov.replay_response
 
     try:
         result = await webauthn.verify_response(
             challenge_id=request.challenge_id,
             credential=request.credential,
         )
-        return PasskeyVerifyResponse(**result)
+        body = PasskeyVerifyResponse(**result).model_dump(mode="json")
+        return await complete_awi_http_governed(
+            gov,
+            request_payload=request_payload,
+            response_payload=body,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "verification_failed", "message": str(e)},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Passkey verification error")
         raise HTTPException(
@@ -498,13 +562,17 @@ async def list_dom_sessions(auth: AuthContext = Depends(get_auth_context)):
 
 @router.post(
     "/dom/sync",
-    response_model=DOMSyncResponse,
     summary="Execute AWI action via DOM",
-    description="Execute an AWI action against real browser DOM via Playwright.",
+    description=(
+        "Execute an AWI action against real browser DOM via Playwright. "
+        "Governed: requires X-Permit-Id and Idempotency-Key."
+    ),
 )
 async def sync_dom(
     request: DOMSyncRequest,
     auth: AuthContext = Depends(get_auth_context),
+    x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Bidirectional AWI ↔ DOM translation.
@@ -512,9 +580,29 @@ async def sync_dom(
     Translates the AWI action to Playwright commands, executes them,
     and returns the resulting state representation.
     """
+    from ..services.awi_http_governance import (
+        begin_awi_http_governed,
+        complete_awi_http_governed,
+    )
     from ..services.awi_playwright_bridge import get_playwright_bridge
 
     await _require_dom_session_access(request.session_id, auth)
+    wallet_id = _DOM_SESSION_WALLETS.get(request.session_id)
+    request_payload = {
+        "session_id": request.session_id,
+        "action": request.action,
+    }
+    gov = await begin_awi_http_governed(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name="awi_dom_sync",
+        endpoint="POST /v1/awi/dom/sync",
+        permit_id=x_permit_id,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+    )
+    if gov.replay_response is not None:
+        return gov.replay_response
 
     bridge = get_playwright_bridge()
 
@@ -536,7 +624,7 @@ async def sync_dom(
             include_elements=True,
         )
 
-        return DOMSyncResponse(
+        body = DOMSyncResponse(
             session_id=request.session_id,
             execution_id=str(uuid4()),
             action=request.action,
@@ -545,18 +633,24 @@ async def sync_dom(
             new_url=execution.new_url,
             state_representation=representation,
             error=execution.error,
+        ).model_dump(mode="json")
+        return await complete_awi_http_governed(
+            gov,
+            request_payload=request_payload,
+            response_payload=body,
         )
-
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "translation_failed", "message": str(e)},
         )
     except Exception as e:
-        logger.exception(f"DOM sync failed: {request.session_id}")
+        logger.exception("DOM sync failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "execution_failed", "message": str(e)},
+            detail={"error": "sync_failed", "message": str(e)},
         )
 
 
@@ -655,23 +749,49 @@ async def preview_action(
 
 @router.post(
     "/rag/index",
-    response_model=MemoryIndexResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Index AWI session",
-    description="Index a completed AWI session for future retrieval.",
+    description=(
+        "Index a completed AWI session for future retrieval. "
+        "Governed: requires X-Permit-Id and Idempotency-Key."
+    ),
 )
 async def index_session(
     request: MemoryIndexRequest,
     auth: AuthContext = Depends(get_auth_context),
+    x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Index an AWI session for semantic search.
 
     Extracts entities, infers intent, and generates embeddings for retrieval.
     """
+    from ..services.awi_http_governance import (
+        begin_awi_http_governed,
+        complete_awi_http_governed,
+    )
     from ..services.awi_rag_engine import get_awi_rag_engine
+    from ..services.awi_session import get_awi_session_manager
 
     await _require_awi_session_access(request.session_id, auth)
+    session = await get_awi_session_manager().get_session(request.session_id)
+    wallet_id = session.wallet_id if session else None
+    request_payload = {
+        "session_id": request.session_id,
+        "session_type": request.session_type,
+    }
+    gov = await begin_awi_http_governed(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name="awi_memory_index",
+        endpoint="POST /v1/awi/rag/index",
+        permit_id=x_permit_id,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+    )
+    if gov.replay_response is not None:
+        return gov.replay_response
 
     rag = get_awi_rag_engine()
 
@@ -686,14 +806,21 @@ async def index_session(
 
         memory = await rag.get_memory(memory_id)
 
-        return MemoryIndexResponse(
+        body = MemoryIndexResponse(
             memory_id=memory_id,
             session_id=request.session_id,
             indexed_at=memory.created_at if memory else utc_now(),
             entities_extracted=len(memory.key_entities) if memory else 0,
             intent_inferred=memory.user_intent if memory else "",
+        ).model_dump(mode="json")
+        return await complete_awi_http_governed(
+            gov,
+            request_payload=request_payload,
+            response_payload=body,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Failed to index session: {request.session_id}")
         raise HTTPException(
@@ -704,22 +831,46 @@ async def index_session(
 
 @router.post(
     "/rag/query",
-    response_model=RAGQueryResponse,
     summary="Query session memories",
-    description="Semantic search over past AWI session memories.",
+    description=(
+        "Semantic search over past AWI session memories. "
+        "Governed: requires X-Permit-Id, Idempotency-Key, and X-Wallet-Id."
+    ),
 )
 async def query_memories(
     request: RAGQueryRequest,
     auth: AuthContext = Depends(get_auth_context),
+    x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    x_wallet_id: str | None = Header(None, alias="X-Wallet-Id"),
 ):
     """
     Query session memories with natural language.
 
     Returns relevant past sessions sorted by similarity to the query.
     """
+    from ..services.awi_http_governance import (
+        begin_awi_http_governed,
+        complete_awi_http_governed,
+    )
     from ..services.awi_rag_engine import get_awi_rag_engine
 
-    auth.require_bootstrap_admin()
+    request_payload = {
+        "query": request.query,
+        "top_k": request.top_k,
+        "session_type": request.session_type,
+    }
+    gov = await begin_awi_http_governed(
+        auth=auth,
+        wallet_id=x_wallet_id,
+        tool_name="awi_rag_query",
+        endpoint="POST /v1/awi/rag/query",
+        permit_id=x_permit_id,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+    )
+    if gov.replay_response is not None:
+        return gov.replay_response
 
     rag = get_awi_rag_engine()
 
@@ -736,7 +887,7 @@ async def query_memories(
 
         search_time_ms = int((utc_now() - start_time).total_seconds() * 1000)
 
-        return RAGQueryResponse(
+        body = RAGQueryResponse(
             query=request.query,
             results=[
                 MemorySearchResult(
@@ -750,14 +901,20 @@ async def query_memories(
                     created_at=r.created_at,
                     accessed_at=r.accessed_at,
                     access_count=r.access_count,
-                    raw_state=r.raw_state,
+                    raw_state=r.raw_state if request.include_raw_state else None,
                 )
                 for r in results
             ],
             total_found=len(results),
             search_time_ms=search_time_ms,
+        ).model_dump(mode="json")
+        return await complete_awi_http_governed(
+            gov,
+            request_payload=request_payload,
+            response_payload=body,
         )
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("RAG query failed")
         raise HTTPException(

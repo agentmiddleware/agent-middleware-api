@@ -133,6 +133,13 @@ class AWIDiscoveryManifest(BaseModel):
     awi_version: str
     status: str
     profile: str
+    surface: str = Field(
+        default="proof_surface",
+        description=(
+            "Discovery honesty label. AWI HTTP routes are proof-surface "
+            "scaffolding unless invoked through governed MCP."
+        ),
+    )
     transport: AWIManifestTransport
     description: str
     endpoints: dict[str, str]

@@ -396,6 +396,11 @@ async def _execute_registered_tool(
     category = ServiceCategory(
         service.get("category", ServiceCategory.PLATFORM_FEE.value)
     )
+    # High-value tools can force the permit path even when legacy
+    # unpermitted MCP is otherwise allowed.
+    if service.get("require_permit"):
+        governed_call = True
+
     registered_cost = _registered_tool_cost(service, category)
     charge_units = _charge_units_for_registered_cost(registered_cost, category)
     estimated_cost = float(registered_cost)

@@ -220,11 +220,7 @@ class TestAWIRepresentation:
 
         def stable(report):
             return [
-                {
-                    key: value
-                    for key, value in row.items()
-                    if key != "latency_ms"
-                }
+                {key: value for key, value in row.items() if key != "latency_ms"}
                 for row in report["results"]
             ]
 
@@ -429,12 +425,10 @@ class TestAWISessionManager:
             stored_session.model_dump(mode="json")
         )
         assert (
-            stored_session.action_history[-1]["parameters"]["username"]
-            == "[REDACTED]"
+            stored_session.action_history[-1]["parameters"]["username"] == "[REDACTED]"
         )
         assert (
-            stored_session.action_history[-1]["parameters"]["password"]
-            == "[REDACTED]"
+            stored_session.action_history[-1]["parameters"]["password"] == "[REDACTED]"
         )
 
     @pytest.mark.anyio
@@ -665,16 +659,43 @@ class TestAWIRouter:
 
     @pytest.mark.anyio
     async def test_execute_action_endpoint(self):
-        """Test POST /v1/awi/execute."""
+        """Test POST /v1/awi/execute requires permit and returns receipt."""
+        from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
+            provisioned = await provision_agent_wallet(client)
+            wallet_id = provisioned["agent_wallet_id"]
+            headers = provisioned["agent_headers"]
+            permit = await create_tool_permit(
+                client,
+                wallet_id=wallet_id,
+                key_id=provisioned["key_id"],
+                tool_name="awi_execute",
+                max_credits=50,
+                idem_key="permit-awi-execute-endpoint",
+            )
+
             create_response = await client.post(
                 "/v1/awi/sessions",
-                json={"target_url": "https://example.com"},
-                headers=HEADERS,
+                json={"target_url": "https://example.com", "wallet_id": wallet_id},
+                headers=headers,
             )
+            assert create_response.status_code == 201
             session_id = create_response.json()["session_id"]
+
+            denied = await client.post(
+                "/v1/awi/execute",
+                json={
+                    "session_id": session_id,
+                    "action": "navigate_to",
+                    "parameters": {"url": "https://new-page.com"},
+                },
+                headers=headers,
+            )
+            assert denied.status_code == 403
+            assert denied.json()["detail"]["error"] == "permit_required"
 
             response = await client.post(
                 "/v1/awi/execute",
@@ -683,13 +704,19 @@ class TestAWIRouter:
                     "action": "navigate_to",
                     "parameters": {"url": "https://new-page.com"},
                 },
-                headers=HEADERS,
+                headers={
+                    **headers,
+                    "X-Permit-Id": permit["permit_id"],
+                    "Idempotency-Key": "awi-execute-endpoint-1",
+                },
             )
 
             assert response.status_code == 200
             data = response.json()
             assert "execution_id" in data
             assert data["status"] == "success"
+            assert data["receipt"]["permit_id"] == permit["permit_id"]
+            assert data["receipt"]["outcome"] == "success"
 
     @pytest.mark.anyio
     async def test_list_vocabulary_endpoint(self):
@@ -739,7 +766,9 @@ class TestAWIRouter:
             assert set(data["representation_types"]) == {
                 item.value for item in AWIRepresentationType
             }
-            assert manifest_schema == {"$ref": "#/components/schemas/AWIDiscoveryManifest"}
+            assert manifest_schema == {
+                "$ref": "#/components/schemas/AWIDiscoveryManifest"
+            }
             assert actions["login"]["status"] == "provisional"
             assert actions["click_button"]["tier"] == "compatibility"
 
@@ -870,20 +899,27 @@ class TestAWIRouter:
 
     @pytest.mark.anyio
     async def test_passkey_challenge_requires_session_owner(self):
-        """Login-window passkey challenges inherit AWI session ownership."""
+        """Login-window passkey challenges inherit AWI session ownership and permits."""
+        from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            wallet_resp = await client.post(
-                "/v1/billing/wallets/sponsor",
-                json={"sponsor_name": "AWI Passkey", "email": "awi-passkey@test.com"},
-                headers=HEADERS,
+            provisioned = await provision_agent_wallet(client)
+            wallet_id = provisioned["agent_wallet_id"]
+            headers = provisioned["agent_headers"]
+            permit = await create_tool_permit(
+                client,
+                wallet_id=wallet_id,
+                key_id=provisioned["key_id"],
+                tool_name="awi_passkey_challenge",
+                max_credits=50,
+                idem_key="permit-awi-passkey-owner",
             )
-            wallet_id = wallet_resp.json()["wallet_id"]
             session_resp = await client.post(
                 "/v1/awi/sessions",
                 json={"target_url": "https://example.com", "wallet_id": wallet_id},
-                headers=HEADERS,
+                headers=headers,
             )
             session_id = session_resp.json()["session_id"]
 
@@ -891,11 +927,23 @@ class TestAWIRouter:
                 "/v1/awi/passkey/challenge",
                 json={"session_id": session_id, "action": "checkout"},
             )
-            with_auth = await client.post(
+            with_auth_no_permit = await client.post(
                 "/v1/awi/passkey/challenge",
                 json={"session_id": session_id, "action": "checkout"},
-                headers=HEADERS,
+                headers=headers,
+            )
+            with_permit = await client.post(
+                "/v1/awi/passkey/challenge",
+                json={"session_id": session_id, "action": "checkout"},
+                headers={
+                    **headers,
+                    "X-Permit-Id": permit["permit_id"],
+                    "Idempotency-Key": "awi-passkey-owner-1",
+                },
             )
 
             assert no_auth.status_code == 401
-            assert with_auth.status_code == 200
+            assert with_auth_no_permit.status_code == 403
+            assert with_auth_no_permit.json()["detail"]["error"] == "permit_required"
+            assert with_permit.status_code == 200
+            assert with_permit.json()["receipt"]["permit_id"] == permit["permit_id"]

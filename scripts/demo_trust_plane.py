@@ -34,6 +34,7 @@ def configure_environment() -> None:
     os.environ["VALID_API_KEYS"] = ADMIN_KEY
     os.environ["TRUST_MODE_ENABLED"] = "true"
     os.environ["ALLOW_LEGACY_UNPERMITTED_MCP"] = "false"
+    os.environ["ENABLE_PROOF_SURFACES"] = "false"
     os.environ["TRUST_SIGNING_KEY_ID"] = "demo-ed25519"
     os.environ["TRUST_SIGNING_PRIVATE_KEY_B64"] = DEMO_PRIVATE_KEY_B64
 
@@ -123,11 +124,15 @@ def register_demo_tools() -> None:
     registry.register_local(
         service_id=ALLOWED_TOOL,
         name="Trust Plane Echo",
-        description="Demo tool allowed by the signed permit",
+        description=(
+            "Design-partner reference tool: stand-in for one internal MCP tool. "
+            "Replace with a real tool id when onboarding a partner."
+        ),
         category=ServiceCategory.AGENT_COMMS,
         func=echo,
         credits_per_unit=2.0,
         unit_name="call",
+        require_permit=True,
     )
     registry.register_local(
         service_id=BLOCKED_TOOL,
@@ -137,6 +142,7 @@ def register_demo_tools() -> None:
         func=admin_ledger_probe,
         credits_per_unit=2.0,
         unit_name="call",
+        require_permit=True,
     )
 
 

@@ -85,12 +85,35 @@ def test_production_trust_mode_reports_all_fail_closed_violations():
 
 
 def test_production_without_trust_mode_stays_compatible():
+    # Trust-mode opt-out is allowed in production-like, but proof surfaces,
+    # DEBUG, and WebAuthn mock still must stay fail-closed.
     validate_trust_mode_config(
         environment="production",
         trust_mode_enabled=False,
         signing_private_key_b64="",
         allow_legacy_unpermitted_mcp=True,
+        enable_proof_surfaces=False,
+        debug=False,
+        webauthn_allow_mock=False,
     )
+
+
+def test_production_rejects_debug_webauthn_mock_and_proof_surfaces():
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment="production",
+            trust_mode_enabled=False,
+            signing_private_key_b64="",
+            allow_legacy_unpermitted_mcp=True,
+            debug=True,
+            webauthn_allow_mock=True,
+            enable_proof_surfaces=True,
+        )
+
+    message = str(exc_info.value)
+    assert "DEBUG" in message
+    assert "WEBAUTHN_ALLOW_MOCK" in message
+    assert "ENABLE_PROOF_SURFACES" in message
 
 
 def test_settings_wrapper_uses_environment_field():
@@ -99,6 +122,9 @@ def test_settings_wrapper_uses_environment_field():
         TRUST_MODE_ENABLED=True,
         TRUST_SIGNING_PRIVATE_KEY_B64="private-key-material",
         ALLOW_LEGACY_UNPERMITTED_MCP=False,
+        ENABLE_PROOF_SURFACES=False,
+        DEBUG=False,
+        WEBAUTHN_ALLOW_MOCK=False,
     )
 
     validate_trust_mode_guardrails(settings)
@@ -185,9 +211,9 @@ def test_warn_if_trust_mode_permissive_logs_warning_in_legacy_mode():
     records = _capture_trust_mode_warnings(
         lambda: warn_if_trust_mode_permissive(settings)
     )
-    assert any(
-        "trust_mode_permissive" in record.getMessage() for record in records
-    ), records
+    assert any("trust_mode_permissive" in record.getMessage() for record in records), (
+        records
+    )
 
 
 def test_warn_if_trust_mode_permissive_silent_when_strict():

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from .config import get_settings
+from .trust_mode import is_production_like_environment
 
 settings = get_settings()
 
@@ -126,6 +127,18 @@ async def get_auth_context(
         )
 
     if valid_keys or not settings.DEBUG:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "invalid_api_key",
+                "message": "The provided API key is not authorized.",
+            },
+        )
+
+    # DEBUG empty-key bootstrap is local/dev only. Production-like
+    # environments must never accept arbitrary keys as bootstrap admin —
+    # even if DEBUG somehow slipped past startup guardrails.
+    if is_production_like_environment(settings.ENVIRONMENT):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

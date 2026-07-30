@@ -10,22 +10,26 @@
 
 ## What This API Does
 
-Agent Middleware API is the operational control plane for autonomous agents:
-identity, billing, discovery, policy, and execution governance for
-machine-native software tenants.
+Agent Middleware API is a **governed MCP trust plane** for autonomous agents:
+scoped permits, metered tool invocation, signed receipts, and wallet audit chains.
 
-The core loop is:
+The product loop is:
 
 ```text
-discover -> authenticate -> invoke -> meter -> govern
+discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
 ```
 
+Read `capabilities` on `GET /.well-known/agent.json` for the product wedge.
+Entries under `proof_surfaces` (and capabilities with `surface=proof_surface`
+on `/v1/discover`) are labeled scaffolding — often simulated, and not
+permit-enforced on HTTP unless routed through governed MCP.
+
 Core infrastructure:
-- **Identity & authority** — Wallet-scoped agents, delegated credentials, key rotation, KYC hooks
+- **Identity & authority** — Wallet-scoped agents, API keys, signing keys, KYC hooks
 - **Discovery** — MCP tools, `.well-known/agent.json`, `llm.txt`, OpenAPI, `/v1/discover`
-- **Execution governance** — MCP invocation, planner constraints, service health, simulation visibility
-- **Economics** — Dry-run pricing, spend limits, ledgering, exact decimal billing fields
-- **Readiness** — Telemetry, health checks, audit surfaces, security posture
+- **Execution governance** — Permit-gated MCP invocation, receipts, audit chain
+- **Economics** — Wallet budgets, ledger charges, idempotent replay without double-charge
+- **Readiness** — `/health/dependencies` (`simulation_modes`, `enable_proof_surfaces`)
 
 Proof surfaces such as AWI, content generation, oracle crawls, and sandboxes
 exercise the control plane; they do not replace the core loop.

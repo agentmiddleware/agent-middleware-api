@@ -13,7 +13,7 @@ Provides standardized, stateful interfaces for web agents with:
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from ..core.auth import AuthContext, get_auth_context
 from ..schemas.awi import (
@@ -129,24 +129,64 @@ async def destroy_session(
 
 @router.post(
     "/execute",
-    response_model=AWIExecutionResponse,
     summary="Execute AWI action",
-    description="Execute a standardized AWI action within a session.",
+    description=(
+        "Execute a standardized AWI action within a session. "
+        "Governed: requires X-Permit-Id and Idempotency-Key."
+    ),
 )
 async def execute_action(
     request: AWIExecutionRequest,
     auth: AuthContext = Depends(get_auth_context),
+    x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Execute a standardized AWI action.
 
     Actions use semantic vocabulary (search_and_sort, add_to_cart) instead
     of raw DOM manipulation, making agents more robust and website-independent.
+    Governed: requires ``X-Permit-Id`` + ``Idempotency-Key`` (tool ``awi_execute``).
     """
+    from ..services.awi_http_governance import (
+        begin_awi_http_governed,
+        complete_awi_http_governed,
+    )
+
     try:
-        await _require_session_access(request.session_id, auth)
+        session = await _require_session_access(request.session_id, auth)
+        request_payload = {
+            "session_id": request.session_id,
+            "action": (
+                request.action.value
+                if hasattr(request.action, "value")
+                else str(request.action)
+            ),
+        }
+        gov = await begin_awi_http_governed(
+            auth=auth,
+            wallet_id=session.wallet_id,
+            tool_name="awi_execute",
+            endpoint="POST /v1/awi/execute",
+            permit_id=x_permit_id,
+            idempotency_key=idempotency_key,
+            request_payload=request_payload,
+        )
+        if gov.replay_response is not None:
+            return gov.replay_response
+
         manager = get_awi_session_manager()
-        return await manager.execute_action(request)
+        result = await manager.execute_action(request)
+        body = (
+            result.model_dump(mode="json")
+            if hasattr(result, "model_dump")
+            else dict(result)
+        )
+        return await complete_awi_http_governed(
+            gov,
+            request_payload=request_payload,
+            response_payload=body,
+        )
     except HTTPException:
         raise
     except Exception as e:
