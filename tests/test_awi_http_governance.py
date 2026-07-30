@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 
 @pytest.fixture
@@ -59,6 +65,58 @@ async def test_rag_query_succeeds_with_permit_and_receipt(client, clean_database
     assert body["receipt"]["permit_id"] == permit["permit_id"]
     assert body["receipt"]["outcome"] == "success"
     assert body["receipt"]["signature"]
+
+    receipt_resp = await client.get(
+        f"/v1/receipts/{body['receipt']['receipt_id']}",
+        headers=provisioned["agent_headers"],
+    )
+    assert receipt_resp.status_code == 200, receipt_resp.text
+    receipt = receipt_resp.json()
+    assert Decimal(str(receipt["credits_authorized"])) == Decimal("3")
+    assert Decimal(str(receipt["credits_charged"])) == Decimal("3")
+    assert receipt["ledger_entry_id"]
+
+
+@pytest.mark.anyio
+async def test_rag_query_insufficient_funds_aborts_and_replays(client, clean_database):
+    """402 closes the idempotency key; same key replays 402 (not 409 in-progress)."""
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="awi_rag_query",
+        max_credits=50,
+        idem_key="permit-awi-broke",
+    )
+
+    # Leave the agent with 2 credits (rag costs 3) after permit creation.
+    transfer = await client.post(
+        "/v1/billing/transfer",
+        params={
+            "from_wallet_id": provisioned["agent_wallet_id"],
+            "to_wallet_id": provisioned["sponsor_wallet_id"],
+            "amount": 998,
+        },
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert transfer.status_code == 200, transfer.text
+
+    headers = {
+        **provisioned["agent_headers"],
+        "X-Wallet-Id": provisioned["agent_wallet_id"],
+        "X-Permit-Id": permit["permit_id"],
+        "Idempotency-Key": "awi-http-broke-1",
+    }
+    payload = {"query": "laptops", "top_k": 3}
+
+    first = await client.post("/v1/awi/rag/query", json=payload, headers=headers)
+    assert first.status_code == 402, first.text
+    assert first.json()["detail"]["error"] == "insufficient_funds"
+
+    second = await client.post("/v1/awi/rag/query", json=payload, headers=headers)
+    assert second.status_code == 402, second.text
+    assert second.json()["detail"]["error"] == "insufficient_funds"
 
 
 @pytest.mark.anyio

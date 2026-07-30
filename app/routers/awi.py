@@ -150,6 +150,7 @@ async def execute_action(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        consume_awi_http_replay,
         raise_awi_http_error,
     )
 
@@ -173,8 +174,9 @@ async def execute_action(
             idempotency_key=idempotency_key,
             request_payload=request_payload,
         )
-        if gov.replay_response is not None:
-            return gov.replay_response
+        replayed = consume_awi_http_replay(gov)
+        if replayed is not None:
+            return replayed
 
         manager = get_awi_session_manager()
         result = await manager.execute_action(request)
