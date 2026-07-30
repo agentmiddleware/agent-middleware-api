@@ -110,6 +110,25 @@ class ReceiptService:
             model = await session.get(ReceiptModel, receipt_id)
             return receipt_model_to_response(model) if model else None
 
+    async def get_receipt_by_ledger_entry_id(
+        self, ledger_entry_id: str
+    ) -> ReceiptResponse | None:
+        """Return an existing receipt for a ledger charge, if one was written."""
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(ReceiptModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        ReceiptModel.ledger_entry_id == ledger_entry_id,
+                    )
+                )
+                .limit(1)
+            )
+            model = result.scalar_one_or_none()
+            return receipt_model_to_response(model) if model else None
+
     async def list_receipts(
         self,
         *,
@@ -125,9 +144,13 @@ class ReceiptService:
 
         filters: list[ColumnElement[bool]] = []
         if permit_id:
-            filters.append(cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id))
+            filters.append(
+                cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id)
+            )
         if wallet_id:
-            filters.append(cast(ColumnElement[bool], ReceiptModel.wallet_id == wallet_id))
+            filters.append(
+                cast(ColumnElement[bool], ReceiptModel.wallet_id == wallet_id)
+            )
         if tool:
             filters.append(cast(ColumnElement[bool], ReceiptModel.tool == tool))
         if outcome:
@@ -147,9 +170,7 @@ class ReceiptService:
         async with factory() as session:
             result = await session.execute(stmt)
             total = await session.scalar(count_stmt)
-            receipts = [
-                receipt_model_to_response(model) for model in result.scalars()
-            ]
+            receipts = [receipt_model_to_response(model) for model in result.scalars()]
             return receipts, int(total or 0)
 
     async def verify_receipt(

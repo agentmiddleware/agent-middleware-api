@@ -669,18 +669,41 @@ async def _execute_registered_tool(
         f"Expected LedgerEntry from non-dry-run charge, got {type(charge_result).__name__}"
     )
 
+    # Checkpoint before credit alignment so a mismatch still leaves a
+    # repairable charged record for reconcile_stuck_records.
     if governed_call and idempotency_key:
-        # Checkpoint the charge before attempting finalization (tool result,
-        # audit, receipt, idempotency-complete) below, so a crash in that
-        # window is repairable later instead of leaving this record stuck
-        # "in progress" forever with no trace of the charge that landed. See
-        # IdempotencyService.reconcile_stuck_records.
         await idem.mark_charged(
             wallet_id=wallet_id,
             endpoint=endpoint,
             idempotency_key=idempotency_key,
             ledger_entry_id=charge_result.entry_id,
         )
+
+    # Permit reserved / ledger debit / receipt credits must share one number.
+    from app.services.governed_metering import (
+        ChargeCreditMismatchError,
+        aligned_credits_charged,
+    )
+
+    try:
+        credits_charged = aligned_credits_charged(
+            ledger_amount=charge_result.amount,
+            authorized_credits=registered_cost,
+            context=f"mcp:{tool_name}",
+        )
+    except ChargeCreditMismatchError as mismatch_exc:
+        # Charge is checkpointed; close the key so clients are not stuck
+        # in-progress. Leave permit budget reserved (wallet was debited).
+        if governed_call and idempotency_key:
+            await idem.complete(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key,
+                response_reference=None,
+                response_json=_governed_error_payload(str(mismatch_exc), None),
+                status_code=500,
+            )
+        raise
 
     try:
         if inspect.iscoroutinefunction(func):
@@ -721,6 +744,17 @@ async def _execute_registered_tool(
                     "Failed to audit MCP refund failure for charge %s: %s",
                     charge_result.entry_id,
                     audit_exc,
+                )
+            # Close the idempotency key so retries are not forever "in progress".
+            # Charge remains checkpointed via mark_charged for reconcile review.
+            if governed_call and idempotency_key:
+                await idem.complete(
+                    wallet_id=wallet_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    response_reference=None,
+                    response_json=_governed_error_payload(error, None),
+                    status_code=500,
                 )
             raise RuntimeError(error) from refund_exc
         if governed_call and permit_model:
@@ -820,7 +854,7 @@ async def _execute_registered_tool(
                         response_payload=response_payload,
                         ledger_entry_id=charge_result.entry_id,
                         credits_authorized=registered_cost,
-                        credits_charged=registered_cost,
+                        credits_charged=credits_charged,
                         outcome="success",
                         audit_event_id=audit_event.event_id,
                     )

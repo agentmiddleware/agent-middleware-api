@@ -122,6 +122,7 @@ async def create_passkey_challenge(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        consume_awi_http_replay,
         raise_awi_http_error,
     )
     from ..services.awi_session import get_awi_session_manager
@@ -144,8 +145,9 @@ async def create_passkey_challenge(
         idempotency_key=idempotency_key,
         request_payload=request_payload,
     )
-    if gov.replay_response is not None:
-        return gov.replay_response
+    replayed = consume_awi_http_replay(gov)
+    if replayed is not None:
+        return replayed
 
     webauthn = get_webauthn_provider()
 
@@ -213,6 +215,8 @@ async def verify_passkey(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        consume_awi_http_replay,
+        raise_awi_http_error,
     )
     from ..services.awi_session import get_awi_session_manager
     from ..services.webauthn_provider import get_webauthn_provider
@@ -238,8 +242,9 @@ async def verify_passkey(
         idempotency_key=idempotency_key,
         request_payload=request_payload,
     )
-    if gov.replay_response is not None:
-        return gov.replay_response
+    replayed = consume_awi_http_replay(gov)
+    if replayed is not None:
+        return replayed
 
     try:
         result = await webauthn.verify_response(
@@ -253,7 +258,8 @@ async def verify_passkey(
             response_payload=body,
         )
     except ValueError as e:
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "verification_failed", "message": str(e)},
         )
@@ -261,7 +267,8 @@ async def verify_passkey(
         raise
     except Exception as e:
         logger.exception("Passkey verification error")
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "verification_error", "message": str(e)},
         )
@@ -590,6 +597,8 @@ async def sync_dom(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        consume_awi_http_replay,
+        raise_awi_http_error,
     )
     from ..services.awi_playwright_bridge import get_playwright_bridge
 
@@ -608,8 +617,9 @@ async def sync_dom(
         idempotency_key=idempotency_key,
         request_payload=request_payload,
     )
-    if gov.replay_response is not None:
-        return gov.replay_response
+    replayed = consume_awi_http_replay(gov)
+    if replayed is not None:
+        return replayed
 
     bridge = get_playwright_bridge()
 
@@ -649,13 +659,15 @@ async def sync_dom(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "translation_failed", "message": str(e)},
         )
     except Exception as e:
         logger.exception("DOM sync failed")
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "sync_failed", "message": str(e)},
         )
@@ -777,6 +789,8 @@ async def index_session(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        consume_awi_http_replay,
+        raise_awi_http_error,
     )
     from ..services.awi_rag_engine import get_awi_rag_engine
     from ..services.awi_session import get_awi_session_manager
@@ -797,8 +811,9 @@ async def index_session(
         idempotency_key=idempotency_key,
         request_payload=request_payload,
     )
-    if gov.replay_response is not None:
-        return gov.replay_response
+    replayed = consume_awi_http_replay(gov)
+    if replayed is not None:
+        return replayed
 
     rag = get_awi_rag_engine()
 
@@ -830,7 +845,8 @@ async def index_session(
         raise
     except Exception as e:
         logger.exception(f"Failed to index session: {request.session_id}")
-        raise HTTPException(
+        await raise_awi_http_error(
+            gov,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "indexing_failed", "message": str(e)},
         )
@@ -859,6 +875,7 @@ async def query_memories(
     from ..services.awi_http_governance import (
         begin_awi_http_governed,
         complete_awi_http_governed,
+        consume_awi_http_replay,
         raise_awi_http_error,
     )
     from ..services.awi_rag_engine import get_awi_rag_engine
@@ -878,8 +895,9 @@ async def query_memories(
         idempotency_key=idempotency_key,
         request_payload=request_payload,
     )
-    if gov.replay_response is not None:
-        return gov.replay_response
+    replayed = consume_awi_http_replay(gov)
+    if replayed is not None:
+        return replayed
 
     rag = get_awi_rag_engine()
     sessions = get_awi_session_manager()
