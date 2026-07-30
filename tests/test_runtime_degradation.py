@@ -8,7 +8,6 @@ from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
-from app.core.config import get_settings
 from app.core.health import gather_dependency_report
 from app.core.rate_limiter import RateLimitMiddleware
 from app.core.runtime_degradation import (
@@ -60,17 +59,22 @@ async def test_health_endpoint_includes_runtime_degradation_field(client=None):
 
 @pytest.mark.anyio
 async def test_production_like_redis_outage_fails_closed(monkeypatch):
-    settings = get_settings()
-    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
-    monkeypatch.setattr(settings, "REDIS_URL", "redis://127.0.0.1:1/0")
+    from app.core import rate_limiter as rate_limiter_module
+
+    monkeypatch.setattr(rate_limiter_module.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(
+        rate_limiter_module,
+        "is_production_like_environment",
+        lambda _env: True,
+    )
 
     async def ok(_request):
         return PlainTextResponse("ok")
 
     starlette_app = Starlette(routes=[Route("/v1/ping", ok)])
     limited = RateLimitMiddleware(starlette_app, requests_per_minute=100)
-    # Force the Redis path without relying on OS-level connection refusal
-    # (CI runners can behave differently for 127.0.0.1:1).
+    # Force the Redis-required path without relying on OS-level connection
+    # refusal (CI runners vary for 127.0.0.1:1).
     limited._redis_url = "redis://127.0.0.1:1/0"
 
     async def _redis_unavailable():
@@ -78,6 +82,7 @@ async def test_production_like_redis_outage_fails_closed(monkeypatch):
         return None
 
     limited._get_redis = _redis_unavailable  # type: ignore[method-assign]
+    assert limited._fail_closed_on_redis_outage() is True
 
     async def call_next(request):
         return PlainTextResponse("ok")

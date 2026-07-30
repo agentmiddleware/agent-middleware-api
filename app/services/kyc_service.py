@@ -256,8 +256,8 @@ class KYCService:
         async with self._session_factory()() as session:
             result = await session.execute(
                 select(KYCVerificationModel).where(
-                    KYCVerificationModel.verification_id == verification_id
-                )  # type: ignore[arg-type]  # see app/db/models.py
+                    KYCVerificationModel.verification_id == verification_id  # type: ignore[arg-type]
+                )
             )
             verification = result.scalar_one_or_none()
 
