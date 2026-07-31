@@ -165,9 +165,9 @@
 ### Acceptance
 
 - [x] Code: `/mcp/tools.json` omits AWI / marketplace stubs when `ENABLE_PROOF_SURFACES=false` (negative tests).
-- [ ] Live (after Railway deploy): tools.json is wedge-sized / no AWI stubs when proof off.
+- [x] Live (after Railway deploy): tools.json is wedge-sized / no AWI stubs when proof off. *(verified 2026-07-31 after `railway up` of `main` @ `5d547a6` / deploy `639c908a`: `tools=[]`, no `awi_*`; `/.well-known/awi.json` → 404; `GET /` bootstrap drops awi; `/llm.txt` Base URL = `PUBLIC_URL`)*
 - [x] `llm.txt` does not tell agents `localhost:8000` as the production base (`{{PUBLIC_URL}}` + operator instruction).
-- [ ] Dogfood / prove-trust-plane still green. *(run after merge; dogfood path unchanged)*
+- [x] Dogfood / prove-trust-plane still green. *(local `make dogfood-trust-plane-check` + `make prove-trust-plane` after merge)*
 
 ### Partner prep (before code)
 
@@ -182,6 +182,14 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 - Registration gated via `sync_proof_surface_mcp_registration()` in `app/services/mcp_phase9_tools.py`.
 - `GET /`, `/v1/discover`, and well-known bootstrap drop unmounted proof advertising.
 - Negative coverage: `tests/test_mcp_discovery_wedge_gate.py`.
+
+### Live residual (not Phase 2 blockers; park for later phases)
+
+- `/mcp/tools.json` envelope still titled **"B2A Service Marketplace"** even when `tools=[]` — rename/honesty is Phase 5 docs/OpenAPI work.
+- `/v1/discover` pricing/integration copy still mentions telemetry/comms/`awi_adoption` — Phase 5 wedge honesty.
+- OpenAPI `servers` still lists `http://localhost:8000` alongside production `PUBLIC_URL` (expected dual-server; Phase 3 posture can document).
+- Live `partner.notes.write` absent until ops registers a real tool (dogfood is local ASGI; do not expect it on Railway).
+- Phase 1 still holds: `fell_back_to_memory=false`, `STATE_BACKEND=postgres`, `ENABLE_PROOF_SURFACES=false`.
 
 ---
 
@@ -288,7 +296,7 @@ Only if requested after Phases 1–5:
 ```text
 [ ] Phase 0  Baseline (health endpoint confirmed; curls still for PR body)
 [x] Phase 1  Durable state + URL normalize     ← complete (live verify OK on Railway after #178 / c5811ea)
-[x] Phase 2  Gate MCP tools + llm.txt          ← code+tests on fix/mcp-discovery-wedge-gate; live verify after deploy
+[x] Phase 2  Gate MCP tools + llm.txt          ← complete (live verify OK on Railway after #180 / 5d547a6 via railway up)
 [ ] Phase 3  Deploy posture + image SOP
 [ ] Phase 4  Migrations
 [ ] Phase 5  Docs / OpenAPI / registry
