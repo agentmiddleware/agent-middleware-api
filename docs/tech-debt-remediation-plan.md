@@ -247,8 +247,15 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 
 ### Acceptance
 
-- [ ] Prod path uses migrations.
-- [ ] Docs match code (`SECURITY_LIMITATIONS.md`).
+- [x] Prod path uses migrations.
+- [x] Docs match code (`SECURITY_LIMITATIONS.md`).
+
+**Shipped:** `init_db` skips `create_all` outside ephemeral non-prod SQLite;
+verifies `permits` / `receipts` / `idempotency_records` and raises
+`SchemaInitError` (lifespan fails closed). Entrypoint fails closed when
+`RUN_MIGRATIONS_ON_START=true` without `DATABASE_URL`. Migrate-on-start stays
+operator-set (not committed in `railway.json`) so a create_all-era DB is not
+surprised by `upgrade` without a stamp. See `tests/test_schema_boot.py`.
 
 ---
 
@@ -307,7 +314,7 @@ Only if requested after Phases 1–5:
 [x] Phase 1  Durable state + URL normalize     ← complete (live verify OK on Railway after #178 / c5811ea)
 [x] Phase 2  Gate MCP tools + llm.txt          ← complete (live verify OK on Railway after #180 / 5d547a6 via railway up)
 [x] Phase 3  Deploy posture + image SOP        ← code/docs/CI complete (live already on railway up; redeploy optional)
-[ ] Phase 4  Migrations
+[x] Phase 4  Migrations                        ← create_all gated; migrate-on-start fail-closed; schema verify at boot
 [ ] Phase 5  Docs / OpenAPI / registry
 [ ] Phase 6  Freeze hygiene
 [ ] Phase 7  Optional (only if asked)
