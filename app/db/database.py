@@ -15,6 +15,7 @@ tables and fails closed if they are missing.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
 
@@ -57,13 +58,22 @@ class SchemaInitError(RuntimeError):
 
 
 def allows_metadata_create_all(*, dialect_name: str, environment: str) -> bool:
-    """Return True only for ephemeral non-production SQLite.
+    """Return True only for ephemeral SQLite (tests/local).
 
-    Postgres (any env) and production-like environments must use Alembic.
+    Postgres (any env) and production-like environments must use Alembic,
+    unless ``ALLOW_METADATA_CREATE_ALL=true`` is set for the pytest harness
+    (ephemeral SQLite only — never for Postgres).
     """
-    if is_production_like_environment(environment):
+    if not dialect_name.startswith("sqlite"):
         return False
-    return dialect_name.startswith("sqlite")
+    if os.environ.get("ALLOW_METADATA_CREATE_ALL", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+    return not is_production_like_environment(environment)
 
 
 def _get_database_url() -> str | None:
@@ -71,8 +81,6 @@ def _get_database_url() -> str | None:
     settings = get_settings()
     raw = settings.DATABASE_URL or None
     if not raw:
-        import os
-
         raw = os.environ.get("DATABASE_URL")
     if not raw:
         return None

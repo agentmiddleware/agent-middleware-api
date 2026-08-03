@@ -36,10 +36,19 @@ from app.db.database import (
         ("postgresql", "development", False),
     ],
 )
-def test_allows_metadata_create_all_policy(dialect, environment, expected):
+def test_allows_metadata_create_all_policy(dialect, environment, expected, monkeypatch):
+    monkeypatch.delenv("ALLOW_METADATA_CREATE_ALL", raising=False)
     assert (
         allows_metadata_create_all(dialect_name=dialect, environment=environment)
         is expected
+    )
+
+
+def test_allows_metadata_create_all_harness_escape_sqlite_only(monkeypatch):
+    monkeypatch.setenv("ALLOW_METADATA_CREATE_ALL", "true")
+    assert allows_metadata_create_all(dialect_name="sqlite", environment="production")
+    assert not allows_metadata_create_all(
+        dialect_name="postgresql", environment="production"
     )
 
 
@@ -75,6 +84,7 @@ async def test_init_db_production_like_fails_without_migrations(tmp_path, monkey
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("DEBUG", "false")
     monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
+    monkeypatch.setenv("ALLOW_METADATA_CREATE_ALL", "false")
     get_settings.cache_clear()
     await close_db()
 
@@ -107,6 +117,7 @@ async def test_init_db_production_like_accepts_legacy_create_all_tables(
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("DEBUG", "false")
     monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
+    monkeypatch.setenv("ALLOW_METADATA_CREATE_ALL", "false")
     get_settings.cache_clear()
 
     sync = create_engine(f"sqlite:///{db_path}")
@@ -130,6 +141,7 @@ def test_init_db_production_like_ok_after_alembic(tmp_path, monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("DEBUG", "false")
     monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
+    monkeypatch.setenv("ALLOW_METADATA_CREATE_ALL", "false")
     get_settings.cache_clear()
 
     config = Config("alembic.ini")
