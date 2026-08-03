@@ -165,6 +165,33 @@ def test_init_db_production_like_ok_after_alembic(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_init_db_production_like_rejects_stale_alembic_revision(tmp_path, monkeypatch):
+    """Stamped-but-behind Alembic revisions must fail closed at boot."""
+    import asyncio
+
+    db_path = tmp_path / "stale_prod.db"
+    async_url = f"sqlite+aiosqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DEBUG", "false")
+    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
+    monkeypatch.setenv("ALLOW_METADATA_CREATE_ALL", "false")
+    get_settings.cache_clear()
+
+    config = Config("alembic.ini")
+    # Stop before latest trust-plane revisions so tables exist but stamp is stale.
+    command.upgrade(config, "016_trust_primitives")
+
+    async def _boot() -> None:
+        await close_db()
+        with pytest.raises(SchemaInitError, match="behind packaged head"):
+            await init_db()
+        await close_db()
+
+    asyncio.run(_boot())
+    get_settings.cache_clear()
+
+
 def test_docker_entrypoint_fails_closed_without_database_url():
     script = Path("scripts/docker_entrypoint.sh")
     assert script.is_file()

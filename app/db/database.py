@@ -178,10 +178,42 @@ def _missing_required_tables(sync_conn) -> set[str]:  # noqa: ANN001
     return set(REQUIRED_TRUST_TABLES) - existing
 
 
+def _stale_alembic_message(sync_conn) -> str | None:  # noqa: ANN001
+    """If alembic_version is stamped but behind packaged head, return an error.
+
+    Legacy create_all DBs without a stamp are skipped (table check is enough).
+    """
+    inspector = sa_inspect(sync_conn)
+    if "alembic_version" not in inspector.get_table_names():
+        return None
+
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    context = MigrationContext.configure(sync_conn)
+    current = set(context.get_current_heads())
+    script = ScriptDirectory.from_config(Config("alembic.ini"))
+    heads = set(script.get_heads())
+    if not current:
+        return (
+            "alembic_version exists but has no revision. "
+            "Run `alembic stamp head` or `alembic upgrade head`."
+        )
+    if current != heads:
+        return (
+            "Database Alembic revision is behind packaged head: "
+            f"current={sorted(current)} heads={sorted(heads)}. "
+            "Run `alembic upgrade head` (or set RUN_MIGRATIONS_ON_START=true)."
+        )
+    return None
+
+
 async def verify_required_schema(engine: AsyncEngine) -> None:
-    """Fail closed when Alembic/trust tables are missing."""
+    """Fail closed when Alembic/trust tables are missing or stamp is stale."""
     async with engine.connect() as conn:
         missing = await conn.run_sync(_missing_required_tables)
+        stale = await conn.run_sync(_stale_alembic_message)
     if missing:
         raise SchemaInitError(
             "Required database tables missing: "
@@ -190,6 +222,8 @@ async def verify_required_schema(engine: AsyncEngine) -> None:
             "on the Docker entrypoint) before starting the API. "
             "Production-like boots do not call create_all."
         )
+    if stale:
+        raise SchemaInitError(stale)
 
 
 async def init_db() -> None:
