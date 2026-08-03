@@ -1090,6 +1090,11 @@ curl -X POST http://localhost:8000/v1/awi/intervene \
 
 This repository is deployment-ready for Railway via `Dockerfile` + `railway.json`.
 
+**Canonical SOP:** [`docs/deploy-railway.md`](docs/deploy-railway.md) —
+use `railway up` from this repo; do **not** Redeploy from GitHub source (can
+roll back to an old image). Set production trust vars there; never commit
+`VALID_API_KEYS=change-me`.
+
 ### 1. Create Services
 
 1. Create a Railway project from this repository.
@@ -1112,6 +1117,11 @@ Set these in Railway dashboard or via CLI:
 
 ```bash
 railway variables set DEBUG=false
+railway variables set ENVIRONMENT=production
+railway variables set ENABLE_PROOF_SURFACES=false
+railway variables set TRUST_MODE_ENABLED=true
+railway variables set ALLOW_LEGACY_UNPERMITTED_MCP=false
+railway variables set PUBLIC_URL=https://your-service.up.railway.app
 railway variables set VALID_API_KEYS=your-key-here,your-other-key
 railway variables set STATE_BACKEND=postgres
 railway variables set RATE_LIMIT_PER_MINUTE=120

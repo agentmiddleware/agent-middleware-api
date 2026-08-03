@@ -106,6 +106,8 @@ primitives.
   [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
 
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
+Deploy SOP (single path: `railway up` from this Dockerfile):
+[`docs/deploy-railway.md`](docs/deploy-railway.md).
 
 Agent-executable remediation of known spine/discovery/deploy debt:
 [`docs/tech-debt-remediation-plan.md`](docs/tech-debt-remediation-plan.md).

@@ -19,6 +19,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "proof: exercises an example proof-surface workload, not the trust-plane product. Skipped by `make test`; run the full suite with `make test-all`.",
+    "production_trust: runs under production-like trust flags (TRUST_MODE_ENABLED=true, ALLOW_LEGACY_UNPERMITTED_MCP=false, ENABLE_PROOF_SURFACES=false). Dedicated CI job sets those env vars.",
 ]
 filterwarnings = [
     # Pydantic v2 calls the deprecated datetime.utcnow() internally

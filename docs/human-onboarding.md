@@ -34,7 +34,7 @@ content factory perform real external work when they are still simulated.
 
 | Role | You are responsible for | Start here |
 |------|-------------------------|------------|
-| **Operator** | Hosting, secrets, DB, migrations, Stripe/KYC env, sandbox isolation | This doc + [Threat model](threat-model.md) |
+| **Operator** | Hosting, secrets, DB, migrations, Stripe/KYC env, sandbox isolation | This doc + [Railway deploy SOP](deploy-railway.md) + [Threat model](threat-model.md) |
 | **Integrator** | Calling the API from code or agents, keys, wallet scope | [Golden path](golden-path.md) + OpenAPI `/docs` |
 | **End user** | Often **none** — the designed “customer” may be an autonomous agent | Your product’s UX, if any |
 
@@ -146,4 +146,5 @@ the golden path for that.
 | End-to-end wallet + key + tool flow | `docs/golden-path.md` |
 | What “beta” still means | `docs/production-beta-roadmap.md` |
 | Env flags | `.env.example` |
+| Railway deploy (single path) | [`deploy-railway.md`](deploy-railway.md) — `railway up`; never Redeploy from GitHub source |
 | Database migrations | This section §7 + `scripts/docker_entrypoint.sh` |

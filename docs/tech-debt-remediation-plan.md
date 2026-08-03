@@ -219,11 +219,20 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 
 ### Acceptance
 
-- [ ] Written single deploy SOP.
-- [ ] No committed default API key `change-me` for prod.
-- [ ] At least one CI path mirrors production trust flags.
+- [x] Written single deploy SOP. (`docs/deploy-railway.md` — Dockerfile + `railway up`; GHCR optional/offline only)
+- [x] No committed default API key `change-me` for prod. (`railway.json` has no `VALID_API_KEYS`; guarded by `tests/test_production_trust_posture.py`)
+- [x] At least one CI path mirrors production trust flags. (`.github/workflows/ci.yml` job `production_trust` + `@pytest.mark.production_trust`)
 
----
+### Implementation notes (this phase)
+
+- Image source of truth: **in-repo Dockerfile via `railway up`** (not GHCR `:latest`).
+- `railway.json` non-secret defaults: `STATE_BACKEND=postgres`, `PUBLIC_URL`, `ENABLE_PROOF_SURFACES=false`.
+- Live already had correct trust env; docs/CI/railway hygiene do **not** require a Railway redeploy unless operators want the new `ENABLE_PROOF_SURFACES=false` default synced into the service variable set.
+- Live verify (2026-08-03, no redeploy): `/health/dependencies` → `enable_proof_surfaces=false`, `fell_back_to_memory=false`.
+
+### Stop if
+
+- Changing the image path would orphan a partner’s GHCR pull workflow without notice — document dual path, do not silently switch live.
 
 ## Phase 4 — P1: Migrations on start + reduce create_all reliance
 
@@ -297,7 +306,7 @@ Only if requested after Phases 1–5:
 [ ] Phase 0  Baseline (health endpoint confirmed; curls still for PR body)
 [x] Phase 1  Durable state + URL normalize     ← complete (live verify OK on Railway after #178 / c5811ea)
 [x] Phase 2  Gate MCP tools + llm.txt          ← complete (live verify OK on Railway after #180 / 5d547a6 via railway up)
-[ ] Phase 3  Deploy posture + image SOP
+[x] Phase 3  Deploy posture + image SOP        ← code/docs/CI complete (live already on railway up; redeploy optional)
 [ ] Phase 4  Migrations
 [ ] Phase 5  Docs / OpenAPI / registry
 [ ] Phase 6  Freeze hygiene

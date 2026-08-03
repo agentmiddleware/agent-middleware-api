@@ -10,6 +10,7 @@
   },
   "variables": {
     "STATE_BACKEND": "postgres",
-    "PUBLIC_URL": "https://api-service-production-433c.up.railway.app"
+    "PUBLIC_URL": "https://api-service-production-433c.up.railway.app",
+    "ENABLE_PROOF_SURFACES": "false"
   }
 }

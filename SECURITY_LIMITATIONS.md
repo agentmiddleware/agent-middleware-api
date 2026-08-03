@@ -29,6 +29,10 @@ Keep these out of the wedge until a design partner requires them:
 
 ## Required Production Posture
 
+Operator deploy path and variable checklist:
+[`docs/deploy-railway.md`](docs/deploy-railway.md) (`railway up` from this
+repo; do not Redeploy from GitHub source).
+
 - `TRUST_MODE_ENABLED=true` and `ALLOW_LEGACY_UNPERMITTED_MCP=false` are the
   shipped defaults. A production-like environment cannot boot under any
   permissive combination — `app.core.trust_mode.validate_trust_mode_guardrails`
@@ -41,6 +45,12 @@ Keep these out of the wedge until a design partner requires them:
   and `ENABLE_PROOF_SURFACES=true`. Set `ENABLE_PROOF_SURFACES=false` so only
   core trust routers and MCP are mounted. Leave proof surfaces frozen unless a
   partner demo explicitly needs them.
+- Set `PUBLIC_URL` to the public HTTPS API origin (Railway host or custom
+  domain). Agents and `/llm.txt` use it; do not leave production pointing at
+  localhost.
+- Set `VALID_API_KEYS` only via host secrets / Railway variables. Never commit
+  real keys; never use the placeholder `change-me` in prod defaults
+  (`railway.json` must not ship API keys).
 - Disable or isolate proof surfaces that execute code, drive browsers, generate
   patches, crawl external URLs, or touch third-party systems.
 - When `REDIS_URL` is set, production-like environments fail closed on Redis
@@ -53,4 +63,5 @@ Keep these out of the wedge until a design partner requires them:
   surfaces are off — see partner inventory note in
   [`DESIGN_PARTNER_GUIDE.md`](DESIGN_PARTNER_GUIDE.md#mcp-discovery-gate-phase-2).
 - Run migrations instead of relying on `SQLModel.metadata.create_all`.
-- Keep CI trust invariant tests required before merge.
+- Keep CI trust invariant tests required before merge. CI also runs a
+  `production_trust` subset with production-like trust flags.

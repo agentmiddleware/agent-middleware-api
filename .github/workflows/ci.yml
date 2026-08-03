@@ -40,7 +40,7 @@ jobs:
           pip install pytest pytest-asyncio anyio httpx
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short -m "not production_trust"
 
       - name: Run trust primitive invariant tests
         run: |
@@ -86,6 +86,40 @@ jobs:
       - name: Verify Alembic migrations upgrade from empty DB
         if: matrix.python-version == '3.12'
         run: pytest tests/test_migrations.py -v --tb=short
+
+  # Production-like trust flags (default conftest stays permissive for unit speed).
+  production_trust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio anyio httpx
+
+      - name: Run production-trust posture tests
+        env:
+          TRUST_MODE_ENABLED: "true"
+          ALLOW_LEGACY_UNPERMITTED_MCP: "false"
+          ENABLE_PROOF_SURFACES: "false"
+          ENVIRONMENT: production
+          DEBUG: "false"
+          WEBAUTHN_ALLOW_MOCK: "false"
+          # Non-secret test material so prod-like guardrails can validate.
+          TRUST_SIGNING_PRIVATE_KEY_B64: dGVzdC1zaWduaW5nLWtleS1ub3QtZm9yLXByb2Q=
+          PUBLIC_URL: https://api-service-production-433c.up.railway.app
+          VALID_API_KEYS: test-key
+          DATABASE_URL: sqlite+aiosqlite:///./test-production-trust.db
+        run: |
+          pytest tests/test_production_trust_posture.py -m production_trust -v --tb=short
 
   lint:
     runs-on: ubuntu-latest
