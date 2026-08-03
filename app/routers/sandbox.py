@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Interactive Testing Sandboxes Router (Pillar 13)
 ---------------------------------------------------
 Headless puzzle environments for testing agent-built tools'
@@ -22,8 +23,10 @@ router = APIRouter(
 
 # --- Schemas ---
 
+
 class CreateEnvironmentRequest(BaseModel):
     """Spin up a new testing environment."""
+
     env_type: str = Field(
         default="pattern",
         description="Environment type: pattern, navigation, api_mock, adversarial.",
@@ -40,6 +43,7 @@ class CreateEnvironmentRequest(BaseModel):
 
 class EnvironmentResponse(BaseModel):
     """Sandbox environment state (hidden rules are never exposed)."""
+
     env_id: str
     env_type: str
     difficulty: str
@@ -52,6 +56,7 @@ class EnvironmentResponse(BaseModel):
 
 class ActionRequest(BaseModel):
     """Submit an action to the environment."""
+
     action: dict = Field(
         ...,
         description=(
@@ -66,6 +71,7 @@ class ActionRequest(BaseModel):
 
 class ActionResponse(BaseModel):
     """Result of an action in the environment."""
+
     step: int
     action_accepted: bool
     state_changed: bool
@@ -77,6 +83,7 @@ class ActionResponse(BaseModel):
 
 class EvaluationResponse(BaseModel):
     """Final generalization score for a completed environment."""
+
     env_id: str
     env_type: str
     difficulty: str
@@ -97,6 +104,7 @@ class EnvironmentListResponse(BaseModel):
 
 
 # --- Endpoints ---
+
 
 @router.post(
     "/environments",

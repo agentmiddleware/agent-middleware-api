@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Programmatic Media Engine Router
 ---------------------------------
 Ingest long-form video -> detect viral hooks -> reframe for vertical ->
@@ -59,8 +60,7 @@ async def upload_video(
     return VideoUploadResponse(
         video_id=video.video_id,
         upload_url=(
-            None if request.source_url
-            else f"/v1/media/videos/{video.video_id}/upload"
+            None if request.source_url else f"/v1/media/videos/{video.video_id}/upload"
         ),
         status=video.status.value,
         estimated_processing_seconds=120 if request.source_url else None,

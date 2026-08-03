@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Blob storage abstraction.
 
 Media and content generation produce byte artifacts (video clips,
@@ -161,7 +162,9 @@ def get_blob_backend() -> BlobBackend:
         return LocalFilesystemBlob(Path(root) if root else None)
 
     if backend_name == "s3":
-        logger.warning("S3 blob backend selected but not implemented; falling back to local")
+        logger.warning(
+            "S3 blob backend selected but not implemented; falling back to local"
+        )
         return _UnimplementedBlob("s3")
 
     if backend_name == "vercel":

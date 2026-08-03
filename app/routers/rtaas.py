@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Red-Team-as-a-Service Router (Pillar 12)
 ------------------------------------------
 Multi-tenant security scanning for agent-built tools.
@@ -22,8 +23,10 @@ router = APIRouter(
 
 # --- Schemas ---
 
+
 class RTaaSTargetSchema(BaseModel):
     """An external endpoint to attack."""
+
     url: str = Field(..., description="Full URL of the target endpoint.")
     method: str = Field(default="GET", description="HTTP method.")
     auth_header: str | None = Field(
@@ -34,6 +37,7 @@ class RTaaSTargetSchema(BaseModel):
 
 class CreateJobRequest(BaseModel):
     """Submit external targets for Red Team scanning."""
+
     tenant_id: str = Field(
         ...,
         description="Your agent or wallet ID (for job tracking).",
@@ -67,6 +71,7 @@ class VulnerabilitySchema(BaseModel):
 
 class JobResponse(BaseModel):
     """RTaaS scanning job result."""
+
     job_id: str
     tenant_id: str
     status: str
@@ -86,6 +91,7 @@ class JobListResponse(BaseModel):
 
 
 # --- Endpoints ---
+
 
 @router.post(
     "/jobs",

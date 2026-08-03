@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Protocol Generation Engine Router (Pillar 11)
 -----------------------------------------------
 Code-to-discovery pipeline. Feed raw API code,
@@ -24,8 +25,10 @@ router = APIRouter(
 
 # --- Schemas ---
 
+
 class GenerateRequest(BaseModel):
     """Submit source code for protocol generation."""
+
     source_code: str = Field(
         ...,
         min_length=10,
@@ -49,14 +52,14 @@ class GenerateRequest(BaseModel):
     register_in_oracle: bool = Field(
         default=False,
         description=(
-            "Auto-register the generated service in the "
-            "Agent Oracle directories."
+            "Auto-register the generated service in the Agent Oracle directories."
         ),
     )
 
 
 class GenerateResponse(BaseModel):
     """Full protocol generation output."""
+
     generation_id: str
     service_name: str
     service_version: str
@@ -71,11 +74,13 @@ class GenerateResponse(BaseModel):
 
 class GenerationListResponse(BaseModel):
     """List of all generations."""
+
     generations: list[dict]
     total: int
 
 
 # --- Endpoints ---
+
 
 @router.post(
     "/generate",

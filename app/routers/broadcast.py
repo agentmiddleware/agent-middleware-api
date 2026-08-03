@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Oracle Mass-Broadcast — Router
 ================================
 Push published APIs into the agent discovery network.
@@ -32,8 +33,10 @@ router = APIRouter(
 # Schemas
 # ---------------------------------------------------------------------------
 
+
 class BroadcastRequest(BaseModel):
     """Request to broadcast a published API to agent directories."""
+
     service_name: str = Field(..., description="Name of the API to broadcast.")
     service_version: str = Field(default="1.0.0", description="API version.")
     base_url: str = Field(..., description="Production base URL of the API.")
@@ -87,6 +90,7 @@ class BroadcastJobResponse(BaseModel):
 
 class DiscoveryEventRequest(BaseModel):
     """Simulate an inbound discovery event."""
+
     event_type: str = Field(
         ...,
         description="Event type: impression, lookup, or integration.",
@@ -99,6 +103,7 @@ class DiscoveryEventRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "",

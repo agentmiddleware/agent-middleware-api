@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Programmatic Media Engine — Service Layer
 ==========================================
 Handles the full video-to-viral-clip pipeline:

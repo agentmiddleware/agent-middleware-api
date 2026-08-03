@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Durable agent comms API (Phase 1): DB-backed send + inbox.
 
 ``/v1/comms/*`` remains the original surface; this router adds
