@@ -33,7 +33,7 @@ from .core.trust_mode import (
     validate_trust_mode_guardrails,
     warn_if_trust_mode_permissive,
 )
-from .db.database import init_db, close_db
+from .db.database import SchemaInitError, init_db, close_db
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from .routers.well_known import get_agent_first_metadata
 from .routers import (
@@ -184,6 +184,8 @@ async def lifespan(app: FastAPI):
 
     startup_time = time.monotonic()
     if settings.DATABASE_URL:
+        from .core.trust_mode import is_production_like_environment
+
         try:
             await init_db()
             logger.info(
@@ -192,6 +194,17 @@ async def lifespan(app: FastAPI):
                 startup_time_s=time.monotonic() - startup_time,
             )
         except Exception as e:
+            # Production-like (and any SchemaInitError) fail closed: do not
+            # boot against a DB that still needs Alembic.
+            if isinstance(e, SchemaInitError) or is_production_like_environment(
+                settings.ENVIRONMENT
+            ):
+                logger.error(
+                    "app_startup",
+                    phase="database_init_failed",
+                    error=str(e),
+                )
+                raise
             logger.warning("app_startup", phase="database_init_failed", error=str(e))
 
     # Fail closed at boot in production-like envs (DurableStateConfigError)

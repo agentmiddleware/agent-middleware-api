@@ -31,5 +31,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen(f\"http://localhost:{os.getenv('PORT', '8000')}/health\")"
 
-# Optional: RUN_MIGRATIONS_ON_START=true + DATABASE_URL for production cutover (see docs/human-onboarding.md)
+# Optional: RUN_MIGRATIONS_ON_START=true + DATABASE_URL runs Alembic before uvicorn
+# (fail-closed if the flag is set without DATABASE_URL). See docs/deploy-railway.md.
 ENTRYPOINT ["scripts/docker_entrypoint.sh"]

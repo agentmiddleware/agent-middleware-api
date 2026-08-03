@@ -3,13 +3,23 @@ Database engine and session management for Agent Middleware API.
 Provides async PostgreSQL connection via SQLModel/SQLAlchemy.
 
 Supports SQLite fallback for testing when DATABASE_URL is not configured.
+
+Schema boot policy
+------------------
+Production-like environments never call ``SQLModel.metadata.create_all``.
+Schema must come from Alembic (entrypoint ``RUN_MIGRATIONS_ON_START=true``
+or an out-of-band ``alembic upgrade head``). Boot verifies required trust
+tables and fails closed if they are missing.
+
+``create_all`` is reserved for ephemeral non-production SQLite (local/dev/test).
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
 
-from sqlalchemy import event
+from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.engine import Result
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -22,11 +32,48 @@ from sqlmodel import SQLModel
 
 from ..core.config import get_settings
 from ..core.db_urls import as_sqlalchemy_url
+from ..core.trust_mode import is_production_like_environment
 
 logger = logging.getLogger(__name__)
 
+# Trust-plane tables that must exist after Alembic (or a stamped legacy DB).
+# alembic_version is intentionally omitted: a DB previously bootstrapped via
+# create_all may have trust tables without a stamp; requiring the stamp would
+# refuse a healthy service. Operators enabling RUN_MIGRATIONS_ON_START on such
+# a DB should `alembic stamp head` first.
+REQUIRED_TRUST_TABLES = frozenset(
+    {
+        "permits",
+        "receipts",
+        "idempotency_records",
+    }
+)
+
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+class SchemaInitError(RuntimeError):
+    """Raised when production schema is missing or unsafe to auto-create."""
+
+
+def allows_metadata_create_all(*, dialect_name: str, environment: str) -> bool:
+    """Return True only for ephemeral SQLite (tests/local).
+
+    Postgres (any env) and production-like environments must use Alembic,
+    unless ``ALLOW_METADATA_CREATE_ALL=true`` is set for the pytest harness
+    (ephemeral SQLite only — never for Postgres).
+    """
+    if not dialect_name.startswith("sqlite"):
+        return False
+    if os.environ.get("ALLOW_METADATA_CREATE_ALL", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+    return not is_production_like_environment(environment)
 
 
 def _get_database_url() -> str | None:
@@ -34,8 +81,6 @@ def _get_database_url() -> str | None:
     settings = get_settings()
     raw = settings.DATABASE_URL or None
     if not raw:
-        import os
-
         raw = os.environ.get("DATABASE_URL")
     if not raw:
         return None
@@ -128,22 +173,90 @@ def is_database_configured() -> bool:
     return get_engine() is not None
 
 
+def _missing_required_tables(sync_conn) -> set[str]:  # noqa: ANN001
+    existing = set(sa_inspect(sync_conn).get_table_names())
+    return set(REQUIRED_TRUST_TABLES) - existing
+
+
+def _stale_alembic_message(sync_conn) -> str | None:  # noqa: ANN001
+    """If alembic_version is stamped but behind packaged head, return an error.
+
+    Legacy create_all DBs without a stamp are skipped (table check is enough).
+    """
+    inspector = sa_inspect(sync_conn)
+    if "alembic_version" not in inspector.get_table_names():
+        return None
+
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    context = MigrationContext.configure(sync_conn)
+    current = set(context.get_current_heads())
+    script = ScriptDirectory.from_config(Config("alembic.ini"))
+    heads = set(script.get_heads())
+    if not current:
+        return (
+            "alembic_version exists but has no revision. "
+            "Run `alembic stamp head` or `alembic upgrade head`."
+        )
+    if current != heads:
+        return (
+            "Database Alembic revision is behind packaged head: "
+            f"current={sorted(current)} heads={sorted(heads)}. "
+            "Run `alembic upgrade head` (or set RUN_MIGRATIONS_ON_START=true)."
+        )
+    return None
+
+
+async def verify_required_schema(engine: AsyncEngine) -> None:
+    """Fail closed when Alembic/trust tables are missing or stamp is stale."""
+    async with engine.connect() as conn:
+        missing = await conn.run_sync(_missing_required_tables)
+        stale = await conn.run_sync(_stale_alembic_message)
+    if missing:
+        raise SchemaInitError(
+            "Required database tables missing: "
+            + ", ".join(sorted(missing))
+            + ". Run `alembic upgrade head` (or set RUN_MIGRATIONS_ON_START=true "
+            "on the Docker entrypoint) before starting the API. "
+            "Production-like boots do not call create_all."
+        )
+    if stale:
+        raise SchemaInitError(stale)
+
+
 async def init_db() -> None:
     """
-    Initialize the database.
+    Initialize database schema for the current environment.
 
-    Creates all tables defined in SQLModel metadata.
-    For production, use Alembic migrations instead.
+    - Non-production SQLite: ``create_all`` for ephemeral test/dev DBs.
+    - Otherwise (Postgres, or any production-like env): verify Alembic schema;
+      never paper over missing migrations with ``create_all``.
     """
     engine = get_engine()
     if engine is None:
         logger.warning("Database not configured, skipping initialization")
         return
 
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    settings = get_settings()
+    dialect = engine.dialect.name
+    environment = settings.ENVIRONMENT
 
-    logger.info("Database tables initialized")
+    if allows_metadata_create_all(dialect_name=dialect, environment=environment):
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        logger.info(
+            "Database tables initialized via create_all",
+            extra={"dialect": dialect, "environment": environment},
+        )
+        return
+
+    await verify_required_schema(engine)
+    logger.info(
+        "Database schema verified (Alembic path; create_all skipped)",
+        extra={"dialect": dialect, "environment": environment},
+    )
 
 
 async def close_db() -> None:

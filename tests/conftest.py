@@ -77,6 +77,9 @@ def iter_routes(routes):
 
 # Set up SQLite for testing before any imports
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+# Ephemeral SQLite create_all even when a job sets ENVIRONMENT=production
+# (production_trust CI). Never applies to Postgres — see allows_metadata_create_all.
+os.environ.setdefault("ALLOW_METADATA_CREATE_ALL", "true")
 # Configure auth so tests don't hit the fail-safe 503 in verify_api_key.
 # Tests authenticate with X-API-Key: test-key (see RateLimitMiddleware, which
 # also special-cases this value to bypass rate limiting).
