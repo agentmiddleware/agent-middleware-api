@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -20,6 +22,38 @@ import httpx
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(f"error: {message}")
+
+
+def _require_safe_api_url(api_url: str) -> str:
+    base = api_url.strip().rstrip("/")
+    parsed = urlparse(base)
+    host = (parsed.hostname or "").lower()
+    loopback = host in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme == "https":
+        return base
+    if parsed.scheme == "http" and loopback:
+        return base
+    raise SystemExit(
+        "error: --api-url must be https:// for non-loopback hosts "
+        "(bootstrap key must not travel in cleartext)"
+    )
+
+
+def _bootstrap_key(cli_value: str | None) -> str:
+    key = (os.environ.get("BOOTSTRAP_KEY") or "").strip()
+    if key:
+        return key
+    if cli_value:
+        print(
+            "warning: prefer BOOTSTRAP_KEY env over --bootstrap-key "
+            "(argv is visible to local process listings)",
+            file=sys.stderr,
+        )
+        return cli_value.strip()
+    raise SystemExit(
+        "error: set BOOTSTRAP_KEY in the environment "
+        "(or pass --bootstrap-key for local-only use)"
+    )
 
 
 def _get(client: httpx.Client, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -37,7 +71,7 @@ def export_bundle(
     audit_limit: int,
     ledger_limit: int,
 ) -> dict[str, Any]:
-    base = api_url.rstrip("/")
+    base = _require_safe_api_url(api_url)
     headers = {"X-API-Key": bootstrap_key}
     with httpx.Client(base_url=base, headers=headers, timeout=60.0) as client:
         health = _get(client, "/health")
@@ -83,7 +117,11 @@ def main() -> int:
         description="Export wallet/audit/ledger analytics for operators."
     )
     parser.add_argument("--api-url", required=True)
-    parser.add_argument("--bootstrap-key", required=True)
+    parser.add_argument(
+        "--bootstrap-key",
+        default=None,
+        help="Deprecated: prefer BOOTSTRAP_KEY env (argv is process-visible)",
+    )
     parser.add_argument(
         "--wallet-id",
         default=None,
@@ -101,7 +139,7 @@ def main() -> int:
 
     bundle = export_bundle(
         api_url=args.api_url,
-        bootstrap_key=args.bootstrap_key,
+        bootstrap_key=_bootstrap_key(args.bootstrap_key),
         wallet_id=args.wallet_id,
         audit_limit=args.audit_limit,
         ledger_limit=args.ledger_limit,

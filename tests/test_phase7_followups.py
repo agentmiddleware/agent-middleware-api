@@ -58,3 +58,17 @@ async def test_partner_api_key_bootstrap_doc_is_served(client):
     assert resp.status_code == 200
     assert "public self-serve" in resp.text.lower()
     assert "partner_api_key_bootstrap.py" in resp.text
+    assert "DELETE" in resp.text
+    assert "/v1/api-keys/" in resp.text
+
+
+def test_partner_bootstrap_rejects_cleartext_remote_url():
+    from scripts.partner_api_key_bootstrap import _require_safe_api_url
+
+    assert _require_safe_api_url("https://api.example.com") == "https://api.example.com"
+    assert _require_safe_api_url("http://127.0.0.1:8000") == "http://127.0.0.1:8000"
+    try:
+        _require_safe_api_url("http://api.example.com")
+        raise AssertionError("expected SystemExit")
+    except SystemExit as exc:
+        assert "https://" in str(exc)

@@ -24,14 +24,28 @@ export BOOTSTRAP_KEY=...   # from secret manager / Railway variables — not a d
 uv run --with-requirements requirements.txt \
   python scripts/partner_api_key_bootstrap.py \
   --api-url "$API_URL" \
-  --bootstrap-key "$BOOTSTRAP_KEY" \
   --sponsor-name "Partner Co" \
   --agent-id "partner-agent-001" \
   --budget-credits 1000
 ```
 
+On partial failure, re-run with the IDs printed to stderr:
+
+```bash
+uv run --with-requirements requirements.txt \
+  python scripts/partner_api_key_bootstrap.py \
+  --api-url "$API_URL" \
+  --sponsor-wallet-id "$SPONSOR_WALLET_ID" \
+  --agent-wallet-id "$AGENT_WALLET_ID"
+```
+
 Hand the **agent** key (and wallet id) to the partner over a secure channel.
-Revoke via `POST /v1/api-keys/{key_id}/revoke` when the engagement ends.
+Revoke when the engagement ends:
+
+```bash
+curl -X DELETE "$API_URL/v1/api-keys/$AGENT_WALLET_ID/$KEY_ID" \
+  -H "X-API-Key: $BOOTSTRAP_KEY"
+```
 
 ## Manual equivalent
 

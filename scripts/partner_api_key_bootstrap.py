@@ -5,15 +5,20 @@ Uses a bootstrap/admin key (VALID_API_KEYS) only to provision:
   sponsor wallet → agent wallet → DB-scoped agent API key.
 
 The agent secret is printed once. Requires network access to --api-url.
-Does not mint keys without --bootstrap-key (fail closed).
+Does not mint keys without a bootstrap secret (fail closed).
+
+Resume: pass --sponsor-wallet-id / --agent-wallet-id to skip earlier creates
+after a partial run (avoids duplicate wallets/credits).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -21,6 +26,40 @@ import httpx
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(f"error: {message}")
+
+
+def _require_safe_api_url(api_url: str) -> str:
+    """Require HTTPS for remote hosts; allow http:// for loopback only."""
+    base = api_url.strip().rstrip("/")
+    parsed = urlparse(base)
+    host = (parsed.hostname or "").lower()
+    loopback = host in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme == "https":
+        return base
+    if parsed.scheme == "http" and loopback:
+        return base
+    raise SystemExit(
+        "error: --api-url must be https:// for non-loopback hosts "
+        "(bootstrap key must not travel in cleartext)"
+    )
+
+
+def _bootstrap_key(cli_value: str | None) -> str:
+    """Prefer env over argv so the secret is not in process arguments."""
+    key = (os.environ.get("BOOTSTRAP_KEY") or "").strip()
+    if key:
+        return key
+    if cli_value:
+        print(
+            "warning: prefer BOOTSTRAP_KEY env over --bootstrap-key "
+            "(argv is visible to local process listings)",
+            file=sys.stderr,
+        )
+        return cli_value.strip()
+    raise SystemExit(
+        "error: set BOOTSTRAP_KEY in the environment "
+        "(or pass --bootstrap-key for local-only use)"
+    )
 
 
 def _post(client: httpx.Client, path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -41,8 +80,10 @@ def provision(
     budget_credits: float,
     initial_credits: float,
     key_name: str,
+    sponsor_wallet_id: str | None,
+    agent_wallet_id: str | None,
 ) -> dict[str, Any]:
-    base = api_url.rstrip("/")
+    base = _require_safe_api_url(api_url)
     headers = {
         "X-API-Key": bootstrap_key,
         "Content-Type": "application/json",
@@ -51,30 +92,46 @@ def provision(
         health = client.get("/health")
         _require(health.status_code == 200, f"/health → {health.status_code}")
 
-        sponsor = _post(
-            client,
-            "/v1/billing/wallets/sponsor",
-            {
-                "sponsor_name": sponsor_name,
-                "email": f"{agent_id}@partners.local",
-                "initial_credits": initial_credits,
-                "require_kyc": False,
-            },
-        )
-        sponsor_wallet_id = sponsor.get("wallet_id")
-        _require(bool(sponsor_wallet_id), "sponsor wallet_id missing")
+        if sponsor_wallet_id:
+            print(
+                f"[resume] using sponsor_wallet_id={sponsor_wallet_id}", file=sys.stderr
+            )
+        else:
+            sponsor = _post(
+                client,
+                "/v1/billing/wallets/sponsor",
+                {
+                    "sponsor_name": sponsor_name,
+                    "email": f"{agent_id}@partners.local",
+                    "initial_credits": initial_credits,
+                    "require_kyc": False,
+                },
+            )
+            sponsor_wallet_id = sponsor.get("wallet_id")
+            _require(bool(sponsor_wallet_id), "sponsor wallet_id missing")
+            print(
+                f"[created] sponsor_wallet_id={sponsor_wallet_id}",
+                file=sys.stderr,
+            )
 
-        agent = _post(
-            client,
-            "/v1/billing/wallets/agent",
-            {
-                "sponsor_wallet_id": sponsor_wallet_id,
-                "agent_id": agent_id,
-                "budget_credits": budget_credits,
-            },
-        )
-        agent_wallet_id = agent.get("wallet_id")
-        _require(bool(agent_wallet_id), "agent wallet_id missing")
+        if agent_wallet_id:
+            print(f"[resume] using agent_wallet_id={agent_wallet_id}", file=sys.stderr)
+        else:
+            agent = _post(
+                client,
+                "/v1/billing/wallets/agent",
+                {
+                    "sponsor_wallet_id": sponsor_wallet_id,
+                    "agent_id": agent_id,
+                    "budget_credits": budget_credits,
+                },
+            )
+            agent_wallet_id = agent.get("wallet_id")
+            _require(bool(agent_wallet_id), "agent wallet_id missing")
+            print(
+                f"[created] agent_wallet_id={agent_wallet_id}",
+                file=sys.stderr,
+            )
 
         key = _post(
             client,
@@ -97,7 +154,8 @@ def provision(
             "api_key": api_key,
             "note": (
                 "Store api_key securely. Bootstrap key must not be shared "
-                "with the partner agent."
+                "with the partner agent. On partial failure, re-run with "
+                "--sponsor-wallet-id / --agent-wallet-id to resume."
             ),
         }
 
@@ -113,8 +171,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--bootstrap-key",
-        required=True,
-        help="Operator VALID_API_KEYS entry — never a partner-facing secret",
+        default=None,
+        help="Deprecated: prefer BOOTSTRAP_KEY env (argv is process-visible)",
     )
     parser.add_argument("--sponsor-name", default="Design Partner")
     parser.add_argument("--agent-id", default="partner-agent-001")
@@ -122,20 +180,38 @@ def main() -> int:
     parser.add_argument("--initial-credits", type=float, default=10000.0)
     parser.add_argument("--key-name", default="partner-agent")
     parser.add_argument(
+        "--sponsor-wallet-id",
+        default=None,
+        help="Resume: skip sponsor create and reuse this wallet id",
+    )
+    parser.add_argument(
+        "--agent-wallet-id",
+        default=None,
+        help="Resume: skip agent create and reuse this wallet id",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print full JSON including api_key (default: human summary)",
     )
     args = parser.parse_args()
 
+    if args.agent_wallet_id and not args.sponsor_wallet_id:
+        raise SystemExit(
+            "error: --agent-wallet-id resume requires --sponsor-wallet-id "
+            "(for operator record-keeping)"
+        )
+
     result = provision(
         api_url=args.api_url,
-        bootstrap_key=args.bootstrap_key,
+        bootstrap_key=_bootstrap_key(args.bootstrap_key),
         sponsor_name=args.sponsor_name,
         agent_id=args.agent_id,
         budget_credits=args.budget_credits,
         initial_credits=args.initial_credits,
         key_name=args.key_name,
+        sponsor_wallet_id=args.sponsor_wallet_id,
+        agent_wallet_id=args.agent_wallet_id,
     )
 
     if args.json:
