@@ -27,6 +27,18 @@ Run the focused one-command proof first:
 make demo-trust-plane
 ```
 
+### API key bootstrap (gated)
+
+There is **no public self-serve key mint**. After discovery, agents get `401`
+until an operator provisions a wallet-scoped key with a bootstrap admin key.
+
+Documented flow + script:
+
+- [`docs/partner-api-key-bootstrap.md`](docs/partner-api-key-bootstrap.md)
+- `scripts/partner_api_key_bootstrap.py`
+
+Also advertised on `GET /.well-known/agent.json` → `authentication.bootstrap_docs`.
+
 To dogfood a fake partner tool with a real side effect (writes
 `data/dogfood_partner_notes.jsonl`):
 
