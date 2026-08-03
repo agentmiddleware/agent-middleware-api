@@ -263,33 +263,31 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description=(
-        "## Agent-Native Middleware API\n\n"
-        "Agent Middleware API is the operational control plane for autonomous "
-        "agents: identity, billing, discovery, policy, and execution governance "
-        "for machine-native software tenants.\n\n"
+        "## MCP Trust Plane\n\n"
+        "Agent Middleware API is a **governed MCP trust plane** for autonomous "
+        "agent tool calls — not a full agent middleware platform.\n\n"
+        "Credible wedge: exactly-once permits and receipts for metered MCP "
+        "calls. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n"
         "### Canonical Loop\n\n"
-        "`discover -> authenticate -> invoke -> meter -> govern`\n\n"
-        "### Core Infrastructure\n\n"
-        "- **Identity and authority** — wallet-scoped agents, delegated "
-        "credentials, API-key rotation, KYC hooks, and cross-wallet isolation\n"
-        "- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, "
-        "`llm.txt`, OpenAPI, and `/v1/discover`\n"
-        "- **Policy-constrained execution** — MCP invocation, planner optimization, "
-        "service health checks, simulation visibility, and bounded sandbox "
-        "execution\n"
-        "- **Economics and accounting** — dry-run pricing, spend limits, ledger "
-        "entries, exact decimal fields, Stripe top-ups, and transfer flows\n"
-        "- **Governance and readiness** — telemetry, audit surfaces, dependency "
-        "health, security posture, and operator preflight checks\n\n"
+        "`discover -> authenticate -> authorize -> invoke -> meter -> "
+        "receipt -> audit -> govern`\n\n"
+        "### Product Surface\n\n"
+        "- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n"
+        "- **Governed MCP invoke** — permit check, policy, idempotency, charge\n"
+        "- **Wallet metering** — ledger-backed credits with exact decimals\n"
+        "- **Signed receipts + evidence** — verifiable attempt outcomes\n"
+        "- **Wallet audit chain** — tamper-evident per-wallet events\n"
+        "- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, "
+        "`/llm.txt`, `/v1/discover`\n\n"
         "### Proof Surfaces\n\n"
-        "AWI, browser control, content generation, oracle crawls, sandbox demos, "
-        "media utilities, IoT bridges, and red-team services exercise the control "
-        "plane without defining the core product surface.\n\n"
+        "AWI, browser, content, oracle, sandbox, media, IoT, red-team, and "
+        "telemetry demos are labeled scaffolding. They mount only when "
+        "`ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n"
         "### Authentication\n\n"
-        "All endpoints require an API key passed via the `X-API-Key` header.\n\n"
+        "Protected endpoints require an API key via the `X-API-Key` header.\n\n"
         "### For Agents\n\n"
-        "This API is designed for programmatic consumption. See `/llm.txt` for "
-        "LLM-optimized documentation and `/openapi.json` for the full spec."
+        "Start at `/.well-known/agent.json`, then `/llm.txt` and "
+        "`/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry."
     ),
     docs_url="/docs",
     redoc_url="/redoc",
@@ -304,9 +302,13 @@ app = FastAPI(
     servers=[
         {
             "url": settings.PUBLIC_URL or "https://api.yourdomain.com",
-            "description": "Production",
+            "description": "Public API (set PUBLIC_URL)",
         },
-        {"url": "http://localhost:8000", "description": "Local Development"},
+        *(
+            []
+            if settings.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+            else [{"url": "http://localhost:8000", "description": "Local Development"}]
+        ),
     ],
 )
 

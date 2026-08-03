@@ -34,7 +34,7 @@ class McpGenerator:
     MCP Manifest Structure (tools.json):
     {
         "version": "1.0",
-        "name": "B2A Service Marketplace",
+        "name": "Agent Middleware MCP Trust Plane",
         "description": "...",
         "tools": [
             {
@@ -51,8 +51,24 @@ class McpGenerator:
     }
     """
 
+    MANIFEST_NAME = "Agent Middleware MCP Trust Plane"
+    MANIFEST_DESCRIPTION = (
+        "Governed MCP trust plane: scoped permits, metered tool invocation, "
+        "signed receipts, and wallet audit. Tools listed here are "
+        "ops-registered (or dogfood) endpoints — not a service catalog."
+    )
+
     def __init__(self, registry: ServiceRegistry | None = None):
         self.registry = registry or get_service_registry()
+
+    def _tools_manifest_envelope(self, tools: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "version": MCP_TOOLS_JSON_VERSION,
+            "name": self.MANIFEST_NAME,
+            "description": self.MANIFEST_DESCRIPTION,
+            "tools": tools,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     def generate_tools_json(
         self,
@@ -90,14 +106,7 @@ class McpGenerator:
             for service in persistent_services:
                 services.append(self._service_to_mcp_tool(service))
 
-        return {
-            "version": MCP_TOOLS_JSON_VERSION,
-            "name": "B2A Service Marketplace",
-            "description": "Billable AI agent services powered by the B2A economy. "
-            "Each tool invocation deducts credits from the caller's wallet.",
-            "tools": services,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        return self._tools_manifest_envelope(services)
 
     async def generate_tools_json_async(
         self,
@@ -128,14 +137,7 @@ class McpGenerator:
                 else:
                     raise
 
-        return {
-            "version": MCP_TOOLS_JSON_VERSION,
-            "name": "B2A Service Marketplace",
-            "description": "Billable AI agent services powered by the B2A economy. "
-            "Each tool invocation deducts credits from the caller's wallet.",
-            "tools": services,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        return self._tools_manifest_envelope(services)
 
     def _service_to_mcp_tool(self, service: dict) -> dict[str, Any]:
         """Convert a service record to MCP tool format."""

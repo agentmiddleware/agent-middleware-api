@@ -104,16 +104,15 @@ class DiscoveryManifest(BaseModel):
             "interactive_docs": "/docs",
             "llm_readable": "/llm.txt",
             "agent_manifest": "/.well-known/agent.json",
+            "wedge": "/WEDGE.md",
+            "security_limitations": "/SECURITY_LIMITATIONS.md",
+            "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
         }
     )
 
     integration_guides: dict = Field(
-        default_factory=lambda: {
-            "python_sdk": "pip install b2a-sdk",
-            "typescript_sdk": "npm install @b2a/sdk",
-            "mcp_server": "/mcp",
-            "awi_adoption": "/docs/awi-adoption-guide.md",
-        }
+        default_factory=dict,
+        description="Integration entry points; proof-surface guides only when mounted.",
     )
 
     agent_first: dict[str, Any] = Field(
@@ -483,27 +482,26 @@ def _build_awi_endpoints() -> list[AWIEndpoint]:
 
 
 def _build_pricing() -> list[PricingTier]:
-    """Build pricing tiers."""
+    """Build pricing tiers for the trust-plane wedge (not proof surfaces)."""
     return [
         PricingTier(
-            tier_name="free",
+            tier_name="self_hosted",
             price_per_credit=0.0,
             minimum_purchase=0.0,
             features=[
-                "1000 credits/month",
-                "Basic telemetry",
-                "Agent messaging",
+                "Scoped signed permits",
+                "Governed MCP invoke + metering",
+                "Signed receipts + wallet audit",
             ],
         ),
         PricingTier(
-            tier_name="pro",
+            tier_name="design_partner",
             price_per_credit=0.001,
             minimum_purchase=10.0,
             features=[
-                "Unlimited credits",
-                "AI decision making",
-                "AWI sessions",
-                "Priority support",
+                "Same trust loop as self-hosted",
+                "One partner-registered MCP tool",
+                "Operator runbook + dogfood path",
             ],
         ),
         PricingTier(
@@ -511,14 +509,26 @@ def _build_pricing() -> list[PricingTier]:
             price_per_credit=0.0008,
             minimum_purchase=1000.0,
             features=[
-                "Unlimited everything",
-                "Custom MCP tools",
-                "Multi-tenant isolation",
-                "Dedicated support",
-                "SLA guarantees",
+                "Wallet-scoped multi-tenant isolation",
+                "Custom MCP tool registration",
+                "Dedicated support (when contracted)",
             ],
         ),
     ]
+
+
+def _build_integration_guides() -> dict[str, str]:
+    """Trust-plane guides; AWI guide only when proof surfaces are mounted."""
+    guides = {
+        "mcp_server": "/mcp",
+        "llm_txt": "/llm.txt",
+        "wedge": "/WEDGE.md",
+        "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
+        "dogfood": "make dogfood-trust-plane (local partner.notes.write)",
+    }
+    if get_settings().ENABLE_PROOF_SURFACES:
+        guides["awi_adoption"] = "/docs/awi-adoption-guide.md"
+    return guides
 
 
 @router.get(
@@ -553,6 +563,7 @@ async def get_discovery_manifest():
         if get_settings().ENABLE_PROOF_SURFACES
         else [],
         pricing=_build_pricing(),
+        integration_guides=_build_integration_guides(),
     )
 
 
@@ -602,4 +613,5 @@ async def list_awi_endpoints(api_key: str = Depends(verify_api_key)):
         "endpoints": _build_awi_endpoints(),
         "vocabulary_endpoint": "/v1/awi/vocabulary",
         "reference": "/docs/awi-adoption-guide.md",
+        "note": "AWI is a labeled proof surface, not the product wedge.",
     }

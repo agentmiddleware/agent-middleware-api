@@ -18,6 +18,7 @@ async def client():
 
 # --- Root Discovery ---
 
+
 @pytest.mark.anyio
 async def test_root_returns_manifest(client):
     resp = await client.get("/")
@@ -45,6 +46,7 @@ async def test_health_check(client):
 
 # --- OpenAPI Spec ---
 
+
 @pytest.mark.anyio
 async def test_openapi_json_accessible(client):
     resp = await client.get("/openapi.json")
@@ -57,6 +59,7 @@ async def test_openapi_json_accessible(client):
 
 # --- Doc Index ---
 
+
 @pytest.mark.anyio
 async def test_doc_index(client):
     resp = await client.get("/docs/index")
@@ -64,9 +67,14 @@ async def test_doc_index(client):
     data = resp.json()
     assert "sections" in data
     assert "services" in data
+    assert data["product_wedge"] == "governed_mcp_trust_plane"
     assert data["agent_first"]["design_principle"] == "agent_first"
     assert data["sections"][0]["path"] == "/.well-known/agent.json"
-    assert len(data["services"]) >= 13  # 11 pillars + preflight + broadcast
+    assert any(s["path"] == "/WEDGE.md" for s in data["sections"])
+    # Trust-plane services always; proof surfaces only when mounted.
+    assert len(data["services"]) >= 5
+    assert all("surface" in s for s in data["services"])
+    assert any(s["id"] == "mcp-trust-plane" for s in data["services"])
 
 
 @pytest.mark.anyio
@@ -104,6 +112,7 @@ async def test_well_known_agent_json(client):
 
 
 # --- LLM.txt ---
+
 
 @pytest.mark.anyio
 async def test_llm_txt_served(client):
