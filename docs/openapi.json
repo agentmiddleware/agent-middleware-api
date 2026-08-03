@@ -4765,6 +4765,26 @@
         }
       }
     },
+    "/docs/index": {
+      "get": {
+        "tags": [
+          "Documentation & Discovery"
+        ],
+        "summary": "Structured documentation index",
+        "description": "Returns a JSON index of documentation resources. Trust-plane sections always; proof-surface service entries only when mounted.",
+        "operationId": "get_doc_index_docs_index_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/iot/devices": {
       "post": {
         "tags": [
@@ -9416,26 +9436,6 @@
             "APIKeyHeader": []
           }
         ]
-      }
-    },
-    "/docs/index": {
-      "get": {
-        "tags": [
-          "Documentation & Discovery"
-        ],
-        "summary": "Structured documentation index",
-        "description": "Returns a JSON index of documentation resources. Trust-plane sections always; proof-surface service entries only when mounted.",
-        "operationId": "get_doc_index_docs_index_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
       }
     },
     "/v1/awi/sessions": {

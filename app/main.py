@@ -30,6 +30,7 @@ from .core.durable_state import (
 from .core.health import gather_dependency_report
 from .core.rate_limiter import RateLimitMiddleware
 from .core.trust_mode import (
+    is_production_like_environment,
     validate_trust_mode_guardrails,
     warn_if_trust_mode_permissive,
 )
@@ -306,7 +307,7 @@ app = FastAPI(
         },
         *(
             []
-            if settings.ENVIRONMENT.lower() in {"production", "prod", "staging"}
+            if is_production_like_environment(settings.ENVIRONMENT)
             else [{"url": "http://localhost:8000", "description": "Local Development"}]
         ),
     ],
@@ -347,6 +348,7 @@ CORE_TRUST_ROUTERS = (
     planner,
     well_known,
     static,
+    docs,
 )
 
 PROOF_SURFACE_ROUTERS = (
@@ -366,7 +368,6 @@ PROOF_SURFACE_ROUTERS = (
     telemetry_scope,
     broadcast,
     ai,
-    docs,
     awi,
     awi_enhanced,
 )
