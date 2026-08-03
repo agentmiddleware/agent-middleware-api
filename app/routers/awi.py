@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 AWI Router — Phase 7
 ====================
 Agentic Web Interface endpoints + MCP translation layer.

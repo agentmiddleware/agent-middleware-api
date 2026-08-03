@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Agent Oracle Infiltration Router
 ----------------------------------
 Crawl agent directories, index external API capabilities,
@@ -41,6 +42,7 @@ router = APIRouter(
 
 
 # --- Crawling ---
+
 
 @router.post(
     "/crawl",
@@ -117,6 +119,7 @@ async def batch_crawl(
 
 # --- Indexed API Directory ---
 
+
 @router.get(
     "/index",
     response_model=IndexedAPIListResponse,
@@ -131,7 +134,8 @@ async def batch_crawl(
 )
 async def list_indexed(
     tier: CompatibilityTier | None = Query(
-        None, description="Filter indexed APIs by compatibility tier (ignored when domain is set)"
+        None,
+        description="Filter indexed APIs by compatibility tier (ignored when domain is set)",
     ),
     directory_type: DirectoryType | None = Query(
         None,
@@ -154,7 +158,12 @@ async def list_indexed(
         rows, total = await oracle.store.list_crawl_targets(
             domain=domain, limit=limit, offset=offset
         )
-        audit_basis = {"mode": "crawl_targets", **filters, "limit": limit, "offset": offset}
+        audit_basis = {
+            "mode": "crawl_targets",
+            **filters,
+            "limit": limit,
+            "offset": offset,
+        }
         record_audit(
             "oracle.index.list",
             actor_source=auth.source,
@@ -238,6 +247,7 @@ async def get_indexed_api(
 
 # --- Registration ---
 
+
 @router.post(
     "/register",
     response_model=RegistrationResponse,
@@ -304,6 +314,7 @@ async def list_registrations(
 
 
 # --- Visibility & Analytics ---
+
 
 @router.get(
     "/visibility",

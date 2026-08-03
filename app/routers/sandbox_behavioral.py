@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Behavioral Sandbox Router — Phase 6
 ===================================
 Endpoints for creating and managing behavioral sandbox environments.
@@ -98,7 +99,10 @@ async def get_environment(
         if not found:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "not_found", "message": f"Environment {env_id} not found"},
+                detail={
+                    "error": "not_found",
+                    "message": f"Environment {env_id} not found",
+                },
             )
         auth.require_wallet_access(owner)
         return await engine.get_environment_state(env_id)
@@ -186,7 +190,10 @@ async def execute_tool(
         if not found:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "not_found", "message": f"Environment {request.env_id} not found"},
+                detail={
+                    "error": "not_found",
+                    "message": f"Environment {request.env_id} not found",
+                },
             )
         auth.require_wallet_access(owner)
         result = await engine.execute_tool(request)

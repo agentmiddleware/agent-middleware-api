@@ -98,9 +98,14 @@ proof surfaces. They may exercise the control plane, but they do not define the
 product until they consume the same permit, receipt, idempotency, and audit
 primitives.
 
+**Freeze list (do not expand):** [`docs/PROOF_SURFACES.md`](docs/PROOF_SURFACES.md)
+— mirrors `PROOF_SURFACE_ROUTERS` in `app/main.py`, accept/freeze stubs, and
+agent rules.
+
 ## What To Freeze
 
-- New proof-surface features and ungated HTTP demos.
+- New proof-surface features and ungated HTTP demos (see
+  [`docs/PROOF_SURFACES.md`](docs/PROOF_SURFACES.md)).
 - Broad multi-tool migrations before one partner tool is live.
 - KMS, settlement, transparency logs, and non-MCP adapters (see
   [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).

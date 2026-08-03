@@ -50,7 +50,7 @@
 
 ### Acceptance
 
-- [ ] Baseline curls documented in PR body.
+- [x] Baseline curls documented in PR body. *(captured across Phase 1–5 PR bodies / live verifies)*
 - [x] Confirmed which health endpoint exposes `durable_state.fell_back_to_memory` (`GET /health/dependencies` → `runtime_degradation.durable_state`).
 
 ### Stop if
@@ -299,13 +299,19 @@ proof surfaces are off.
 
 ### Acceptance
 
-- [ ] Freeze list exists and is linked from `WEDGE.md`.
+- [x] Freeze list exists and is linked from `WEDGE.md`.
+
+**Shipped:** `docs/PROOF_SURFACES.md` lists `PROOF_SURFACE_ROUTERS` + accept/freeze
+stubs; linked from `WEDGE.md`; router/stub modules carry
+`PROOF SURFACE — frozen` docstrings; `kyc` / `planner` demotion deferred
+(product approval). Tests: `tests/test_proof_surface_freeze.py`. Docs/comment
+only — no Railway redeploy required.
 
 ---
 
 ## Phase 7 — Optional follow-ons (out of core debt plan)
 
-Only if requested after Phases 1–5:
+Only if requested after Phases 1–6:
 
 - Absolute `canonical_api` in API `agent.json` from `PUBLIC_URL`.
 - Design-partner API key bootstrap (documented gated flow).
@@ -318,15 +324,20 @@ Only if requested after Phases 1–5:
 ## Execution order (checklist for the orchestrating agent)
 
 ```text
-[ ] Phase 0  Baseline (health endpoint confirmed; curls still for PR body)
+[x] Phase 0  Baseline (health endpoint confirmed; curls captured in Phase 1–5 PR bodies)
 [x] Phase 1  Durable state + URL normalize     ← complete (live verify OK on Railway after #178 / c5811ea)
 [x] Phase 2  Gate MCP tools + llm.txt          ← complete (live verify OK on Railway after #180 / 5d547a6 via railway up)
 [x] Phase 3  Deploy posture + image SOP        ← code/docs/CI complete (live already on railway up; redeploy optional)
 [x] Phase 4  Migrations                        ← create_all gated; migrate-on-start fail-closed; schema verify at boot
 [x] Phase 5  Docs / OpenAPI / registry
-[ ] Phase 6  Freeze hygiene
-[ ] Phase 7  Optional (only if asked)
+[x] Phase 6  Freeze hygiene                    ← docs/PROOF_SURFACES.md + markers; no redeploy
+[ ] Phase 7  Optional (only if asked)          ← out of core debt plan
 ```
+
+### Plan status
+
+**Core tech-debt remediation plan complete** after Phase 6 (Phases 0–6).
+Phase 7 remains optional follow-ons only.
 
 ### PR naming convention
 
@@ -351,11 +362,11 @@ Only if requested after Phases 1–5:
 
 ## Definition of done (whole plan)
 
-1. Live Railway: no durable_state memory fallback under production config.  
-2. Live `/mcp/tools.json` with proof surfaces off does not list AWI/marketplace stubs.  
-3. Live `/llm.txt` uses public API base and wedge bootstrap.  
-4. One documented deploy path; no `change-me` prod key in repo defaults.  
-5. Docs/OpenAPI match `WEDGE.md`.  
-6. Proof surfaces explicitly frozen.
+1. [x] Live Railway: no durable_state memory fallback under production config.  
+2. [x] Live `/mcp/tools.json` with proof surfaces off does not list AWI/marketplace stubs.  
+3. [x] Live `/llm.txt` uses public API base and wedge bootstrap.  
+4. [x] One documented deploy path; no `change-me` prod key in repo defaults.  
+5. [x] Docs/OpenAPI match `WEDGE.md`.  
+6. [x] Proof surfaces explicitly frozen. (`docs/PROOF_SURFACES.md` + module markers)
 
-When all are true, mark this plan complete in a final PR that only checks the boxes above (no new features).
+**Plan complete (core Phases 0–6).** Phase 7 remains optional and out of scope unless requested.

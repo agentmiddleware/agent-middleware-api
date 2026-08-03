@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 LLM Integration Service for AI Agent Intelligence
 ==================================================
 Provides unified access to OpenAI, Azure OpenAI, Anthropic, and Ollama.
@@ -244,9 +245,7 @@ class LLMService:
             data = response.json()
 
             self._circuit_breaker.record_success()
-            logger.debug(
-                "llm_response_received model=%s", data.get("model", "unknown")
-            )
+            logger.debug("llm_response_received model=%s", data.get("model", "unknown"))
 
             return self._parse_response(data, self._get_provider())
 
@@ -256,9 +255,7 @@ class LLMService:
             raise
         except httpx.HTTPStatusError as e:
             self._circuit_breaker.record_failure()
-            logger.error(
-                "llm_http_error status=%s error=%s", e.response.status_code, e
-            )
+            logger.error("llm_http_error status=%s error=%s", e.response.status_code, e)
             raise
         except Exception as e:
             self._circuit_breaker.record_failure()

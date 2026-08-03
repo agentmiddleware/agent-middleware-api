@@ -1,4 +1,8 @@
-"""Text generation API backed by Content Factory (durable + LLM)."""
+"""
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
+
+Text generation API backed by Content Factory (durable + LLM).
+"""
 
 from __future__ import annotations
 

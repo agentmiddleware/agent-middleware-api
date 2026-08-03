@@ -351,6 +351,7 @@ CORE_TRUST_ROUTERS = (
     docs,
 )
 
+# Frozen scaffolding — do not expand. See docs/PROOF_SURFACES.md.
 PROOF_SURFACE_ROUTERS = (
     iot,
     telemetry,

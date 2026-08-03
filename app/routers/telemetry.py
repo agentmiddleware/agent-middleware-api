@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Autonomous Product Manager / Telemetry Router
 ----------------------------------------------
 Ingests raw telemetry, detects anomalies, generates autonomous PRs.

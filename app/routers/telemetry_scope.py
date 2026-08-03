@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Telemetry Scoping Router (Pillar 14)
 --------------------------------------
 Multi-tenant autonomous PM for agent-built tools.
@@ -43,8 +44,10 @@ async def _load_owned_pipeline(
 
 # --- Schemas ---
 
+
 class CreatePipelineRequest(BaseModel):
     """Create a tenant-scoped telemetry pipeline."""
+
     tenant_id: str = Field(..., description="Your agent or wallet ID.")
     service_name: str = Field(..., description="Name of the tool being monitored.")
     git_repo_url: str = Field(
@@ -70,6 +73,7 @@ class PipelineResponse(BaseModel):
 
 class IngestRequest(BaseModel):
     """Ingest telemetry events into a scoped pipeline."""
+
     events: list[dict] = Field(
         ...,
         min_length=1,
@@ -107,6 +111,7 @@ class PipelineListResponse(BaseModel):
 
 
 # --- Endpoints ---
+
 
 @router.post(
     "/pipelines",
