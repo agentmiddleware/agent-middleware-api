@@ -311,13 +311,29 @@ only — no Railway redeploy required.
 
 ## Phase 7 — Optional follow-ons (out of core debt plan)
 
-Only if requested after Phases 1–6:
+Requested after Phases 1–6 (this continuation). Status:
 
-- Absolute `canonical_api` in API `agent.json` from `PUBLIC_URL`.
-- Design-partner API key bootstrap (documented gated flow).
-- Operator analytics export over wallet/audit/ledger.
-- Brand rename (drop provisional PERMIT).
-- Link GitHub ↔ Vercel for `agent-middleware-web` (root directory `site`).
+- [x] Absolute `canonical_api` in API `agent.json` from `PUBLIC_URL`.
+- [x] Design-partner API key bootstrap (documented gated flow).
+- [x] Operator analytics export over wallet/audit/ledger.
+- [ ] Brand rename (drop provisional PERMIT).
+  **Deferred:** product decision; infra already uses `agent-middleware-*`.
+  No mass rename. See `site/README.md` § Brand rename.
+- [x] Link GitHub ↔ Vercel for `agent-middleware-web` (root directory `site`).
+  Root Directory = `site`; GitHub `PetrefiedThunder/agent-middleware-api`
+  connected (production branch `main`). Confirm first Git-triggered deploy
+  still serves marketing + discovery redirects (`site/README.md`).
+
+### Acceptance (Phase 7 slice)
+
+- [x] `GET /.well-known/agent.json` includes absolute `canonical_api` when
+      `PUBLIC_URL` is set; empty string when unset (no invented localhost).
+- [x] Auth discovery declares `public_self_serve: false` + bootstrap docs path.
+- [x] `/docs/partner-api-key-bootstrap.md` served; script
+      `scripts/partner_api_key_bootstrap.py` exists.
+- [x] `scripts/operator_analytics_export.py` exists (bootstrap-gated HTTP export).
+- [x] Brand rename explicitly deferred with rationale.
+- [x] Vercel↔GitHub linked with Root Directory `site` (confirm first Git deploy).
 
 ---
 
@@ -331,13 +347,15 @@ Only if requested after Phases 1–6:
 [x] Phase 4  Migrations                        ← create_all gated; migrate-on-start fail-closed; schema verify at boot
 [x] Phase 5  Docs / OpenAPI / registry
 [x] Phase 6  Freeze hygiene                    ← docs/PROOF_SURFACES.md + markers; no redeploy
-[ ] Phase 7  Optional (only if asked)          ← out of core debt plan
+[~] Phase 7  Optional follow-ons               ← safe slice done; brand rename deferred (product)
 ```
 
 ### Plan status
 
 **Core tech-debt remediation plan complete** after Phase 6 (Phases 0–6).
-Phase 7 remains optional follow-ons only.
+Phase 7 optional follow-ons: safe slice shipped (`canonical_api`, partner key
+bootstrap, analytics export, Vercel Git link + `site` root). Brand rename
+deferred.
 
 ### PR naming convention
 
@@ -347,6 +365,7 @@ Phase 7 remains optional follow-ons only.
 - `fix/migrations-prod-boot`
 - `docs/wedge-honesty-pass`
 - `chore/freeze-proof-surfaces`
+- `chore/phase7-followups`
 
 ### Per-PR agent final summary (required)
 
@@ -369,4 +388,7 @@ Phase 7 remains optional follow-ons only.
 5. [x] Docs/OpenAPI match `WEDGE.md`.  
 6. [x] Proof surfaces explicitly frozen. (`docs/PROOF_SURFACES.md` + module markers)
 
-**Plan complete (core Phases 0–6).** Phase 7 remains optional and out of scope unless requested.
+**Plan complete (core Phases 0–6).** Phase 7 optional safe slice shipped
+(`canonical_api`, partner key bootstrap docs/script, analytics export script,
+Vercel rootDirectory=`site` + GitHub connected). Brand rename remains a product
+decision (deferred).

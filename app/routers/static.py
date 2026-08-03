@@ -21,6 +21,9 @@ _MARKDOWN_DOCS: dict[str, Path] = {
     "/WEDGE.md": _REPO_ROOT / "WEDGE.md",
     "/SECURITY_LIMITATIONS.md": _REPO_ROOT / "SECURITY_LIMITATIONS.md",
     "/DESIGN_PARTNER_GUIDE.md": _REPO_ROOT / "DESIGN_PARTNER_GUIDE.md",
+    "/docs/partner-api-key-bootstrap.md": (
+        _REPO_ROOT / "docs" / "partner-api-key-bootstrap.md"
+    ),
 }
 
 
@@ -114,3 +117,13 @@ async def get_security_limitations_md():
 )
 async def get_design_partner_guide_md():
     return _serve_markdown("/DESIGN_PARTNER_GUIDE.md")
+
+
+@router.get(
+    "/docs/partner-api-key-bootstrap.md",
+    summary="Partner API key bootstrap",
+    description="Gated operator flow to provision wallet-scoped agent API keys.",
+    response_class=PlainTextResponse,
+)
+async def get_partner_api_key_bootstrap_md():
+    return _serve_markdown("/docs/partner-api-key-bootstrap.md")

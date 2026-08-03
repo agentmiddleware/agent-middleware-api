@@ -160,6 +160,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/WEDGE.md",
             "/SECURITY_LIMITATIONS.md",
             "/DESIGN_PARTNER_GUIDE.md",
+            "/docs/partner-api-key-bootstrap.md",
         )
         if request.url.path in skip_paths:
             response = await call_next(request)

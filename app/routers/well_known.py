@@ -21,6 +21,7 @@ from ..services.awi_action_vocab import get_awi_vocabulary
 
 router = APIRouter(prefix="", tags=["Agent Discovery"])
 
+# Module alias for tests that monkeypatch settings (see test_production_trust_posture).
 settings = get_settings()
 
 # Trust-plane product capabilities (governed MCP wedge).
@@ -143,6 +144,26 @@ def get_agent_first_metadata() -> dict[str, Any]:
     }
 
 
+def _public_api_origin() -> str:
+    """Absolute public API origin from PUBLIC_URL (empty when unset)."""
+    return (get_settings().PUBLIC_URL or "").strip().rstrip("/")
+
+
+def _authentication_manifest() -> dict[str, Any]:
+    """Honest auth discovery: no public self-serve key mint."""
+    return {
+        "type": "api_key",
+        "header": "X-API-Key",
+        "public_self_serve": False,
+        "bootstrap_docs": "/docs/partner-api-key-bootstrap.md",
+        "note": (
+            "No public self-serve API key mint. An operator bootstrap/admin "
+            "key (VALID_API_KEYS) provisions wallets and DB-scoped agent keys. "
+            "Agents must use a wallet-scoped key — see bootstrap_docs."
+        ),
+    }
+
+
 class AgentPluginManifest(BaseModel):
     """Standard agent plugin manifest format."""
 
@@ -150,6 +171,13 @@ class AgentPluginManifest(BaseModel):
     name: str = Field(description="Service/plugin name")
     description: str = Field(description="What this service provides")
     version: str = Field(description="Current version")
+    canonical_api: str = Field(
+        default="",
+        description=(
+            "Absolute public API origin from PUBLIC_URL. Empty when unset — "
+            "do not invent localhost as the canonical base."
+        ),
+    )
     provider: dict = Field(
         default_factory=lambda: {
             "name": "Agent-Native Middleware",
@@ -175,12 +203,7 @@ class AgentPluginManifest(BaseModel):
 
     endpoints: dict = Field(description="API endpoints")
 
-    authentication: dict = Field(
-        default_factory=lambda: {
-            "type": "api_key",
-            "header": "X-API-Key",
-        }
-    )
+    authentication: dict = Field(default_factory=_authentication_manifest)
 
     pricing: dict = Field(
         default_factory=lambda: {
@@ -210,6 +233,7 @@ class AgentPluginManifest(BaseModel):
             "wedge": "/WEDGE.md",
             "security_limitations": "/SECURITY_LIMITATIONS.md",
             "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
+            "partner_api_key_bootstrap": "/docs/partner-api-key-bootstrap.md",
         }
     )
 
@@ -267,9 +291,11 @@ def _build_agent_manifest() -> AgentPluginManifest:
         "wedge": "/WEDGE.md",
         "security_limitations": "/SECURITY_LIMITATIONS.md",
         "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
+        "partner_api_key_bootstrap": "/docs/partner-api-key-bootstrap.md",
     }
 
-    if get_settings().ENABLE_PROOF_SURFACES:
+    cfg = get_settings()
+    if cfg.ENABLE_PROOF_SURFACES:
         endpoints = {**endpoints, **_proof_surface_endpoints()}
         documentation = {
             **documentation,
@@ -295,10 +321,12 @@ def _build_agent_manifest() -> AgentPluginManifest:
             "metered tool invocation, signed receipts, and wallet audit chains. "
             "Additional routers are labeled proof surfaces, not the product wedge."
         ),
-        version=settings.APP_VERSION,
+        version=cfg.APP_VERSION,
+        canonical_api=_public_api_origin(),
         capabilities=list(PRODUCT_CAPABILITIES),
         proof_surfaces=proof_surfaces,
         endpoints=endpoints,
+        authentication=_authentication_manifest(),
         documentation=documentation,
         agent_first=get_agent_first_metadata(),
     )
