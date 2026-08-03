@@ -4765,6 +4765,28 @@
         }
       }
     },
+    "/docs/partner-api-key-bootstrap.md": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "Partner API key bootstrap",
+        "description": "Gated operator flow to provision wallet-scoped agent API keys.",
+        "operationId": "get_partner_api_key_bootstrap_md_docs_partner_api_key_bootstrap_md_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/docs/index": {
       "get": {
         "tags": [
