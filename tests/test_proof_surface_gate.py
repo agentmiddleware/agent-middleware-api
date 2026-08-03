@@ -18,6 +18,8 @@ def test_core_trust_routers_include_mcp_and_permits():
     assert "permits" in names
     assert "receipts" in names
     assert "audit" in names
+    assert "docs" in names
+    assert "static" in names
 
 
 def test_proof_surface_routers_include_awi_and_media():
@@ -25,6 +27,7 @@ def test_proof_surface_routers_include_awi_and_media():
     assert "awi" in names
     assert "media" in names
     assert "oracle" in names
+    assert "docs" not in names
 
 
 def test_proof_surfaces_can_be_omitted_from_mount_set():
@@ -42,6 +45,8 @@ def test_proof_surfaces_can_be_omitted_from_mount_set():
     assert "/mcp/tools" in core_only
     assert "/v1/permits" in core_only
     assert "/v1/receipts" in core_only
+    assert "/docs/index" in core_only
+    assert "/WEDGE.md" in core_only
     assert not any(p.startswith("/v1/media") for p in core_only)
     assert not any(p.startswith("/v1/awi/") for p in core_only)
 

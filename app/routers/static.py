@@ -1,10 +1,10 @@
 """
 Static Files Router
 ====================
-Serves static files for agent discovery.
+Serves static discovery docs for agents (llm.txt + advertised markdown).
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 from pathlib import Path
 
@@ -14,6 +14,24 @@ router = APIRouter(tags=["Static"])
 
 _PUBLIC_URL_PLACEHOLDER = "{{PUBLIC_URL}}"
 _LOCAL_EXAMPLE = "http://localhost:8000"
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Paths advertised in /.well-known/agent.json documentation (must 200).
+_MARKDOWN_DOCS: dict[str, Path] = {
+    "/WEDGE.md": _REPO_ROOT / "WEDGE.md",
+    "/SECURITY_LIMITATIONS.md": _REPO_ROOT / "SECURITY_LIMITATIONS.md",
+    "/DESIGN_PARTNER_GUIDE.md": _REPO_ROOT / "DESIGN_PARTNER_GUIDE.md",
+}
+
+
+def _serve_markdown(path: str) -> PlainTextResponse:
+    file_path = _MARKDOWN_DOCS.get(path)
+    if file_path is None or not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"{path} not found")
+    return PlainTextResponse(
+        file_path.read_text(encoding="utf-8"),
+        media_type="text/markdown; charset=utf-8",
+    )
 
 
 @router.get(
@@ -30,7 +48,7 @@ async def get_llm_txt():
     treat localhost as the deployment base.
     """
     settings = get_settings()
-    llm_path = Path(__file__).parent.parent.parent / "static" / "llm.txt"
+    llm_path = _REPO_ROOT / "static" / "llm.txt"
     if llm_path.exists():
         content = llm_path.read_text(encoding="utf-8")
     else:
@@ -66,3 +84,33 @@ GET /mcp/tools.json — List available tools
             f"**Base URL:** {base}",
         )
     return PlainTextResponse(content=content)
+
+
+@router.get(
+    "/WEDGE.md",
+    summary="Product wedge",
+    description="Exactly-once MCP permits wedge definition.",
+    response_class=PlainTextResponse,
+)
+async def get_wedge_md():
+    return _serve_markdown("/WEDGE.md")
+
+
+@router.get(
+    "/SECURITY_LIMITATIONS.md",
+    summary="Security limitations",
+    description="Honest non-claims and production posture requirements.",
+    response_class=PlainTextResponse,
+)
+async def get_security_limitations_md():
+    return _serve_markdown("/SECURITY_LIMITATIONS.md")
+
+
+@router.get(
+    "/DESIGN_PARTNER_GUIDE.md",
+    summary="Design partner guide",
+    description="Trust-plane demo and dogfood path for design partners.",
+    response_class=PlainTextResponse,
+)
+async def get_design_partner_guide_md():
+    return _serve_markdown("/DESIGN_PARTNER_GUIDE.md")

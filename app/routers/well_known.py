@@ -209,7 +209,7 @@ class AgentPluginManifest(BaseModel):
             "llm_readable": "/llm.txt",
             "wedge": "/WEDGE.md",
             "security_limitations": "/SECURITY_LIMITATIONS.md",
-            "agent_recipes": "/docs/agent-recipes.md",
+            "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
         }
     )
 
@@ -266,7 +266,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
         "llm_readable": "/llm.txt",
         "wedge": "/WEDGE.md",
         "security_limitations": "/SECURITY_LIMITATIONS.md",
-        "agent_recipes": "/docs/agent-recipes.md",
+        "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
     }
 
     if get_settings().ENABLE_PROOF_SURFACES:

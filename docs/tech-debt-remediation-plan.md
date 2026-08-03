@@ -183,11 +183,11 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 - `GET /`, `/v1/discover`, and well-known bootstrap drop unmounted proof advertising.
 - Negative coverage: `tests/test_mcp_discovery_wedge_gate.py`.
 
-### Live residual (not Phase 2 blockers; park for later phases)
+### Live residual (not Phase 2 blockers; parked → addressed in Phase 5)
 
-- `/mcp/tools.json` envelope still titled **"B2A Service Marketplace"** even when `tools=[]` — rename/honesty is Phase 5 docs/OpenAPI work.
-- `/v1/discover` pricing/integration copy still mentions telemetry/comms/`awi_adoption` — Phase 5 wedge honesty.
-- OpenAPI `servers` still lists `http://localhost:8000` alongside production `PUBLIC_URL` (expected dual-server; Phase 3 posture can document).
+- ~~`/mcp/tools.json` envelope titled "B2A Service Marketplace"~~ → Phase 5 rename.
+- ~~`/v1/discover` pricing/integration telemetry/comms/`awi_adoption`~~ → Phase 5 trust-plane copy.
+- ~~OpenAPI localhost second server~~ → omitted when `ENVIRONMENT` is production-like.
 - Live `partner.notes.write` absent until ops registers a real tool (dogfood is local ASGI; do not expect it on Railway).
 - Phase 1 still holds: `fell_back_to_memory=false`, `STATE_BACKEND=postgres`, `ENABLE_PROOF_SURFACES=false`.
 
@@ -273,8 +273,16 @@ surprised by `upgrade` without a stamp. See `tests/test_schema_boot.py`.
 
 ### Acceptance
 
-- [ ] No primary docs claim “full agent middleware platform.”
-- [ ] agent.json documentation URLs resolve or are removed.
+- [x] No primary docs claim “full agent middleware platform.”
+- [x] agent.json documentation URLs resolve or are removed.
+
+**Shipped:** MCP `/mcp/tools.json` envelope renamed off “B2A Service Marketplace”;
+`/v1/discover` pricing + integration guides are trust-plane-only (AWI guide
+gated); OpenAPI description narrowed and localhost server omitted in
+production-like `ENVIRONMENT`; `WEDGE.md` / `SECURITY_LIMITATIONS.md` /
+`DESIGN_PARTNER_GUIDE.md` served at advertised paths; agentmarket listing +
+README deploy claims made honest; `/docs/index` gated to trust plane when
+proof surfaces are off.
 
 ---
 
@@ -315,7 +323,7 @@ Only if requested after Phases 1–5:
 [x] Phase 2  Gate MCP tools + llm.txt          ← complete (live verify OK on Railway after #180 / 5d547a6 via railway up)
 [x] Phase 3  Deploy posture + image SOP        ← code/docs/CI complete (live already on railway up; redeploy optional)
 [x] Phase 4  Migrations                        ← create_all gated; migrate-on-start fail-closed; schema verify at boot
-[ ] Phase 5  Docs / OpenAPI / registry
+[x] Phase 5  Docs / OpenAPI / registry
 [ ] Phase 6  Freeze hygiene
 [ ] Phase 7  Optional (only if asked)
 ```

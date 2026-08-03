@@ -157,6 +157,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/.well-known/agent.json",
             "/llm.txt",
             "/docs/index",
+            "/WEDGE.md",
+            "/SECURITY_LIMITATIONS.md",
+            "/DESIGN_PARTNER_GUIDE.md",
         )
         if request.url.path in skip_paths:
             response = await call_next(request)

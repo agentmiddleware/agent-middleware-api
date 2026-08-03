@@ -86,9 +86,11 @@ API_URL="$API_URL" bash scripts/human_preflight.sh
 
 ## OpenAPI servers note
 
-FastAPI OpenAPI may list both `http://localhost:8000` and `PUBLIC_URL`. That is
-intentional dual-server documentation for local + deployed clients — not a
-second deploy target. Production agents should use `PUBLIC_URL`.
+FastAPI OpenAPI lists `PUBLIC_URL` as the public API server. A
+`http://localhost:8000` entry is included only when
+`is_production_like_environment(ENVIRONMENT)` is false (local/dev/test/ci).
+That is local-dev documentation — not a second deploy target. Production
+agents should use `PUBLIC_URL`.
 
 ## Related docs
 
