@@ -23,6 +23,10 @@ from typing import Any, Awaitable, Callable
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
 from .runtime_degradation import get_runtime_degradation
+from ..services.signing_keys import (
+    SigningKeyError,
+    validate_signing_key_configuration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +195,36 @@ async def _check_llm(simulation_modes: dict[str, bool]) -> dict[str, Any]:
     }
 
 
+async def _check_signing_key() -> dict[str, Any]:
+    """Report signing readiness without signing, persisting, or leaking keys."""
+
+    try:
+        state = validate_signing_key_configuration()
+    except SigningKeyError as exc:
+        error = str(exc)
+        if error not in {
+            "trust_signing_private_key_required",
+            "invalid_trust_signing_private_key",
+        }:
+            error = "signing_key_unavailable"
+        return {"status": "down", "state": "invalid", "error": error}
+    except Exception:
+        logger.debug("signing key configuration check raised", exc_info=True)
+        return {
+            "status": "down",
+            "state": "invalid",
+            "error": "signing_key_unavailable",
+        }
+
+    if state == "ephemeral":
+        return {
+            "status": "up",
+            "state": "ephemeral",
+            "reason": "trust mode disabled; process-ephemeral signing key",
+        }
+    return {"status": "up", "state": "loaded"}
+
+
 # ---------------------------------------------------------------------------
 # Public aggregator
 # ---------------------------------------------------------------------------
@@ -207,12 +241,13 @@ async def gather_dependency_report() -> dict[str, Any]:
     settings = get_settings()
     sim_modes = get_simulation_modes()
 
-    postgres, redis_res, mqtt, stripe_res, llm = await asyncio.gather(
+    postgres, redis_res, mqtt, stripe_res, llm, signing_key = await asyncio.gather(
         _run_check("postgres", _check_postgres),
         _run_check("redis", _check_redis),
         _run_check("mqtt", lambda: _check_mqtt(sim_modes)),
         _run_check("stripe", _check_stripe),
         _run_check("llm", lambda: _check_llm(sim_modes)),
+        _run_check("signing_key", _check_signing_key),
     )
 
     dependencies = {
@@ -221,6 +256,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         "mqtt": mqtt,
         "stripe": stripe_res,
         "llm": llm,
+        "signing_key": signing_key,
     }
 
     unhealthy = [
