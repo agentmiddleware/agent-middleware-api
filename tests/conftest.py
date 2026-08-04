@@ -130,7 +130,9 @@ async def clean_database():
 
     factory = get_session_factory()
     async with factory() as session:
-        # Clean up tables
+        # Child tables that FK to wallets must go before wallets. Self-FK on
+        # wallets.parent_wallet_id is cleared so a bulk DELETE succeeds with
+        # PRAGMA foreign_keys=ON (Postgres-parity for SQLite tests).
         await session.execute(text("DELETE FROM idempotency_records"))
         await session.execute(text("DELETE FROM receipts"))
         await session.execute(text("DELETE FROM permits"))
@@ -139,7 +141,6 @@ async def clean_database():
         await session.execute(text("DELETE FROM ledger_entries"))
         await session.execute(text("DELETE FROM billing_alerts"))
         await session.execute(text("DELETE FROM policy_bundles"))
-        await session.execute(text("DELETE FROM wallets"))
         await session.execute(text("DELETE FROM daily_balance_snapshots"))
         await session.execute(text("DELETE FROM kyc_verifications"))
         await session.execute(text("DELETE FROM api_keys"))
@@ -149,6 +150,8 @@ async def clean_database():
         await session.execute(text("DELETE FROM audit_chain_heads"))
         await session.execute(text("DELETE FROM signing_keys"))
         await session.execute(text("DELETE FROM optimizer_telemetry"))
+        await session.execute(text("UPDATE wallets SET parent_wallet_id = NULL"))
+        await session.execute(text("DELETE FROM wallets"))
         await session.commit()
 
     yield

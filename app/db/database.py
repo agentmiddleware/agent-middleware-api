@@ -128,6 +128,9 @@ def get_engine() -> AsyncEngine | None:
             def _set_sqlite_pragmas(dbapi_conn, _connection_record):  # noqa: ANN001
                 cursor = dbapi_conn.cursor()
                 try:
+                    # Match Postgres: enforce FKs so insert-order bugs surface
+                    # in tests (e.g. ledger_entries before wallets).
+                    cursor.execute("PRAGMA foreign_keys=ON")
                     cursor.execute("PRAGMA journal_mode=WAL")
                     cursor.execute("PRAGMA busy_timeout=10000")
                     cursor.execute("PRAGMA synchronous=NORMAL")

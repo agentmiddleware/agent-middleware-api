@@ -16,6 +16,7 @@ from app.db.models import LedgerEntryModel, WalletModel
 from app.services.agent_money import get_agent_money
 from app.services.audit_log import list_audit_events
 
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
@@ -29,6 +30,7 @@ def api_headers():
 
 
 # --- Sponsor Wallet ---
+
 
 @pytest.mark.anyio
 async def test_create_sponsor_wallet(client, api_headers):
@@ -62,14 +64,82 @@ async def test_create_sponsor_zero_balance(client, api_headers):
     assert resp.json()["balance"] == 0.0
 
 
+@pytest.mark.anyio
+async def test_create_sponsor_with_credits_writes_ledger(
+    client, api_headers, clean_database
+):
+    """Funded sponsor create must persist wallet before initial ledger credit.
+
+    Regression for ledger_entries_wallet_id_fkey on Postgres when autoflush
+    is off and the UOW inserts ledger_entries before wallets.
+    """
+    resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Funded Corp",
+            "email": "funded@example.com",
+            "initial_credits": 1000.0,
+            "require_kyc": False,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    wallet_id = resp.json()["wallet_id"]
+    assert resp.json()["balance"] == 1000.0
+
+    factory = get_session_factory()
+    async with factory() as session:
+        wallet = await session.get(WalletModel, wallet_id)
+        assert wallet is not None
+        assert wallet.balance == Decimal("1000")
+
+        result = await session.execute(
+            select(LedgerEntryModel).where(LedgerEntryModel.wallet_id == wallet_id)
+        )
+        entries = list(result.scalars().all())
+        assert len(entries) == 1
+        assert entries[0].action == "credit"
+        assert entries[0].amount == Decimal("1000")
+        assert entries[0].balance_after == Decimal("1000")
+        assert entries[0].description == "Initial sponsor deposit"
+
+
+@pytest.mark.anyio
+async def test_ledger_entry_rejects_unknown_wallet_id(clean_database):
+    """Negative path: ledger FK must reject wallet_ids with no wallet row."""
+    import uuid
+
+    from sqlalchemy.exc import IntegrityError
+
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            LedgerEntryModel(
+                entry_id=str(uuid.uuid4()),
+                wallet_id="spn-does-not-exist",
+                action="credit",
+                amount=Decimal("1"),
+                balance_after=Decimal("1"),
+                description="orphan ledger",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+
 # --- Agent Wallet Provisioning ---
+
 
 @pytest.mark.anyio
 async def test_provision_agent_wallet(client, api_headers):
     # Create sponsor first
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Test Sponsor", "email": "s@t.com", "initial_credits": 20000},
+        json={
+            "sponsor_name": "Test Sponsor",
+            "email": "s@t.com",
+            "initial_credits": 20000,
+        },
         headers=api_headers,
     )
     sponsor_id = sponsor_resp.json()["wallet_id"]
@@ -113,7 +183,11 @@ async def test_provision_insufficient_sponsor_balance(client, api_headers):
 
     resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_id, "agent_id": "greedy-bot", "budget_credits": 50000},
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "greedy-bot",
+            "budget_credits": 50000,
+        },
         headers=api_headers,
     )
     assert resp.status_code == 400
@@ -122,19 +196,28 @@ async def test_provision_insufficient_sponsor_balance(client, api_headers):
 
 # --- Charging (Micro-Metering) ---
 
+
 @pytest.mark.anyio
 async def test_charge_agent_wallet(client, api_headers):
     # Setup: sponsor → agent
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Charge Test", "email": "c@t.com", "initial_credits": 10000},
+        json={
+            "sponsor_name": "Charge Test",
+            "email": "c@t.com",
+            "initial_credits": 10000,
+        },
         headers=api_headers,
     )
     sponsor_id = sponsor_resp.json()["wallet_id"]
 
     agent_resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_id, "agent_id": "metered-bot", "budget_credits": 5000},
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "metered-bot",
+            "budget_credits": 5000,
+        },
         headers=api_headers,
     )
     agent_wallet_id = agent_resp.json()["wallet_id"]
@@ -270,9 +353,7 @@ async def test_refund_charge_reverses_debit(client, api_headers, clean_database)
     factory = get_session_factory()
     async with factory() as session:
         refund_result = await session.execute(
-            select(LedgerEntryModel).where(
-                LedgerEntryModel.entry_id == refund.entry_id
-            )
+            select(LedgerEntryModel).where(LedgerEntryModel.entry_id == refund.entry_id)
         )
         refund_row = refund_result.scalar_one()
         assert refund_row.correlation_id == charge["entry_id"]
@@ -377,7 +458,11 @@ async def test_charge_insufficient_funds_returns_402(client, api_headers):
 
     agent_resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_id, "agent_id": "broke-bot", "budget_credits": 10},
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "broke-bot",
+            "budget_credits": 10,
+        },
         headers=api_headers,
     )
     agent_wallet_id = agent_resp.json()["wallet_id"]
@@ -397,18 +482,27 @@ async def test_charge_insufficient_funds_returns_402(client, api_headers):
 
 # --- Ledger ---
 
+
 @pytest.mark.anyio
 async def test_ledger_records_transactions(client, api_headers):
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Ledger Test", "email": "l@t.com", "initial_credits": 5000},
+        json={
+            "sponsor_name": "Ledger Test",
+            "email": "l@t.com",
+            "initial_credits": 5000,
+        },
         headers=api_headers,
     )
     sponsor_id = sponsor_resp.json()["wallet_id"]
 
     agent_resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_id, "agent_id": "ledger-bot", "budget_credits": 2000},
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "ledger-bot",
+            "budget_credits": 2000,
+        },
         headers=api_headers,
     )
     agent_wallet_id = agent_resp.json()["wallet_id"]
@@ -439,6 +533,7 @@ async def test_ledger_records_transactions(client, api_headers):
 
 
 # --- Top-Up ---
+
 
 @pytest.mark.anyio
 async def test_top_up_sponsor(client, api_headers):
@@ -475,7 +570,11 @@ async def test_top_up_agent_wallet_fails(client, api_headers):
     )
     agent_resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_resp.json()["wallet_id"], "agent_id": "a", "budget_credits": 1000},
+        json={
+            "sponsor_wallet_id": sponsor_resp.json()["wallet_id"],
+            "agent_id": "a",
+            "budget_credits": 1000,
+        },
         headers=api_headers,
     )
 
@@ -488,6 +587,7 @@ async def test_top_up_agent_wallet_fails(client, api_headers):
 
 
 # --- Pricing Table ---
+
 
 @pytest.mark.anyio
 async def test_pricing_table(client, api_headers):
@@ -505,25 +605,43 @@ async def test_pricing_table(client, api_headers):
 
 # --- Arbitrage Report ---
 
+
 @pytest.mark.anyio
 async def test_arbitrage_report(client, api_headers):
     # Create wallet chain and make some charges
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Arb Test", "email": "a@t.com", "initial_credits": 100000},
+        json={
+            "sponsor_name": "Arb Test",
+            "email": "a@t.com",
+            "initial_credits": 100000,
+        },
         headers=api_headers,
     )
     agent_resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_resp.json()["wallet_id"], "agent_id": "arb-bot", "budget_credits": 50000},
+        json={
+            "sponsor_wallet_id": sponsor_resp.json()["wallet_id"],
+            "agent_id": "arb-bot",
+            "budget_credits": 50000,
+        },
         headers=api_headers,
     )
     wallet_id = agent_resp.json()["wallet_id"]
 
     # Generate some revenue across services
-    await client.post(f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=100", headers=api_headers)
-    await client.post(f"/v1/billing/charge?wallet_id={wallet_id}&service=content_factory&units=5", headers=api_headers)
-    await client.post(f"/v1/billing/charge?wallet_id={wallet_id}&service=media_engine&units=200", headers=api_headers)
+    await client.post(
+        f"/v1/billing/charge?wallet_id={wallet_id}&service=iot_bridge&units=100",
+        headers=api_headers,
+    )
+    await client.post(
+        f"/v1/billing/charge?wallet_id={wallet_id}&service=content_factory&units=5",
+        headers=api_headers,
+    )
+    await client.post(
+        f"/v1/billing/charge?wallet_id={wallet_id}&service=media_engine&units=200",
+        headers=api_headers,
+    )
 
     resp = await client.get("/v1/billing/arbitrage", headers=api_headers)
     assert resp.status_code == 200
@@ -537,6 +655,7 @@ async def test_arbitrage_report(client, api_headers):
 
 
 # --- Wallet Listing ---
+
 
 @pytest.mark.anyio
 async def test_list_wallets(client, api_headers):
@@ -570,6 +689,7 @@ async def test_get_wallet_not_found(client, api_headers):
 
 # --- Alerts ---
 
+
 @pytest.mark.anyio
 async def test_billing_alerts(client, api_headers):
     resp = await client.get("/v1/billing/alerts", headers=api_headers)
@@ -581,6 +701,7 @@ async def test_billing_alerts(client, api_headers):
 
 
 # --- Auth ---
+
 
 @pytest.mark.anyio
 async def test_billing_requires_api_key(client):
@@ -603,13 +724,21 @@ async def test_charge_retry_with_same_idempotency_key_does_not_double_charge(
 ):
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Idempotent Charge", "email": "idem-charge@t.com", "initial_credits": 10000},
+        json={
+            "sponsor_name": "Idempotent Charge",
+            "email": "idem-charge@t.com",
+            "initial_credits": 10000,
+        },
         headers=api_headers,
     )
     sponsor_id = sponsor_resp.json()["wallet_id"]
     agent_resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_id, "agent_id": "idem-bot", "budget_credits": 5000},
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "idem-bot",
+            "budget_credits": 5000,
+        },
         headers=api_headers,
     )
     agent_wallet_id = agent_resp.json()["wallet_id"]
@@ -626,7 +755,9 @@ async def test_charge_retry_with_same_idempotency_key_does_not_double_charge(
     assert second.status_code == 200
     assert second.json()["entry_id"] == first_entry_id
 
-    ledger_resp = await client.get(f"/v1/billing/ledger/{agent_wallet_id}", headers=api_headers)
+    ledger_resp = await client.get(
+        f"/v1/billing/ledger/{agent_wallet_id}", headers=api_headers
+    )
     debit_entries = [e for e in ledger_resp.json()["entries"] if e["action"] == "debit"]
     assert len(debit_entries) == 1
 
@@ -637,13 +768,21 @@ async def test_charge_reused_idempotency_key_with_different_payload_conflicts(
 ):
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Idempotent Conflict", "email": "idem-conflict@t.com", "initial_credits": 10000},
+        json={
+            "sponsor_name": "Idempotent Conflict",
+            "email": "idem-conflict@t.com",
+            "initial_credits": 10000,
+        },
         headers=api_headers,
     )
     sponsor_id = sponsor_resp.json()["wallet_id"]
     agent_resp = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor_id, "agent_id": "idem-conflict-bot", "budget_credits": 5000},
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "idem-conflict-bot",
+            "budget_credits": 5000,
+        },
         headers=api_headers,
     )
     agent_wallet_id = agent_resp.json()["wallet_id"]
@@ -664,12 +803,20 @@ async def test_charge_reused_idempotency_key_with_different_payload_conflicts(
 async def test_db_key_cannot_operate_on_other_wallet(client, api_headers):
     wallet_a_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Tenant A", "email": "a@test.com", "initial_credits": 1000},
+        json={
+            "sponsor_name": "Tenant A",
+            "email": "a@test.com",
+            "initial_credits": 1000,
+        },
         headers=api_headers,
     )
     wallet_b_resp = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Tenant B", "email": "b@test.com", "initial_credits": 1000},
+        json={
+            "sponsor_name": "Tenant B",
+            "email": "b@test.com",
+            "initial_credits": 1000,
+        },
         headers=api_headers,
     )
     wallet_a = wallet_a_resp.json()["wallet_id"]
@@ -749,7 +896,11 @@ async def test_topup_retry_with_same_idempotency_key_does_not_double_credit(
 ):
     sponsor = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Idem Topup", "email": "idem-topup@t.com", "initial_credits": 0},
+        json={
+            "sponsor_name": "Idem Topup",
+            "email": "idem-topup@t.com",
+            "initial_credits": 0,
+        },
         headers=api_headers,
     )
     wallet_id = sponsor.json()["wallet_id"]
@@ -776,17 +927,25 @@ async def test_topup_reused_key_different_amount_conflicts(
 ):
     sponsor = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Idem Topup Conflict", "email": "idem-topup-c@t.com", "initial_credits": 0},
+        json={
+            "sponsor_name": "Idem Topup Conflict",
+            "email": "idem-topup-c@t.com",
+            "initial_credits": 0,
+        },
         headers=api_headers,
     )
     wallet_id = sponsor.json()["wallet_id"]
     headers = {**api_headers, "Idempotency-Key": "topup-conflict-1"}
 
     await client.post(
-        "/v1/billing/top-up", json={"wallet_id": wallet_id, "amount_fiat": 50.0}, headers=headers
+        "/v1/billing/top-up",
+        json={"wallet_id": wallet_id, "amount_fiat": 50.0},
+        headers=headers,
     )
     conflict = await client.post(
-        "/v1/billing/top-up", json={"wallet_id": wallet_id, "amount_fiat": 99.0}, headers=headers
+        "/v1/billing/top-up",
+        json={"wallet_id": wallet_id, "amount_fiat": 99.0},
+        headers=headers,
     )
     assert conflict.status_code == 409
 
@@ -797,7 +956,11 @@ async def test_transfer_retry_with_same_idempotency_key_does_not_double_spend(
 ):
     sponsor = await client.post(
         "/v1/billing/wallets/sponsor",
-        json={"sponsor_name": "Xfer Src", "email": "xfer-src@t.com", "initial_credits": 10000},
+        json={
+            "sponsor_name": "Xfer Src",
+            "email": "xfer-src@t.com",
+            "initial_credits": 10000,
+        },
         headers=api_headers,
     )
     src = sponsor.json()["wallet_id"]
@@ -849,7 +1012,11 @@ async def test_rejected_charge_does_not_inflate_velocity_counters(
     )
     agent = await client.post(
         "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": sponsor.json()["wallet_id"], "agent_id": "velo-a", "budget_credits": 5},
+        json={
+            "sponsor_wallet_id": sponsor.json()["wallet_id"],
+            "agent_id": "velo-a",
+            "budget_credits": 5,
+        },
         headers=api_headers,
     )
     wallet_id = agent.json()["wallet_id"]
