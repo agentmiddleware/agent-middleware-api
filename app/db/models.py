@@ -11,6 +11,7 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field
 
 from app.core.time import utc_now
+from app.db.types import NaiveUTCDateTime
 
 
 class WalletModel(SQLModel, table=True):
@@ -255,15 +256,15 @@ class APIKeyModel(SQLModel, table=True):
     status: str = Field(default="active", max_length=20)
 
     rotation_count: int = Field(default=0)
-    last_rotated_at: Optional[datetime] = Field(default=None)
+    last_rotated_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
-    last_used_at: Optional[datetime] = Field(default=None)
+    last_used_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     last_used_ip: Optional[str] = Field(default=None, max_length=45)
 
-    created_at: datetime = Field(default_factory=utc_now, index=True)
-    expires_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
+    expires_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
-    revoked_at: Optional[datetime] = Field(default=None)
+    revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     revoke_reason: Optional[str] = Field(default=None, max_length=255)
 
     metadata_json: Optional[str] = Field(default=None)
@@ -731,16 +732,16 @@ class PermitModel(SQLModel, table=True):
     allowed_tools_json: str
     max_credits: Decimal = Field(decimal_places=8)
     spent_credits: Decimal = Field(default=Decimal("0"), decimal_places=8)
-    expires_at: datetime = Field(index=True)
+    expires_at: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
     nonce: str = Field(max_length=64, index=True)
     status: str = Field(default="active", max_length=20, index=True)
     signature: str
     key_id: str = Field(max_length=64, foreign_key="signing_keys.key_id", index=True)
-    issued_at: datetime = Field(default_factory=utc_now, index=True)
-    revoked_at: Optional[datetime] = Field(default=None)
+    issued_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
+    revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     # Last time budget was reserved/released; used to distinguish a live
     # in-flight reservation from one orphaned by a crash during reconciliation.
-    updated_at: Optional[datetime] = Field(default=None, index=True)
+    updated_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -772,7 +773,7 @@ class ReceiptModel(SQLModel, table=True):
         foreign_key="control_plane_audit_events.event_id",
         index=True,
     )
-    created_at: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
     signature: str
     signature_key_id: str = Field(
         max_length=64,
