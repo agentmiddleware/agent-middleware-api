@@ -31,6 +31,7 @@ from ..core.config import get_settings
 from ..core.auth import AuthContext, get_auth_context
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
+from ..services.dogfood_tool import sync_dogfood_tool_registration
 from ..services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from ..schemas.billing import InsufficientFundsResponse, LedgerEntry, ServiceCategory
 
@@ -65,8 +66,9 @@ _mcp_adapter = McpGovernedAdapter()
 
 
 def _ensure_local_mcp_tools_registered() -> None:
-    """Align local MCP stubs with ENABLE_PROOF_SURFACES (lazy startup + flag flips)."""
+    """Align local MCP tools with proof-surface + dogfood flags (lazy + flag flips)."""
     sync_proof_surface_mcp_registration()
+    sync_dogfood_tool_registration()
 
 
 async def build_mcp_tools_manifest(

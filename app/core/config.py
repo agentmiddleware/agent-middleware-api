@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # environments must set this false — see validate_trust_mode_guardrails.
     ENABLE_PROOF_SURFACES: bool = True
 
+    # --- Dogfood tool (opt-in executable partner.notes.write) ---
+    # When true, registers a safe local notes-write MCP tool so live
+    # /mcp/tools.json is non-empty for permit→invoke→receipt dogfood.
+    # Default false: no stub pollution. Independent of ENABLE_PROOF_SURFACES.
+    ENABLE_DOGFOOD_TOOL: bool = False
+
     # --- Phase 9: WebAuthn mock (tests/local only) ---
     # When true and py_webauthn is absent, verification can short-circuit.
     # Production-like environments must keep this false.

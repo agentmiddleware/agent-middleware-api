@@ -86,8 +86,12 @@ def production_trust_flags():
         assert cfg.TRUST_MODE_ENABLED is True
         assert cfg.ALLOW_LEGACY_UNPERMITTED_MCP is False
         assert cfg.ENABLE_PROOF_SURFACES is False
+        assert cfg.ENABLE_DOGFOOD_TOOL is False
         previous_aliases = _bind_settings_aliases(cfg)
         sync_proof_surface_mcp_registration()
+        from app.services.dogfood_tool import sync_dogfood_tool_registration
+
+        sync_dogfood_tool_registration()
         yield cfg
     finally:
         for key, old in saved_env.items():
@@ -102,6 +106,9 @@ def production_trust_flags():
         restored = get_settings()
         _bind_settings_aliases(restored)
         sync_proof_surface_mcp_registration()
+        from app.services.dogfood_tool import sync_dogfood_tool_registration
+
+        sync_dogfood_tool_registration()
 
 
 @pytest.fixture
@@ -169,6 +176,7 @@ async def test_tools_json_omits_proof_stubs_under_prod_flags(
     assert names.isdisjoint(PROOF_SURFACE_MCP_STUB_IDS)
     assert names.isdisjoint(DEFAULT_MCP_STUB_SERVICE_IDS)
     assert not any(name.startswith("awi_") for name in names)
+    assert "partner.notes.write" not in names
 
 
 @pytest.mark.production_trust
@@ -180,3 +188,4 @@ async def test_health_dependencies_reports_proof_surfaces_off(
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("enable_proof_surfaces") is False
+    assert body.get("enable_dogfood_tool") is False
