@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import Settings, get_settings
+from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import SigningKeyModel
 
