@@ -124,15 +124,33 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio anyio httpx
 
-      - name: Run trust loop against Postgres
-        # Only TEST_POSTGRES_URL. Setting DATABASE_URL here would point
-        # conftest's session-scoped setup_database fixture at Postgres before
-        # the test module has run `alembic upgrade head`, and verify_required_schema
-        # fails closed on the missing trust tables. The module fixture sets
-        # DATABASE_URL itself, migrates, then rebuilds the engine.
+      - name: Run trust loop against Postgres (full suite)
+        # Run the full trust test suite against PostgreSQL/asyncpg.
+        # The module fixture handles alembic migration before tests run.
         env:
           TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
-        run: pytest tests/test_postgres_datetime_binding.py -v --tb=short
+          STATE_BACKEND: postgres
+        run: |
+          pytest \
+            tests/test_permits.py \
+            tests/test_receipts.py \
+            tests/test_mcp_trust.py \
+            tests/test_audit_chain.py \
+            tests/test_key_management.py \
+            tests/test_idempotency.py \
+            tests/test_postgres_datetime_binding.py \
+            -v --tb=short
+
+      - name: Run trust-plane demo against Postgres
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          STATE_BACKEND: postgres
+          TRUST_SIGNING_PRIVATE_KEY_B64: ${{ secrets.TRUST_SIGNING_PRIVATE_KEY_B64 }}
+          TRUST_MODE_ENABLED: true
+          VALID_API_KEYS: ci-test-key
+        run: |
+          alembic upgrade head
+          python scripts/demo_trust_plane.py --assert
 
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:

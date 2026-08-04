@@ -18,6 +18,11 @@ test-proof:
 prove-trust-plane:
 	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert
 
+prove-trust-plane-postgres:
+	# Requires DATABASE_URL=postgresql+asyncpg://... and STATE_BACKEND=postgres
+	alembic upgrade head
+	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert
+
 demo-trust-plane:
 	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py
 
