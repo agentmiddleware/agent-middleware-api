@@ -363,7 +363,7 @@ deferred.
 |------|--------|
 | Discovery honesty: stop advertising unpublished `pip install b2a-sdk` / `npm install @b2a/sdk` in `agent.json` + `/llm.txt` | Done (#191 / live after `railway up`) |
 | Live dogfood tool on Railway (`partner.notes.write` / echo) | Waiting: empty `tools.json` is intentional until ops registers an **executable** local tool; persistent `/v1/billing/services` rows are not invokable without a local func |
-| Alembic stamp + `RUN_MIGRATIONS_ON_START=true` | Waiting: needs stamp evidence on live DB before enabling |
+| Alembic stamp + `RUN_MIGRATIONS_ON_START=true` | Done (2026-08-04): live DB had trust tables + no `alembic_version` (create_all-era). Schema matched through `020`; missing `ledger_entries.stripe_event_id` (021). Stamped `020`, `alembic upgrade head` applied 021, then `RUN_MIGRATIONS_ON_START=true` + `railway up`. Live: boot healthy, `fell_back_to_memory=false`, stamp=`021_ledger_stripe_event_id`. |
 | Brand rename (drop provisional PERMIT / `b2a_*`) | Blocked on product name |
 | Demote `kyc` / `planner` from `CORE_TRUST_ROUTERS` | Blocked on product approval |
 
