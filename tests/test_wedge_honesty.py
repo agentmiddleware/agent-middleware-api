@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -86,6 +88,45 @@ async def test_agent_json_documentation_urls_resolve(client, proof_surfaces_off)
         resp = await client.get(path)
         assert resp.status_code == 200, f"{key}={path} returned {resp.status_code}"
         assert len(resp.text) > 50
+
+
+@pytest.mark.anyio
+async def test_agent_json_sdk_integrations_are_honest(client):
+    """Discovery must not advertise unpublished PyPI/npm package installs."""
+    resp = await client.get("/.well-known/agent.json")
+    assert resp.status_code == 200
+    integrations = resp.json()["integrations"]
+
+    python_sdk = integrations["python_sdk"]
+    assert isinstance(python_sdk, dict)
+    assert python_sdk["status"] == "provisional_in_repo"
+    assert python_sdk["install"] == "pip install -e ./b2a_sdk"
+    assert "pip install b2a-sdk" not in json.dumps(python_sdk)
+    assert "not published" in python_sdk["note"].lower()
+
+    typescript_sdk = integrations["typescript_sdk"]
+    assert isinstance(typescript_sdk, dict)
+    assert typescript_sdk["status"] == "not_published"
+    assert "npm install @b2a/sdk" not in json.dumps(typescript_sdk)
+
+    assert integrations["preferred_integration"] == "http_mcp"
+    assert integrations["mcp"] is True
+
+
+@pytest.mark.anyio
+async def test_llm_txt_does_not_advertise_unpublished_sdk_installs(client):
+    resp = await client.get("/llm.txt")
+    assert resp.status_code == 200
+    text = resp.text
+    assert "pip install b2a-sdk" not in text
+    assert "npm install @b2a/sdk" not in text
+    assert "pip install -e ./b2a_sdk" in text
+    assert (
+        "not**" in text.lower()
+        or "not\npublished" in text.lower()
+        or "not published" in text.lower()
+    )
+    assert "No published TypeScript SDK" in text
 
 
 @pytest.mark.anyio

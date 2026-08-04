@@ -118,11 +118,18 @@ Wallets are auto-frozen if spending exceeds:
 
 ---
 
-## SDKs
+## SDKs (provisional)
 
-### Python (b2a-sdk)
+Prefer the HTTP trust loop above (permits → MCP invoke → receipts). Client
+libraries are optional and not required for the wedge.
+
+### Python (in-repo only)
+
+The provisional package lives at `b2a_sdk/` in this repository. It is **not**
+published to PyPI. From a clone:
+
 ```bash
-pip install b2a-sdk
+pip install -e ./b2a_sdk
 ```
 
 ```python
@@ -135,10 +142,11 @@ async def my_tool():
     return result
 ```
 
-### TypeScript (@b2a/sdk)
-```bash
-npm install @b2a/sdk
-```
+Package rename is deferred pending product brand decision.
+
+### TypeScript
+
+No published TypeScript SDK. Use HTTP (`/mcp`, `/v1/permits`, `/v1/receipts`).
 
 ---
 

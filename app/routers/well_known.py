@@ -215,13 +215,30 @@ class AgentPluginManifest(BaseModel):
 
     integrations: dict = Field(
         default_factory=lambda: {
-            "python_sdk": "pip install b2a-sdk",
-            "typescript_sdk": "npm install @b2a/sdk",
+            # Provisional package directory name pending brand decision.
+            # Do not advertise unpublished registry installs (PyPI/npm 404).
+            "python_sdk": {
+                "status": "provisional_in_repo",
+                "path": "b2a_sdk/",
+                "install": "pip install -e ./b2a_sdk",
+                "note": (
+                    "Not published to PyPI. Prefer the HTTP trust loop "
+                    "(permits → MCP → receipts). Package rename deferred."
+                ),
+            },
+            "typescript_sdk": {
+                "status": "not_published",
+                "note": (
+                    "No published TypeScript SDK. Use HTTP "
+                    "(/mcp, /v1/permits, /v1/receipts)."
+                ),
+            },
             "mcp": True,
-            "langgraph": True,
-            "crewai": True,
-            "autogen": True,
-            "llamaindex": True,
+            "preferred_integration": "http_mcp",
+            "langgraph": "in_repo_wrapper",
+            "crewai": "in_repo_wrapper",
+            "autogen": "in_repo_wrapper",
+            "llamaindex": "in_repo_wrapper",
         }
     )
 
