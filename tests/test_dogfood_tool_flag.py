@@ -62,6 +62,10 @@ def _restore_settings_aliases(previous: dict) -> None:
 @pytest.fixture
 def dogfood_tool_off(monkeypatch):
     """Force dogfood tool off; keep proof surfaces off to avoid stub pollution."""
+    saved = {
+        "ENABLE_DOGFOOD_TOOL": os.environ.get("ENABLE_DOGFOOD_TOOL"),
+        "ENABLE_PROOF_SURFACES": os.environ.get("ENABLE_PROOF_SURFACES"),
+    }
     monkeypatch.setenv("ENABLE_DOGFOOD_TOOL", "false")
     monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
     get_settings.cache_clear()
@@ -72,8 +76,11 @@ def dogfood_tool_off(monkeypatch):
     sync_proof_surface_mcp_registration()
     sync_dogfood_tool_registration()
     yield cfg
-    monkeypatch.delenv("ENABLE_DOGFOOD_TOOL", raising=False)
-    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "true")
+    for key, old in saved.items():
+        if old is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old
     get_settings.cache_clear()
     _restore_settings_aliases(previous)
     restored = get_settings()
@@ -165,6 +172,7 @@ async def test_dogfood_invoke_completes_trust_loop(
 
     notes_path = tmp_path / "dogfood_partner_notes.jsonl"
     monkeypatch.setattr(dogfood_mod, "DOGFOOD_NOTES_PATH", notes_path)
+    monkeypatch.setattr(dogfood_mod, "_note_count", None)
 
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]

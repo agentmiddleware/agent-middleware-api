@@ -26,28 +26,53 @@ DOGFOOD_TOOL_ID = "partner.notes.write"
 DOGFOOD_TOOL_NAME = "Partner Notes Write"
 DOGFOOD_NOTES_PATH = Path("data") / "dogfood_partner_notes.jsonl"
 DOGFOOD_CREDITS_PER_UNIT = 2.0
+DOGFOOD_MAX_TEXT_CHARS = 2_000
+DOGFOOD_MAX_NOTES = 1_000
 
 _registered = False
 _registration_lock = Lock()
+_note_count: int | None = None
+
+
+def _load_note_count() -> int:
+    if not DOGFOOD_NOTES_PATH.exists():
+        return 0
+    return sum(
+        1
+        for line in DOGFOOD_NOTES_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
 
 
 def _write_note(text: str = "hello") -> dict[str, Any]:
     """Append one governed dogfood note (safe side effect: local JSONL)."""
-    DOGFOOD_NOTES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "text": text,
-        "written_at": datetime.now(timezone.utc).isoformat(),
-        "governed": True,
-    }
-    with DOGFOOD_NOTES_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry) + "\n")
-    note_count = 0
-    if DOGFOOD_NOTES_PATH.exists():
-        note_count = sum(
-            1
-            for line in DOGFOOD_NOTES_PATH.read_text(encoding="utf-8").splitlines()
-            if line.strip()
+    global _note_count
+    if not isinstance(text, str):
+        raise ValueError("text must be a string")
+    if len(text) > DOGFOOD_MAX_TEXT_CHARS:
+        raise ValueError(
+            f"text exceeds max length of {DOGFOOD_MAX_TEXT_CHARS} characters"
         )
+
+    with _registration_lock:
+        if _note_count is None:
+            _note_count = _load_note_count()
+        if _note_count >= DOGFOOD_MAX_NOTES:
+            raise ValueError(
+                f"dogfood notes file is full (max {DOGFOOD_MAX_NOTES} notes); "
+                "rotate or delete data/dogfood_partner_notes.jsonl"
+            )
+        DOGFOOD_NOTES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "text": text,
+            "written_at": datetime.now(timezone.utc).isoformat(),
+            "governed": True,
+        }
+        with DOGFOOD_NOTES_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+        _note_count += 1
+        note_count = _note_count
+
     return {
         "status": "ok",
         "tool": DOGFOOD_TOOL_ID,
@@ -87,11 +112,12 @@ def register_dogfood_tool() -> None:
 
 def unregister_dogfood_tool() -> None:
     """Remove the dogfood tool from the local registry."""
-    global _registered
+    global _registered, _note_count
     registry = get_service_registry()
     with _registration_lock:
         registry.unregister_local(DOGFOOD_TOOL_ID)
         _registered = False
+        _note_count = None
 
 
 def sync_dogfood_tool_registration() -> None:
