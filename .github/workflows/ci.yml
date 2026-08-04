@@ -125,9 +125,13 @@ jobs:
           pip install pytest pytest-asyncio anyio httpx
 
       - name: Run trust loop against Postgres
+        # Only TEST_POSTGRES_URL. Setting DATABASE_URL here would point
+        # conftest's session-scoped setup_database fixture at Postgres before
+        # the test module has run `alembic upgrade head`, and verify_required_schema
+        # fails closed on the missing trust tables. The module fixture sets
+        # DATABASE_URL itself, migrates, then rebuilds the engine.
         env:
           TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
         run: pytest tests/test_postgres_datetime_binding.py -v --tb=short
 
   # Production-like trust flags (default conftest stays permissive for unit speed).
