@@ -357,6 +357,16 @@ Phase 7 optional follow-ons: safe slice shipped (`canonical_api`, partner key
 bootstrap, analytics export, Vercel Git link + `site` root). Brand rename
 deferred.
 
+### Post-plan backlog (unblocked / blocked)
+
+| Item | Status |
+|------|--------|
+| Discovery honesty: stop advertising unpublished `pip install b2a-sdk` / `npm install @b2a/sdk` in `agent.json` + `/llm.txt` | In progress (this slice) |
+| Live dogfood tool on Railway (`partner.notes.write` / echo) | Waiting: empty `tools.json` is intentional until ops registers an **executable** local tool; persistent `/v1/billing/services` rows are not invokable without a local func |
+| Alembic stamp + `RUN_MIGRATIONS_ON_START=true` | Waiting: needs stamp evidence on live DB before enabling |
+| Brand rename (drop provisional PERMIT / `b2a_*`) | Blocked on product name |
+| Demote `kyc` / `planner` from `CORE_TRUST_ROUTERS` | Blocked on product approval |
+
 ### PR naming convention
 
 - `fix/durable-state-url-normalize`
