@@ -361,7 +361,7 @@ deferred.
 
 | Item | Status |
 |------|--------|
-| Discovery honesty: stop advertising unpublished `pip install b2a-sdk` / `npm install @b2a/sdk` in `agent.json` + `/llm.txt` | In progress (this slice) |
+| Discovery honesty: stop advertising unpublished `pip install b2a-sdk` / `npm install @b2a/sdk` in `agent.json` + `/llm.txt` | Done (#191 / live after `railway up`) |
 | Live dogfood tool on Railway (`partner.notes.write` / echo) | Waiting: empty `tools.json` is intentional until ops registers an **executable** local tool; persistent `/v1/billing/services` rows are not invokable without a local func |
 | Alembic stamp + `RUN_MIGRATIONS_ON_START=true` | Waiting: needs stamp evidence on live DB before enabling |
 | Brand rename (drop provisional PERMIT / `b2a_*`) | Blocked on product name |
