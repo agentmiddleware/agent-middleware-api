@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import ReceiptModel
 from app.schemas.trust import ReceiptResponse
@@ -56,7 +56,7 @@ class ReceiptService:
         outcome: str,
         audit_event_id: str | None,
     ) -> ReceiptResponse:
-        created_at = datetime.now(timezone.utc)
+        created_at = utc_now()
         request_hash = sha256_hex(request_payload)
         response_hash = (
             sha256_hex(response_payload) if response_payload is not None else None

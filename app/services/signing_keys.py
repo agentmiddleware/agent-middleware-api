@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
+from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import SigningKeyModel
 
@@ -125,7 +126,7 @@ class SigningKeyService:
             if key:
                 if key.public_key_b64 != public_key_b64:
                     key.public_key_b64 = public_key_b64
-                    key.activated_at = datetime.now(timezone.utc)
+                    key.activated_at = utc_now()
                 key.status = "active"
                 key.retired_at = None
                 session.add(key)
@@ -134,7 +135,7 @@ class SigningKeyService:
                     key_id=self._key_id,
                     public_key_b64=public_key_b64,
                     status="active",
-                    activated_at=datetime.now(timezone.utc),
+                    activated_at=utc_now(),
                 )
                 session.add(key)
             try:
@@ -179,7 +180,7 @@ class SigningKeyService:
                 raise SigningKeyError("signing_key_not_found")
             if key.status != "disabled":
                 key.status = "retired"
-                key.retired_at = datetime.now(timezone.utc)
+                key.retired_at = utc_now()
             session.add(key)
             await session.commit()
             await session.refresh(key)
@@ -200,7 +201,7 @@ class SigningKeyService:
 
         old_key = await self.ensure_active_key()
         new_key_id = new_key_id.strip()
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         public_key_b64 = self._public_key_b64()
         factory = get_session_factory()
         async with factory() as session:
