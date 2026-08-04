@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import base64
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,9 @@ RAILWAY_JSON = REPO_ROOT / "railway.json"
 
 # Dummy non-secret material so production-like validation can pass without
 # loading a real signing key into the test process.
-_TEST_SIGNING_PRIVATE_KEY_B64 = "dGVzdC1zaWduaW5nLWtleS1ub3QtZm9yLXByb2Q="
+_TEST_SIGNING_PRIVATE_KEY_B64 = base64.b64encode(
+    b"test-signing-key-material-32byte"
+).decode()
 
 _PROD_TRUST_ENV = {
     "TRUST_MODE_ENABLED": "true",

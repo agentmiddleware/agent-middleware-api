@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -17,13 +18,41 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.database import get_session_factory
 from app.db.models import SigningKeyModel
 
 
 class SigningKeyError(RuntimeError):
     """Raised when trust-plane signing or verification cannot proceed."""
+
+
+def _decode_private_key(configured: str) -> Ed25519PrivateKey:
+    """Decode strict base64 Ed25519 seed material without exposing it."""
+
+    try:
+        raw = base64.b64decode(configured, validate=True)
+        return Ed25519PrivateKey.from_private_bytes(raw)
+    except (binascii.Error, ValueError) as exc:
+        raise SigningKeyError("invalid_trust_signing_private_key") from exc
+
+
+def validate_signing_key_configuration(settings: Settings | None = None) -> str:
+    """Validate configured signing material without touching durable state.
+
+    Returns a non-secret state for startup logs and dependency health. The
+    configured value must be strict base64 that decodes to the 32-byte seed
+    accepted by ``Ed25519PrivateKey.from_private_bytes``.
+    """
+
+    settings = settings or get_settings()
+    configured = settings.TRUST_SIGNING_PRIVATE_KEY_B64.strip()
+    if configured:
+        _decode_private_key(configured)
+        return "loaded"
+    if settings.TRUST_MODE_ENABLED:
+        raise SigningKeyError("trust_signing_private_key_required")
+    return "ephemeral"
 
 
 def canonical_json(payload: dict[str, Any]) -> str:
@@ -72,12 +101,8 @@ class SigningKeyService:
 
         configured = self._settings.TRUST_SIGNING_PRIVATE_KEY_B64.strip()
         if configured:
-            try:
-                raw = base64.b64decode(configured)
-                self._private_key = Ed25519PrivateKey.from_private_bytes(raw)
-                return self._private_key
-            except Exception as exc:  # pragma: no cover - defensive config guard
-                raise SigningKeyError("invalid_trust_signing_private_key") from exc
+            self._private_key = _decode_private_key(configured)
+            return self._private_key
 
         if self._settings.TRUST_MODE_ENABLED:
             raise SigningKeyError("trust_signing_private_key_required")
@@ -251,7 +276,9 @@ class SigningKeyService:
         signing_payload.setdefault("kid", key_id)
         payload_hash = sha256_hex(signing_payload)
         signing_payload.setdefault("payload_hash", payload_hash)
-        signature = self._load_private_key().sign(canonical_json(signing_payload).encode())
+        signature = self._load_private_key().sign(
+            canonical_json(signing_payload).encode()
+        )
         return base64.b64encode(signature).decode(), key_id, payload_hash
 
     async def verify_payload(
@@ -267,7 +294,9 @@ class SigningKeyService:
         public_raw = base64.b64decode(key.public_key_b64)
         public_key = Ed25519PublicKey.from_public_bytes(public_raw)
         try:
-            public_key.verify(base64.b64decode(signature), canonical_json(payload).encode())
+            public_key.verify(
+                base64.b64decode(signature), canonical_json(payload).encode()
+            )
             return True
         except InvalidSignature:
             return False

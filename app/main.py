@@ -36,6 +36,7 @@ from .core.trust_mode import (
 )
 from .db.database import SchemaInitError, init_db, close_db
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
+from .services.signing_keys import validate_signing_key_configuration
 from .routers.well_known import get_agent_first_metadata
 from .routers import (
     iot,
@@ -110,6 +111,12 @@ except ImportError:
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
+    signing_key_state = validate_signing_key_configuration(settings)
+    logger.info(
+        "app_startup",
+        phase="signing_key_validated",
+        state=signing_key_state,
+    )
 
     cleanup_task: asyncio.Task | None = None
     startup_time = time.monotonic()
@@ -779,8 +786,8 @@ async def health_ready():
     summary="Dependency health check",
     description=(
         "Probes every external dependency (PostgreSQL, Redis, MQTT broker, "
-        "Stripe, LLM provider) in parallel with a short timeout. Each entry "
-        "reports status, latency_ms, and an error message when unreachable. "
+        "Stripe, LLM provider, signing key) in parallel with a short timeout. "
+        "Each entry reports status, latency_ms, and an error message when unreachable. "
         "Deps whose consumers are in simulation mode return `not_used` so "
         "the health verdict doesn't degrade on mock-only deployments."
     ),
