@@ -87,6 +87,53 @@ jobs:
         if: matrix.python-version == '3.12'
         run: pytest tests/test_migrations.py -v --tb=short
 
+  # Railway runs Postgres; the rest of CI runs SQLite. Dialect differences that
+  # SQLite accepts silently (notably tz-aware datetimes bound to the schema's
+  # TIMESTAMP WITHOUT TIME ZONE columns, which asyncpg rejects outright) are
+  # invisible everywhere else and only surface as production 500s.
+  postgres_trust:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trust_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio anyio httpx
+
+      - name: Run trust loop against Postgres
+        # Only TEST_POSTGRES_URL. Setting DATABASE_URL here would point
+        # conftest's session-scoped setup_database fixture at Postgres before
+        # the test module has run `alembic upgrade head`, and verify_required_schema
+        # fails closed on the missing trust tables. The module fixture sets
+        # DATABASE_URL itself, migrates, then rebuilds the engine.
+        env:
+          TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+        run: pytest tests/test_postgres_datetime_binding.py -v --tb=short
+
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:
     runs-on: ubuntu-latest

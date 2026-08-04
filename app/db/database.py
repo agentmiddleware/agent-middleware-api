@@ -17,6 +17,7 @@ tables and fails closed if they are missing.
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, AsyncGenerator
 
 from sqlalchemy import event, inspect as sa_inspect
@@ -32,6 +33,7 @@ from sqlmodel import SQLModel
 
 from ..core.config import get_settings
 from ..core.db_urls import as_sqlalchemy_url
+from ..core.time import to_naive_utc
 from ..core.trust_mode import is_production_like_environment
 
 logger = logging.getLogger(__name__)
@@ -137,12 +139,74 @@ def get_engine() -> AsyncEngine | None:
                 finally:
                     cursor.close()
 
+        _install_naive_utc_bind_guard(_engine)
+
         logger.info(
             "Database engine created: dialect=%s",
             "sqlite" if is_sqlite else "postgres",
         )
 
     return _engine
+
+
+def _normalize_bind_parameters(parameters: Any) -> Any:
+    """Coerce tz-aware datetimes in a bind-parameter set to naive UTC.
+
+    Returns ``parameters`` unchanged (same object) when there is nothing to
+    rewrite, so the overwhelmingly common case costs one scan and no copy.
+    """
+    if isinstance(parameters, dict):
+        rewritten = {
+            key: to_naive_utc(value) if isinstance(value, datetime) else value
+            for key, value in parameters.items()
+        }
+        # Identity, not equality: bind values are arbitrary user types whose
+        # __eq__ may be expensive or may not return a bool.
+        if all(rewritten[key] is value for key, value in parameters.items()):
+            return parameters
+        return rewritten
+    if isinstance(parameters, (tuple, list)):
+        rewritten_seq = [
+            to_naive_utc(value) if isinstance(value, datetime) else value
+            for value in parameters
+        ]
+        if all(a is b for a, b in zip(rewritten_seq, parameters)):
+            return parameters
+        return tuple(rewritten_seq) if isinstance(parameters, tuple) else rewritten_seq
+    return parameters
+
+
+def _install_naive_utc_bind_guard(engine: AsyncEngine) -> None:
+    """Normalize tz-aware datetime binds to naive UTC before they reach the DB.
+
+    Every datetime column in this schema is ``TIMESTAMP WITHOUT TIME ZONE``
+    and ``app.core.time.utc_now`` is the storage convention, but a call site
+    that reaches for ``datetime.now(timezone.utc)`` instead produces a
+    tz-aware value. On SQLite that is accepted silently; on Postgres asyncpg
+    rejects it with ``DataError``, so the mismatch only ever surfaces in
+    production. This guard closes that gap at the driver boundary for every
+    dialect, keeping SQLite and Postgres behavior identical.
+
+    Conversion is instant-preserving (``astimezone(utc)`` before dropping
+    ``tzinfo``). Should a column ever be migrated to ``TIMESTAMP WITH TIME
+    ZONE``, this guard must be revisited alongside it.
+    """
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute", retval=True)
+    def _coerce_naive_utc(  # noqa: ANN001, ANN202
+        _conn,
+        _cursor,
+        statement,
+        parameters,
+        _context,
+        executemany,
+    ):
+        if executemany and isinstance(parameters, (list, tuple)):
+            normalized = [_normalize_bind_parameters(p) for p in parameters]
+            if all(a is b for a, b in zip(normalized, parameters)):
+                return statement, parameters
+            return statement, normalized
+        return statement, _normalize_bind_parameters(parameters)
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
