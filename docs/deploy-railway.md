@@ -45,7 +45,7 @@ in committed defaults.
 | `ENABLE_DOGFOOD_TOOL` | `true` (optional dogfood) | Opt-in executable `partner.notes.write` for live trust-loop demos. Default in code is `false`. Safe side effect only (append JSONL). Do **not** set `ENABLE_PROOF_SURFACES=true` for this. |
 | `TRUST_MODE_ENABLED` | `true` | Shipped default; keep it |
 | `ALLOW_LEGACY_UNPERMITTED_MCP` | `false` | Shipped default; keep it |
-| `TRUST_SIGNING_PRIVATE_KEY_B64` | secret material | Required when trust mode is on in prod-like |
+| `TRUST_SIGNING_PRIVATE_KEY_B64` | strict base64 of exactly 32 raw bytes | Required when trust mode is on in prod-like; PEM, hex, 64-byte concatenations, and double-encoded base64 are invalid |
 | `STATE_BACKEND` | `postgres` | Use linked Postgres; avoid silent memory fallback |
 | `DATABASE_URL` | from Railway Postgres plugin | App normalizes `postgresql://` ↔ `postgresql+asyncpg://` |
 | `PUBLIC_URL` | public HTTPS API origin | e.g. `https://api-service-production-433c.up.railway.app` |

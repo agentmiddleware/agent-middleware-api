@@ -11270,7 +11270,7 @@
           "Discovery"
         ],
         "summary": "Dependency health check",
-        "description": "Probes every external dependency (PostgreSQL, Redis, MQTT broker, Stripe, LLM provider) in parallel with a short timeout. Each entry reports status, latency_ms, and an error message when unreachable. Deps whose consumers are in simulation mode return `not_used` so the health verdict doesn't degrade on mock-only deployments.",
+        "description": "Probes every external dependency (PostgreSQL, Redis, MQTT broker, Stripe, LLM provider, signing key) in parallel with a short timeout. Each entry reports status, latency_ms, and an error message when unreachable. Deps whose consumers are in simulation mode return `not_used` so the health verdict doesn't degrade on mock-only deployments.",
         "operationId": "health_dependencies_health_dependencies_get",
         "responses": {
           "200": {

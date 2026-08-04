@@ -161,7 +161,7 @@ jobs:
           DEBUG: "false"
           WEBAUTHN_ALLOW_MOCK: "false"
           # Non-secret test material so prod-like guardrails can validate.
-          TRUST_SIGNING_PRIVATE_KEY_B64: dGVzdC1zaWduaW5nLWtleS1ub3QtZm9yLXByb2Q=
+          TRUST_SIGNING_PRIVATE_KEY_B64: dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU=
           PUBLIC_URL: https://api-service-production-433c.up.railway.app
           VALID_API_KEYS: test-key
           DATABASE_URL: sqlite+aiosqlite:///./test-production-trust.db
