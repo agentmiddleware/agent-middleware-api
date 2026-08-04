@@ -240,6 +240,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         "dependencies": dependencies,
         "simulation_modes": sim_modes,
         "enable_proof_surfaces": bool(settings.ENABLE_PROOF_SURFACES),
+        "enable_dogfood_tool": bool(settings.ENABLE_DOGFOOD_TOOL),
         "runtime_degradation": runtime_degradation,
         "unhealthy": unhealthy,
     }

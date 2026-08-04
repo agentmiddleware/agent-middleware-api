@@ -46,6 +46,10 @@ To dogfood a fake partner tool with a real side effect (writes
 make dogfood-trust-plane
 ```
 
+On Railway, set `ENABLE_DOGFOOD_TOOL=true` (keep `ENABLE_PROOF_SURFACES=false`)
+so `GET /mcp/tools.json` lists executable `partner.notes.write`. See
+[`docs/deploy-railway.md`](docs/deploy-railway.md#enable-live-dogfood-tool-ops).
+
 For the live engagement checklist that replaces `trust-plane-echo` / 
 `partner.notes.write` with the partner's real tool id, use
 [`docs/partner-first-tool-runbook.md`](docs/partner-first-tool-runbook.md).

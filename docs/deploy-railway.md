@@ -42,6 +42,7 @@ in committed defaults.
 | `ENVIRONMENT` | `production` (or other production-like) | Engages trust guardrails |
 | `DEBUG` | `false` | Empty-key auth bootstrap is forbidden in prod-like |
 | `ENABLE_PROOF_SURFACES` | `false` | Mount only core trust routers + MCP |
+| `ENABLE_DOGFOOD_TOOL` | `true` (optional dogfood) | Opt-in executable `partner.notes.write` for live trust-loop demos. Default in code is `false`. Safe side effect only (append JSONL). Do **not** set `ENABLE_PROOF_SURFACES=true` for this. |
 | `TRUST_MODE_ENABLED` | `true` | Shipped default; keep it |
 | `ALLOW_LEGACY_UNPERMITTED_MCP` | `false` | Shipped default; keep it |
 | `TRUST_SIGNING_PRIVATE_KEY_B64` | secret material | Required when trust mode is on in prod-like |
@@ -77,6 +78,64 @@ Expect:
 - No `trust_mode_permissive` warning in Railway logs for production.
 - `/health/dependencies` → `runtime_degradation.durable_state.fell_back_to_memory=false`.
 - `ENABLE_PROOF_SURFACES=false` reflected in health / agent.json.
+- If `ENABLE_DOGFOOD_TOOL=true`: `/mcp/tools.json` includes `partner.notes.write`
+  and `/health/dependencies` shows `enable_dogfood_tool=true`. Otherwise tools
+  list stays empty of dogfood ids.
+
+### Enable live dogfood tool (ops)
+
+After a green deploy of a build that includes the flag:
+
+```bash
+railway variables set ENABLE_DOGFOOD_TOOL=true
+railway up   # or restart so the process picks up the var
+curl -sS "$API_URL/mcp/tools.json" | jq '.tools[].name'
+# expect: partner.notes.write
+```
+
+Minimal governed invoke (requires an existing agent API key + funded wallet;
+do not invent secrets — use your operator key store / `cw-vault`):
+
+```bash
+# 1) Discover
+curl -sS "$API_URL/mcp/tools.json" | jq .
+
+# 2) Create permit (admin/bootstrap key) — fill WALLET_ID, KEY_ID, ADMIN_KEY
+curl -sS -X POST "$API_URL/v1/permits" \
+  -H "X-API-Key: $ADMIN_KEY" \
+  -H "Idempotency-Key: dogfood-live-permit-1" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"issuer_wallet_id\": \"$WALLET_ID\",
+    \"subject_wallet_id\": \"$WALLET_ID\",
+    \"subject_key_id\": \"$KEY_ID\",
+    \"allowed_tools\": [\"partner.notes.write\"],
+    \"scopes\": [\"tool:partner.notes.write:invoke\", \"billing:charge\"],
+    \"max_credits\": 20,
+    \"expires_at\": \"$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)\"
+  }"
+
+# 3) Invoke (agent key) — fill PERMIT_ID, AGENT_KEY
+curl -sS -X POST "$API_URL/mcp/messages" \
+  -H "X-API-Key: $AGENT_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"jsonrpc\": \"2.0\",
+    \"id\": \"dogfood-live-1\",
+    \"method\": \"tools/call\",
+    \"params\": {
+      \"name\": \"partner.notes.write\",
+      \"arguments\": {\"text\": \"live dogfood note\"},
+      \"mcpContext\": {
+        \"wallet_id\": \"$WALLET_ID\",
+        \"permit_id\": \"$PERMIT_ID\",
+        \"idempotency_key\": \"dogfood-live-invoke-1\"
+      }
+    }
+  }"
+```
+
+Local full loop without Railway credentials: `make dogfood-trust-plane`.
 
 Operator checklist script (unauthenticated discovery only):
 
