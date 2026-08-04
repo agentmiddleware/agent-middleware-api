@@ -12,7 +12,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
-from app.db.models import PermitModel, WalletModel
+from app.db.models import BillingAlertModel, PermitModel, WalletModel
 from app.schemas.trust import PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service
 
@@ -272,6 +272,34 @@ class PermitService:
                 model.spent_credits += amount
                 model.updated_at = utc_now()
                 session.add(model)
+
+                # Budget percentage alerts
+                if model.max_credits > 0:
+                    pct = (model.spent_credits / model.max_credits) * 100
+                    thresholds = [
+                        (Decimal("100"), "critical", "permit_budget_exhausted"),
+                        (Decimal("90"), "warning", "permit_budget_90pct"),
+                        (Decimal("80"), "info", "permit_budget_80pct"),
+                    ]
+                    for threshold, severity, alert_type in thresholds:
+                        if pct >= threshold:
+                            # Only create alert if we just crossed this threshold
+                            prior_pct = ((model.spent_credits - amount) / model.max_credits) * 100
+                            if prior_pct < threshold:
+                                alert = BillingAlertModel(
+                                    alert_id=f"alt-{uuid.uuid4().hex[:12]}",
+                                    wallet_id=model.subject_wallet_id,
+                                    alert_type=alert_type,
+                                    threshold_amount=threshold,
+                                    current_balance=model.max_credits - model.spent_credits,
+                                    message=(
+                                        f"Permit {permit_id}: {pct:.0f}% of "
+                                        f"{model.max_credits} credits spent."
+                                    ),
+                                    severity=severity,
+                                )
+                                session.add(alert)
+                            break  # Only fire the highest crossed threshold
             await session.commit()
 
     async def release_budget(self, permit_id: str, amount: Decimal) -> None:
