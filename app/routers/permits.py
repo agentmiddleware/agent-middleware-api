@@ -101,7 +101,7 @@ async def create_permit(
         return PermitResponse(**replay.response_json)
 
     try:
-        permit = await get_permit_service().create_permit(request)
+        permit = await get_permit_service().create_permit(request, subject_key_id=auth.key_id)
     except PermitError as exc:
         raise HTTPException(status_code=400, detail=exc.reason)
     await idem.complete(

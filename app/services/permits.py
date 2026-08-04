@@ -138,7 +138,9 @@ class PermitService:
             permits = [permit_model_to_response(model) for model in result.scalars()]
             return permits, int(total or 0)
 
-    async def create_permit(self, request: PermitCreateRequest) -> PermitResponse:
+    async def create_permit(
+        self, request: PermitCreateRequest, subject_key_id: str | None = None
+    ) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
 
@@ -169,11 +171,15 @@ class PermitService:
 
         permit_id = f"permit-{uuid.uuid4().hex[:16]}"
         nonce = request.nonce or uuid.uuid4().hex
+        # Prefer the explicitly-passed key_id (from auth context) over the
+        # request body, so wallet-bound self-service permits show up in
+        # /v1/me/permits queries filtered by subject_key_id.
+        effective_key_id = request.subject_key_id or subject_key_id
         payload = {
             "permit_id": permit_id,
             "issuer_wallet_id": request.issuer_wallet_id,
             "subject_wallet_id": request.subject_wallet_id,
-            "subject_key_id": request.subject_key_id,
+            "subject_key_id": effective_key_id,
             "scopes": scopes,
             "allowed_tools": request.allowed_tools,
             "max_credits": request.max_credits,
@@ -188,7 +194,7 @@ class PermitService:
             permit_id=permit_id,
             issuer_wallet_id=request.issuer_wallet_id,
             subject_wallet_id=request.subject_wallet_id,
-            subject_key_id=request.subject_key_id,
+            subject_key_id=effective_key_id,
             scopes_json=json.dumps(scopes),
             allowed_tools_json=json.dumps(request.allowed_tools),
             max_credits=request.max_credits,
