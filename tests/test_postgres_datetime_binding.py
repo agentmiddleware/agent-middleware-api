@@ -225,6 +225,66 @@ class TestPostgresTrustLoop:
         assert "+" not in body["issued_at"]
 
     @pytest.mark.anyio
+    async def test_permit_with_non_utc_offset_normalizes_correctly(
+        self, client, wallets
+    ):
+        """Regression: non-UTC offset must be converted, not truncated.
+
+        2099-01-01T00:00:00+05:00 is 2098-12-31T19:00:00 UTC.
+        The signed payload and persisted row must both use the naive UTC
+        instant so that signature verification and governed invocation
+        succeed on every dialect (SQLite and PostgreSQL/asyncpg).
+        """
+        sponsor_id, agent_id = wallets
+        response = await client.post(
+            "/v1/permits",
+            headers={"X-API-Key": "pg-test-key", "Idempotency-Key": "pg-permit-offset"},
+            json={
+                "issuer_wallet_id": sponsor_id,
+                "subject_wallet_id": agent_id,
+                "allowed_tools": ["partner.notes.write"],
+                "max_credits": "10",
+                "expires_at": "2099-01-01T00:00:00+05:00",
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["status"] == "active"
+        assert body["signature"]
+
+        # The stored expires_at must be the naive UTC instant, not the raw
+        # local wall-clock time (which would silently shift by 5 hours).
+        assert body["expires_at"] == "2098-12-31T19:00:00"
+        assert "+" not in body["expires_at"]
+
+        # Governed invocation with this permit must succeed, which exercises
+        # signature verification against the normalized timestamp.
+        invoke = await client.post(
+            "/mcp/messages",
+            headers={
+                "X-API-Key": "pg-test-key",
+                "Idempotency-Key": "pg-invoke-offset",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "partner.notes.write",
+                    "arguments": {"text": "offset regression"},
+                    "mcpContext": {
+                        "wallet_id": agent_id,
+                        "permit_id": body["permit_id"],
+                    },
+                },
+            },
+        )
+        assert invoke.status_code == 200, invoke.text
+        result = invoke.json()
+        assert "error" not in result, result
+        assert result["result"]["receipt"]["receipt_id"]
+
+    @pytest.mark.anyio
     async def test_unpermitted_mcp_call_is_denied_not_500(self, client, wallets):
         """Strict trust mode must return a JSON-RPC denial, not crash."""
         _, agent_id = wallets

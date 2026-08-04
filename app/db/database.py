@@ -177,20 +177,22 @@ def _normalize_bind_parameters(parameters: Any) -> Any:
 
 
 def _install_naive_utc_bind_guard(engine: AsyncEngine) -> None:
-    """Normalize tz-aware datetime binds to naive UTC before they reach the DB.
+    """Safety-net: normalize tz-aware datetime binds for PostgreSQL/asyncpg.
 
     Every datetime column in this schema is ``TIMESTAMP WITHOUT TIME ZONE``
-    and ``app.core.time.utc_now`` is the storage convention, but a call site
-    that reaches for ``datetime.now(timezone.utc)`` instead produces a
-    tz-aware value. On SQLite that is accepted silently; on Postgres asyncpg
-    rejects it with ``DataError``, so the mismatch only ever surfaces in
-    production. This guard closes that gap at the driver boundary for every
-    dialect, keeping SQLite and Postgres behavior identical.
+    and ``app.core.time.utc_now`` is the storage convention. The merge-safe
+    fix in ``PermitService.create_permit`` (and any future call sites) now
+    normalizes *before* signing and persisting, so this guard should never
+    fire on the happy path. It remains as a production safety net for any
+    overlooked call site that still passes a tz-aware datetime to a bind.
 
-    Conversion is instant-preserving (``astimezone(utc)`` before dropping
-    ``tzinfo``). Should a column ever be migrated to ``TIMESTAMP WITH TIME
-    ZONE``, this guard must be revisited alongside it.
+    Scoped to PostgreSQL only: SQLite accepts tz-aware values silently, and
+    the explicit normalization at call sites already keeps SQLite and Postgres
+    behavior identical. Should a column ever be migrated to
+    ``TIMESTAMP WITH TIME ZONE``, this guard must be revisited.
     """
+    if engine.dialect.name != "postgresql":
+        return
 
     @event.listens_for(engine.sync_engine, "before_cursor_execute", retval=True)
     def _coerce_naive_utc(  # noqa: ANN001, ANN202

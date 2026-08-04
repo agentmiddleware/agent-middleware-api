@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.time import utc_now
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import PermitModel, WalletModel
 from app.schemas.trust import PermitCreateRequest, PermitResponse
@@ -141,10 +141,14 @@ class PermitService:
     async def create_permit(self, request: PermitCreateRequest) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
-        expires_at = request.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at <= datetime.now(timezone.utc):
+
+        # Normalize to naive UTC before any comparison, signing, or persistence.
+        # Guarantees the signed timestamp and persisted timestamp are identical
+        # on every dialect (SQLite, PostgreSQL, asyncpg).
+        expires_at = to_naive_utc(request.expires_at)
+        now = utc_now()
+
+        if expires_at <= now:
             raise PermitError("permit_expired_at_creation")
         scopes = request.scopes or [
             f"tool:{tool}:invoke" for tool in request.allowed_tools
@@ -163,7 +167,6 @@ class PermitService:
             if subject.balance < request.max_credits:
                 raise PermitError("permit_budget_exceeds_wallet_balance")
 
-        now = datetime.now(timezone.utc)
         permit_id = f"permit-{uuid.uuid4().hex[:16]}"
         nonce = request.nonce or uuid.uuid4().hex
         payload = {
@@ -209,7 +212,7 @@ class PermitService:
             if not model:
                 raise PermitError("permit_not_found")
             model.status = "revoked"
-            model.revoked_at = datetime.now(timezone.utc)
+            model.revoked_at = utc_now()
             session.add(model)
             await session.commit()
             await session.refresh(model)
@@ -232,9 +235,7 @@ class PermitService:
             if model.status != "active":
                 return PermitValidation(False, f"permit_{model.status}", model)
             expires_at = model.expires_at
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at <= datetime.now(timezone.utc):
+            if expires_at <= utc_now():
                 return PermitValidation(False, "permit_expired", model)
             if model.subject_wallet_id != wallet_id:
                 return PermitValidation(False, "permit_wallet_mismatch", model)
@@ -263,7 +264,7 @@ class PermitService:
                 if model.spent_credits + amount > model.max_credits:
                     raise PermitError("permit_budget_exceeded")
                 model.spent_credits += amount
-                model.updated_at = datetime.now(timezone.utc)
+                model.updated_at = utc_now()
                 session.add(model)
             await session.commit()
 
@@ -275,7 +276,7 @@ class PermitService:
                 if not model:
                     return
                 model.spent_credits = max(Decimal("0"), model.spent_credits - amount)
-                model.updated_at = datetime.now(timezone.utc)
+                model.updated_at = utc_now()
                 session.add(model)
             await session.commit()
 
