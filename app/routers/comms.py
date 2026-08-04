@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Agent-Native Communications Router
 ------------------------------------
 Machine-to-machine messaging that bypasses human-first platforms.

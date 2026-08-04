@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 IoT Protocol Bridge — Service Layer
 =====================================
 Handles the actual protocol translation between REST and native IoT protocols.
@@ -40,8 +41,10 @@ logger = logging.getLogger(__name__)
 # ACL Engine
 # ---------------------------------------------------------------------------
 
+
 class ACLViolation(Exception):
     """Raised when a message violates topic-level access controls."""
+
     def __init__(self, device_id: str, topic: str, required: str):
         self.device_id = device_id
         self.topic = topic
@@ -117,9 +120,11 @@ class TopicACLEngine:
 # Device Registry
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RegisteredDevice:
     """Internal representation of a registered device."""
+
     device_id: str
     protocol: ProtocolType
     broker_url: str | None
@@ -221,9 +226,7 @@ class _DeviceCache:
                 await client.ping()
                 self._client = client
             except Exception as exc:
-                logger.warning(
-                    "IoT device cache disabled (Redis unavailable): %s", exc
-                )
+                logger.warning("IoT device cache disabled (Redis unavailable): %s", exc)
                 self._disabled = True
         return self._client
 
@@ -265,18 +268,14 @@ class _DeviceCache:
                 "status": row.status,
                 "registered_at": row.registered_at.isoformat(),
                 "last_message_at": (
-                    row.last_message_at.isoformat()
-                    if row.last_message_at
-                    else None
+                    row.last_message_at.isoformat() if row.last_message_at else None
                 ),
                 "message_count": row.message_count,
             },
             default=str,
         )
         try:
-            await client.set(
-                self._key(device.device_id), serialized, ex=self._ttl
-            )
+            await client.set(self._key(device.device_id), serialized, ex=self._ttl)
         except Exception as exc:
             logger.debug("Redis SET failed (cache skipped): %s", exc)
 
@@ -332,9 +331,7 @@ class DeviceRegistry:
         async with factory() as session:
             existing = await session.get(IoTDeviceModel, device.device_id)
             if existing is not None:
-                raise ValueError(
-                    f"Device '{device.device_id}' already registered"
-                )
+                raise ValueError(f"Device '{device.device_id}' already registered")
             session.add(_device_to_row(device))
             await self._write_event(
                 session,
@@ -345,9 +342,7 @@ class DeviceRegistry:
             await session.commit()
 
         await self._cache.set(device)
-        logger.info(
-            f"Device registered: {device.device_id} ({device.protocol})"
-        )
+        logger.info(f"Device registered: {device.device_id} ({device.protocol})")
         return device
 
     async def get(self, device_id: str) -> RegisteredDevice | None:
@@ -375,9 +370,10 @@ class DeviceRegistry:
         factory = get_session_factory()
         offset = max(0, (page - 1) * per_page)
         async with factory() as session:
-            total = await session.scalar(
-                select(func.count()).select_from(IoTDeviceModel)
-            ) or 0
+            total = (
+                await session.scalar(select(func.count()).select_from(IoTDeviceModel))
+                or 0
+            )
             result = await session.execute(
                 select(IoTDeviceModel)
                 .order_by(cast(ColumnElement[Any], IoTDeviceModel.registered_at).asc())
@@ -427,9 +423,7 @@ class DeviceRegistry:
         self._require_db()
         factory = get_session_factory()
         async with factory() as session:
-            await self._write_event(
-                session, device_id, event_type, topic, payload
-            )
+            await self._write_event(session, device_id, event_type, topic, payload)
             await session.commit()
 
     async def recent_events(self, limit: int = 100) -> list[dict]:
@@ -439,7 +433,9 @@ class DeviceRegistry:
         async with factory() as session:
             result = await session.execute(
                 select(IoTDeviceEventModel)
-                .order_by(cast(ColumnElement[Any], IoTDeviceEventModel.timestamp).desc())
+                .order_by(
+                    cast(ColumnElement[Any], IoTDeviceEventModel.timestamp).desc()
+                )
                 .limit(limit)
             )
             rows = list(result.scalars().all())
@@ -470,9 +466,11 @@ class DeviceRegistry:
 # Protocol Translators
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BridgedMessage:
     """A message that has been translated and sent through the bridge."""
+
     message_id: str
     device_id: str
     topic: str
@@ -553,6 +551,7 @@ class CoAPTranslator:
 # ---------------------------------------------------------------------------
 # Bridge Orchestrator
 # ---------------------------------------------------------------------------
+
 
 class ProtocolBridge:
     """

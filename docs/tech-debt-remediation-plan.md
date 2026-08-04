@@ -50,7 +50,7 @@
 
 ### Acceptance
 
-- [ ] Baseline curls documented in PR body.
+- [x] Baseline curls documented in PR body. *(captured across Phase 1–5 PR bodies / live verifies)*
 - [x] Confirmed which health endpoint exposes `durable_state.fell_back_to_memory` (`GET /health/dependencies` → `runtime_degradation.durable_state`).
 
 ### Stop if
@@ -183,11 +183,11 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 - `GET /`, `/v1/discover`, and well-known bootstrap drop unmounted proof advertising.
 - Negative coverage: `tests/test_mcp_discovery_wedge_gate.py`.
 
-### Live residual (not Phase 2 blockers; park for later phases)
+### Live residual (not Phase 2 blockers; parked → addressed in Phase 5)
 
-- `/mcp/tools.json` envelope still titled **"B2A Service Marketplace"** even when `tools=[]` — rename/honesty is Phase 5 docs/OpenAPI work.
-- `/v1/discover` pricing/integration copy still mentions telemetry/comms/`awi_adoption` — Phase 5 wedge honesty.
-- OpenAPI `servers` still lists `http://localhost:8000` alongside production `PUBLIC_URL` (expected dual-server; Phase 3 posture can document).
+- ~~`/mcp/tools.json` envelope titled "B2A Service Marketplace"~~ → Phase 5 rename.
+- ~~`/v1/discover` pricing/integration telemetry/comms/`awi_adoption`~~ → Phase 5 trust-plane copy.
+- ~~OpenAPI localhost second server~~ → omitted when `ENVIRONMENT` is production-like.
 - Live `partner.notes.write` absent until ops registers a real tool (dogfood is local ASGI; do not expect it on Railway).
 - Phase 1 still holds: `fell_back_to_memory=false`, `STATE_BACKEND=postgres`, `ENABLE_PROOF_SURFACES=false`.
 
@@ -247,8 +247,15 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 
 ### Acceptance
 
-- [ ] Prod path uses migrations.
-- [ ] Docs match code (`SECURITY_LIMITATIONS.md`).
+- [x] Prod path uses migrations.
+- [x] Docs match code (`SECURITY_LIMITATIONS.md`).
+
+**Shipped:** `init_db` skips `create_all` outside ephemeral non-prod SQLite;
+verifies `permits` / `receipts` / `idempotency_records` and raises
+`SchemaInitError` (lifespan fails closed). Entrypoint fails closed when
+`RUN_MIGRATIONS_ON_START=true` without `DATABASE_URL`. Migrate-on-start stays
+operator-set (not committed in `railway.json`) so a create_all-era DB is not
+surprised by `upgrade` without a stamp. See `tests/test_schema_boot.py`.
 
 ---
 
@@ -266,8 +273,16 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 
 ### Acceptance
 
-- [ ] No primary docs claim “full agent middleware platform.”
-- [ ] agent.json documentation URLs resolve or are removed.
+- [x] No primary docs claim “full agent middleware platform.”
+- [x] agent.json documentation URLs resolve or are removed.
+
+**Shipped:** MCP `/mcp/tools.json` envelope renamed off “B2A Service Marketplace”;
+`/v1/discover` pricing + integration guides are trust-plane-only (AWI guide
+gated); OpenAPI description narrowed and localhost server omitted in
+production-like `ENVIRONMENT`; `WEDGE.md` / `SECURITY_LIMITATIONS.md` /
+`DESIGN_PARTNER_GUIDE.md` served at advertised paths; agentmarket listing +
+README deploy claims made honest; `/docs/index` gated to trust plane when
+proof surfaces are off.
 
 ---
 
@@ -284,34 +299,63 @@ Live trust mode already runs with `ENABLE_PROOF_SURFACES=false`. Phase 2 stops a
 
 ### Acceptance
 
-- [ ] Freeze list exists and is linked from `WEDGE.md`.
+- [x] Freeze list exists and is linked from `WEDGE.md`.
+
+**Shipped:** `docs/PROOF_SURFACES.md` lists `PROOF_SURFACE_ROUTERS` + accept/freeze
+stubs; linked from `WEDGE.md`; router/stub modules carry
+`PROOF SURFACE — frozen` docstrings; `kyc` / `planner` demotion deferred
+(product approval). Tests: `tests/test_proof_surface_freeze.py`. Docs/comment
+only — no Railway redeploy required.
 
 ---
 
 ## Phase 7 — Optional follow-ons (out of core debt plan)
 
-Only if requested after Phases 1–5:
+Requested after Phases 1–6 (this continuation). Status:
 
-- Absolute `canonical_api` in API `agent.json` from `PUBLIC_URL`.
-- Design-partner API key bootstrap (documented gated flow).
-- Operator analytics export over wallet/audit/ledger.
-- Brand rename (drop provisional PERMIT).
-- Link GitHub ↔ Vercel for `agent-middleware-web` (root directory `site`).
+- [x] Absolute `canonical_api` in API `agent.json` from `PUBLIC_URL`.
+- [x] Design-partner API key bootstrap (documented gated flow).
+- [x] Operator analytics export over wallet/audit/ledger.
+- [ ] Brand rename (drop provisional PERMIT).
+  **Deferred:** product decision; infra already uses `agent-middleware-*`.
+  No mass rename. See `site/README.md` § Brand rename.
+- [x] Link GitHub ↔ Vercel for `agent-middleware-web` (root directory `site`).
+  Root Directory = `site`; GitHub `PetrefiedThunder/agent-middleware-api`
+  connected (production branch `main`). Confirm first Git-triggered deploy
+  still serves marketing + discovery redirects (`site/README.md`).
+
+### Acceptance (Phase 7 slice)
+
+- [x] `GET /.well-known/agent.json` includes absolute `canonical_api` when
+      `PUBLIC_URL` is set; empty string when unset (no invented localhost).
+- [x] Auth discovery declares `public_self_serve: false` + bootstrap docs path.
+- [x] `/docs/partner-api-key-bootstrap.md` served; script
+      `scripts/partner_api_key_bootstrap.py` exists.
+- [x] `scripts/operator_analytics_export.py` exists (bootstrap-gated HTTP export).
+- [x] Brand rename explicitly deferred with rationale.
+- [x] Vercel↔GitHub linked with Root Directory `site` (confirm first Git deploy).
 
 ---
 
 ## Execution order (checklist for the orchestrating agent)
 
 ```text
-[ ] Phase 0  Baseline (health endpoint confirmed; curls still for PR body)
+[x] Phase 0  Baseline (health endpoint confirmed; curls captured in Phase 1–5 PR bodies)
 [x] Phase 1  Durable state + URL normalize     ← complete (live verify OK on Railway after #178 / c5811ea)
 [x] Phase 2  Gate MCP tools + llm.txt          ← complete (live verify OK on Railway after #180 / 5d547a6 via railway up)
 [x] Phase 3  Deploy posture + image SOP        ← code/docs/CI complete (live already on railway up; redeploy optional)
-[ ] Phase 4  Migrations
-[ ] Phase 5  Docs / OpenAPI / registry
-[ ] Phase 6  Freeze hygiene
-[ ] Phase 7  Optional (only if asked)
+[x] Phase 4  Migrations                        ← create_all gated; migrate-on-start fail-closed; schema verify at boot
+[x] Phase 5  Docs / OpenAPI / registry
+[x] Phase 6  Freeze hygiene                    ← docs/PROOF_SURFACES.md + markers; no redeploy
+[~] Phase 7  Optional follow-ons               ← safe slice done; brand rename deferred (product)
 ```
+
+### Plan status
+
+**Core tech-debt remediation plan complete** after Phase 6 (Phases 0–6).
+Phase 7 optional follow-ons: safe slice shipped (`canonical_api`, partner key
+bootstrap, analytics export, Vercel Git link + `site` root). Brand rename
+deferred.
 
 ### PR naming convention
 
@@ -321,6 +365,7 @@ Only if requested after Phases 1–5:
 - `fix/migrations-prod-boot`
 - `docs/wedge-honesty-pass`
 - `chore/freeze-proof-surfaces`
+- `chore/phase7-followups`
 
 ### Per-PR agent final summary (required)
 
@@ -336,11 +381,14 @@ Only if requested after Phases 1–5:
 
 ## Definition of done (whole plan)
 
-1. Live Railway: no durable_state memory fallback under production config.  
-2. Live `/mcp/tools.json` with proof surfaces off does not list AWI/marketplace stubs.  
-3. Live `/llm.txt` uses public API base and wedge bootstrap.  
-4. One documented deploy path; no `change-me` prod key in repo defaults.  
-5. Docs/OpenAPI match `WEDGE.md`.  
-6. Proof surfaces explicitly frozen.
+1. [x] Live Railway: no durable_state memory fallback under production config.  
+2. [x] Live `/mcp/tools.json` with proof surfaces off does not list AWI/marketplace stubs.  
+3. [x] Live `/llm.txt` uses public API base and wedge bootstrap.  
+4. [x] One documented deploy path; no `change-me` prod key in repo defaults.  
+5. [x] Docs/OpenAPI match `WEDGE.md`.  
+6. [x] Proof surfaces explicitly frozen. (`docs/PROOF_SURFACES.md` + module markers)
 
-When all are true, mark this plan complete in a final PR that only checks the boxes above (no new features).
+**Plan complete (core Phases 0–6).** Phase 7 optional safe slice shipped
+(`canonical_api`, partner key bootstrap docs/script, analytics export script,
+Vercel rootDirectory=`site` + GitHub connected). Brand rename remains a product
+decision (deferred).

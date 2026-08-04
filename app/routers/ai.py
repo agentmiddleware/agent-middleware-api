@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Agent Intelligence Router
 ==========================
 Natural language queries, autonomous decisions, self-healing,
@@ -22,8 +23,10 @@ router = APIRouter(
 
 # --- Request/Response Models ---
 
+
 class DecisionRequest(BaseModel):
     """Request an autonomous decision."""
+
     agent_id: str = Field(..., description="The agent requesting the decision")
     context: dict = Field(..., description="Current context and state")
     options: list[str] | None = Field(None, description="Available action options")
@@ -31,6 +34,7 @@ class DecisionRequest(BaseModel):
 
 class DecisionResponse(BaseModel):
     """Response containing the decision."""
+
     decision_id: str
     agent_id: str
     reasoning: str
@@ -41,12 +45,14 @@ class DecisionResponse(BaseModel):
 
 class HealRequest(BaseModel):
     """Request automatic diagnosis and healing."""
+
     issue: str = Field(..., description="Description of the issue")
     context: dict = Field(..., description="Error logs, stack traces, config, etc.")
 
 
 class HealResponse(BaseModel):
     """Response containing the diagnosis and fix."""
+
     heal_id: str
     issue: str
     diagnosis: str
@@ -58,6 +64,7 @@ class HealResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     """Natural language query about the system."""
+
     question: str = Field(..., description="The question to answer")
     data_context: dict | None = Field(
         None, description="Optional data to query against"
@@ -66,12 +73,14 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     """Response to a natural language query."""
+
     answer: str
     model: str
 
 
 class RememberRequest(BaseModel):
     """Store a memory for an agent."""
+
     agent_id: str
     key: str
     value: str
@@ -79,6 +88,7 @@ class RememberRequest(BaseModel):
 
 class RecallRequest(BaseModel):
     """Recall memories for an agent."""
+
     agent_id: str
     key: str | None = None
     limit: int = 10
@@ -86,21 +96,25 @@ class RecallRequest(BaseModel):
 
 class MemoryResponse(BaseModel):
     """Retrieved memories."""
+
     memories: list[dict]
 
 
 class LearnRequest(BaseModel):
     """Learn from an experience."""
+
     agent_id: str
     experience: dict
 
 
 class LearnResponse(BaseModel):
     """Result of learning."""
+
     insight: str
 
 
 # --- Endpoints ---
+
 
 @router.post("/decide", response_model=DecisionResponse)
 async def make_decision(request: DecisionRequest):

@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 AWI Enhanced Router — Phase 9
 =============================
 

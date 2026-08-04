@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent-Native Middleware API",
-    "description": "## Agent-Native Middleware API\n\nAgent Middleware API is the operational control plane for autonomous agents: identity, billing, discovery, policy, and execution governance for machine-native software tenants.\n\n### Canonical Loop\n\n`discover -> authenticate -> invoke -> meter -> govern`\n\n### Core Infrastructure\n\n- **Identity and authority** — wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks, and cross-wallet isolation\n- **Discovery and negotiation** — MCP manifests, `.well-known/agent.json`, `llm.txt`, OpenAPI, and `/v1/discover`\n- **Policy-constrained execution** — MCP invocation, planner optimization, service health checks, simulation visibility, and bounded sandbox execution\n- **Economics and accounting** — dry-run pricing, spend limits, ledger entries, exact decimal fields, Stripe top-ups, and transfer flows\n- **Governance and readiness** — telemetry, audit surfaces, dependency health, security posture, and operator preflight checks\n\n### Proof Surfaces\n\nAWI, browser control, content generation, oracle crawls, sandbox demos, media utilities, IoT bridges, and red-team services exercise the control plane without defining the core product surface.\n\n### Authentication\n\nAll endpoints require an API key passed via the `X-API-Key` header.\n\n### For Agents\n\nThis API is designed for programmatic consumption. See `/llm.txt` for LLM-optimized documentation and `/openapi.json` for the full spec.",
+    "description": "## MCP Trust Plane\n\nAgent Middleware API is a **governed MCP trust plane** for autonomous agent tool calls — not a full agent middleware platform.\n\nCredible wedge: exactly-once permits and receipts for metered MCP calls. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`\n\n### Product Surface\n\n- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n- **Governed MCP invoke** — permit check, policy, idempotency, charge\n- **Wallet metering** — ledger-backed credits with exact decimals\n- **Signed receipts + evidence** — verifiable attempt outcomes\n- **Wallet audit chain** — tamper-evident per-wallet events\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llm.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAWI, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llm.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
     "contact": {
       "name": "Agent-Native Middleware",
       "email": "support@agent-middleware.dev"
@@ -15,7 +15,7 @@
   "servers": [
     {
       "url": "https://api.yourdomain.com",
-      "description": "Production"
+      "description": "Public API (set PUBLIC_URL)"
     },
     {
       "url": "http://localhost:8000",
@@ -4699,6 +4699,114 @@
         }
       }
     },
+    "/WEDGE.md": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "Product wedge",
+        "description": "Exactly-once MCP permits wedge definition.",
+        "operationId": "get_wedge_md_WEDGE_md_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/SECURITY_LIMITATIONS.md": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "Security limitations",
+        "description": "Honest non-claims and production posture requirements.",
+        "operationId": "get_security_limitations_md_SECURITY_LIMITATIONS_md_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/DESIGN_PARTNER_GUIDE.md": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "Design partner guide",
+        "description": "Trust-plane demo and dogfood path for design partners.",
+        "operationId": "get_design_partner_guide_md_DESIGN_PARTNER_GUIDE_md_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/partner-api-key-bootstrap.md": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "Partner API key bootstrap",
+        "description": "Gated operator flow to provision wallet-scoped agent API keys.",
+        "operationId": "get_partner_api_key_bootstrap_md_docs_partner_api_key_bootstrap_md_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/index": {
+      "get": {
+        "tags": [
+          "Documentation & Discovery"
+        ],
+        "summary": "Structured documentation index",
+        "description": "Returns a JSON index of documentation resources. Trust-plane sections always; proof-surface service entries only when mounted.",
+        "operationId": "get_doc_index_docs_index_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/iot/devices": {
       "post": {
         "tags": [
@@ -9350,26 +9458,6 @@
             "APIKeyHeader": []
           }
         ]
-      }
-    },
-    "/docs/index": {
-      "get": {
-        "tags": [
-          "Documentation & Discovery"
-        ],
-        "summary": "Structured documentation index",
-        "description": "Returns a JSON index of all available documentation resources. Agents use this to navigate the doc tree and find relevant sections without parsing the entire llm.txt.",
-        "operationId": "get_doc_index_docs_index_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
       }
     },
     "/v1/awi/sessions": {
@@ -15536,7 +15624,8 @@
           "integration_guides": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Integration Guides"
+            "title": "Integration Guides",
+            "description": "Integration entry points; proof-surface guides only when mounted."
           },
           "agent_first": {
             "additionalProperties": true,

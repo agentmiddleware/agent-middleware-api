@@ -49,7 +49,7 @@ in committed defaults.
 | `DATABASE_URL` | from Railway Postgres plugin | App normalizes `postgresql://` ↔ `postgresql+asyncpg://` |
 | `PUBLIC_URL` | public HTTPS API origin | e.g. `https://api-service-production-433c.up.railway.app` |
 | `VALID_API_KEYS` | operator-set secrets | Bootstrap/admin keys only; **never** `change-me` |
-| `RUN_MIGRATIONS_ON_START` | `true` (recommended) | Entrypoint runs Alembic before uvicorn |
+| `RUN_MIGRATIONS_ON_START` | `true` (recommended; set via `railway variables`) | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If the DB was previously bootstrapped with `create_all` and has no `alembic_version` row, run `alembic stamp head` once before enabling this flag. |
 
 Optional but recommended: `CORS_ORIGINS` locked to known frontends;
 `REDIS_URL` only if you intend Redis rate limiting (prod-like fails closed on
@@ -57,7 +57,8 @@ Redis outage when set).
 
 Committed `railway.json` may list **non-secret** defaults only
 (`STATE_BACKEND`, `PUBLIC_URL`, `ENABLE_PROOF_SURFACES`). It must not contain
-`VALID_API_KEYS` or signing material.
+`VALID_API_KEYS` or signing material. Set `RUN_MIGRATIONS_ON_START` via
+Railway variables (not committed) after confirming Alembic stamp state.
 
 ## After deploy — verify
 
@@ -85,9 +86,11 @@ API_URL="$API_URL" bash scripts/human_preflight.sh
 
 ## OpenAPI servers note
 
-FastAPI OpenAPI may list both `http://localhost:8000` and `PUBLIC_URL`. That is
-intentional dual-server documentation for local + deployed clients — not a
-second deploy target. Production agents should use `PUBLIC_URL`.
+FastAPI OpenAPI lists `PUBLIC_URL` as the public API server. A
+`http://localhost:8000` entry is included only when
+`is_production_like_environment(ENVIRONMENT)` is false (local/dev/test/ci).
+That is local-dev documentation — not a second deploy target. Production
+agents should use `PUBLIC_URL`.
 
 ## Related docs
 

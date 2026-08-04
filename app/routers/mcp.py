@@ -2,7 +2,7 @@
 MCP Router
 ==========
 
-Dynamic MCP Proxy router for the B2A Service Marketplace.
+Governed MCP proxy for the agent trust plane (permits, metering, receipts).
 
 Provides:
 - /mcp/tools.json - MCP manifest discovery
@@ -10,8 +10,8 @@ Provides:
 - /mcp/messages - JSON-RPC message handling
 
 This enables agents to:
-1. Discover available tools via tools.json
-2. Execute tools with automatic billing + velocity monitoring
+1. Discover ops-registered tools via tools.json
+2. Invoke tools under permit + wallet metering + signed receipts
 3. Receive results in real-time via SSE
 """
 

@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 IoT Protocol Bridge Router
 --------------------------
 Secure, topic-ACL-enforced protocol bridging for IoT devices.

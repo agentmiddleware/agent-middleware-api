@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Programmatic Content Factory Router
 -------------------------------------
 Turn one source asset into dozens of format-adapted content pieces.
@@ -39,6 +40,7 @@ router = APIRouter(
 
 # --- Content Pipeline ---
 
+
 @router.post(
     "/pipelines",
     response_model=ContentPipelineResponse,
@@ -71,8 +73,10 @@ async def create_pipeline(
         pipeline_id=pipeline.pipeline_id,
         title=pipeline.title,
         source_type=(
-            "clip" if pipeline.source_clip_id
-            else "url" if pipeline.source_url
+            "clip"
+            if pipeline.source_clip_id
+            else "url"
+            if pipeline.source_url
             else "none"
         ),
         target_formats=pipeline.target_formats,
@@ -154,6 +158,7 @@ async def get_content(
 
 
 # --- Live Campaign Mode ---
+
 
 @router.post(
     "/campaigns",
@@ -245,6 +250,7 @@ async def list_campaigns(
 
 
 # --- Algorithmic Scheduling ---
+
 
 @router.post(
     "/analytics",

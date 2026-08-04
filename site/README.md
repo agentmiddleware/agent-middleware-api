@@ -64,6 +64,25 @@ Prefix everything with **`agent-middleware-`** so GitHub, Vercel, Railway, and l
 
 - Use `agent-middleware-{role}`: `api` (backend), `web` (marketing). Avoid generic names (`site`, `frontend`, `api-service`) for new resources.
 - Do not rename the `site/` directory solely for cosmetics — link it to the Vercel project named `agent-middleware-web`.
-- Deploy marketing with CLI from `site/` (`vercel --prod --scope petrefiedthunders-projects`). GitHub is **not** linked yet; if linking, set Root Directory to `site` (expect preview URLs like `agent-middleware-web-git-<branch>-petrefiedthunders-projects.vercel.app`).
+- Deploy marketing with CLI from `site/` (`vercel --prod --scope petrefiedthunders-projects`).
+- **GitHub ↔ Vercel:** project `agent-middleware-web` is linked to
+  `PetrefiedThunder/agent-middleware-api` with **Root Directory = `site`**.
+  Confirm the first Git-triggered deploy still serves marketing + discovery
+  redirects before relying on it over CLI deploys.
+
+  Re-link / verify if needed:
+
+  ```bash
+  cd site
+  vercel link --yes --scope petrefiedthunders-projects --project agent-middleware-web
+  vercel git connect https://github.com/PetrefiedThunder/agent-middleware-api \
+    --scope petrefiedthunders-projects
+  ```
 - Leave Railway service `api-service` until a coordinated rename updates `PUBLIC_URL` + `site/vercel.json` redirects.
 - Custom domains later: prefer product DNS (not `site-*.vercel.app` leftovers).
+
+## Brand rename (deferred)
+
+Provisional marketing wordmark **PERMIT** stays until an explicit product
+decision. Infra names already use `agent-middleware-*`; do not mass-rename
+code, packages, or Railway hosts for cosmetics.

@@ -1,4 +1,5 @@
 """
+PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
 Red Team Security Swarm Router
 -------------------------------
 Endpoints for triggering, monitoring, and reviewing automated
@@ -144,6 +145,7 @@ async def quick_scan(
     swarm: RedTeamSwarm = Depends(get_red_team_swarm),
 ):
     from ..schemas.red_team import AttackCategory
+
     report = await swarm.run_scan(
         target_services=["iot", "telemetry", "media", "comms", "factory"],
         attack_categories=[

@@ -1088,7 +1088,10 @@ curl -X POST http://localhost:8000/v1/awi/intervene \
 
 ## Deployment (Railway + PostgreSQL)
 
-This repository is deployment-ready for Railway via `Dockerfile` + `railway.json`.
+Production-beta deploy path: `Dockerfile` + `railway.json` via `railway up`.
+This is **design-partner ready for the MCP trust-plane wedge**, not
+production-complete infrastructure. Remaining risks and phases:
+[`docs/tech-debt-remediation-plan.md`](docs/tech-debt-remediation-plan.md).
 
 **Canonical SOP:** [`docs/deploy-railway.md`](docs/deploy-railway.md) —
 use `railway up` from this repo; do **not** Redeploy from GitHub source (can
@@ -1136,8 +1139,10 @@ railway variables set VELOCITY_HOURLY_LIMIT=1000.0
 railway variables set VELOCITY_DAILY_LIMIT=10000.0
 railway variables set VELOCITY_FREEZE_THRESHOLD=3
 
-# Run Alembic before uvicorn (Dockerfile entrypoint). Use postgresql+asyncpg:// for DATABASE_URL.
-railway variables set RUN_MIGRATIONS_ON_START=true
+# Optional operator choice: Alembic on start (Dockerfile entrypoint).
+# Prefer stamp + upgrade on create_all-era DBs before enabling.
+# Do not set unless you intend migrate-on-start. Use postgresql+asyncpg://.
+# railway variables set RUN_MIGRATIONS_ON_START=true
 ```
 
 > **Note:** `DATABASE_URL` is automatically injected when you link the PostgreSQL database. For async SQLAlchemy + Alembic, set it to **`postgresql+asyncpg://`** (not only `postgresql://`) unless your platform documents otherwise.
