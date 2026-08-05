@@ -5,6 +5,8 @@ Modern token-based auth alongside legacy API keys.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import AuthContext, get_auth_context
@@ -21,6 +23,11 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/v1/auth", tags=["Authentication"])
+
+
+def _exp_to_datetime(ts: int) -> datetime:
+    """Convert JWT exp (int) to timezone-aware datetime."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc)
 
 
 @router.post("/token", response_model=TokenExchangeResponse)
@@ -63,7 +70,7 @@ async def exchange_api_key_for_tokens(
         model = RefreshTokenModel(
             jti=refresh_payload.jti,
             wallet_id=db_key.wallet_id,
-            expires_at=refresh_payload.exp,
+            expires_at=_exp_to_datetime(refresh_payload.exp),
         )
         session.add(model)
         await session.commit()
@@ -124,7 +131,7 @@ async def refresh_access_token(
         model = RefreshTokenModel(
             jti=new_refresh_payload.jti,
             wallet_id=payload.sub,
-            expires_at=new_refresh_payload.exp,
+            expires_at=_exp_to_datetime(new_refresh_payload.exp),
         )
         session.add(model)
         await session.commit()
