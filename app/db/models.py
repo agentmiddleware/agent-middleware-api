@@ -813,6 +813,20 @@ class IdempotencyRecordModel(SQLModel, table=True):
     ledger_entry_id: Optional[str] = Field(default=None, max_length=64, index=True)
 
 
+class RefreshTokenModel(SQLModel, table=True):
+    """Refresh token registry for JWT revocation."""
+
+    __tablename__ = "refresh_tokens"
+
+    jti: str = Field(primary_key=True, max_length=64)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    revoked: bool = Field(default=False, index=True)
+    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    expires_at: datetime = Field(sa_type=NaiveUTCDateTime)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
 class PolicyBundleModel(SQLModel, table=True):
     """Wallet-scoped execution policy bundle."""
 

@@ -39,6 +39,7 @@ from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from .services.signing_keys import validate_signing_key_configuration
 from .routers.well_known import get_agent_first_metadata
 from .routers import (
+    auth,
     iot,
     telemetry,
     media,
@@ -338,6 +339,7 @@ app.add_middleware(
 # --- Mount service routers ---
 
 CORE_TRUST_ROUTERS = (
+    auth,
     audit,
     policies,
     billing,
