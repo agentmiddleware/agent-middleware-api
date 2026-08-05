@@ -735,6 +735,10 @@ class PermitModel(SQLModel, table=True):
     expires_at: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
     nonce: str = Field(max_length=64, index=True)
     status: str = Field(default="active", max_length=20, index=True)
+    # Governed invokes under this permit block on a human decision (Sentinel)
+    # before any budget is reserved or charged. Included in the signed permit
+    # payload only when true, so pre-existing permit signatures stay valid.
+    requires_human_approval: bool = Field(default=False)
     signature: str
     key_id: str = Field(max_length=64, foreign_key="signing_keys.key_id", index=True)
     issued_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
@@ -773,6 +777,11 @@ class ReceiptModel(SQLModel, table=True):
         foreign_key="control_plane_audit_events.event_id",
         index=True,
     )
+    # Human approval that authorized this invoke, when the permit required one.
+    # Included in the signed receipt payload only when set, so pre-existing
+    # receipt signatures stay valid. Plain string (no FK) — the column is
+    # ALTER-added and SQLite cannot add FK constraints via ALTER (see 020).
+    approval_id: Optional[str] = Field(default=None, max_length=64, index=True)
     created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
     signature: str
     signature_key_id: str = Field(
@@ -780,6 +789,46 @@ class ReceiptModel(SQLModel, table=True):
         foreign_key="signing_keys.key_id",
         index=True,
     )
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class HumanApprovalModel(SQLModel, table=True):
+    """Human decision gating one governed invoke (Sentinel-backed).
+
+    One row per (wallet, permit, tool, idempotency_key) — the idempotency key
+    names the invoke attempt, so retries with the same key re-check the same
+    approval instead of paging a human again. Sentinel never expires an
+    approval server-side (a timed-out approval stays "pending" there), so
+    ``expires_at`` is enforced here.
+    """
+
+    __tablename__ = "human_approvals"
+    __table_args__ = (
+        UniqueConstraint(
+            "wallet_id",
+            "permit_id",
+            "tool",
+            "idempotency_key",
+            name="uq_human_approvals_invoke",
+        ),
+    )
+
+    approval_id: str = Field(primary_key=True, max_length=64)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    permit_id: str = Field(max_length=64, foreign_key="permits.permit_id", index=True)
+    tool: str = Field(max_length=128)
+    idempotency_key: str = Field(max_length=128)
+    # pending | approved | rejected | expired
+    status: str = Field(default="pending", max_length=16, index=True)
+    simulated: bool = Field(default=False)
+    # Sentinel action id (act_<hex>); None for simulated approvals.
+    sentinel_action_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    requested_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    expires_at: datetime = Field(sa_type=NaiveUTCDateTime)
+    decided_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    decided_by: Optional[str] = Field(default=None, max_length=128)
+    reason: Optional[str] = Field(default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 

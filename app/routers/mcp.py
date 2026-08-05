@@ -20,7 +20,7 @@ import inspect
 import json
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
@@ -38,8 +38,12 @@ from ..schemas.billing import InsufficientFundsResponse, LedgerEntry, ServiceCat
 # Spine primitives are consumed through the trust-plane facade so the governed
 # invocation path depends on the product core by its public boundary.
 from ..trust import (
+    APPROVAL_STATUS_APPROVED,
+    APPROVAL_STATUS_PENDING,
     DEFAULT_PRICING,
     AgentMoney,
+    HumanApprovalError,
+    HumanApprovalUnavailableError,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     McpGovernedAdapter,
@@ -47,6 +51,7 @@ from ..trust import (
     evaluate_tool_invocation,
     evaluate_wallet_policy,
     get_agent_money,
+    get_human_approval_service,
     get_idempotency_service,
     get_permit_service,
     get_receipt_service,
@@ -113,6 +118,29 @@ class ToolPermissionDenied(PermissionError):
         self.receipt = receipt
         self.status_code = 403
         self.jsonrpc_code = -32003
+
+
+class HumanApprovalPendingSignal(RuntimeError):
+    """Governed invoke paused on a retryable human-approval condition.
+
+    Not a terminal outcome: no receipt exists, nothing was charged, and the
+    caller's idempotency key was released — the same invoke (same body, same
+    key) should be retried once the approval is decided (or, for
+    ``human_approval_unavailable``, once Sentinel is reachable again).
+    """
+
+    jsonrpc_code = -32005
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        data: dict[str, Any] | None = None,
+        status_code: int = 202,
+    ) -> None:
+        super().__init__(reason)
+        self.data = data or {}
+        self.status_code = status_code
 
 
 class McpContext(BaseModel):
@@ -221,8 +249,22 @@ async def handle_messages(
                     "result": result,
                 }
             )
-        except ToolPermissionDenied as e:
+        except HumanApprovalPendingSignal as e:
             error_payload: dict[str, Any] = {
+                "code": e.jsonrpc_code,
+                "message": str(e),
+            }
+            if e.data:
+                error_payload["data"] = e.data
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": error_payload,
+                }
+            )
+        except ToolPermissionDenied as e:
+            error_payload = {
                 "code": -32003,
                 "message": str(e),
             }
@@ -601,6 +643,23 @@ async def _execute_registered_tool(
             raise ToolPermissionDenied(reason, receipt=receipt_payload)
         raise PermissionError(policy.reason)
 
+    approval_check = None
+    if governed_call and permit_model and permit_model.requires_human_approval:
+        approval_check = await _require_human_approval(
+            decision=decision,
+            permit_model=permit_model,
+            wallet_id=wallet_id,
+            key_id=auth.key_id,
+            endpoint=endpoint,
+            transport=transport,
+            idem=idem,
+            idempotency_key=idempotency_key,
+            tool_name=tool_name,
+            request_payload=request_payload,
+            arguments=arguments,
+            registered_cost=registered_cost,
+        )
+
     description = f"MCP {transport} invoke {tool_name}"
     if governed_call and permit_model:
         await get_permit_service().reserve_budget(
@@ -839,6 +898,7 @@ async def _execute_registered_tool(
                             arguments=arguments,
                             ledger_entry_id=charge_result.entry_id,
                         ),
+                        **_approval_metadata(approval_check),
                     },
                 )
             if governed_call and permit_model:
@@ -855,6 +915,9 @@ async def _execute_registered_tool(
                         credits_charged=credits_charged,
                         outcome="success",
                         audit_event_id=audit_event.event_id,
+                        approval_id=(
+                            approval_check.approval_id if approval_check else None
+                        ),
                     )
                     response_payload["receipt"] = _receipt_response_payload(receipt)
                 assert receipt is not None
@@ -966,6 +1029,7 @@ async def _finalize_governed_denial(
     outcome: str,
     status_code: int,
     ledger_entry_id: str | None = None,
+    approval_id: str | None = None,
 ) -> dict[str, Any]:
     """Sign a non-success governed receipt and record the idempotent outcome.
 
@@ -985,6 +1049,7 @@ async def _finalize_governed_denial(
         credits_charged=Decimal("0"),
         outcome=outcome,
         audit_event_id=audit_event_id,
+        approval_id=approval_id,
     )
     receipt_payload = _receipt_response_payload(receipt)
     await idem.complete(
@@ -996,6 +1061,135 @@ async def _finalize_governed_denial(
         status_code=status_code,
     )
     return receipt_payload
+
+
+def _approval_metadata(approval_check: Any) -> dict[str, Any]:
+    """Audit-metadata fragment for the human-approval gate (signed via chain)."""
+    if approval_check is None:
+        return {}
+    metadata: dict[str, Any] = {
+        "approval_id": approval_check.approval_id,
+        "approval_status": approval_check.status,
+    }
+    if approval_check.sentinel_action_id:
+        metadata["sentinel_action_id"] = approval_check.sentinel_action_id
+    if approval_check.simulated:
+        metadata["approval_simulated"] = True
+    return metadata
+
+
+async def _require_human_approval(
+    *,
+    decision: PolicyDecision,
+    permit_model: Any,
+    wallet_id: str,
+    key_id: str | None,
+    endpoint: str,
+    transport: str,
+    idem: Any,
+    idempotency_key: str | None,
+    tool_name: str,
+    request_payload: dict[str, Any] | None,
+    arguments: dict[str, Any],
+    registered_cost: Decimal,
+) -> Any:
+    """Enforce the permit's human-approval gate before any budget moves.
+
+    Returns the approved ``ApprovalCheck`` or raises:
+
+    - ``HumanApprovalPendingSignal`` (decision pending / Sentinel unreachable):
+      retryable — the idempotency record is abandoned so the same key can be
+      retried, and no receipt is written because nothing terminal happened.
+    - ``ToolPermissionDenied`` (rejected / expired / misconfigured): terminal —
+      a denied receipt is signed and the idempotency record completes, so
+      replays of this key return the same denial.
+    """
+    trust_metadata = _trust_metadata(
+        permit_id=permit_model.permit_id,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+        arguments=arguments,
+    )
+
+    async def _terminal_denial(reason: str, approval_id: str | None) -> NoReturn:
+        audit_event = await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=reason,
+            extra_metadata=trust_metadata,
+        )
+        receipt_payload = await _finalize_governed_denial(
+            idem=idem,
+            permit_model=permit_model,
+            wallet_id=wallet_id,
+            key_id=key_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            tool_name=tool_name,
+            request_payload=request_payload,
+            arguments=arguments,
+            registered_cost=registered_cost,
+            audit_event_id=audit_event.event_id,
+            reason=reason,
+            outcome="denied",
+            status_code=403,
+            approval_id=approval_id,
+        )
+        raise ToolPermissionDenied(reason, receipt=receipt_payload)
+
+    async def _retryable(
+        reason: str, *, data: dict[str, Any], status_code: int
+    ) -> NoReturn:
+        await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=reason,
+            extra_metadata={**trust_metadata, **data},
+        )
+        # Nothing was charged and no terminal outcome exists: free the key so
+        # the same invoke can be retried once the condition clears.
+        await idem.abandon(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key or "",
+        )
+        raise HumanApprovalPendingSignal(reason, data=data, status_code=status_code)
+
+    try:
+        approval_check = await get_human_approval_service().ensure_approval(
+            wallet_id=wallet_id,
+            permit_id=permit_model.permit_id,
+            tool_name=tool_name,
+            idempotency_key=idempotency_key or "",
+            arguments=arguments,
+            estimated_credits=registered_cost,
+        )
+    except HumanApprovalUnavailableError as exc:
+        await _retryable(exc.reason, data={}, status_code=503)
+    except HumanApprovalError as exc:
+        await _terminal_denial(exc.reason, None)
+
+    approval_data = _approval_metadata(approval_check)
+    if approval_check.status == APPROVAL_STATUS_PENDING:
+        await _retryable(
+            "human_approval_pending",
+            data={
+                **approval_data,
+                "expires_at": approval_check.expires_at.isoformat(),
+            },
+            status_code=202,
+        )
+    if approval_check.status != APPROVAL_STATUS_APPROVED:
+        # rejected or expired
+        await _terminal_denial(
+            f"human_approval_{approval_check.status}", approval_check.approval_id
+        )
+    return approval_check
+
 
 
 def _raise_replayed_error(replay: Any) -> None:
@@ -1185,8 +1379,13 @@ async def invoke_tool(
         )
         result = await _mcp_adapter.invoke(governed_request)
         return ToolCallResponse(**await _mcp_adapter.normalize_response(result))
-    except ToolPermissionDenied as exc:
+    except HumanApprovalPendingSignal as exc:
         detail: dict[str, Any] = {"error": str(exc)}
+        if exc.data:
+            detail["approval"] = exc.data
+        raise HTTPException(status_code=exc.status_code, detail=detail)
+    except ToolPermissionDenied as exc:
+        detail = {"error": str(exc)}
         if exc.receipt:
             detail["receipt"] = exc.receipt
         raise HTTPException(status_code=403, detail=detail)

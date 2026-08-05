@@ -51,6 +51,7 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         expires_at=model.expires_at,
         nonce=model.nonce,
         status=model.status,
+        requires_human_approval=model.requires_human_approval,
         signature=model.signature,
         key_id=model.key_id,
         issued_at=model.issued_at,
@@ -152,6 +153,17 @@ class PermitService:
 
         if expires_at <= now:
             raise PermitError("permit_expired_at_creation")
+
+        if request.requires_human_approval:
+            # Fail at creation rather than minting a permit every invoke of
+            # which would be denied (simulated approvals are refused in
+            # production-like environments; real mode needs Sentinel config).
+            from app.services.human_approval import human_approval_available
+
+            available, reason = human_approval_available()
+            if not available:
+                raise PermitError(reason or "human_approval_not_configured")
+
         scopes = request.scopes or [
             f"tool:{tool}:invoke" for tool in request.allowed_tools
         ]
@@ -175,7 +187,7 @@ class PermitService:
         # request body, so wallet-bound self-service permits show up in
         # /v1/me/permits queries filtered by subject_key_id.
         effective_key_id = request.subject_key_id or subject_key_id
-        payload = {
+        payload: dict[str, Any] = {
             "permit_id": permit_id,
             "issuer_wallet_id": request.issuer_wallet_id,
             "subject_wallet_id": request.subject_wallet_id,
@@ -188,6 +200,10 @@ class PermitService:
             "status": "active",
             "issued_at": now,
         }
+        # Signed only when set, so signatures on permits issued before this
+        # field existed keep verifying (verify_signature mirrors this).
+        if request.requires_human_approval:
+            payload["requires_human_approval"] = True
         signature, key_id, _ = await get_signing_key_service().sign_payload(payload)
 
         model = PermitModel(
@@ -201,6 +217,7 @@ class PermitService:
             expires_at=expires_at,
             nonce=nonce,
             status="active",
+            requires_human_approval=request.requires_human_approval,
             signature=signature,
             key_id=key_id,
             issued_at=now,
@@ -402,7 +419,7 @@ class PermitService:
         return corrected
 
     async def verify_signature(self, model: PermitModel) -> bool:
-        payload = {
+        payload: dict[str, Any] = {
             "permit_id": model.permit_id,
             "issuer_wallet_id": model.issuer_wallet_id,
             "subject_wallet_id": model.subject_wallet_id,
@@ -417,6 +434,11 @@ class PermitService:
             "alg": "Ed25519",
             "kid": model.key_id,
         }
+        # Mirror of create_permit: the key is present in the signed payload
+        # only when true. Flipping the stored flag in either direction breaks
+        # the rebuilt payload and fails verification.
+        if model.requires_human_approval:
+            payload["requires_human_approval"] = True
         from app.services.signing_keys import sha256_hex
 
         payload["payload_hash"] = sha256_hex(payload)

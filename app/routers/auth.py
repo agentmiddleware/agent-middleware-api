@@ -7,11 +7,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
-from app.core.auth import AuthContext, get_auth_context
 from app.core.jwt import JWTError, get_jwt_service
-from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import RefreshTokenModel
 from app.schemas.auth import (

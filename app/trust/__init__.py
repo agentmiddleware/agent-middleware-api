@@ -27,6 +27,19 @@ from .adapters import (
     GovernedResult,
     McpGovernedAdapter,
 )
+from .approvals import (
+    APPROVAL_STATUS_APPROVED,
+    APPROVAL_STATUS_EXPIRED,
+    APPROVAL_STATUS_PENDING,
+    APPROVAL_STATUS_REJECTED,
+    ApprovalCheck,
+    HumanApprovalError,
+    HumanApprovalService,
+    HumanApprovalUnavailableError,
+    get_human_approval_service,
+    human_approval_available,
+    human_approval_configured,
+)
 from .audit_chain import (
     AuditChainVerification,
     audit_payload,
@@ -87,6 +100,18 @@ __all__ = [
     "GovernedRequest",
     "GovernedResult",
     "McpGovernedAdapter",
+    # human approval gate
+    "APPROVAL_STATUS_APPROVED",
+    "APPROVAL_STATUS_EXPIRED",
+    "APPROVAL_STATUS_PENDING",
+    "APPROVAL_STATUS_REJECTED",
+    "ApprovalCheck",
+    "HumanApprovalError",
+    "HumanApprovalService",
+    "HumanApprovalUnavailableError",
+    "get_human_approval_service",
+    "human_approval_available",
+    "human_approval_configured",
     # permits
     "PermitService",
     "PermitValidation",

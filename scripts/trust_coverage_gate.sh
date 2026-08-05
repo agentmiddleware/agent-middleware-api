@@ -26,6 +26,7 @@ TRUST_COVERAGE_TESTS=(
   tests/test_receipts.py
   tests/test_audit_chain.py
   tests/test_idempotency.py
+  tests/test_human_approval_gate.py
 )
 
 TRUST_COVERAGE_MODULES=(
@@ -39,6 +40,7 @@ TRUST_COVERAGE_MODULES=(
   app.services.receipts
   app.services.signing_keys
   app.services.idempotency
+  app.services.human_approval
   app.core.trust_mode
 )
 

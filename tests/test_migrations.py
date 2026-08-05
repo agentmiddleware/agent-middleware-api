@@ -32,7 +32,13 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         "permits",
         "receipts",
         "idempotency_records",
+        "human_approvals",
     } <= tables
+
+    permit_columns = {col["name"] for col in inspector.get_columns("permits")}
+    assert "requires_human_approval" in permit_columns
+    receipt_columns = {col["name"] for col in inspector.get_columns("receipts")}
+    assert "approval_id" in receipt_columns
 
     wallet_columns = {col["name"] for col in inspector.get_columns("wallets")}
     assert {

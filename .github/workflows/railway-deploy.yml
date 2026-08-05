@@ -1,0 +1,127 @@
+# Manual Railway deploy, gated on green CI + preflight.
+#
+# This does NOT auto-deploy on push, and it does NOT use Railway's
+# "Redeploy from GitHub source" — docs/deploy-railway.md rules both out. It
+# runs the same canonical `railway up` from a checkout of the ref you pick,
+# building the in-repo Dockerfile, after checking that:
+#
+#   1. the CI workflow concluded successfully for that exact commit, and
+#   2. the deployed service is currently in the expected posture.
+#
+# Inert until an operator adds the RAILWAY_TOKEN secret (a project token for
+# the target Railway project). Without it the job stops before touching
+# anything.
+name: Deploy to Railway
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or SHA to deploy"
+        required: true
+        default: main
+      service:
+        description: "Railway service name"
+        required: true
+        default: api-service
+      skip_ci_gate:
+        description: "Deploy even if CI is not green for this commit (emergency only)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve commit
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Require RAILWAY_TOKEN
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN secret is not set. Add a Railway project token before using this workflow."
+            exit 1
+          fi
+
+      - name: Require green CI for ${{ steps.sha.outputs.sha }}
+        if: ${{ !inputs.skip_ci_gate }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          conclusion=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$SHA&status=completed" \
+            --jq '[.workflow_runs[] | select(.conclusion != null)][0].conclusion // "none"')
+          echo "CI conclusion for $SHA: $conclusion"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI is '$conclusion' for $SHA — refusing to deploy. Re-run CI, or dispatch with skip_ci_gate=true."
+            exit 1
+          fi
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install preflight dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Migration parity needs DATABASE_URL, which only exists inside the
+      # Railway service env — so pre-deploy we check live posture only. The
+      # post-deploy step below runs the full preflight via `railway run`.
+      - name: Preflight — current service posture
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: python scripts/railway_preflight.py --live
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy (railway up)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service "${{ inputs.service }}" --ci
+
+      # Runs inside the service environment, so DATABASE_URL and PUBLIC_URL are
+      # both present: this is the check that catches a deploy whose schema did
+      # not migrate (RUN_MIGRATIONS_ON_START unset, or a create_all-bootstrapped
+      # DB that was never stamped).
+      - name: Verify deploy — migrations + posture
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway run --service "${{ inputs.service }}" -- \
+            python scripts/railway_preflight.py --strict
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Railway deploy"
+            echo ""
+            echo "- ref: \`${{ inputs.ref }}\` (\`${{ steps.sha.outputs.sha }}\`)"
+            echo "- service: \`${{ inputs.service }}\`"
+            echo "- CI gate: ${{ inputs.skip_ci_gate && 'SKIPPED (emergency)' || 'enforced' }}"
+            echo "- result: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"

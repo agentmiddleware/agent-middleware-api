@@ -82,7 +82,13 @@ async def get_auth_context(
     Checks in order:
     1. Authorization: Bearer <jwt> (modern, short-lived)
     2. X-API-Key header (legacy, long-lived keys)
+
+    Settings are read per call, not from the module-level singleton: tests and
+    the Postgres CI job rebind VALID_API_KEYS and clear the settings cache after
+    this module is already imported, and a captured `settings` would keep
+    serving the stale key list.
     """
+    settings = get_settings()
     # FastAPI doesn't auto-extract Authorization header for us in this pattern,
     # so we use Request directly in the router dependency. For now, check JWT
     # via a simpler approach: if api_key looks like a JWT, verify it as JWT.
@@ -177,7 +183,7 @@ async def _auth_from_jwt(token: str) -> AuthContext:
 
     jwt_svc = get_jwt_service()
     try:
-        payload = await jwt_svc.verify_access_token(token)
+        payload = jwt_svc.verify_access_token(token)
     except JWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

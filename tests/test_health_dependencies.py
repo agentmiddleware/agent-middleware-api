@@ -78,6 +78,7 @@ async def test_report_default_shape():
         "stripe",
         "llm",
         "signing_key",
+        "sentinel",
     }
     # Every check carries an error slot (None when healthy) and latency_ms.
     for name, res in report["dependencies"].items():
@@ -96,6 +97,10 @@ async def test_report_default_shape():
     # MQTT gated on iot_bridge simulation mode.
     assert report["dependencies"]["mqtt"]["status"] == "not_used"
     assert "iot_bridge" in report["dependencies"]["mqtt"].get("reason", "")
+
+    # Sentinel gated on human_approval simulation mode.
+    assert report["dependencies"]["sentinel"]["status"] == "not_used"
+    assert "human_approval" in report["dependencies"]["sentinel"].get("reason", "")
 
     # Simulation modes are surfaced for operators.
     assert "simulation_modes" in report
@@ -268,6 +273,7 @@ async def test_health_dependencies_endpoint_returns_report(client):
         "stripe",
         "llm",
         "signing_key",
+        "sentinel",
     }
     assert "simulation_modes" in body
     assert "unhealthy" in body

@@ -34,8 +34,10 @@ class JWTPayload:
     sub: str          # wallet_id
     key_id: str | None
     scopes: list[str]
-    iat: datetime
-    exp: datetime
+    # Epoch seconds, as PyJWT decodes them. Callers that need a datetime
+    # convert explicitly (see app.routers.auth._exp_to_datetime).
+    iat: int
+    exp: int
     iss: str
     aud: str
     jti: str          # unique token id

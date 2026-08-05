@@ -134,7 +134,10 @@ def get_engine() -> AsyncEngine | None:
                     # in tests (e.g. ledger_entries before wallets).
                     cursor.execute("PRAGMA foreign_keys=ON")
                     cursor.execute("PRAGMA journal_mode=WAL")
-                    cursor.execute("PRAGMA busy_timeout=10000")
+                    # Aligned with connect_args timeout above: overloaded CI
+                    # runners have been observed exceeding a 10s wait with a
+                    # handful of concurrent writers.
+                    cursor.execute("PRAGMA busy_timeout=30000")
                     cursor.execute("PRAGMA synchronous=NORMAL")
                 finally:
                     cursor.close()

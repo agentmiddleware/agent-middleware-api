@@ -9,9 +9,9 @@ from app.core.auth import AuthContext, get_auth_context
 from app.schemas.audit import AuditEventListResponse, AuditEventResponse
 from app.schemas.billing import AlertListResponse
 from app.schemas.trust import PermitListResponse, ReceiptListResponse
-from app.services.agent_money import get_agent_money
 from app.trust import (
     count_audit_events,
+    get_agent_money,
     get_permit_service,
     get_receipt_service,
     list_audit_events,

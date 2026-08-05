@@ -230,6 +230,25 @@ async def _check_signing_key() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+async def _check_sentinel(simulation_modes: dict[str, bool]) -> dict[str, Any]:
+    # The human-approval gate is the sole Sentinel consumer. In sim mode the
+    # service is never called — don't probe and don't degrade health over it.
+    if simulation_modes.get("human_approval", True):
+        return {"status": "not_used", "reason": "human_approval in simulation mode"}
+
+    settings = get_settings()
+    base_url = (settings.SENTINEL_API_URL or "").strip()
+    if not base_url:
+        return {"status": "not_configured"}
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=CHECK_TIMEOUT_SECONDS) as http:
+        resp = await http.get(f"{base_url.rstrip('/')}/health")
+        resp.raise_for_status()
+    return {"status": "up"}
+
+
 async def gather_dependency_report() -> dict[str, Any]:
     """
     Run every dependency check in parallel and return a consolidated report.
@@ -241,13 +260,22 @@ async def gather_dependency_report() -> dict[str, Any]:
     settings = get_settings()
     sim_modes = get_simulation_modes()
 
-    postgres, redis_res, mqtt, stripe_res, llm, signing_key = await asyncio.gather(
+    (
+        postgres,
+        redis_res,
+        mqtt,
+        stripe_res,
+        llm,
+        signing_key,
+        sentinel,
+    ) = await asyncio.gather(
         _run_check("postgres", _check_postgres),
         _run_check("redis", _check_redis),
         _run_check("mqtt", lambda: _check_mqtt(sim_modes)),
         _run_check("stripe", _check_stripe),
         _run_check("llm", lambda: _check_llm(sim_modes)),
         _run_check("signing_key", _check_signing_key),
+        _run_check("sentinel", lambda: _check_sentinel(sim_modes)),
     )
 
     dependencies = {
@@ -257,6 +285,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         "stripe": stripe_res,
         "llm": llm,
         "signing_key": signing_key,
+        "sentinel": sentinel,
     }
 
     unhealthy = [
