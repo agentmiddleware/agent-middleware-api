@@ -13,13 +13,15 @@ Zero GUI. Your customer is an autonomous agent.
 
 import asyncio
 import logging
+from pathlib import Path
 import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from .core.config import get_settings
 from .core.durable_state import (
@@ -79,6 +81,7 @@ from .routers import (
 )
 
 settings = get_settings()
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Try structured logging, fall back to standard logging
 try:
@@ -401,14 +404,22 @@ else:
 @app.get(
     "/",
     tags=["Discovery"],
-    summary="API root — legacy service index",
+    summary="API root — service index & human dashboard negotiation",
     description=(
-        "Returns a broad service catalog. For agent-first bootstrap, follow "
-        "`GET /.well-known/agent.json` → field `agent_first` (paths and "
-        "`simulation_and_dependency_truth`), not this index alone."
+        "Returns a broad service catalog for API callers or HTML dashboard for browsers. "
+        "For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`."
     ),
 )
-async def root():
+async def root(request: Request):
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and "application/json" not in accept:
+        dashboard_path = _REPO_ROOT / "static" / "dashboard.html"
+        if dashboard_path.is_file():
+            return HTMLResponse(
+                dashboard_path.read_text(encoding="utf-8"),
+                media_type="text/html; charset=utf-8",
+            )
+
     payload: dict[str, Any] = {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
