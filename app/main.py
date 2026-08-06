@@ -409,6 +409,12 @@ else:
         "Returns a broad service catalog for API callers or HTML dashboard for browsers. "
         "For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`."
     ),
+    responses={
+        200: {
+            "description": "JSON service index or HTML control deck",
+            "content": {"text/html": {"schema": {"type": "string"}}},
+        }
+    },
 )
 async def root(request: Request):
     accept = request.headers.get("accept", "")

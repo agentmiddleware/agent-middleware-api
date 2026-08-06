@@ -134,6 +134,7 @@ async def get_partner_api_key_bootstrap_md():
     summary="Human Control Deck",
     description="Human-accessible control plane, audit visualizer, and telemetry dashboard.",
     response_class=HTMLResponse,
+    responses={404: {"description": "Dashboard not found"}},
 )
 async def get_human_dashboard():
     dashboard_path = _REPO_ROOT / "static" / "dashboard.html"
@@ -143,4 +144,3 @@ async def get_human_dashboard():
         dashboard_path.read_text(encoding="utf-8"),
         media_type="text/html; charset=utf-8",
     )
-

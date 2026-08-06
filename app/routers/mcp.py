@@ -1172,6 +1172,13 @@ async def _require_human_approval(
         await _retryable(exc.reason, data={}, status_code=503)
     except HumanApprovalError as exc:
         await _terminal_denial(exc.reason, None)
+    except Exception:
+        # Never let an unexpected error strand the caller's in-progress
+        # idempotency record (reconcile can't repair an uncharged one). Fail
+        # closed and retryable: release the key, execute nothing, surface an
+        # outage. Logged loudly so it isn't silently swallowed.
+        logger.exception("human_approval_gate_unexpected_error")
+        await _retryable("human_approval_unavailable", data={}, status_code=503)
 
     approval_data = _approval_metadata(approval_check)
     if approval_check.status == APPROVAL_STATUS_PENDING:

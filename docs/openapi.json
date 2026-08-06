@@ -5924,6 +5924,31 @@
         }
       }
     },
+    "/dashboard": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "Human Control Deck",
+        "description": "Human-accessible control plane, audit visualizer, and telemetry dashboard.",
+        "operationId": "get_human_dashboard_dashboard_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dashboard not found"
+          }
+        }
+      }
+    },
     "/docs/index": {
       "get": {
         "tags": [
@@ -13316,15 +13341,20 @@
         "tags": [
           "Discovery"
         ],
-        "summary": "API root — legacy service index",
-        "description": "Returns a broad service catalog. For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first` (paths and `simulation_and_dependency_truth`), not this index alone.",
+        "summary": "API root — service index & human dashboard negotiation",
+        "description": "Returns a broad service catalog for API callers or HTML dashboard for browsers. For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`.",
         "operationId": "root__get",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "JSON service index or HTML control deck",
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           }

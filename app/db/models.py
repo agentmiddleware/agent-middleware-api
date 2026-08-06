@@ -261,7 +261,9 @@ class APIKeyModel(SQLModel, table=True):
     last_used_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     last_used_ip: Optional[str] = Field(default=None, max_length=45)
 
-    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
     expires_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
@@ -741,11 +743,15 @@ class PermitModel(SQLModel, table=True):
     requires_human_approval: bool = Field(default=False)
     signature: str
     key_id: str = Field(max_length=64, foreign_key="signing_keys.key_id", index=True)
-    issued_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
+    issued_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
     revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     # Last time budget was reserved/released; used to distinguish a live
     # in-flight reservation from one orphaned by a crash during reconciliation.
-    updated_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    updated_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None, index=True
+    )
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -782,7 +788,9 @@ class ReceiptModel(SQLModel, table=True):
     # receipt signatures stay valid. Plain string (no FK) — the column is
     # ALTER-added and SQLite cannot add FK constraints via ALTER (see 020).
     approval_id: Optional[str] = Field(default=None, max_length=64, index=True)
-    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True)
+    created_at: datetime = Field(
+        sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
+    )
     signature: str
     signature_key_id: str = Field(
         max_length=64,
@@ -819,7 +827,11 @@ class HumanApprovalModel(SQLModel, table=True):
     permit_id: str = Field(max_length=64, foreign_key="permits.permit_id", index=True)
     tool: str = Field(max_length=128)
     idempotency_key: str = Field(max_length=128)
-    # pending | approved | rejected | expired
+    # sha256 of the (tool, arguments, estimated_credits) the human reviewed.
+    # Binds the approval to the exact call, so a retry reusing the idempotency
+    # key with different arguments or price cannot ride this approval.
+    request_hash: Optional[str] = Field(default=None, max_length=64)
+    # pending | approved | rejected | expired | consumed
     status: str = Field(default="pending", max_length=16, index=True)
     simulated: bool = Field(default=False)
     # Sentinel action id (act_<hex>); None for simulated approvals.

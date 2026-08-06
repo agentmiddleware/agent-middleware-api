@@ -75,3 +75,16 @@ async def test_docs_and_llm_txt_remain_accessible(client):
     resp_openapi = await client.get("/openapi.json")
     assert resp_openapi.status_code == 200
     assert "openapi" in resp_openapi.json()
+
+
+def test_openapi_documents_human_html_and_dashboard_not_found():
+    """Generated clients see both negotiated root media types and the
+    dashboard file-missing response."""
+    spec = app.openapi()
+
+    root_content = spec["paths"]["/"]["get"]["responses"]["200"]["content"]
+    assert "application/json" in root_content
+    assert root_content["text/html"]["schema"] == {"type": "string"}
+
+    dashboard_responses = spec["paths"]["/dashboard"]["get"]["responses"]
+    assert dashboard_responses["404"]["description"] == "Dashboard not found"
