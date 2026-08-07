@@ -106,10 +106,12 @@ Recent work substantially tightened the trust and accounting boundary:
 - **Settlement-gated top-ups.** Direct credit minting is disabled. Stripe
   top-ups derive credits from a verified, fully settled USD PaymentIntent;
   duplicate and stale webhook events do not mint or debit twice.
-- **Safer key custody.** Core wallet and service-registry tables no longer store
-  legacy plaintext owner keys. Wallet API keys are stored as SHA-256 hashes,
-  while the trust-signing private key is injected at runtime and only public
-  signing metadata is persisted.
+- **Safer key custody.** Current wallet and service-registry models no longer
+  persist legacy plaintext owner keys. Migration 025 scrubs existing values
+  but retains empty compatibility columns for one rolling release; the deploy
+  gate re-scrubs and asserts them after old workers drain. Wallet API keys are
+  stored as SHA-256 hashes, while the trust-signing private key is injected at
+  runtime and only public signing metadata is persisted.
 - **Signing-key lifecycle checks.** Reusing a key ID with different material is
   rejected, disabled keys stay disabled, and retired public metadata remains
   available for historical verification.

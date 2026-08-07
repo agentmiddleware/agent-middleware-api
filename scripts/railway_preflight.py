@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Railway deploy preflight: migration-head parity + live posture check.
 
-Two independent checks, each skipped when its input is absent:
+Two independent checks, each skipped when its ordinary input is absent.
+Explicit ``--public-db`` mode is an exception and fails closed when absent:
 
 ``--db`` (needs ``DATABASE_URL``)
     Compare the Alembic head revision in this tree against the
@@ -11,6 +12,11 @@ Two independent checks, each skipped when its input is absent:
     Also flags a database bootstrapped with ``create_all`` (tables present,
     no ``alembic_version`` row) — that needs a one-time ``alembic stamp head``
     before ``RUN_MIGRATIONS_ON_START=true`` is safe.
+
+``--public-db`` (needs ``DATABASE_PUBLIC_URL``)
+    Select the explicit public PostgreSQL URL for an off-platform database
+    check, such as GitHub Actions after ``railway up``. This never falls back
+    to ``DATABASE_URL``; a missing or private-looking value fails closed.
 
 ``--live`` (needs ``PUBLIC_URL`` or ``--url``)
     Probe the deployed service and assert the production posture the SOP
@@ -29,6 +35,10 @@ Usage::
     # Schema parity only:
     DATABASE_URL=postgresql://... python scripts/railway_preflight.py --db
 
+    # Schema parity from an off-platform runner:
+    DATABASE_PUBLIC_URL=postgresql://... \
+      python scripts/railway_preflight.py --db --public-db --strict
+
     # Post-deploy verification only:
     python scripts/railway_preflight.py --live --url https://api.example.com
 
@@ -39,9 +49,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -113,10 +126,37 @@ def check_db(url: str) -> bool:
     print(
         f"{BAD} migration drift: tree head is {head}, database is at "
         f"{', '.join(applied)}. Deploying now ships code whose tables do not "
-        f"exist yet. Run `alembic upgrade head` against this DATABASE_URL "
+        f"exist yet. Run `alembic upgrade head` against the target database "
         f"(or set RUN_MIGRATIONS_ON_START=true so the entrypoint does it)."
     )
     return False
+
+
+def _public_database_url(environment: Mapping[str, str] | None = None) -> str:
+    """Load an explicitly public PostgreSQL URL without rendering its value."""
+    values = os.environ if environment is None else environment
+    url = values.get("DATABASE_PUBLIC_URL", "").strip()
+    if not url:
+        raise ValueError("DATABASE_PUBLIC_URL is required")
+    try:
+        parsed = urlsplit(url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError(
+            "DATABASE_PUBLIC_URL must be a valid public PostgreSQL URL"
+        ) from exc
+    if parsed.scheme not in {"postgres", "postgresql", "postgresql+asyncpg"}:
+        raise ValueError("DATABASE_PUBLIC_URL must be a public PostgreSQL URL")
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if not hostname or hostname == "localhost" or hostname.endswith(".internal"):
+        raise ValueError("DATABASE_PUBLIC_URL must not use a private or local hostname")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ValueError("DATABASE_PUBLIC_URL must not use a private or local address")
+    return url
 
 
 def check_live(url: str) -> bool:
@@ -165,13 +205,21 @@ def check_live(url: str) -> bool:
     return True
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
         "--db", action="store_true", help="run only the migration-parity check"
     )
     parser.add_argument(
         "--live", action="store_true", help="run only the live posture check"
+    )
+    parser.add_argument(
+        "--public-db",
+        action="store_true",
+        help=(
+            "use explicit $DATABASE_PUBLIC_URL for an off-platform DB check; "
+            "missing or private values fail closed"
+        ),
     )
     parser.add_argument(
         "--url",
@@ -183,7 +231,7 @@ def main() -> int:
         action="store_true",
         help="treat a skipped check as a failure (for CI)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Neither flag given: run whatever the environment supports.
     run_db = args.db or not (args.db or args.live)
@@ -192,10 +240,29 @@ def main() -> int:
     results: list[bool] = []
 
     if run_db:
-        database_url = os.getenv("DATABASE_URL", "").strip()
+        database_url_load_failed = False
+        try:
+            database_url = (
+                _public_database_url()
+                if args.public_db
+                else os.getenv("DATABASE_URL", "").strip()
+            )
+        except ValueError as exc:
+            print(f"{BAD} migration parity: {exc}")
+            results.append(False)
+            database_url_load_failed = True
+            database_url = ""
         if database_url:
-            results.append(check_db(database_url))
-        else:
+            try:
+                results.append(check_db(database_url))
+            except Exception:
+                source = "DATABASE_PUBLIC_URL" if args.public_db else "DATABASE_URL"
+                print(
+                    f"{BAD} migration parity: {source} connection or schema "
+                    "check failed"
+                )
+                results.append(False)
+        elif not database_url_load_failed:
             print(f"{SKIP} migration parity: DATABASE_URL not set")
             results.append(not args.strict)
 

@@ -1,12 +1,20 @@
-"""Remove plaintext API-key ownership columns.
+"""Retire plaintext API-key ownership values without breaking old workers.
 
 Revision ID: 025_remove_plaintext_owner_keys
 Revises: 024_human_approval_hardening
 Create Date: 2026-08-05
 
 Wallet and service ownership is represented by wallet identifiers and the
-hashed API-key registry. The legacy owner_key columns duplicated live API
-credentials in plaintext and were not required by the supported auth path.
+hashed API-key registry. The legacy ``owner_key`` columns duplicated live API
+credentials in plaintext and are not used by current code.
+
+This revision deliberately retains the columns and indexes for one rolling
+release. Workers from the previous release still select and write these
+columns; dropping them before those workers drain causes query failures. The
+migration performs an initial scrub, while the deploy workflow performs the
+same idempotent scrub and assertion again after Railway reports that only the
+new deployment is active. A later contract migration may drop the empty
+compatibility columns once no old binary can be running.
 """
 
 from typing import Sequence, Union
@@ -22,36 +30,57 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Remove legacy plaintext API credentials from the active schema."""
-    op.drop_index("ix_service_registry_owner_key", table_name="service_registry")
-    op.drop_column("service_registry", "owner_key")
-    op.drop_index("ix_wallets_owner_key", table_name="wallets")
-    op.drop_column("wallets", "owner_key")
+    """Scrub legacy credentials while retaining the rolling-compatible shape."""
+    op.execute(
+        sa.text(
+            """
+            UPDATE wallets
+            SET owner_key = ''
+            WHERE owner_key IS NULL OR owner_key <> ''
+            """
+        )
+    )
+    # Current workers no longer map these columns, so the retained NOT NULL
+    # shape needs an empty server default for their inserts. Previous workers
+    # continue to supply a value explicitly and remain schema-compatible.
+    with op.batch_alter_table("wallets") as batch_op:
+        batch_op.alter_column(
+            "owner_key",
+            existing_type=sa.String(length=255),
+            existing_nullable=False,
+            server_default="",
+        )
+    with op.batch_alter_table("service_registry") as batch_op:
+        batch_op.alter_column(
+            "owner_key",
+            existing_type=sa.String(length=255),
+            existing_nullable=False,
+            server_default="",
+        )
+    op.execute(
+        sa.text(
+            """
+            UPDATE service_registry
+            SET owner_key = ''
+            WHERE owner_key IS NULL OR owner_key <> ''
+            """
+        )
+    )
 
 
 def downgrade() -> None:
-    """Restore only the legacy shape; removed credentials are not reconstructed."""
-    op.add_column(
-        "wallets",
-        sa.Column(
+    """Keep the compatibility shape; scrubbed credentials are unrecoverable."""
+    with op.batch_alter_table("service_registry") as batch_op:
+        batch_op.alter_column(
             "owner_key",
-            sa.String(255),
-            nullable=False,
-            server_default="",
-        ),
-    )
-    op.create_index("ix_wallets_owner_key", "wallets", ["owner_key"])
-    op.add_column(
-        "service_registry",
-        sa.Column(
+            existing_type=sa.String(length=255),
+            existing_nullable=False,
+            server_default=None,
+        )
+    with op.batch_alter_table("wallets") as batch_op:
+        batch_op.alter_column(
             "owner_key",
-            sa.String(255),
-            nullable=False,
-            server_default="",
-        ),
-    )
-    op.create_index(
-        "ix_service_registry_owner_key",
-        "service_registry",
-        ["owner_key"],
-    )
+            existing_type=sa.String(length=255),
+            existing_nullable=False,
+            server_default=None,
+        )

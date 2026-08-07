@@ -1,5 +1,7 @@
 """Regression coverage for raw API-key persistence boundaries."""
 
+from pathlib import Path
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -24,6 +26,16 @@ def test_wallet_and_service_tables_have_no_raw_owner_key_columns():
     """Live API credentials must never be persisted as ownership metadata."""
     assert "owner_key" not in WalletModel.__table__.columns
     assert "owner_key" not in ServiceRegistryModel.__table__.columns
+
+
+def test_docker_context_excludes_local_agent_and_secret_files():
+    """Local Railway builds must not copy workstation-only control files."""
+    ignored = {
+        line.strip()
+        for line in Path(".dockerignore").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert {".agents", ".claude", ".envrc", ".vercel", ".venv"} <= ignored
 
 
 @pytest.mark.anyio

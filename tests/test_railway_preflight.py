@@ -60,7 +60,11 @@ def test_fails_when_database_behind_tree(migrated_db):
     async_url, sync_url = migrated_db
     engine = create_engine(sync_url)
     with engine.begin() as conn:
-        conn.execute(text("UPDATE alembic_version SET version_num = '021_ledger_stripe_event_id'"))
+        conn.execute(
+            text(
+                "UPDATE alembic_version SET version_num = '021_ledger_stripe_event_id'"
+            )
+        )
     engine.dispose()
 
     assert preflight.check_db(async_url) is False
@@ -75,6 +79,98 @@ def test_fails_on_unstamped_create_all_bootstrap(migrated_db):
     engine.dispose()
 
     assert preflight.check_db(async_url) is False
+
+
+def test_public_db_mode_fails_closed_without_public_url(
+    monkeypatch,
+    capsys,
+):
+    private_secret = "postgresql://user:private-secret@postgres.railway.internal/db"
+    monkeypatch.setenv("DATABASE_URL", private_secret)
+    monkeypatch.delenv("DATABASE_PUBLIC_URL", raising=False)
+
+    assert preflight.main(["--db", "--public-db", "--strict"]) == 1
+
+    output = capsys.readouterr().out
+    assert "DATABASE_PUBLIC_URL is required" in output
+    assert private_secret not in output
+    assert "private-secret" not in output
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql://user:secret@postgres.railway.internal/db",
+        "postgresql://user:secret@127.0.0.1:5432/db",
+        "sqlite+aiosqlite:///local.db",
+    ],
+)
+def test_public_db_mode_rejects_private_or_non_postgres_urls(
+    monkeypatch,
+    capsys,
+    url,
+):
+    monkeypatch.setenv("DATABASE_PUBLIC_URL", url)
+
+    assert preflight.main(["--db", "--public-db", "--strict"]) == 1
+
+    output = capsys.readouterr().out
+    assert "[preflight] FAIL" in output
+    assert url not in output
+    assert "secret" not in output
+
+
+def test_public_db_mode_uses_only_explicit_value_without_rendering_it(
+    monkeypatch,
+    capsys,
+):
+    public_url = "postgresql://user:public-secret@switchback.proxy.rlwy.net:5432/db"
+    seen = []
+    monkeypatch.setenv("DATABASE_URL", "postgresql://wrong:private@internal/db")
+    monkeypatch.setenv("DATABASE_PUBLIC_URL", public_url)
+    monkeypatch.setattr(
+        preflight,
+        "check_db",
+        lambda url: seen.append(url) is None,
+    )
+
+    assert preflight.main(["--db", "--public-db", "--strict"]) == 0
+    assert seen == [public_url]
+    assert public_url not in capsys.readouterr().out
+
+
+def test_public_db_connection_failure_does_not_render_url(
+    monkeypatch,
+    capsys,
+):
+    public_url = "postgresql://user:public-secret@switchback.proxy.rlwy.net:5432/db"
+    monkeypatch.setenv("DATABASE_PUBLIC_URL", public_url)
+
+    def fail(_url):
+        raise RuntimeError(f"could not connect to {public_url}")
+
+    monkeypatch.setattr(preflight, "check_db", fail)
+
+    assert preflight.main(["--db", "--public-db", "--strict"]) == 1
+    output = capsys.readouterr().out
+    assert "connection or schema check failed" in output
+    assert public_url not in output
+    assert "public-secret" not in output
+
+
+def test_deploy_workflow_drains_then_rescrubs_and_uses_public_db() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "railway-deploy.yml").read_text()
+
+    drain = workflow.index("- name: Wait for old workers to drain")
+    rescrub = workflow.index("- name: Re-scrub retired owner keys")
+    verify = workflow.index("- name: Verify deploy — migrations + posture")
+    assert drain < rescrub < verify
+    assert "python scripts/retire_owner_keys.py" in workflow
+    assert "railway run --service Postgres --environment production" in workflow
+    assert "--public-db" in workflow
+    assert 'activeDeployments[0].status == "SUCCESS"' in workflow
+    assert "activeDeployments | length) == 1" in workflow
+    assert "python scripts/railway_preflight.py --live --strict" in workflow
 
 
 class _Response:

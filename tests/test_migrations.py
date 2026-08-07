@@ -86,10 +86,12 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         "kyc_status",
         "kyc_verified_at",
     } <= wallet_columns
-    assert "owner_key" not in wallet_columns
+    # Revision 025 scrubs these compatibility columns but retains their shape
+    # for one rolling release so the previous worker can drain safely.
+    assert "owner_key" in wallet_columns
 
     service_columns = {col["name"] for col in inspector.get_columns("service_registry")}
-    assert "owner_key" not in service_columns
+    assert "owner_key" in service_columns
 
     audit_columns = {
         col["name"] for col in inspector.get_columns("control_plane_audit_events")
@@ -364,7 +366,7 @@ def test_governed_mcp_identity_migration_refuses_ambiguous_history(
     os.remove(db_path)
 
 
-def test_owner_key_migration_removes_columns_but_preserves_owned_rows(
+def test_owner_key_migration_scrubs_values_but_retains_rolling_compatible_columns(
     tmp_path,
     monkeypatch,
 ):
@@ -436,32 +438,41 @@ def test_owner_key_migration_removes_columns_but_preserves_owned_rows(
 
     engine = create_engine(sync_url)
     inspector = inspect(engine)
-    assert "owner_key" not in {
+    assert "owner_key" in {
         column["name"] for column in inspector.get_columns("wallets")
     }
-    assert "owner_key" not in {
+    assert "owner_key" in {
         column["name"] for column in inspector.get_columns("service_registry")
     }
     with engine.connect() as connection:
-        assert (
-            connection.execute(
-                text("SELECT wallet_id FROM wallets WHERE wallet_id = :wallet_id"),
-                {"wallet_id": "spn-owner-key-migration"},
-            ).scalar_one()
-            == "spn-owner-key-migration"
-        )
-        assert (
-            connection.execute(
-                text(
-                    """
-                SELECT owner_wallet_id
+        wallet = connection.execute(
+            text(
+                """
+                SELECT wallet_id, owner_key
+                FROM wallets
+                WHERE wallet_id = :wallet_id
+                """
+            ),
+            {"wallet_id": "spn-owner-key-migration"},
+        ).one()
+        service = connection.execute(
+            text(
+                """
+                SELECT owner_wallet_id, owner_key
                 FROM service_registry
                 WHERE service_id = 'svc-owner-key-migration'
                 """
-                )
-            ).scalar_one()
-            == "spn-owner-key-migration"
+            )
+        ).one()
+        assert wallet == (
+            "spn-owner-key-migration",
+            "",
         )
+        assert service == (
+            "spn-owner-key-migration",
+            "",
+        )
+        assert sentinel not in repr((wallet, service))
     engine.dispose()
 
 

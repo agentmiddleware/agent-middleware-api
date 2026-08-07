@@ -64,7 +64,7 @@ def _receipt_payload(outcome: str = "success") -> dict:
 
 def _client(handler) -> AgentMiddlewareClient:
     return AgentMiddlewareClient(
-        api_key="test-agent-key",
+        api_key="test-key",
         base_url="https://gateway.example",
         transport=httpx.MockTransport(handler),
     )
@@ -337,7 +337,7 @@ async def test_authentication_and_transport_failures_are_typed() -> None:
 async def test_b2a_client_remains_a_deprecated_compatibility_name() -> None:
     with pytest.warns(DeprecationWarning, match="AgentMiddlewareClient"):
         client = B2AClient(
-            api_key="test-agent-key",
+            api_key="test-key",
             base_url="https://gateway.example",
         )
     await client.close()
