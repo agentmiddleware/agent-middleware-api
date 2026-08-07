@@ -1,13 +1,47 @@
-"""Hyper-edge-case stress test against live trust plane."""
+"""Hyper-edge-case stress test against live trust plane.
+
+Usage:
+    export AGENT_MIDDLEWARE_API_KEY=...        # required, never hardcode
+    export AGENT_MIDDLEWARE_API_URL=https://...  # optional, defaults to production
+    python scripts/stress_test_live.py
+
+This script creates wallets, permits and receipts on whatever deployment it is
+pointed at. Point it at a staging deployment unless you intend to write test
+data to production.
+"""
 
 import asyncio
+import os
+import sys
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
-API_URL = "https://api-service-production-433c.up.railway.app"
-API_KEY = "***REMOVED***"
+DEFAULT_API_URL = "https://api-service-production-433c.up.railway.app"
+
+API_URL = os.environ.get("AGENT_MIDDLEWARE_API_URL", DEFAULT_API_URL)
+API_KEY = os.environ.get("AGENT_MIDDLEWARE_API_KEY", "")
+
+if not API_KEY:
+    sys.exit(
+        "AGENT_MIDDLEWARE_API_KEY is not set.\n"
+        "Export a key for the target deployment before running:\n"
+        "    export AGENT_MIDDLEWARE_API_KEY=...\n"
+        "Credentials must never be committed to this repository."
+    )
+
+# Every idempotency key is namespaced with a fresh per-run prefix. Without this
+# a second run replays the first run's cached responses instead of re-testing,
+# so the suite would silently stop exercising the code paths it claims to cover.
+RUN_ID = os.environ.get("STRESS_RUN_ID") or uuid.uuid4().hex[:12]
+
+
+def ikey(name: str) -> str:
+    """Build a run-scoped Idempotency-Key."""
+    return f"stress-{RUN_ID}-{name}"
+
 
 # Rate-limiting semaphore
 SEM = asyncio.Semaphore(10)
@@ -29,7 +63,7 @@ async def setup_wallets():
     spn = sponsor.json()["wallet_id"]
 
     agent = await req("POST", "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": spn, "agent_id": "stress-bot", "budget_credits": 1000})
+        json={"sponsor_wallet_id": spn, "agent_id": ikey("bot"), "budget_credits": 1000})
     assert agent.status_code == 201, f"agent: {agent.text}"
     agt = agent.json()["wallet_id"]
 
@@ -40,7 +74,7 @@ async def test_budget_exhaustion(spn, agt):
     """Spend exact budget, then one more."""
     print("\n[STRESS] Budget exhaustion...")
     permit = await req("POST", "/v1/permits",
-        headers={"Idempotency-Key": "stress-budget"},
+        headers={"Idempotency-Key": ikey("budget")},
         json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
               "allowed_tools": ["partner.notes.write"],
               "max_credits": "4", "expires_at": "2099-01-01T00:00:00Z"})
@@ -50,7 +84,7 @@ async def test_budget_exhaustion(spn, agt):
     # 4 credits / 2 per call = 2 calls exactly
     for i in range(2):
         r = await req("POST", "/mcp/messages",
-            headers={"Idempotency-Key": f"stress-budget-invoke-{i}"},
+            headers={"Idempotency-Key": ikey(f"budget-invoke-{i}")},
             json={"jsonrpc": "2.0", "id": i, "method": "tools/call",
                   "params": {"name": "partner.notes.write", "arguments": {"text": f"call {i}"},
                              "mcpContext": {"wallet_id": agt, "permit_id": pid}}})
@@ -60,7 +94,7 @@ async def test_budget_exhaustion(spn, agt):
 
     # Third call should exceed budget
     r = await req("POST", "/mcp/messages",
-        headers={"Idempotency-Key": "stress-budget-invoke-2"},
+        headers={"Idempotency-Key": ikey("budget-invoke-2")},
         json={"jsonrpc": "2.0", "id": 99, "method": "tools/call",
               "params": {"name": "partner.notes.write", "arguments": {"text": "over budget"},
                          "mcpContext": {"wallet_id": agt, "permit_id": pid}}})
@@ -75,7 +109,7 @@ async def test_expired_permit(spn, agt):
     print("\n[STRESS] Expired permit...")
     one_sec_ago = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     permit = await req("POST", "/v1/permits",
-        headers={"Idempotency-Key": "stress-expired"},
+        headers={"Idempotency-Key": ikey("expired")},
         json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
               "allowed_tools": ["partner.notes.write"],
               "max_credits": "10", "expires_at": one_sec_ago})
@@ -89,7 +123,7 @@ async def test_concurrent_permit_creation(spn, agt):
     print("\n[STRESS] Concurrent permit creation (same idempotency key)...")
     async def create(i):
         return await req("POST", "/v1/permits",
-            headers={"Idempotency-Key": "stress-concurrent-permit"},
+            headers={"Idempotency-Key": ikey("concurrent-permit")},
             json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
                   "allowed_tools": ["partner.notes.write"],
                   "max_credits": "10", "expires_at": "2099-01-01T00:00:00Z"})
@@ -109,7 +143,7 @@ async def test_concurrent_governed_invokes(spn, agt):
     """20 parallel invokes with fresh idempotency keys."""
     print("\n[STRESS] Concurrent governed invokes...")
     permit = await req("POST", "/v1/permits",
-        headers={"Idempotency-Key": "stress-concurrent-invoke-permit"},
+        headers={"Idempotency-Key": ikey("concurrent-invoke-permit")},
         json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
               "allowed_tools": ["partner.notes.write"],
               "max_credits": "100", "expires_at": "2099-01-01T00:00:00Z"})
@@ -117,7 +151,7 @@ async def test_concurrent_governed_invokes(spn, agt):
 
     async def invoke(i):
         return await req("POST", "/mcp/messages",
-            headers={"Idempotency-Key": f"stress-invoke-{i}"},
+            headers={"Idempotency-Key": ikey(f"invoke-{i}")},
             json={"jsonrpc": "2.0", "id": i, "method": "tools/call",
                   "params": {"name": "partner.notes.write", "arguments": {"text": f"concurrent {i}"},
                              "mcpContext": {"wallet_id": agt, "permit_id": pid}}})
@@ -135,7 +169,7 @@ async def test_unicode_payload(spn, agt):
     """Unicode, emoji, and special chars in note text."""
     print("\n[STRESS] Unicode/emoji payload...")
     permit = await req("POST", "/v1/permits",
-        headers={"Idempotency-Key": "stress-unicode-permit"},
+        headers={"Idempotency-Key": ikey("unicode-permit")},
         json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
               "allowed_tools": ["partner.notes.write"],
               "max_credits": "10", "expires_at": "2099-01-01T00:00:00Z"})
@@ -152,7 +186,7 @@ async def test_unicode_payload(spn, agt):
     ]
     for i, text in enumerate(texts):
         r = await req("POST", "/mcp/messages",
-            headers={"Idempotency-Key": f"stress-unicode-{i}"},
+            headers={"Idempotency-Key": ikey(f"unicode-{i}")},
             json={"jsonrpc": "2.0", "id": i, "method": "tools/call",
                   "params": {"name": "partner.notes.write", "arguments": {"text": text},
                              "mcpContext": {"wallet_id": agt, "permit_id": pid}}})
@@ -167,7 +201,7 @@ async def test_tampered_permit(spn, agt):
     """Try to use a forged permit ID."""
     print("\n[STRESS] Tampered/forged permit...")
     r = await req("POST", "/mcp/messages",
-        headers={"Idempotency-Key": "stress-forged"},
+        headers={"Idempotency-Key": ikey("forged")},
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
               "params": {"name": "partner.notes.write", "arguments": {"text": "forged"},
                          "mcpContext": {"wallet_id": agt, "permit_id": "permit-fake123456789"}}})
@@ -182,12 +216,12 @@ async def test_cross_wallet_access(spn, agt):
     print("\n[STRESS] Cross-wallet access...")
     # Create a second agent
     agent2 = await req("POST", "/v1/billing/wallets/agent",
-        json={"sponsor_wallet_id": spn, "agent_id": "stress-bot-2", "budget_credits": 100})
+        json={"sponsor_wallet_id": spn, "agent_id": ikey("bot-2"), "budget_credits": 100})
     agt2 = agent2.json()["wallet_id"]
 
     # Create permit for agent 1
     permit = await req("POST", "/v1/permits",
-        headers={"Idempotency-Key": "stress-cross-permit"},
+        headers={"Idempotency-Key": ikey("cross-permit")},
         json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
               "allowed_tools": ["partner.notes.write"],
               "max_credits": "10", "expires_at": "2099-01-01T00:00:00Z"})
@@ -195,7 +229,7 @@ async def test_cross_wallet_access(spn, agt):
 
     # Agent 2 tries to use it
     r = await req("POST", "/mcp/messages",
-        headers={"Idempotency-Key": "stress-cross-invoke"},
+        headers={"Idempotency-Key": ikey("cross-invoke")},
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
               "params": {"name": "partner.notes.write", "arguments": {"text": "cross"},
                          "mcpContext": {"wallet_id": agt2, "permit_id": pid}}})
@@ -217,7 +251,7 @@ async def test_timezone_extremes(spn, agt):
     ]
     for i, offset in enumerate(offsets):
         r = await req("POST", "/v1/permits",
-            headers={"Idempotency-Key": f"stress-tz-{i}"},
+            headers={"Idempotency-Key": ikey(f"tz-{i}")},
             json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
                   "allowed_tools": ["partner.notes.write"],
                   "max_credits": "10", "expires_at": offset})
@@ -234,7 +268,7 @@ async def test_decimal_precision(spn, agt):
     amounts = ["0.01", "0.001", "999999", "-1", "0", "abc", ""]
     for i, amt in enumerate(amounts):
         r = await req("POST", "/v1/permits",
-            headers={"Idempotency-Key": f"stress-decimal-{i}"},
+            headers={"Idempotency-Key": ikey(f"decimal-{i}")},
             json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
                   "allowed_tools": ["partner.notes.write"],
                   "max_credits": amt, "expires_at": "2099-01-01T00:00:00Z"})
@@ -252,7 +286,7 @@ async def test_rapid_fire_idempotency(spn, agt):
     """Hammer same idempotency key 50 times in <1s."""
     print("\n[STRESS] Rapid-fire idempotency (50x same key)...")
     permit = await req("POST", "/v1/permits",
-        headers={"Idempotency-Key": "stress-rapid-permit"},
+        headers={"Idempotency-Key": ikey("rapid-permit")},
         json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
               "allowed_tools": ["partner.notes.write"],
               "max_credits": "100", "expires_at": "2099-01-01T00:00:00Z"})
@@ -262,7 +296,7 @@ async def test_rapid_fire_idempotency(spn, agt):
     tasks = []
     for i in range(50):
         tasks.append(req("POST", "/mcp/messages",
-            headers={"Idempotency-Key": "stress-rapid-same-key"},
+            headers={"Idempotency-Key": ikey("rapid-same-key")},
             json={"jsonrpc": "2.0", "id": i, "method": "tools/call",
                   "params": {"name": "partner.notes.write", "arguments": {"text": f"rapid {i}"},
                              "mcpContext": {"wallet_id": agt, "permit_id": pid}}}))
@@ -283,7 +317,7 @@ async def test_permit_reuse_after_replay(spn, agt):
     """Use same permit after many replays."""
     print("\n[STRESS] Permit reuse after heavy load...")
     permit = await req("POST", "/v1/permits",
-        headers={"Idempotency-Key": "stress-reuse-permit"},
+        headers={"Idempotency-Key": ikey("reuse-permit")},
         json={"issuer_wallet_id": spn, "subject_wallet_id": agt,
               "allowed_tools": ["partner.notes.write"],
               "max_credits": "100", "expires_at": "2099-01-01T00:00:00Z"})
@@ -292,7 +326,7 @@ async def test_permit_reuse_after_replay(spn, agt):
     # Burn 48 credits (24 calls * 2)
     for i in range(24):
         r = await req("POST", "/mcp/messages",
-            headers={"Idempotency-Key": f"stress-reuse-{i}"},
+            headers={"Idempotency-Key": ikey(f"reuse-{i}")},
             json={"jsonrpc": "2.0", "id": i, "method": "tools/call",
                   "params": {"name": "partner.notes.write", "arguments": {"text": f"burn {i}"},
                              "mcpContext": {"wallet_id": agt, "permit_id": pid}}})
@@ -305,7 +339,7 @@ async def test_permit_reuse_after_replay(spn, agt):
 
     # One more should work
     r = await req("POST", "/mcp/messages",
-        headers={"Idempotency-Key": "stress-reuse-final"},
+        headers={"Idempotency-Key": ikey("reuse-final")},
         json={"jsonrpc": "2.0", "id": 99, "method": "tools/call",
               "params": {"name": "partner.notes.write", "arguments": {"text": "final"},
                          "mcpContext": {"wallet_id": agt, "permit_id": pid}}})
