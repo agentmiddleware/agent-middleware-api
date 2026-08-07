@@ -23,6 +23,14 @@ from app.db.database import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _restore_schema_boot_environment(monkeypatch):
+    """Restore patched boot variables before invalidating cached Settings."""
+    yield
+    monkeypatch.undo()
+    get_settings.cache_clear()
+
+
 @pytest.mark.parametrize(
     ("dialect", "environment", "expected"),
     [

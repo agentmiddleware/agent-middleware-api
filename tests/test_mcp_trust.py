@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -12,9 +13,11 @@ from app.db.models import IdempotencyRecordModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.idempotency import (
+    GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
     IdempotencyInProgressError,
     get_idempotency_service,
 )
+from app.services.permits import get_permit_service
 from app.services.receipts import ReceiptService
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
@@ -93,11 +96,15 @@ async def test_governed_mcp_invoke_returns_receipt_and_replay_does_not_double_ch
             headers=provisioned["agent_headers"],
         )
         debits = [
-            entry for entry in ledger_resp.json()["entries"]
+            entry
+            for entry in ledger_resp.json()["entries"]
             if entry["service_category"] == "agent_comms"
             and "trust-echo" in entry["description"]
         ]
         assert len(debits) == 1
+        stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == 2
     finally:
         registry.unregister_local("trust-echo")
 
@@ -259,9 +266,14 @@ async def test_governed_mcp_rejects_in_progress_idempotency_without_charge(
     }
     await get_idempotency_service().begin(
         wallet_id=provisioned["agent_wallet_id"],
-        endpoint="/mcp/messages",
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
         idempotency_key="in-progress-mcp-key",
-        request_payload=body,
+        request_payload={
+            "tool_name": "in-progress-idem-tool",
+            "arguments": {},
+            "wallet_id": provisioned["agent_wallet_id"],
+            "permit_id": permit["permit_id"],
+        },
     )
     try:
         resp = await client.post(
@@ -435,9 +447,13 @@ async def test_governed_policy_denial_returns_receipt(client, clean_database):
             json=body,
             headers=provisioned["agent_headers"],
         )
-        assert replay.json()["error"]["data"]["receipt"]["receipt_id"] == receipt[
-            "receipt_id"
-        ]
+        assert (
+            replay.json()["error"]["data"]["receipt"]["receipt_id"]
+            == receipt["receipt_id"]
+        )
+        stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == 0
     finally:
         registry.unregister_local("policy-denied-trust-tool")
 
@@ -495,6 +511,123 @@ async def test_governed_tool_failure_returns_refunded_receipt(client, clean_data
     assert receipt["outcome"] == "failed_refunded"
     assert receipt["ledger_entry_id"]
     assert receipt["credits_charged"] == "0"
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == 0
+
+
+@pytest.mark.anyio
+async def test_governed_refund_failure_keeps_permit_budget_reserved(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    registry = get_service_registry()
+    calls = {"count": 0}
+
+    def failing_tool() -> dict:
+        calls["count"] += 1
+        raise RuntimeError("tool exploded")
+
+    async def failing_refund(self, **_kwargs):
+        raise RuntimeError("refund down")
+
+    registry.register_local(
+        service_id="unrefunded-trust-tool",
+        name="Unrefunded Trust Tool",
+        description="Governed refund-failure permit-accounting test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=failing_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="unrefunded-trust-tool",
+        max_credits=2,
+        idem_key="unrefunded-trust-permit-create-1",
+    )
+
+    def body(idempotency_key: str, request_id: str) -> dict:
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "unrefunded-trust-tool",
+                "arguments": {},
+                "mcpContext": {
+                    "wallet_id": provisioned["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": idempotency_key,
+                },
+            },
+        }
+
+    try:
+        with patch(
+            "app.services.agent_money.AgentMoney.refund_charge",
+            failing_refund,
+        ):
+            first = await client.post(
+                "/mcp/messages",
+                json=body("unrefunded-trust-invoke-1", "unrefunded-call-1"),
+                headers=provisioned["agent_headers"],
+            )
+            replay = await client.post(
+                "/mcp/messages",
+                json=body("unrefunded-trust-invoke-1", "unrefunded-call-1"),
+                headers=provisioned["agent_headers"],
+            )
+            fresh_key = await client.post(
+                "/mcp/messages",
+                json=body("unrefunded-trust-invoke-2", "unrefunded-call-2"),
+                headers=provisioned["agent_headers"],
+            )
+    finally:
+        registry.unregister_local("unrefunded-trust-tool")
+
+    assert first.status_code == 200
+    assert first.json()["error"]["code"] == -32603
+    assert "refund_failed:refund down" in first.json()["error"]["message"]
+    assert replay.json()["error"] == first.json()["error"]
+    receipt = first.json()["error"]["data"]["receipt"]
+    assert receipt["outcome"] == "failed_unrefunded"
+    assert receipt["ledger_entry_id"]
+    assert Decimal(receipt["credits_charged"]) == Decimal("2")
+    assert first.json()["error"]["data"]["refund_reconciliation"]["status"] == (
+        "pending"
+    )
+
+    # The failed compensation leaves a real wallet debit, so the matching
+    # permit reservation must remain consumed. A fresh idempotency key cannot
+    # bypass max_credits and execute or charge the tool again.
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == 2
+    assert fresh_key.status_code == 200
+    assert fresh_key.json()["error"]["message"] == "permit_budget_exceeded"
+    assert calls["count"] == 1
+
+    wallet_resp = await client.get(
+        f"/v1/billing/wallets/{provisioned['agent_wallet_id']}",
+        headers=provisioned["agent_headers"],
+    )
+    assert wallet_resp.status_code == 200
+    assert Decimal(wallet_resp.json()["balance_exact"]) == Decimal("998")
+
+    ledger_resp = await client.get(
+        f"/v1/billing/ledger/{provisioned['agent_wallet_id']}",
+        headers=provisioned["agent_headers"],
+    )
+    tool_entries = [
+        entry
+        for entry in ledger_resp.json()["entries"]
+        if "unrefunded-trust-tool" in entry.get("description", "")
+    ]
+    assert [entry["action"] for entry in tool_entries] == ["debit"]
 
 
 async def _age_idempotency_record(wallet_id: str, idempotency_key: str) -> None:
@@ -503,7 +636,7 @@ async def _age_idempotency_record(wallet_id: str, idempotency_key: str) -> None:
         result = await session.execute(
             select(IdempotencyRecordModel).where(
                 IdempotencyRecordModel.wallet_id == wallet_id,
-                IdempotencyRecordModel.endpoint == "/mcp/messages",
+                IdempotencyRecordModel.endpoint == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
                 IdempotencyRecordModel.idempotency_key == idempotency_key,
             )
         )
@@ -644,9 +777,7 @@ async def test_reconcile_stuck_records_repairs_charged_but_unfinalized_record(
             },
         }
         idem = get_idempotency_service()
-        with patch.object(
-            type(idem), "complete", always_fail_complete
-        ):
+        with patch.object(type(idem), "complete", always_fail_complete):
             resp = await client.post(
                 "/mcp/messages", json=body, headers=provisioned["agent_headers"]
             )
@@ -655,9 +786,7 @@ async def test_reconcile_stuck_records_repairs_charged_but_unfinalized_record(
         assert resp.status_code == 200
         assert resp.json()["error"]["code"] == -32603
 
-        await _age_idempotency_record(
-            provisioned["agent_wallet_id"], idempotency_key
-        )
+        await _age_idempotency_record(provisioned["agent_wallet_id"], idempotency_key)
 
         repaired, needs_review = await idem.reconcile_stuck_records(idle_seconds=900)
         assert repaired == 1
@@ -738,18 +867,14 @@ async def test_reconcile_stuck_records_flags_charge_with_no_receipt_for_review(
                 },
             },
         }
-        with patch.object(
-            ReceiptService, "create_receipt", always_fail_create_receipt
-        ):
+        with patch.object(ReceiptService, "create_receipt", always_fail_create_receipt):
             resp = await client.post(
                 "/mcp/messages", json=body, headers=provisioned["agent_headers"]
             )
         assert resp.status_code == 200
         assert resp.json()["error"]["code"] == -32603
 
-        await _age_idempotency_record(
-            provisioned["agent_wallet_id"], idempotency_key
-        )
+        await _age_idempotency_record(provisioned["agent_wallet_id"], idempotency_key)
 
         idem = get_idempotency_service()
         repaired, needs_review = await idem.reconcile_stuck_records(idle_seconds=900)
@@ -762,9 +887,9 @@ async def test_reconcile_stuck_records_flags_charge_with_no_receipt_for_review(
         async with factory() as session:
             result = await session.execute(
                 select(IdempotencyRecordModel).where(
-                    IdempotencyRecordModel.wallet_id
-                    == provisioned["agent_wallet_id"],
-                    IdempotencyRecordModel.endpoint == "/mcp/messages",
+                    IdempotencyRecordModel.wallet_id == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.endpoint
+                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
                     IdempotencyRecordModel.idempotency_key == idempotency_key,
                 )
             )
@@ -773,22 +898,21 @@ async def test_reconcile_stuck_records_flags_charge_with_no_receipt_for_review(
         with pytest.raises(IdempotencyInProgressError):
             await idem.begin(
                 wallet_id=provisioned["agent_wallet_id"],
-                endpoint="/mcp/messages",
+                endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
                 idempotency_key=idempotency_key,
-                # Must match the exact payload the router hashed originally
-                # (the whole JSON-RPC body -- see handle_messages, which
-                # passes request_payload=body), or this looks like key reuse
-                # with a different request instead of a genuine retry.
-                request_payload=body,
+                request_payload={
+                    "tool_name": "crash-before-receipt-tool",
+                    "arguments": {},
+                    "wallet_id": provisioned["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                },
             )
     finally:
         registry.unregister_local("crash-before-receipt-tool")
 
 
 @pytest.mark.anyio
-async def test_reconcile_stuck_records_preserves_failed_outcome(
-    client, clean_database
-):
+async def test_reconcile_stuck_records_preserves_failed_outcome(client, clean_database):
     """A crash can leave a stuck idempotency record whose matching receipt
     records a FAILURE (e.g. the tool raised, the charge was refunded, and
     _finalize_governed_denial crashed before idem.complete()). Reconciliation
@@ -840,18 +964,14 @@ async def test_reconcile_stuck_records_preserves_failed_outcome(
                 },
             },
         }
-        with patch.object(
-            type(idem), "complete", complete_only_fails_for_this_key
-        ):
+        with patch.object(type(idem), "complete", complete_only_fails_for_this_key):
             resp = await client.post(
                 "/mcp/messages", json=body, headers=provisioned["agent_headers"]
             )
         assert resp.status_code == 200
         assert resp.json()["error"]["code"] == -32603
 
-        await _age_idempotency_record(
-            provisioned["agent_wallet_id"], idempotency_key
-        )
+        await _age_idempotency_record(provisioned["agent_wallet_id"], idempotency_key)
 
         repaired, needs_review = await idem.reconcile_stuck_records(idle_seconds=900)
         assert repaired == 1
@@ -861,9 +981,9 @@ async def test_reconcile_stuck_records_preserves_failed_outcome(
         async with factory() as session:
             result = await session.execute(
                 select(IdempotencyRecordModel).where(
-                    IdempotencyRecordModel.wallet_id
-                    == provisioned["agent_wallet_id"],
-                    IdempotencyRecordModel.endpoint == "/mcp/messages",
+                    IdempotencyRecordModel.wallet_id == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.endpoint
+                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
                     IdempotencyRecordModel.idempotency_key == idempotency_key,
                 )
             )

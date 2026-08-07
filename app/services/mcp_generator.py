@@ -55,7 +55,8 @@ class McpGenerator:
     MANIFEST_DESCRIPTION = (
         "Governed MCP trust plane: scoped permits, metered tool invocation, "
         "signed receipts, and wallet audit. Tools listed here are "
-        "ops-registered (or dogfood) endpoints — not a service catalog."
+        "executable local, configured upstream, or dogfood endpoints — not a "
+        "metadata-only service catalog."
     )
 
     def __init__(self, registry: ServiceRegistry | None = None):
@@ -74,13 +75,16 @@ class McpGenerator:
         self,
         category: ServiceCategory | None = None,
         include_local: bool = True,
-        include_persistent: bool = True,
+        include_persistent: bool = False,
     ) -> dict[str, Any]:
         """
-        Generate a tools.json manifest for MCP discovery.
+        Generate a tools.json manifest for executable MCP discovery.
 
         This is the standard MCP server manifest format.
-        Agents can fetch this to discover available tools.
+        Agents can fetch this to discover available tools. Metadata-only
+        database registrations are excluded by default because the gateway has
+        no executable transport for them; callers that need an administrative
+        catalog may opt in explicitly.
         """
         services = []
 
@@ -112,7 +116,7 @@ class McpGenerator:
         self,
         category: ServiceCategory | None = None,
         include_local: bool = True,
-        include_persistent: bool = True,
+        include_persistent: bool = False,
     ) -> dict[str, Any]:
         """Async version of generate_tools_json."""
         services = []

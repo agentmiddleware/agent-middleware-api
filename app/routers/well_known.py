@@ -164,6 +164,29 @@ def _authentication_manifest() -> dict[str, Any]:
     }
 
 
+def _local_try_it_manifest() -> dict[str, Any]:
+    """Credential-free proof path for agents evaluating the trust loop."""
+    return {
+        "mode": "local_self_hosted",
+        "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
+        "command": "make prove-trust-plane",
+        "live_access": "operator_issued",
+        "requires_live_credentials": False,
+        "proves": [
+            "scoped_permit",
+            "metered_mcp_invoke",
+            "signed_receipt",
+            "replay_without_second_charge",
+            "out_of_scope_denial",
+        ],
+        "note": (
+            "Runs the real FastAPI trust path against a throwaway local SQLite "
+            "database. This is a reproducible proof, not a production or "
+            "settlement claim."
+        ),
+    }
+
+
 class AgentPluginManifest(BaseModel):
     """Standard agent plugin manifest format."""
 
@@ -205,25 +228,35 @@ class AgentPluginManifest(BaseModel):
 
     authentication: dict = Field(default_factory=_authentication_manifest)
 
+    try_it: dict[str, Any] = Field(
+        default_factory=_local_try_it_manifest,
+        description=(
+            "Credential-free local proof for autonomous clients evaluating "
+            "the governed permit-to-receipt loop."
+        ),
+    )
+
     pricing: dict = Field(
         default_factory=lambda: {
-            "model": "credit_based",
-            "free_tier": "1000 credits/month",
-            "credit_conversion": "$0.001 per credit",
+            "model": "controlled_design_partner_pilot",
+            "public_pricing": False,
+            "public_sla": False,
+            "note": "Credits and credentials are provisioned by an operator.",
         }
     )
 
     integrations: dict = Field(
         default_factory=lambda: {
-            # Provisional package directory name pending brand decision.
-            # Do not advertise unpublished registry installs (PyPI/npm 404).
+            # Release artifacts are built from this repository; neither SDK is
+            # advertised as a package-registry install.
             "python_sdk": {
-                "status": "provisional_in_repo",
+                "status": "release_artifact_only",
+                "version": "0.4.0",
                 "path": "b2a_sdk/",
                 "install": "pip install -e ./b2a_sdk",
                 "note": (
-                    "Not published to PyPI. Prefer the HTTP trust loop "
-                    "(permits → MCP → receipts). Package rename deferred."
+                    "Wheel and sdist are attached to python-sdk-v0.4.0 by the "
+                    "release workflow. Not published to PyPI."
                 ),
             },
             "typescript_sdk": {

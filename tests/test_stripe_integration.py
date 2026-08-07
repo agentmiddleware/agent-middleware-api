@@ -4,14 +4,15 @@ Validates fiat top-up flow, webhook handling, and idempotency.
 """
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import stripe
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.exc import IntegrityError
 
 from app.main import app
-from app.services.stripe_integration import StripeIntegration
+from app.services.stripe_integration import StripeIntegration, StripeSettlementError
 
 
 @pytest.fixture
@@ -41,12 +42,105 @@ async def sponsor_wallet(client, api_headers):
     return resp.json()
 
 
+@pytest.fixture
+async def wallet_hierarchy(client, api_headers):
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Stripe Hierarchy Sponsor",
+            "email": "stripe-hierarchy@b2a.dev",
+            "initial_credits": 1000,
+        },
+        headers=api_headers,
+    )
+    assert sponsor.status_code == 201, sponsor.text
+    sponsor_id = sponsor.json()["wallet_id"]
+
+    agent = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "stripe-agent",
+            "budget_credits": 200,
+        },
+        headers=api_headers,
+    )
+    assert agent.status_code == 201, agent.text
+    agent_id = agent.json()["wallet_id"]
+
+    child = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": agent_id,
+            "child_agent_id": "stripe-child",
+            "budget_credits": 50,
+            "max_spend": 50,
+        },
+        headers=api_headers,
+    )
+    assert child.status_code == 201, child.text
+
+    return {
+        "sponsor": sponsor_id,
+        "agent": agent_id,
+        "child": child.json()["wallet_id"],
+    }
+
+
+def succeeded_payment_intent(
+    *,
+    payment_intent_id: str,
+    wallet_id: str,
+    amount: int = 5000,
+    amount_received: int = 5000,
+    currency: str = "usd",
+    credits: str = "50000",
+) -> dict:
+    return {
+        "type": "payment_intent.succeeded",
+        "data": {
+            "object": {
+                "id": payment_intent_id,
+                "status": "succeeded",
+                "amount": amount,
+                "amount_received": amount_received,
+                "currency": currency,
+                "metadata": {
+                    "wallet_id": wallet_id,
+                    "credits": credits,
+                },
+            }
+        },
+    }
+
+
+def refunded_charge(
+    *,
+    payment_intent_id: str,
+    amount_refunded: int,
+    amount: int = 5000,
+    currency: str = "usd",
+    charge_id: str = "ch_refund_test",
+) -> dict:
+    return {
+        "payment_intent": payment_intent_id,
+        "amount": amount,
+        "amount_refunded": amount_refunded,
+        "currency": currency,
+        "id": charge_id,
+    }
+
+
 @pytest.mark.anyio
-async def test_prepare_top_up_creates_payment_intent(client, sponsor_wallet, api_headers):
+async def test_prepare_top_up_creates_payment_intent(
+    client, sponsor_wallet, api_headers
+):
     """Test that /top-up/prepare creates a Stripe PaymentIntent."""
     wallet_id = sponsor_wallet["wallet_id"]
 
-    with patch("app.services.stripe_integration.stripe.PaymentIntent.create") as mock_create:
+    with patch(
+        "app.services.stripe_integration.stripe.PaymentIntent.create"
+    ) as mock_create:
         mock_create.return_value = MagicMock(
             id="pi_test123",
             client_secret="pi_test123_secret_xyz",
@@ -75,11 +169,59 @@ async def test_prepare_top_up_creates_payment_intent(client, sponsor_wallet, api
 
 
 @pytest.mark.anyio
+async def test_prepare_top_up_rejects_non_usd_in_api_and_service(
+    client, sponsor_wallet, api_headers
+):
+    wallet_id = sponsor_wallet["wallet_id"]
+    integration = StripeIntegration()
+
+    with patch(
+        "app.services.stripe_integration.stripe.PaymentIntent.create"
+    ) as mock_create:
+        response = await client.post(
+            f"/v1/billing/top-up/prepare?wallet_id={wallet_id}"
+            "&amount_fiat=50.0&currency=EUR",
+            headers=api_headers,
+        )
+        assert response.status_code == 400
+
+        with pytest.raises(ValueError, match="unsupported_top_up_currency"):
+            await integration.create_top_up_intent(
+                wallet_id=wallet_id,
+                amount_fiat=Decimal("50"),
+                currency="eur",
+            )
+
+    mock_create.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_prepare_top_up_rejects_agent_and_child_wallets(
+    client, wallet_hierarchy, api_headers
+):
+    with patch(
+        "app.services.stripe_integration.stripe.PaymentIntent.create"
+    ) as mock_create:
+        for wallet_type in ("agent", "child"):
+            wallet_id = wallet_hierarchy[wallet_type]
+            response = await client.post(
+                f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat=1",
+                headers=api_headers,
+            )
+            assert response.status_code == 400
+            assert response.json()["detail"]["error"] == "topup_prepare_error"
+
+    mock_create.assert_not_called()
+
+
+@pytest.mark.anyio
 async def test_prepare_top_up_wallet_not_found(client, api_headers):
     """Test that /top-up/prepare returns 404 for non-existent wallet."""
-    with patch("app.services.stripe_integration.stripe.PaymentIntent.create") as mock_create:
+    with patch(
+        "app.services.stripe_integration.stripe.PaymentIntent.create"
+    ) as mock_create:
         mock_create.side_effect = Exception("Should not be called")
-        
+
         resp = await client.post(
             "/v1/billing/top-up/prepare?wallet_id=nonexistent&amount_fiat=50.0",
             headers=api_headers,
@@ -90,15 +232,25 @@ async def test_prepare_top_up_wallet_not_found(client, api_headers):
 @pytest.mark.anyio
 async def test_webhook_signature_verification(client):
     """Test that invalid Stripe signatures are rejected."""
-    with patch("app.services.stripe_integration.stripe.Webhook.construct_event") as mock_event:
-        mock_event.side_effect = ValueError("Invalid signature")
-        
+    with (
+        patch(
+            "app.services.stripe_integration.stripe.Webhook.construct_event",
+            side_effect=stripe.SignatureVerificationError(
+                "Invalid signature", "invalid_sig"
+            ),
+        ),
+        patch.object(
+            StripeIntegration, "_mint_credits", new_callable=AsyncMock
+        ) as mock_mint,
+    ):
         resp = await client.post(
             "/v1/webhooks/stripe",
             content=b"invalid_payload",
             headers={"stripe-signature": "invalid_sig"},
         )
-        assert resp.status_code == 400
+
+    assert resp.status_code == 400
+    mock_mint.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -109,6 +261,114 @@ async def test_webhook_missing_signature(client):
         content=b"some_payload",
     )
     assert resp.status_code == 400  # Missing signature header
+
+
+@pytest.mark.anyio
+async def test_webhook_rejects_metadata_credit_inflation(
+    client, sponsor_wallet, api_headers
+):
+    """A signed Stripe event cannot mint more than its settled USD amount."""
+    wallet_id = sponsor_wallet["wallet_id"]
+    forged_event = succeeded_payment_intent(
+        payment_intent_id="pi_forged_credits",
+        wallet_id=wallet_id,
+        credits="50000000",
+    )
+
+    with patch(
+        "app.services.stripe_integration.stripe.Webhook.construct_event",
+        return_value=forged_event,
+    ):
+        response = await client.post(
+            "/v1/webhooks/stripe",
+            content=b"signed_but_forged_metadata",
+            headers={"stripe-signature": "valid_signature"},
+        )
+
+    assert response.status_code == 400
+    wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+    assert wallet.json()["balance"] == 0.0
+
+
+@pytest.mark.anyio
+async def test_webhook_rejects_invalid_settlement_fields_without_minting(
+    client, sponsor_wallet, api_headers
+):
+    wallet_id = sponsor_wallet["wallet_id"]
+    invalid_events = [
+        succeeded_payment_intent(
+            payment_intent_id="pi_non_usd",
+            wallet_id=wallet_id,
+            currency="eur",
+        ),
+        succeeded_payment_intent(
+            payment_intent_id="pi_amount_mismatch",
+            wallet_id=wallet_id,
+            amount_received=1000,
+            credits="10000",
+        ),
+        succeeded_payment_intent(
+            payment_intent_id="pi_credit_metadata_missing",
+            wallet_id=wallet_id,
+            credits="",
+        ),
+    ]
+
+    with patch(
+        "app.services.stripe_integration.stripe.Webhook.construct_event",
+        side_effect=invalid_events,
+    ):
+        for event in invalid_events:
+            response = await client.post(
+                "/v1/webhooks/stripe",
+                content=event["data"]["object"]["id"].encode(),
+                headers={"stripe-signature": "valid_signature"},
+            )
+            assert response.status_code == 400
+
+    wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+    assert wallet.json()["balance"] == 0.0
+
+
+@pytest.mark.anyio
+async def test_webhook_rejects_agent_and_child_wallets(
+    client, wallet_hierarchy, api_headers
+):
+    events = [
+        succeeded_payment_intent(
+            payment_intent_id=f"pi_{wallet_type}_wallet",
+            wallet_id=wallet_hierarchy[wallet_type],
+            amount=100,
+            amount_received=100,
+            credits="1000",
+        )
+        for wallet_type in ("agent", "child")
+    ]
+    starting_balances = {}
+    for wallet_type in ("agent", "child"):
+        wallet_id = wallet_hierarchy[wallet_type]
+        wallet = await client.get(
+            f"/v1/billing/wallets/{wallet_id}", headers=api_headers
+        )
+        starting_balances[wallet_id] = wallet.json()["balance"]
+
+    with patch(
+        "app.services.stripe_integration.stripe.Webhook.construct_event",
+        side_effect=events,
+    ):
+        for event in events:
+            response = await client.post(
+                "/v1/webhooks/stripe",
+                content=event["data"]["object"]["id"].encode(),
+                headers={"stripe-signature": "valid_signature"},
+            )
+            assert response.status_code == 400
+
+    for wallet_id, starting_balance in starting_balances.items():
+        wallet = await client.get(
+            f"/v1/billing/wallets/{wallet_id}", headers=api_headers
+        )
+        assert wallet.json()["balance"] == starting_balance
 
 
 class TestStripeWebhookIdempotency:
@@ -151,11 +411,10 @@ class TestStripeWebhookIdempotency:
         )
         assert (await money.get_wallet(wallet_id)).balance == Decimal("50000")
 
-        refund_charge = {
-            "payment_intent": "pi_refund_test",
-            "amount": 5000,  # $50 -> 50000 credits at EXCHANGE_RATE
-            "id": "ch_refund_test",
-        }
+        refund_charge = refunded_charge(
+            payment_intent_id="pi_refund_test",
+            amount_refunded=5000,
+        )
         # First delivery debits.
         await integration._handle_refund(refund_charge, "evt_refund_1")
         assert (await money.get_wallet(wallet_id)).balance == Decimal("0")
@@ -167,6 +426,170 @@ class TestStripeWebhookIdempotency:
         ledger = await money.get_ledger(wallet_id, 50)
         refunds = [e for e in ledger if e.action == "refund"]
         assert len(refunds) == 1
+
+    @pytest.mark.anyio
+    async def test_successive_partial_refunds_apply_only_new_cumulative_delta(
+        self, sponsor_wallet
+    ):
+        """Stripe's cumulative amount_refunded must not be applied repeatedly."""
+        from app.core.dependencies import get_agent_money
+        from app.services.stripe_integration import get_stripe_integration
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        money = get_agent_money()
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_partial_refund_test",
+            description="topup",
+        )
+
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_partial_refund_test",
+                amount_refunded=1000,
+            ),
+            "evt_partial_refund_1",
+        )
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("40000")
+
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_partial_refund_test",
+                amount_refunded=2000,
+            ),
+            "evt_partial_refund_2",
+        )
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("30000")
+
+        ledger = await money.get_ledger(wallet_id, 50)
+        refunds = [entry for entry in ledger if entry.action == "refund"]
+        assert [entry.amount for entry in refunds] == [-10000.0, -10000.0]
+        assert [entry.metadata["stripe_amount_refunded"] for entry in refunds] == [
+            2000,
+            1000,
+        ]  # Ledger responses are newest-first.
+
+    @pytest.mark.anyio
+    async def test_stale_partial_refund_event_is_a_noop(self, sponsor_wallet):
+        from app.core.dependencies import get_agent_money
+        from app.services.stripe_integration import get_stripe_integration
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        money = get_agent_money()
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_stale_refund_test",
+            description="topup",
+        )
+
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_stale_refund_test",
+                amount_refunded=2000,
+            ),
+            "evt_stale_refund_newer",
+        )
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_stale_refund_test",
+                amount_refunded=1000,
+            ),
+            "evt_stale_refund_older",
+        )
+
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("30000")
+        ledger = await money.get_ledger(wallet_id, 50)
+        assert len([entry for entry in ledger if entry.action == "refund"]) == 1
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("charge_overrides", "expected_error"),
+        [
+            ({"currency": "eur"}, "unsupported_refund_currency"),
+            ({"amount_refunded": None}, "invalid_refund_amount"),
+            ({"amount_refunded": 5001}, "refund_exceeds_charge_amount"),
+            ({"amount": True}, "invalid_charge_amount"),
+            ({"payment_intent": ""}, "missing_refund_payment_intent_id"),
+        ],
+    )
+    async def test_invalid_refund_settlement_never_debits(
+        self,
+        sponsor_wallet,
+        charge_overrides,
+        expected_error,
+    ):
+        from app.core.dependencies import get_agent_money
+        from app.services.stripe_integration import get_stripe_integration
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        money = get_agent_money()
+        payment_intent_id = f"pi_invalid_refund_{expected_error}"
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id=payment_intent_id,
+            description="topup",
+        )
+        charge = refunded_charge(
+            payment_intent_id=payment_intent_id,
+            amount_refunded=1000,
+        )
+        charge.update(charge_overrides)
+
+        with pytest.raises(StripeSettlementError, match=expected_error):
+            await integration._handle_refund(charge, "evt_invalid_refund")
+
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("50000")
+        ledger = await money.get_ledger(wallet_id, 50)
+        assert not [entry for entry in ledger if entry.action == "refund"]
+
+    @pytest.mark.anyio
+    async def test_refund_larger_than_available_balance_never_debits(
+        self, client, sponsor_wallet, api_headers
+    ):
+        from app.core.dependencies import get_agent_money
+        from app.services.stripe_integration import get_stripe_integration
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        money = get_agent_money()
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_over_balance_refund",
+            description="topup",
+        )
+        allocation = await client.post(
+            "/v1/billing/wallets/agent",
+            json={
+                "sponsor_wallet_id": wallet_id,
+                "agent_id": "refund-balance-agent",
+                "budget_credits": 45000,
+            },
+            headers=api_headers,
+        )
+        assert allocation.status_code == 201, allocation.text
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("5000")
+
+        with pytest.raises(
+            StripeSettlementError, match="refund_exceeds_wallet_balance"
+        ):
+            await integration._handle_refund(
+                refunded_charge(
+                    payment_intent_id="pi_over_balance_refund",
+                    amount_refunded=1000,
+                ),
+                "evt_over_balance_refund",
+            )
+
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("5000")
+        ledger = await money.get_ledger(wallet_id, 50)
+        assert not [entry for entry in ledger if entry.action == "refund"]
 
     def test_only_payment_intent_unique_errors_are_idempotent(self):
         """Non-idempotency integrity errors must not be swallowed."""
@@ -182,10 +605,14 @@ class TestStripeWebhookIdempotency:
         )
 
         assert StripeIntegration._is_duplicate_payment_intent_error(duplicate) is True
-        assert StripeIntegration._is_duplicate_payment_intent_error(foreign_key) is False
+        assert (
+            StripeIntegration._is_duplicate_payment_intent_error(foreign_key) is False
+        )
 
     @pytest.mark.anyio
-    async def test_duplicate_webhook_returns_200(self, client, sponsor_wallet, api_headers):
+    async def test_duplicate_webhook_returns_200(
+        self, client, sponsor_wallet, api_headers
+    ):
         """
         Test that duplicate payment_intent webhooks don't cause errors.
         The UNIQUE constraint on payment_intent_id + IntegrityError catch
@@ -193,25 +620,21 @@ class TestStripeWebhookIdempotency:
         """
         wallet_id = sponsor_wallet["wallet_id"]
 
-        with patch("app.services.stripe_integration.stripe.PaymentIntent.create") as mock_create:
-            with patch("app.services.stripe_integration.stripe.Webhook.construct_event") as mock_webhook:
+        with patch(
+            "app.services.stripe_integration.stripe.PaymentIntent.create"
+        ) as mock_create:
+            with patch(
+                "app.services.stripe_integration.stripe.Webhook.construct_event"
+            ) as mock_webhook:
                 mock_create.return_value = MagicMock(
                     id="pi_duplicate_test",
                     client_secret="pi_duplicate_secret",
                 )
 
-                mock_webhook.return_value = {
-                    "type": "payment_intent.succeeded",
-                    "data": {
-                        "object": {
-                            "id": "pi_duplicate_test",
-                            "metadata": {
-                                "wallet_id": wallet_id,
-                                "credits": "50000",
-                            },
-                        }
-                    },
-                }
+                mock_webhook.return_value = succeeded_payment_intent(
+                    payment_intent_id="pi_duplicate_test",
+                    wallet_id=wallet_id,
+                )
 
                 resp1 = await client.post(
                     f"/v1/billing/top-up/prepare?wallet_id={wallet_id}&amount_fiat=50.0",
@@ -225,6 +648,25 @@ class TestStripeWebhookIdempotency:
                     headers={"stripe-signature": "valid_sig_for_dup"},
                 )
                 assert resp2.status_code == 200
+
+                wallet = await client.get(
+                    f"/v1/billing/wallets/{wallet_id}", headers=api_headers
+                )
+                assert wallet.json()["balance"] == 50000.0
+
+                # Stripe may redeliver the same verified event. The payment-intent
+                # uniqueness constraint must keep the second delivery charge-neutral.
+                resp3 = await client.post(
+                    "/v1/webhooks/stripe",
+                    content=b"duplicate_webhook_payload",
+                    headers={"stripe-signature": "valid_sig_for_dup"},
+                )
+                assert resp3.status_code == 200
+
+                wallet = await client.get(
+                    f"/v1/billing/wallets/{wallet_id}", headers=api_headers
+                )
+                assert wallet.json()["balance"] == 50000.0
 
 
 class TestNotificationService:

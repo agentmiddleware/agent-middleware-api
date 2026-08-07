@@ -10,13 +10,14 @@ Architecture:
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, cast
 
 from sqlalchemy import select
 from sqlalchemy.sql.elements import ColumnElement
 
+from ..core.time import to_naive_utc, utc_now
 from ..db.database import get_session_factory
 from ..db.models import WalletModel
 from ..services.notifications import get_notification_service
@@ -92,7 +93,9 @@ class VelocityMonitor:
             async with session.begin():
                 result = await session.execute(
                     select(WalletModel)
-                    .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
+                    .where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+                    )
                     .with_for_update()
                 )
                 wallet = result.scalar_one_or_none()
@@ -103,7 +106,7 @@ class VelocityMonitor:
                         reason="Wallet not found",
                     )
 
-                now = datetime.now(timezone.utc)
+                now = utc_now()
 
                 self._reset_if_needed(wallet, now)
 
@@ -153,12 +156,11 @@ class VelocityMonitor:
 
     def _reset_if_needed(self, wallet: WalletModel, now: datetime) -> None:
         """Reset hourly/daily counters if period has elapsed."""
+        now = to_naive_utc(now)
         if wallet.hourly_reset_at is None:
             wallet.hourly_reset_at = now
         else:
-            last_reset = wallet.hourly_reset_at
-            if last_reset.tzinfo is None:
-                last_reset = last_reset.replace(tzinfo=timezone.utc)
+            last_reset = to_naive_utc(wallet.hourly_reset_at)
             if now - last_reset >= timedelta(hours=1):
                 wallet.hourly_spent = Decimal("0")
                 wallet.hourly_reset_at = now
@@ -168,9 +170,7 @@ class VelocityMonitor:
                 hour=0, minute=0, second=0, microsecond=0
             )
         else:
-            last_reset = wallet.daily_reset_at
-            if last_reset.tzinfo is None:
-                last_reset = last_reset.replace(tzinfo=timezone.utc)
+            last_reset = to_naive_utc(wallet.daily_reset_at)
             if now - last_reset >= timedelta(days=1):
                 wallet.daily_spent = Decimal("0")
                 wallet.daily_reset_at = now.replace(
@@ -241,7 +241,7 @@ class VelocityMonitor:
             if not wallet:
                 return {"error": "Wallet not found"}
 
-            now = datetime.now(timezone.utc)
+            now = utc_now()
             self._reset_if_needed(wallet, now)
 
             hourly_limit = wallet.hourly_limit or self._default_hourly_limit

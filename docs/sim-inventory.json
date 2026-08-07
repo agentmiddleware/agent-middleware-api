@@ -1,71 +1,7 @@
 {
-  "generated_at": "2026-05-17T07:11:20.287900+00:00",
-  "mcp_tool_count": 9,
-  "mcp_tools_local": [
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_dom_action_preview",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_dom_bridge_session",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_dom_state",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_dom_sync",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_memory_index",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_passkey_challenge",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_passkey_verify",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_rag_query",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    },
-    {
-      "category": "agent_comms",
-      "integration_status": "simulated",
-      "name": "awi_session_context",
-      "runtime_service": "agent_comms",
-      "simulation": true
-    }
-  ],
+  "generated_at": "2026-08-07T06:40:40.759233+00:00",
+  "mcp_tool_count": 0,
+  "mcp_tools_local": [],
   "services": [
     {
       "current_simulated": true,

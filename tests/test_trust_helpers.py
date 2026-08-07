@@ -59,7 +59,7 @@ async def create_tool_permit(
     client: AsyncClient,
     *,
     wallet_id: str,
-    key_id: str,
+    key_id: str | None,
     tool_name: str,
     max_credits: int = 50,
     idem_key: str = "permit-create-1",

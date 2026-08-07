@@ -6,6 +6,11 @@ Proof surfaces are demo / workload scaffolding that may exercise the trust
 plane but are **not** the product wedge. Production-like deploys keep
 `ENABLE_PROOF_SURFACES=false` so these routers are not mounted.
 
+Some AWI HTTP and Phase9 MCP examples now consume permits, metering, receipts,
+and audit. That makes those individual examples governed proof workloads; it
+does not promote AWI, browser, passkey, DOM, or RAG capabilities into the
+supported product surface.
+
 Product wedge: [`WEDGE.md`](../WEDGE.md).  
 Remediation context: [`tech-debt-remediation-plan.md`](tech-debt-remediation-plan.md) Phase 6.
 
@@ -56,6 +61,22 @@ Leave as-is; do not “finish” them into product:
 | Mock embeddings | `app/services/awi_rag_engine.py` | Deterministic fallback embeddings |
 | LLM mock | `app/services/llm.py` | Mock response when `LLM_API_KEY` unset |
 | Phase9 MCP stubs | `app/services/mcp_phase9_tools.py` | Registered only when proof surfaces on |
+
+## Superseded productionization roadmap
+
+The April 2026 productionization roadmap in GitHub issues #33–#40 predates the
+exactly-once MCP permit wedge. It is superseded by this freeze decision:
+
+- #33–#39 must not be treated as engineering commitments while their AWI,
+  oracle, comms, IoT, telemetry, scanner, and media surfaces remain frozen.
+- #40's foundation and persistence work that supports the trust plane may stay;
+  its broad "productionize every service" direction is not current strategy.
+- #54's AWI bridge split is deferred with the frozen browser surface. Avoid a
+  large mechanical refactor until a supported user path requires that code.
+
+Unfreezing any item requires a narrow product decision, a tenant and threat
+model, and a vertical slice that consumes the permit → invoke → meter → receipt
+→ audit loop. Historical issue text is not approval to unfreeze a surface.
 
 ## Deferred (needs product approval — separate PR)
 

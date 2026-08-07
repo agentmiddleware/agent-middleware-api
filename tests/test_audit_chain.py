@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import AuditChainHeadModel, ControlPlaneAuditEventModel
 from app.main import app
-from app.services.audit_chain import verify_audit_chain
+from app.services.audit_chain import AuditEventConflictError, verify_audit_chain
 from app.services.audit_log import record_audit_event
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
 
@@ -31,7 +33,9 @@ async def test_concurrent_audit_appends_do_not_fork_the_chain(client, clean_data
     n_events = 10
     await asyncio.gather(
         *(
-            record_audit_event(event="trust.race", wallet_id=wallet_id, metadata={"n": n})
+            record_audit_event(
+                event="trust.race", wallet_id=wallet_id, metadata={"n": n}
+            )
             for n in range(n_events)
         )
     )
@@ -65,6 +69,57 @@ async def test_concurrent_audit_appends_do_not_fork_the_chain(client, clean_data
 
 
 @pytest.mark.anyio
+async def test_deterministic_audit_append_is_get_or_create_and_conflict_safe(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    event_id = "audit-dsp-fixed-concurrency-claim"
+    created_at = utc_now()
+    kwargs = {
+        "event": "mcp.invoke",
+        "event_id": event_id,
+        "created_at": created_at,
+        "wallet_id": wallet_id,
+        "tool": "partner.lookup",
+        "endpoint": "/mcp/invoke",
+        "request_id": "dsp-fixed-concurrency-claim",
+        "metadata": {"dispatch_attempt_id": "dsp-fixed-concurrency-claim"},
+    }
+
+    first, second = await asyncio.gather(
+        record_audit_event(**kwargs),
+        record_audit_event(**kwargs),
+    )
+
+    assert first.event_id == second.event_id == event_id
+    factory = get_session_factory()
+    async with factory() as session:
+        persisted = (
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel).where(
+                        ControlPlaneAuditEventModel.event_id == event_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(persisted) == 1
+    assert (await verify_audit_chain(wallet_id=wallet_id)).valid is True
+
+    with pytest.raises(AuditEventConflictError, match="audit_event_id_conflict"):
+        await record_audit_event(
+            **{
+                **kwargs,
+                "metadata": {"dispatch_attempt_id": "different-attempt"},
+            }
+        )
+
+
+@pytest.mark.anyio
 async def test_audit_chain_orders_by_monotonic_sequence(client, clean_database):
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
@@ -72,7 +127,9 @@ async def test_audit_chain_orders_by_monotonic_sequence(client, clean_database):
     # Rapid same-wallet events can share a created_at timestamp; the chain must
     # still order deterministically and verify.
     for n in range(12):
-        await record_audit_event(event="trust.seq", wallet_id=wallet_id, metadata={"n": n})
+        await record_audit_event(
+            event="trust.seq", wallet_id=wallet_id, metadata={"n": n}
+        )
 
     verify_resp = await client.post(
         "/v1/audit/verify-chain",
@@ -133,6 +190,29 @@ async def test_audit_chain_verifies_and_detects_tampering(client, clean_database
 
 
 @pytest.mark.anyio
+async def test_audit_chain_normalizes_offset_time_filters(
+    clean_database,
+    enforce_naive_utc_datetime_columns,
+):
+    wallet_id = "wlt-audit-time-filter"
+    event = await record_audit_event(event="trust.time", wallet_id=wallet_id)
+    event_utc = event.created_at.replace(tzinfo=timezone.utc)
+
+    result = await verify_audit_chain(
+        wallet_id=wallet_id,
+        created_after=(event_utc - timedelta(minutes=1)).astimezone(
+            timezone(timedelta(hours=5, minutes=30))
+        ),
+        created_before=(event_utc + timedelta(minutes=1)).astimezone(
+            timezone(timedelta(hours=-7))
+        ),
+    )
+
+    assert result.valid is True
+    assert result.checked_events == 1
+
+
+@pytest.mark.anyio
 async def test_global_verify_covers_wallet_less_null_chain(clean_database):
     """Global verification must walk the wallet-less (wallet_id IS NULL) chain
     too. Tampering a system/denied-action record used to return valid=True
@@ -148,12 +228,16 @@ async def test_global_verify_covers_wallet_less_null_chain(clean_database):
     factory = get_session_factory()
     async with factory() as session:
         event = (
-            await session.execute(
-                select(ControlPlaneAuditEventModel)
-                .where(ControlPlaneAuditEventModel.wallet_id.is_(None))
-                .order_by(ControlPlaneAuditEventModel.seq)
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel)
+                    .where(ControlPlaneAuditEventModel.wallet_id.is_(None))
+                    .order_by(ControlPlaneAuditEventModel.seq)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         event.metadata_json = '{"n": 6660}'
         session.add(event)
         await session.commit()
@@ -169,7 +253,9 @@ async def test_verify_detects_tail_truncation(clean_database):
     anchor -- a valid prefix must not verify as a valid whole chain."""
     wallet_id = "wlt-truncation-test"
     for n in range(3):
-        await record_audit_event(event="trust.trunc", wallet_id=wallet_id, metadata={"n": n})
+        await record_audit_event(
+            event="trust.trunc", wallet_id=wallet_id, metadata={"n": n}
+        )
 
     assert (await verify_audit_chain(wallet_id=wallet_id)).valid is True
 
@@ -177,12 +263,16 @@ async def test_verify_detects_tail_truncation(clean_database):
     factory = get_session_factory()
     async with factory() as session:
         last = (
-            await session.execute(
-                select(ControlPlaneAuditEventModel)
-                .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
-                .order_by(ControlPlaneAuditEventModel.seq.desc())
+            (
+                await session.execute(
+                    select(ControlPlaneAuditEventModel)
+                    .where(ControlPlaneAuditEventModel.wallet_id == wallet_id)
+                    .order_by(ControlPlaneAuditEventModel.seq.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         await session.delete(last)
         await session.commit()
 

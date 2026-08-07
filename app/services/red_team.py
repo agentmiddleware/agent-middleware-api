@@ -51,9 +51,11 @@ logger = logging.getLogger(__name__)
 # Attack Vector Registry
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AttackVector:
     """A single attack test case."""
+
     vector_id: str
     category: AttackCategory
     name: str
@@ -68,6 +70,7 @@ class AttackVector:
 @dataclass
 class AttackResult:
     """Result of executing an attack vector."""
+
     vector: AttackVector
     passed: bool  # True = system defended correctly
     actual_status: int
@@ -78,6 +81,7 @@ class AttackResult:
 # ---------------------------------------------------------------------------
 # Attack Libraries (one per category)
 # ---------------------------------------------------------------------------
+
 
 class ACLBypassAttacks:
     """
@@ -170,29 +174,33 @@ class AuthProbeAttacks:
         vectors = []
         for endpoint, method in endpoints:
             # No API key at all
-            vectors.append(AttackVector(
-                vector_id=str(uuid.uuid4()),
-                category=AttackCategory.AUTH_PROBE,
-                name=f"Missing API key — {method} {endpoint}",
-                description=f"Hit {endpoint} with no X-API-Key header.",
-                target_endpoint=endpoint,
-                target_method=method,
-                payload={"_no_auth": True},
-                expected_behavior="401 Unauthorized",
-                severity_if_failed=Severity.CRITICAL,
-            ))
+            vectors.append(
+                AttackVector(
+                    vector_id=str(uuid.uuid4()),
+                    category=AttackCategory.AUTH_PROBE,
+                    name=f"Missing API key — {method} {endpoint}",
+                    description=f"Hit {endpoint} with no X-API-Key header.",
+                    target_endpoint=endpoint,
+                    target_method=method,
+                    payload={"_no_auth": True},
+                    expected_behavior="401 Unauthorized",
+                    severity_if_failed=Severity.CRITICAL,
+                )
+            )
             # Empty API key
-            vectors.append(AttackVector(
-                vector_id=str(uuid.uuid4()),
-                category=AttackCategory.AUTH_PROBE,
-                name=f"Empty API key — {method} {endpoint}",
-                description=f"Hit {endpoint} with X-API-Key: '' (empty string).",
-                target_endpoint=endpoint,
-                target_method=method,
-                payload={"_empty_auth": True},
-                expected_behavior="401 or 403",
-                severity_if_failed=Severity.CRITICAL,
-            ))
+            vectors.append(
+                AttackVector(
+                    vector_id=str(uuid.uuid4()),
+                    category=AttackCategory.AUTH_PROBE,
+                    name=f"Empty API key — {method} {endpoint}",
+                    description=f"Hit {endpoint} with X-API-Key: '' (empty string).",
+                    target_endpoint=endpoint,
+                    target_method=method,
+                    payload={"_empty_auth": True},
+                    expected_behavior="401 or 403",
+                    severity_if_failed=Severity.CRITICAL,
+                )
+            )
         return vectors
 
 
@@ -294,15 +302,13 @@ class RateLimitEvasionAttacks:
                 category=AttackCategory.RATE_LIMIT_EVASION,
                 name="Rate limit bypass via missing API key header rotation",
                 description=(
-                    "Alternate between different API keys "
-                    "to test per-key isolation."
+                    "Alternate between different API keys to test per-key isolation."
                 ),
                 target_endpoint="/v1/iot/devices",
                 target_method="GET",
                 payload={"_key_rotation": True},
                 expected_behavior=(
-                    "Each key has its own 120/min window "
-                    "(no cross-contamination)"
+                    "Each key has its own 120/min window (no cross-contamination)"
                 ),
                 severity_if_failed=Severity.MEDIUM,
             ),
@@ -331,8 +337,7 @@ class PrivilegeEscalationAttacks:
                 category=AttackCategory.PRIVILEGE_ESCALATION,
                 name="Access another pipeline's content",
                 description=(
-                    "Try to list content from a pipeline belonging "
-                    "to another API key."
+                    "Try to list content from a pipeline belonging to another API key."
                 ),
                 target_endpoint="/v1/factory/pipelines/__OTHER_PIPELINE__/content",
                 target_method="GET",
@@ -377,7 +382,7 @@ class SchemaAbuseAttacks:
                         {
                             "event_type": "error",
                             "source": f"src-{i}",
-                            "payload": {"x": "y" * 1000}
+                            "payload": {"x": "y" * 1000},
                         }
                         for i in range(1000)
                     ]
@@ -429,8 +434,7 @@ class EnumerationAttacks:
                 category=AttackCategory.ENUMERATION,
                 name="Undocumented endpoint probe",
                 description=(
-                    "Probe common admin paths: /admin, /internal, "
-                    "/debug, /metrics."
+                    "Probe common admin paths: /admin, /internal, /debug, /metrics."
                 ),
                 target_endpoint="/admin",
                 target_method="GET",
@@ -440,7 +444,7 @@ class EnumerationAttacks:
                         "/internal",
                         "/debug",
                         "/metrics",
-                        "/_config"
+                        "/_config",
                     ]
                 },
                 expected_behavior="404 or 405 for all — no hidden endpoints",
@@ -515,8 +519,11 @@ class AttackEngine:
             return await self._check_enumeration_defense(vector)
         else:
             return AttackResult(
-                vector=vector, passed=True, actual_status=200,
-                actual_response={}, notes="Unknown category — skipped"
+                vector=vector,
+                passed=True,
+                actual_status=200,
+                actual_response={},
+                notes="Unknown category — skipped",
             )
 
     async def _check_acl_defense(self, vector: AttackVector) -> AttackResult:
@@ -536,27 +543,32 @@ class AttackEngine:
                 vector=vector,
                 passed=True,
                 actual_status=403,
-                actual_response={
-                    "detail": "ACL violation: traversal patterns blocked"
-                },
+                actual_response={"detail": "ACL violation: traversal patterns blocked"},
                 notes="fnmatch doesn't resolve '../' — traversal ineffective.",
             )
         elif "empty" in vector.name.lower():
             return AttackResult(
-                vector=vector, passed=True, actual_status=403,
+                vector=vector,
+                passed=True,
+                actual_status=403,
                 actual_response={"detail": "ACL violation: no ACL rules = deny all"},
                 notes="Deny-by-default holds with empty ACL list.",
             )
         return AttackResult(
-            vector=vector, passed=True, actual_status=403,
-            actual_response={}, notes="ACL defense held."
+            vector=vector,
+            passed=True,
+            actual_status=403,
+            actual_response={},
+            notes="ACL defense held.",
         )
 
     async def _check_auth_defense(self, vector: AttackVector) -> AttackResult:
         """Our auth uses APIKeyHeader with auto_error=True."""
         if "missing" in vector.name.lower():
             return AttackResult(
-                vector=vector, passed=True, actual_status=401,
+                vector=vector,
+                passed=True,
+                actual_status=401,
                 actual_response={"detail": "Missing API key"},
                 notes="APIKeyHeader returns 401 when header absent.",
             )
@@ -570,8 +582,11 @@ class AttackEngine:
                 notes="PATCHED: verify_api_key() rejects empty/short keys.",
             )
         return AttackResult(
-            vector=vector, passed=True, actual_status=401,
-            actual_response={}, notes="Auth defense held."
+            vector=vector,
+            passed=True,
+            actual_status=401,
+            actual_response={},
+            notes="Auth defense held.",
         )
 
     async def _check_injection_defense(self, vector: AttackVector) -> AttackResult:
@@ -582,9 +597,7 @@ class AttackEngine:
                 vector=vector,
                 passed=True,
                 actual_status=422,
-                actual_response={
-                    "detail": "device_id must be alphanumeric"
-                },
+                actual_response={"detail": "device_id must be alphanumeric"},
                 notes="PATCHED: field_validator rejects traversal chars.",
             )
         elif "json bomb" in vector.name.lower():
@@ -615,8 +628,11 @@ class AttackEngine:
                 notes="In-memory store immune to SQL injection. Flag for DB migration.",
             )
         return AttackResult(
-            vector=vector, passed=True, actual_status=200,
-            actual_response={}, notes="Injection defense held."
+            vector=vector,
+            passed=True,
+            actual_status=200,
+            actual_response={},
+            notes="Injection defense held.",
         )
 
     async def _check_rate_limit_defense(self, vector: AttackVector) -> AttackResult:
@@ -638,8 +654,11 @@ class AttackEngine:
                 notes="Per-key isolation confirmed — each key has its own window.",
             )
         return AttackResult(
-            vector=vector, passed=True, actual_status=200,
-            actual_response={}, notes="Rate limit defense held."
+            vector=vector,
+            passed=True,
+            actual_status=200,
+            actual_response={},
+            notes="Rate limit defense held.",
         )
 
     async def _check_privilege_defense(self, vector: AttackVector) -> AttackResult:
@@ -663,8 +682,11 @@ class AttackEngine:
                 notes="PATCHED: ContentPipeline.owner_key enables tenant-scoped.",
             )
         return AttackResult(
-            vector=vector, passed=True, actual_status=403,
-            actual_response={}, notes="Privilege defense held."
+            vector=vector,
+            passed=True,
+            actual_status=403,
+            actual_response={},
+            notes="Privilege defense held.",
         )
 
     async def _check_schema_defense(self, vector: AttackVector) -> AttackResult:
@@ -696,8 +718,11 @@ class AttackEngine:
                 notes="Pydantic enum validation correctly rejects unknown protocols.",
             )
         return AttackResult(
-            vector=vector, passed=True, actual_status=422,
-            actual_response={}, notes="Schema validation held."
+            vector=vector,
+            passed=True,
+            actual_status=422,
+            actual_response={},
+            notes="Schema validation held.",
         )
 
     async def _check_enumeration_defense(self, vector: AttackVector) -> AttackResult:
@@ -719,14 +744,18 @@ class AttackEngine:
                 notes="No hidden admin endpoints found. All routes explicitly defined.",
             )
         return AttackResult(
-            vector=vector, passed=True, actual_status=404,
-            actual_response={}, notes="Enumeration defense held."
+            vector=vector,
+            passed=True,
+            actual_status=404,
+            actual_response={},
+            notes="Enumeration defense held.",
         )
 
 
 # ---------------------------------------------------------------------------
 # Scan Orchestrator
 # ---------------------------------------------------------------------------
+
 
 class ScanStore:
     """PostgreSQL-backed scan storage shared with rtaas via
@@ -737,8 +766,7 @@ class ScanStore:
     def _require_db() -> None:
         if not is_database_configured():
             raise RuntimeError(
-                "red_team.ScanStore requires a configured database. "
-                "Set DATABASE_URL."
+                "red_team.ScanStore requires a configured database. Set DATABASE_URL."
             )
 
     async def save(self, report: ScanReport):
@@ -771,7 +799,10 @@ class ScanStore:
 
             await session.execute(
                 sa_delete(SecurityVulnerabilityModel).where(
-                    cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == report.scan_id)
+                    cast(
+                        ColumnElement[bool],
+                        SecurityVulnerabilityModel.scan_id == report.scan_id,
+                    )
                 )
             )
             for vuln in report.vulnerabilities:
@@ -788,7 +819,10 @@ class ScanStore:
                 return None
             result = await session.execute(
                 select(SecurityVulnerabilityModel).where(
-                    cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == scan_id)
+                    cast(
+                        ColumnElement[bool],
+                        SecurityVulnerabilityModel.scan_id == scan_id,
+                    )
                 )
             )
             vulns = list(result.scalars().all())
@@ -800,7 +834,9 @@ class ScanStore:
         async with factory() as session:
             result = await session.execute(
                 select(SecurityScanModel)
-                .where(cast(ColumnElement[bool], SecurityScanModel.scan_type == "internal"))
+                .where(
+                    cast(ColumnElement[bool], SecurityScanModel.scan_type == "internal")
+                )
                 .order_by(cast(ColumnElement[Any], SecurityScanModel.created_at).desc())
             )
             scans = list(result.scalars().all())
@@ -809,7 +845,10 @@ class ScanStore:
             for scan in scans:
                 vuln_result = await session.execute(
                     select(SecurityVulnerabilityModel).where(
-                        cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == scan.scan_id)
+                        cast(
+                            ColumnElement[bool],
+                            SecurityVulnerabilityModel.scan_id == scan.scan_id,
+                        )
                     )
                 )
                 vulns = list(vuln_result.scalars().all())
@@ -869,7 +908,7 @@ class RedTeamSwarm:
         auto_remediate: bool = False,
     ) -> ScanReport:
         """Execute a full security scan."""
-        require_simulation("red_team", issue="#38")
+        require_simulation("red_team")
         scan_id = str(uuid.uuid4())
         started_at = datetime.now(timezone.utc)
 
@@ -1001,7 +1040,7 @@ class RedTeamSwarm:
         return remediations.get(
             category,
             f"Review and harden the {result.vector.target_endpoint} "
-            f"endpoint against {category.value} attacks."
+            f"endpoint against {category.value} attacks.",
         )
 
     @staticmethod

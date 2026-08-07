@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -46,7 +47,14 @@ def strict_trust_mode(monkeypatch):
         base64.b64encode(raw_private_key).decode(),
     )
     signing_keys = get_signing_key_service()
+    previous_private_key = signing_keys._private_key
+    previous_key_id = signing_keys._key_id
     signing_keys._private_key = None
+    try:
+        yield
+    finally:
+        signing_keys._private_key = previous_private_key
+        signing_keys._key_id = previous_key_id
 
 
 @pytest.mark.anyio
@@ -73,15 +81,22 @@ async def test_agent_ops_war_room_demo_proves_control_plane_loop(
     assert result["audit"]["chain"]["valid"] is True
     assert result["denial"]["reason"] == "permit_tool_not_allowed"
     assert (
-        result["denial"]["ledger_debits_after"]
-        == result["ledger"]["matching_debits"]
+        result["denial"]["ledger_debits_after"] == result["ledger"]["matching_debits"]
     )
 
 
-def test_agent_ops_war_room_cli_json_proves_control_plane_loop():
+def test_agent_ops_war_room_cli_json_proves_control_plane_loop(tmp_path: Path):
+    # A subprocess must never share the parent pytest worker's SQLite file.
+    # Replacing or mutating that file while SQLAlchemy still has pooled parent
+    # connections makes every later trust test order-dependent.
+    subprocess_env = os.environ.copy()
+    subprocess_env["DATABASE_URL"] = (
+        f"sqlite+aiosqlite:///{tmp_path / 'agent-ops-demo.db'}"
+    )
     result = subprocess.run(
         [sys.executable, "scripts/agent_ops_war_room_demo.py", "--assert", "--json"],
         cwd=ROOT,
+        env=subprocess_env,
         check=False,
         capture_output=True,
         text=True,

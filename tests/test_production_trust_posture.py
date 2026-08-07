@@ -9,8 +9,11 @@ modules in the same pytest session.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,9 +34,9 @@ from app.services.mcp_phase9_tools import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RAILWAY_JSON = REPO_ROOT / "railway.json"
 
-# Dummy non-secret material so production-like validation can pass without
-# loading a real signing key into the test process.
-_TEST_SIGNING_PRIVATE_KEY_B64 = "dGVzdC1zaWduaW5nLWtleS1ub3QtZm9yLXByb2Q="
+# Deterministic non-secret 32-byte material so production-like validation can
+# exercise the real Ed25519 key shape without loading a production secret.
+_TEST_SIGNING_PRIVATE_KEY_B64 = base64.b64encode(bytes(range(32))).decode()
 
 _PROD_TRUST_ENV = {
     "TRUST_MODE_ENABLED": "true",
@@ -150,6 +153,35 @@ def test_production_trust_flags_are_strict(production_trust_flags):
         )
         is None
     )
+
+
+@pytest.mark.production_trust
+def test_fresh_production_import_omits_passkey_routes():
+    """Production env must gate AWI before the process-global app is built."""
+    script = """
+import json
+from app.main import app
+
+paths = sorted(app.openapi().get("paths", {}))
+print(json.dumps(paths))
+"""
+    env = os.environ.copy()
+    env.update(_PROD_TRUST_ENV)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    paths = set(json.loads(result.stdout.strip().splitlines()[-1]))
+    assert "/v1/permits" in paths
+    assert "/v1/awi/passkey/challenge" not in paths
+    assert "/v1/awi/passkey/verify" not in paths
+    assert not any(path.startswith("/v1/awi/") for path in paths)
 
 
 @pytest.mark.production_trust

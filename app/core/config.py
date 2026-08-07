@@ -4,6 +4,7 @@ All settings are loaded from environment variables for zero-GUI deployment.
 """
 
 from decimal import Decimal
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -51,13 +52,27 @@ class Settings(BaseSettings):
     # --- Proof surfaces ---
     # When false, only CORE_TRUST_ROUTERS (+ MCP) are mounted. Production-like
     # environments must set this false — see validate_trust_mode_guardrails.
-    ENABLE_PROOF_SURFACES: bool = True
+    ENABLE_PROOF_SURFACES: bool = False
 
     # --- Dogfood tool (opt-in executable partner.notes.write) ---
     # When true, registers a safe local notes-write MCP tool so live
     # /mcp/tools.json is non-empty for permit→invoke→receipt dogfood.
     # Default false: no stub pollution. Independent of ENABLE_PROOF_SURFACES.
     ENABLE_DOGFOOD_TOOL: bool = False
+
+    # --- Governed upstream MCP partner tool ---
+    # One explicitly configured Streamable HTTP server/tool for the
+    # design-partner pilot. The adapter fails closed at startup when enabled
+    # with incomplete or unsafe configuration.
+    MCP_UPSTREAM_ENABLED: bool = False
+    MCP_UPSTREAM_URL: str = ""
+    MCP_UPSTREAM_TOOL_NAME: str = ""
+    MCP_UPSTREAM_PUBLIC_TOOL_ID: str = ""
+    MCP_UPSTREAM_BEARER_TOKEN: SecretStr = SecretStr("")
+    MCP_UPSTREAM_CREDITS_PER_CALL: Decimal = Decimal("0")
+    MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS: float = 5.0
+    MCP_UPSTREAM_CALL_TIMEOUT_SECONDS: float = 30.0
+    MCP_UPSTREAM_MAX_RESPONSE_BYTES: int = 1_048_576
 
     # --- Phase 9: WebAuthn mock (tests/local only) ---
     # When true and py_webauthn is absent, verification can short-circuit.
@@ -191,10 +206,10 @@ class Settings(BaseSettings):
     RAG_EMBEDDING_DIMENSION: int = 1536
 
     # --- Simulation Mode ---
-    # Per-service flag. True = use the current mock/synthetic implementation.
-    # False = use the real integration (raises NotImplementedError until the
-    # corresponding real implementation lands — see issues #28-#39).
-    # Defaults to True so existing behavior is preserved without env changes.
+    # Per-service flag. True = use the frozen mock/synthetic implementation.
+    # False is reserved for an explicitly approved real adapter and otherwise
+    # raises NotImplementedError. Production-like deployments also disable the
+    # proof-surface routers. See docs/PROOF_SURFACES.md.
     SIMULATION_MODE_ORACLE: bool = True
     SIMULATION_MODE_RED_TEAM: bool = True
     SIMULATION_MODE_RTAAS: bool = True

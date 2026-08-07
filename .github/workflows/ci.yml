@@ -37,6 +37,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -e ./b2a_sdk
           pip install pytest pytest-asyncio anyio httpx
 
       - name: Run tests
@@ -48,6 +49,7 @@ jobs:
             tests/test_permits.py \
             tests/test_receipts.py \
             tests/test_mcp_trust.py \
+            tests/test_refund_reconciliation.py \
             tests/test_audit_chain.py \
             tests/test_key_management.py \
             tests/test_idempotency.py \
@@ -87,6 +89,55 @@ jobs:
         if: matrix.python-version == '3.12'
         run: pytest tests/test_migrations.py -v --tb=short
 
+  python_sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Build SDK wheel and source distribution
+        run: |
+          SDK_VERSION=$(python -c "import pathlib, re; text=pathlib.Path('b2a_sdk/pyproject.toml').read_text(); print(re.search(r'^version = \"([^\"]+)\"$', text, re.MULTILINE).group(1))")
+          echo "SDK_VERSION=$SDK_VERSION" >> "$GITHUB_ENV"
+          python -m pip install --upgrade pip
+          pip install uv pytest pytest-asyncio ruff mypy
+          uv build b2a_sdk --out-dir sdk-dist
+
+      - name: Validate clean wheel installation
+        run: |
+          python -m venv /tmp/b2a-sdk-smoke
+          /tmp/b2a-sdk-smoke/bin/python -m pip install "sdk-dist/b2a_sdk-${SDK_VERSION}-py3-none-any.whl"
+          cd /tmp
+          /tmp/b2a-sdk-smoke/bin/python -c "import b2a_sdk; assert b2a_sdk.__version__ == '${SDK_VERSION}'"
+
+      - name: Run SDK tests and lint against the wheel
+        run: |
+          pip install "sdk-dist/b2a_sdk-${SDK_VERSION}-py3-none-any.whl"
+          cd /tmp
+          python -m pytest "$GITHUB_WORKSPACE/b2a_sdk/tests" -q
+          cd "$GITHUB_WORKSPACE"
+          ruff check b2a_sdk/src b2a_sdk/tests tests/test_python_sdk_trust_loop.py
+          mypy --follow-imports=skip \
+            b2a_sdk/src/b2a_sdk/client.py \
+            b2a_sdk/src/b2a_sdk/models.py \
+            b2a_sdk/src/b2a_sdk/errors.py
+
+      - name: Upload SDK artifacts
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-sdk-${{ env.SDK_VERSION }}
+          path: sdk-dist/*
+          if-no-files-found: error
+
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:
     runs-on: ubuntu-latest
@@ -120,6 +171,49 @@ jobs:
           DATABASE_URL: sqlite+aiosqlite:///./test-production-trust.db
         run: |
           pytest tests/test_production_trust_posture.py -m production_trust -v --tb=short
+
+  postgres_permit_concurrency:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_middleware_permit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_middleware_permit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Apply PostgreSQL migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
+        run: alembic upgrade head
+
+      - name: Prove permit row-lock concurrency
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
+          RUN_POSTGRES_CONCURRENCY_TESTS: "1"
+        run: pytest tests/test_permit_postgres_concurrency.py -v --tb=short
 
   lint:
     runs-on: ubuntu-latest

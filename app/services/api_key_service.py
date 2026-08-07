@@ -22,6 +22,7 @@ from uuid import uuid4
 from sqlalchemy import select, update
 from sqlmodel import col
 
+from ..core.time import to_naive_utc, utc_now
 from ..db.database import get_session_factory
 from ..db.models import APIKeyModel, KeyRotationLogModel, WalletModel
 from ..schemas.billing import (
@@ -37,11 +38,13 @@ API_KEY_PREFIX_LENGTH = 8
 
 class APIKeyError(Exception):
     """Base exception for API key operations."""
+
     pass
 
 
 class KeyNotFoundError(APIKeyError):
     """Raised when an API key is not found."""
+
     def __init__(self, key_id: str):
         self.key_id = key_id
         super().__init__(f"API key not found: {key_id}")
@@ -49,6 +52,7 @@ class KeyNotFoundError(APIKeyError):
 
 class WalletNotFoundError(APIKeyError):
     """Raised when a wallet is not found."""
+
     def __init__(self, wallet_id: str):
         self.wallet_id = wallet_id
         super().__init__(f"Wallet not found: {wallet_id}")
@@ -56,11 +60,13 @@ class WalletNotFoundError(APIKeyError):
 
 class KeyExpiredError(APIKeyError):
     """Raised when an API key has expired."""
+
     pass
 
 
 class KeyRevokedError(APIKeyError):
     """Raised when an API key has been revoked."""
+
     pass
 
 
@@ -148,7 +154,7 @@ class APIKeyService:
                 key_prefix=key_prefix,
                 status=APIKeyStatus.ACTIVE.value,
                 metadata_json=json.dumps({"name": key_name}),
-                expires_at=expires_at,
+                expires_at=(to_naive_utc(expires_at) if expires_at else None),
             )
             session.add(api_key)
             await session.commit()
@@ -205,18 +211,20 @@ class APIKeyService:
                 except json.JSONDecodeError:
                     pass
 
-            response_keys.append({
-                "key_id": key.key_id,
-                "wallet_id": key.wallet_id,
-                "key_prefix": key.key_prefix,
-                "masked_key": f"{key.key_prefix}...****",
-                "status": key.status,
-                "key_name": metadata.get("name", "default"),
-                "rotation_count": key.rotation_count,
-                "last_used_at": key.last_used_at,
-                "created_at": key.created_at,
-                "expires_at": key.expires_at,
-            })
+            response_keys.append(
+                {
+                    "key_id": key.key_id,
+                    "wallet_id": key.wallet_id,
+                    "key_prefix": key.key_prefix,
+                    "masked_key": f"{key.key_prefix}...****",
+                    "status": key.status,
+                    "key_name": metadata.get("name", "default"),
+                    "rotation_count": key.rotation_count,
+                    "last_used_at": key.last_used_at,
+                    "created_at": key.created_at,
+                    "expires_at": key.expires_at,
+                }
+            )
 
             if key.status == APIKeyStatus.ACTIVE.value:
                 total_active += 1
@@ -268,7 +276,7 @@ class APIKeyService:
             if expires_at and expires_at < now:
                 return None
 
-            key.last_used_at = now
+            key.last_used_at = to_naive_utc(now)
             session.add(key)
             await session.commit()
 
@@ -307,9 +315,11 @@ class APIKeyService:
         """
         old_key_id = None
         now = datetime.now(timezone.utc)
+        persisted_now = to_naive_utc(now)
         rotation_id = f"rot_{uuid4().hex[:12]}"
         rotation_type = (
-            RotationType.MANUAL.value if triggered_by == "user"
+            RotationType.MANUAL.value
+            if triggered_by == "user"
             else RotationType.AUTOMATIC.value
         )
 
@@ -336,7 +346,7 @@ class APIKeyService:
 
                 if revoke_old:
                     old_key.status = APIKeyStatus.REVOKED.value
-                    old_key.revoked_at = now
+                    old_key.revoked_at = persisted_now
                     old_key.revoke_reason = reason
 
             full_key, key_hash, key_prefix = generate_api_key()
@@ -358,7 +368,7 @@ class APIKeyService:
                     .where(col(APIKeyModel.key_id) == old_key_id)
                     .values(
                         rotation_count=APIKeyModel.rotation_count + 1,
-                        last_rotated_at=now,
+                        last_rotated_at=persisted_now,
                     )
                 )
 
@@ -372,7 +382,7 @@ class APIKeyService:
                 trigger_reason=reason,
                 triggered_by=triggered_by,
                 ip_address=ip_address,
-                created_at=now,
+                created_at=persisted_now,
             )
             session.add(log_entry)
 
@@ -434,7 +444,7 @@ class APIKeyService:
                 raise KeyNotFoundError(key_id)
 
             key.status = APIKeyStatus.REVOKED.value
-            key.revoked_at = datetime.now(timezone.utc)
+            key.revoked_at = utc_now()
             key.revoke_reason = reason
             session.add(key)
             await session.commit()
@@ -465,6 +475,7 @@ class APIKeyService:
             }
         """
         now = datetime.now(timezone.utc)
+        persisted_now = to_naive_utc(now)
 
         async with self._session_factory()() as session:
             wallet_result = await session.execute(
@@ -484,7 +495,7 @@ class APIKeyService:
             revoked_key_ids = []
             for key in active_keys:
                 key.status = APIKeyStatus.REVOKED.value
-                key.revoked_at = now
+                key.revoked_at = persisted_now
                 key.revoke_reason = f"EMERGENCY: {reason}"
                 session.add(key)
                 revoked_key_ids.append(key.key_id)
@@ -496,7 +507,7 @@ class APIKeyService:
                 rotation_type=RotationType.EMERGENCY.value,
                 trigger_reason=reason,
                 triggered_by="emergency_system",
-                created_at=now,
+                created_at=persisted_now,
             )
             session.add(log_entry)
 
@@ -532,6 +543,7 @@ class APIKeyService:
         )
 
         from ..services.notifications import get_notification_service
+
         notifications = get_notification_service()
         await notifications.send_security_alert(
             wallet_id=wallet_id,

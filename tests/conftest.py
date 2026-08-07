@@ -4,11 +4,15 @@ Sets up pytest-asyncio, database, and common fixtures.
 """
 
 import os
+from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import DateTime, event, inspect as sa_inspect, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 # --- Proof-surface test classification -------------------------------------
 # The product is the trust plane (app/trust + the core trust routers). Everything
@@ -24,6 +28,8 @@ PROOF_SURFACE_TEST_MODULES = frozenset(
         "test_awi",
         "test_awi_adoption",
         "test_awi_dom_bridge_integration",
+        "test_awi_governed_mcp",
+        "test_awi_http_governance",
         "test_awi_phase9",
         "test_behavioral_sandbox",
         "test_broadcast",
@@ -31,6 +37,11 @@ PROOF_SURFACE_TEST_MODULES = frozenset(
         "test_agent_comms_durable",
         "test_content_factory_generation_durable",
         "test_content_store",
+        "test_discover_phase9",
+        "test_discovery",
+        "test_discovery_consistency",
+        "test_discovery_drift",
+        "test_discovery_honesty",
         "test_factory",
         "test_iot",
         "test_iot_registry",
@@ -80,6 +91,9 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 # Ephemeral SQLite create_all even when a job sets ENVIRONMENT=production
 # (production_trust CI). Never applies to Postgres — see allows_metadata_create_all.
 os.environ.setdefault("ALLOW_METADATA_CREATE_ALL", "true")
+# Match the application default. Proof-marked tests opt in through the fixture
+# below, so importing the app in an ordinary test never silently mounts demos.
+os.environ.setdefault("ENABLE_PROOF_SURFACES", "false")
 # Configure auth so tests don't hit the fail-safe 503 in verify_api_key.
 # Tests authenticate with X-API-Key: test-key (see RateLimitMiddleware, which
 # also special-cases this value to bypass rate limiting).
@@ -97,6 +111,32 @@ os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
 @pytest.fixture(scope="session")
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def enable_proof_surfaces_for_marked_tests(request):
+    """Explicitly opt proof-marked tests into the frozen route collection."""
+    if request.node.get_closest_marker("proof") is None:
+        yield
+        return
+
+    from app.core.config import get_settings
+    from app.main import PROOF_SURFACE_ROUTERS, app
+    from app.services.mcp_phase9_tools import sync_proof_surface_mcp_registration
+
+    cfg = get_settings()
+    previous = cfg.ENABLE_PROOF_SURFACES
+    cfg.ENABLE_PROOF_SURFACES = True
+    if not getattr(app.state, "proof_test_routes_mounted", False):
+        for router_module in PROOF_SURFACE_ROUTERS:
+            app.include_router(router_module.router)
+        app.state.proof_test_routes_mounted = True
+    sync_proof_surface_mcp_registration()
+    try:
+        yield
+    finally:
+        cfg.ENABLE_PROOF_SURFACES = previous
+        sync_proof_surface_mcp_registration()
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
@@ -133,8 +173,9 @@ async def clean_database():
         # Child tables that FK to wallets must go before wallets. Self-FK on
         # wallets.parent_wallet_id is cleared so a bulk DELETE succeeds with
         # PRAGMA foreign_keys=ON (Postgres-parity for SQLite tests).
-        await session.execute(text("DELETE FROM idempotency_records"))
         await session.execute(text("DELETE FROM receipts"))
+        await session.execute(text("DELETE FROM mcp_dispatch_attempts"))
+        await session.execute(text("DELETE FROM idempotency_records"))
         await session.execute(text("DELETE FROM permits"))
         await session.execute(text("DELETE FROM agent_comms_messages"))
         await session.execute(text("DELETE FROM content_factory_generations"))
@@ -155,3 +196,59 @@ async def clean_database():
         await session.commit()
 
     yield
+
+
+@pytest.fixture
+def enforce_naive_utc_datetime_columns():
+    """Fail before SQLite hides an aware value bound to the naive-UTC schema.
+
+    PostgreSQL's asyncpg driver rejects this mismatch, while SQLite silently
+    serializes the value and lets the same test pass. Inspect both ORM flushes
+    and Core/SQL query parameters. Keep this opt-in so focused production-parity
+    tests can guard trust-critical paths without expanding unrelated scope.
+    """
+
+    def iter_parameter_values(value):
+        if isinstance(value, Mapping):
+            for nested in value.values():
+                yield from iter_parameter_values(nested)
+        elif isinstance(value, (list, tuple, set)):
+            for nested in value:
+                yield from iter_parameter_values(nested)
+        else:
+            yield value
+
+    def assert_naive_datetime_values(session, _flush_context, _instances):
+        for instance in [*session.new, *session.dirty]:
+            mapper = sa_inspect(instance).mapper
+            for attribute in mapper.column_attrs:
+                if not any(
+                    isinstance(column.type, DateTime) and not column.type.timezone
+                    for column in attribute.columns
+                ):
+                    continue
+                value = getattr(instance, attribute.key, None)
+                if isinstance(value, datetime) and value.utcoffset() is not None:
+                    raise AssertionError(
+                        f"{type(instance).__name__}.{attribute.key} must be naive UTC"
+                    )
+
+    def assert_naive_statement_parameters(
+        connection,
+        clauseelement,
+        multiparams,
+        params,
+        _execution_options,
+    ):
+        compiled_params = clauseelement.compile(dialect=connection.dialect).params
+        for value in iter_parameter_values((multiparams, params, compiled_params)):
+            if isinstance(value, datetime) and value.utcoffset() is not None:
+                raise AssertionError("SQL datetime parameters must be naive UTC")
+
+    event.listen(Session, "before_flush", assert_naive_datetime_values)
+    event.listen(Engine, "before_execute", assert_naive_statement_parameters)
+    try:
+        yield
+    finally:
+        event.remove(Session, "before_flush", assert_naive_datetime_values)
+        event.remove(Engine, "before_execute", assert_naive_statement_parameters)

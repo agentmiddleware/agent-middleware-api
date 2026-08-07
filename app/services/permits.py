@@ -3,16 +3,16 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.time import utc_now
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
-from app.db.models import PermitModel, WalletModel
+from app.db.models import McpDispatchAttemptModel, PermitModel, WalletModel
 from app.schemas.trust import PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service
 
@@ -105,18 +105,22 @@ class PermitService:
                 cast(ColumnElement[bool], PermitModel.subject_key_id == subject_key_id)
             )
         if created_after:
+            created_after = to_naive_utc(created_after)
             filters.append(
                 cast(ColumnElement[bool], PermitModel.issued_at >= created_after)
             )
         if created_before:
+            created_before = to_naive_utc(created_before)
             filters.append(
                 cast(ColumnElement[bool], PermitModel.issued_at <= created_before)
             )
         if expires_after:
+            expires_after = to_naive_utc(expires_after)
             filters.append(
                 cast(ColumnElement[bool], PermitModel.expires_at >= expires_after)
             )
         if expires_before:
+            expires_before = to_naive_utc(expires_before)
             filters.append(
                 cast(ColumnElement[bool], PermitModel.expires_at <= expires_before)
             )
@@ -141,10 +145,8 @@ class PermitService:
     async def create_permit(self, request: PermitCreateRequest) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
-        expires_at = request.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at <= datetime.now(timezone.utc):
+        expires_at = to_naive_utc(request.expires_at)
+        if expires_at <= utc_now():
             raise PermitError("permit_expired_at_creation")
         scopes = request.scopes or [
             f"tool:{tool}:invoke" for tool in request.allowed_tools
@@ -163,7 +165,7 @@ class PermitService:
             if subject.balance < request.max_credits:
                 raise PermitError("permit_budget_exceeds_wallet_balance")
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         permit_id = f"permit-{uuid.uuid4().hex[:16]}"
         nonce = request.nonce or uuid.uuid4().hex
         payload = {
@@ -209,7 +211,7 @@ class PermitService:
             if not model:
                 raise PermitError("permit_not_found")
             model.status = "revoked"
-            model.revoked_at = datetime.now(timezone.utc)
+            model.revoked_at = utc_now()
             session.add(model)
             await session.commit()
             await session.refresh(model)
@@ -229,29 +231,111 @@ class PermitService:
             model = await session.get(PermitModel, permit_id)
             if not model:
                 return PermitValidation(False, "permit_not_found", None)
-            if model.status != "active":
-                return PermitValidation(False, f"permit_{model.status}", model)
-            expires_at = model.expires_at
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at <= datetime.now(timezone.utc):
-                return PermitValidation(False, "permit_expired", model)
+            return await self._validate_model_for_action(
+                model=model,
+                wallet_id=wallet_id,
+                tool_name=tool_name,
+                estimated_credits=estimated_credits,
+                key_id=key_id,
+            )
+
+    async def validate_replay_access(
+        self,
+        *,
+        permit_id: str,
+        wallet_id: str,
+        tool_name: str,
+        key_id: str | None = None,
+    ) -> PermitValidation:
+        """Authorize access to an already-finalized governed invocation.
+
+        Replay deliberately ignores mutable execution constraints such as
+        expiry, revocation, and remaining budget: those were enforced before
+        the original dispatch, and changing them must not make its evidence
+        disappear. Stable wallet/key identity constraints still apply so a
+        second key on the same wallet cannot retrieve a result produced under
+        a key-bound permit. Tool scope is intentionally not re-evaluated: a
+        signed denial for an out-of-scope tool must itself remain replayable.
+        """
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit_id)
+            if model is None:
+                return PermitValidation(False, "permit_not_found", None)
             if model.subject_wallet_id != wallet_id:
                 return PermitValidation(False, "permit_wallet_mismatch", model)
             if model.subject_key_id and model.subject_key_id != key_id:
                 return PermitValidation(False, "permit_key_mismatch", model)
-            allowed_tools = _loads_list(model.allowed_tools_json)
-            if allowed_tools and tool_name not in allowed_tools:
-                return PermitValidation(False, "permit_tool_not_allowed", model)
-            scopes = set(_loads_list(model.scopes_json))
-            required_scope = f"tool:{tool_name}:invoke"
-            if required_scope not in scopes or "billing:charge" not in scopes:
-                return PermitValidation(False, "permit_scope_missing", model)
-            if model.spent_credits + estimated_credits > model.max_credits:
-                return PermitValidation(False, "permit_budget_exceeded", model)
             if not await self.verify_signature(model):
                 return PermitValidation(False, "permit_signature_invalid", model)
             return PermitValidation(True, None, model)
+
+    async def authorize_and_reserve(
+        self,
+        *,
+        permit_id: str,
+        wallet_id: str,
+        tool_name: str,
+        estimated_credits: Decimal,
+        key_id: str | None = None,
+    ) -> PermitValidation:
+        """Atomically authorize an action and reserve its permit budget.
+
+        The permit row remains locked from the final authorization checks
+        through the ``spent_credits`` update. A revocation, expiry, scope
+        change, key mismatch, signature failure, or concurrent reservation
+        therefore cannot slip between a stale read and the budget mutation.
+        """
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                model = await session.get(PermitModel, permit_id, with_for_update=True)
+                if not model:
+                    return PermitValidation(False, "permit_not_found", None)
+                validation = await self._validate_model_for_action(
+                    model=model,
+                    wallet_id=wallet_id,
+                    tool_name=tool_name,
+                    estimated_credits=estimated_credits,
+                    key_id=key_id,
+                )
+                if not validation.allowed:
+                    return validation
+                model.spent_credits += estimated_credits
+                model.updated_at = utc_now()
+                session.add(model)
+            return validation
+
+    async def _validate_model_for_action(
+        self,
+        *,
+        model: PermitModel,
+        wallet_id: str,
+        tool_name: str,
+        estimated_credits: Decimal,
+        key_id: str | None,
+    ) -> PermitValidation:
+        if model.status != "active":
+            return PermitValidation(False, f"permit_{model.status}", model)
+        expires_at = to_naive_utc(model.expires_at)
+        if expires_at <= utc_now():
+            return PermitValidation(False, "permit_expired", model)
+        if model.subject_wallet_id != wallet_id:
+            return PermitValidation(False, "permit_wallet_mismatch", model)
+        if model.subject_key_id and model.subject_key_id != key_id:
+            return PermitValidation(False, "permit_key_mismatch", model)
+        allowed_tools = _loads_list(model.allowed_tools_json)
+        if allowed_tools and tool_name not in allowed_tools:
+            return PermitValidation(False, "permit_tool_not_allowed", model)
+        scopes = set(_loads_list(model.scopes_json))
+        required_scope = f"tool:{tool_name}:invoke"
+        if required_scope not in scopes or "billing:charge" not in scopes:
+            return PermitValidation(False, "permit_scope_missing", model)
+        if model.spent_credits + estimated_credits > model.max_credits:
+            return PermitValidation(False, "permit_budget_exceeded", model)
+        if not await self.verify_signature(model):
+            return PermitValidation(False, "permit_signature_invalid", model)
+        return PermitValidation(True, None, model)
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
         factory = get_session_factory()
@@ -263,7 +347,7 @@ class PermitService:
                 if model.spent_credits + amount > model.max_credits:
                     raise PermitError("permit_budget_exceeded")
                 model.spent_credits += amount
-                model.updated_at = datetime.now(timezone.utc)
+                model.updated_at = utc_now()
                 session.add(model)
             await session.commit()
 
@@ -275,9 +359,50 @@ class PermitService:
                 if not model:
                     return
                 model.spent_credits = max(Decimal("0"), model.spent_credits - amount)
-                model.updated_at = datetime.now(timezone.utc)
+                model.updated_at = utc_now()
                 session.add(model)
             await session.commit()
+
+    async def release_dispatch_budget_once(self, attempt_id: str) -> bool:
+        """Release one remote attempt's reservation exactly once.
+
+        The permit mutation and attempt checkpoint share one transaction. This
+        closes the crash window that exists when a plain ``release_budget``
+        call succeeds but the caller dies before recording that it succeeded.
+        Returns ``True`` only for the transaction that performed the release.
+        """
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                attempt = await session.get(
+                    McpDispatchAttemptModel,
+                    attempt_id,
+                    with_for_update=True,
+                )
+                if attempt is None:
+                    raise PermitError("dispatch_attempt_not_found")
+                if attempt.state != "returned_error":
+                    raise PermitError("dispatch_budget_release_state_invalid")
+                if attempt.budget_released_at is not None:
+                    return False
+                model = await session.get(
+                    PermitModel,
+                    attempt.permit_id,
+                    with_for_update=True,
+                )
+                if model is None:
+                    raise PermitError("permit_not_found")
+                model.spent_credits = max(
+                    Decimal("0"),
+                    model.spent_credits - attempt.credits_authorized,
+                )
+                now = utc_now()
+                model.updated_at = now
+                attempt.budget_released_at = now
+                attempt.updated_at = now
+                session.add(model)
+                session.add(attempt)
+            return True
 
     async def reconcile_budgets(self, *, idle_seconds: int = 900) -> int:
         """Repair budget reservations orphaned by a crash mid-invocation.
@@ -299,7 +424,11 @@ class PermitService:
         (the agent can spend *less* than authorized, never more) and is
         reclaimed once the permit expires. Returns the number corrected.
         """
-        from app.db.models import ReceiptModel
+        from app.db.models import (
+            IdempotencyRecordModel,
+            LedgerEntryModel,
+            ReceiptModel,
+        )
 
         # Persisted datetimes in this codebase are naive UTC (see
         # app.core.time.utc_now); the reconcile columns (expires_at,
@@ -313,38 +442,43 @@ class PermitService:
         async with factory() as session:
             async with session.begin():
                 stale = (
-                    await session.execute(
-                        select(PermitModel)
-                        .where(
-                            or_(
-                                cast(
-                                    ColumnElement[bool],
-                                    PermitModel.status != "active",
+                    (
+                        await session.execute(
+                            select(PermitModel)
+                            .where(
+                                or_(
+                                    cast(
+                                        ColumnElement[bool],
+                                        PermitModel.status != "active",
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        PermitModel.expires_at <= now,
+                                    ),
                                 ),
                                 cast(
                                     ColumnElement[bool],
-                                    PermitModel.expires_at <= now,
+                                    func.coalesce(
+                                        PermitModel.updated_at, PermitModel.issued_at
+                                    )
+                                    < cutoff,
                                 ),
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                func.coalesce(
-                                    PermitModel.updated_at, PermitModel.issued_at
-                                )
-                                < cutoff,
-                            ),
+                            )
+                            .with_for_update()
                         )
-                        .with_for_update()
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 for permit in stale:
-                    consumed = (
+                    receipt_rows = (
                         await session.execute(
                             select(
-                                func.coalesce(
-                                    func.sum(ReceiptModel.credits_charged),
-                                    0,
-                                )
+                                cast(Any, ReceiptModel.receipt_id),
+                                cast(Any, ReceiptModel.outcome),
+                                cast(Any, ReceiptModel.credits_charged),
+                                cast(Any, ReceiptModel.ledger_entry_id),
+                                cast(Any, ReceiptModel.wallet_id),
                             ).where(
                                 cast(
                                     ColumnElement[bool],
@@ -352,12 +486,145 @@ class PermitService:
                                 ),
                                 cast(
                                     ColumnElement[bool],
-                                    ReceiptModel.outcome == "success",
+                                    cast(Any, ReceiptModel.outcome).in_(
+                                        [
+                                            "success",
+                                            "delivery_uncertain",
+                                            "response_rejected",
+                                            "failed_unrefunded",
+                                        ]
+                                    ),
                                 ),
                             )
                         )
-                    ).scalar_one()
-                    consumed_decimal = Decimal(str(consumed))
+                    ).all()
+                    pending_ledger_ids = [
+                        ledger_entry_id
+                        for (
+                            _receipt_id,
+                            outcome,
+                            _credits,
+                            ledger_entry_id,
+                            _wallet_id,
+                        ) in receipt_rows
+                        if outcome == "failed_unrefunded"
+                        and ledger_entry_id is not None
+                    ]
+                    exact_refunded_ledger_ids: set[str] = set()
+                    if pending_ledger_ids:
+                        refund_rows = (
+                            await session.execute(
+                                select(
+                                    cast(Any, LedgerEntryModel.entry_id),
+                                    cast(Any, LedgerEntryModel.wallet_id),
+                                    cast(Any, LedgerEntryModel.amount),
+                                    cast(Any, LedgerEntryModel.correlation_id),
+                                ).where(
+                                    cast(
+                                        ColumnElement[bool],
+                                        LedgerEntryModel.action == "refund",
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        cast(
+                                            Any,
+                                            LedgerEntryModel.correlation_id,
+                                        ).in_(pending_ledger_ids),
+                                    ),
+                                )
+                            )
+                        ).all()
+                        failed_by_ledger = {
+                            ledger_entry_id: (wallet_id, Decimal(str(credits)))
+                            for (
+                                _receipt_id,
+                                outcome,
+                                credits,
+                                ledger_entry_id,
+                                wallet_id,
+                            ) in receipt_rows
+                            if outcome == "failed_unrefunded"
+                            and ledger_entry_id is not None
+                        }
+                        exact_refunded_ledger_ids = {
+                            correlation_id
+                            for entry_id, wallet_id, amount, correlation_id in refund_rows
+                            if correlation_id in failed_by_ledger
+                            and entry_id == f"refund-{correlation_id}"
+                            and wallet_id == failed_by_ledger[correlation_id][0]
+                            and Decimal(str(amount))
+                            == failed_by_ledger[correlation_id][1]
+                        }
+                    failed_receipt_by_id = {
+                        receipt_id: ledger_entry_id
+                        for (
+                            receipt_id,
+                            outcome,
+                            _credits,
+                            ledger_entry_id,
+                            _wallet_id,
+                        ) in receipt_rows
+                        if outcome == "failed_unrefunded"
+                        and ledger_entry_id in exact_refunded_ledger_ids
+                    }
+                    resolved_receipt_ids: set[str] = set()
+                    if failed_receipt_by_id:
+                        state_rows = (
+                            await session.execute(
+                                select(
+                                    cast(
+                                        Any,
+                                        IdempotencyRecordModel.response_reference,
+                                    ),
+                                    cast(Any, IdempotencyRecordModel.response_json),
+                                ).where(
+                                    cast(
+                                        ColumnElement[bool],
+                                        cast(
+                                            Any,
+                                            IdempotencyRecordModel.response_reference,
+                                        ).in_(list(failed_receipt_by_id)),
+                                    )
+                                )
+                            )
+                        ).all()
+                        for receipt_id, response_json in state_rows:
+                            try:
+                                response = json.loads(response_json or "")
+                            except (json.JSONDecodeError, TypeError):
+                                continue
+                            state = (
+                                response.get("refund_reconciliation")
+                                if isinstance(response, dict)
+                                else None
+                            )
+                            if (
+                                isinstance(state, dict)
+                                and state.get("status") == "resolved"
+                                and state.get("receipt_id") == receipt_id
+                                and state.get("ledger_entry_id")
+                                == failed_receipt_by_id[receipt_id]
+                            ):
+                                resolved_receipt_ids.add(receipt_id)
+                    consumed_decimal = sum(
+                        (
+                            Decimal(str(credits))
+                            for (
+                                receipt_id,
+                                outcome,
+                                credits,
+                                _ledger_entry_id,
+                                _wallet_id,
+                            ) in receipt_rows
+                            if outcome
+                            in {"success", "delivery_uncertain", "response_rejected"}
+                            or (
+                                outcome == "failed_unrefunded"
+                                and receipt_id not in resolved_receipt_ids
+                            )
+                        ),
+                        Decimal("0"),
+                    )
                     if permit.spent_credits != consumed_decimal:
                         permit.spent_credits = consumed_decimal
                         permit.updated_at = utc_now()

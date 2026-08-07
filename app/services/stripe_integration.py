@@ -10,9 +10,10 @@ Architecture:
 5. If Stripe retries webhook, only duplicate payment intents are treated as idempotent
 """
 
+import json
 import logging
-from decimal import Decimal
-from typing import Optional
+from decimal import Decimal, InvalidOperation
+from typing import Any, Optional
 from uuid import uuid4
 
 import stripe
@@ -29,6 +30,12 @@ settings = get_settings()
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
+SUPPORTED_TOP_UP_CURRENCY = "usd"
+
+
+class StripeSettlementError(ValueError):
+    """A verified Stripe event does not prove an acceptable top-up settlement."""
+
 
 class StripeIntegration:
     """
@@ -42,12 +49,19 @@ class StripeIntegration:
         self._session_factory = get_session_factory
 
     @staticmethod
+    def _stripe_value(container: Any, key: str, default: Any = None) -> Any:
+        """Read dict and stripe.StripeObject fields without trusting attributes."""
+        try:
+            return container[key]
+        except (KeyError, TypeError, AttributeError):
+            return default
+
+    @staticmethod
     def _is_duplicate_payment_intent_error(exc: IntegrityError) -> bool:
         """Return true only for the idempotency unique constraint."""
         message = str(getattr(exc, "orig", exc)).lower()
-        return (
-            "payment_intent_id" in message
-            and ("unique" in message or "duplicate" in message)
+        return "payment_intent_id" in message and (
+            "unique" in message or "duplicate" in message
         )
 
     async def create_top_up_intent(
@@ -73,6 +87,17 @@ class StripeIntegration:
                 "currency": str,
             }
         """
+        normalized_currency = currency.lower()
+        if normalized_currency != SUPPORTED_TOP_UP_CURRENCY:
+            raise ValueError("unsupported_top_up_currency: only USD is supported")
+        if not amount_fiat.is_finite() or amount_fiat <= 0:
+            raise ValueError("invalid_top_up_amount")
+
+        amount_cents_decimal = amount_fiat * Decimal("100")
+        if amount_cents_decimal != amount_cents_decimal.to_integral_value():
+            raise ValueError("invalid_top_up_amount: use no more than two decimals")
+        amount_cents = int(amount_cents_decimal)
+
         async with self._session_factory()() as session:
             result = await session.execute(
                 # SQLModel fields are plain Python types (not Mapped[...]), so mypy
@@ -83,15 +108,27 @@ class StripeIntegration:
             wallet = result.scalar_one_or_none()
             if not wallet:
                 raise WalletNotFoundError(wallet_id)
+            if wallet.wallet_type != "sponsor":
+                raise ValueError("top_up_wallet_must_be_sponsor")
 
-        credits = int(amount_fiat * settings.EXCHANGE_RATE)
+        credits = Decimal(amount_cents) * settings.EXCHANGE_RATE / Decimal("100")
+        if not credits.is_finite() or credits <= 0:
+            raise ValueError("invalid_top_up_exchange_rate")
+        credits_metadata = (
+            str(int(credits))
+            if credits == credits.to_integral_value()
+            else format(credits.normalize(), "f")
+        )
+        credits_response: int | float = (
+            int(credits) if credits == credits.to_integral_value() else float(credits)
+        )
 
         intent = stripe.PaymentIntent.create(
-            amount=int(amount_fiat * 100),
-            currency=currency.lower(),
+            amount=amount_cents,
+            currency=SUPPORTED_TOP_UP_CURRENCY,
             metadata={
                 "wallet_id": wallet_id,
-                "credits": str(credits),
+                "credits": credits_metadata,
                 "idempotency_key": str(uuid4()),
             },
         )
@@ -104,9 +141,9 @@ class StripeIntegration:
         return {
             "client_secret": intent.client_secret,
             "payment_intent_id": intent.id,
-            "amount_credits": credits,
+            "amount_credits": credits_response,
             "amount_fiat": float(amount_fiat),
-            "currency": currency.upper(),
+            "currency": SUPPORTED_TOP_UP_CURRENCY.upper(),
         }
 
     async def handle_webhook(
@@ -132,7 +169,7 @@ class StripeIntegration:
                 sig_header,
                 settings.STRIPE_WEBHOOK_SECRET,
             )
-        except ValueError as e:
+        except (ValueError, stripe.SignatureVerificationError) as e:
             logger.error(f"Invalid Stripe signature: {e}")
             return False
 
@@ -143,44 +180,104 @@ class StripeIntegration:
             "payment_intent.payment_failed": self._handle_payment_failed,
         }
 
-        event_type = event["type"]
+        event_type = self._stripe_value(event, "type")
+        event_data = self._stripe_value(event, "data")
+        event_object = self._stripe_value(event_data, "object")
         if event_type == "charge.refunded":
-            await self._handle_refund(event["data"]["object"], event.get("id"))
+            await self._handle_refund(
+                event_object,
+                self._stripe_value(event, "id"),
+            )
         elif event_type in handler_map:
-            await handler_map[event_type](event["data"]["object"])
+            await handler_map[event_type](event_object)
         else:
             logger.debug(f"Ignoring unhandled event type: {event_type}")
 
         return True
 
-    async def _handle_payment_success(self, payment_intent: dict) -> None:
-        """Mint credits when Stripe confirms payment."""
-        wallet_id = payment_intent["metadata"].get("wallet_id")
-        credits = int(payment_intent["metadata"].get("credits", 0))
-
-        if not wallet_id or not credits:
-            logger.error(f"Missing metadata in PaymentIntent {payment_intent['id']}")
-            return
+    async def _handle_payment_success(self, payment_intent: Any) -> None:
+        """Mint credits only from a fully settled USD PaymentIntent."""
+        payment_intent_id, wallet_id, credits = self._validate_succeeded_payment_intent(
+            payment_intent
+        )
 
         await self._mint_credits(
             wallet_id=wallet_id,
-            amount=Decimal(credits),
-            payment_intent_id=payment_intent["id"],
-            description=f"Fiat top-up via Stripe ({payment_intent['id']})",
+            amount=credits,
+            payment_intent_id=payment_intent_id,
+            description=f"Fiat top-up via Stripe ({payment_intent_id})",
         )
 
         logger.info(
             f"Minted {credits} credits to wallet {wallet_id} "
-            f"from PaymentIntent {payment_intent['id']}"
+            f"from PaymentIntent {payment_intent_id}"
         )
+
+    @staticmethod
+    def _validate_succeeded_payment_intent(
+        payment_intent: Any,
+    ) -> tuple[str, str, Decimal]:
+        """Derive credits from Stripe settlement fields and verify metadata."""
+        payment_intent_id = StripeIntegration._stripe_value(payment_intent, "id")
+        if not isinstance(payment_intent_id, str) or not payment_intent_id:
+            raise StripeSettlementError("missing_payment_intent_id")
+        if StripeIntegration._stripe_value(payment_intent, "status") != "succeeded":
+            raise StripeSettlementError("payment_intent_not_succeeded")
+
+        currency = StripeIntegration._stripe_value(payment_intent, "currency")
+        if (
+            not isinstance(currency, str)
+            or currency.lower() != SUPPORTED_TOP_UP_CURRENCY
+        ):
+            raise StripeSettlementError("unsupported_top_up_currency")
+
+        amount = StripeIntegration._stripe_value(payment_intent, "amount")
+        amount_received = StripeIntegration._stripe_value(
+            payment_intent, "amount_received"
+        )
+        if (
+            isinstance(amount, bool)
+            or not isinstance(amount, int)
+            or isinstance(amount_received, bool)
+            or not isinstance(amount_received, int)
+            or amount <= 0
+            or amount_received != amount
+        ):
+            raise StripeSettlementError("payment_intent_amount_mismatch")
+
+        credits = Decimal(amount_received) * settings.EXCHANGE_RATE / Decimal("100")
+        if not credits.is_finite() or credits <= 0:
+            raise StripeSettlementError("invalid_settled_credit_amount")
+
+        metadata = StripeIntegration._stripe_value(payment_intent, "metadata")
+        if metadata is None:
+            raise StripeSettlementError("missing_payment_intent_metadata")
+        wallet_id = StripeIntegration._stripe_value(metadata, "wallet_id")
+        if not isinstance(wallet_id, str) or not wallet_id.strip():
+            raise StripeSettlementError("missing_wallet_metadata")
+
+        try:
+            metadata_credits = Decimal(
+                str(StripeIntegration._stripe_value(metadata, "credits"))
+            )
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise StripeSettlementError("invalid_credit_metadata") from exc
+        if (
+            not metadata_credits.is_finite()
+            or metadata_credits <= 0
+            or metadata_credits != credits
+        ):
+            raise StripeSettlementError("credit_metadata_mismatch")
+
+        return payment_intent_id, wallet_id, credits
 
     async def _handle_payment_failed(self, payment_intent: dict) -> None:
         """Log payment failure and notify via Slack."""
         from ..services.notifications import get_notification_service
 
         wallet_id = payment_intent["metadata"].get("wallet_id")
-        error_msg = (
-            payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
+        error_msg = payment_intent.get("last_payment_error", {}).get(
+            "message", "Unknown error"
         )
 
         logger.warning(f"Payment failed for wallet {wallet_id}: {error_msg}")
@@ -193,39 +290,156 @@ class StripeIntegration:
                 payment_intent_id=payment_intent["id"],
             )
 
-    async def _handle_refund(
-        self, charge: dict, event_id: str | None = None
-    ) -> None:
-        """Debit wallet when Stripe issues a refund."""
-        payment_intent_id = charge.get("payment_intent")
-        if not payment_intent_id:
-            return
+    @staticmethod
+    def _validate_refund_charge(charge: Any) -> tuple[str, int, int, str | None]:
+        """Validate authoritative cumulative refund fields from Stripe."""
+        payment_intent_id = StripeIntegration._stripe_value(charge, "payment_intent")
+        if not isinstance(payment_intent_id, str) or not payment_intent_id:
+            raise StripeSettlementError("missing_refund_payment_intent_id")
 
-        async with self._session_factory()() as session:
-            result = await session.execute(
-                select(LedgerEntryModel).where(
-                    LedgerEntryModel.payment_intent_id == payment_intent_id
+        currency = StripeIntegration._stripe_value(charge, "currency")
+        if (
+            not isinstance(currency, str)
+            or currency.lower() != SUPPORTED_TOP_UP_CURRENCY
+        ):
+            raise StripeSettlementError("unsupported_refund_currency")
+
+        charge_amount = StripeIntegration._stripe_value(charge, "amount")
+        if (
+            isinstance(charge_amount, bool)
+            or not isinstance(charge_amount, int)
+            or charge_amount <= 0
+        ):
+            raise StripeSettlementError("invalid_charge_amount")
+
+        amount_refunded = StripeIntegration._stripe_value(charge, "amount_refunded")
+        if (
+            isinstance(amount_refunded, bool)
+            or not isinstance(amount_refunded, int)
+            or amount_refunded <= 0
+        ):
+            raise StripeSettlementError("invalid_refund_amount")
+        if amount_refunded > charge_amount:
+            raise StripeSettlementError("refund_exceeds_charge_amount")
+
+        charge_id = StripeIntegration._stripe_value(charge, "id")
+        normalized_charge_id = (
+            charge_id if isinstance(charge_id, str) and charge_id else None
+        )
+        return (
+            payment_intent_id,
+            charge_amount,
+            amount_refunded,
+            normalized_charge_id,
+        )
+
+    async def _handle_refund(self, charge: Any, event_id: str | None = None) -> None:
+        """Apply only the new delta from Stripe's cumulative refund amount."""
+        (
+            payment_intent_id,
+            charge_amount,
+            amount_refunded,
+            charge_id,
+        ) = self._validate_refund_charge(charge)
+        description = f"Refund for PaymentIntent {payment_intent_id}"
+        stripe_event_id = event_id or charge_id
+
+        try:
+            async with self._session_factory()() as session:
+                async with session.begin():
+                    credit_result = await session.execute(
+                        select(LedgerEntryModel)
+                        .where(
+                            LedgerEntryModel.payment_intent_id == payment_intent_id  # type: ignore[arg-type]
+                        )
+                        .with_for_update()
+                    )
+                    credit_entry = credit_result.scalar_one_or_none()
+                    if not credit_entry:
+                        raise StripeSettlementError("refund_payment_intent_not_found")
+                    if credit_entry.amount <= 0:
+                        raise StripeSettlementError("invalid_original_credit_amount")
+
+                    wallet_result = await session.execute(
+                        select(WalletModel)
+                        .where(
+                            WalletModel.wallet_id == credit_entry.wallet_id  # type: ignore[arg-type]
+                        )
+                        .with_for_update()
+                    )
+                    wallet = wallet_result.scalar_one_or_none()
+                    if not wallet:
+                        raise StripeSettlementError("refund_wallet_not_found")
+                    if wallet.wallet_type != "sponsor":
+                        raise StripeSettlementError("refund_wallet_must_be_sponsor")
+
+                    prior_result = await session.execute(
+                        select(LedgerEntryModel).where(
+                            LedgerEntryModel.wallet_id == credit_entry.wallet_id,  # type: ignore[arg-type]
+                            LedgerEntryModel.action == "refund",  # type: ignore[arg-type]
+                            LedgerEntryModel.description == description,  # type: ignore[arg-type]
+                        )
+                    )
+                    already_refunded = sum(
+                        (-entry.amount for entry in prior_result.scalars().all()),
+                        Decimal("0"),
+                    )
+                    cumulative_refund = (
+                        credit_entry.amount
+                        * Decimal(amount_refunded)
+                        / Decimal(charge_amount)
+                    )
+                    refund_delta = cumulative_refund - already_refunded
+
+                    # Stripe's amount_refunded is cumulative. An older event can
+                    # arrive after a newer one; it must never reverse or repeat a
+                    # debit already reflected in the ledger.
+                    if refund_delta <= 0:
+                        logger.info(
+                            "Ignoring stale or duplicate refund event %s for %s",
+                            stripe_event_id,
+                            payment_intent_id,
+                        )
+                        return
+                    if refund_delta > wallet.balance:
+                        raise StripeSettlementError("refund_exceeds_wallet_balance")
+
+                    wallet.balance -= refund_delta
+                    wallet.lifetime_debits += refund_delta
+                    session.add(wallet)
+                    session.add(
+                        LedgerEntryModel(
+                            entry_id=str(uuid4()),
+                            wallet_id=wallet.wallet_id,
+                            action="refund",
+                            amount=-refund_delta,
+                            balance_after=wallet.balance,
+                            description=description,
+                            stripe_event_id=stripe_event_id,
+                            metadata_json=json.dumps(
+                                {
+                                    "payment_intent_id": payment_intent_id,
+                                    "stripe_charge_amount": charge_amount,
+                                    "stripe_amount_refunded": amount_refunded,
+                                    "refund_delta_credits": str(refund_delta),
+                                },
+                                separators=(",", ":"),
+                                sort_keys=True,
+                            ),
+                        )
+                    )
+        except IntegrityError as exc:
+            if not self._is_duplicate_stripe_event_error(exc):
+                logger.exception(
+                    "Stripe refund debit failed with non-idempotency integrity "
+                    "error for event %s",
+                    stripe_event_id,
                 )
-            )
-            entry = result.scalar_one_or_none()
-            if not entry:
-                logger.warning(
-                    f"Cannot find ledger entry for refund {payment_intent_id}"
-                )
-                return
-
-            refund_amount = Decimal(charge.get("amount", 0)) / Decimal("100")
-            credits = int(refund_amount * settings.EXCHANGE_RATE)
-
-            await self._debit_wallet(
-                wallet_id=entry.wallet_id,
-                amount=Decimal(credits),
-                description=f"Refund for PaymentIntent {payment_intent_id}",
-                # Idempotency key for the refund: a redelivered charge.refunded
-                # event has the same id, so its debit is rejected as a
-                # duplicate instead of taking credits twice. Fall back to the
-                # charge id when the event id is unavailable.
-                stripe_event_id=event_id or charge.get("id"),
+                raise
+            logger.info(
+                "Idempotency catch: refund event %s already processed. "
+                "Swallowing duplicate to avoid a second debit.",
+                stripe_event_id,
             )
 
     async def _mint_credits(
@@ -253,8 +467,9 @@ class StripeIntegration:
                     wallet = result.scalar_one_or_none()
 
                     if not wallet:
-                        logger.error(f"Wallet not found: {wallet_id}")
-                        return
+                        raise StripeSettlementError("top_up_wallet_not_found")
+                    if wallet.wallet_type != "sponsor":
+                        raise StripeSettlementError("top_up_wallet_must_be_sponsor")
 
                     wallet.balance += amount
                     wallet.lifetime_credits += amount
@@ -294,62 +509,6 @@ class StripeIntegration:
         return "stripe_event_id" in message and (
             "unique" in message or "duplicate" in message
         )
-
-    async def _debit_wallet(
-        self,
-        wallet_id: str,
-        amount: Decimal,
-        description: str,
-        stripe_event_id: str | None = None,
-    ) -> None:
-        """Debit wallet for refunds.
-
-        When ``stripe_event_id`` is set, the unique constraint on that column
-        makes a redelivered refund event a no-op instead of a second debit.
-        """
-        try:
-            async with self._session_factory()() as session:
-                async with session.begin():
-                    result = await session.execute(
-                        select(WalletModel)
-                        .where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
-                        .with_for_update()
-                    )
-                    wallet = result.scalar_one_or_none()
-
-                    if not wallet:
-                        logger.error(f"Wallet not found: {wallet_id}")
-                        return
-
-                    wallet.balance -= amount
-                    wallet.lifetime_debits += amount
-
-                    entry = LedgerEntryModel(
-                        entry_id=str(uuid4()),
-                        wallet_id=wallet_id,
-                        action="refund",
-                        amount=-amount,
-                        balance_after=wallet.balance,
-                        description=description,
-                        stripe_event_id=stripe_event_id,
-                    )
-                    session.add(entry)
-
-                await session.commit()
-        except IntegrityError as exc:
-            if not self._is_duplicate_stripe_event_error(exc):
-                logger.exception(
-                    "Stripe refund debit failed with non-idempotency integrity "
-                    "error for event %s",
-                    stripe_event_id,
-                )
-                raise
-            logger.info(
-                "Idempotency catch: refund event %s already processed. "
-                "Swallowing duplicate to avoid a second debit.",
-                stripe_event_id,
-            )
-            return
 
 
 _stripe_integration: Optional[StripeIntegration] = None

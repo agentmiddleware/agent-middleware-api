@@ -13,6 +13,7 @@ import pytest_asyncio
 
 from app.db.models import TelemetryEventModel
 from app.db.database import get_session_factory
+from app.core.time import utc_now
 from app.schemas.telemetry import (
     Severity,
     TelemetryEvent,
@@ -52,7 +53,7 @@ def _event(
 
 
 @pytest.mark.anyio
-async def test_ingest_then_query_round_trip():
+async def test_ingest_then_query_round_trip(enforce_naive_utc_datetime_columns):
     """What goes in must come out with fields intact."""
     store = EventStore(retention_hours=168)
 
@@ -82,9 +83,17 @@ async def test_query_filters():
 
     await store.ingest(
         [
-            _event(event_type=TelemetryEventType.ERROR, severity=Severity.HIGH, source="a"),
-            _event(event_type=TelemetryEventType.WARNING, severity=Severity.MEDIUM, source="a"),
-            _event(event_type=TelemetryEventType.ERROR, severity=Severity.HIGH, source="b"),
+            _event(
+                event_type=TelemetryEventType.ERROR, severity=Severity.HIGH, source="a"
+            ),
+            _event(
+                event_type=TelemetryEventType.WARNING,
+                severity=Severity.MEDIUM,
+                source="a",
+            ),
+            _event(
+                event_type=TelemetryEventType.ERROR, severity=Severity.HIGH, source="b"
+            ),
         ],
         batch_id="b-filters",
     )
@@ -116,7 +125,11 @@ async def test_stats_aggregation():
         [
             _event(event_type=TelemetryEventType.ERROR, source="svc-a"),
             _event(event_type=TelemetryEventType.ERROR, source="svc-b"),
-            _event(event_type=TelemetryEventType.WARNING, severity=Severity.MEDIUM, source="svc-a"),
+            _event(
+                event_type=TelemetryEventType.WARNING,
+                severity=Severity.MEDIUM,
+                source="svc-a",
+            ),
         ],
         batch_id="b-stats",
     )
@@ -130,7 +143,7 @@ async def test_stats_aggregation():
 
 
 @pytest.mark.anyio
-async def test_evict_expired_drops_old_rows():
+async def test_evict_expired_drops_old_rows(enforce_naive_utc_datetime_columns):
     """Anything older than the retention window must be purged."""
     # Retention = 1 hour. We'll manually insert a row with a past ingested_at.
     store = EventStore(retention_hours=1)
@@ -140,7 +153,7 @@ async def test_evict_expired_drops_old_rows():
 
     # Manually insert an expired row (2 hours old).
     factory = get_session_factory()
-    two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
+    two_hours_ago = utc_now() - timedelta(hours=2)
     async with factory() as session:
         session.add(
             TelemetryEventModel(
@@ -168,12 +181,17 @@ async def test_evict_expired_drops_old_rows():
 
 
 @pytest.mark.anyio
-async def test_query_time_window_uses_event_timestamp_when_present():
+async def test_query_time_window_uses_event_timestamp_when_present(
+    enforce_naive_utc_datetime_columns,
+):
     """A client-supplied timestamp wins over ingested_at for range queries."""
     store = EventStore()
 
-    far_past = datetime.now(timezone.utc) - timedelta(days=3)
-    recent = datetime.now(timezone.utc) - timedelta(minutes=1)
+    now = datetime.now(timezone.utc)
+    event_timezone = timezone(timedelta(hours=-7))
+    query_timezone = timezone(timedelta(hours=5, minutes=30))
+    far_past = (now - timedelta(days=3)).astimezone(event_timezone)
+    recent = (now - timedelta(minutes=1)).astimezone(event_timezone)
 
     await store.ingest(
         [
@@ -184,8 +202,16 @@ async def test_query_time_window_uses_event_timestamp_when_present():
     )
 
     in_last_hour = await store.query(
-        since=datetime.now(timezone.utc) - timedelta(hours=1)
+        since=(now - timedelta(hours=1)).astimezone(query_timezone)
     )
     messages = [se.event.message for se in in_last_hour]
     assert "recent-event" in messages
     assert "old-event" not in messages
+    recent_event = next(
+        se.event for se in in_last_hour if se.event.message == "recent-event"
+    )
+    assert recent_event.timestamp is not None
+    assert recent_event.timestamp.tzinfo is None
+    assert recent_event.timestamp == recent.astimezone(timezone.utc).replace(
+        tzinfo=None
+    )

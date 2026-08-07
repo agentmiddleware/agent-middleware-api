@@ -337,7 +337,6 @@ async def test_strict_mode_replays_non_executable_tool_error_with_idempotency_ke
     provisioned = await provision_agent_wallet(client)
     registry = get_service_registry()
     service = await registry.register_persistent(
-        owner_key="test-key",
         name="Strict Non Executable Lookup Tool",
         description="Persistent service without local executable function",
         category=ServiceCategory.AGENT_COMMS,
@@ -375,6 +374,34 @@ async def test_strict_mode_replays_non_executable_tool_error_with_idempotency_ke
         wallet_id=provisioned["agent_wallet_id"],
         headers=provisioned["agent_headers"],
         tool_name=tool_name,
+    )
+
+
+@pytest.mark.anyio
+async def test_metadata_only_persistent_service_is_not_mcp_discoverable(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    registry = get_service_registry()
+    service = await registry.register_persistent(
+        name="Metadata Only Service",
+        description="Billing catalog metadata without an execution backend",
+        category=ServiceCategory.AGENT_COMMS,
+        credits_per_unit=2.0,
+        owner_wallet_id=provisioned["agent_wallet_id"],
+    )
+
+    manifest = await client.get("/mcp/tools.json")
+    detail = await client.get(f"/mcp/tools/{service['service_id']}")
+
+    assert manifest.status_code == 200
+    assert service["service_id"] not in {
+        tool["name"] for tool in manifest.json()["tools"]
+    }
+    assert detail.status_code == 404
+    assert detail.json()["detail"] == (
+        f"Executable tool not found: {service['service_id']}"
     )
 
 

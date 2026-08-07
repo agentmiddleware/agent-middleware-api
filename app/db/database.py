@@ -46,6 +46,7 @@ REQUIRED_TRUST_TABLES = frozenset(
         "permits",
         "receipts",
         "idempotency_records",
+        "mcp_dispatch_attempts",
     }
 )
 
@@ -217,6 +218,11 @@ async def verify_required_schema(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         missing = await conn.run_sync(_missing_required_tables)
         stale = await conn.run_sync(_stale_alembic_message)
+    # A stamped database can be both behind head and missing tables introduced
+    # by later revisions. Report the revision mismatch first: it is the
+    # actionable root cause and avoids implying that create_all is appropriate.
+    if stale:
+        raise SchemaInitError(stale)
     if missing:
         raise SchemaInitError(
             "Required database tables missing: "
@@ -225,8 +231,6 @@ async def verify_required_schema(engine: AsyncEngine) -> None:
             "on the Docker entrypoint) before starting the API. "
             "Production-like boots do not call create_all."
         )
-    if stale:
-        raise SchemaInitError(stale)
 
 
 async def init_db() -> None:

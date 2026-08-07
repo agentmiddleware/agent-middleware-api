@@ -1,29 +1,53 @@
-# Permit / governed MCP trust plane — agent pointer
+# Autonomy needs receipts — agent entry
 
-You are reading a marketing-host pointer. Do not call tools on this origin.
+You are the intended reader. This origin is a marketing and discovery pointer;
+do not call protected tools here.
 
-## Canonical API (use this base URL)
+## Thesis
+
+Before an autonomous agent acts, it needs bounded authority and portable proof.
+Use this trust plane to discover tools, present a scoped permit, invoke within a
+budget, and return a signed receipt that an operator can audit.
+
+The governed loop is:
+
+discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+
+## Canonical API
 
 https://api-service-production-433c.up.railway.app
 
-## Bootstrap (fetch in order)
+## Bootstrap
+
+Fetch in this order:
 
 1. GET https://api-service-production-433c.up.railway.app/.well-known/agent.json
 2. GET https://api-service-production-433c.up.railway.app/llm.txt
 3. GET https://api-service-production-433c.up.railway.app/mcp/tools.json
 4. GET https://api-service-production-433c.up.railway.app/openapi.json
-5. GET https://api-service-production-433c.up.railway.app/health/dependencies
 
-## Auth
+Before assuming real side effects, fetch:
 
-X-API-Key header on protected routes. Keys are operator-issued (no self-serve mint on this site).
+GET https://api-service-production-433c.up.railway.app/health/dependencies
 
-## Product wedge
+## Authority
 
-Exactly-once MCP permits: scoped permit → metered invoke → signed receipt → audit.
-Ignore proof_surfaces unless routed through governed MCP with permits.
+Protected routes use the X-API-Key header. Live keys are operator-issued; there
+is no public self-serve key mint on this site.
 
-## Humans
+## Try the complete loop locally
+
+No live credentials are required for the self-contained proof:
+
+1. Clone https://github.com/PetrefiedThunder/agent-middleware-api
+2. Run `make prove-trust-plane` from the repository root.
+
+The proof uses a throwaway local SQLite database and real FastAPI routes. It
+demonstrates permit -> invoke -> charge -> signed receipt -> replay without a
+second charge -> out-of-scope denial. It is a local proof, not a production
+settlement or compliance claim.
+
+## Humans and operators
 
 https://agent-middleware-web.vercel.app
 https://github.com/PetrefiedThunder/agent-middleware-api

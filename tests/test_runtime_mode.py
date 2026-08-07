@@ -85,15 +85,15 @@ def test_require_simulation_passes_when_simulating():
     require_simulation("oracle")  # should not raise
 
 
-def test_require_simulation_raises_with_issue_reference():
+def test_require_simulation_raises_with_frozen_scope_guidance():
     settings = get_settings()
     settings.SIMULATION_MODE_TELEMETRY_PM = False
     with pytest.raises(NotImplementedError) as exc:
-        require_simulation("telemetry_pm", issue="#37")
+        require_simulation("telemetry_pm")
     msg = str(exc.value)
     assert "telemetry_pm" in msg
-    assert "#37" in msg
     assert "SIMULATION_MODE_TELEMETRY_PM" in msg
+    assert "docs/PROOF_SURFACES.md" in msg
 
 
 def test_get_simulation_modes_returns_all_services():
@@ -128,6 +128,7 @@ async def test_health_dependencies_surfaces_simulation_modes(client):
     assert set(body["simulation_modes"].keys()) == SERVICE_NAMES
 
 
+@pytest.mark.proof
 @pytest.mark.anyio
 async def test_oracle_crawl_works_when_simulation_disabled(client):
     """Durable crawl path: synthetic extractor runs; DB persistence is allowed."""

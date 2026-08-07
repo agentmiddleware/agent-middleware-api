@@ -1,12 +1,13 @@
 """
 Per-service simulation mode registry.
 
-Every service whose production behavior still depends on mocks, synthetic
-data, or hardcoded responses gates its real-vs-simulated branch through
-``is_simulation("<service>")``. Flipping a flag to ``False`` is the signal
-that a real integration is wired up and callers expect real side effects.
+Every frozen proof surface whose behavior still depends on mocks, synthetic
+data, or hardcoded responses gates that behavior through
+``is_simulation("<service>")``. Production-like deployments disable the proof
+surface routers entirely. A flag may only be set to ``False`` after an
+explicit product decision unfreezes that surface and a real adapter is wired.
 
-See issue #26 and the tracking issue #40 for context.
+See ``docs/PROOF_SURFACES.md`` for the current product boundary.
 """
 
 from __future__ import annotations
@@ -48,16 +49,19 @@ def is_simulation(service: str) -> bool:
 
 def require_simulation(service: str, issue: str | None = None) -> None:
     """
-    Guard used at the top of a simulated method while the real
-    implementation is still pending. Raises NotImplementedError if the
-    service's simulation flag was disabled — surfaces a loud failure
-    instead of silently running a stub against production traffic.
+    Guard used at the top of a frozen simulated method. Raises
+    NotImplementedError if the service's simulation flag was disabled —
+    surfaces a loud failure instead of silently running a stub against
+    production traffic. ``issue`` remains as a compatibility-only diagnostic
+    suffix for callers outside this package.
     """
     if not is_simulation(service):
         suffix = f" (tracking: {issue})" if issue else ""
         raise NotImplementedError(
-            f"{service}: real implementation pending{suffix}. "
-            f"Set SIMULATION_MODE_{service.upper()}=true until it lands."
+            f"{service}: real adapter is outside the current frozen proof-surface "
+            f"scope{suffix}. Set SIMULATION_MODE_{service.upper()}=true or obtain "
+            "an explicit product decision before implementing it; see "
+            "docs/PROOF_SURFACES.md."
         )
 
 

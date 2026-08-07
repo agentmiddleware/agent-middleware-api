@@ -10,7 +10,9 @@ telemetry, or media as the product.
 
 **"Authorize one agent action. Charge it once. Prove what happened."**
 
-Credible wedge: exactly-once permits and receipts for metered MCP calls.
+Credible wedge: exactly-once gateway debit, dispatch checkpoint, and receipt
+finalization for metered MCP calls. Remote side effects are exactly once only
+when the upstream independently honors the forwarded idempotency key.
 
 Canonical loop:
 
@@ -50,9 +52,9 @@ IAM replacement, or broad agent-framework governance.
 |-------|--------|
 | Name | Agent Middleware API |
 | Category | MCP trust plane / governed tool metering |
-| Product | Exactly-once permits + receipts for metered MCP |
+| Product | Replay-safe gateway debit + dispatch evidence + signed receipts |
 | Mechanism | Permit → governed invoke → wallet charge → receipt → audit |
-| Pricing | Self-hosted open source; design-partner / enterprise by arrangement |
+| Pricing | Controlled design-partner pilot; no public tier or SLA committed |
 | Repo | https://github.com/PetrefiedThunder/agent-middleware-api |
 
 ---

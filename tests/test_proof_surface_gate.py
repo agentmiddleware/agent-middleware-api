@@ -34,8 +34,8 @@ def test_proof_surfaces_can_be_omitted_from_mount_set():
     """When ENABLE_PROOF_SURFACES is false, only core trust routers mount.
 
     Rebuild a minimal FastAPI app the same way main.py does, without
-    re-importing the process-global app (already mounted under the
-    test-suite default ENABLE_PROOF_SURFACES=true).
+    re-importing the process-global app. Proof-marked tests opt in explicitly;
+    the ordinary test-suite import keeps ENABLE_PROOF_SURFACES=false.
     """
     app = FastAPI()
     for router_module in CORE_TRUST_ROUTERS:

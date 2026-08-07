@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 from typing import TYPE_CHECKING
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -40,6 +44,15 @@ class TrustModeGuardrailError(RuntimeError):
     """Raised when trust mode is unsafe for a production-like deployment."""
 
 
+def _has_valid_ed25519_private_key(signing_private_key_b64: str) -> bool:
+    try:
+        raw = base64.b64decode(signing_private_key_b64, validate=True)
+        Ed25519PrivateKey.from_private_bytes(raw)
+    except (binascii.Error, TypeError, ValueError):
+        return False
+    return True
+
+
 def normalize_environment(environment: str | None) -> str:
     return (environment or "").strip().lower().replace("_", "-")
 
@@ -67,14 +80,35 @@ def validate_trust_mode_config(
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
-    Trust-mode signing/legacy checks only apply when trust mode is enabled.
-    DEBUG bootstrap, WebAuthn mock, and proof-surface mounts are always
-    forbidden in production-like environments regardless of trust mode.
+    Production-like environments must run the complete strict trust posture:
+    trust mode enabled, a durable signing key configured, legacy unpermitted
+    MCP disabled, and all development-only escape hatches disabled.
     """
     production_like = is_production_like_environment(environment)
     violations: list[str] = []
 
     if production_like:
+        if not trust_mode_enabled:
+            violations.append(
+                "TRUST_MODE_ENABLED must be true in production-like environments "
+                "(permit validation cannot be disabled)"
+            )
+        configured_signing_key = (signing_private_key_b64 or "").strip()
+        if not configured_signing_key:
+            violations.append(
+                "TRUST_SIGNING_PRIVATE_KEY_B64 is required in production-like "
+                "environments"
+            )
+        elif not _has_valid_ed25519_private_key(configured_signing_key):
+            violations.append(
+                "TRUST_SIGNING_PRIVATE_KEY_B64 must encode a valid 32-byte "
+                "Ed25519 private key in production-like environments"
+            )
+        if allow_legacy_unpermitted_mcp:
+            violations.append(
+                "ALLOW_LEGACY_UNPERMITTED_MCP must be false in production-like "
+                "environments"
+            )
         if debug:
             violations.append(
                 "DEBUG must be false in production-like environments "
@@ -88,18 +122,6 @@ def validate_trust_mode_config(
             violations.append(
                 "ENABLE_PROOF_SURFACES must be false in production-like "
                 "environments (mount only CORE_TRUST_ROUTERS + MCP)"
-            )
-
-    if trust_mode_enabled and production_like:
-        if not (signing_private_key_b64 or "").strip():
-            violations.append(
-                "TRUST_SIGNING_PRIVATE_KEY_B64 is required when "
-                "TRUST_MODE_ENABLED=true in production-like environments"
-            )
-        if allow_legacy_unpermitted_mcp:
-            violations.append(
-                "ALLOW_LEGACY_UNPERMITTED_MCP must be false when "
-                "TRUST_MODE_ENABLED=true in production-like environments"
             )
 
     if violations:

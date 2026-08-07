@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import asc, desc, select, update
@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import AuditChainHeadModel, ControlPlaneAuditEventModel
 from app.services.signing_keys import get_signing_key_service, sha256_hex
@@ -132,7 +133,75 @@ class _HeadConflict(Exception):
     """A concurrent writer advanced the chain head; the append must retry."""
 
 
-async def append_chained_audit_event(model: ControlPlaneAuditEventModel) -> None:
+class AuditEventConflictError(RuntimeError):
+    """A caller reused an audit event identity for different signed evidence."""
+
+
+def _assert_same_audit_intent(
+    existing: ControlPlaneAuditEventModel,
+    intended: ControlPlaneAuditEventModel,
+) -> None:
+    """Adopt an existing event only when its complete signed intent matches.
+
+    The sequence and chain fields are assigned by the winning append, so they
+    are deliberately excluded from the caller intent comparison. Their hashes
+    are still checked below before the persisted event is returned.
+    """
+    intent_fields = (
+        "event_id",
+        "created_at",
+        "event",
+        "wallet_id",
+        "tool",
+        "endpoint",
+        "auth_source",
+        "key_id",
+        "policy_decision_id",
+        "request_id",
+        "ok",
+        "error",
+        "metadata_json",
+    )
+    if any(
+        getattr(existing, field) != getattr(intended, field) for field in intent_fields
+    ):
+        raise AuditEventConflictError("audit_event_id_conflict")
+
+    payload = audit_payload(
+        event_id=existing.event_id,
+        created_at=existing.created_at,
+        event=existing.event,
+        wallet_id=existing.wallet_id,
+        tool=existing.tool,
+        endpoint=existing.endpoint,
+        auth_source=existing.auth_source,
+        key_id=existing.key_id,
+        policy_decision_id=existing.policy_decision_id,
+        request_id=existing.request_id,
+        ok=existing.ok,
+        error=existing.error,
+        metadata_json=existing.metadata_json,
+        previous_hash=existing.previous_hash,
+    )
+    if (
+        existing.payload_hash != sha256_hex(payload)
+        or existing.signature is None
+        or existing.signature_key_id is None
+        or existing.chain_hash
+        != sha256_hex(
+            {
+                "previous_hash": existing.previous_hash,
+                "payload_hash": existing.payload_hash,
+                "signature": existing.signature,
+            }
+        )
+    ):
+        raise AuditEventConflictError("audit_event_integrity_conflict")
+
+
+async def append_chained_audit_event(
+    model: ControlPlaneAuditEventModel,
+) -> ControlPlaneAuditEventModel:
     """Sign and persist ``model`` as the next link in its wallet's audit chain.
 
     Concurrency is handled with optimistic control on the per-wallet head row:
@@ -157,6 +226,18 @@ async def append_chained_audit_event(model: ControlPlaneAuditEventModel) -> None
         session = factory()
         try:
             async with session.begin():
+                # A deterministic event id is the durable uniqueness claim for
+                # dispatch reconciliation. Check it inside the same optimistic
+                # chain-head transaction: a racing writer either sees this row
+                # now or loses the head update and sees it on the next retry.
+                existing = await session.get(
+                    ControlPlaneAuditEventModel,
+                    model.event_id,
+                )
+                if existing is not None:
+                    _assert_same_audit_intent(existing, model)
+                    return existing
+
                 row = (
                     await session.execute(
                         select(
@@ -174,7 +255,7 @@ async def append_chained_audit_event(model: ControlPlaneAuditEventModel) -> None
                 previous_hash = row[1] if row else None
                 model.seq = observed_seq + 1
                 _sign_with_previous(model, previous_hash, signing_key_id=key.key_id)
-                now = datetime.now(timezone.utc)
+                now = utc_now()
                 if row is None:
                     # First event for this wallet; a unique PK collision means a
                     # concurrent writer won the race — retry against their head.
@@ -215,7 +296,7 @@ async def append_chained_audit_event(model: ControlPlaneAuditEventModel) -> None
                     if result.rowcount == 0:
                         raise _HeadConflict()
                 session.add(model)
-            return
+            return model
         except (_HeadConflict, IntegrityError, OperationalError):
             if attempt == attempts - 1:
                 raise
@@ -291,17 +372,19 @@ async def _verify_single_chain(
 ) -> AuditChainVerification:
     """Verify one wallet's audit chain (``wallet_id=None`` -> the wallet-less
     chain of ``wallet_id IS NULL`` events)."""
+    created_after = to_naive_utc(created_after) if created_after else None
+    created_before = to_naive_utc(created_before) if created_before else None
     stmt = select(ControlPlaneAuditEventModel).order_by(
         asc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.seq)),
         asc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)),
     )
     if wallet_id is None:
-        stmt = stmt.where(
-            cast(Any, ControlPlaneAuditEventModel.wallet_id).is_(None)
-        )
+        stmt = stmt.where(cast(Any, ControlPlaneAuditEventModel.wallet_id).is_(None))
     else:
         stmt = stmt.where(
-            cast(ColumnElement[bool], ControlPlaneAuditEventModel.wallet_id == wallet_id)
+            cast(
+                ColumnElement[bool], ControlPlaneAuditEventModel.wallet_id == wallet_id
+            )
         )
     if created_after:
         stmt = stmt.where(

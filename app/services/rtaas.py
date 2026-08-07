@@ -41,9 +41,11 @@ logger = logging.getLogger(__name__)
 # RTaaS Job Model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RTaaSTarget:
     """An external endpoint to attack."""
+
     url: str
     method: str = "GET"
     auth_header: str | None = None
@@ -53,6 +55,7 @@ class RTaaSTarget:
 @dataclass
 class RTaaSVulnerability:
     """A vulnerability found during external scanning."""
+
     vuln_id: str
     severity: Severity
     category: AttackCategory
@@ -67,12 +70,13 @@ class RTaaSVulnerability:
 @dataclass
 class RTaaSJob:
     """A multi-tenant Red Team scanning job."""
+
     job_id: str
     tenant_id: str  # The agent/wallet requesting the scan
     targets: list[RTaaSTarget]
     attack_categories: list[AttackCategory]
     intensity: str = "standard"  # "quick", "standard", "thorough"
-    status: str = "pending"      # "pending", "running", "completed", "failed"
+    status: str = "pending"  # "pending", "running", "completed", "failed"
     vulnerabilities: list[RTaaSVulnerability] = field(default_factory=list)
     total_tests_run: int = 0
     security_score: float = 0.0
@@ -84,6 +88,7 @@ class RTaaSJob:
 # ---------------------------------------------------------------------------
 # RTaaS Engine
 # ---------------------------------------------------------------------------
+
 
 class RTaaSEngine:
     """
@@ -116,9 +121,7 @@ class RTaaSEngine:
             scan_type="rtaas",
             tenant_id=job.tenant_id,
             targets_json=json.dumps([asdict(t) for t in job.targets], default=str),
-            attack_categories_json=json.dumps(
-                [c.value for c in job.attack_categories]
-            ),
+            attack_categories_json=json.dumps([c.value for c in job.attack_categories]),
             intensity=job.intensity,
             status=job.status,
             total_tests_run=job.total_tests_run,
@@ -271,7 +274,7 @@ class RTaaSEngine:
         intensity: str = "standard",
     ) -> RTaaSJob:
         """Create and execute an RTaaS scanning job against external endpoints."""
-        require_simulation("rtaas", issue="#38")
+        require_simulation("rtaas")
         job_id = f"rtaas-{uuid.uuid4().hex[:12]}"
 
         parsed_targets = [
@@ -284,9 +287,11 @@ class RTaaSEngine:
             for t in targets
         ]
 
-        categories = [
-            AttackCategory(c) for c in attack_categories
-        ] if attack_categories else list(AttackCategory)
+        categories = (
+            [AttackCategory(c) for c in attack_categories]
+            if attack_categories
+            else list(AttackCategory)
+        )
 
         job = RTaaSJob(
             job_id=job_id,
@@ -342,35 +347,39 @@ class RTaaSEngine:
                 # Simulate finding vulnerabilities probabilistically
                 if (url_hash + hash(cat.value)) % 7 == 0:
                     severity = Severity.HIGH if url_hash % 3 == 0 else Severity.MEDIUM
-                    vulns.append(RTaaSVulnerability(
-                        vuln_id=f"v-{uuid.uuid4().hex[:8]}",
-                        severity=severity,
-                        category=cat,
-                        target_url=target.url,
-                        title=(
-                            f"{cat.value.replace('_', ' ').title()} "
-                            "vulnerability detected"
-                        ),
-                        description=f"Potential {cat.value} issue at {target.url}",
-                        evidence=(
-                            f"Simulated attack against {target.method} {target.url}"
-                        ),
-                        cwe_id=self._cwe_for_category(cat),
-                        remediation=self._remediation_for_category(cat),
-                    ))
+                    vulns.append(
+                        RTaaSVulnerability(
+                            vuln_id=f"v-{uuid.uuid4().hex[:8]}",
+                            severity=severity,
+                            category=cat,
+                            target_url=target.url,
+                            title=(
+                                f"{cat.value.replace('_', ' ').title()} "
+                                "vulnerability detected"
+                            ),
+                            description=f"Potential {cat.value} issue at {target.url}",
+                            evidence=(
+                                f"Simulated attack against {target.method} {target.url}"
+                            ),
+                            cwe_id=self._cwe_for_category(cat),
+                            remediation=self._remediation_for_category(cat),
+                        )
+                    )
 
                 if (url_hash + hash(cat.value)) % 11 == 0:
-                    vulns.append(RTaaSVulnerability(
-                        vuln_id=f"v-{uuid.uuid4().hex[:8]}",
-                        severity=Severity.LOW,
-                        category=cat,
-                        target_url=target.url,
-                        title=f"Minor {cat.value.replace('_', ' ')} finding",
-                        description=f"Low-risk {cat.value} observation",
-                        evidence="Informational finding from automated scan",
-                        cwe_id=self._cwe_for_category(cat),
-                        remediation="Consider hardening as a best practice.",
-                    ))
+                    vulns.append(
+                        RTaaSVulnerability(
+                            vuln_id=f"v-{uuid.uuid4().hex[:8]}",
+                            severity=Severity.LOW,
+                            category=cat,
+                            target_url=target.url,
+                            title=f"Minor {cat.value.replace('_', ' ')} finding",
+                            description=f"Low-risk {cat.value} observation",
+                            evidence="Informational finding from automated scan",
+                            cwe_id=self._cwe_for_category(cat),
+                            remediation="Consider hardening as a best practice.",
+                        )
+                    )
 
         # Score: 100 - penalty per vuln
         penalty = sum(
@@ -398,8 +407,7 @@ class RTaaSEngine:
     def _remediation_for_category(self, cat: AttackCategory) -> str:
         mapping = {
             AttackCategory.ACL_BYPASS: (
-                "Implement topic-level ACLs. Validate resource ownership "
-                "per request."
+                "Implement topic-level ACLs. Validate resource ownership per request."
             ),
             AttackCategory.AUTH_PROBE: (
                 "Enforce authentication on all endpoints. Validate API keys "
@@ -412,23 +420,19 @@ class RTaaSEngine:
                 "Add sliding-window rate limiting per API key."
             ),
             AttackCategory.PRIVILEGE_ESCALATION: (
-                "Enforce principle of least privilege. Check role on every "
-                "request."
+                "Enforce principle of least privilege. Check role on every request."
             ),
             AttackCategory.SCHEMA_ABUSE: (
-                "Validate all input schemas strictly. Reject unexpected "
-                "types."
+                "Validate all input schemas strictly. Reject unexpected types."
             ),
             AttackCategory.ENUMERATION: (
-                "Use non-sequential IDs. Audit response payloads for data "
-                "leaks."
+                "Use non-sequential IDs. Audit response payloads for data leaks."
             ),
             AttackCategory.REPLAY: (
                 "Add nonce or timestamp validation. Use short-lived tokens."
             ),
             AttackCategory.DOS_PATTERN: (
-                "Add request timeouts and resource limits. Cap expensive "
-                "operations."
+                "Add request timeouts and resource limits. Cap expensive operations."
             ),
         }
         return mapping.get(cat, "Review and harden the affected endpoint.")
@@ -442,7 +446,10 @@ class RTaaSEngine:
                 return None
             vuln_result = await session.execute(
                 select(SecurityVulnerabilityModel).where(
-                    cast(ColumnElement[bool], SecurityVulnerabilityModel.scan_id == job_id)
+                    cast(
+                        ColumnElement[bool],
+                        SecurityVulnerabilityModel.scan_id == job_id,
+                    )
                 )
             )
             vulns = list(vuln_result.scalars().all())
@@ -459,7 +466,9 @@ class RTaaSEngine:
             stmt = stmt.where(
                 cast(ColumnElement[bool], SecurityScanModel.tenant_id == tenant_id)
             )
-        stmt = stmt.order_by(cast(ColumnElement[Any], SecurityScanModel.created_at).desc())
+        stmt = stmt.order_by(
+            cast(ColumnElement[Any], SecurityScanModel.created_at).desc()
+        )
 
         async with factory() as session:
             result = await session.execute(stmt)

@@ -40,6 +40,7 @@ SPINE_SERVICE_MODULES = {
     "app.services.permits",
     "app.services.policies",
     "app.services.receipts",
+    "app.services.refund_reconciliation",
     "app.services.signing_keys",
 }
 

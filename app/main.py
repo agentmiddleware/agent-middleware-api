@@ -120,54 +120,130 @@ async def lifespan(app: FastAPI):
             try:
                 await asyncio.sleep(300)  # Run every 5 minutes
 
-                from .services.webauthn_provider import get_webauthn_provider
+                # Frozen proof surfaces do not run background work when they are
+                # not mounted. This keeps production-like trust deployments from
+                # importing or mutating demo-only state behind a disabled flag.
+                if settings.ENABLE_PROOF_SURFACES:
+                    from .services.webauthn_provider import get_webauthn_provider
 
-                webauthn = get_webauthn_provider()
-                result = webauthn.cleanup_expired()
-                if (
-                    result["challenges_removed"] > 0
-                    or result["verifications_removed"] > 0
-                ):
-                    logger.info(
-                        "cleanup_completed",
-                        challenges_removed=result["challenges_removed"],
-                        verifications_removed=result["verifications_removed"],
-                    )
-
-                from .services.awi_session import get_awi_session_manager
-
-                session_mgr = get_awi_session_manager()
-                result = await session_mgr.cleanup_expired_async()
-                if result["sessions_removed"] > 0:
-                    logger.info(
-                        "cleanup_completed",
-                        sessions_removed=result["sessions_removed"],
-                    )
-
-                # Telemetry retention sweep (per TELEMETRY_RETENTION_HOURS).
-                # Ingests do a lazy eviction too; this handles idle systems.
-                if settings.DATABASE_URL:
-                    from .services.telemetry_pm import EventStore
-
-                    removed = await EventStore(
-                        retention_hours=settings.TELEMETRY_RETENTION_HOURS
-                    )._evict_expired()
-                    if removed:
+                    webauthn = get_webauthn_provider()
+                    result = webauthn.cleanup_expired()
+                    if (
+                        result["challenges_removed"] > 0
+                        or result["verifications_removed"] > 0
+                    ):
                         logger.info(
                             "cleanup_completed",
-                            telemetry_events_removed=removed,
+                            challenges_removed=result["challenges_removed"],
+                            verifications_removed=result["verifications_removed"],
                         )
+
+                    from .services.awi_session import get_awi_session_manager
+
+                    session_mgr = get_awi_session_manager()
+                    result = await session_mgr.cleanup_expired_async()
+                    if result["sessions_removed"] > 0:
+                        logger.info(
+                            "cleanup_completed",
+                            sessions_removed=result["sessions_removed"],
+                        )
+
+                    # Telemetry retention sweep (per
+                    # TELEMETRY_RETENTION_HOURS). Ingests do a lazy eviction too;
+                    # this handles idle proof-surface systems.
+                    if settings.DATABASE_URL:
+                        from .services.telemetry_pm import EventStore
+
+                        removed = await EventStore(
+                            retention_hours=settings.TELEMETRY_RETENTION_HOURS
+                        )._evict_expired()
+                        if removed:
+                            logger.info(
+                                "cleanup_completed",
+                                telemetry_events_removed=removed,
+                            )
 
                 # Repair permit budget reservations orphaned by a crash between
                 # reserve and the receipt write (only touches idle permits).
                 if settings.DATABASE_URL:
+                    from .services.idempotency import get_idempotency_service
+                    from .services.mcp_dispatch_attempts import (
+                        get_mcp_dispatch_attempt_service,
+                    )
+                    from .services.mcp_dispatch_reconciliation import (
+                        get_mcp_dispatch_reconciliation_service,
+                    )
                     from .services.permits import get_permit_service
+
+                    dispatch_result = (
+                        await get_mcp_dispatch_reconciliation_service().reconcile(
+                            idle_seconds=300
+                        )
+                    )
+                    if dispatch_result.repaired:
+                        logger.info(
+                            "cleanup_completed",
+                            dispatch_prepared_finalized=(
+                                dispatch_result.prepared_finalized
+                            ),
+                            dispatch_marked_uncertain=(
+                                dispatch_result.dispatched_uncertain
+                            ),
+                            dispatch_terminal_recovered=(
+                                dispatch_result.terminal_recovered
+                            ),
+                            dispatch_idempotency_recovered=(
+                                dispatch_result.idempotency_recovered
+                            ),
+                        )
+                    if dispatch_result.failed_attempt_ids:
+                        logger.warning(
+                            "mcp_dispatch_reconciliation_failures",
+                            failed_count=len(dispatch_result.failed_attempt_ids),
+                        )
+
+                    dispatch_metrics = (
+                        await get_mcp_dispatch_attempt_service().summarize(
+                            idle_seconds=300
+                        )
+                    )
+                    uncertainty_count = dispatch_metrics.state_counts.get(
+                        "delivery_uncertain", 0
+                    )
+                    if uncertainty_count or dispatch_metrics.reconciliation_backlog:
+                        logger.warning(
+                            "mcp_dispatch_operator_alert",
+                            delivery_uncertain=uncertainty_count,
+                            stale_active=dispatch_metrics.stale_active,
+                            unfinalized_terminal=(
+                                dispatch_metrics.unfinalized_terminal
+                            ),
+                            terminal_idempotency_incomplete=(
+                                dispatch_metrics.terminal_idempotency_incomplete
+                            ),
+                            reconciliation_backlog=(
+                                dispatch_metrics.reconciliation_backlog
+                            ),
+                        )
 
                     corrected = await get_permit_service().reconcile_budgets()
                     if corrected:
                         logger.info(
                             "cleanup_completed",
                             permit_budgets_reconciled=corrected,
+                        )
+
+                    (
+                        repaired,
+                        needs_review,
+                    ) = await get_idempotency_service().reconcile_stuck_records(
+                        idle_seconds=300
+                    )
+                    if repaired or needs_review:
+                        logger.info(
+                            "cleanup_completed",
+                            idempotency_records_repaired=repaired,
+                            idempotency_records_needing_review=needs_review,
                         )
 
             except asyncio.CancelledError:
@@ -208,6 +284,25 @@ async def lifespan(app: FastAPI):
                 raise
             logger.warning("app_startup", phase="database_init_failed", error=str(e))
 
+        if settings.TRUST_MODE_ENABLED:
+            from .services.signing_keys import get_signing_key_service
+
+            try:
+                signing_key = await get_signing_key_service().ensure_active_key()
+                logger.info(
+                    "app_startup",
+                    phase="trust_signing_key_ready",
+                    key_id=signing_key.key_id,
+                    startup_time_s=time.monotonic() - startup_time,
+                )
+            except Exception as e:
+                logger.error(
+                    "app_startup",
+                    phase="trust_signing_key_failed",
+                    error=str(e),
+                )
+                raise
+
     # Fail closed at boot in production-like envs (DurableStateConfigError)
     # rather than waiting for the first request that touches durable state.
     startup_time = time.monotonic()
@@ -230,6 +325,26 @@ async def lifespan(app: FastAPI):
         "app_startup",
         phase="mcp_proof_surface_registration_synced",
         enable_proof_surfaces=bool(settings.ENABLE_PROOF_SURFACES),
+        startup_time_s=time.monotonic() - startup_time,
+    )
+
+    # The design-partner adapter is configuration-only and fail-closed. When
+    # enabled, startup must complete MCP initialize + tools/list and register
+    # the exact executable tool before the app advertises readiness.
+    startup_time = time.monotonic()
+    from .services.upstream_mcp import register_configured_upstream_mcp
+
+    upstream_service = await register_configured_upstream_mcp(settings=settings)
+    logger.info(
+        "app_startup",
+        phase="mcp_upstream_registration_synced",
+        enabled=bool(settings.MCP_UPSTREAM_ENABLED),
+        public_tool_id=(
+            upstream_service.get("service_id") if upstream_service else None
+        ),
+        upstream_origin=(
+            upstream_service.get("upstream_origin") if upstream_service else None
+        ),
         startup_time_s=time.monotonic() - startup_time,
     )
 
@@ -267,8 +382,10 @@ app = FastAPI(
         "## MCP Trust Plane\n\n"
         "Agent Middleware API is a **governed MCP trust plane** for autonomous "
         "agent tool calls — not a full agent middleware platform.\n\n"
-        "Credible wedge: exactly-once permits and receipts for metered MCP "
-        "calls. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n"
+        "Credible wedge: exactly-once gateway authorization, debit, and receipt "
+        "finalization for metered MCP calls. Remote side effects require the "
+        "upstream to honor the forwarded idempotency key. See `/WEDGE.md` and "
+        "`/SECURITY_LIMITATIONS.md`.\n\n"
         "### Canonical Loop\n\n"
         "`discover -> authenticate -> authorize -> invoke -> meter -> "
         "receipt -> audit -> govern`\n\n"
@@ -558,7 +675,7 @@ async def root():
                     "GET /v1/billing/wallets",
                     "GET /v1/billing/ledger/{wallet_id}",
                     "POST /v1/billing/charge",
-                    "POST /v1/billing/top-up",
+                    "POST /v1/billing/top-up/prepare",
                     "GET /v1/billing/pricing",
                     "GET /v1/billing/arbitrage",
                     "GET /v1/billing/alerts",
@@ -567,8 +684,9 @@ async def root():
             "mcp_server": {
                 "base_path": "/mcp",
                 "description": (
-                    "Model Context Protocol (MCP) server for governed tool "
-                    "discovery and execution (permit → meter → receipt)."
+                    "Model Context Protocol (MCP) gateway for governed tool "
+                    "discovery and execution (permit → meter → dispatch → "
+                    "receipt)."
                 ),
                 "endpoints": [
                     "GET /mcp/tools.json",

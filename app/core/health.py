@@ -191,6 +191,57 @@ async def _check_llm(simulation_modes: dict[str, bool]) -> dict[str, Any]:
     }
 
 
+async def _check_upstream_mcp() -> dict[str, Any]:
+    """Report the fail-closed startup registration without exposing secrets."""
+    settings = get_settings()
+    if not settings.MCP_UPSTREAM_ENABLED:
+        return {"status": "not_configured", "enabled": False}
+
+    from ..services.service_registry import get_service_registry
+    from ..services.mcp_dispatch_attempts import get_mcp_dispatch_attempt_service
+    from ..services.upstream_mcp import get_upstream_mcp_metrics_snapshot
+
+    registry = get_service_registry()
+    service = registry.get_local(settings.MCP_UPSTREAM_PUBLIC_TOOL_ID)
+    executor = registry.get_executor(settings.MCP_UPSTREAM_PUBLIC_TOOL_ID)
+    if (
+        not service
+        or service.get("execution_backend") != "upstream_mcp"
+        or executor is None
+    ):
+        return {
+            "status": "down",
+            "enabled": True,
+            "public_tool_id": settings.MCP_UPSTREAM_PUBLIC_TOOL_ID,
+            "error": "configured upstream tool is not registered",
+        }
+    dispatch_metrics = await get_mcp_dispatch_attempt_service().summarize(
+        idle_seconds=300
+    )
+    returned_errors = dispatch_metrics.state_counts.get("returned_error", 0)
+    rejected = dispatch_metrics.state_counts.get("response_rejected", 0)
+    uncertainty_count = dispatch_metrics.state_counts.get("delivery_uncertain", 0)
+    return {
+        "status": "up",
+        "enabled": True,
+        "public_tool_id": service.get("service_id"),
+        "upstream_tool_name": service.get("upstream_tool_name"),
+        "upstream_origin": service.get("upstream_origin"),
+        "call_metrics": get_upstream_mcp_metrics_snapshot(),
+        "dispatch_metrics": {
+            "state_counts": dispatch_metrics.state_counts,
+            "failures": returned_errors + rejected,
+            "uncertainty_count": uncertainty_count,
+            "stale_active": dispatch_metrics.stale_active,
+            "unfinalized_terminal": dispatch_metrics.unfinalized_terminal,
+            "terminal_idempotency_incomplete": (
+                dispatch_metrics.terminal_idempotency_incomplete
+            ),
+            "reconciliation_backlog": dispatch_metrics.reconciliation_backlog,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Public aggregator
 # ---------------------------------------------------------------------------
@@ -207,12 +258,13 @@ async def gather_dependency_report() -> dict[str, Any]:
     settings = get_settings()
     sim_modes = get_simulation_modes()
 
-    postgres, redis_res, mqtt, stripe_res, llm = await asyncio.gather(
+    postgres, redis_res, mqtt, stripe_res, llm, upstream_mcp = await asyncio.gather(
         _run_check("postgres", _check_postgres),
         _run_check("redis", _check_redis),
         _run_check("mqtt", lambda: _check_mqtt(sim_modes)),
         _run_check("stripe", _check_stripe),
         _run_check("llm", lambda: _check_llm(sim_modes)),
+        _run_check("upstream_mcp", _check_upstream_mcp),
     )
 
     dependencies = {
@@ -221,6 +273,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         "mqtt": mqtt,
         "stripe": stripe_res,
         "llm": llm,
+        "upstream_mcp": upstream_mcp,
     }
 
     unhealthy = [

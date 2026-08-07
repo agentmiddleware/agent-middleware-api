@@ -33,7 +33,10 @@ _TRUST_PLANE_SECTIONS = [
         "title": "Product wedge",
         "path": "/WEDGE.md",
         "content_type": "text/markdown",
-        "summary": "Exactly-once permits and receipts for metered MCP calls.",
+        "summary": (
+            "Exactly-once gateway debit, dispatch checkpoint, and receipt "
+            "finalization for metered MCP calls."
+        ),
     },
     {
         "id": "security_limitations",

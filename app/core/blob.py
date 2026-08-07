@@ -5,8 +5,8 @@ Blob storage abstraction.
 Media and content generation produce byte artifacts (video clips,
 thumbnails, captioned renders). The database only stores references;
 bytes live in a blob backend. This module defines the interface and
-ships a local-filesystem backend for dev/tests. S3 and Vercel Blob
-implementations stub out until the real media engine lands (see #39).
+ships a local-filesystem backend for dev/tests. S3 and Vercel Blob remain
+explicitly unsupported while the media proof surface is frozen.
 
 Pluggable via ``BLOB_BACKEND`` env var:
 
@@ -126,29 +126,33 @@ class LocalFilesystemBlob(BlobBackend):
 
 
 class _UnimplementedBlob(BlobBackend):
-    """Stub backend used until #39 wires up a real one."""
+    """Unsupported backend retained to fail loudly on invalid production use."""
 
     def __init__(self, name: str):
         self._name = name
 
     async def put(self, key, data, content_type="application/octet-stream"):  # type: ignore[override]
         raise NotImplementedError(
-            f"{self._name} blob backend not implemented yet — see issue #39"
+            f"{self._name} blob backend is outside the frozen proof-surface scope; "
+            "see docs/PROOF_SURFACES.md"
         )
 
     async def get(self, key):  # type: ignore[override]
         raise NotImplementedError(
-            f"{self._name} blob backend not implemented yet — see issue #39"
+            f"{self._name} blob backend is outside the frozen proof-surface scope; "
+            "see docs/PROOF_SURFACES.md"
         )
 
     async def delete(self, key):  # type: ignore[override]
         raise NotImplementedError(
-            f"{self._name} blob backend not implemented yet — see issue #39"
+            f"{self._name} blob backend is outside the frozen proof-surface scope; "
+            "see docs/PROOF_SURFACES.md"
         )
 
     async def url(self, key):  # type: ignore[override]
         raise NotImplementedError(
-            f"{self._name} blob backend not implemented yet — see issue #39"
+            f"{self._name} blob backend is outside the frozen proof-surface scope; "
+            "see docs/PROOF_SURFACES.md"
         )
 
 
@@ -169,7 +173,7 @@ def get_blob_backend() -> BlobBackend:
 
     if backend_name == "vercel":
         logger.warning(
-            "Vercel blob backend selected but not implemented; see #39 for planned work"
+            "Vercel blob backend selected but unsupported while media is frozen"
         )
         return _UnimplementedBlob("vercel")
 

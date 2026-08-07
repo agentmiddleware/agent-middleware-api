@@ -80,7 +80,9 @@ async def test_media_distribute_requires_simulation_and_never_published():
             title="demo",
             hashtags=[],
         )
-    assert "#39" in str(exc.value)
+    message = str(exc.value)
+    assert "frozen proof-surface" in message
+    assert "docs/PROOF_SURFACES.md" in message
 
 
 @pytest.mark.anyio
@@ -110,7 +112,9 @@ async def test_agent_webhook_delivery_requires_simulation():
     settings.SIMULATION_MODE_AGENT_COMMS = False
     with pytest.raises(NotImplementedError) as exc:
         await router._deliver_webhook(message, recipient)
-    assert "#35" in str(exc.value)
+    message = str(exc.value)
+    assert "frozen proof-surface" in message
+    assert "docs/PROOF_SURFACES.md" in message
 
 
 @pytest.mark.anyio
@@ -126,10 +130,10 @@ async def test_debug_bootstrap_rejected_in_production_like_environment():
 
 
 @pytest.mark.anyio
-async def test_proof_surfaces_flag_defaults_true_for_local():
-    """Local/dev keep proof surfaces mounted; production guardrail forces off."""
+async def test_proof_surfaces_flag_defaults_false_for_local():
+    """Local/dev imports now match the production-safe default."""
     settings = get_settings()
-    assert settings.ENABLE_PROOF_SURFACES is True
+    assert settings.ENABLE_PROOF_SURFACES is False
     from app.main import app
 
     transport = ASGITransport(app=app)
@@ -138,9 +142,11 @@ async def test_proof_surfaces_flag_defaults_true_for_local():
         assert resp.status_code == 200
 
 
-def test_require_simulation_media_issue_tag():
+def test_require_simulation_media_names_frozen_scope():
     settings = get_settings()
     settings.SIMULATION_MODE_MEDIA_ENGINE = False
     with pytest.raises(NotImplementedError) as exc:
-        require_simulation("media_engine", issue="#39")
-    assert "SIMULATION_MODE_MEDIA_ENGINE" in str(exc.value)
+        require_simulation("media_engine")
+    message = str(exc.value)
+    assert "SIMULATION_MODE_MEDIA_ENGINE" in message
+    assert "frozen proof-surface" in message

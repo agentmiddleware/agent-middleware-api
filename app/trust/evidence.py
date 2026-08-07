@@ -15,9 +15,11 @@ The verification logic lives here once; both endpoints call it.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from decimal import Decimal
 from typing import cast
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.sql.elements import ColumnElement
@@ -28,12 +30,14 @@ from app.db.database import get_session_factory
 from app.db.models import (
     ControlPlaneAuditEventModel,
     LedgerEntryModel,
+    McpDispatchAttemptModel,
     PermitModel,
 )
 from app.schemas.audit import AuditEventResponse
 from app.schemas.billing import LedgerAction
 from app.schemas.trust import (
     AuditChainVerifyResponse,
+    DispatchEvidenceResponse,
     EvidenceBundleResponse,
     PermitResponse,
     ReceiptEvidenceCheck,
@@ -43,6 +47,17 @@ from app.schemas.trust import (
 from app.services.audit_chain import verify_audit_chain
 from app.services.permits import get_permit_service, permit_model_to_response
 from app.services.receipts import get_receipt_service
+
+
+_DISPATCH_OUTCOMES = {
+    "succeeded": frozenset({"success"}),
+    # A failed refund leaves a deliberately charged failed_unrefunded receipt
+    # for operator reconciliation; it is still the same returned_error dispatch.
+    "returned_error": frozenset({"failed_refunded", "failed_unrefunded"}),
+    "delivery_uncertain": frozenset({"delivery_uncertain"}),
+    "response_rejected": frozenset({"response_rejected"}),
+}
+_SAFE_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _check(
@@ -169,6 +184,166 @@ async def _get_ledger_entry_model(
         return result.scalar_one_or_none()
 
 
+async def _get_dispatch_attempt_model(
+    *,
+    dispatch_attempt_id: str,
+    receipt_wallet_id: str,
+) -> McpDispatchAttemptModel | None:
+    """Load dispatch state through the receipt's tenant boundary.
+
+    Filtering by wallet in SQL mirrors the permit, audit, and ledger lookups
+    above: a tampered cross-wallet link is indistinguishable from a missing
+    attempt and cannot disclose the other wallet's dispatch metadata.
+    """
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(McpDispatchAttemptModel).where(
+                cast(
+                    ColumnElement[bool],
+                    McpDispatchAttemptModel.attempt_id == dispatch_attempt_id,
+                ),
+                cast(
+                    ColumnElement[bool],
+                    McpDispatchAttemptModel.wallet_id == receipt_wallet_id,
+                ),
+            )
+        )
+        return result.scalar_one_or_none()
+
+
+def _dispatch_linkage_failures(
+    *,
+    attempt: McpDispatchAttemptModel,
+    receipt: ReceiptResponse,
+) -> list[str]:
+    """Verify every signed receipt invariant that dispatch state must share."""
+    failures: list[str] = []
+    if attempt.wallet_id != receipt.wallet_id:
+        failures.append("dispatch_wallet_mismatch")
+    if attempt.permit_id != receipt.permit_id:
+        failures.append("dispatch_permit_mismatch")
+    if attempt.key_id != receipt.key_id:
+        failures.append("dispatch_key_mismatch")
+    if attempt.public_tool_id != receipt.tool:
+        failures.append("dispatch_tool_mismatch")
+    if attempt.request_hash != receipt.request_hash:
+        failures.append("dispatch_request_hash_mismatch")
+    if attempt.ledger_entry_id != receipt.ledger_entry_id:
+        failures.append("dispatch_ledger_entry_mismatch")
+    if attempt.response_hash != receipt.response_hash:
+        failures.append("dispatch_response_hash_mismatch")
+    if attempt.idempotency_record_id != receipt.idempotency_record_id:
+        failures.append("dispatch_idempotency_mismatch")
+    if attempt.credits_authorized != receipt.credits_authorized:
+        failures.append("dispatch_authorized_credits_mismatch")
+
+    expected_outcomes = _DISPATCH_OUTCOMES.get(attempt.state)
+    if expected_outcomes is None:
+        failures.append("dispatch_state_not_terminal")
+    elif receipt.outcome not in expected_outcomes:
+        failures.append("dispatch_outcome_mismatch")
+
+    if attempt.state == "returned_error" and receipt.outcome == "failed_refunded":
+        # The attempt records the original debit. A failed-refunded receipt
+        # records zero net charge; ledger_linkage separately proves the refund.
+        if receipt.credits_charged != Decimal("0"):
+            failures.append("dispatch_refunded_credits_mismatch")
+    elif attempt.credits_charged != receipt.credits_charged:
+        failures.append("dispatch_charged_credits_mismatch")
+    return failures
+
+
+def _dispatch_audit_linkage_failures(
+    *,
+    attempt: McpDispatchAttemptModel,
+    metadata: dict,
+) -> list[str]:
+    """Bind persisted dispatch state to the signed audit-event metadata.
+
+    The audit chain authenticates ``metadata_json``.  These comparisons make
+    that signature meaningful for remote dispatch evidence by proving the
+    signed dispatch identity and terminal result describe the same persisted
+    attempt linked by the receipt.
+    """
+    expected = (
+        (
+            "dispatch_attempt_id",
+            attempt.attempt_id,
+            "audit_dispatch_attempt_mismatch",
+        ),
+        ("dispatch_state", attempt.state, "audit_dispatch_state_mismatch"),
+        (
+            "upstream_tool_name",
+            attempt.upstream_tool_name,
+            "audit_upstream_tool_mismatch",
+        ),
+        (
+            "upstream_origin",
+            attempt.upstream_origin,
+            "audit_upstream_origin_mismatch",
+        ),
+        (
+            "dispatch_response_hash",
+            attempt.response_hash,
+            "audit_dispatch_response_hash_mismatch",
+        ),
+        ("permit_id", attempt.permit_id, "audit_dispatch_permit_mismatch"),
+        (
+            "request_hash",
+            attempt.request_hash,
+            "audit_dispatch_request_hash_mismatch",
+        ),
+        (
+            "ledger_entry_id",
+            attempt.ledger_entry_id,
+            "audit_dispatch_ledger_entry_mismatch",
+        ),
+    )
+    return [
+        failure
+        for field, expected_value, failure in expected
+        if metadata.get(field) != expected_value
+    ]
+
+
+def _dispatch_evidence(
+    attempt: McpDispatchAttemptModel,
+) -> DispatchEvidenceResponse:
+    """Project only bounded, non-secret dispatch metadata into evidence."""
+    parsed_origin = urlsplit(attempt.upstream_origin)
+    hostname = parsed_origin.hostname
+    sanitized_origin = "invalid"
+    if parsed_origin.scheme in {"http", "https"} and hostname:
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        try:
+            port = parsed_origin.port
+        except ValueError:
+            port = None
+        sanitized_origin = f"{parsed_origin.scheme}://{host}"
+        if port is not None:
+            sanitized_origin = f"{sanitized_origin}:{port}"
+    error_code = attempt.error_code
+    if error_code is not None and not _SAFE_ERROR_CODE.fullmatch(error_code):
+        error_code = "upstream_error"
+    return DispatchEvidenceResponse(
+        attempt_id=attempt.attempt_id,
+        state=attempt.state,
+        public_tool_id=attempt.public_tool_id,
+        upstream_tool_name=attempt.upstream_tool_name,
+        upstream_origin=sanitized_origin,
+        request_hash=attempt.request_hash,
+        response_hash=attempt.response_hash,
+        ledger_entry_id=attempt.ledger_entry_id,
+        credits_authorized=attempt.credits_authorized,
+        credits_charged=attempt.credits_charged,
+        error_code=error_code,
+        created_at=attempt.created_at,
+        dispatched_at=attempt.dispatched_at,
+        completed_at=attempt.completed_at,
+    )
+
+
 async def _refund_exists(
     *,
     wallet_id: str,
@@ -286,6 +461,13 @@ async def build_receipt_evidence(
             )
         )
 
+    dispatch_attempt = None
+    if receipt.dispatch_attempt_id:
+        dispatch_attempt = await _get_dispatch_attempt_model(
+            dispatch_attempt_id=receipt.dispatch_attempt_id,
+            receipt_wallet_id=receipt.wallet_id,
+        )
+
     audit_event_payload = None
     audit_chain_payload = None
     if not receipt.audit_event_id:
@@ -321,6 +503,16 @@ async def build_receipt_evidence(
                 metadata.get("ledger_entry_id") != receipt.ledger_entry_id
             ):
                 linkage_failures.append("audit_ledger_entry_mismatch")
+            if receipt.dispatch_attempt_id:
+                if metadata.get("dispatch_attempt_id") != receipt.dispatch_attempt_id:
+                    linkage_failures.append("audit_dispatch_attempt_mismatch")
+                if dispatch_attempt is not None:
+                    for failure in _dispatch_audit_linkage_failures(
+                        attempt=dispatch_attempt,
+                        metadata=metadata,
+                    ):
+                        if failure not in linkage_failures:
+                            linkage_failures.append(failure)
             checks.append(
                 _check(
                     "audit_event_linkage",
@@ -406,6 +598,41 @@ async def build_receipt_evidence(
                 )
             )
 
+    dispatch_payload = None
+    if not receipt.dispatch_attempt_id:
+        checks.append(
+            _skipped(
+                "dispatch_linkage",
+                "receipt_has_no_dispatch_attempt",
+            )
+        )
+    else:
+        if dispatch_attempt is None:
+            checks.append(
+                _check(
+                    "dispatch_linkage",
+                    False,
+                    reason="dispatch_attempt_not_found",
+                    details={"dispatch_attempt_id": receipt.dispatch_attempt_id},
+                )
+            )
+        else:
+            linkage_failures = _dispatch_linkage_failures(
+                attempt=dispatch_attempt,
+                receipt=receipt,
+            )
+            checks.append(
+                _check(
+                    "dispatch_linkage",
+                    not linkage_failures,
+                    reason=";".join(linkage_failures) if linkage_failures else None,
+                    details={"dispatch_attempt_id": receipt.dispatch_attempt_id},
+                )
+            )
+            # Keep the stored MCP result and idempotency key private. This
+            # projection includes only bounded linkage/operational metadata.
+            dispatch_payload = _dispatch_evidence(dispatch_attempt)
+
     return ReceiptEvidenceResponse(
         receipt_id=receipt.receipt_id,
         valid=all(check.status != "failed" for check in checks),
@@ -415,6 +642,7 @@ async def build_receipt_evidence(
         audit_event=audit_event_payload,
         audit_chain=audit_chain_payload,
         ledger_entry=ledger_entry_payload,
+        dispatch=dispatch_payload,
     )
 
 
@@ -441,6 +669,10 @@ def build_evidence_bundle(evidence: ReceiptEvidenceResponse) -> EvidenceBundleRe
         "permit_signature": _verification_status(checks_by_name, "permit_signature"),
         "audit_chain": _verification_status(checks_by_name, "audit_chain"),
         "request_hash": _verification_status(checks_by_name, "request_hash"),
+        "dispatch_linkage": _verification_status(
+            checks_by_name,
+            "dispatch_linkage",
+        ),
     }
 
     return EvidenceBundleResponse(
@@ -450,6 +682,7 @@ def build_evidence_bundle(evidence: ReceiptEvidenceResponse) -> EvidenceBundleRe
         permit=evidence.permit,
         ledger_entry=evidence.ledger_entry,
         audit_event=evidence.audit_event,
+        dispatch=evidence.dispatch,
         verification=verification,
     )
 

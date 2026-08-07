@@ -50,6 +50,8 @@ def _optimizer_body(wallet_id: str) -> dict:
 # telemetry-scope
 # --------------------------------------------------------------------------
 
+
+@pytest.mark.proof
 @pytest.mark.anyio
 async def test_telemetry_pipeline_not_readable_across_tenants(client, clean_database):
     a = await provision_agent_wallet(client)
@@ -96,6 +98,7 @@ async def test_telemetry_pipeline_not_readable_across_tenants(client, clean_data
     ).status_code == 200
 
 
+@pytest.mark.proof
 @pytest.mark.anyio
 async def test_telemetry_list_pipelines_scoped_to_caller(client, clean_database):
     a = await provision_agent_wallet(client)
@@ -115,8 +118,11 @@ async def test_telemetry_list_pipelines_scoped_to_caller(client, clean_database)
     assert resp.json()["total"] == 0
 
 
+@pytest.mark.proof
 @pytest.mark.anyio
-async def test_telemetry_create_pipeline_for_other_wallet_denied(client, clean_database):
+async def test_telemetry_create_pipeline_for_other_wallet_denied(
+    client, clean_database
+):
     a = await provision_agent_wallet(client)
     b = await provision_agent_wallet(client)
     resp = await client.post(
@@ -130,6 +136,7 @@ async def test_telemetry_create_pipeline_for_other_wallet_denied(client, clean_d
 # --------------------------------------------------------------------------
 # planner/optimize
 # --------------------------------------------------------------------------
+
 
 @pytest.mark.anyio
 async def test_planner_optimize_requires_auth(client, clean_database):
@@ -162,6 +169,8 @@ async def test_planner_optimize_rejects_cross_wallet(client, clean_database):
 # sandbox/behavioral
 # --------------------------------------------------------------------------
 
+
+@pytest.mark.proof
 @pytest.mark.anyio
 async def test_sandbox_env_not_accessible_across_tenants(client, clean_database):
     a = await provision_agent_wallet(client)

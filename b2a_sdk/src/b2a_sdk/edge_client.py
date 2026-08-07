@@ -1,4 +1,4 @@
-"""Shared HTTP edge client for framework wrappers.
+"""Legacy shared HTTP edge client for framework wrappers.
 
 The framework wrappers (langchain, crewai, autogen) all need the same
 narrow surface: list MCP tools, call an MCP tool, drive an AWI session, read

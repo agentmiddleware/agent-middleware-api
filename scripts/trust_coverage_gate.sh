@@ -18,6 +18,12 @@ TRUST_COVERAGE_TESTS=(
   tests/test_agent_ops_war_room_demo.py
   tests/test_me_trust_ledger.py
   tests/test_mcp_trust.py
+  tests/test_governed_persistence.py
+  tests/test_mcp_dispatch_evidence.py
+  tests/test_mcp_dispatch_reconciliation.py
+  tests/test_mcp_upstream_governed.py
+  tests/test_upstream_mcp.py
+  tests/test_refund_reconciliation.py
   tests/test_mcp_trust_mode.py
   tests/test_trust_operator_inspection.py
   tests/test_signing_key_lifecycle.py
@@ -39,6 +45,12 @@ TRUST_COVERAGE_MODULES=(
   app.services.receipts
   app.services.signing_keys
   app.services.idempotency
+  app.services.refund_reconciliation
+  app.services.billing_engine
+  app.services.mcp_dispatch_attempts
+  app.services.mcp_dispatch_reconciliation
+  app.services.upstream_mcp
+  app.trust.evidence
   app.core.trust_mode
 )
 
