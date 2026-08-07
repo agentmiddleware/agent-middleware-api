@@ -168,6 +168,79 @@ class TestStripeWebhookIdempotency:
         refunds = [e for e in ledger if e.action == "refund"]
         assert len(refunds) == 1
 
+    @pytest.mark.anyio
+    async def test_chargeback_past_spent_credits_freezes_and_alerts(
+        self, client, sponsor_wallet, api_headers
+    ):
+        """A refund for credits already spent must not pass silently.
+
+        The deficit stays in the ledger (clamping to zero would discard a real
+        loss), but the wallet is frozen — which, with wallet.status now
+        authoritative, blocks further charge/transfer/child-spawn — and a
+        critical alert is raised for human review.
+        """
+        from app.services.stripe_integration import get_stripe_integration
+        from app.core.dependencies import get_agent_money
+        from app.db.database import get_session_factory
+        from app.db.models import BillingAlertModel
+        from sqlalchemy import select
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        money = get_agent_money()
+
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_chargeback_test",
+            description="topup",
+        )
+        # Simulate the agent having spent most of it before the chargeback.
+        await money.transfer(
+            from_wallet_id=wallet_id,
+            to_wallet_id=(
+                await client.post(
+                    "/v1/billing/wallets/sponsor",
+                    json={
+                        "sponsor_name": "Sink",
+                        "email": "sink@b2a.dev",
+                        "initial_credits": 0,
+                    },
+                    headers=api_headers,
+                )
+            ).json()["wallet_id"],
+            amount=Decimal("40000"),
+            description="spent",
+        )
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("10000")
+
+        # Full chargeback of the original 50000-credit top-up.
+        await integration._handle_refund(
+            {
+                "payment_intent": "pi_chargeback_test",
+                "amount": 5000,
+                "id": "ch_chargeback_test",
+            },
+            "evt_chargeback_1",
+        )
+
+        wallet = await money.get_wallet(wallet_id)
+        # Ledger keeps the truth: the deficit is real and recorded.
+        assert wallet.balance == Decimal("-40000")
+        # ...but the wallet is contained and surfaced.
+        assert wallet.status.value == "frozen"
+
+        factory = get_session_factory()
+        async with factory() as session:
+            alerts = (
+                await session.execute(
+                    select(BillingAlertModel).where(
+                        BillingAlertModel.wallet_id == wallet_id
+                    )
+                )
+            ).scalars().all()
+        assert any(a.severity == "critical" for a in alerts)
+
     def test_only_payment_intent_unique_errors_are_idempotent(self):
         """Non-idempotency integrity errors must not be swallowed."""
         duplicate = IntegrityError(

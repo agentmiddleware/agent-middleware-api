@@ -68,6 +68,9 @@ async def exchange_api_key_for_tokens(
         model = RefreshTokenModel(
             jti=refresh_payload.jti,
             wallet_id=db_key.wallet_id,
+            # Bind the chain to the key that minted it, so revoking that key
+            # invalidates what it produced even when sibling keys stay active.
+            key_id=db_key.key_id,
             expires_at=_exp_to_datetime(refresh_payload.exp),
         )
         session.add(model)
@@ -113,22 +116,62 @@ async def refresh_access_token(
 
         # Mark old refresh token as revoked
         record.revoked = True
+        origin_key_id = record.key_id
         await session.commit()
+
+    # A JWT is derived authority: it exists only because an API key was
+    # presented at /token. Refreshing checked the signature and the revoked
+    # flag but never re-checked the underlying credential, so tokens minted
+    # from a stolen key kept renewing for the refresh lifetime after that key
+    # was revoked — revocation did not contain the compromise.
+    #
+    # Check the ORIGINATING key, not merely the wallet. Wallet-level liveness is
+    # too coarse: a wallet with several keys stays live after the compromised one
+    # is revoked, and auto_rotate_on_suspicious_activity revokes the suspect key
+    # while issuing a replacement, so the wallet is never keyless and the
+    # attacker's chain would survive the rotation meant to contain it. Binding
+    # also makes the revoke/refresh race benign — a token that wins the timing
+    # window is still bound to the revoked key, so it cannot be renewed.
+    #
+    # Tokens issued before binding existed carry no key_id; they fall back to
+    # wallet-level liveness, which is no weaker than what they were issued
+    # under, and they age out within the refresh lifetime.
+    from app.services.api_key_service import get_api_key_service
+
+    key_svc = get_api_key_service()
+    still_live = (
+        await key_svc.is_key_live(origin_key_id)
+        if origin_key_id
+        else await key_svc.has_live_key(payload.sub)
+    )
+    if not still_live:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "no_active_api_key",
+                "message": (
+                    "The API key this token was issued from is no longer active; "
+                    "it cannot be renewed."
+                ),
+            },
+        )
 
     # Issue new tokens
     new_access = jwt_svc.create_access_token(
         wallet_id=payload.sub,
-        key_id=None,  # Refresh tokens don't carry key_id
+        key_id=origin_key_id,
         scopes=["billing:charge", "tool:invoke"],
     )
     new_refresh = jwt_svc.create_refresh_token(wallet_id=payload.sub)
 
-    # Store new refresh token
+    # Store new refresh token, carrying the binding forward so rotation cannot
+    # launder a chain into an unbound one.
     new_refresh_payload = jwt_svc.verify_refresh_token(new_refresh)
     async with factory() as session:
         model = RefreshTokenModel(
             jti=new_refresh_payload.jti,
             wallet_id=payload.sub,
+            key_id=origin_key_id,
             expires_at=_exp_to_datetime(new_refresh_payload.exp),
         )
         session.add(model)

@@ -387,6 +387,17 @@ class AgentMoney:
 
                 if not sponsor:
                     raise WalletNotFoundError(sponsor_wallet_id)
+                # Provisioning an agent debits the sponsor, so it is outbound
+                # movement and must respect the same non-spendable statuses as
+                # charge/transfer/child-spawn. Without this, a sponsor frozen
+                # after a chargeback resumes funding brand-new active agent
+                # wallets as soon as any inbound credit makes its balance
+                # positive again, which reopens the path the freeze closes.
+                if sponsor.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    raise ValueError(
+                        f"Sponsor wallet is {sponsor.status} and cannot fund "
+                        f"new agent wallets"
+                    )
                 if sponsor.wallet_type != WalletType.SPONSOR.value:
                     raise ValueError(
                         "Can only provision agent wallets from sponsor wallets"

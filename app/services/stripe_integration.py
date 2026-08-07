@@ -20,8 +20,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 
 from ..db.database import get_session_factory
-from ..db.models import WalletModel, LedgerEntryModel
+from ..db.models import BillingAlertModel, WalletModel, LedgerEntryModel
 from ..core.config import get_settings
+from ..schemas.billing import AlertSeverity, AlertType, WalletStatus
 from .agent_money import WalletNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -334,6 +335,36 @@ class StripeIntegration:
                         stripe_event_id=stripe_event_id,
                     )
                     session.add(entry)
+
+                    # A refund/chargeback for credits the agent already spent
+                    # drives the balance negative. The deficit is left in the
+                    # ledger deliberately — clamping to zero would silently
+                    # discard a real loss — but it must not pass unnoticed or
+                    # keep moving funds. Freeze the wallet (blocks charge,
+                    # transfer and child-spawn) and raise a critical alert for
+                    # human review; who absorbs the loss stays a business call.
+                    if wallet.balance < 0:
+                        wallet.status = WalletStatus.FROZEN.value
+                        session.add(
+                            BillingAlertModel(
+                                alert_id=str(uuid4())[:12],
+                                wallet_id=wallet_id,
+                                alert_type=AlertType.SUSPICIOUS_ACTIVITY.value,
+                                current_balance=wallet.balance,
+                                message=(
+                                    f"Refund of {amount} credits drove the balance "
+                                    f"negative ({wallet.balance}). Wallet frozen "
+                                    f"pending review."
+                                ),
+                                severity=AlertSeverity.CRITICAL.value,
+                            )
+                        )
+                        logger.critical(
+                            "Refund drove wallet %s to a negative balance (%s); "
+                            "wallet frozen pending review.",
+                            wallet_id,
+                            wallet.balance,
+                        )
 
                 await session.commit()
         except IntegrityError as exc:

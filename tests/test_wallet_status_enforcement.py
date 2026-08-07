@@ -127,6 +127,32 @@ async def test_child_cap_enforced_on_transfer(client, clean_database):
 
 
 @pytest.mark.anyio
+async def test_frozen_sponsor_cannot_provision_agent_wallets(
+    client, clean_database
+):
+    """Provisioning debits the sponsor, so a frozen sponsor must not fund one.
+
+    Without this, a sponsor frozen after a chargeback resumes funding brand-new
+    active agent wallets as soon as any inbound credit makes its balance
+    positive, reopening the path the freeze exists to close.
+    """
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "S", "email": "s2@t.com", "initial_credits": 10000},
+        headers=BOOTSTRAP,
+    )
+    spn = sponsor.json()["wallet_id"]
+    await _set_status(spn, "frozen")
+
+    resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={"sponsor_wallet_id": spn, "agent_id": "bot", "budget_credits": 100},
+        headers=BOOTSTRAP,
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.anyio
 async def test_active_wallet_still_operates(client, clean_database):
     """The enforcement must not block a normal active wallet."""
     _, agent = await _make_agent(client)
