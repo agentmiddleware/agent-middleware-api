@@ -24,7 +24,12 @@ from sqlmodel import col
 
 from ..core.time import to_naive_utc, utc_now
 from ..db.database import get_session_factory
-from ..db.models import APIKeyModel, KeyRotationLogModel, WalletModel
+from ..db.models import (
+    APIKeyModel,
+    KeyRotationLogModel,
+    RefreshTokenModel,
+    WalletModel,
+)
 from ..schemas.billing import (
     APIKeyStatus,
     RotationType,
@@ -237,6 +242,50 @@ class APIKeyService:
             "total_active": total_active,
             "total_revoked": total_revoked,
         }
+
+    async def has_live_key(self, wallet_id: str) -> bool:
+        """True if the wallet holds at least one key that could authenticate now.
+
+        Deliberately mirrors ``validate_key``'s liveness rule — ACTIVE status
+        *and* not past ``expires_at`` — rather than reusing ``get_keys``'
+        ``total_active``, which counts status only. Nothing sweeps expired keys
+        to a non-active status, so a status-only check reports a wallet as
+        credentialed after every one of its keys has timed out, and any gate
+        built on it would outlive the credentials it is meant to track.
+        """
+        now = utc_now()
+        async with self._session_factory()() as session:
+            result = await session.execute(
+                select(APIKeyModel).where(
+                    col(APIKeyModel.wallet_id) == wallet_id,
+                    col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
+                )
+            )
+            for key in result.scalars().all():
+                expires_at = key.expires_at
+                if not expires_at or expires_at >= now:
+                    return True
+        return False
+
+    async def is_key_live(self, key_id: str) -> bool:
+        """True if this specific key could authenticate right now.
+
+        Wallet-level liveness is too coarse for revocation containment: a wallet
+        holding several keys stays "live" after the compromised one is revoked,
+        and auto_rotate_on_suspicious_activity revokes the suspect key while
+        issuing a replacement, so the wallet is never keyless. Checking the
+        originating key directly is what makes revoking one credential actually
+        invalidate what that credential minted. An unknown key_id is not live.
+        """
+        async with self._session_factory()() as session:
+            result = await session.execute(
+                select(APIKeyModel).where(col(APIKeyModel.key_id) == key_id)
+            )
+            key = result.scalar_one_or_none()
+        if not key or key.status != APIKeyStatus.ACTIVE.value:
+            return False
+        expires_at = key.expires_at
+        return not expires_at or expires_at >= utc_now()
 
     async def validate_key(self, api_key: str) -> Optional[APIKeyModel]:
         """
@@ -498,6 +547,24 @@ class APIKeyService:
                 session.add(key)
                 revoked_key_ids.append(key.key_id)
 
+            # Revoking the API keys alone does not contain a compromise: a JWT
+            # minted from a stolen key before revocation keeps working, and
+            # POST /v1/auth/refresh re-issues access tokens from it for the
+            # refresh token's full lifetime without ever re-checking that the
+            # wallet still has a live key. Emergency revocation must therefore
+            # kill the derived credentials too, not just the keys they came from.
+            refresh_result = await session.execute(
+                select(RefreshTokenModel).where(
+                    col(RefreshTokenModel.wallet_id) == wallet_id,
+                    col(RefreshTokenModel.revoked).is_(False),
+                )
+            )
+            revoked_refresh_tokens = 0
+            for token in refresh_result.scalars().all():
+                token.revoked = True
+                session.add(token)
+                revoked_refresh_tokens += 1
+
             log_entry = KeyRotationLogModel(
                 log_id=f"rot_{uuid4().hex[:12]}",
                 key_id="all",
@@ -537,7 +604,8 @@ class APIKeyService:
 
         logger.critical(
             f"EMERGENCY revocation for wallet {wallet_id}: "
-            f"revoked {len(revoked_key_ids)} keys, reason={reason}"
+            f"revoked {len(revoked_key_ids)} keys and "
+            f"{revoked_refresh_tokens} refresh tokens, reason={reason}"
         )
 
         from ..services.notifications import get_notification_service
@@ -552,6 +620,7 @@ class APIKeyService:
         return {
             "wallet_id": wallet_id,
             "revoked_keys": revoked_key_ids,
+            "revoked_refresh_tokens": revoked_refresh_tokens,
             "new_key": new_key_data,
             "created_at": now,
         }

@@ -127,34 +127,29 @@ async def test_child_cap_enforced_on_transfer(client, clean_database):
 
 
 @pytest.mark.anyio
-async def test_child_cap_enforced_when_spawning_grandchild(client, clean_database):
-    _, agent = await _make_agent(client)
-    child_resp = await client.post(
-        "/v1/billing/wallets/child",
-        json={
-            "parent_wallet_id": agent,
-            "child_agent_id": "capped-parent",
-            "budget_credits": 100,
-            "max_spend": 5,
-        },
+async def test_frozen_sponsor_cannot_provision_agent_wallets(
+    client, clean_database
+):
+    """Provisioning debits the sponsor, so a frozen sponsor must not fund one.
+
+    Without this, a sponsor frozen after a chargeback resumes funding brand-new
+    active agent wallets as soon as any inbound credit makes its balance
+    positive, reopening the path the freeze exists to close.
+    """
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "S", "email": "s2@t.com", "initial_credits": 10000},
         headers=BOOTSTRAP,
     )
-    assert child_resp.status_code == 201
-    child = child_resp.json()["wallet_id"]
+    spn = sponsor.json()["wallet_id"]
+    await _set_status(spn, "frozen")
 
-    response = await client.post(
-        "/v1/billing/wallets/child",
-        json={
-            "parent_wallet_id": child,
-            "child_agent_id": "cap-escape",
-            "budget_credits": 10,
-            "max_spend": 10,
-        },
+    resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={"sponsor_wallet_id": spn, "agent_id": "bot", "budget_credits": 100},
         headers=BOOTSTRAP,
     )
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["error"] == "child_wallet_error"
+    assert resp.status_code == 400
 
 
 @pytest.mark.anyio

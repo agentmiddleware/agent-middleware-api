@@ -984,6 +984,10 @@ class RefreshTokenModel(SQLModel, table=True):
 
     jti: str = Field(primary_key=True, max_length=64)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    # The API key this token chain was minted from. Soft reference (no FK): a
+    # revoked key stays in the table, and a missing key must fail closed rather
+    # than error. NULL means "issued before binding existed" — see migration 025.
+    key_id: Optional[str] = Field(default=None, max_length=50, index=True)
     revoked: bool = Field(default=False, index=True)
     created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
     expires_at: datetime = Field(sa_type=NaiveUTCDateTime)

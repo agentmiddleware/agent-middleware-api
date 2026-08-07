@@ -21,8 +21,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 
 from ..db.database import get_session_factory
-from ..db.models import WalletModel, LedgerEntryModel
+from ..db.models import BillingAlertModel, WalletModel, LedgerEntryModel
 from ..core.config import get_settings
+from ..schemas.billing import AlertSeverity, AlertType, WalletStatus
 from .agent_money import WalletNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -509,6 +510,92 @@ class StripeIntegration:
         return "stripe_event_id" in message and (
             "unique" in message or "duplicate" in message
         )
+
+    async def _debit_wallet(
+        self,
+        wallet_id: str,
+        amount: Decimal,
+        description: str,
+        stripe_event_id: str | None = None,
+    ) -> None:
+        """Debit wallet for refunds.
+
+        When ``stripe_event_id`` is set, the unique constraint on that column
+        makes a redelivered refund event a no-op instead of a second debit.
+        """
+        try:
+            async with self._session_factory()() as session:
+                async with session.begin():
+                    result = await session.execute(
+                        select(WalletModel)
+                        .where(WalletModel.wallet_id == wallet_id)  # type: ignore[arg-type]  # see app/db/models.py
+                        .with_for_update()
+                    )
+                    wallet = result.scalar_one_or_none()
+
+                    if not wallet:
+                        logger.error(f"Wallet not found: {wallet_id}")
+                        return
+
+                    wallet.balance -= amount
+                    wallet.lifetime_debits += amount
+
+                    entry = LedgerEntryModel(
+                        entry_id=str(uuid4()),
+                        wallet_id=wallet_id,
+                        action="refund",
+                        amount=-amount,
+                        balance_after=wallet.balance,
+                        description=description,
+                        stripe_event_id=stripe_event_id,
+                    )
+                    session.add(entry)
+
+                    # A refund/chargeback for credits the agent already spent
+                    # drives the balance negative. The deficit is left in the
+                    # ledger deliberately — clamping to zero would silently
+                    # discard a real loss — but it must not pass unnoticed or
+                    # keep moving funds. Freeze the wallet (blocks charge,
+                    # transfer and child-spawn) and raise a critical alert for
+                    # human review; who absorbs the loss stays a business call.
+                    if wallet.balance < 0:
+                        wallet.status = WalletStatus.FROZEN.value
+                        session.add(
+                            BillingAlertModel(
+                                alert_id=str(uuid4())[:12],
+                                wallet_id=wallet_id,
+                                alert_type=AlertType.SUSPICIOUS_ACTIVITY.value,
+                                current_balance=wallet.balance,
+                                message=(
+                                    f"Refund of {amount} credits drove the balance "
+                                    f"negative ({wallet.balance}). Wallet frozen "
+                                    f"pending review."
+                                ),
+                                severity=AlertSeverity.CRITICAL.value,
+                            )
+                        )
+                        logger.critical(
+                            "Refund drove wallet %s to a negative balance (%s); "
+                            "wallet frozen pending review.",
+                            wallet_id,
+                            wallet.balance,
+                        )
+
+                await session.commit()
+        except IntegrityError as exc:
+            if not self._is_duplicate_stripe_event_error(exc):
+                logger.exception(
+                    "Stripe refund debit failed with non-idempotency integrity "
+                    "error for event %s",
+                    stripe_event_id,
+                )
+                raise
+            logger.info(
+                "Idempotency catch: refund event %s already processed. "
+                "Swallowing duplicate to avoid a second debit.",
+                stripe_event_id,
+            )
+            return
 
 
 _stripe_integration: Optional[StripeIntegration] = None

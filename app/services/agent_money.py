@@ -216,15 +216,101 @@ class AgentMoney:
         auto_refill_threshold: Decimal = Decimal("100.0"),
         auto_refill_amount: Decimal = Decimal("1000.0"),
     ) -> WalletResponse:
-        return await self._wallet_engine.create_agent_wallet(
-            sponsor_wallet_id=sponsor_wallet_id,
-            agent_id=agent_id,
-            budget_credits=budget_credits,
-            daily_limit=daily_limit,
-            auto_refill=auto_refill,
-            auto_refill_threshold=auto_refill_threshold,
-            auto_refill_amount=auto_refill_amount,
-        )
+        """Provision a pre-paid agent wallet from a sponsor's balance."""
+        async with self._session_factory()() as session:
+            async with session.begin():
+                # Lock sponsor wallet for update
+                result = await session.execute(
+                    select(WalletModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            WalletModel.wallet_id == sponsor_wallet_id,
+                        )
+                    )
+                    .with_for_update()
+                )
+                sponsor = result.scalar_one_or_none()
+
+                if not sponsor:
+                    raise WalletNotFoundError(sponsor_wallet_id)
+                # Provisioning an agent debits the sponsor, so it is outbound
+                # movement and must respect the same non-spendable statuses as
+                # charge/transfer/child-spawn. Without this, a sponsor frozen
+                # after a chargeback resumes funding brand-new active agent
+                # wallets as soon as any inbound credit makes its balance
+                # positive again, which reopens the path the freeze closes.
+                if sponsor.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    raise ValueError(
+                        f"Sponsor wallet is {sponsor.status} and cannot fund "
+                        f"new agent wallets"
+                    )
+                if sponsor.wallet_type != WalletType.SPONSOR.value:
+                    raise ValueError(
+                        "Can only provision agent wallets from sponsor wallets"
+                    )
+                if sponsor.balance < budget_credits:
+                    raise InsufficientFundsError(
+                        sponsor_wallet_id,
+                        sponsor.balance,
+                        budget_credits,
+                    )
+
+                # Deduct from sponsor
+                sponsor.balance -= budget_credits
+                sponsor.lifetime_debits += budget_credits
+
+                # Create agent wallet
+                agent_wallet_id = f"agt-{uuid.uuid4().hex[:12]}"
+                agent_wallet = WalletModel(
+                    wallet_id=agent_wallet_id,
+                    wallet_type=WalletType.AGENT.value,
+                    owner_name=f"Agent: {agent_id}",
+                    balance=budget_credits,
+                    lifetime_credits=budget_credits,
+                    owner_key=owner_key,
+                    parent_wallet_id=sponsor_wallet_id,
+                    agent_id=agent_id,
+                    daily_limit=daily_limit,
+                    auto_refill=auto_refill,
+                    auto_refill_threshold=auto_refill_threshold,
+                    auto_refill_amount=auto_refill_amount,
+                )
+                session.add(agent_wallet)
+                # Persist new wallet before ledger rows that FK to it.
+                await session.flush()
+
+                # Ledger entries
+                session.add(
+                    LedgerEntryModel(
+                        entry_id=str(uuid.uuid4()),
+                        wallet_id=sponsor_wallet_id,
+                        action=LedgerAction.TRANSFER.value,
+                        amount=-budget_credits,
+                        balance_after=sponsor.balance,
+                        description=(
+                            f"Provision agent wallet {agent_wallet_id} for {agent_id}"
+                        ),
+                    )
+                )
+                session.add(
+                    LedgerEntryModel(
+                        entry_id=str(uuid.uuid4()),
+                        wallet_id=agent_wallet_id,
+                        action=LedgerAction.TRANSFER.value,
+                        amount=budget_credits,
+                        balance_after=budget_credits,
+                        description=f"Provisioned from sponsor {sponsor_wallet_id}",
+                    )
+                )
+
+            await session.commit()
+            logger.info(
+                f"Created agent wallet {agent_wallet_id} with {budget_credits} credits"
+            )
+            return wallet_model_to_response(agent_wallet)
+
+    # --- Child Wallet Management (Swarm Delegation) ---
 
     async def create_child_wallet(
         self,

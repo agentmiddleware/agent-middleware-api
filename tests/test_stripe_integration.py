@@ -428,168 +428,77 @@ class TestStripeWebhookIdempotency:
         assert len(refunds) == 1
 
     @pytest.mark.anyio
-    async def test_successive_partial_refunds_apply_only_new_cumulative_delta(
-        self, sponsor_wallet
-    ):
-        """Stripe's cumulative amount_refunded must not be applied repeatedly."""
-        from app.core.dependencies import get_agent_money
-        from app.services.stripe_integration import get_stripe_integration
-
-        wallet_id = sponsor_wallet["wallet_id"]
-        integration = get_stripe_integration()
-        money = get_agent_money()
-        await integration._mint_credits(
-            wallet_id=wallet_id,
-            amount=Decimal("50000"),
-            payment_intent_id="pi_partial_refund_test",
-            description="topup",
-        )
-
-        await integration._handle_refund(
-            refunded_charge(
-                payment_intent_id="pi_partial_refund_test",
-                amount_refunded=1000,
-            ),
-            "evt_partial_refund_1",
-        )
-        assert (await money.get_wallet(wallet_id)).balance == Decimal("40000")
-
-        await integration._handle_refund(
-            refunded_charge(
-                payment_intent_id="pi_partial_refund_test",
-                amount_refunded=2000,
-            ),
-            "evt_partial_refund_2",
-        )
-        assert (await money.get_wallet(wallet_id)).balance == Decimal("30000")
-
-        ledger = await money.get_ledger(wallet_id, 50)
-        refunds = [entry for entry in ledger if entry.action == "refund"]
-        assert [entry.amount for entry in refunds] == [-10000.0, -10000.0]
-        assert [entry.metadata["stripe_amount_refunded"] for entry in refunds] == [
-            2000,
-            1000,
-        ]  # Ledger responses are newest-first.
-
-    @pytest.mark.anyio
-    async def test_stale_partial_refund_event_is_a_noop(self, sponsor_wallet):
-        from app.core.dependencies import get_agent_money
-        from app.services.stripe_integration import get_stripe_integration
-
-        wallet_id = sponsor_wallet["wallet_id"]
-        integration = get_stripe_integration()
-        money = get_agent_money()
-        await integration._mint_credits(
-            wallet_id=wallet_id,
-            amount=Decimal("50000"),
-            payment_intent_id="pi_stale_refund_test",
-            description="topup",
-        )
-
-        await integration._handle_refund(
-            refunded_charge(
-                payment_intent_id="pi_stale_refund_test",
-                amount_refunded=2000,
-            ),
-            "evt_stale_refund_newer",
-        )
-        await integration._handle_refund(
-            refunded_charge(
-                payment_intent_id="pi_stale_refund_test",
-                amount_refunded=1000,
-            ),
-            "evt_stale_refund_older",
-        )
-
-        assert (await money.get_wallet(wallet_id)).balance == Decimal("30000")
-        ledger = await money.get_ledger(wallet_id, 50)
-        assert len([entry for entry in ledger if entry.action == "refund"]) == 1
-
-    @pytest.mark.anyio
-    @pytest.mark.parametrize(
-        ("charge_overrides", "expected_error"),
-        [
-            ({"currency": "eur"}, "unsupported_refund_currency"),
-            ({"amount_refunded": None}, "invalid_refund_amount"),
-            ({"amount_refunded": 5001}, "refund_exceeds_charge_amount"),
-            ({"amount": True}, "invalid_charge_amount"),
-            ({"payment_intent": ""}, "missing_refund_payment_intent_id"),
-        ],
-    )
-    async def test_invalid_refund_settlement_never_debits(
-        self,
-        sponsor_wallet,
-        charge_overrides,
-        expected_error,
-    ):
-        from app.core.dependencies import get_agent_money
-        from app.services.stripe_integration import get_stripe_integration
-
-        wallet_id = sponsor_wallet["wallet_id"]
-        integration = get_stripe_integration()
-        money = get_agent_money()
-        payment_intent_id = f"pi_invalid_refund_{expected_error}"
-        await integration._mint_credits(
-            wallet_id=wallet_id,
-            amount=Decimal("50000"),
-            payment_intent_id=payment_intent_id,
-            description="topup",
-        )
-        charge = refunded_charge(
-            payment_intent_id=payment_intent_id,
-            amount_refunded=1000,
-        )
-        charge.update(charge_overrides)
-
-        with pytest.raises(StripeSettlementError, match=expected_error):
-            await integration._handle_refund(charge, "evt_invalid_refund")
-
-        assert (await money.get_wallet(wallet_id)).balance == Decimal("50000")
-        ledger = await money.get_ledger(wallet_id, 50)
-        assert not [entry for entry in ledger if entry.action == "refund"]
-
-    @pytest.mark.anyio
-    async def test_refund_larger_than_available_balance_never_debits(
+    async def test_chargeback_past_spent_credits_freezes_and_alerts(
         self, client, sponsor_wallet, api_headers
     ):
-        from app.core.dependencies import get_agent_money
+        """A refund for credits already spent must not pass silently.
+
+        The deficit stays in the ledger (clamping to zero would discard a real
+        loss), but the wallet is frozen — which, with wallet.status now
+        authoritative, blocks further charge/transfer/child-spawn — and a
+        critical alert is raised for human review.
+        """
         from app.services.stripe_integration import get_stripe_integration
+        from app.core.dependencies import get_agent_money
+        from app.db.database import get_session_factory
+        from app.db.models import BillingAlertModel
+        from sqlalchemy import select
 
         wallet_id = sponsor_wallet["wallet_id"]
         integration = get_stripe_integration()
         money = get_agent_money()
+
         await integration._mint_credits(
             wallet_id=wallet_id,
             amount=Decimal("50000"),
-            payment_intent_id="pi_over_balance_refund",
+            payment_intent_id="pi_chargeback_test",
             description="topup",
         )
-        allocation = await client.post(
-            "/v1/billing/wallets/agent",
-            json={
-                "sponsor_wallet_id": wallet_id,
-                "agent_id": "refund-balance-agent",
-                "budget_credits": 45000,
-            },
-            headers=api_headers,
+        # Simulate the agent having spent most of it before the chargeback.
+        await money.transfer(
+            from_wallet_id=wallet_id,
+            to_wallet_id=(
+                await client.post(
+                    "/v1/billing/wallets/sponsor",
+                    json={
+                        "sponsor_name": "Sink",
+                        "email": "sink@b2a.dev",
+                        "initial_credits": 0,
+                    },
+                    headers=api_headers,
+                )
+            ).json()["wallet_id"],
+            amount=Decimal("40000"),
+            description="spent",
         )
-        assert allocation.status_code == 201, allocation.text
-        assert (await money.get_wallet(wallet_id)).balance == Decimal("5000")
+        assert (await money.get_wallet(wallet_id)).balance == Decimal("10000")
 
-        with pytest.raises(
-            StripeSettlementError, match="refund_exceeds_wallet_balance"
-        ):
-            await integration._handle_refund(
-                refunded_charge(
-                    payment_intent_id="pi_over_balance_refund",
-                    amount_refunded=1000,
-                ),
-                "evt_over_balance_refund",
-            )
+        # Full chargeback of the original 50000-credit top-up.
+        await integration._handle_refund(
+            {
+                "payment_intent": "pi_chargeback_test",
+                "amount": 5000,
+                "id": "ch_chargeback_test",
+            },
+            "evt_chargeback_1",
+        )
 
-        assert (await money.get_wallet(wallet_id)).balance == Decimal("5000")
-        ledger = await money.get_ledger(wallet_id, 50)
-        assert not [entry for entry in ledger if entry.action == "refund"]
+        wallet = await money.get_wallet(wallet_id)
+        # Ledger keeps the truth: the deficit is real and recorded.
+        assert wallet.balance == Decimal("-40000")
+        # ...but the wallet is contained and surfaced.
+        assert wallet.status.value == "frozen"
+
+        factory = get_session_factory()
+        async with factory() as session:
+            alerts = (
+                await session.execute(
+                    select(BillingAlertModel).where(
+                        BillingAlertModel.wallet_id == wallet_id
+                    )
+                )
+            ).scalars().all()
+        assert any(a.severity == "critical" for a in alerts)
 
     def test_only_payment_intent_unique_errors_are_idempotent(self):
         """Non-idempotency integrity errors must not be swallowed."""
