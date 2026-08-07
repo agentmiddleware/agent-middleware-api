@@ -6,7 +6,7 @@ unbound token could rotate forever through that sibling. The application now
 fails closed on NULL bindings, and this data migration durably revokes every
 historical row that cannot be attributed to a key.
 
-Revision ID: 028_revoke_unbound_refresh_tokens
+Revision ID: 028_revoke_unbound_refresh
 Revises: 027_governed_mcp_identity
 """
 
@@ -15,7 +15,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "028_revoke_unbound_refresh_tokens"
+revision: str = "028_revoke_unbound_refresh"
 down_revision: Union[str, None] = "027_governed_mcp_identity"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

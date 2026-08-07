@@ -48,7 +48,7 @@ Do not mount AWI/media/oracle for this session.
 
 ## Rolling deployment safety
 
-Apply Alembic through the current head (`028_revoke_unbound_refresh_tokens`)
+Apply Alembic through the current head (`028_revoke_unbound_refresh`)
 before current workers take traffic. Revision `027_governed_mcp_identity` adds
 a rolling-compatible unique index that serializes pre-026 physical MCP endpoint
 keys with the current `/mcp/invoke` identity. Revision 028 revokes historical
