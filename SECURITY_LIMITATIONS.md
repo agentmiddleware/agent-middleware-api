@@ -32,13 +32,13 @@ Keep these out of the wedge until a design partner requires them:
   redispatches automatically, and requires operator/upstream reconciliation.
 - Gateway exactly-once behavior does not make a remote side effect exactly
   once unless the upstream honors the forwarded idempotency key.
-- URL validation rejects unsafe destinations and redirects, but production
-  should still enforce a network egress allowlist/proxy for the single partner
-  origin. Application-level DNS checks do not themselves pin a resolved IP to
-  the later TLS connection.
-- The stored-result limit is enforced after the MCP client has decoded a wire
-  response. The controlled pilot therefore trusts its allowlisted partner not
-  to send a pathological wire-level response.
+- URL validation rejects unsafe destinations and redirects, then pins one
+  validated resolved address through the later connection while preserving the
+  configured HTTP Host and TLS SNI. Production should still enforce a network
+  egress allowlist/proxy for the single partner origin as defense in depth.
+- The upstream limit is enforced on the streamed identity-encoded HTTP body,
+  including the JSON-RPC envelope, before buffering and parsing. Retained
+  decoded discovery and result payloads are bounded again after validation.
 - No public uptime SLA, compliance scope, RTO/RPO, tenant-isolation guarantee,
   or immutable-ledger claim is made.
 - Sandbox and AWI/browser automation are not production isolation boundaries.

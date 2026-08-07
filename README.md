@@ -239,7 +239,10 @@ loopback URL in local or test environments. The gateway forwards the invocation
 idempotency key as MCP request metadata, but remote exactly-once behavior still
 depends on the upstream honoring it. Inspect `/health/dependencies` for
 payload-free call, dispatch-state, uncertainty, and reconciliation-backlog
-counts. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md)
+counts. Upstream discovery keeps the legacy numeric `creditsPerCall` annotation
+and adds the authoritative Decimal string `creditsPerCallExact`; clients doing
+budget math must prefer the exact field. See
+[docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md)
 for the live checklist and failure semantics.
 
 ## Governed MCP call shape
@@ -375,10 +378,12 @@ The supported API deployment path is the repository Dockerfile on Railway:
 - Wallet isolation is enforced by application authorization and query scoping;
   PostgreSQL row-level security and a public multi-tenant isolation guarantee
   are not implemented.
-- Upstream URL checks do not pin DNS through the later TLS connection.
-  Production operators still need a network egress allowlist or proxy.
-- Upstream result limits are enforced after protocol decoding, not as a
-  streaming wire-byte limit.
+- Upstream connections pin one validated resolved address for the session while
+  preserving the configured HTTP Host and TLS SNI. Production operators should
+  still enforce a network egress allowlist or proxy as defense in depth.
+- Upstream responses are capped while streaming the identity-encoded wire body,
+  including the JSON-RPC envelope, and retained decoded payloads are capped
+  again after protocol validation.
 - AWI/browser and sandbox proof surfaces are not production isolation
   boundaries.
 

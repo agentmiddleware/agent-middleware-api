@@ -29,7 +29,11 @@ class WalletModel(SQLModel, table=True):
     email: Optional[str] = Field(default=None, max_length=255)
 
     # Monetary fields - all Decimal for precision
-    balance: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=8)
+    # Provider-authoritative refunds can leave a sponsor with a negative
+    # balance after the corresponding credits have already been delegated or
+    # spent. In that state the balance is the durable liability and the Stripe
+    # settlement path keeps the wallet non-spendable for operator review.
+    balance: Decimal = Field(default=Decimal("0"), decimal_places=8)
     lifetime_credits: Decimal = Field(default=Decimal("0"), decimal_places=8)
     lifetime_debits: Decimal = Field(default=Decimal("0"), decimal_places=8)
 
@@ -99,7 +103,9 @@ class LedgerEntryModel(SQLModel, table=True):
     # Transaction details
     action: str = Field(max_length=20)
     amount: Decimal = Field(decimal_places=8)  # Positive = credit, negative = debit
-    balance_after: Decimal = Field(ge=0, decimal_places=8)
+    # May be negative only when a provider refund records an unfunded sponsor
+    # liability; the associated wallet is frozen in the same transaction.
+    balance_after: Decimal = Field(decimal_places=8)
 
     # Service categorization
     service_category: Optional[str] = Field(default=None, max_length=50, index=True)

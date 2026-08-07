@@ -2044,6 +2044,9 @@ def _registered_tool_cost(
     category: ServiceCategory,
 ) -> Decimal:
     default_price = DEFAULT_PRICING[category][1]
+    exact_price = service.get("credits_per_unit_exact")
+    if exact_price is not None:
+        return Decimal(str(exact_price))
     return Decimal(str(service.get("credits_per_unit", default_price)))
 
 

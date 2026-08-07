@@ -99,6 +99,33 @@ async def test_frozen_wallet_cannot_spawn_child(client, clean_database):
 
 
 @pytest.mark.anyio
+async def test_frozen_sponsor_cannot_provision_agent_with_positive_balance(
+    client, clean_database
+):
+    sponsor, _ = await _make_agent(client, budget=5000, initial=10000)
+    await _set_status(sponsor, "frozen")
+
+    response = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor,
+            "agent_id": "blocked-after-freeze",
+            "budget_credits": 1000,
+        },
+        headers=BOOTSTRAP,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"] == "wallet_error"
+    assert "frozen" in response.json()["detail"]["message"]
+    sponsor_response = await client.get(
+        f"/v1/billing/wallets/{sponsor}", headers=BOOTSTRAP
+    )
+    assert sponsor_response.json()["balance"] == 5000
+    assert sponsor_response.json()["status"] == "frozen"
+
+
+@pytest.mark.anyio
 async def test_child_cap_enforced_on_transfer(client, clean_database):
     _, agent = await _make_agent(client)
     _, sink = await _make_agent(client)

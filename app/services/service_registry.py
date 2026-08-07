@@ -144,6 +144,8 @@ def _service_to_mcp_tool(service: dict) -> dict:
         "unitName": service.get("unit_name", "call"),
         "category": service.get("category", "custom"),
     }
+    if service.get("credits_per_unit_exact") is not None:
+        annotations["creditsPerCallExact"] = service["credits_per_unit_exact"]
 
     if service.get("require_permit"):
         annotations["requirePermit"] = True
@@ -251,6 +253,7 @@ class ServiceRegistry:
         credits_per_unit: float,
         upstream_tool_name: str,
         upstream_origin: str,
+        credits_per_unit_exact: str | None = None,
     ) -> dict[str, Any]:
         """Register one runtime-backed remote MCP tool without persisting secrets."""
         existing = self._local_registry.get(service_id)
@@ -263,6 +266,7 @@ class ServiceRegistry:
             "description": description,
             "category": category.value,
             "credits_per_unit": credits_per_unit,
+            "credits_per_unit_exact": credits_per_unit_exact,
             "unit_name": "call",
             "input_schema": input_schema,
             "output_schema": output_schema,

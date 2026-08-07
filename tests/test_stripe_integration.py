@@ -506,6 +506,52 @@ class TestStripeWebhookIdempotency:
         assert len([entry for entry in ledger if entry.action == "refund"]) == 1
 
     @pytest.mark.anyio
+    async def test_refund_cannot_be_redirected_to_another_sponsor(
+        self, client, sponsor_wallet, api_headers
+    ):
+        from app.core.dependencies import get_agent_money
+        from app.services.stripe_integration import get_stripe_integration
+
+        original_wallet_id = sponsor_wallet["wallet_id"]
+        other_response = await client.post(
+            "/v1/billing/wallets/sponsor",
+            json={
+                "sponsor_name": "Other Stripe Sponsor",
+                "email": "other-stripe-sponsor@b2a.dev",
+                "initial_credits": 0,
+            },
+            headers=api_headers,
+        )
+        assert other_response.status_code == 201, other_response.text
+        other_wallet_id = other_response.json()["wallet_id"]
+
+        integration = get_stripe_integration()
+        money = get_agent_money()
+        await integration._mint_credits(
+            wallet_id=original_wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_tenant_bound_refund",
+            description="topup",
+        )
+        charge = refunded_charge(
+            payment_intent_id="pi_tenant_bound_refund",
+            amount_refunded=1000,
+        )
+        # Charge metadata is not an authority for wallet selection. The
+        # original, unique PaymentIntent ledger row remains the tenant binding.
+        charge["metadata"] = {"wallet_id": other_wallet_id}
+        await integration._handle_refund(charge, "evt_tenant_bound_refund")
+
+        assert (await money.get_wallet(original_wallet_id)).balance == Decimal("40000")
+        assert (await money.get_wallet(other_wallet_id)).balance == Decimal("0")
+        original_ledger = await money.get_ledger(original_wallet_id, 50)
+        other_ledger = await money.get_ledger(other_wallet_id, 50)
+        assert (
+            len([entry for entry in original_ledger if entry.action == "refund"]) == 1
+        )
+        assert not [entry for entry in other_ledger if entry.action == "refund"]
+
+    @pytest.mark.anyio
     @pytest.mark.parametrize(
         ("charge_overrides", "expected_error"),
         [
@@ -549,10 +595,14 @@ class TestStripeWebhookIdempotency:
         assert not [entry for entry in ledger if entry.action == "refund"]
 
     @pytest.mark.anyio
-    async def test_refund_larger_than_available_balance_never_debits(
+    async def test_refund_larger_than_available_balance_records_liability_once(
         self, client, sponsor_wallet, api_headers
     ):
+        from sqlalchemy import select
+
         from app.core.dependencies import get_agent_money
+        from app.db.database import get_session_factory
+        from app.db.models import BillingAlertModel
         from app.services.stripe_integration import get_stripe_integration
 
         wallet_id = sponsor_wallet["wallet_id"]
@@ -576,20 +626,162 @@ class TestStripeWebhookIdempotency:
         assert allocation.status_code == 201, allocation.text
         assert (await money.get_wallet(wallet_id)).balance == Decimal("5000")
 
-        with pytest.raises(
-            StripeSettlementError, match="refund_exceeds_wallet_balance"
+        charge = refunded_charge(
+            payment_intent_id="pi_over_balance_refund",
+            amount_refunded=1000,
+        )
+        refund_event = {
+            "id": "evt_over_balance_refund",
+            "type": "charge.refunded",
+            "data": {"object": charge},
+        }
+        with patch(
+            "app.services.stripe_integration.stripe.Webhook.construct_event",
+            return_value=refund_event,
         ):
-            await integration._handle_refund(
-                refunded_charge(
-                    payment_intent_id="pi_over_balance_refund",
-                    amount_refunded=1000,
-                ),
-                "evt_over_balance_refund",
+            first = await client.post(
+                "/v1/webhooks/stripe",
+                content=b"valid_refund",
+                headers={"stripe-signature": "valid_signature"},
             )
+            redelivery = await client.post(
+                "/v1/webhooks/stripe",
+                content=b"valid_refund_redelivery",
+                headers={"stripe-signature": "valid_signature"},
+            )
+        assert first.status_code == 200
+        assert redelivery.status_code == 200
 
-        assert (await money.get_wallet(wallet_id)).balance == Decimal("5000")
+        # A distinct event reporting the same cumulative Stripe amount must
+        # also converge without another debit, alert, or liability increase.
+        await integration._handle_refund(charge, "evt_same_cumulative_refund")
+
+        wallet = await money.get_wallet(wallet_id)
+        assert wallet.balance == Decimal("-5000")
+        assert wallet.status.value == "frozen"
+
         ledger = await money.get_ledger(wallet_id, 50)
-        assert not [entry for entry in ledger if entry.action == "refund"]
+        refunds = [entry for entry in ledger if entry.action == "refund"]
+        assert len(refunds) == 1
+        assert refunds[0].amount == -10000.0
+        assert refunds[0].balance_after == -5000.0
+        assert Decimal(refunds[0].metadata["refund_liability_credits"]) == Decimal(
+            "5000"
+        )
+        assert refunds[0].metadata["wallet_frozen_for_refund_liability"] is True
+
+        async with get_session_factory()() as session:
+            alerts = list(
+                (
+                    await session.execute(
+                        select(BillingAlertModel).where(
+                            BillingAlertModel.wallet_id == wallet_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        liability_alerts = [
+            alert
+            for alert in alerts
+            if alert.alert_type == "suspicious_activity"
+            and alert.severity == "critical"
+        ]
+        assert len(liability_alerts) == 1
+        assert liability_alerts[0].current_balance == Decimal("-5000")
+
+        # A later, independently settled top-up pays down the liability, but
+        # restoration of spending authority remains an explicit operator act.
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("6000"),
+            payment_intent_id="pi_refund_liability_repayment",
+            description="liability repayment topup",
+        )
+        replenished_wallet = await money.get_wallet(wallet_id)
+        assert replenished_wallet.balance == Decimal("1000")
+        assert replenished_wallet.status.value == "frozen"
+
+        # This is the exact containment boundary: a refund-induced freeze must
+        # still block agent provisioning after a later top-up makes the balance
+        # positive enough to fund it.
+        blocked_provision = await client.post(
+            "/v1/billing/wallets/agent",
+            json={
+                "sponsor_wallet_id": wallet_id,
+                "agent_id": "blocked-after-liability-repayment",
+                "budget_credits": 1,
+            },
+            headers=api_headers,
+        )
+        assert blocked_provision.status_code == 400
+        assert blocked_provision.json()["detail"]["error"] == "wallet_error"
+        assert "frozen" in blocked_provision.json()["detail"]["message"]
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("existing_status", ["suspended", "closed"])
+    async def test_refund_liability_preserves_existing_non_spendable_status(
+        self, client, sponsor_wallet, api_headers, existing_status
+    ):
+        from sqlalchemy import select
+
+        from app.core.dependencies import get_agent_money
+        from app.db.database import get_session_factory
+        from app.db.models import WalletModel
+        from app.services.stripe_integration import get_stripe_integration
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        payment_intent_id = f"pi_refund_existing_{existing_status}"
+        integration = get_stripe_integration()
+        money = get_agent_money()
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id=payment_intent_id,
+            description="topup",
+        )
+        allocation = await client.post(
+            "/v1/billing/wallets/agent",
+            json={
+                "sponsor_wallet_id": wallet_id,
+                "agent_id": f"existing-{existing_status}-agent",
+                "budget_credits": 45000,
+            },
+            headers=api_headers,
+        )
+        assert allocation.status_code == 201, allocation.text
+
+        async with get_session_factory()() as session:
+            wallet = (
+                await session.execute(
+                    select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                )
+            ).scalar_one()
+            wallet.status = existing_status
+            session.add(wallet)
+            await session.commit()
+
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id=payment_intent_id,
+                amount_refunded=1000,
+            ),
+            f"evt_refund_existing_{existing_status}",
+        )
+
+        persisted_wallet = await money.get_wallet(wallet_id)
+        assert persisted_wallet.balance == Decimal("-5000")
+        assert persisted_wallet.status.value == existing_status
+        refunds = [
+            entry
+            for entry in await money.get_ledger(wallet_id, 50)
+            if entry.action == "refund"
+        ]
+        assert len(refunds) == 1
+        assert refunds[0].metadata["wallet_status_before_refund"] == existing_status
+        assert refunds[0].metadata["wallet_status_after_refund"] == existing_status
+        assert refunds[0].metadata["wallet_frozen_for_refund_liability"] is False
 
     def test_only_payment_intent_unique_errors_are_idempotent(self):
         """Non-idempotency integrity errors must not be swallowed."""

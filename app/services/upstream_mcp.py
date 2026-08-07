@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any, Protocol, cast
 from urllib.parse import SplitResult, urlsplit
 
@@ -51,6 +51,8 @@ _BLOCKED_HOSTNAMES = frozenset(
 _BLOCKED_HOST_SUFFIXES = (".internal", ".local")
 _MAX_DISCOVERY_PAGES = 100
 _MAX_DISCOVERY_TOOLS = 1024
+_CREDITS_QUANTUM = Decimal("0.00000001")
+_MAX_NUMERIC_20_8 = Decimal("999999999999.99999999")
 _GATEWAY_TOOL_DESCRIPTION = (
     "Governed remote MCP tool dispatched through the Agent Middleware trust plane."
 )
@@ -215,6 +217,22 @@ class UpstreamMcpConfiguration:
             raise UpstreamMcpConfigurationError(
                 "MCP_UPSTREAM_CREDITS_PER_CALL must be finite and greater than zero"
             )
+        if credits > _MAX_NUMERIC_20_8:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_CREDITS_PER_CALL must fit NUMERIC(20,8)"
+            )
+        try:
+            with localcontext() as context:
+                context.prec = 64
+                quantized_credits = credits.quantize(_CREDITS_QUANTUM)
+        except InvalidOperation:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_CREDITS_PER_CALL must fit NUMERIC(20,8)"
+            ) from None
+        if quantized_credits != credits:
+            raise UpstreamMcpConfigurationError(
+                "MCP_UPSTREAM_CREDITS_PER_CALL must use at most 8 decimal places"
+            )
         if (
             not math.isfinite(settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS)
             or settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS <= 0
@@ -245,7 +263,7 @@ class UpstreamMcpConfiguration:
             tool_name=settings.MCP_UPSTREAM_TOOL_NAME,
             public_tool_id=settings.MCP_UPSTREAM_PUBLIC_TOOL_ID,
             bearer_token=settings.MCP_UPSTREAM_BEARER_TOKEN,
-            credits_per_call=credits,
+            credits_per_call=quantized_credits,
             connect_timeout_seconds=settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
             call_timeout_seconds=settings.MCP_UPSTREAM_CALL_TIMEOUT_SECONDS,
             max_response_bytes=settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES,
@@ -308,8 +326,8 @@ async def validate_upstream_url(
     configuration: UpstreamMcpConfiguration,
     *,
     resolver: Resolver | None = None,
-) -> None:
-    """Reject unsafe upstream destinations before opening a network session."""
+) -> str:
+    """Validate the destination and return the address to pin for connection."""
     parts = _parse_url_shape(configuration.url)
     host = (parts.hostname or "").strip("[]").rstrip(".").lower()
     if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_HOST_SUFFIXES):
@@ -373,6 +391,192 @@ async def validate_upstream_url(
         raise UpstreamMcpConfigurationError(
             "MCP_UPSTREAM_URL must not resolve to private, loopback, link-local, metadata, or reserved addresses"
         )
+    return str(parsed_addresses[0])
+
+
+@dataclass
+class _ResponseGuardState:
+    rejection_code: str | None = None
+    rejected: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+
+    def reject(self, code: str) -> None:
+        if self.rejection_code is None:
+            self.rejection_code = code
+            self.rejected.set()
+
+
+class _GuardedResponseRejected(RuntimeError):
+    """Internal marker for a response rejected before buffering or parsing."""
+
+
+class _BoundedResponseStream(httpx.AsyncByteStream):
+    def __init__(
+        self,
+        stream: httpx.AsyncByteStream,
+        *,
+        limit: int,
+        state: _ResponseGuardState,
+    ) -> None:
+        self._stream = stream
+        self._limit = limit
+        self._state = state
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        received = 0
+        async for chunk in self._stream:
+            received += len(chunk)
+            if received > self._limit:
+                self._state.reject("upstream_response_too_large")
+                await self._stream.aclose()
+                raise _GuardedResponseRejected("upstream_response_too_large")
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+class _DelegatedResponseStream(httpx.AsyncByteStream):
+    """Keep an injected client's streamed response alive without owning the client."""
+
+    def __init__(self, response: httpx.Response) -> None:
+        self._response = response
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        if self._response.is_stream_consumed:
+            if self._response.content:
+                yield self._response.content
+            return
+        async for chunk in self._response.aiter_raw():
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._response.aclose()
+
+
+class _InjectedClientTransport(httpx.AsyncBaseTransport):
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await self._client.send(
+            request,
+            follow_redirects=False,
+            stream=True,
+        )
+        return httpx.Response(
+            response.status_code,
+            headers=response.headers,
+            stream=_DelegatedResponseStream(response),
+            extensions=response.extensions,
+        )
+
+
+class _PinnedAsyncTransport(httpx.AsyncBaseTransport):
+    """Connect to one validated address while retaining HTTP Host and TLS SNI."""
+
+    def __init__(
+        self,
+        configuration: UpstreamMcpConfiguration,
+        *,
+        pinned_address: str,
+        response_guard: _ResponseGuardState,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        parts = _parse_url_shape(configuration.url)
+        self._expected_url = httpx.URL(configuration.url)
+        self._expected_host_header = self._expected_url.netloc.decode("ascii")
+        self._server_name = (parts.hostname or "").strip("[]").rstrip(".").lower()
+        self._pinned_address = pinned_address
+        self._max_response_bytes = configuration.max_response_bytes
+        self._response_guard = response_guard
+        self._transport = transport or httpx.AsyncHTTPTransport(
+            verify=True,
+            retries=0,
+            trust_env=False,
+        )
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if (
+            request.url != self._expected_url
+            or request.headers.get("Host") != self._expected_host_header
+        ):
+            raise UpstreamMcpConfigurationError(
+                "upstream MCP HTTP client attempted an unconfigured endpoint"
+            )
+
+        extensions = dict(request.extensions)
+        extensions["sni_hostname"] = self._server_name
+        pinned_request = httpx.Request(
+            request.method,
+            request.url.copy_with(host=self._pinned_address),
+            headers=request.headers,
+            stream=request.stream,
+            extensions=extensions,
+        )
+        response = await self._transport.handle_async_request(pinned_request)
+
+        content_encoding = response.headers.get("content-encoding", "identity")
+        if content_encoding.strip().lower() not in {"", "identity"}:
+            self._response_guard.reject("upstream_response_invalid")
+            await response.aclose()
+            raise _GuardedResponseRejected("upstream_response_invalid")
+
+        content_length = response.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_length = int(content_length)
+            except ValueError:
+                self._response_guard.reject("upstream_response_invalid")
+                await response.aclose()
+                raise _GuardedResponseRejected("upstream_response_invalid") from None
+            if declared_length < 0:
+                self._response_guard.reject("upstream_response_invalid")
+                await response.aclose()
+                raise _GuardedResponseRejected("upstream_response_invalid")
+            if declared_length > self._max_response_bytes:
+                self._response_guard.reject("upstream_response_too_large")
+                await response.aclose()
+                raise _GuardedResponseRejected("upstream_response_too_large")
+
+        # This is the identity-encoded HTTP body cap, including the JSON-RPC
+        # envelope. Discovery and tool results are separately capped after
+        # parsing so their retained canonical payloads cannot exceed the limit.
+        return httpx.Response(
+            response.status_code,
+            headers=response.headers,
+            stream=_BoundedResponseStream(
+                cast(httpx.AsyncByteStream, response.stream),
+                limit=self._max_response_bytes,
+                state=self._response_guard,
+            ),
+            extensions=response.extensions,
+        )
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+
+async def _await_guarded_response(
+    operation: Awaitable[Any],
+    *,
+    response_guard: _ResponseGuardState,
+) -> Any:
+    """Stop waiting on the MCP SDK as soon as its HTTP stream is rejected."""
+    operation_task = asyncio.ensure_future(operation)
+    rejection_task = asyncio.create_task(response_guard.rejected.wait())
+    try:
+        await asyncio.wait(
+            {operation_task, rejection_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if response_guard.rejection_code is not None:
+            raise _GuardedResponseRejected(response_guard.rejection_code)
+        return await operation_task
+    finally:
+        for task in (operation_task, rejection_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(operation_task, rejection_task, return_exceptions=True)
 
 
 def _contains_exact_secret(value: Any, secret: str) -> bool:
@@ -458,7 +662,23 @@ class UpstreamMcpAdapter:
         return self._discovered_tool
 
     @asynccontextmanager
-    async def _http_client(self) -> AsyncIterator[httpx.AsyncClient]:
+    async def _http_client(
+        self,
+        *,
+        response_guard: _ResponseGuardState | None = None,
+    ) -> AsyncIterator[httpx.AsyncClient]:
+        active_guard = response_guard or _ResponseGuardState()
+        if self._injected_http_client is not None and is_production_like_environment(
+            self.configuration.environment
+        ):
+            raise UpstreamMcpConfigurationError(
+                "injected upstream MCP HTTP clients are not allowed in production"
+            )
+        active_address = await validate_upstream_url(
+            self.configuration,
+            resolver=self._resolver,
+        )
+        delegated_transport: httpx.AsyncBaseTransport | None = None
         if self._injected_http_client is not None:
             if self._injected_http_client.follow_redirects:
                 raise UpstreamMcpConfigurationError(
@@ -474,8 +694,7 @@ class UpstreamMcpAdapter:
                 raise UpstreamMcpConfigurationError(
                     "injected upstream MCP HTTP client must carry the configured bearer credential"
                 )
-            yield self._injected_http_client
-            return
+            delegated_transport = _InjectedClientTransport(self._injected_http_client)
 
         token = self.configuration.bearer_token.get_secret_value()
         timeout = httpx.Timeout(
@@ -484,17 +703,31 @@ class UpstreamMcpAdapter:
             write=self.configuration.call_timeout_seconds,
             pool=self.configuration.connect_timeout_seconds,
         )
+        transport = _PinnedAsyncTransport(
+            self.configuration,
+            pinned_address=active_address,
+            response_guard=active_guard,
+            transport=delegated_transport,
+        )
         async with httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept-Encoding": "identity",
+            },
             timeout=timeout,
             follow_redirects=False,
             trust_env=False,
+            transport=transport,
         ) as client:
             yield client
 
     @asynccontextmanager
-    async def _session(self) -> AsyncIterator[McpSession]:
-        async with self._http_client() as client:
+    async def _session(
+        self,
+        *,
+        response_guard: _ResponseGuardState | None = None,
+    ) -> AsyncIterator[McpSession]:
+        async with self._http_client(response_guard=response_guard) as client:
             async with streamable_http_client(
                 self.configuration.url,
                 http_client=client,
@@ -503,25 +736,39 @@ class UpstreamMcpAdapter:
                 async with ClientSession(read_stream, write_stream) as session:
                     yield cast(McpSession, session)
 
-    async def _initialize_session(self, session: McpSession) -> None:
+    async def _initialize_session(
+        self,
+        session: McpSession,
+        *,
+        response_guard: _ResponseGuardState,
+    ) -> None:
         async with asyncio.timeout(self.configuration.call_timeout_seconds):
-            await session.initialize()
+            await _await_guarded_response(
+                session.initialize(),
+                response_guard=response_guard,
+            )
 
     async def discover_tool(self) -> DiscoveredUpstreamTool:
         """Initialize the upstream and cache the exact configured tool schema."""
-        await validate_upstream_url(self.configuration, resolver=self._resolver)
         matches: list[Any] = []
         discovered_bytes = 0
         discovered_tool_count = 0
         cursor: str | None = None
         seen_cursors: set[str] = set()
         secret = self.configuration.bearer_token.get_secret_value()
+        response_guard = _ResponseGuardState()
         try:
-            async with self._session() as session:
-                await self._initialize_session(session)
+            async with self._session(response_guard=response_guard) as session:
+                await self._initialize_session(
+                    session,
+                    response_guard=response_guard,
+                )
                 for _page in range(_MAX_DISCOVERY_PAGES):
                     async with asyncio.timeout(self.configuration.call_timeout_seconds):
-                        page = await session.list_tools(cursor=cursor)
+                        page = await _await_guarded_response(
+                            session.list_tools(cursor=cursor),
+                            response_guard=response_guard,
+                        )
                     page_payload = page.model_dump(
                         mode="json",
                         by_alias=True,
@@ -564,6 +811,14 @@ class UpstreamMcpAdapter:
         except UpstreamMcpConfigurationError:
             raise
         except Exception:
+            if response_guard.rejection_code == "upstream_response_too_large":
+                raise UpstreamMcpConfigurationError(
+                    "upstream MCP response exceeds the configured size limit"
+                ) from None
+            if response_guard.rejection_code is not None:
+                raise UpstreamMcpConfigurationError(
+                    "upstream MCP response is invalid"
+                ) from None
             raise UpstreamMcpConfigurationError(
                 "upstream MCP discovery or initialization failed"
             ) from None
@@ -652,17 +907,16 @@ class UpstreamMcpAdapter:
         if not invocation_id or not idempotency_key:
             raise UpstreamMcpPreDispatchError("upstream_invocation_context_missing")
 
-        try:
-            await validate_upstream_url(self.configuration, resolver=self._resolver)
-        except UpstreamMcpConfigurationError:
-            raise
-
         dispatch_started = False
         canonical_result: UpstreamMcpResult | None = None
         response_rejected: UpstreamMcpResponseRejectedError | None = None
+        response_guard = _ResponseGuardState()
         try:
-            async with self._session() as session:
-                await self._initialize_session(session)
+            async with self._session(response_guard=response_guard) as session:
+                await self._initialize_session(
+                    session,
+                    response_guard=response_guard,
+                )
                 try:
                     await before_dispatch()
                 except Exception:
@@ -672,16 +926,19 @@ class UpstreamMcpAdapter:
                 dispatch_started = True
                 try:
                     async with asyncio.timeout(self.configuration.call_timeout_seconds):
-                        result = await session.call_tool(
-                            self.configuration.tool_name,
-                            arguments,
-                            read_timeout_seconds=timedelta(
-                                seconds=self.configuration.call_timeout_seconds
+                        result = await _await_guarded_response(
+                            session.call_tool(
+                                self.configuration.tool_name,
+                                arguments,
+                                read_timeout_seconds=timedelta(
+                                    seconds=self.configuration.call_timeout_seconds
+                                ),
+                                meta={
+                                    "io.agentmiddleware/invocation_id": invocation_id,
+                                    "io.agentmiddleware/idempotency_key": idempotency_key,
+                                },
                             ),
-                            meta={
-                                "io.agentmiddleware/invocation_id": invocation_id,
-                                "io.agentmiddleware/idempotency_key": idempotency_key,
-                            },
+                            response_guard=response_guard,
                         )
                     canonical_result = self._canonicalize_result(result)
                 except UpstreamMcpResponseRejectedError as exc:
@@ -689,12 +946,28 @@ class UpstreamMcpAdapter:
         except UpstreamMcpError:
             raise
         except (ValidationError, json.JSONDecodeError):
+            if response_guard.rejection_code is not None:
+                if dispatch_started:
+                    raise UpstreamMcpResponseRejectedError(
+                        response_guard.rejection_code
+                    ) from None
+                raise UpstreamMcpPreDispatchError(
+                    response_guard.rejection_code
+                ) from None
             if dispatch_started:
                 raise UpstreamMcpResponseRejectedError(
                     "upstream_response_invalid"
                 ) from None
             raise UpstreamMcpPreDispatchError() from None
         except Exception:
+            if response_guard.rejection_code is not None:
+                if dispatch_started:
+                    raise UpstreamMcpResponseRejectedError(
+                        response_guard.rejection_code
+                    ) from None
+                raise UpstreamMcpPreDispatchError(
+                    response_guard.rejection_code
+                ) from None
             if canonical_result is not None or response_rejected is not None:
                 # The terminal response is already known. A close/terminate
                 # failure cannot change its outcome and must not create false
@@ -795,4 +1068,5 @@ async def register_configured_upstream_mcp(
         credits_per_unit=float(configuration.credits_per_call),
         upstream_tool_name=configuration.tool_name,
         upstream_origin=configuration.origin,
+        credits_per_unit_exact=format(configuration.credits_per_call, "f"),
     )

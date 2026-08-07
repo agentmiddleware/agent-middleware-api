@@ -21,8 +21,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 
 from ..db.database import get_session_factory
-from ..db.models import WalletModel, LedgerEntryModel
+from ..db.models import BillingAlertModel, LedgerEntryModel, WalletModel
 from ..core.config import get_settings
+from ..schemas.billing import AlertSeverity, AlertType, WalletStatus
 from .agent_money import WalletNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -401,11 +402,48 @@ class StripeIntegration:
                             payment_intent_id,
                         )
                         return
-                    if refund_delta > wallet.balance:
-                        raise StripeSettlementError("refund_exceeds_wallet_balance")
-
                     wallet.balance -= refund_delta
                     wallet.lifetime_debits += refund_delta
+                    refund_liability = max(Decimal("0"), -wallet.balance)
+                    wallet_status_before_refund = wallet.status
+                    wallet_frozen_for_liability = False
+                    if refund_liability > 0:
+                        # Stripe has already returned the fiat, so rejecting the
+                        # event because credits were spent would leave the books
+                        # wrong forever. Preserve the negative balance as the
+                        # sponsor's durable liability and contain further spend.
+                        # Do not weaken a pre-existing closed/suspended state.
+                        if wallet.status not in {
+                            WalletStatus.FROZEN.value,
+                            WalletStatus.SUSPENDED.value,
+                            WalletStatus.CLOSED.value,
+                        }:
+                            wallet.status = WalletStatus.FROZEN.value
+                        wallet_frozen_for_liability = (
+                            wallet.status == WalletStatus.FROZEN.value
+                        )
+                        session.add(
+                            BillingAlertModel(
+                                alert_id=str(uuid4())[:12],
+                                wallet_id=wallet.wallet_id,
+                                alert_type=AlertType.SUSPICIOUS_ACTIVITY.value,
+                                current_balance=wallet.balance,
+                                message=(
+                                    f"Stripe refund created a {refund_liability} "
+                                    "credit liability. Wallet contained with status "
+                                    f"{wallet.status} (previously "
+                                    f"{wallet_status_before_refund}) pending review."
+                                ),
+                                severity=AlertSeverity.CRITICAL.value,
+                            )
+                        )
+                        logger.critical(
+                            "Stripe refund created a %s credit liability for "
+                            "wallet %s; wallet status=%s pending review.",
+                            refund_liability,
+                            wallet.wallet_id,
+                            wallet.status,
+                        )
                     session.add(wallet)
                     session.add(
                         LedgerEntryModel(
@@ -422,6 +460,14 @@ class StripeIntegration:
                                     "stripe_charge_amount": charge_amount,
                                     "stripe_amount_refunded": amount_refunded,
                                     "refund_delta_credits": str(refund_delta),
+                                    "refund_liability_credits": str(refund_liability),
+                                    "wallet_frozen_for_refund_liability": (
+                                        wallet_frozen_for_liability
+                                    ),
+                                    "wallet_status_before_refund": (
+                                        wallet_status_before_refund
+                                    ),
+                                    "wallet_status_after_refund": wallet.status,
                                 },
                                 separators=(",", ":"),
                                 sort_keys=True,

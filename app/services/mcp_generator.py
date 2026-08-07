@@ -163,6 +163,8 @@ class McpGenerator:
             "simulation": truth["simulation"],
             "integrationStatus": truth["integration_status"],
         }
+        if service.get("credits_per_unit_exact") is not None:
+            annotations["creditsPerCallExact"] = service["credits_per_unit_exact"]
 
         if truth.get("runtime_service"):
             annotations["runtimeService"] = truth["runtime_service"]

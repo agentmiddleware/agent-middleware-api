@@ -179,6 +179,11 @@ class WalletEngine:
                     raise ValueError(
                         "Can only provision agent wallets from sponsor wallets"
                     )
+                if sponsor.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    raise ValueError(
+                        f"Sponsor wallet is {sponsor.status} and cannot provision "
+                        "agent wallets"
+                    )
                 if sponsor.balance < budget_credits:
                     raise self._insufficient_funds_error(
                         sponsor_wallet_id,

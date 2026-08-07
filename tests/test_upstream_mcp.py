@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+import json
 import logging
+import ssl
 from typing import Any
 
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
@@ -16,7 +25,9 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 from app.core.config import Settings
 from app.db.database import get_session_factory
 from app.db.models import WalletModel
+from app.routers.mcp import _registered_tool_cost
 from app.schemas.billing import ServiceCategory
+from app.services.mcp_generator import McpGenerator
 from app.services.service_registry import ServiceRegistry
 from app.services.upstream_mcp import (
     DiscoveredUpstreamTool,
@@ -104,6 +115,119 @@ class FakeSession:
         return self.result
 
 
+class ChunkedResponseStream(httpx.AsyncByteStream):
+    def __init__(self, body: bytes, *, chunk_size: int = 64) -> None:
+        self._chunks = [
+            body[offset : offset + chunk_size]
+            for offset in range(0, len(body), chunk_size)
+        ]
+        self.chunks_yielded = 0
+        self.closed = False
+
+    @property
+    def chunk_count(self) -> int:
+        return len(self._chunks)
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            self.chunks_yielded += 1
+            yield chunk
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def _streaming_mcp_client(
+    *,
+    oversized_method: str,
+) -> tuple[httpx.AsyncClient, list[ChunkedResponseStream]]:
+    oversized_streams: list[ChunkedResponseStream] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        request_id = payload.get("id")
+        method = payload["method"]
+        if request_id is None:
+            return httpx.Response(202)
+        if method == "initialize":
+            result: dict[str, Any] = {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "serverInfo": {"name": "partner", "version": "1.0"},
+            }
+        elif method == "tools/list":
+            result = {
+                "tools": [
+                    {
+                        "name": "partner.write",
+                        "description": "x" * 2_000,
+                        "inputSchema": {"type": "object"},
+                    }
+                ]
+            }
+        elif method == "tools/call":
+            result = {
+                "content": [{"type": "text", "text": "x" * 2_000}],
+                "isError": False,
+            }
+        else:  # pragma: no cover - the focused MCP lifecycle is deterministic
+            raise AssertionError(f"unexpected MCP method: {method}")
+
+        body = json.dumps(
+            {"jsonrpc": "2.0", "id": request_id, "result": result},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if method == oversized_method:
+            stream = ChunkedResponseStream(body)
+            oversized_streams.append(stream)
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "application/json"},
+                stream=stream,
+            )
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "application/json"},
+            content=body,
+        )
+
+    return (
+        httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            headers={"Authorization": "Bearer secret-partner-token"},
+            follow_redirects=False,
+        ),
+        oversized_streams,
+    )
+
+
+def _guarded_transport_case(
+    body: bytes,
+    *,
+    headers: dict[str, str] | None = None,
+    limit: int = 5,
+) -> tuple[UpstreamMcpAdapter, httpx.AsyncClient, ChunkedResponseStream]:
+    stream = ChunkedResponseStream(body, chunk_size=3)
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=headers, stream=stream)
+
+    injected = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        headers={"Authorization": "Bearer secret-partner-token"},
+        follow_redirects=False,
+    )
+    adapter = UpstreamMcpAdapter(
+        _configuration(
+            MCP_UPSTREAM_URL="https://partner.example/mcp",
+            MCP_UPSTREAM_MAX_RESPONSE_BYTES=limit,
+        ),
+        http_client=injected,
+        resolver=_global_resolver,
+    )
+    return adapter, injected, stream
+
+
 def _bind_session(
     adapter: UpstreamMcpAdapter,
     session: FakeSession,
@@ -111,7 +235,7 @@ def _bind_session(
     cleanup_error: Exception | None = None,
 ) -> None:
     @asynccontextmanager
-    async def session_context() -> AsyncIterator[FakeSession]:
+    async def session_context(**_kwargs: Any) -> AsyncIterator[FakeSession]:
         yield session
         if cleanup_error:
             raise cleanup_error
@@ -164,6 +288,37 @@ def test_configuration_uses_mcp_recommended_tool_name_characters() -> None:
 
 
 @pytest.mark.parametrize(
+    "credits",
+    [
+        "0.000000001",
+        "1.000000001",
+        "999999999999.999999999",
+        "1000000000000",
+        "1e1000",
+    ],
+)
+def test_configuration_rejects_credits_not_representable_as_numeric_20_8(
+    credits: str,
+) -> None:
+    with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
+        _configuration(MCP_UPSTREAM_CREDITS_PER_CALL=credits)
+
+    assert "MCP_UPSTREAM_CREDITS_PER_CALL" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "credits",
+    ["0.00000001", "7.500000000", "999999999999.99999999"],
+)
+def test_configuration_accepts_credits_representable_as_numeric_20_8(
+    credits: str,
+) -> None:
+    assert _configuration(
+        MCP_UPSTREAM_CREDITS_PER_CALL=credits
+    ).credits_per_call == Decimal(credits)
+
+
+@pytest.mark.parametrize(
     ("url", "environment"),
     [
         ("https://user:pass@example.com/mcp", "production"),
@@ -179,13 +334,16 @@ def test_configuration_rejects_unsafe_url_shapes(url: str, environment: str) -> 
 
 @pytest.mark.anyio
 async def test_url_guard_allows_only_public_https_or_local_loopback_http() -> None:
-    await validate_upstream_url(_configuration())
-    await validate_upstream_url(
-        _configuration(
-            MCP_UPSTREAM_URL="https://partner.example/mcp",
-            ENVIRONMENT="production",
-        ),
-        resolver=_global_resolver,
+    assert await validate_upstream_url(_configuration()) == "127.0.0.1"
+    assert (
+        await validate_upstream_url(
+            _configuration(
+                MCP_UPSTREAM_URL="https://partner.example/mcp",
+                ENVIRONMENT="production",
+            ),
+            resolver=_global_resolver,
+        )
+        == "93.184.216.34"
     )
 
     unsafe = [
@@ -239,6 +397,260 @@ async def test_default_http_client_disables_redirects_and_redacts_auth() -> None
 
 
 @pytest.mark.anyio
+async def test_http_transport_pins_validated_address_and_blocks_endpoint_drift() -> (
+    None
+):
+    captured_requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured_requests.append(request)
+        return httpx.Response(204)
+
+    resolver_calls = 0
+
+    async def rebinding_resolver(_host: str, _port: int | None) -> Sequence[str]:
+        nonlocal resolver_calls
+        resolver_calls += 1
+        if resolver_calls == 1:
+            return ("2606:4700:4700::1111",)
+        return ("127.0.0.1",)
+
+    injected = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        headers={"Authorization": "Bearer secret-partner-token"},
+        follow_redirects=False,
+    )
+    configuration = _configuration(
+        MCP_UPSTREAM_URL="https://partner.example:8443/mcp",
+    )
+    adapter = UpstreamMcpAdapter(
+        configuration,
+        http_client=injected,
+        resolver=rebinding_resolver,
+    )
+
+    async with adapter._http_client() as client:
+        response = await client.post(configuration.url)
+        assert response.status_code == 204
+        with pytest.raises(UpstreamMcpConfigurationError):
+            await client.post("https://attacker.example/mcp")
+        mismatched_host = client.build_request(
+            "POST",
+            configuration.url,
+            headers={"Host": "attacker.example"},
+        )
+        with pytest.raises(UpstreamMcpConfigurationError):
+            await client.send(mismatched_host)
+
+    assert resolver_calls == 1
+    assert len(captured_requests) == 1
+    connected_request = captured_requests[0]
+    assert connected_request.url == httpx.URL("https://[2606:4700:4700::1111]:8443/mcp")
+    assert connected_request.headers["Host"] == "partner.example:8443"
+    assert connected_request.headers["Authorization"] == ("Bearer secret-partner-token")
+    assert connected_request.headers["Accept-Encoding"] == "identity"
+    assert connected_request.extensions["sni_hostname"] == "partner.example"
+    await injected.aclose()
+
+
+@pytest.mark.anyio
+async def test_pinned_tls_connection_verifies_configured_hostname_and_sni(
+    tmp_path,
+) -> None:
+    now = datetime.now(timezone.utc)
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test MCP CA")])
+    ca_certificate = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(ca_key, hashes.SHA256())
+    )
+    server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    server_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    server_certificate = (
+        x509.CertificateBuilder()
+        .subject_name(server_name)
+        .issuer_name(ca_name)
+        .public_key(server_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName("localhost")]),
+            critical=False,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+            critical=False,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+
+    ca_path = tmp_path / "ca.pem"
+    certificate_path = tmp_path / "server.pem"
+    key_path = tmp_path / "server-key.pem"
+    ca_path.write_bytes(ca_certificate.public_bytes(serialization.Encoding.PEM))
+    certificate_path.write_bytes(
+        server_certificate.public_bytes(serialization.Encoding.PEM)
+    )
+    key_path.write_bytes(
+        server_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+
+    observed_sni: list[str | None] = []
+    observed_hosts: list[str] = []
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(certificate_path, key_path)
+    server_context.set_servername_callback(
+        lambda _socket, hostname, _context: observed_sni.append(hostname)
+    )
+
+    async def handle_connection(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        request_head = await reader.readuntil(b"\r\n\r\n")
+        for line in request_head.split(b"\r\n"):
+            if line.lower().startswith(b"host:"):
+                observed_hosts.append(line.split(b":", 1)[1].strip().decode("ascii"))
+        writer.write(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+            b"Content-Type: text/plain\r\nConnection: close\r\n\r\nok"
+        )
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(
+        handle_connection,
+        host="127.0.0.1",
+        port=0,
+        ssl=server_context,
+    )
+    socket_name = server.sockets[0].getsockname()
+    port = int(socket_name[1])
+    configuration = _configuration(
+        MCP_UPSTREAM_URL=f"https://localhost:{port}/mcp",
+    )
+    client_context = ssl.create_default_context(cafile=str(ca_path))
+    injected = httpx.AsyncClient(
+        verify=client_context,
+        headers={"Authorization": "Bearer secret-partner-token"},
+        follow_redirects=False,
+        trust_env=False,
+    )
+    adapter = UpstreamMcpAdapter(configuration, http_client=injected)
+
+    async with server:
+        async with adapter._http_client() as client:
+            response = await client.get(configuration.url)
+
+    assert response.text == "ok"
+    assert observed_sni == ["localhost"]
+    assert observed_hosts == [f"localhost:{port}"]
+    await injected.aclose()
+
+
+@pytest.mark.anyio
+async def test_injected_http_client_is_rejected_in_production() -> None:
+    injected = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(204)),
+        headers={"Authorization": "Bearer secret-partner-token"},
+        follow_redirects=False,
+    )
+    adapter = UpstreamMcpAdapter(
+        _configuration(
+            MCP_UPSTREAM_URL="https://partner.example/mcp",
+            ENVIRONMENT="production",
+        ),
+        http_client=injected,
+    )
+
+    with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
+        async with adapter._http_client():
+            pass
+
+    assert exc_info.value.detail == (
+        "injected upstream MCP HTTP clients are not allowed in production"
+    )
+    await injected.aclose()
+
+
+@pytest.mark.anyio
+async def test_transport_rejects_oversized_content_length_before_body() -> None:
+    adapter, injected, stream = _guarded_transport_case(
+        b"123456",
+        headers={"Content-Length": "6"},
+    )
+
+    with pytest.raises(RuntimeError, match="upstream_response_too_large"):
+        async with adapter._http_client() as client:
+            await client.get(adapter.configuration.url)
+
+    assert stream.chunks_yielded == 0
+    assert stream.closed is True
+    await injected.aclose()
+
+
+@pytest.mark.parametrize("headers", [{}, {"Content-Length": "5"}])
+@pytest.mark.anyio
+async def test_transport_stream_cap_rejects_missing_or_dishonest_content_length(
+    headers: dict[str, str],
+) -> None:
+    adapter, injected, stream = _guarded_transport_case(
+        b"123456",
+        headers=headers,
+    )
+
+    with pytest.raises(RuntimeError, match="upstream_response_too_large"):
+        async with adapter._http_client() as client:
+            await client.get(adapter.configuration.url)
+
+    assert stream.chunks_yielded == 2
+    assert stream.closed is True
+    await injected.aclose()
+
+
+@pytest.mark.anyio
+async def test_transport_accepts_response_at_exact_byte_limit() -> None:
+    adapter, injected, stream = _guarded_transport_case(b"12345")
+
+    async with adapter._http_client() as client:
+        response = await client.get(adapter.configuration.url)
+
+    assert response.content == b"12345"
+    assert stream.chunks_yielded == stream.chunk_count
+    assert stream.closed is True
+    await injected.aclose()
+
+
+@pytest.mark.anyio
+async def test_transport_rejects_non_identity_content_encoding_before_body() -> None:
+    adapter, injected, stream = _guarded_transport_case(
+        b"12345",
+        headers={"Content-Encoding": "gzip"},
+    )
+
+    with pytest.raises(RuntimeError, match="upstream_response_invalid"):
+        async with adapter._http_client() as client:
+            await client.get(adapter.configuration.url)
+
+    assert stream.chunks_yielded == 0
+    assert stream.closed is True
+    await injected.aclose()
+
+
+@pytest.mark.anyio
 async def test_injected_http_client_is_used_without_being_closed() -> None:
     injected = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda _request: None),
@@ -246,7 +658,8 @@ async def test_injected_http_client_is_used_without_being_closed() -> None:
     )
     adapter = UpstreamMcpAdapter(_configuration(), http_client=injected)
     async with adapter._http_client() as selected:
-        assert selected is injected
+        assert selected is not injected
+        assert selected.follow_redirects is False
     assert not injected.is_closed
     await injected.aclose()
 
@@ -270,6 +683,66 @@ async def test_injected_http_client_is_used_without_being_closed() -> None:
             pass
     assert "secret-partner-token" not in exc_info.value.detail
     await missing_credential.aclose()
+
+
+@pytest.mark.anyio
+async def test_discovery_stops_streaming_before_buffering_oversized_response() -> None:
+    client, oversized_streams = _streaming_mcp_client(oversized_method="tools/list")
+    adapter = UpstreamMcpAdapter(
+        _configuration(
+            MCP_UPSTREAM_URL="https://partner.example/mcp",
+            MCP_UPSTREAM_MAX_RESPONSE_BYTES=512,
+        ),
+        http_client=client,
+        resolver=_global_resolver,
+    )
+
+    with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
+        await adapter.discover_tool()
+
+    assert exc_info.value.detail == (
+        "upstream MCP response exceeds the configured size limit"
+    )
+    assert len(oversized_streams) == 1
+    stream = oversized_streams[0]
+    assert stream.chunks_yielded < stream.chunk_count
+    assert stream.closed is True
+    await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_call_stops_streaming_before_buffering_oversized_response() -> None:
+    client, oversized_streams = _streaming_mcp_client(oversized_method="tools/call")
+    adapter = UpstreamMcpAdapter(
+        _configuration(
+            MCP_UPSTREAM_URL="https://partner.example/mcp",
+            MCP_UPSTREAM_MAX_RESPONSE_BYTES=512,
+        ),
+        http_client=client,
+        resolver=_global_resolver,
+    )
+    _mark_discovered(adapter)
+    dispatch_committed = False
+
+    async def before_dispatch() -> None:
+        nonlocal dispatch_committed
+        dispatch_committed = True
+
+    with pytest.raises(UpstreamMcpResponseRejectedError) as exc_info:
+        await adapter.call_tool(
+            {},
+            invocation_id="inv",
+            idempotency_key="idem",
+            before_dispatch=before_dispatch,
+        )
+
+    assert dispatch_committed is True
+    assert exc_info.value.code == "upstream_response_too_large"
+    assert len(oversized_streams) == 1
+    stream = oversized_streams[0]
+    assert stream.chunks_yielded < stream.chunk_count
+    assert stream.closed is True
+    await client.aclose()
 
 
 @pytest.mark.anyio
@@ -878,6 +1351,48 @@ async def test_startup_helper_registers_cached_upstream_executor(monkeypatch) ->
         registry.get_executor("partner.notes.write"),
         UpstreamMcpAdapter,
     )
+
+
+@pytest.mark.parametrize(
+    "credits",
+    ["0.00000001", "999999999999.99999999"],
+)
+@pytest.mark.anyio
+async def test_upstream_registration_preserves_exact_min_and_max_cost(
+    monkeypatch,
+    credits: str,
+) -> None:
+    discovered = DiscoveredUpstreamTool(
+        name="partner.write",
+        description="Partner write",
+        input_schema={"type": "object"},
+        output_schema=None,
+    )
+
+    async def fake_discover(self: UpstreamMcpAdapter) -> DiscoveredUpstreamTool:
+        self._discovered_tool = discovered
+        return discovered
+
+    monkeypatch.setattr(UpstreamMcpAdapter, "discover_tool", fake_discover)
+    registry = ServiceRegistry()
+    registered = await register_configured_upstream_mcp(
+        settings=_settings(MCP_UPSTREAM_CREDITS_PER_CALL=credits),
+        registry=registry,
+    )
+
+    assert registered is not None
+    expected = Decimal(credits).quantize(Decimal("0.00000001"))
+    assert registered["credits_per_unit"] == float(expected)
+    assert registered["credits_per_unit_exact"] == format(expected, "f")
+    assert _registered_tool_cost(
+        registered,
+        ServiceCategory.PLATFORM_FEE,
+    ) == Decimal(credits)
+    registry_tool = registry.to_mcp_tool(registered)
+    generated_tool = McpGenerator(registry).generate_tools_json()["tools"][0]
+    for tool in (registry_tool, generated_tool):
+        assert tool["annotations"]["creditsPerCall"] == float(expected)
+        assert tool["annotations"]["creditsPerCallExact"] == format(expected, "f")
 
 
 @pytest.mark.anyio
