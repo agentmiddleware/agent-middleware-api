@@ -159,7 +159,8 @@ verifier can walk a chain that spans key rotations.
 
 This document covers the trust-plane signing key. It does not cover:
 
-- API-key custody (`VALID_API_KEYS`, DB-backed API keys)
+- API-key custody (`VALID_API_KEYS`, DB-backed API keys) — rotation for
+  these is covered in `docs/api-key-rotation.md`
 - Stripe webhook secrets
 - Database credentials
 - TLS material
