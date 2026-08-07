@@ -58,6 +58,7 @@ def test_service_names_are_complete():
         "telemetry_pm",
         "agent_comms",
         "content_factory",
+        "human_approval",
     }
     assert SERVICE_NAMES == expected
 

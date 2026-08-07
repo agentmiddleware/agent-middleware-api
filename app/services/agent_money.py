@@ -6,7 +6,6 @@ implementation live in focused internal engines.
 
 import json
 from decimal import Decimal
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import get_settings
@@ -29,7 +28,6 @@ from .shadow_ledger import SimulatedChargeResult
 from .wallet_engine import WalletEngine
 
 settings = get_settings()
-
 
 # ---------------------------------------------------------------------------
 # Pricing Table
@@ -266,6 +264,34 @@ class AgentMoney:
             description=description,
             correlation_id=correlation_id,
         )
+
+    async def is_wallet_or_descendant(
+        self, wallet_id: str, ancestor_wallet_id: str, *, max_depth: int = 32
+    ) -> bool:
+        """True if ``wallet_id`` is ``ancestor_wallet_id`` or below it in the
+        sponsor -> agent -> child hierarchy.
+
+        Used to authorize which wallet a permit may encumber: an issuer may name
+        itself or any wallet it funds as the permit subject, but not an
+        unrelated wallet. Walks the ``parent_wallet_id`` chain with a depth cap
+        so a malformed cycle cannot loop forever.
+        """
+        if wallet_id == ancestor_wallet_id:
+            return True
+        async with self._session_factory()() as session:
+            current = wallet_id
+            seen: set[str] = set()
+            for _ in range(max_depth):
+                if current in seen:
+                    return False
+                seen.add(current)
+                wallet = await session.get(WalletModel, current)
+                if wallet is None or not wallet.parent_wallet_id:
+                    return False
+                if wallet.parent_wallet_id == ancestor_wallet_id:
+                    return True
+                current = wallet.parent_wallet_id
+        return False
 
     async def get_swarm_budget(self, parent_wallet_id: str) -> dict:
         return await self._wallet_engine.get_swarm_budget(parent_wallet_id)

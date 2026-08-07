@@ -91,7 +91,7 @@ async def test_unauthenticated_service_registration_is_rejected(
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"]["error"] == "missing_api_key"
+    assert response.json()["detail"]["error"] == "missing_credentials"
 
 
 @pytest.mark.anyio

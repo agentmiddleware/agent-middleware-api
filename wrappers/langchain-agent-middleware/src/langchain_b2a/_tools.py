@@ -1,7 +1,9 @@
 """Internal tool implementations."""
 
-from typing import Any, Callable
-from langchain_core.tools import StructuredTool, tool
+from collections.abc import Callable
+from typing import Any
+
+from langchain_core.tools import StructuredTool
 
 from .client import B2AClient
 
@@ -9,7 +11,7 @@ from .client import B2AClient
 def create_mcp_tool(client: B2AClient) -> StructuredTool:
     """Create a LangChain tool that calls MCP endpoints."""
 
-    async def call_mcp(tool_name: str, arguments: dict[str, Any] = None) -> str:
+    async def call_mcp(tool_name: str, arguments: dict[str, Any] | None = None) -> str:
         """Call an MCP tool on the Agent Middleware API.
 
         Args:
@@ -38,9 +40,9 @@ def create_awi_tool(client: B2AClient) -> StructuredTool:
 
     async def execute_web_action(
         action: str,
-        target_url: str = None,
-        session_id: str = None,
-        parameters: dict[str, Any] = None,
+        target_url: str | None = None,
+        session_id: str | None = None,
+        parameters: dict[str, Any] | None = None,
     ) -> str:
         """Execute an Agentic Web Interface (AWI) action.
 

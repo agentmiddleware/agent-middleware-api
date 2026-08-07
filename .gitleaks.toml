@@ -1,0 +1,58 @@
+# Secret-scanning config for CI.
+#
+# Scope note: CI scans the WORKING TREE, not git history. History already
+# contains a leaked production key (removed from HEAD in the commit that added
+# this file), so a history scan would fail permanently and teach everyone to
+# ignore the job. The exposed key must be rotated at the provider instead —
+# deleting it from HEAD removes it from neither history nor existing clones.
+
+[extend]
+useDefault = true
+
+# The default ruleset is entropy-driven: it reliably catches vendor-formatted
+# keys (sk_live_..., ghp_..., AKIA...) but NOT low-entropy hand-written ones.
+# The key this repo actually leaked — a dictionary-word string assigned to a
+# module-level API_KEY — scores too low to trip any built-in rule, so the stock
+# scanner would have let it through again. This rule targets the shape of the
+# defect (a credential-named variable bound to a literal) rather than the
+# randomness of the value.
+[[rules]]
+id = "hardcoded-credential-assignment"
+description = "Credential-named variable assigned a hardcoded string literal"
+# The credential name is non-capturing so that capture group 1 is the assigned
+# VALUE. gitleaks treats the first group as the secret, and the allowlist below
+# matches against the secret — allowlisting placeholders only works if the
+# secret is the value rather than the variable name.
+regex = '''(?i)\b(?:api[-_]?key|secret[-_]?key|client[-_]?secret|auth[-_]?token|access[-_]?token|bearer[-_]?token|password|passwd)\s*[:=]\s*["']([^"'\s$<>{}]{8,})["']'''
+secretGroup = 1
+tags = ["hardcoded", "credential"]
+
+[allowlist]
+description = "Synthetic credentials used by tests, demos and CI — not real secrets"
+
+paths = [
+  # Test suites construct synthetic keys by design.
+  '''^tests/''',
+  # Demo transcripts and copy-paste docs use placeholder keys.
+  '''^docs/demo-.*\.md$''',
+]
+
+regexes = [
+  # base64 of bytes 0x00..0x1F — a sequential-byte Ed25519 seed used by the
+  # demo/dogfood/red-team scripts so their signed output is reproducible.
+  '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=''',
+  # base64 of the literal string "test-signing-key-material-32byte".
+  '''dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU=''',
+  # Placeholder API keys in demos, docs and CI env blocks.
+  '''(?i)\b(demo|dogfood|test|example|dummy|fake|placeholder)[-_](admin[-_])?key([-_][0-9]+)?\b''',
+  # Copy-paste placeholders in SDK READMEs and quickstarts, e.g. "your-api-key",
+  # "your-middleware-api-key", "agt-your-api-key".
+  '''(?i)^(agt-)?(your|my|insert|replace|changeme)[-_]''',
+  # Illustrative wallet-scoped key in the b2a_sdk examples.
+  '''(?i)^agt-xyz123$''',
+  # signing_keys.py assigns a key *identifier* (not key material) from settings.
+  '''TRUST_SIGNING_KEY_ID''',
+  # `self._private_key: Ed25519PrivateKey | None = None` — a type annotation,
+  # which the generic-api-key rule reads as an assigned secret value.
+  '''Ed25519PrivateKey''',
+]

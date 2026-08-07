@@ -1,7 +1,9 @@
 """LangChain tools from Agent Middleware API."""
 
-from typing import Any, Callable
-from langchain_core.tools import BaseTool, tool
+from collections.abc import Callable
+from typing import Any
+
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
 from .client import B2AClient

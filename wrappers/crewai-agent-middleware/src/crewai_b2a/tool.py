@@ -1,6 +1,6 @@
 """CrewAI Tool for Agent Middleware API."""
 
-from typing import Any, Type
+from typing import Any
 from crewai.tools import BaseTool
 from pydantic import BaseModel
 

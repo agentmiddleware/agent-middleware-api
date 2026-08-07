@@ -19,7 +19,14 @@ from datetime import datetime, timezone
 
 
 def to_naive_utc(value: datetime) -> datetime:
-    """Normalize a datetime for the codebase's naive-UTC DB columns."""
+    """Normalize a datetime to the naive-UTC form used for persistence.
+
+    Tz-aware input is converted to UTC before ``tzinfo`` is dropped, so the
+    instant is preserved. Naive input is returned unchanged (already the
+    storage convention). Every datetime column in this schema is
+    ``TIMESTAMP WITHOUT TIME ZONE`` (see ``migrations/versions``), and asyncpg
+    refuses a tz-aware value for such a column.
+    """
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)

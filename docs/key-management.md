@@ -16,9 +16,10 @@ The active key is loaded by `SigningKeyService._load_private_key` in
 `app/services/signing_keys.py`. The loader has two modes:
 
 1. **Configured key** — `TRUST_SIGNING_PRIVATE_KEY_B64` (set in
-   `app/core/config.py`) is read at first use, base64-decoded, and constructed
-   as an `Ed25519PrivateKey`. The decoded private bytes never leave the
-   process.
+   `app/core/config.py`) must be strict standard base64 that decodes to exactly
+   the 32 raw bytes accepted by `Ed25519PrivateKey.from_private_bytes`. PEM,
+   hex, 64-byte seed-plus-public-key concatenations, and double-encoded base64
+   are rejected. The decoded private bytes never leave the process.
 2. **Ephemeral fallback** — if the env var is empty and `TRUST_MODE_ENABLED`
    is false, the loader generates a process-local `Ed25519PrivateKey` that
    exists only in memory and dies with the process. This path exists so local
@@ -158,7 +159,8 @@ verifier can walk a chain that spans key rotations.
 
 This document covers the trust-plane signing key. It does not cover:
 
-- API-key custody (`VALID_API_KEYS`, DB-backed API keys)
+- API-key custody (`VALID_API_KEYS`, DB-backed API keys) — rotation for
+  these is covered in `docs/api-key-rotation.md`
 - Stripe webhook secrets
 - Database credentials
 - TLS material

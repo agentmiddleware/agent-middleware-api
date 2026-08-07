@@ -16,6 +16,9 @@ class PermitCreateRequest(BaseModel):
     max_credits: Decimal
     expires_at: datetime
     nonce: str | None = None
+    # Governed invokes under this permit block on a human decision (Sentinel)
+    # before budget is reserved or credits are charged.
+    requires_human_approval: bool = False
 
 
 class PermitResponse(BaseModel):
@@ -30,6 +33,7 @@ class PermitResponse(BaseModel):
     expires_at: datetime
     nonce: str
     status: str
+    requires_human_approval: bool = False
     signature: str
     key_id: str
     issued_at: datetime
@@ -73,6 +77,8 @@ class ReceiptResponse(BaseModel):
     credits_charged: Decimal
     outcome: str
     audit_event_id: str | None
+    # Human approval that authorized this invoke, when the permit required one.
+    approval_id: str | None = None
     created_at: datetime
     signature: str
     signature_key_id: str

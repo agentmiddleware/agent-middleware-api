@@ -40,6 +40,7 @@ from ..schemas.billing import (
     ServicePricing,
     ServiceRegistration,
     TopUpResponse,
+    WalletStatus,
     WalletType,
 )
 from .shadow_ledger import SimulatedChargeResult, get_shadow_ledger
@@ -53,6 +54,14 @@ from .wallet_engine import (
 KYCRequiredFactory = Callable[[str, str], Exception]
 
 logger = logging.getLogger(__name__)
+
+_NON_SPENDABLE_WALLET_STATUSES = frozenset(
+    {
+        WalletStatus.FROZEN.value,
+        WalletStatus.SUSPENDED.value,
+        WalletStatus.CLOSED.value,
+    }
+)
 
 
 class DirectTopUpDisabledError(RuntimeError):
@@ -245,6 +254,20 @@ class BillingEngine:
             # reverse exactly that increment.
             wallet.hourly_spent = max(Decimal("0"), wallet.hourly_spent - charge_amount)
             wallet.daily_spent = max(Decimal("0"), wallet.daily_spent - charge_amount)
+
+        if wallet.status in _NON_SPENDABLE_WALLET_STATUSES:
+            reverse_velocity_record()
+            return InsufficientFundsResponse(
+                wallet_id=wallet_id,
+                current_balance=float(wallet.balance),
+                current_balance_exact=str(wallet.balance),
+                required_amount=float(charge_amount),
+                required_amount_exact=str(charge_amount),
+                shortfall=0.0,
+                shortfall_exact="0",
+                top_up_url="",
+                message=f"Wallet is {wallet.status} and cannot be charged.",
+            )
 
         if wallet.wallet_type == WalletType.CHILD.value and wallet.max_spend:
             new_debits = wallet.lifetime_debits + charge_amount

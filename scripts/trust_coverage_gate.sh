@@ -32,6 +32,7 @@ TRUST_COVERAGE_TESTS=(
   tests/test_receipts.py
   tests/test_audit_chain.py
   tests/test_idempotency.py
+  tests/test_human_approval_gate.py
 )
 
 TRUST_COVERAGE_MODULES=(
@@ -51,6 +52,7 @@ TRUST_COVERAGE_MODULES=(
   app.services.mcp_dispatch_reconciliation
   app.services.upstream_mcp
   app.trust.evidence
+  app.services.human_approval
   app.core.trust_mode
 )
 

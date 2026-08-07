@@ -17,6 +17,7 @@ tables and fails closed if they are missing.
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, AsyncGenerator
 
 from sqlalchemy import event, inspect as sa_inspect
@@ -32,6 +33,7 @@ from sqlmodel import SQLModel
 
 from ..core.config import get_settings
 from ..core.db_urls import as_sqlalchemy_url
+from ..core.time import to_naive_utc
 from ..core.trust_mode import is_production_like_environment
 
 logger = logging.getLogger(__name__)
@@ -133,10 +135,15 @@ def get_engine() -> AsyncEngine | None:
                     # in tests (e.g. ledger_entries before wallets).
                     cursor.execute("PRAGMA foreign_keys=ON")
                     cursor.execute("PRAGMA journal_mode=WAL")
-                    cursor.execute("PRAGMA busy_timeout=10000")
+                    # Aligned with connect_args timeout above: overloaded CI
+                    # runners have been observed exceeding a 10s wait with a
+                    # handful of concurrent writers.
+                    cursor.execute("PRAGMA busy_timeout=30000")
                     cursor.execute("PRAGMA synchronous=NORMAL")
                 finally:
                     cursor.close()
+
+        _install_naive_utc_bind_guard(_engine)
 
         logger.info(
             "Database engine created: dialect=%s",
@@ -144,6 +151,68 @@ def get_engine() -> AsyncEngine | None:
         )
 
     return _engine
+
+
+def _normalize_bind_parameters(parameters: Any) -> Any:
+    """Coerce tz-aware datetimes in a bind-parameter set to naive UTC.
+
+    Returns ``parameters`` unchanged (same object) when there is nothing to
+    rewrite, so the overwhelmingly common case costs one scan and no copy.
+    """
+    if isinstance(parameters, dict):
+        rewritten = {
+            key: to_naive_utc(value) if isinstance(value, datetime) else value
+            for key, value in parameters.items()
+        }
+        # Identity, not equality: bind values are arbitrary user types whose
+        # __eq__ may be expensive or may not return a bool.
+        if all(rewritten[key] is value for key, value in parameters.items()):
+            return parameters
+        return rewritten
+    if isinstance(parameters, (tuple, list)):
+        rewritten_seq = [
+            to_naive_utc(value) if isinstance(value, datetime) else value
+            for value in parameters
+        ]
+        if all(a is b for a, b in zip(rewritten_seq, parameters)):
+            return parameters
+        return tuple(rewritten_seq) if isinstance(parameters, tuple) else rewritten_seq
+    return parameters
+
+
+def _install_naive_utc_bind_guard(engine: AsyncEngine) -> None:
+    """Safety-net: normalize tz-aware datetime binds for PostgreSQL/asyncpg.
+
+    Every datetime column in this schema is ``TIMESTAMP WITHOUT TIME ZONE``
+    and ``app.core.time.utc_now`` is the storage convention. The merge-safe
+    fix in ``PermitService.create_permit`` (and any future call sites) now
+    normalizes *before* signing and persisting, so this guard should never
+    fire on the happy path. It remains as a production safety net for any
+    overlooked call site that still passes a tz-aware datetime to a bind.
+
+    Scoped to PostgreSQL only: SQLite accepts tz-aware values silently, and
+    the explicit normalization at call sites already keeps SQLite and Postgres
+    behavior identical. Should a column ever be migrated to
+    ``TIMESTAMP WITH TIME ZONE``, this guard must be revisited.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute", retval=True)
+    def _coerce_naive_utc(  # noqa: ANN001, ANN202
+        _conn,
+        _cursor,
+        statement,
+        parameters,
+        _context,
+        executemany,
+    ):
+        if executemany and isinstance(parameters, (list, tuple)):
+            normalized = [_normalize_bind_parameters(p) for p in parameters]
+            if all(a is b for a, b in zip(normalized, parameters)):
+                return statement, parameters
+            return statement, normalized
+        return statement, _normalize_bind_parameters(parameters)
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:

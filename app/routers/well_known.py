@@ -141,6 +141,12 @@ def get_agent_first_metadata() -> dict[str, Any]:
             "They do not define the product unless they consume the same "
             "permit, receipt, idempotency, and audit primitives via governed MCP."
         ),
+        "human_observability": {
+            "human_dashboard_url": "/dashboard",
+            "interactive_docs_url": "/docs",
+            "redoc_url": "/redoc",
+            "note": "Human operators can visually inspect active permits, receipts, and audit telemetry at /dashboard.",
+        },
     }
 
 
@@ -277,6 +283,7 @@ class AgentPluginManifest(BaseModel):
 
     documentation: dict = Field(
         default_factory=lambda: {
+            "human_dashboard": "/dashboard",
             "api_reference": "/docs",
             "openapi": "/openapi.json",
             "llm_readable": "/llm.txt",
@@ -335,6 +342,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
     endpoints = _product_endpoints()
     proof_surfaces = list(PROOF_SURFACE_CATALOG)
     documentation = {
+        "human_dashboard": "/dashboard",
         "api_reference": "/docs",
         "openapi": "/openapi.json",
         "llm_readable": "/llm.txt",

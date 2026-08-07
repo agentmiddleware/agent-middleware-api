@@ -10,8 +10,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, ReceiptModel
+from app.db.models import HumanApprovalModel, IdempotencyRecordModel, ReceiptModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import get_agent_money
@@ -38,7 +39,11 @@ async def client():
         yield instance
 
 
-async def _create_unrefunded_failure(client: AsyncClient) -> dict[str, Any]:
+async def _create_unrefunded_failure(
+    client: AsyncClient,
+    *,
+    requires_human_approval: bool = False,
+) -> dict[str, Any]:
     provisioned = await provision_agent_wallet(client)
     registry = get_service_registry()
     calls = {"count": 0}
@@ -67,6 +72,7 @@ async def _create_unrefunded_failure(client: AsyncClient) -> dict[str, Any]:
         tool_name=tool_name,
         max_credits=2,
         idem_key="operator-reconcile-permit-create",
+        requires_human_approval=requires_human_approval,
     )
     body = {
         "jsonrpc": "2.0",
@@ -105,13 +111,22 @@ async def _create_unrefunded_failure(client: AsyncClient) -> dict[str, Any]:
         wallet_id=provisioned["agent_wallet_id"],
     )
     assert len(pending_audits) == 1
-    assert pending_audits[0].metadata == {
+    expected_audit_metadata = {
         "receipt_id": data["receipt"]["receipt_id"],
         "permit_id": permit["permit_id"],
         "ledger_entry_id": data["receipt"]["ledger_entry_id"],
         "credits": "2.0",
         "status": "pending",
     }
+    if requires_human_approval:
+        expected_audit_metadata.update(
+            {
+                "approval_id": data["receipt"]["approval_id"],
+                "approval_status": "approved",
+                "approval_simulated": True,
+            }
+        )
+    assert pending_audits[0].metadata == expected_audit_metadata
     assert pending_audits[0].chain_hash
     assert pending_audits[0].signature
     return {
@@ -122,6 +137,36 @@ async def _create_unrefunded_failure(client: AsyncClient) -> dict[str, Any]:
         "receipt": data["receipt"],
         "calls": calls,
     }
+
+
+@pytest.mark.anyio
+async def test_failed_refund_receipt_preserves_consumed_human_approval(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        get_settings(),
+        "SIMULATION_MODE_HUMAN_APPROVAL",
+        True,
+    )
+
+    case = await _create_unrefunded_failure(
+        client,
+        requires_human_approval=True,
+    )
+
+    approval_id = case["receipt"]["approval_id"]
+    assert approval_id
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
+        receipt = await session.get(ReceiptModel, case["receipt"]["receipt_id"])
+    assert approval is not None and approval.status == "consumed"
+    assert receipt is not None
+    assert receipt.approval_id == approval_id
+    valid, reason, _ = await ReceiptService().verify_receipt(receipt.receipt_id)
+    assert (valid, reason) == (True, None)
 
 
 @pytest.mark.anyio

@@ -23,6 +23,10 @@ from typing import Any, Awaitable, Callable
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
 from .runtime_degradation import get_runtime_degradation
+from ..services.signing_keys import (
+    SigningKeyError,
+    validate_signing_key_configuration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -242,9 +246,58 @@ async def _check_upstream_mcp() -> dict[str, Any]:
     }
 
 
+async def _check_signing_key() -> dict[str, Any]:
+    """Report signing readiness without signing, persisting, or leaking keys."""
+
+    try:
+        state = validate_signing_key_configuration()
+    except SigningKeyError as exc:
+        error = str(exc)
+        if error not in {
+            "trust_signing_private_key_required",
+            "invalid_trust_signing_private_key",
+        }:
+            error = "signing_key_unavailable"
+        return {"status": "down", "state": "invalid", "error": error}
+    except Exception:
+        logger.debug("signing key configuration check raised", exc_info=True)
+        return {
+            "status": "down",
+            "state": "invalid",
+            "error": "signing_key_unavailable",
+        }
+
+    if state == "ephemeral":
+        return {
+            "status": "up",
+            "state": "ephemeral",
+            "reason": "trust mode disabled; process-ephemeral signing key",
+        }
+    return {"status": "up", "state": "loaded"}
+
+
 # ---------------------------------------------------------------------------
 # Public aggregator
 # ---------------------------------------------------------------------------
+
+
+async def _check_sentinel(simulation_modes: dict[str, bool]) -> dict[str, Any]:
+    # The human-approval gate is the sole Sentinel consumer. In sim mode the
+    # service is never called — don't probe and don't degrade health over it.
+    if simulation_modes.get("human_approval", True):
+        return {"status": "not_used", "reason": "human_approval in simulation mode"}
+
+    settings = get_settings()
+    base_url = (settings.SENTINEL_API_URL or "").strip()
+    if not base_url:
+        return {"status": "not_configured"}
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=CHECK_TIMEOUT_SECONDS) as http:
+        resp = await http.get(f"{base_url.rstrip('/')}/health")
+        resp.raise_for_status()
+    return {"status": "up"}
 
 
 async def gather_dependency_report() -> dict[str, Any]:
@@ -258,13 +311,24 @@ async def gather_dependency_report() -> dict[str, Any]:
     settings = get_settings()
     sim_modes = get_simulation_modes()
 
-    postgres, redis_res, mqtt, stripe_res, llm, upstream_mcp = await asyncio.gather(
+    (
+        postgres,
+        redis_res,
+        mqtt,
+        stripe_res,
+        llm,
+        upstream_mcp,
+        signing_key,
+        sentinel,
+    ) = await asyncio.gather(
         _run_check("postgres", _check_postgres),
         _run_check("redis", _check_redis),
         _run_check("mqtt", lambda: _check_mqtt(sim_modes)),
         _run_check("stripe", _check_stripe),
         _run_check("llm", lambda: _check_llm(sim_modes)),
         _run_check("upstream_mcp", _check_upstream_mcp),
+        _run_check("signing_key", _check_signing_key),
+        _run_check("sentinel", lambda: _check_sentinel(sim_modes)),
     )
 
     dependencies = {
@@ -274,6 +338,8 @@ async def gather_dependency_report() -> dict[str, Any]:
         "stripe": stripe_res,
         "llm": llm,
         "upstream_mcp": upstream_mcp,
+        "signing_key": signing_key,
+        "sentinel": sentinel,
     }
 
     unhealthy = [

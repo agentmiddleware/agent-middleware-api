@@ -138,6 +138,71 @@ jobs:
           path: sdk-dist/*
           if-no-files-found: error
 
+  # Railway runs Postgres; the rest of CI runs SQLite. Dialect differences that
+  # SQLite accepts silently (notably tz-aware datetimes bound to the schema's
+  # TIMESTAMP WITHOUT TIME ZONE columns, which asyncpg rejects outright) are
+  # invisible everywhere else and only surface as production 500s.
+  postgres_trust:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trust_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio anyio httpx
+
+      - name: Run trust loop against Postgres (full suite)
+        # Run the full trust test suite against PostgreSQL/asyncpg.
+        # The module fixture handles alembic migration before tests run.
+        env:
+          TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          STATE_BACKEND: postgres
+        run: |
+          pytest \
+            tests/test_permits.py \
+            tests/test_receipts.py \
+            tests/test_mcp_trust.py \
+            tests/test_audit_chain.py \
+            tests/test_key_management.py \
+            tests/test_idempotency.py \
+            tests/test_postgres_datetime_binding.py \
+            -v --tb=short
+
+      - name: Run trust-plane demo against Postgres
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          STATE_BACKEND: postgres
+          TRUST_SIGNING_PRIVATE_KEY_B64: ${{ secrets.TRUST_SIGNING_PRIVATE_KEY_B64 }}
+          TRUST_MODE_ENABLED: true
+          VALID_API_KEYS: ci-test-key
+        run: |
+          alembic upgrade head
+          python scripts/demo_trust_plane.py --assert
+
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:
     runs-on: ubuntu-latest
@@ -165,7 +230,7 @@ jobs:
           DEBUG: "false"
           WEBAUTHN_ALLOW_MOCK: "false"
           # Non-secret test material so prod-like guardrails can validate.
-          TRUST_SIGNING_PRIVATE_KEY_B64: dGVzdC1zaWduaW5nLWtleS1ub3QtZm9yLXByb2Q=
+          TRUST_SIGNING_PRIVATE_KEY_B64: dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU=
           PUBLIC_URL: https://api-service-production-433c.up.railway.app
           VALID_API_KEYS: test-key
           DATABASE_URL: sqlite+aiosqlite:///./test-production-trust.db
@@ -209,11 +274,60 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
         run: alembic upgrade head
 
+      - name: Prove governed MCP across two OS processes
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
+          STATE_BACKEND: postgres
+          ENVIRONMENT: test
+          RUN_MCP_MULTIPROCESS_TESTS: "1"
+          MCP_STRESS_DB_ISOLATED: "1"
+        run: pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
+
       - name: Prove permit row-lock concurrency
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
           RUN_POSTGRES_CONCURRENCY_TESTS: "1"
         run: pytest tests/test_permit_postgres_concurrency.py -v --tb=short
+
+  # Blocks credentials from being committed. A live production API key reached
+  # main through scripts/stress_test_live.py because nothing scanned for this.
+  secret_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          curl -sSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      # Working tree only, not history: history already contains the leaked key,
+      # so a history scan would fail on every run forever and train reviewers to
+      # ignore the job. That key is handled by rotation, not by this gate.
+      - name: Scan working tree for committed secrets
+        run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose
+
+      # Guards the guard: proves the ruleset still catches the exact class of
+      # low-entropy credential that leaked, so an over-broad allowlist edit
+      # cannot silently disarm this job.
+      # The canary value is assembled at runtime via printf's %s rather than
+      # written inline, so this workflow file does not itself contain a
+      # credential-shaped literal for the scanner to flag on every run.
+      - name: Verify scanner still catches a known-bad credential
+        run: |
+          printf 'API_KEY = "%s"\n' 'canary-lowentropy-credential-must-be-flagged' > ./_gitleaks_canary.py
+          if gitleaks detect --no-git --source . --config .gitleaks.toml --redact >/dev/null 2>&1; then
+            rm -f ./_gitleaks_canary.py
+            echo "::error::Secret scanner did NOT flag a known-bad hardcoded credential. The allowlist or ruleset is too permissive."
+            exit 1
+          fi
+          rm -f ./_gitleaks_canary.py
+          echo "Canary correctly detected."
 
   lint:
     runs-on: ubuntu-latest
@@ -233,7 +347,7 @@ jobs:
           pip install ruff mypy
 
       - name: Run ruff
-        run: ruff check app/ tests/
+        run: ruff check .
 
       - name: Run mypy
         run: mypy app/

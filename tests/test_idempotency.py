@@ -117,3 +117,64 @@ async def test_concurrent_begin_with_same_key_never_raises_unhandled_error(
 
     started = [r for r in results if r is None]
     assert len(started) == 1
+
+
+@pytest.mark.anyio
+async def test_begin_translates_sqlite_lock_error_to_in_progress(
+    clean_database, monkeypatch
+):
+    """SQLite exhausting busy_timeout under write contention fails the INSERT
+    with OperationalError("database is locked") instead of a clean unique-
+    constraint error. For an idempotent begin that is the same situation as
+    losing the race — the caller must see the in-progress/replay contract,
+    never a raw 500 (observed on a slow CI runner in the concurrency test
+    above)."""
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    service = get_idempotency_service()
+    wallet = await get_agent_money().create_sponsor_wallet(
+        sponsor_name="Locked Sponsor",
+        email="idem-locked@example.com",
+    )
+
+    real_commit = AsyncSession.commit
+
+    async def locked_commit(self):
+        raise OperationalError(
+            "INSERT INTO idempotency_records ...",
+            {},
+            Exception("database is locked"),
+        )
+
+    monkeypatch.setattr(AsyncSession, "commit", locked_commit)
+    with pytest.raises(IdempotencyInProgressError):
+        await service.begin(
+            wallet_id=wallet.wallet_id,
+            endpoint="/v1/test",
+            idempotency_key="locked-key",
+            request_payload={"amount": 1},
+        )
+
+    # Once the lock clears, the same key begins normally (no phantom row).
+    monkeypatch.setattr(AsyncSession, "commit", real_commit)
+    started = await service.begin(
+        wallet_id=wallet.wallet_id,
+        endpoint="/v1/test",
+        idempotency_key="locked-key",
+        request_payload={"amount": 1},
+    )
+    assert started is None
+
+    # Unrelated operational errors still surface.
+    async def broken_commit(self):
+        raise OperationalError("INSERT ...", {}, Exception("disk I/O error"))
+
+    monkeypatch.setattr(AsyncSession, "commit", broken_commit)
+    with pytest.raises(OperationalError):
+        await service.begin(
+            wallet_id=wallet.wallet_id,
+            endpoint="/v1/test",
+            idempotency_key="broken-key",
+            request_payload={"amount": 1},
+        )

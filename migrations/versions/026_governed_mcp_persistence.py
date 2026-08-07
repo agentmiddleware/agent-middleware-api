@@ -1,7 +1,7 @@
 """Add exactly-once ledger, receipt, and remote dispatch persistence.
 
-Revision ID: 023_governed_mcp_persistence
-Revises: 022_remove_plaintext_owner_keys
+Revision ID: 026_governed_mcp_persistence
+Revises: 025_remove_plaintext_owner_keys
 Create Date: 2026-08-06
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "023_governed_mcp_persistence"
-down_revision: Union[str, None] = "022_remove_plaintext_owner_keys"
+revision: str = "026_governed_mcp_persistence"
+down_revision: Union[str, None] = "025_remove_plaintext_owner_keys"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -99,6 +99,7 @@ def upgrade() -> None:
         sa.Column("idempotency_record_id", sa.String(length=64), nullable=False),
         sa.Column("wallet_id", sa.String(length=50), nullable=False),
         sa.Column("permit_id", sa.String(length=64), nullable=False),
+        sa.Column("approval_id", sa.String(length=64), nullable=True),
         sa.Column("key_id", sa.String(length=50), nullable=True),
         sa.Column("public_tool_id", sa.String(length=128), nullable=False),
         sa.Column("upstream_tool_name", sa.String(length=128), nullable=False),
@@ -148,6 +149,10 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["wallet_id"], ["wallets.wallet_id"]),
         sa.ForeignKeyConstraint(["permit_id"], ["permits.permit_id"]),
+        sa.ForeignKeyConstraint(
+            ["approval_id"],
+            ["human_approvals.approval_id"],
+        ),
         sa.ForeignKeyConstraint(["key_id"], ["api_keys.key_id"]),
         sa.ForeignKeyConstraint(
             ["ledger_entry_id"],
@@ -163,6 +168,7 @@ def upgrade() -> None:
     for column in (
         "wallet_id",
         "permit_id",
+        "approval_id",
         "key_id",
         "public_tool_id",
         "request_hash",
@@ -216,6 +222,7 @@ def downgrade() -> None:
         (
             "wallet_id",
             "permit_id",
+            "approval_id",
             "key_id",
             "public_tool_id",
             "request_hash",

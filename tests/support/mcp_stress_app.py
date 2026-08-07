@@ -9,13 +9,14 @@ application.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Query
+from fastapi import Header, HTTPException, Query, status
 from sqlalchemy import text
 
 from app.main import app
@@ -35,6 +36,7 @@ _MARKER_PATH = Path(os.environ.get("MCP_STRESS_MARKER_PATH", "/tmp/mcp-stress.ma
 _RELEASE_PATH = Path(
     os.environ.get("MCP_STRESS_RELEASE_PATH", "/tmp/mcp-stress.release")
 )
+_CONTROL_TOKEN = os.environ.get("MCP_STRESS_CONTROL_TOKEN", "")
 _fault_count = 0
 
 
@@ -74,7 +76,7 @@ def _fault(point: str, **context: Any) -> None:
 
 
 def _install_fault_wrappers() -> None:
-    original_begin = IdempotencyService.begin
+    original_begin_with_record = IdempotencyService.begin_with_record
     original_complete = IdempotencyService.complete
     original_mark_charged = IdempotencyService.mark_charged
     original_authorize_and_reserve = PermitService.authorize_and_reserve
@@ -82,11 +84,15 @@ def _install_fault_wrappers() -> None:
     original_create_receipt = ReceiptService.create_receipt
     original_audit = mcp_router._audit_mcp_invocation
 
-    async def begin(self: IdempotencyService, *args: Any, **kwargs: Any) -> Any:
-        result = await original_begin(self, *args, **kwargs)
-        if result is None:
+    async def begin_with_record(
+        self: IdempotencyService, *args: Any, **kwargs: Any
+    ) -> Any:
+        result = await original_begin_with_record(self, *args, **kwargs)
+        if result.replay is None:
             _fault(
-                "after_idempotency_begin", idempotency_key=kwargs.get("idempotency_key")
+                "after_idempotency_begin",
+                idempotency_key=kwargs.get("idempotency_key"),
+                record_id=result.record_id,
             )
         return result
 
@@ -146,7 +152,7 @@ def _install_fault_wrappers() -> None:
         _fault("after_audit_commit", audit_event_id=getattr(result, "event_id", None))
         return result
 
-    IdempotencyService.begin = begin
+    IdempotencyService.begin_with_record = begin_with_record
     IdempotencyService.complete = complete
     IdempotencyService.mark_charged = mark_charged
     PermitService.authorize_and_reserve = authorize_and_reserve
@@ -218,8 +224,30 @@ get_service_registry().register_local(
 )
 
 
+def _authorize_control_request(provided_token: str | None) -> None:
+    """Keep test-only process controls inaccessible without the run token."""
+    if not _CONTROL_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="mcp_stress_control_not_configured",
+        )
+    if provided_token is None or not hmac.compare_digest(
+        provided_token, _CONTROL_TOKEN
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="mcp_stress_control_denied",
+        )
+
+
 @app.get("/__stress/pid", include_in_schema=False)
-async def stress_pid() -> dict[str, Any]:
+async def stress_pid(
+    control_token: str | None = Header(
+        default=None,
+        alias="X-MCP-Stress-Control",
+    ),
+) -> dict[str, Any]:
+    _authorize_control_request(control_token)
     return {
         "pid": os.getpid(),
         "fault_point": _FAULT_POINT or None,
@@ -230,7 +258,12 @@ async def stress_pid() -> dict[str, Any]:
 @app.post("/__stress/reconcile", include_in_schema=False)
 async def stress_reconcile(
     idle_seconds: int = Query(default=0, ge=0),
+    control_token: str | None = Header(
+        default=None,
+        alias="X-MCP-Stress-Control",
+    ),
 ) -> dict[str, Any]:
+    _authorize_control_request(control_token)
     repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
         idle_seconds=idle_seconds
     )

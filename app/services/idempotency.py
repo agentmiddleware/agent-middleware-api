@@ -9,7 +9,7 @@ from datetime import timedelta
 from typing import Any, cast
 
 from sqlalchemy import or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
@@ -208,6 +208,44 @@ class IdempotencyService:
                     request_hash=request_hash,
                     replay=replay,
                 )
+            except OperationalError as exc:
+                # SQLite can report a write-contention race as "database is
+                # locked" instead of a unique-key IntegrityError. Preserve the
+                # same bounded replay behavior and never expose a raw 500.
+                if "database is locked" not in str(exc):
+                    raise
+                await session.rollback()
+                result = await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        *_idempotency_predicates(
+                            wallet_id,
+                            endpoint,
+                            idempotency_key,
+                        )
+                    )
+                )
+                existing = result.scalar_one_or_none()
+                if existing is None:
+                    raise IdempotencyInProgressError("idempotency_in_progress")
+                try:
+                    replay = _replay_from_record(existing, request_hash)
+                except IdempotencyInProgressError:
+                    if wait_timeout_seconds <= 0:
+                        raise
+                    replay = await self._wait_for_replay(
+                        session,
+                        wallet_id=wallet_id,
+                        endpoint=endpoint,
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        timeout_seconds=wait_timeout_seconds,
+                        poll_interval_seconds=poll_interval_seconds,
+                    )
+                return IdempotencyBegin(
+                    record_id=existing.record_id,
+                    request_hash=request_hash,
+                    replay=replay,
+                )
             return IdempotencyBegin(
                 record_id=record.record_id,
                 request_hash=request_hash,
@@ -304,6 +342,38 @@ class IdempotencyService:
             )
             record.status_code = status_code
             session.add(record)
+            await session.commit()
+
+    async def abandon(
+        self,
+        *,
+        wallet_id: str,
+        endpoint: str,
+        idempotency_key: str,
+    ) -> None:
+        """Release an in-progress record so the caller may retry the key.
+
+        Used when a governed invoke stops on a retryable, side-effect-free
+        condition (human approval still pending, approval backend
+        unreachable): completing the record would replay that transient state
+        forever, and leaving it in progress would reject the retry with
+        ``idempotency_in_progress``. Only an uncharged, unfinished record is
+        deleted — a completed response or a ``ledger_entry_id`` checkpoint
+        means money moved, and the record must survive for replay/repair.
+        """
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(IdempotencyRecordModel).where(
+                    *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
+                )
+            )
+            record = result.scalar_one_or_none()
+            if not record:
+                return
+            if record.response_json is not None or record.ledger_entry_id:
+                return
+            await session.delete(record)
             await session.commit()
 
     async def mark_charged(

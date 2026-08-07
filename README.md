@@ -83,6 +83,11 @@ Recent work substantially tightened the trust and accounting boundary:
   debit, dispatch attempt, signed receipt, and audit event. Recovery finalizes
   pre-dispatch failures or marks ambiguous post-dispatch calls
   `delivery_uncertain`; it never redispatches them.
+- **Process-crash recovery proof.** An opt-in PostgreSQL harness starts two
+  independent Uvicorn processes against one isolated database and kills a
+  worker at durable commit boundaries. It proves one side effect/debit/receipt,
+  receipt-commit recovery, and fail-closed manual review after an ambiguous
+  side effect without automatic redispatch.
 - **Hardened upstream boundary.** Startup performs MCP `initialize` and
   `tools/list` and registers one exact Streamable HTTP tool or fails closed.
   Production requires a public HTTPS origin; redirect following and ambient
@@ -321,7 +326,7 @@ Use `alembic upgrade head` for schema changes; production startup verifies the
 schema instead of relying on `create_all`.
 
 Apply the current migration head before mixed old/current workers take traffic.
-Migration 024 serializes the legacy JSON-RPC and REST governed-MCP endpoint
+Migration 027 serializes the legacy JSON-RPC and REST governed-MCP endpoint
 identities behind one wallet/idempotency-key uniqueness boundary.
 
 The supported API deployment path is the repository Dockerfile on Railway:
@@ -410,7 +415,8 @@ The CI workflows also run:
 - Ruff and mypy.
 - Production-like startup and routing checks.
 - Migration-from-empty-database checks.
-- PostgreSQL permit/refund concurrency tests.
+- PostgreSQL permit/refund concurrency tests plus two-process crash and replay
+  proofs against the same row-locking backend.
 - Governed upstream replay, failure accounting, dispatch reconciliation,
   evidence-linkage, and tenant-isolation tests.
 - Trust-plane and adversarial demo smoke tests.

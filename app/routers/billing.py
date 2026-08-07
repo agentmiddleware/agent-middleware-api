@@ -247,9 +247,12 @@ async def create_sponsor_wallet(
     auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
-    # Sponsor creation can seed the root liability ledger. Wallet-scoped tenant
-    # keys may manage only their existing wallet; only the bootstrap operator
-    # may create a new sponsor or grant its initial credits.
+    # Creating a sponsor mints ecosystem credits directly into its balance
+    # (initial_credits), so this is a credit-issuance operation, not self-serve
+    # onboarding. Without a gate, any valid wallet key could mint arbitrary
+    # credits — the billing system would not be an economic control. Restrict to
+    # bootstrap/admin credentials, which are the identities that operate the
+    # fiat -> credit conversion this endpoint represents.
     auth.require_bootstrap_admin()
     initial = (
         Decimal(str(request.initial_credits))

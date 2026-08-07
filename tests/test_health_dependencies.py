@@ -7,6 +7,7 @@ overall-status degradation, and timeout behavior.
 """
 
 import asyncio
+import base64
 import json
 
 import pytest
@@ -51,6 +52,8 @@ def _restore_env():
         "MCP_UPSTREAM_ENABLED",
         "MCP_UPSTREAM_PUBLIC_TOOL_ID",
         "MCP_UPSTREAM_BEARER_TOKEN",
+        "TRUST_MODE_ENABLED",
+        "TRUST_SIGNING_PRIVATE_KEY_B64",
     ]
     saved = {f: getattr(settings, f) for f in fields}
     reset_runtime_degradation()
@@ -116,6 +119,8 @@ async def test_report_default_shape():
         "stripe",
         "llm",
         "upstream_mcp",
+        "signing_key",
+        "sentinel",
     }
     # Every check carries an error slot (None when healthy) and latency_ms.
     for name, res in report["dependencies"].items():
@@ -129,10 +134,16 @@ async def test_report_default_shape():
     assert report["dependencies"]["stripe"]["status"] == "not_configured"
     assert report["dependencies"]["llm"]["status"] == "not_configured"
     assert report["dependencies"]["upstream_mcp"]["status"] == "not_configured"
+    assert report["dependencies"]["signing_key"]["status"] == "up"
+    assert report["dependencies"]["signing_key"]["state"] == "ephemeral"
 
     # MQTT gated on iot_bridge simulation mode.
     assert report["dependencies"]["mqtt"]["status"] == "not_used"
     assert "iot_bridge" in report["dependencies"]["mqtt"].get("reason", "")
+
+    # Sentinel gated on human_approval simulation mode.
+    assert report["dependencies"]["sentinel"]["status"] == "not_used"
+    assert "human_approval" in report["dependencies"]["sentinel"].get("reason", "")
 
     # Simulation modes are surfaced for operators.
     assert "simulation_modes" in report
@@ -236,6 +247,56 @@ async def test_not_configured_and_not_used_do_not_degrade_status():
         assert status in {"up", "not_configured", "not_used"}
 
 
+@pytest.mark.anyio
+async def test_valid_signing_key_is_reported_as_loaded():
+    settings = get_settings()
+    settings.TRUST_MODE_ENABLED = True
+    settings.TRUST_SIGNING_PRIVATE_KEY_B64 = base64.b64encode(bytes(range(32))).decode()
+
+    report = await gather_dependency_report()
+
+    assert report["dependencies"]["signing_key"]["status"] == "up"
+    assert report["dependencies"]["signing_key"]["state"] == "loaded"
+    assert "signing_key" not in report["unhealthy"]
+
+
+@pytest.mark.anyio
+async def test_invalid_signing_key_degrades_without_leaking_configured_value(client):
+    settings = get_settings()
+    secret_sentinel = f"{base64.b64encode(bytes(range(32))).decode()}!DO_NOT_LEAK"
+    settings.TRUST_MODE_ENABLED = True
+    settings.TRUST_SIGNING_PRIVATE_KEY_B64 = secret_sentinel
+
+    resp = await client.get("/health/dependencies")
+    report = resp.json()
+    signing_key = report["dependencies"]["signing_key"]
+
+    assert resp.status_code == 200
+    assert report["status"] == "degraded"
+    assert "signing_key" in report["unhealthy"]
+    assert signing_key["status"] == "down"
+    assert signing_key["state"] == "invalid"
+    assert signing_key["error"] == "invalid_trust_signing_private_key"
+    assert secret_sentinel not in json.dumps(report)
+    assert secret_sentinel not in resp.text
+
+
+@pytest.mark.anyio
+async def test_missing_signing_key_degrades_when_trust_mode_is_enabled():
+    settings = get_settings()
+    settings.TRUST_MODE_ENABLED = True
+    settings.TRUST_SIGNING_PRIVATE_KEY_B64 = ""
+
+    report = await gather_dependency_report()
+    signing_key = report["dependencies"]["signing_key"]
+
+    assert report["status"] == "degraded"
+    assert "signing_key" in report["unhealthy"]
+    assert signing_key["status"] == "down"
+    assert signing_key["state"] == "invalid"
+    assert signing_key["error"] == "trust_signing_private_key_required"
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -255,6 +316,8 @@ async def test_health_dependencies_endpoint_returns_report(client):
         "stripe",
         "llm",
         "upstream_mcp",
+        "signing_key",
+        "sentinel",
     }
     assert "simulation_modes" in body
     assert "unhealthy" in body

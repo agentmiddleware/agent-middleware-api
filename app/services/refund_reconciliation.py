@@ -15,6 +15,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
+    HumanApprovalModel,
     IdempotencyRecordModel,
     LedgerEntryModel,
     PermitModel,
@@ -85,6 +86,38 @@ class RefundReconciliationService:
 
     _process_lock = asyncio.Lock()
 
+    @staticmethod
+    async def _assert_approval_binding(
+        session: AsyncSession,
+        *,
+        record: IdempotencyRecordModel,
+        permit: PermitModel,
+        approval_id: str | None,
+        wallet_id: str,
+        tool_name: str,
+    ) -> None:
+        """Reject unsigned or mismatched approval evidence before receipt signing."""
+        if not permit.requires_human_approval:
+            if approval_id is not None:
+                raise RefundReconciliationError(
+                    "refund_reconciliation_approval_linkage_invalid"
+                )
+            return
+        if approval_id is None:
+            raise RefundReconciliationError("refund_reconciliation_approval_required")
+        approval = await session.get(HumanApprovalModel, approval_id)
+        if (
+            approval is None
+            or approval.wallet_id != wallet_id
+            or approval.permit_id != permit.permit_id
+            or approval.tool != tool_name
+            or approval.idempotency_key != record.idempotency_key
+            or approval.status != "consumed"
+        ):
+            raise RefundReconciliationError(
+                "refund_reconciliation_approval_linkage_invalid"
+            )
+
     async def create_pending(
         self,
         *,
@@ -101,6 +134,7 @@ class RefundReconciliationService:
         audit_event_id: str | None,
         reason: str,
         dispatch_attempt_id: str | None = None,
+        approval_id: str | None = None,
         response_payload: dict[str, Any] | None = None,
         response_hash_override: str | None = None,
     ) -> tuple[ReceiptResponse, dict[str, Any]]:
@@ -138,6 +172,19 @@ class RefundReconciliationService:
                     raise RefundReconciliationError(
                         "refund_reconciliation_checkpoint_invalid"
                     )
+                permit = await session.get(PermitModel, permit_id)
+                if permit is None:
+                    raise RefundReconciliationError(
+                        "refund_reconciliation_checkpoint_invalid"
+                    )
+                await self._assert_approval_binding(
+                    session,
+                    record=record,
+                    permit=permit,
+                    approval_id=approval_id,
+                    wallet_id=wallet_id,
+                    tool_name=tool_name,
+                )
 
                 receipt = await get_receipt_service().create_receipt(
                     permit_id=permit_id,
@@ -153,6 +200,7 @@ class RefundReconciliationService:
                     audit_event_id=audit_event_id,
                     idempotency_record_id=record.record_id,
                     dispatch_attempt_id=dispatch_attempt_id,
+                    approval_id=approval_id,
                     response_hash_override=response_hash_override,
                     session=session,
                 )

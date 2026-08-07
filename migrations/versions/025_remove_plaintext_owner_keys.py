@@ -1,7 +1,7 @@
 """Remove plaintext API-key ownership columns.
 
-Revision ID: 022_remove_plaintext_owner_keys
-Revises: 021_ledger_stripe_event_id
+Revision ID: 025_remove_plaintext_owner_keys
+Revises: 024_human_approval_hardening
 Create Date: 2026-08-05
 
 Wallet and service ownership is represented by wallet identifiers and the
@@ -15,8 +15,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "022_remove_plaintext_owner_keys"
-down_revision: Union[str, None] = "021_ledger_stripe_event_id"
+revision: str = "025_remove_plaintext_owner_keys"
+down_revision: Union[str, None] = "024_human_approval_hardening"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

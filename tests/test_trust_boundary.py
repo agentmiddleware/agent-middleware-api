@@ -36,6 +36,7 @@ SPINE_SERVICE_MODULES = {
     "app.services.audit_chain",
     "app.services.audit_log",
     "app.services.governance",
+    "app.services.human_approval",
     "app.services.idempotency",
     "app.services.permits",
     "app.services.policies",

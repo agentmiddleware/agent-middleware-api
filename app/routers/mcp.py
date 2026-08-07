@@ -20,7 +20,7 @@ import inspect
 import json
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
@@ -54,9 +54,13 @@ from ..schemas.billing import InsufficientFundsResponse, LedgerEntry, ServiceCat
 # Spine primitives are consumed through the trust-plane facade so the governed
 # invocation path depends on the product core by its public boundary.
 from ..trust import (
+    APPROVAL_STATUS_APPROVED,
+    APPROVAL_STATUS_PENDING,
     DEFAULT_PRICING,
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
     AgentMoney,
+    HumanApprovalError,
+    HumanApprovalUnavailableError,
     IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
@@ -65,6 +69,7 @@ from ..trust import (
     evaluate_tool_invocation,
     evaluate_wallet_policy,
     get_agent_money,
+    get_human_approval_service,
     get_idempotency_service,
     get_permit_service,
     get_receipt_service,
@@ -134,6 +139,29 @@ class ToolPermissionDenied(PermissionError):
         self.receipt = receipt
         self.status_code = 403
         self.jsonrpc_code = -32003
+
+
+class HumanApprovalPendingSignal(RuntimeError):
+    """Governed invoke paused on a retryable human-approval condition.
+
+    Not a terminal outcome: no receipt exists, nothing was charged, and the
+    caller's idempotency key was released — the same invoke (same body, same
+    key) should be retried once the approval is decided (or, for
+    ``human_approval_unavailable``, once Sentinel is reachable again).
+    """
+
+    jsonrpc_code = -32005
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        data: dict[str, Any] | None = None,
+        status_code: int = 202,
+    ) -> None:
+        super().__init__(reason)
+        self.data = data or {}
+        self.status_code = status_code
 
 
 class McpContext(BaseModel):
@@ -243,8 +271,22 @@ async def handle_messages(
                     "result": result,
                 }
             )
-        except ToolPermissionDenied as e:
+        except HumanApprovalPendingSignal as e:
             error_payload: dict[str, Any] = {
+                "code": e.jsonrpc_code,
+                "message": str(e),
+            }
+            if e.data:
+                error_payload["data"] = e.data
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": error_payload,
+                }
+            )
+        except ToolPermissionDenied as e:
+            error_payload = {
                 "code": -32003,
                 "message": str(e),
             }
@@ -370,14 +412,14 @@ async def _begin_governed_mcp_idempotency(
 ) -> IdempotencyBegin:
     """Adopt a completed pre-canonical replay without creating a new identity.
 
-    Before migration 023, governed MCP calls were keyed by their physical REST
+    Before migration 026, governed MCP calls were keyed by their physical REST
     or JSON-RPC endpoint and hashed the raw transport payload. A canonical row
     must not be created while either legacy scope already owns the wallet/key:
     doing so could debit and dispatch the same historical action again.
 
     Only the current transport payload can be compared exactly. An existing row
     under the other transport is therefore a fail-closed conflict (or remains in
-    progress) rather than an unsafe cross-transport guess. Migration 024 adds a
+    progress) rather than an unsafe cross-transport guess. Migration 027 adds a
     database identity shared by old and current workers; the second lookup below
     adopts whichever row won a rolling-deployment insertion race.
     """
@@ -477,10 +519,14 @@ async def _execute_registered_tool(
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
 
-    # Authorize the tenant boundary before consulting durable idempotency state.
-    # This is especially important when an executable registration has been
-    # removed: replay lookup must not become an oracle for another wallet's
-    # stored result, including permits that are intentionally not key-bound.
+    # Authorize wallet ownership BEFORE the idempotency store is touched. The
+    # idempotency lookup key is (wallet_id, endpoint, key) with wallet_id taken
+    # from the request body, so running idem.begin() first let an unauthorized
+    # caller (a) be served another wallet's stored signed receipt via the replay
+    # short-circuit and (b) plant an orphaned in-progress record in the victim's
+    # namespace on denial, permanently poisoning that (wallet, key). Gate here so
+    # a caller who does not own wallet_id never reaches the store. The priced
+    # decision below re-runs this check with the real cost for the audit record.
     tenant_decision = evaluate_tool_invocation(
         auth=auth,
         wallet_id=wallet_id,
@@ -836,6 +882,24 @@ async def _execute_registered_tool(
             raise ToolPermissionDenied(reason, receipt=receipt_payload)
         raise PermissionError(policy.reason)
 
+    approval_check = None
+    if governed_call and permit_model and permit_model.requires_human_approval:
+        approval_check = await _require_human_approval(
+            decision=decision,
+            permit_model=permit_model,
+            wallet_id=wallet_id,
+            key_id=auth.key_id,
+            endpoint=endpoint,
+            idempotency_endpoint=idempotency_endpoint,
+            transport=transport,
+            idem=idem,
+            idempotency_key=idempotency_key,
+            tool_name=tool_name,
+            request_payload=effective_request_payload,
+            arguments=arguments,
+            registered_cost=registered_cost,
+        )
+
     dispatch_service: McpDispatchAttemptService | None = (
         get_mcp_dispatch_attempt_service()
         if execution_backend == "upstream_mcp"
@@ -859,6 +923,9 @@ async def _execute_registered_tool(
                     idempotency_record_id=idem_begin.record_id,
                     wallet_id=wallet_id,
                     permit_id=permit_model.permit_id,
+                    approval_id=(
+                        approval_check.approval_id if approval_check else None
+                    ),
                     key_id=auth.key_id,
                     public_tool_id=tool_name,
                     upstream_tool_name=str(service["upstream_tool_name"]),
@@ -882,6 +949,7 @@ async def _execute_registered_tool(
                             request_payload=effective_request_payload,
                             arguments=arguments,
                         ),
+                        **_approval_metadata(approval_check),
                     },
                 )
                 receipt_payload = await _finalize_governed_denial(
@@ -900,6 +968,9 @@ async def _execute_registered_tool(
                     outcome="failed_refunded",
                     status_code=502,
                     idempotency_record_id=idem_begin.record_id,
+                    approval_id=(
+                        approval_check.approval_id if approval_check else None
+                    ),
                 )
                 raise GovernedToolError(
                     reason,
@@ -927,6 +998,7 @@ async def _execute_registered_tool(
                     "permit_id": permit_id,
                     "idempotency_key": idempotency_key,
                     "request_hash": effective_request_hash,
+                    **_approval_metadata(approval_check),
                 },
             )
             receipt_payload = None
@@ -947,6 +1019,9 @@ async def _execute_registered_tool(
                     reason=reason,
                     outcome="denied",
                     status_code=403,
+                    approval_id=(
+                        approval_check.approval_id if approval_check else None
+                    ),
                 )
             elif permit_validation.reason:
                 await _complete_governed_denial_idempotency(
@@ -1042,6 +1117,7 @@ async def _execute_registered_tool(
                     arguments=arguments,
                 ),
                 **_dispatch_audit_metadata(dispatch_attempt),
+                **_approval_metadata(approval_check),
             },
         )
         if governed_call and permit_model:
@@ -1073,6 +1149,7 @@ async def _execute_registered_tool(
                     if dispatch_attempt is not None
                     else None
                 ),
+                approval_id=(approval_check.approval_id if approval_check else None),
             )
             raise GovernedToolError(
                 "insufficient_funds",
@@ -1120,6 +1197,7 @@ async def _execute_registered_tool(
             ledger_entry_id=charge_result.entry_id,
             description=description,
             policy_metadata=policy_metadata,
+            approval_check=approval_check,
         )
 
     assert func is not None
@@ -1160,6 +1238,7 @@ async def _execute_registered_tool(
                             ledger_entry_id=charge_result.entry_id,
                         ),
                         "refund_reconciliation_status": "pending",
+                        **_approval_metadata(approval_check),
                     },
                 )
             except Exception as audit_exc:
@@ -1186,6 +1265,9 @@ async def _execute_registered_tool(
                     ),
                     ledger_entry_id=charge_result.entry_id,
                     reason=error,
+                    approval_id=(
+                        approval_check.approval_id if approval_check else None
+                    ),
                 )
                 try:
                     await record_audit_event(
@@ -1205,6 +1287,7 @@ async def _execute_registered_tool(
                             "ledger_entry_id": charge_result.entry_id,
                             "credits": str(credits_charged),
                             "status": "pending",
+                            **_approval_metadata(approval_check),
                         },
                     )
                 except Exception as audit_exc:
@@ -1241,6 +1324,7 @@ async def _execute_registered_tool(
                     arguments=arguments,
                     ledger_entry_id=charge_result.entry_id,
                 ),
+                **_approval_metadata(approval_check),
             },
         )
         if governed_call and permit_model:
@@ -1260,6 +1344,7 @@ async def _execute_registered_tool(
                 outcome="failed_refunded",
                 status_code=500,
                 ledger_entry_id=charge_result.entry_id,
+                approval_id=(approval_check.approval_id if approval_check else None),
             )
             raise GovernedToolError(
                 str(exc),
@@ -1305,6 +1390,7 @@ async def _execute_registered_tool(
                             arguments=arguments,
                             ledger_entry_id=charge_result.entry_id,
                         ),
+                        **_approval_metadata(approval_check),
                     },
                 )
             if governed_call and permit_model:
@@ -1323,6 +1409,9 @@ async def _execute_registered_tool(
                         audit_event_id=audit_event.event_id,
                         idempotency_record_id=(
                             idem_begin.record_id if idem_begin is not None else None
+                        ),
+                        approval_id=(
+                            approval_check.approval_id if approval_check else None
                         ),
                     )
                     response_payload["receipt"] = _receipt_response_payload(receipt)
@@ -1465,6 +1554,7 @@ async def _execute_upstream_after_charge(
     ledger_entry_id: str,
     description: str,
     policy_metadata: dict[str, Any],
+    approval_check: Any | None,
 ) -> dict[str, Any]:
     """Dispatch once and durably classify every post-charge remote outcome."""
 
@@ -1510,6 +1600,7 @@ async def _execute_upstream_after_charge(
             credits_charged=credits_charged,
             ledger_entry_id=ledger_entry_id,
             policy_metadata=policy_metadata,
+            approval_check=approval_check,
         )
         raise AssertionError("unreachable")
 
@@ -1563,6 +1654,7 @@ async def _execute_upstream_after_charge(
             ledger_entry_id=ledger_entry_id,
             description=description,
             policy_metadata=policy_metadata,
+            approval_check=approval_check,
         )
         raise AssertionError("unreachable")
     except UpstreamMcpPreDispatchError as exc:
@@ -1600,6 +1692,7 @@ async def _execute_upstream_after_charge(
             ledger_entry_id=ledger_entry_id,
             description=description,
             policy_metadata=policy_metadata,
+            approval_check=approval_check,
         )
         raise AssertionError("unreachable")
     except UpstreamMcpDeliveryUncertainError:
@@ -1642,6 +1735,7 @@ async def _execute_upstream_after_charge(
             credits_charged=credits_charged,
             ledger_entry_id=ledger_entry_id,
             policy_metadata=policy_metadata,
+            approval_check=approval_check,
         )
         raise AssertionError("unreachable")
     except UpstreamMcpResponseRejectedError as exc:
@@ -1679,6 +1773,7 @@ async def _execute_upstream_after_charge(
                 ledger_entry_id=ledger_entry_id,
             ),
             **_dispatch_audit_metadata(terminal),
+            **_approval_metadata(approval_check),
         },
     )
     receipt = await get_receipt_service().create_receipt(
@@ -1696,6 +1791,7 @@ async def _execute_upstream_after_charge(
         idempotency_record_id=idempotency_record_id,
         dispatch_attempt_id=terminal.attempt_id,
         response_hash_override=terminal.response_hash,
+        approval_id=(approval_check.approval_id if approval_check else None),
     )
     response_payload = dict(upstream_result.payload)
     response_payload["receipt"] = _receipt_response_payload(receipt)
@@ -1734,6 +1830,7 @@ async def _raise_refunded_upstream_failure(
     ledger_entry_id: str,
     description: str,
     policy_metadata: dict[str, Any],
+    approval_check: Any | None,
 ) -> None:
     """Compensate a confirmed failure and sign its terminal evidence."""
     try:
@@ -1766,6 +1863,7 @@ async def _raise_refunded_upstream_failure(
                 ),
                 **_dispatch_audit_metadata(dispatch_attempt),
                 "refund_reconciliation_status": "pending",
+                **_approval_metadata(approval_check),
             },
         )
         receipt_payload, reconciliation = await _finalize_unrefunded_failure(
@@ -1785,6 +1883,7 @@ async def _raise_refunded_upstream_failure(
             dispatch_attempt_id=dispatch_attempt.attempt_id,
             response_payload=terminal_payload,
             response_hash_override=dispatch_attempt.response_hash,
+            approval_id=(approval_check.approval_id if approval_check else None),
         )
         raise GovernedToolError(
             error,
@@ -1812,6 +1911,7 @@ async def _raise_refunded_upstream_failure(
                 ledger_entry_id=ledger_entry_id,
             ),
             **_dispatch_audit_metadata(dispatch_attempt),
+            **_approval_metadata(approval_check),
         },
     )
     response_extra_data = {
@@ -1839,6 +1939,7 @@ async def _raise_refunded_upstream_failure(
         response_payload=terminal_payload,
         response_hash_override=dispatch_attempt.response_hash,
         response_extra_data=response_extra_data,
+        approval_id=(approval_check.approval_id if approval_check else None),
     )
     raise GovernedToolError(
         reason,
@@ -1873,6 +1974,7 @@ async def _raise_charged_upstream_failure(
     credits_charged: Decimal,
     ledger_entry_id: str,
     policy_metadata: dict[str, Any],
+    approval_check: Any | None,
 ) -> None:
     """Sign an ambiguous/rejected response without refunding or releasing budget."""
     audit_event = await _audit_mcp_invocation(
@@ -1892,6 +1994,7 @@ async def _raise_charged_upstream_failure(
                 ledger_entry_id=ledger_entry_id,
             ),
             **_dispatch_audit_metadata(dispatch_attempt),
+            **_approval_metadata(approval_check),
         },
     )
     receipt = await get_receipt_service().create_receipt(
@@ -1911,6 +2014,7 @@ async def _raise_charged_upstream_failure(
         audit_event_id=audit_event.event_id,
         idempotency_record_id=dispatch_attempt.idempotency_record_id,
         dispatch_attempt_id=dispatch_attempt.attempt_id,
+        approval_id=(approval_check.approval_id if approval_check else None),
     )
     receipt_payload = _receipt_response_payload(receipt)
     response_extra_data = {"dispatch": _dispatch_response_metadata(dispatch_attempt)}
@@ -2019,6 +2123,7 @@ async def _finalize_governed_denial(
     response_payload: dict[str, Any] | None = None,
     response_hash_override: str | None = None,
     response_extra_data: dict[str, Any] | None = None,
+    approval_id: str | None = None,
 ) -> dict[str, Any]:
     """Sign a non-success governed receipt and record the idempotent outcome.
 
@@ -2048,6 +2153,7 @@ async def _finalize_governed_denial(
         idempotency_record_id=idempotency_record_id,
         dispatch_attempt_id=dispatch_attempt_id,
         response_hash_override=response_hash_override,
+        approval_id=approval_id,
     )
     receipt_payload = _receipt_response_payload(receipt)
     await idem.complete(
@@ -2083,6 +2189,7 @@ async def _finalize_unrefunded_failure(
     dispatch_attempt_id: str | None = None,
     response_payload: dict[str, Any] | None = None,
     response_hash_override: str | None = None,
+    approval_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Persist the signed failure and its exact-once operator work item."""
     receipt, reconciliation = await get_refund_reconciliation_service().create_pending(
@@ -2101,6 +2208,7 @@ async def _finalize_unrefunded_failure(
         dispatch_attempt_id=dispatch_attempt_id,
         response_payload=response_payload,
         response_hash_override=response_hash_override,
+        approval_id=approval_id,
     )
     receipt_payload = _receipt_response_payload(receipt)
     return receipt_payload, reconciliation
@@ -2122,6 +2230,142 @@ async def _assert_governed_replay_access(
     )
     if not validation.allowed:
         raise ToolPermissionDenied(validation.reason or "permit_denied")
+
+
+def _approval_metadata(approval_check: Any) -> dict[str, Any]:
+    """Audit-metadata fragment for the human-approval gate (signed via chain)."""
+    if approval_check is None:
+        return {}
+    metadata: dict[str, Any] = {
+        "approval_id": approval_check.approval_id,
+        "approval_status": approval_check.status,
+    }
+    if approval_check.sentinel_action_id:
+        metadata["sentinel_action_id"] = approval_check.sentinel_action_id
+    if approval_check.simulated:
+        metadata["approval_simulated"] = True
+    return metadata
+
+
+async def _require_human_approval(
+    *,
+    decision: PolicyDecision,
+    permit_model: Any,
+    wallet_id: str,
+    key_id: str | None,
+    endpoint: str,
+    idempotency_endpoint: str,
+    transport: str,
+    idem: Any,
+    idempotency_key: str | None,
+    tool_name: str,
+    request_payload: dict[str, Any] | None,
+    arguments: dict[str, Any],
+    registered_cost: Decimal,
+) -> Any:
+    """Enforce the permit's human-approval gate before any budget moves.
+
+    Returns the approved ``ApprovalCheck`` or raises:
+
+    - ``HumanApprovalPendingSignal`` (decision pending / Sentinel unreachable):
+      retryable — the idempotency record is abandoned so the same key can be
+      retried, and no receipt is written because nothing terminal happened.
+    - ``ToolPermissionDenied`` (rejected / expired / misconfigured): terminal —
+      a denied receipt is signed and the idempotency record completes, so
+      replays of this key return the same denial.
+    """
+    trust_metadata = _trust_metadata(
+        permit_id=permit_model.permit_id,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+        arguments=arguments,
+    )
+
+    async def _terminal_denial(reason: str, approval_id: str | None) -> NoReturn:
+        audit_event = await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=reason,
+            extra_metadata=trust_metadata,
+        )
+        receipt_payload = await _finalize_governed_denial(
+            idem=idem,
+            permit_model=permit_model,
+            wallet_id=wallet_id,
+            key_id=key_id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            tool_name=tool_name,
+            request_payload=request_payload,
+            arguments=arguments,
+            registered_cost=registered_cost,
+            audit_event_id=audit_event.event_id,
+            reason=reason,
+            outcome="denied",
+            status_code=403,
+            approval_id=approval_id,
+        )
+        raise ToolPermissionDenied(reason, receipt=receipt_payload)
+
+    async def _retryable(
+        reason: str, *, data: dict[str, Any], status_code: int
+    ) -> NoReturn:
+        await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=reason,
+            extra_metadata={**trust_metadata, **data},
+        )
+        # Nothing was charged and no terminal outcome exists: free the key so
+        # the same invoke can be retried once the condition clears.
+        await idem.abandon(
+            wallet_id=wallet_id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key or "",
+        )
+        raise HumanApprovalPendingSignal(reason, data=data, status_code=status_code)
+
+    try:
+        approval_check = await get_human_approval_service().ensure_approval(
+            wallet_id=wallet_id,
+            permit_id=permit_model.permit_id,
+            tool_name=tool_name,
+            idempotency_key=idempotency_key or "",
+            arguments=arguments,
+            estimated_credits=registered_cost,
+        )
+    except HumanApprovalUnavailableError as exc:
+        await _retryable(exc.reason, data={}, status_code=503)
+    except HumanApprovalError as exc:
+        await _terminal_denial(exc.reason, None)
+    except Exception:
+        # Never let an unexpected error strand the caller's in-progress
+        # idempotency record (reconcile can't repair an uncharged one). Fail
+        # closed and retryable: release the key, execute nothing, surface an
+        # outage. Logged loudly so it isn't silently swallowed.
+        logger.exception("human_approval_gate_unexpected_error")
+        await _retryable("human_approval_unavailable", data={}, status_code=503)
+
+    approval_data = _approval_metadata(approval_check)
+    if approval_check.status == APPROVAL_STATUS_PENDING:
+        await _retryable(
+            "human_approval_pending",
+            data={
+                **approval_data,
+                "expires_at": approval_check.expires_at.isoformat(),
+            },
+            status_code=202,
+        )
+    if approval_check.status != APPROVAL_STATUS_APPROVED:
+        # rejected or expired
+        await _terminal_denial(
+            f"human_approval_{approval_check.status}", approval_check.approval_id
+        )
+    return approval_check
 
 
 async def _raise_replayed_error(replay: Any) -> None:
@@ -2356,8 +2600,13 @@ async def invoke_tool(
         )
         result = await _mcp_adapter.invoke(governed_request)
         return ToolCallResponse(**await _mcp_adapter.normalize_response(result))
-    except ToolPermissionDenied as exc:
+    except HumanApprovalPendingSignal as exc:
         detail: dict[str, Any] = {"error": str(exc)}
+        if exc.data:
+            detail["approval"] = exc.data
+        raise HTTPException(status_code=exc.status_code, detail=detail)
+    except ToolPermissionDenied as exc:
+        detail = {"error": str(exc)}
         if exc.receipt:
             detail["receipt"] = exc.receipt
         raise HTTPException(status_code=403, detail=detail)

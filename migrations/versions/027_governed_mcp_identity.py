@@ -1,7 +1,7 @@
 """Serialize legacy and canonical governed MCP idempotency identities.
 
-Revision ID: 024_governed_mcp_identity
-Revises: 023_governed_mcp_persistence
+Revision ID: 027_governed_mcp_identity
+Revises: 026_governed_mcp_persistence
 Create Date: 2026-08-07
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "024_governed_mcp_identity"
-down_revision: Union[str, None] = "023_governed_mcp_persistence"
+revision: str = "027_governed_mcp_identity"
+down_revision: Union[str, None] = "026_governed_mcp_persistence"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -57,7 +57,7 @@ def upgrade() -> None:
             f"{int(ambiguous_groups)} ambiguous wallet/key group(s)"
         )
 
-    # This expression index is intentionally compatible with pre-023 binaries.
+    # This expression index is intentionally compatible with pre-026 binaries.
     # Install the migration before rolling out current workers: an old worker
     # inserting /mcp/messages and a current worker inserting /mcp/invoke then
     # contend on the same database key, so only one pipeline can proceed.

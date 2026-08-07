@@ -35,7 +35,14 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         "receipts",
         "idempotency_records",
         "mcp_dispatch_attempts",
+        "human_approvals",
     } <= tables
+
+    permit_columns = {col["name"] for col in inspector.get_columns("permits")}
+    assert "requires_human_approval" in permit_columns
+    receipt_columns = {col["name"] for col in inspector.get_columns("receipts")}
+    assert "approval_id" in receipt_columns
+    assert {"idempotency_record_id", "dispatch_attempt_id"} <= receipt_columns
 
     ledger_columns = {col["name"] for col in inspector.get_columns("ledger_entries")}
     assert "operation_key" in ledger_columns
@@ -45,20 +52,30 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
     }
     assert "operation_kind" in idempotency_columns
 
-    receipt_columns = {col["name"] for col in inspector.get_columns("receipts")}
-    assert {"idempotency_record_id", "dispatch_attempt_id"} <= receipt_columns
-
     dispatch_columns = {
         col["name"] for col in inspector.get_columns("mcp_dispatch_attempts")
     }
     assert {
         "idempotency_record_id",
+        "approval_id",
         "ledger_entry_id",
         "state",
         "result_json",
         "result_size_bytes",
         "response_hash",
     } <= dispatch_columns
+    dispatch_foreign_keys = inspector.get_foreign_keys("mcp_dispatch_attempts")
+    assert any(
+        foreign_key["constrained_columns"] == ["approval_id"]
+        and foreign_key["referred_table"] == "human_approvals"
+        for foreign_key in dispatch_foreign_keys
+    )
+    dispatch_indexes = inspector.get_indexes("mcp_dispatch_attempts")
+    assert any(
+        index["name"] == "ix_mcp_dispatch_attempts_approval_id"
+        and index["column_names"] == ["approval_id"]
+        for index in dispatch_indexes
+    )
 
     wallet_columns = {col["name"] for col in inspector.get_columns("wallets")}
     assert {
@@ -98,7 +115,7 @@ def test_governed_persistence_migration_backfills_only_unambiguous_receipts(
     sync_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", async_url)
     config = Config("alembic.ini")
-    command.upgrade(config, "022_remove_plaintext_owner_keys")
+    command.upgrade(config, "025_remove_plaintext_owner_keys")
 
     engine = create_engine(sync_url)
     with engine.begin() as connection:
@@ -277,7 +294,7 @@ def test_governed_mcp_identity_migration_refuses_ambiguous_history(
     sync_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", async_url)
     config = Config("alembic.ini")
-    command.upgrade(config, "023_governed_mcp_persistence")
+    command.upgrade(config, "026_governed_mcp_persistence")
 
     engine = create_engine(sync_url)
     with engine.begin() as connection:
@@ -341,7 +358,7 @@ def test_governed_mcp_identity_migration_refuses_ambiguous_history(
                 """
             )
         ).scalar_one()
-    assert revision == "023_governed_mcp_persistence"
+    assert revision == "026_governed_mcp_persistence"
     assert installed_index == 0
     engine.dispose()
     os.remove(db_path)
@@ -445,4 +462,60 @@ def test_owner_key_migration_removes_columns_but_preserves_owned_rows(
             ).scalar_one()
             == "spn-owner-key-migration"
         )
+    engine.dispose()
+
+
+def test_024_repairs_sqlite_boolean_backfill(tmp_path, monkeypatch):
+    """Verify 024 repairs 023's SQLite text-boolean backfill."""
+    from sqlalchemy import Boolean, Column, MetaData, String, Table, select
+
+    db_path = tmp_path / "repair.db"
+    async_url = f"sqlite+aiosqlite:///{db_path}"
+    sync_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    config = Config("alembic.ini")
+
+    command.upgrade(config, "023_human_approval_gate")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    engine = create_engine(sync_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO permits (permit_id, issuer_wallet_id, "
+                "subject_wallet_id, scopes_json, allowed_tools_json, max_credits, "
+                "expires_at, nonce, status, requires_human_approval, signature, "
+                "key_id, issued_at) VALUES ('p-legacy', 'w', 'w', '[]', '[]', 10, "
+                "'2999-01-01 00:00:00', 'n', 'active', 'false', 'sig', 'k', "
+                "'2026-01-01 00:00:00')"
+            )
+        )
+
+    metadata = MetaData()
+    permits = Table(
+        "permits",
+        metadata,
+        Column("permit_id", String, primary_key=True),
+        Column("requires_human_approval", Boolean),
+    )
+    with engine.connect() as connection:
+        buggy = connection.execute(
+            select(permits.c.requires_human_approval).where(
+                permits.c.permit_id == "p-legacy"
+            )
+        ).scalar_one()
+    assert buggy is True, "precondition: 023 leaves a truthy text value on SQLite"
+
+    command.upgrade(config, "024_human_approval_hardening")
+    with engine.connect() as connection:
+        fixed = connection.execute(
+            select(permits.c.requires_human_approval).where(
+                permits.c.permit_id == "p-legacy"
+            )
+        ).scalar_one()
+    assert fixed is False, "024 must normalize the backfilled text 'false' to False"
+
+    approval_columns = {
+        column["name"] for column in inspect(engine).get_columns("human_approvals")
+    }
+    assert "request_hash" in approval_columns
     engine.dispose()

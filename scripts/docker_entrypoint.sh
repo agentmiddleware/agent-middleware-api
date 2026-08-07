@@ -17,4 +17,5 @@ if [ "${RUN_MIGRATIONS_ON_START:-}" = "true" ]; then
   alembic upgrade head
 fi
 
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+app_module="${APP_MODULE:-app.main:app}"
+exec uvicorn "$app_module" --host 0.0.0.0 --port "${PORT:-8000}"

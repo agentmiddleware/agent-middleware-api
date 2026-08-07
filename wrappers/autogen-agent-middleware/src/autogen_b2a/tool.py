@@ -2,7 +2,6 @@
 
 from typing import Any
 from autogen.agentchat.conversable_agent import ConversableAgent
-from autogen.core import FunctionCall
 
 from .client import B2AClient
 

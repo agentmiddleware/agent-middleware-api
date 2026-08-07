@@ -1,13 +1,16 @@
 """
-API Key authentication for agent consumers.
-Agents pass their key via the X-API-Key header. No cookies, no sessions,
-no OAuth dance — just a key and a handshake.
+API Key + JWT Bearer authentication for agent consumers.
+
+Agents pass credentials via:
+- X-API-Key header (legacy, long-lived keys)
+- Authorization: Bearer <jwt> header (modern, short-lived tokens)
 """
 
 import hmac
 from dataclasses import dataclass
+from typing import Annotated
 
-from fastapi import HTTPException, Security, status
+from fastapi import Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from .config import get_settings
 from .trust_mode import is_production_like_environment
@@ -30,6 +33,11 @@ class AuthContext:
     key_id: str | None = None
     wallet_id: str | None = None
     is_bootstrap_admin: bool = False
+    scopes: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.scopes is None:
+            object.__setattr__(self, "scopes", [])
 
     def require_wallet_access(self, wallet_id: str | None) -> None:
         """Allow bootstrap admins or the exact wallet owning a DB-backed key.
@@ -67,26 +75,46 @@ class AuthContext:
 
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),
+    authorization: Annotated[str | None, Header()] = None,
 ) -> AuthContext:
     """
-    Validate an API key and return caller context.
+    Validate credentials and return caller context.
 
-    Environment keys are trusted bootstrap/admin credentials. If the key
-    is not an environment key, fall through to the DB-backed key registry.
+    Checks in order:
+    1. Authorization: Bearer <jwt> (modern, short-lived)
+    2. X-API-Key header (legacy, long-lived keys)
+
+    Settings are read per call, not from the module-level singleton: tests and
+    the Postgres CI job rebind VALID_API_KEYS and clear the settings cache after
+    this module is already imported, and a captured `settings` would keep
+    serving the stale key list.
     """
+    settings = get_settings()
+
+    # A presented Authorization header is authoritative. Never fall back to a
+    # concurrently supplied API key when its scheme, shape, or token is invalid:
+    # doing so would let an invalid bearer credential authenticate as a different
+    # principal than the caller intended.
+    if authorization is not None:
+        token = _parse_bearer_authorization(authorization)
+        return await _auth_from_jwt(token)
+
+    # Preserve the pre-header direct-call/X-API-Key compatibility path.
+    if api_key and api_key.startswith("Bearer "):
+        token = api_key[7:].strip()
+        return await _auth_from_jwt(token)
+
     if api_key is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
-                "error": "missing_api_key",
-                "message": "X-API-Key header is required.",
+                "error": "missing_credentials",
+                "message": "X-API-Key or Authorization: Bearer header is required.",
                 "docs": "/docs",
             },
         )
 
     # RED TEAM FIX: Reject empty or whitespace-only keys.
-    # FastAPI's APIKeyHeader passes empty strings through — a gap
-    # that would let any request with `X-API-Key: ""` bypass auth.
     stripped = api_key.strip()
     if not stripped or len(stripped) < 8:
         raise HTTPException(
@@ -97,12 +125,15 @@ async def get_auth_context(
             },
         )
 
+    # Try JWT first (token might not start with "Bearer " but be a raw JWT)
+    if stripped.count(".") == 2 and len(stripped) > 50:
+        try:
+            return await _auth_from_jwt(stripped)
+        except Exception:
+            pass  # Not a valid JWT, fall through to API key
+
     valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
 
-    # Constant-time compare against every configured key so that a timing
-    # side channel can't be used to recover a bootstrap-admin key byte by
-    # byte. `any()` short-circuits on the first match but each individual
-    # comparison is itself constant-time, which is what matters here.
     if any(hmac.compare_digest(stripped, key) for key in valid_keys):
         return AuthContext(
             source="env",
@@ -135,9 +166,6 @@ async def get_auth_context(
             },
         )
 
-    # DEBUG empty-key bootstrap is local/dev only. Production-like
-    # environments must never accept arbitrary keys as bootstrap admin —
-    # even if DEBUG somehow slipped past startup guardrails.
     if is_production_like_environment(settings.ENVIRONMENT):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -147,12 +175,55 @@ async def get_auth_context(
             },
         )
 
-    # Development mode with no configured keys: preserve the previous local
-    # testing behavior while still identifying the caller as bootstrap-scoped.
     return AuthContext(
         source="env",
         raw_key=stripped,
         is_bootstrap_admin=True,
+    )
+
+
+def _parse_bearer_authorization(authorization: str) -> str:
+    """Accept exactly ``Bearer <nonempty-token>`` with no extra whitespace."""
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        token = ""
+    else:
+        token = authorization[len(prefix) :]
+
+    if not token or token != token.strip() or any(char.isspace() for char in token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "invalid_token",
+                "message": "Authorization header must be exactly 'Bearer <token>'.",
+            },
+        )
+    return token
+
+
+async def _auth_from_jwt(token: str) -> AuthContext:
+    """Verify JWT and return AuthContext."""
+    from .jwt import get_jwt_service, JWTError
+
+    jwt_svc = get_jwt_service()
+    try:
+        payload = jwt_svc.verify_access_token(token)
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "invalid_token",
+                "message": str(e),
+            },
+        ) from e
+
+    return AuthContext(
+        source="jwt",
+        raw_key=token[:20] + "...",
+        wallet_id=payload.sub,
+        key_id=payload.key_id,
+        is_bootstrap_admin=False,
+        scopes=payload.scopes,
     )
 
 

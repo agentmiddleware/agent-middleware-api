@@ -417,6 +417,18 @@ class McpDispatchReconciliationService:
             return existing
         attempt = context.attempt
         ok = attempt.state == "succeeded"
+        metadata: dict[str, Any] = {
+            "permit_id": attempt.permit_id,
+            "request_hash": attempt.request_hash,
+            "ledger_entry_id": attempt.ledger_entry_id,
+            "dispatch_attempt_id": attempt.attempt_id,
+            "dispatch_state": attempt.state,
+            "upstream_tool_name": attempt.upstream_tool_name,
+            "upstream_origin": attempt.upstream_origin,
+            "dispatch_response_hash": attempt.response_hash,
+        }
+        if attempt.approval_id is not None:
+            metadata["approval_id"] = attempt.approval_id
         return await record_audit_event(
             event="mcp.invoke",
             # The event id is part of the signed audit payload and its primary
@@ -432,16 +444,7 @@ class McpDispatchReconciliationService:
             request_id=attempt.attempt_id,
             ok=ok,
             error=None if ok else self._public_error(attempt),
-            metadata={
-                "permit_id": attempt.permit_id,
-                "request_hash": attempt.request_hash,
-                "ledger_entry_id": attempt.ledger_entry_id,
-                "dispatch_attempt_id": attempt.attempt_id,
-                "dispatch_state": attempt.state,
-                "upstream_tool_name": attempt.upstream_tool_name,
-                "upstream_origin": attempt.upstream_origin,
-                "dispatch_response_hash": attempt.response_hash,
-            },
+            metadata=metadata,
         )
 
     async def _find_existing_audit(
@@ -516,6 +519,7 @@ class McpDispatchReconciliationService:
                 "dispatch_response_hash": attempt.response_hash,
                 "upstream_tool_name": attempt.upstream_tool_name,
                 "upstream_origin": attempt.upstream_origin,
+                "approval_id": attempt.approval_id,
             }
             if any(metadata.get(key) != value for key, value in expected.items()):
                 raise DispatchAttemptError("dispatch_audit_linkage_conflict")
@@ -597,6 +601,7 @@ class McpDispatchReconciliationService:
                 credits_charged=credits_charged,
                 outcome=outcome,
                 audit_event_id=audit_event_id,
+                approval_id=attempt.approval_id,
             )
         except ReceiptError:
             # Another process may have finalized the same attempt after our
@@ -641,6 +646,7 @@ class McpDispatchReconciliationService:
             "credits_charged": expected_charged,
             "outcome": outcome,
             "audit_event_id": audit_event_id,
+            "approval_id": attempt.approval_id,
         }
         if any(getattr(receipt, key) != value for key, value in expected.items()):
             raise DispatchAttemptError("dispatch_receipt_linkage_conflict")

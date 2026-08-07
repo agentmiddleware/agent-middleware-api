@@ -115,6 +115,25 @@ class Settings(BaseSettings):
     SLACK_WEBHOOK_URL: str = ""
     ALERT_FROM_EMAIL: str = "alerts@b2a.dev"
 
+    # --- Sentinel Human Approval (pauseapi.app) ---
+    # Backs the per-permit requires_human_approval gate on governed invokes.
+    # Real mode needs both URL and key; used only when
+    # SIMULATION_MODE_HUMAN_APPROVAL=false.
+    SENTINEL_API_URL: str = ""
+    SENTINEL_API_KEY: str = ""
+    # Forwarded to Sentinel as timeout_seconds (its magic-link expiry, 1..86400)
+    # and enforced locally as the approval's expiry — Sentinel itself never
+    # expires a pending approval.
+    SENTINEL_APPROVAL_TIMEOUT_SECONDS: int = 300
+    # >0: on first invoke, long-poll Sentinel this many seconds for an instant
+    # decision before returning human_approval_pending (max 300).
+    SENTINEL_WAIT_SECONDS: float = 0.0
+    # Comma-separated approver list (email, mailto:, or sms:+E164). Empty defers
+    # to the Sentinel tenant's default approvers.
+    SENTINEL_APPROVERS: str = ""
+    # Sentinel risk_level attached to approval requests: low|medium|high|critical.
+    SENTINEL_RISK_LEVEL: str = "high"
+
     # --- Velocity Monitoring ---
     VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")
     VELOCITY_DAILY_LIMIT: Decimal = Decimal("10000.0")
@@ -218,6 +237,10 @@ class Settings(BaseSettings):
     SIMULATION_MODE_TELEMETRY_PM: bool = True
     SIMULATION_MODE_AGENT_COMMS: bool = True
     SIMULATION_MODE_CONTENT_FACTORY: bool = True
+    # Human-approval gate. Simulated approvals auto-approve (marked simulated)
+    # in local/dev only; production-like environments fail closed instead of
+    # honoring a simulated approval. False requires SENTINEL_API_URL + KEY.
+    SIMULATION_MODE_HUMAN_APPROVAL: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

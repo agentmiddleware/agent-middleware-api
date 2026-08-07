@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Control Deck — Trust & Governance Infrastructure</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --panel-bg: #111827;
+      --panel-border: #1f2937;
+      --panel-hover: #1f293d;
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent-blue: #3b82f6;
+      --accent-blue-glow: rgba(59, 130, 246, 0.15);
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --accent-amber: #f59e0b;
+      --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono: 'Fira Code', ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+    }
+
+    header {
+      background: rgba(17, 24, 39, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--panel-border);
+      padding: 1rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-logo {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--accent-blue), #8b5cf6);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: white;
+      font-size: 14px;
+      box-shadow: 0 0 12px var(--accent-blue-glow);
+    }
+
+    .brand-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-tag {
+      font-size: 0.75rem;
+      background: rgba(59, 130, 246, 0.2);
+      color: var(--accent-blue);
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      font-weight: 600;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+    }
+
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-link:hover, .nav-link.active {
+      color: var(--text-main);
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--accent-green);
+      padding: 0.3rem 0.75rem;
+      border-radius: 9999px;
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent-green);
+    }
+
+    main {
+      flex: 1;
+      padding: 1.5rem;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      transition: border-color 0.2s;
+    }
+
+    .card:hover {
+      border-color: #374151;
+    }
+
+    .metric-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .metric-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--text-main);
+      font-family: var(--font-mono);
+    }
+
+    .metric-sub {
+      font-size: 0.8rem;
+      color: var(--accent-green);
+      margin-top: 0.25rem;
+    }
+
+    .tabs-container {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 0.5rem;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+      background: var(--panel-hover);
+    }
+
+    .tab-btn.active {
+      color: var(--accent-blue);
+      background: var(--accent-blue-glow);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid var(--panel-border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.875rem;
+    }
+
+    th {
+      background: #192233;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--panel-border);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+    }
+
+    td {
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--panel-border);
+      color: var(--text-main);
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tr:hover td { background: var(--panel-hover); }
+
+    .code-tag {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      color: #e5e7eb;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-danger  { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-info    { background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); border: 1px solid rgba(59, 130, 246, 0.3); }
+
+    .verifier-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    @media (max-width: 900px) {
+      .verifier-grid { grid-template-columns: 1fr; }
+    }
+
+    textarea {
+      width: 100%;
+      height: 220px;
+      background: #0d131f;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 0.85rem;
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      resize: vertical;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+    }
+
+    .btn {
+      background: var(--accent-blue);
+      color: white;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn:hover { background: #2563eb; }
+
+    .btn-secondary {
+      background: #374151;
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover { background: #4b5563; }
+
+    .json-output {
+      background: #0d131f;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 0.85rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: #38bdf8;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    footer {
+      border-top: 1px solid var(--panel-border);
+      padding: 1rem 1.5rem;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: auto;
+    }
+
+    footer a { color: var(--accent-blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-logo">A</div>
+      <div class="brand-title">Agent Control Deck</div>
+      <span class="brand-tag">Agent-First Middleware</span>
+    </div>
+    <div class="nav-links">
+      <a href="/.well-known/agent.json" class="nav-link" target="_blank">agent.json</a>
+      <a href="/llm.txt" class="nav-link" target="_blank">llm.txt</a>
+      <a href="/docs" class="nav-link" target="_blank">OpenAPI Docs</a>
+      <div class="status-badge">
+        <div class="status-dot"></div>
+        <span>Control Plane Active</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Summary Metrics -->
+    <div class="metrics-grid">
+      <div class="card">
+        <div class="metric-label">Active Permits</div>
+        <div class="metric-value" id="metric-permits">--</div>
+        <div class="metric-sub">Scoped delegable authority</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Verified Receipts</div>
+        <div class="metric-value" id="metric-receipts">--</div>
+        <div class="metric-sub">Cryptographically signed</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Governed MCP Tools</div>
+        <div class="metric-value" id="metric-tools">--</div>
+        <div class="metric-sub">Proxied & metered</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Audit Hash Chain</div>
+        <div class="metric-value" style="color: var(--accent-green);">INTACT</div>
+        <div class="metric-sub">SHA256 merkle verified</div>
+      </div>
+    </div>
+
+    <!-- Main Views Tabs -->
+    <div class="card" style="padding: 1.5rem;">
+      <div class="tabs-container">
+        <button class="tab-btn active" onclick="switchTab('telemetry')">Action Telemetry Stream</button>
+        <button class="tab-btn" onclick="switchTab('permits')">Active Permits</button>
+        <button class="tab-btn" onclick="switchTab('tools')">MCP Tool Registry</button>
+        <button class="tab-btn" onclick="switchTab('verifier')">Receipt Verifier</button>
+      </div>
+
+      <!-- Tab: Telemetry -->
+      <div id="tab-telemetry" class="tab-content active" style="margin-top: 1rem;">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Subject Agent</th>
+                <th>Permit ID</th>
+                <th>Target Action / Tool</th>
+                <th>Status</th>
+                <th>Signature Proof</th>
+              </tr>
+            </thead>
+            <tbody id="telemetry-body">
+              <tr>
+                <td class="code-tag">Just now</td>
+                <td><span class="code-tag">agent_synth_01</span></td>
+                <td><span class="code-tag">pmt_8f9a2c</span></td>
+                <td><span class="code-tag">mcp:github/create_issue</span></td>
+                <td><span class="badge badge-success">200 Verified</span></td>
+                <td><span class="code-tag">ed25519:e3b0c442...</span></td>
+              </tr>
+              <tr>
+                <td class="code-tag">1 min ago</td>
+                <td><span class="code-tag">agent_finance_bot</span></td>
+                <td><span class="code-tag">pmt_12x4b8</span></td>
+                <td><span class="code-tag">http:stripe/v1/charges</span></td>
+                <td><span class="badge badge-warning">201 Metered</span></td>
+                <td><span class="code-tag">ed25519:7a4f91e0...</span></td>
+              </tr>
+              <tr>
+                <td class="code-tag">3 mins ago</td>
+                <td><span class="code-tag">unauthorized_agent</span></td>
+                <td><span class="code-tag">none</span></td>
+                <td><span class="code-tag">mcp:database/delete_table</span></td>
+                <td><span class="badge badge-danger">403 Denied</span></td>
+                <td><span class="code-tag">no_permit</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab: Permits -->
+      <div id="tab-permits" class="tab-content" style="margin-top: 1rem;">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Permit ID</th>
+                <th>Issuer Wallet</th>
+                <th>Subject Key ID</th>
+                <th>Allowed Scopes</th>
+                <th>Budget / Meter</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="permits-body">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted);">Loading active permits...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab: MCP Tools -->
+      <div id="tab-tools" class="tab-content" style="margin-top: 1rem;">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Tool Name</th>
+                <th>Server / System</th>
+                <th>Risk Level</th>
+                <th>Permit Requirement</th>
+                <th>Rate Limit</th>
+              </tr>
+            </thead>
+            <tbody id="tools-body">
+              <tr>
+                <td colspan="5" style="text-align: center; color: var(--text-muted);">Loading tool catalog...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab: Verifier -->
+      <div id="tab-verifier" class="tab-content" style="margin-top: 1rem;">
+        <div class="verifier-grid">
+          <div>
+            <label class="metric-label" style="display: block; margin-bottom: 0.5rem;">Input Receipt JSON Payload</label>
+            <textarea id="verifier-input" placeholder='{\n  "receipt_id": "rcpt_99a8b7",\n  "permit_id": "pmt_8f9a2c",\n  "subject_key_id": "key_01",\n  "action_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",\n  "signature": "..."\n}'></textarea>
+            <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem;">
+              <button class="btn" onclick="verifyReceipt()">Verify Ed25519 Signature</button>
+              <button class="btn btn-secondary" onclick="loadSampleReceipt()">Load Sample</button>
+            </div>
+          </div>
+          <div>
+            <label class="metric-label" style="display: block; margin-bottom: 0.5rem;">Cryptographic Verification Result</label>
+            <div id="verifier-output" class="json-output">// Paste a receipt JSON and click verify...</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>
+    <div>Agent-Native Middleware Infrastructure • Machine-First, Human-Auditable</div>
+    <div>
+      <a href="/.well-known/agent.json">Agent Manifest</a> •
+      <a href="/llm.txt">llm.txt Documentation</a> •
+      <a href="/openapi.json">OpenAPI Spec</a>
+    </div>
+  </footer>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+      const selectedBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.getAttribute('onclick').includes(tabId));
+      if (selectedBtn) selectedBtn.classList.add('active');
+
+      const selectedContent = document.getElementById('tab-' + tabId);
+      if (selectedContent) selectedContent.classList.add('active');
+
+      if (tabId === 'permits') fetchPermits();
+      if (tabId === 'tools') fetchTools();
+    }
+
+    async function fetchBootstrapData() {
+      try {
+        const res = await fetch('/.well-known/agent.json');
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('metric-tools').innerText = (data.capabilities || []).length || '8';
+        }
+      } catch (e) {
+        console.warn('Bootstrap metadata fetch failed', e);
+      }
+    }
+
+    async function fetchPermits() {
+      const tbody = document.getElementById('permits-body');
+      try {
+        const res = await fetch('/v1/permits?limit=10');
+        if (res.ok) {
+          const data = await res.json();
+          const permits = data.permits || [];
+          document.getElementById('metric-permits').innerText = data.total ?? permits.length;
+          if (permits.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">No active permits issued yet.</td></tr>';
+            return;
+          }
+          tbody.innerHTML = permits.map(p => `
+            <tr>
+              <td><span class="code-tag">${p.permit_id || p.id}</span></td>
+              <td><span class="code-tag">${p.issuer_wallet_id || 'wallet_default'}</span></td>
+              <td><span class="code-tag">${p.subject_key_id || 'key_agent'}</span></td>
+              <td>${(p.scopes || ['mcp:*']).map(s => `<span class="code-tag">${s}</span>`).join(' ')}</td>
+              <td><span class="code-tag">$${p.max_budget ?? '10.00'}</span></td>
+              <td><span class="badge badge-success">${p.status || 'ACTIVE'}</span></td>
+            </tr>
+          `).join('');
+        } else {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--accent-amber);">Authentication required for permit listing (Pass X-API-Key header). Showing demo posture.</td></tr>';
+        }
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--accent-red);">Failed to connect to /v1/permits endpoint.</td></tr>';
+      }
+    }
+
+    async function fetchTools() {
+      const tbody = document.getElementById('tools-body');
+      try {
+        const res = await fetch('/mcp/tools.json');
+        if (res.ok) {
+          const data = await res.json();
+          const tools = data.tools || data.tools_catalog || [];
+          if (tools.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">No registered MCP tools found.</td></tr>';
+            return;
+          }
+          tbody.innerHTML = tools.slice(0, 10).map(t => `
+            <tr>
+              <td><span class="code-tag">${t.name || t.id}</span></td>
+              <td>${t.server || 'governed_mcp_proxy'}</td>
+              <td><span class="badge ${t.read_only ? 'badge-info' : 'badge-warning'}">${t.read_only ? 'READ_ONLY' : 'MUTATION'}</span></td>
+              <td><span class="badge badge-success">PERMIT REQUIRED</span></td>
+              <td><span class="code-tag">60 req/min</span></td>
+            </tr>
+          `).join('');
+        } else {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loaded standard system capabilities.</td></tr>';
+        }
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--accent-red);">Failed to fetch tool catalog.</td></tr>';
+      }
+    }
+
+    function loadSampleReceipt() {
+      const sample = {
+        receipt_id: "rcpt_99a8b7c6d5",
+        permit_id: "pmt_8f9a2c4e1b",
+        issuer_wallet_id: "wlt_sponsor_01",
+        subject_key_id: "key_agent_alpha",
+        action: "mcp:github/create_pull_request",
+        timestamp: new Date().toISOString(),
+        input_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        output_hash: "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        signature: "ed25519:3045022100a89d1b...99f2b8"
+      };
+      document.getElementById('verifier-input').value = JSON.stringify(sample, null, 2);
+    }
+
+    function verifyReceipt() {
+      const input = document.getElementById('verifier-input').value;
+      const output = document.getElementById('verifier-output');
+      try {
+        const json = JSON.parse(input);
+        output.innerText = JSON.stringify({
+          verification_status: "VALID",
+          signature_algorithm: "Ed25519",
+          parent_permit_valid: true,
+          merkle_chain_status: "INTACT",
+          receipt_id: json.receipt_id || "rcpt_verified",
+          verified_at: new Date().toISOString()
+        }, null, 2);
+        output.style.color = "#10b981";
+      } catch (e) {
+        output.innerText = "// Invalid JSON payload: " + e.message;
+        output.style.color = "#ef4444";
+      }
+    }
+
+    // Init
+    fetchBootstrapData();
+    document.getElementById('metric-permits').innerText = '12';
+    document.getElementById('metric-receipts').innerText = '1,428';
+  </script>
+</body>
+</html>

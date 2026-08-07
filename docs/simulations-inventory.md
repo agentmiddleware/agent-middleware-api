@@ -16,6 +16,7 @@ _Canonical timestamp and machine-readable snapshot: `docs/sim-inventory.json`._
 |-----------------|----------------|-------------------|
 | `agent_comms` | `SIMULATION_MODE_AGENT_COMMS` | `True` |
 | `content_factory` | `SIMULATION_MODE_CONTENT_FACTORY` | `True` |
+| `human_approval` | `SIMULATION_MODE_HUMAN_APPROVAL` | `True` |
 | `iot_bridge` | `SIMULATION_MODE_IOT_BRIDGE` | `True` |
 | `media_engine` | `SIMULATION_MODE_MEDIA_ENGINE` | `True` |
 | `oracle` | `SIMULATION_MODE_ORACLE` | `True` |

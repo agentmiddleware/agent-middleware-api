@@ -42,6 +42,7 @@ def receipt_model_to_response(model: ReceiptModel) -> ReceiptResponse:
         credits_charged=model.credits_charged,
         outcome=model.outcome,
         audit_event_id=model.audit_event_id,
+        approval_id=model.approval_id,
         created_at=model.created_at,
         signature=model.signature,
         signature_key_id=model.signature_key_id,
@@ -76,6 +77,10 @@ class ReceiptService:
             payload["idempotency_record_id"] = model.idempotency_record_id
         if include_linkage and model.dispatch_attempt_id is not None:
             payload["dispatch_attempt_id"] = model.dispatch_attempt_id
+        # Approval linkage predates the governed-dispatch linkage migration and
+        # remains part of both current and constrained legacy signatures.
+        if model.approval_id is not None:
+            payload["approval_id"] = model.approval_id
         payload["payload_hash"] = sha256_hex(payload)
         return payload
 
@@ -132,6 +137,7 @@ class ReceiptService:
         credits_charged: Decimal,
         outcome: str,
         audit_event_id: str | None,
+        approval_id: str | None,
     ) -> None:
         """Reject reuse of one idempotency record for different evidence."""
         expected = {
@@ -148,6 +154,7 @@ class ReceiptService:
             "credits_charged": credits_charged,
             "outcome": outcome,
             "audit_event_id": audit_event_id,
+            "approval_id": approval_id,
         }
         if any(getattr(model, name) != value for name, value in expected.items()):
             raise ReceiptError("receipt_idempotency_conflict")
@@ -187,6 +194,7 @@ class ReceiptService:
         request_hash: str | None = None,
         response_hash_override: str | None = None,
         session: AsyncSession | None = None,
+        approval_id: str | None = None,
     ) -> ReceiptResponse:
         if (request_payload is None) == (request_hash is None):
             raise ReceiptError("receipt_request_identity_invalid")
@@ -252,6 +260,7 @@ class ReceiptService:
                 credits_charged=credits_charged,
                 outcome=outcome,
                 audit_event_id=audit_event_id,
+                approval_id=approval_id,
             )
             return receipt_model_to_response(existing)
 
@@ -284,6 +293,10 @@ class ReceiptService:
             payload["idempotency_record_id"] = idempotency_record_id
         if dispatch_attempt_id is not None:
             payload["dispatch_attempt_id"] = dispatch_attempt_id
+        # Signed only when set, so signatures on receipts written before this
+        # field existed keep verifying (verify_receipt mirrors this).
+        if approval_id is not None:
+            payload["approval_id"] = approval_id
         signature, signature_key_id, _ = await get_signing_key_service().sign_payload(
             payload
         )
@@ -302,6 +315,7 @@ class ReceiptService:
             credits_charged=credits_charged,
             outcome=outcome,
             audit_event_id=audit_event_id,
+            approval_id=approval_id,
             created_at=created_at,
             signature=signature,
             signature_key_id=signature_key_id,
@@ -469,7 +483,7 @@ class ReceiptService:
         ):
             return True
 
-        # Migration 023 backfilled one unambiguous idempotency link onto some
+        # Migration 026 backfilled one unambiguous idempotency link onto some
         # receipts whose original signature predates linkage fields. Do not
         # generalize legacy verification: dispatch-linked receipts and links
         # that are absent, mismatched, or ambiguous must fail closed.

@@ -14,6 +14,7 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     ControlPlaneAuditEventModel,
+    HumanApprovalModel,
     IdempotencyRecordModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
@@ -22,6 +23,7 @@ from app.db.models import (
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import get_agent_money
+from app.services.audit_chain import verify_audit_chain
 from app.services.audit_log import record_audit_event
 from app.services.idempotency import (
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
@@ -57,6 +59,7 @@ class SeededAttempt:
     idempotency_endpoint: str
     attempt_id: str
     ledger_entry_id: str | None
+    approval_id: str | None
 
 
 async def _seed_attempt(
@@ -68,6 +71,7 @@ async def _seed_attempt(
     result_payload: dict[str, Any] | None = None,
     error_code: str | None = None,
     idempotency_endpoint: str = ENDPOINT,
+    requires_human_approval: bool = False,
 ) -> SeededAttempt:
     provisioned = await provision_agent_wallet(client)
     tool_name = f"reconcile-{suffix}"
@@ -77,15 +81,17 @@ async def _seed_attempt(
         key_id=provisioned["key_id"],
         tool_name=tool_name,
         idem_key=f"reconcile-permit-{suffix}",
+        requires_human_approval=requires_human_approval,
     )
-    validation = await get_permit_service().authorize_and_reserve(
-        permit_id=permit["permit_id"],
-        wallet_id=provisioned["agent_wallet_id"],
-        tool_name=tool_name,
-        estimated_credits=CREDITS,
-        key_id=provisioned["key_id"],
-    )
-    assert validation.allowed is True
+    if not requires_human_approval:
+        validation = await get_permit_service().authorize_and_reserve(
+            permit_id=permit["permit_id"],
+            wallet_id=provisioned["agent_wallet_id"],
+            tool_name=tool_name,
+            estimated_credits=CREDITS,
+            key_id=provisioned["key_id"],
+        )
+        assert validation.allowed is True
 
     request_payload = {
         "tool": tool_name,
@@ -100,18 +106,46 @@ async def _seed_attempt(
         idempotency_key=idempotency_key,
         request_payload=request_payload,
     )
+    approval_id = None
+    if requires_human_approval:
+        approval_id = f"appr-reconcile-{suffix}"
+        factory = get_session_factory()
+        async with factory() as session:
+            session.add(
+                HumanApprovalModel(
+                    approval_id=approval_id,
+                    wallet_id=provisioned["agent_wallet_id"],
+                    permit_id=permit["permit_id"],
+                    tool=tool_name,
+                    idempotency_key=idempotency_key,
+                    request_hash="a" * 64,
+                    status="consumed",
+                    simulated=True,
+                    expires_at=utc_now() + timedelta(minutes=30),
+                )
+            )
+            await session.commit()
     dispatch = get_mcp_dispatch_attempt_service()
-    attempt = await dispatch.prepare(
-        idempotency_record_id=begun.record_id,
-        wallet_id=provisioned["agent_wallet_id"],
-        permit_id=permit["permit_id"],
-        key_id=provisioned["key_id"],
-        public_tool_id=tool_name,
-        upstream_tool_name="partner_lookup",
-        upstream_origin="https://partner.example",
-        request_hash=begun.request_hash,
-        credits_authorized=CREDITS,
-    )
+    prepare_kwargs: dict[str, Any] = {
+        "idempotency_record_id": begun.record_id,
+        "wallet_id": provisioned["agent_wallet_id"],
+        "permit_id": permit["permit_id"],
+        "approval_id": approval_id,
+        "key_id": provisioned["key_id"],
+        "public_tool_id": tool_name,
+        "upstream_tool_name": "partner_lookup",
+        "upstream_origin": "https://partner.example",
+        "request_hash": begun.request_hash,
+        "credits_authorized": CREDITS,
+    }
+    if requires_human_approval:
+        validation, attempt = await dispatch.authorize_reserve_and_prepare(
+            **prepare_kwargs
+        )
+        assert validation.allowed is True
+        assert attempt is not None
+    else:
+        attempt = await dispatch.prepare(**prepare_kwargs)
     charge = await get_agent_money().charge(
         wallet_id=provisioned["agent_wallet_id"],
         service_category=ServiceCategory.AGENT_COMMS,
@@ -148,6 +182,7 @@ async def _seed_attempt(
         idempotency_endpoint=idempotency_endpoint,
         attempt_id=attempt.attempt_id,
         ledger_entry_id=ledger_entry_id,
+        approval_id=approval_id,
     )
 
 
@@ -398,6 +433,117 @@ async def test_terminal_success_is_reconstructed_from_bounded_result(
     assert replay["structuredContent"] == upstream_result["structuredContent"]
     assert replay["receipt"]["receipt_id"] == receipt.receipt_id
     assert await _ledger_counts(seed.wallet_id) == (1, 0)
+
+
+@pytest.mark.anyio
+async def test_approval_required_terminal_crash_reconciliation_preserves_approval(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    upstream_result = {
+        "content": [{"type": "text", "text": "approved response"}],
+        "structuredContent": {"approved": True},
+        "isError": False,
+    }
+    seed = await _seed_attempt(
+        client,
+        suffix="approved-success-crash",
+        state="succeeded",
+        result_payload=upstream_result,
+        idempotency_endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        requires_human_approval=True,
+    )
+    assert seed.approval_id is not None
+    assert (await _attempt(seed.attempt_id)).approval_id == seed.approval_id
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.terminal_recovered == 1
+    attempt = await _attempt(seed.attempt_id)
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        attempt.idempotency_record_id
+    )
+    assert receipt is not None
+    assert receipt.approval_id == seed.approval_id
+    valid, reason, _ = await get_receipt_service().verify_receipt(receipt.receipt_id)
+    assert (valid, reason) == (True, None)
+    replay, status = await _replay(seed)
+    assert status == 200
+    assert replay["receipt"]["receipt_id"] == receipt.receipt_id
+    assert replay["receipt"]["approval_id"] == seed.approval_id
+
+    factory = get_session_factory()
+    async with factory() as session:
+        audit = (
+            await session.execute(
+                select(ControlPlaneAuditEventModel).where(
+                    ControlPlaneAuditEventModel.request_id == seed.attempt_id
+                )
+            )
+        ).scalar_one()
+    assert json.loads(audit.metadata_json or "{}")["approval_id"] == seed.approval_id
+    assert (await verify_audit_chain(wallet_id=seed.wallet_id)).valid is True
+
+
+@pytest.mark.anyio
+async def test_reconciliation_rejects_tampered_human_approval_linkage(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    seed = await _seed_attempt(
+        client,
+        suffix="approval-linkage-tampered",
+        state="succeeded",
+        result_payload={"content": [], "isError": False},
+        idempotency_endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        requires_human_approval=True,
+    )
+    wrong_approval_id = "appr-reconcile-wrong-binding"
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            session.add(
+                HumanApprovalModel(
+                    approval_id=wrong_approval_id,
+                    wallet_id=seed.wallet_id,
+                    permit_id=seed.permit_id,
+                    tool="different-tool",
+                    idempotency_key="different-idempotency-key",
+                    request_hash="b" * 64,
+                    status="consumed",
+                    simulated=True,
+                    expires_at=utc_now() + timedelta(minutes=30),
+                )
+            )
+            attempt = await session.get(McpDispatchAttemptModel, seed.attempt_id)
+            assert attempt is not None
+            attempt.approval_id = wrong_approval_id
+            session.add(attempt)
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.terminal_recovered == 0
+    assert result.failed_attempt_ids == (seed.attempt_id,)
+    async with factory() as session:
+        attempt = await session.get(McpDispatchAttemptModel, seed.attempt_id)
+    assert attempt is not None
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        attempt.idempotency_record_id
+    )
+    assert receipt is None
+    async with factory() as session:
+        audit_count = await session.scalar(
+            select(func.count())
+            .select_from(ControlPlaneAuditEventModel)
+            .where(ControlPlaneAuditEventModel.request_id == seed.attempt_id)
+        )
+        record = await session.get(
+            IdempotencyRecordModel,
+            attempt.idempotency_record_id,
+        )
+    assert int(audit_count or 0) == 0
+    assert record is not None
+    assert record.response_json is None
 
 
 @pytest.mark.anyio

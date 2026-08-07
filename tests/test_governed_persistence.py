@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
+    HumanApprovalModel,
     IdempotencyRecordModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
@@ -45,6 +46,7 @@ async def _seed_governed_identity(
     client: AsyncClient,
     *,
     suffix: str,
+    requires_human_approval: bool = False,
 ) -> tuple[dict, dict, dict, IdempotencyBegin]:
     provisioned = await provision_agent_wallet(client)
     tool_name = f"partner-tool-{suffix}"
@@ -54,6 +56,7 @@ async def _seed_governed_identity(
         key_id=provisioned["key_id"],
         tool_name=tool_name,
         idem_key=f"permit-{suffix}",
+        requires_human_approval=requires_human_approval,
     )
     request_payload = {"tool": tool_name, "arguments": {"value": suffix}}
     begun = await get_idempotency_service().begin_with_record(
@@ -64,6 +67,33 @@ async def _seed_governed_identity(
     )
     assert begun.replay is None
     return provisioned, permit, request_payload, begun
+
+
+async def _store_human_approval(
+    *,
+    approval_id: str,
+    wallet_id: str,
+    permit_id: str,
+    tool_name: str,
+    idempotency_key: str,
+    status: str = "consumed",
+) -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            HumanApprovalModel(
+                approval_id=approval_id,
+                wallet_id=wallet_id,
+                permit_id=permit_id,
+                tool=tool_name,
+                idempotency_key=idempotency_key,
+                request_hash="a" * 64,
+                status=status,
+                simulated=True,
+                expires_at=utc_now() + timedelta(minutes=30),
+            )
+        )
+        await session.commit()
 
 
 async def _seed_backfilled_legacy_receipt(
@@ -668,6 +698,160 @@ async def test_remote_reservation_and_prepared_attempt_are_atomic_and_idempotent
     replay_validation, replayed = await service.authorize_reserve_and_prepare(**kwargs)
     assert replay_validation.allowed is True
     assert replayed is not None and replayed.attempt_id == prepared.attempt_id
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1.5")
+
+
+@pytest.mark.anyio
+async def test_remote_prepare_rejects_missing_required_human_approval(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix="approval-required",
+        requires_human_approval=True,
+    )
+
+    with pytest.raises(
+        DispatchAttemptConflictError,
+        match="dispatch_approval_required",
+    ):
+        await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+            idempotency_record_id=begun.record_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            key_id=provisioned["key_id"],
+            public_tool_id="partner-tool-approval-required",
+            upstream_tool_name="remote_tool",
+            upstream_origin="https://partner.example",
+            request_hash=begun.request_hash,
+            credits_authorized=Decimal("1.5"),
+        )
+
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    factory = get_session_factory()
+    async with factory() as session:
+        attempt_count = await session.scalar(
+            select(func.count())
+            .select_from(McpDispatchAttemptModel)
+            .where(McpDispatchAttemptModel.idempotency_record_id == begun.record_id)
+        )
+    assert int(attempt_count or 0) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("case", "approval_status", "wrong_tool"),
+    [
+        ("missing-row", None, False),
+        ("wrong-binding", "consumed", True),
+        ("unconsumed", "approved", False),
+    ],
+)
+async def test_remote_prepare_rejects_invalid_human_approval_binding(
+    client: AsyncClient,
+    clean_database,
+    case: str,
+    approval_status: str | None,
+    wrong_tool: bool,
+) -> None:
+    suffix = f"approval-{case}"
+    tool_name = f"partner-tool-{suffix}"
+    idempotency_key = f"invoke-{suffix}"
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix=suffix,
+        requires_human_approval=True,
+    )
+    approval_id = f"appr-{case}"
+    if approval_status is not None:
+        await _store_human_approval(
+            approval_id=approval_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            tool_name="wrong-tool" if wrong_tool else tool_name,
+            idempotency_key=idempotency_key,
+            status=approval_status,
+        )
+
+    with pytest.raises(
+        DispatchAttemptConflictError,
+        match="dispatch_approval_linkage_invalid",
+    ):
+        await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+            idempotency_record_id=begun.record_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            approval_id=approval_id,
+            key_id=provisioned["key_id"],
+            public_tool_id=tool_name,
+            upstream_tool_name="remote_tool",
+            upstream_origin="https://partner.example",
+            request_hash=begun.request_hash,
+            credits_authorized=Decimal("1.5"),
+        )
+
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    factory = get_session_factory()
+    async with factory() as session:
+        attempt_count = await session.scalar(
+            select(func.count())
+            .select_from(McpDispatchAttemptModel)
+            .where(McpDispatchAttemptModel.idempotency_record_id == begun.record_id)
+        )
+    assert int(attempt_count or 0) == 0
+
+
+@pytest.mark.anyio
+async def test_remote_prepare_persists_valid_consumed_human_approval(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    suffix = "approval-consumed"
+    tool_name = f"partner-tool-{suffix}"
+    idempotency_key = f"invoke-{suffix}"
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix=suffix,
+        requires_human_approval=True,
+    )
+    approval_id = "appr-valid-consumed"
+    await _store_human_approval(
+        approval_id=approval_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=tool_name,
+        idempotency_key=idempotency_key,
+    )
+
+    (
+        validation,
+        attempt,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        approval_id=approval_id,
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="remote_tool",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("1.5"),
+    )
+
+    assert validation.allowed is True
+    assert attempt is not None
+    assert attempt.approval_id == approval_id
+    context = await get_mcp_dispatch_attempt_service().get_context(attempt.attempt_id)
+    assert context is not None
+    assert context.attempt.approval_id == approval_id
     stored_permit = await get_permit_service().get_permit(permit["permit_id"])
     assert stored_permit is not None
     assert stored_permit.spent_credits == Decimal("1.5")

@@ -18,6 +18,7 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     ControlPlaneAuditEventModel,
+    HumanApprovalModel,
     IdempotencyRecordModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
@@ -38,7 +39,7 @@ from app.services.mcp_dispatch_reconciliation import (
     get_mcp_dispatch_reconciliation_service,
 )
 from app.services.permits import get_permit_service
-from app.services.receipts import get_receipt_service
+from app.services.receipts import ReceiptService, get_receipt_service
 from app.services.service_registry import get_service_registry
 from app.services.signing_keys import sha256_hex
 from app.services.upstream_mcp import (
@@ -452,6 +453,125 @@ async def test_governed_upstream_success_replays_without_second_debit_or_dispatc
 
 
 @pytest.mark.anyio
+async def test_approval_required_upstream_crash_reconciliation_keeps_approval(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_router.settings,
+        "SIMULATION_MODE_HUMAN_APPROVAL",
+        True,
+    )
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-approved-crash"
+    idempotency_key = "partner-upstream-approved-crash-1"
+    executor = FakeUpstreamExecutor("success")
+    original_create_receipt = ReceiptService.create_receipt
+    receipt_crashed = False
+
+    async def crash_first_success_receipt(
+        self: ReceiptService,
+        *args: Any,
+        **kwargs: Any,
+    ):
+        nonlocal receipt_crashed
+        if (
+            not receipt_crashed
+            and kwargs.get("dispatch_attempt_id") is not None
+            and kwargs.get("outcome") == "success"
+        ):
+            receipt_crashed = True
+            raise RuntimeError("simulated_receipt_crash")
+        return await original_create_receipt(self, *args, **kwargs)
+
+    monkeypatch.setattr(ReceiptService, "create_receipt", crash_first_success_receipt)
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-approved-crash-permit",
+            requires_human_approval=True,
+        )
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+
+        failed = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        assert failed.json()["error"]["message"] == "simulated_receipt_crash"
+        assert receipt_crashed is True
+        assert executor.dispatch_count == 1
+
+        factory = get_session_factory()
+        async with factory() as session:
+            record = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id
+                        == provisioned["agent_wallet_id"],
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            attempt = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id
+                        == record.record_id
+                    )
+                )
+            ).scalar_one()
+            approval = await session.get(HumanApprovalModel, attempt.approval_id)
+            receipt_count = await session.scalar(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(ReceiptModel.idempotency_record_id == record.record_id)
+            )
+        assert attempt.state == "succeeded"
+        assert attempt.approval_id is not None
+        assert approval is not None and approval.status == "consumed"
+        assert int(receipt_count or 0) == 0
+
+        await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+            attempt.attempt_id
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert replay.status_code == 200
+        assert replay.json()["result"]["receipt"]["approval_id"] == (
+            attempt.approval_id
+        )
+        assert executor.dispatch_count == 1
+        persisted = await _load_persisted_invocation(
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        assert persisted.attempt.approval_id == attempt.approval_id
+        assert persisted.receipt.approval_id == attempt.approval_id
+        valid, reason, _ = await get_receipt_service().verify_receipt(
+            persisted.receipt.receipt_id
+        )
+        assert (valid, reason) == (True, None)
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
 async def test_direct_finalizer_and_reconciler_share_one_dispatch_audit(
     client: AsyncClient,
     clean_database: None,
@@ -730,6 +850,11 @@ async def test_unicode_returned_error_keeps_linked_evidence_if_refund_fails(
     clean_database: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        mcp_router.settings,
+        "SIMULATION_MODE_HUMAN_APPROVAL",
+        True,
+    )
     provisioned = await provision_agent_wallet(client)
     tool_name = "partner-upstream-unicode-unrefunded"
     idempotency_key = "partner-upstream-unicode-unrefunded-1"
@@ -757,6 +882,7 @@ async def test_unicode_returned_error_keeps_linked_evidence_if_refund_fails(
             key_id=provisioned["key_id"],
             tool_name=tool_name,
             idem_key="partner-upstream-unicode-unrefunded-permit",
+            requires_human_approval=True,
         )
         response = await client.post(
             "/mcp/messages",
@@ -771,6 +897,8 @@ async def test_unicode_returned_error_keeps_linked_evidence_if_refund_fails(
 
         assert response.status_code == 200
         assert response.json()["error"]["message"].startswith("refund_failed")
+        approval_id = response.json()["error"]["data"]["receipt"]["approval_id"]
+        assert approval_id
         persisted = await _load_persisted_invocation(
             wallet_id=provisioned["agent_wallet_id"],
             permit_id=permit["permit_id"],
@@ -783,7 +911,13 @@ async def test_unicode_returned_error_keeps_linked_evidence_if_refund_fails(
             charged=Decimal("2"),
             refunded=False,
         )
+        assert persisted.attempt.approval_id == approval_id
+        assert persisted.receipt.approval_id == approval_id
         assert persisted.attempt.response_hash is not None
+        valid, reason, _ = await get_receipt_service().verify_receipt(
+            persisted.receipt.receipt_id
+        )
+        assert (valid, reason) == (True, None)
         evidence = await client.get(
             f"/v1/receipts/{persisted.receipt.receipt_id}/evidence",
             headers=provisioned["agent_headers"],

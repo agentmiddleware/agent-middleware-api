@@ -45,7 +45,7 @@ in committed defaults.
 | `ENABLE_DOGFOOD_TOOL` | `true` (optional dogfood) | Opt-in executable `partner.notes.write` for live trust-loop demos. Default in code is `false`. Safe side effect only (append JSONL). Do **not** set `ENABLE_PROOF_SURFACES=true` for this. |
 | `TRUST_MODE_ENABLED` | `true` | Shipped default; keep it |
 | `ALLOW_LEGACY_UNPERMITTED_MCP` | `false` | Shipped default; keep it |
-| `TRUST_SIGNING_PRIVATE_KEY_B64` | secret material | Required when trust mode is on in prod-like |
+| `TRUST_SIGNING_PRIVATE_KEY_B64` | strict base64 of exactly 32 raw bytes | Required when trust mode is on in prod-like; PEM, hex, 64-byte concatenations, and double-encoded base64 are invalid |
 | `STATE_BACKEND` | `postgres` | Use linked Postgres; avoid silent memory fallback |
 | `DATABASE_URL` | from Railway Postgres plugin | App normalizes `postgresql://` ↔ `postgresql+asyncpg://` |
 | `PUBLIC_URL` | public HTTPS API origin | e.g. `https://api-service-production-433c.up.railway.app` |
@@ -60,6 +60,58 @@ Committed `railway.json` may list **non-secret** defaults only
 (`STATE_BACKEND`, `PUBLIC_URL`, `ENABLE_PROOF_SURFACES`). It must not contain
 `VALID_API_KEYS` or signing material. Set `RUN_MIGRATIONS_ON_START` via
 Railway variables (not committed) after confirming Alembic stamp state.
+
+## Preflight — before you ship
+
+`scripts/railway_preflight.py` runs two checks and exits non-zero if either
+fails, so it works as a gate in a shell or in CI:
+
+- **Migration parity** (needs `DATABASE_URL`) — compares the Alembic head in
+  this tree against the `alembic_version` row in the target database. A tree
+  ahead of the deployed schema is the failure that produces a 500 on the first
+  request touching a new table. It also detects a `create_all`-bootstrapped DB
+  with no `alembic_version` row and tells you to `alembic stamp head` once
+  before enabling `RUN_MIGRATIONS_ON_START`.
+- **Live posture** (needs `PUBLIC_URL` or `--url`) — asserts the deployed
+  service is healthy, has no unhealthy dependency, did **not** fall back to
+  memory state, and has `ENABLE_PROOF_SURFACES=false`.
+
+```bash
+# Both checks, inside the Railway service env:
+railway run python scripts/railway_preflight.py
+
+# Schema parity only:
+DATABASE_URL=postgresql://… python scripts/railway_preflight.py --db
+
+# Posture only, against any origin:
+python scripts/railway_preflight.py --live --url "$API_URL"
+```
+
+A check whose input is absent is **skipped**, not failed; pass `--strict` to
+turn a skip into a failure (what CI and the deploy workflow use). Shorthands:
+`make railway-preflight` and `make railway-preflight-live`.
+
+## Deploying from CI (optional)
+
+`.github/workflows/railway-deploy.yml` is a **manual** (`workflow_dispatch`)
+deploy that runs the same canonical `railway up` from a checkout of the ref you
+pick. It is not a push trigger, and it does not use Railway's *Redeploy from
+GitHub source* — both remain forbidden above. Before deploying it requires the
+CI workflow to have concluded `success` for that exact commit (override with
+`skip_ci_gate` for emergencies), then runs the live posture preflight; after
+deploying it runs the full preflight via `railway run --strict`, which is what
+catches a shipped-but-unmigrated schema.
+
+The workflow is inert until an operator adds:
+
+| Setting | Kind | Value |
+|---------|------|-------|
+| `RAILWAY_TOKEN` | repo/environment **secret** | Railway project token for the target project |
+| `PUBLIC_URL` | repo **variable** | Public API origin, used by the pre-deploy posture check |
+
+Manual `railway up` from a verified working tree remains fully supported and is
+still the fastest path; the workflow exists so a deploy has an auditable record
+and cannot skip the migration check.
 
 ## After deploy — verify
 
@@ -154,5 +206,6 @@ agents should use `PUBLIC_URL`.
 ## Related docs
 
 - Human operator checklist: [`human-onboarding.md`](human-onboarding.md)
+- Human approval gate (Sentinel) rollout: [`human-approval-gate.md`](human-approval-gate.md)
 - Env template: [`.env.example`](../.env.example)
 - Tech-debt phases: [`tech-debt-remediation-plan.md`](tech-debt-remediation-plan.md)

@@ -15,9 +15,11 @@ from app.schemas.trust import (
     ReceiptListResponse,
 )
 from app.trust import (
+    AgentMoney,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     PermitError,
+    get_agent_money,
     get_idempotency_service,
     get_permit_service,
     get_receipt_service,
@@ -85,8 +87,28 @@ async def create_permit(
     request: PermitCreateRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
+    money: AgentMoney = Depends(get_agent_money),
 ) -> PermitResponse:
     auth.require_wallet_access(request.issuer_wallet_id)
+    # Authorizing only the issuer let any wallet holder mint a signed permit
+    # against an arbitrary victim wallet (charged when used, listed in the
+    # victim's own permits) and probe foreign balances via the creation error.
+    # The subject is the wallet the permit encumbers, so the issuer must have
+    # authority over it: itself or a wallet it funds in the sponsor -> agent ->
+    # child hierarchy. Bootstrap admins are unrestricted.
+    if not auth.is_bootstrap_admin and not await money.is_wallet_or_descendant(
+        request.subject_wallet_id, request.issuer_wallet_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "subject_wallet_access_denied",
+                "message": (
+                    "The permit subject wallet must be the issuer wallet or a "
+                    "wallet it funds."
+                ),
+            },
+        )
     idem = get_idempotency_service()
     try:
         replay = await idem.begin(
@@ -101,7 +123,7 @@ async def create_permit(
         return PermitResponse(**replay.response_json)
 
     try:
-        permit = await get_permit_service().create_permit(request)
+        permit = await get_permit_service().create_permit(request, subject_key_id=auth.key_id)
     except PermitError as exc:
         raise HTTPException(status_code=400, detail=exc.reason)
     await idem.complete(

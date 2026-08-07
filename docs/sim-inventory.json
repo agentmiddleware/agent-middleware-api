@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-07T06:40:40.759233+00:00",
+  "generated_at": "2026-08-07T08:25:35.667675+00:00",
   "mcp_tool_count": 0,
   "mcp_tools_local": [],
   "services": [
@@ -14,6 +14,12 @@
       "default_simulated": true,
       "runtime_service": "content_factory",
       "settings_attribute": "SIMULATION_MODE_CONTENT_FACTORY"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "human_approval",
+      "settings_attribute": "SIMULATION_MODE_HUMAN_APPROVAL"
     },
     {
       "current_simulated": true,
@@ -55,6 +61,7 @@
   "simulation_modes": {
     "agent_comms": true,
     "content_factory": true,
+    "human_approval": true,
     "iot_bridge": true,
     "media_engine": true,
     "oracle": true,

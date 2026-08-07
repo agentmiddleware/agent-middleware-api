@@ -13,13 +13,15 @@ Zero GUI. Your customer is an autonomous agent.
 
 import asyncio
 import logging
+from pathlib import Path
 import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from .core.config import get_settings
 from .core.durable_state import (
@@ -36,8 +38,10 @@ from .core.trust_mode import (
 )
 from .db.database import SchemaInitError, init_db, close_db
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
+from .services.signing_keys import validate_signing_key_configuration
 from .routers.well_known import get_agent_first_metadata
 from .routers import (
+    auth,
     iot,
     telemetry,
     media,
@@ -77,6 +81,7 @@ from .routers import (
 )
 
 settings = get_settings()
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Try structured logging, fall back to standard logging
 try:
@@ -110,6 +115,12 @@ except ImportError:
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
+    signing_key_state = validate_signing_key_configuration(settings)
+    logger.info(
+        "app_startup",
+        phase="signing_key_validated",
+        state=signing_key_state,
+    )
 
     cleanup_task: asyncio.Task | None = None
     startup_time = time.monotonic()
@@ -448,6 +459,7 @@ app.add_middleware(
 # --- Mount service routers ---
 
 CORE_TRUST_ROUTERS = (
+    auth,
     audit,
     policies,
     billing,
@@ -509,14 +521,28 @@ else:
 @app.get(
     "/",
     tags=["Discovery"],
-    summary="API root — legacy service index",
+    summary="API root — service index & human dashboard negotiation",
     description=(
-        "Returns a broad service catalog. For agent-first bootstrap, follow "
-        "`GET /.well-known/agent.json` → field `agent_first` (paths and "
-        "`simulation_and_dependency_truth`), not this index alone."
+        "Returns a broad service catalog for API callers or HTML dashboard for browsers. "
+        "For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`."
     ),
+    responses={
+        200: {
+            "description": "JSON service index or HTML control deck",
+            "content": {"text/html": {"schema": {"type": "string"}}},
+        }
+    },
 )
-async def root():
+async def root(request: Request):
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and "application/json" not in accept:
+        dashboard_path = _REPO_ROOT / "static" / "dashboard.html"
+        if dashboard_path.is_file():
+            return HTMLResponse(
+                dashboard_path.read_text(encoding="utf-8"),
+                media_type="text/html; charset=utf-8",
+            )
+
     payload: dict[str, Any] = {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
@@ -897,8 +923,8 @@ async def health_ready():
     summary="Dependency health check",
     description=(
         "Probes every external dependency (PostgreSQL, Redis, MQTT broker, "
-        "Stripe, LLM provider) in parallel with a short timeout. Each entry "
-        "reports status, latency_ms, and an error message when unreachable. "
+        "Stripe, LLM provider, signing key) in parallel with a short timeout. "
+        "Each entry reports status, latency_ms, and an error message when unreachable. "
         "Deps whose consumers are in simulation mode return `not_used` so "
         "the health verdict doesn't degrade on mock-only deployments."
     ),

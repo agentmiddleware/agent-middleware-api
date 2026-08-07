@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
 from app.schemas.audit import AuditEventListResponse, AuditEventResponse
+from app.schemas.billing import AlertListResponse
 from app.schemas.trust import PermitListResponse, ReceiptListResponse
 from app.trust import (
     count_audit_events,
+    get_agent_money,
     get_permit_service,
     get_receipt_service,
     list_audit_events,
@@ -28,6 +30,26 @@ def _require_wallet_key(auth: AuthContext) -> tuple[str, str | None]:
             },
         )
     return auth.wallet_id, auth.key_id
+
+
+@router.get("/alerts", response_model=AlertListResponse)
+async def list_my_alerts(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
+) -> AlertListResponse:
+    wallet_id, _ = _require_wallet_key(auth)
+    money = get_agent_money()
+    alerts = await money.get_alerts(wallet_id)
+    # Apply pagination
+    total = len(alerts)
+    paginated = alerts[offset : offset + limit]
+    unacknowledged = sum(1 for a in alerts if not a.acknowledged)
+    return AlertListResponse(
+        alerts=paginated,
+        total=total,
+        unacknowledged=unacknowledged,
+    )
 
 
 @router.get("/permits", response_model=PermitListResponse)

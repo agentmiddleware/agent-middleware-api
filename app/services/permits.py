@@ -12,7 +12,12 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
-from app.db.models import McpDispatchAttemptModel, PermitModel, WalletModel
+from app.db.models import (
+    BillingAlertModel,
+    McpDispatchAttemptModel,
+    PermitModel,
+    WalletModel,
+)
 from app.schemas.trust import PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service
 
@@ -51,6 +56,7 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         expires_at=model.expires_at,
         nonce=model.nonce,
         status=model.status,
+        requires_human_approval=model.requires_human_approval,
         signature=model.signature,
         key_id=model.key_id,
         issued_at=model.issued_at,
@@ -142,12 +148,30 @@ class PermitService:
             permits = [permit_model_to_response(model) for model in result.scalars()]
             return permits, int(total or 0)
 
-    async def create_permit(self, request: PermitCreateRequest) -> PermitResponse:
+    async def create_permit(
+        self, request: PermitCreateRequest, subject_key_id: str | None = None
+    ) -> PermitResponse:
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
+        # Normalize to naive UTC before any comparison, signing, or persistence.
+        # Guarantees the signed timestamp and persisted timestamp are identical
+        # on every dialect (SQLite, PostgreSQL, asyncpg).
         expires_at = to_naive_utc(request.expires_at)
-        if expires_at <= utc_now():
+        now = utc_now()
+
+        if expires_at <= now:
             raise PermitError("permit_expired_at_creation")
+
+        if request.requires_human_approval:
+            # Fail at creation rather than minting a permit every invoke of
+            # which would be denied (simulated approvals are refused in
+            # production-like environments; real mode needs Sentinel config).
+            from app.services.human_approval import human_approval_available
+
+            available, reason = human_approval_available()
+            if not available:
+                raise PermitError(reason or "human_approval_not_configured")
+
         scopes = request.scopes or [
             f"tool:{tool}:invoke" for tool in request.allowed_tools
         ]
@@ -165,14 +189,17 @@ class PermitService:
             if subject.balance < request.max_credits:
                 raise PermitError("permit_budget_exceeds_wallet_balance")
 
-        now = utc_now()
         permit_id = f"permit-{uuid.uuid4().hex[:16]}"
         nonce = request.nonce or uuid.uuid4().hex
-        payload = {
+        # Prefer the explicitly-passed key_id (from auth context) over the
+        # request body, so wallet-bound self-service permits show up in
+        # /v1/me/permits queries filtered by subject_key_id.
+        effective_key_id = request.subject_key_id or subject_key_id
+        payload: dict[str, Any] = {
             "permit_id": permit_id,
             "issuer_wallet_id": request.issuer_wallet_id,
             "subject_wallet_id": request.subject_wallet_id,
-            "subject_key_id": request.subject_key_id,
+            "subject_key_id": effective_key_id,
             "scopes": scopes,
             "allowed_tools": request.allowed_tools,
             "max_credits": request.max_credits,
@@ -181,19 +208,24 @@ class PermitService:
             "status": "active",
             "issued_at": now,
         }
+        # Signed only when set, so signatures on permits issued before this
+        # field existed keep verifying (verify_signature mirrors this).
+        if request.requires_human_approval:
+            payload["requires_human_approval"] = True
         signature, key_id, _ = await get_signing_key_service().sign_payload(payload)
 
         model = PermitModel(
             permit_id=permit_id,
             issuer_wallet_id=request.issuer_wallet_id,
             subject_wallet_id=request.subject_wallet_id,
-            subject_key_id=request.subject_key_id,
+            subject_key_id=effective_key_id,
             scopes_json=json.dumps(scopes),
             allowed_tools_json=json.dumps(request.allowed_tools),
             max_credits=request.max_credits,
             expires_at=expires_at,
             nonce=nonce,
             status="active",
+            requires_human_approval=request.requires_human_approval,
             signature=signature,
             key_id=key_id,
             issued_at=now,
@@ -349,6 +381,37 @@ class PermitService:
                 model.spent_credits += amount
                 model.updated_at = utc_now()
                 session.add(model)
+
+                # Budget percentage alerts
+                if model.max_credits > 0:
+                    pct = (model.spent_credits / model.max_credits) * 100
+                    thresholds = [
+                        (Decimal("100"), "critical", "permit_budget_exhausted"),
+                        (Decimal("90"), "warning", "permit_budget_90pct"),
+                        (Decimal("80"), "info", "permit_budget_80pct"),
+                    ]
+                    for threshold, severity, alert_type in thresholds:
+                        if pct >= threshold:
+                            # Only create alert if we just crossed this threshold
+                            prior_pct = (
+                                (model.spent_credits - amount) / model.max_credits
+                            ) * 100
+                            if prior_pct < threshold:
+                                alert = BillingAlertModel(
+                                    alert_id=f"alt-{uuid.uuid4().hex[:12]}",
+                                    wallet_id=model.subject_wallet_id,
+                                    alert_type=alert_type,
+                                    threshold_amount=threshold,
+                                    current_balance=model.max_credits
+                                    - model.spent_credits,
+                                    message=(
+                                        f"Permit {permit_id}: {pct:.0f}% of "
+                                        f"{model.max_credits} credits spent."
+                                    ),
+                                    severity=severity,
+                                )
+                                session.add(alert)
+                            break  # Only fire the highest crossed threshold
             await session.commit()
 
     async def release_budget(self, permit_id: str, amount: Decimal) -> None:
@@ -634,7 +697,7 @@ class PermitService:
         return corrected
 
     async def verify_signature(self, model: PermitModel) -> bool:
-        payload = {
+        payload: dict[str, Any] = {
             "permit_id": model.permit_id,
             "issuer_wallet_id": model.issuer_wallet_id,
             "subject_wallet_id": model.subject_wallet_id,
@@ -649,6 +712,11 @@ class PermitService:
             "alg": "Ed25519",
             "kid": model.key_id,
         }
+        # Mirror of create_permit: the key is present in the signed payload
+        # only when true. Flipping the stored flag in either direction breaks
+        # the rebuilt payload and fails verification.
+        if model.requires_human_approval:
+            payload["requires_human_approval"] = True
         from app.services.signing_keys import sha256_hex
 
         payload["payload_hash"] = sha256_hex(payload)

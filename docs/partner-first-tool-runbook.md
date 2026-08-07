@@ -48,8 +48,8 @@ Do not mount AWI/media/oracle for this session.
 
 ## Rolling deployment safety
 
-Apply Alembic migration `024_governed_mcp_identity` before current workers take
-traffic. Its additive unique index is compatible with pre-023 workers and
+Apply Alembic migration `027_governed_mcp_identity` before current workers take
+traffic. Its additive unique index is compatible with pre-026 workers and
 serializes their physical MCP endpoint keys with the current `/mcp/invoke`
 identity during a rolling deployment.
 
@@ -58,7 +58,7 @@ already reuse one wallet/key across MCP endpoint generations. Do not pick or
 delete one automatically; adjudicate those operations from their receipts,
 ledger entries, and audit evidence, then rerun the migration.
 
-For an emergency code rollback, keep migration 024 in place. Old workers remain
+For an emergency code rollback, keep migration 027 in place. Old workers remain
 compatible and fail closed if they collide with a canonical row. Dropping the
 index after canonical rows exist reopens the duplicate debit/dispatch race.
 
@@ -72,6 +72,27 @@ required.
 
 Keep a second tool id out of the permit (e.g. `YOUR_TOOL_ID.admin`) for the
 out-of-scope denial step.
+
+### Operator-controlled live smoke server
+
+Before a partner endpoint is available, deploy the repository's isolated
+stateless smoke server as a separate service. It proves real TLS, bearer auth,
+MCP discovery, metadata forwarding, and gateway dispatch; it is not a partner
+integration and performs no persistent side effect.
+
+```bash
+export APP_MODULE=app.partner_mcp:app
+export RUN_MIGRATIONS_ON_START=false
+export PARTNER_MCP_BEARER_TOKEN=...       # generated secret, 32+ characters
+export PARTNER_MCP_ALLOWED_HOSTS=exact-service-host.example
+```
+
+The service exposes public `GET /health` and authenticated Streamable HTTP at
+`/mcp`, with one tool named `partner.echo`. Configure the gateway's
+`MCP_UPSTREAM_URL`, tool names, and bearer token from this service, complete the
+live checklist below, then replace it with the real partner endpoint. Never
+describe the smoke server as evidence of partner adoption or remote
+exactly-once side effects.
 
 ## Live checklist
 

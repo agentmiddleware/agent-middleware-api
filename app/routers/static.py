@@ -5,7 +5,7 @@ Serves static discovery docs for agents (llm.txt + advertised markdown).
 """
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pathlib import Path
 
 from ..core.config import get_settings
@@ -127,3 +127,20 @@ async def get_design_partner_guide_md():
 )
 async def get_partner_api_key_bootstrap_md():
     return _serve_markdown("/docs/partner-api-key-bootstrap.md")
+
+
+@router.get(
+    "/dashboard",
+    summary="Human Control Deck",
+    description="Human-accessible control plane, audit visualizer, and telemetry dashboard.",
+    response_class=HTMLResponse,
+    responses={404: {"description": "Dashboard not found"}},
+)
+async def get_human_dashboard():
+    dashboard_path = _REPO_ROOT / "static" / "dashboard.html"
+    if not dashboard_path.is_file():
+        raise HTTPException(status_code=404, detail="dashboard.html not found")
+    return HTMLResponse(
+        dashboard_path.read_text(encoding="utf-8"),
+        media_type="text/html; charset=utf-8",
+    )

@@ -49,6 +49,29 @@ async def test_active_signing_key_metadata_endpoint_excludes_private_key(
 
 
 @pytest.mark.anyio
+async def test_verify_payload_fails_closed_on_malformed_signature(clean_database):
+    """A malformed signature must verify as False, not raise.
+
+    Regression: the base64 decodes were outside the try/except, so a signature
+    with bad padding raised binascii.Error (a ValueError) and surfaced as an
+    HTTP 500 from the verify endpoints, letting a corrupt row mask tampering.
+    """
+    service = get_signing_key_service()
+    _, key_id, payload_hash = await service.sign_payload({"purpose": "malformed"})
+    payload = {
+        "purpose": "malformed",
+        "alg": "Ed25519",
+        "kid": key_id,
+        "payload_hash": payload_hash,
+    }
+
+    for bad in ("!!!not-base64!!!", "", "YWJj"):  # invalid, empty, valid-b64-wrong
+        assert (
+            await service.verify_payload(payload, signature=bad, key_id=key_id) is False
+        )
+
+
+@pytest.mark.anyio
 async def test_retired_signing_key_metadata_still_verifies_payload(clean_database):
     service = get_signing_key_service()
     signature, key_id, payload_hash = await service.sign_payload(

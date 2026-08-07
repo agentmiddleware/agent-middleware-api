@@ -63,6 +63,7 @@ async def create_tool_permit(
     tool_name: str,
     max_credits: int = 50,
     idem_key: str = "permit-create-1",
+    requires_human_approval: bool = False,
 ) -> dict[str, Any]:
     permit_resp = await client.post(
         "/v1/permits",
@@ -73,6 +74,7 @@ async def create_tool_permit(
             "allowed_tools": [tool_name],
             "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
             "max_credits": max_credits,
+            "requires_human_approval": requires_human_approval,
             "expires_at": (
                 datetime.now(timezone.utc) + timedelta(minutes=30)
             ).isoformat(),

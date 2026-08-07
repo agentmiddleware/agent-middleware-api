@@ -30,6 +30,14 @@ from ..schemas.billing import (
 
 logger = logging.getLogger(__name__)
 
+_NON_SPENDABLE_WALLET_STATUSES = frozenset(
+    {
+        WalletStatus.FROZEN.value,
+        WalletStatus.SUSPENDED.value,
+        WalletStatus.CLOSED.value,
+    }
+)
+
 SessionFactoryProvider = Callable[[], async_sessionmaker[AsyncSession]]
 WalletNotFoundFactory = Callable[[str], Exception]
 InsufficientFundsFactory = Callable[[str, Decimal, Decimal], Exception]
@@ -268,6 +276,16 @@ class WalletEngine:
                     raise ValueError(
                         "Only agent or child wallets can spawn child wallets"
                     )
+                if parent.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    raise ValueError(
+                        f"Parent wallet is {parent.status} and cannot spawn child wallets"
+                    )
+                if (
+                    parent.wallet_type == WalletType.CHILD.value
+                    and parent.max_spend
+                    and parent.lifetime_debits + budget_credits > parent.max_spend
+                ):
+                    raise ValueError("Child wallet lifetime spend cap exceeded")
                 if parent.balance < budget_credits:
                     raise self._insufficient_funds_error(
                         parent_wallet_id,
@@ -460,6 +478,17 @@ class WalletEngine:
                     raise self._wallet_not_found_error(from_wallet_id)
                 if not dest:
                     raise self._wallet_not_found_error(to_wallet_id)
+
+                if source.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    raise ValueError(
+                        f"Source wallet is {source.status} and cannot transfer credits"
+                    )
+                if (
+                    source.wallet_type == WalletType.CHILD.value
+                    and source.max_spend
+                    and source.lifetime_debits + amount > source.max_spend
+                ):
+                    raise ValueError("Child wallet lifetime spend cap exceeded")
 
                 if source.balance < amount:
                     raise self._insufficient_funds_error(

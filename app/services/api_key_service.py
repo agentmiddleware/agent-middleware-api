@@ -15,7 +15,7 @@ import hashlib
 import json
 import secrets
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional
 from uuid import uuid4
 
@@ -140,7 +140,7 @@ class APIKeyService:
 
         full_key, key_hash, key_prefix = generate_api_key()
         key_id = f"key_{uuid4().hex[:12]}"
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         expires_at = None
 
         if expires_in_days:
@@ -269,10 +269,8 @@ class APIKeyService:
             if key.key_hash != key_hash:
                 return None
 
-            now = datetime.now(timezone.utc)
+            now = utc_now()
             expires_at = key.expires_at
-            if expires_at and expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
             if expires_at and expires_at < now:
                 return None
 
@@ -314,7 +312,7 @@ class APIKeyService:
             }
         """
         old_key_id = None
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         persisted_now = to_naive_utc(now)
         rotation_id = f"rot_{uuid4().hex[:12]}"
         rotation_type = (
@@ -474,7 +472,7 @@ class APIKeyService:
                 "created_at": datetime,
             }
         """
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         persisted_now = to_naive_utc(now)
 
         async with self._session_factory()() as session:

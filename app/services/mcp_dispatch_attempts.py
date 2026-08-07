@@ -17,6 +17,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
+    HumanApprovalModel,
     IdempotencyRecordModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
@@ -151,12 +152,47 @@ class McpDispatchAttemptService:
         ).scalar_one_or_none()
 
     @staticmethod
+    async def _assert_approval_binding(
+        session: AsyncSession,
+        *,
+        record: IdempotencyRecordModel,
+        permit: PermitModel,
+        approval_id: str | None,
+        wallet_id: str,
+        public_tool_id: str,
+    ) -> None:
+        """Bind an approval-required dispatch to its consumed decision.
+
+        The human decision is consumed before permit budget moves. Persisting
+        that exact identity on ``prepared`` makes the authorization evidence
+        recoverable even if the request worker crashes before it signs a
+        receipt.
+        """
+        if not permit.requires_human_approval:
+            if approval_id is not None:
+                raise DispatchAttemptConflictError("dispatch_approval_linkage_invalid")
+            return
+        if approval_id is None:
+            raise DispatchAttemptConflictError("dispatch_approval_required")
+        approval = await session.get(HumanApprovalModel, approval_id)
+        if (
+            approval is None
+            or approval.wallet_id != wallet_id
+            or approval.permit_id != permit.permit_id
+            or approval.tool != public_tool_id
+            or approval.idempotency_key != record.idempotency_key
+            or approval.status != "consumed"
+        ):
+            raise DispatchAttemptConflictError("dispatch_approval_linkage_invalid")
+
+    @staticmethod
     def _assert_prepared_match(
         attempt: McpDispatchAttemptModel,
         *,
         idempotency_record_id: str,
         wallet_id: str,
         permit_id: str,
+        approval_id: str | None,
         key_id: str | None,
         public_tool_id: str,
         upstream_tool_name: str,
@@ -168,6 +204,7 @@ class McpDispatchAttemptService:
             "idempotency_record_id": idempotency_record_id,
             "wallet_id": wallet_id,
             "permit_id": permit_id,
+            "approval_id": approval_id,
             "key_id": key_id,
             "public_tool_id": public_tool_id,
             "upstream_tool_name": upstream_tool_name,
@@ -184,6 +221,7 @@ class McpDispatchAttemptService:
         idempotency_record_id: str,
         wallet_id: str,
         permit_id: str,
+        approval_id: str | None = None,
         key_id: str | None,
         public_tool_id: str,
         upstream_tool_name: str,
@@ -227,6 +265,17 @@ class McpDispatchAttemptService:
                     raise DispatchAttemptConflictError(
                         "dispatch_idempotency_record_invalid"
                     )
+                permit = await session.get(PermitModel, permit_id)
+                if permit is None:
+                    raise DispatchAttemptConflictError("dispatch_permit_not_found")
+                await self._assert_approval_binding(
+                    session,
+                    record=record,
+                    permit=permit,
+                    approval_id=approval_id,
+                    wallet_id=wallet_id,
+                    public_tool_id=public_tool_id,
+                )
 
                 existing = await self._get_by_idempotency_record(
                     session,
@@ -238,6 +287,7 @@ class McpDispatchAttemptService:
                         idempotency_record_id=idempotency_record_id,
                         wallet_id=wallet_id,
                         permit_id=permit_id,
+                        approval_id=approval_id,
                         key_id=key_id,
                         public_tool_id=public_tool_id,
                         upstream_tool_name=upstream_tool_name,
@@ -252,6 +302,7 @@ class McpDispatchAttemptService:
                     idempotency_record_id=idempotency_record_id,
                     wallet_id=wallet_id,
                     permit_id=permit_id,
+                    approval_id=approval_id,
                     key_id=key_id,
                     public_tool_id=public_tool_id,
                     upstream_tool_name=upstream_tool_name,
@@ -279,6 +330,7 @@ class McpDispatchAttemptService:
                         idempotency_record_id=idempotency_record_id,
                         wallet_id=wallet_id,
                         permit_id=permit_id,
+                        approval_id=approval_id,
                         key_id=key_id,
                         public_tool_id=public_tool_id,
                         upstream_tool_name=upstream_tool_name,
@@ -295,6 +347,7 @@ class McpDispatchAttemptService:
         idempotency_record_id: str,
         wallet_id: str,
         permit_id: str,
+        approval_id: str | None = None,
         key_id: str | None,
         public_tool_id: str,
         upstream_tool_name: str,
@@ -349,6 +402,21 @@ class McpDispatchAttemptService:
                         raise DispatchAttemptConflictError(
                             "dispatch_idempotency_record_invalid"
                         )
+                    permit = await session.get(
+                        PermitModel,
+                        permit_id,
+                        with_for_update=True,
+                    )
+                    if permit is None:
+                        return PermitValidation(False, "permit_not_found", None), None
+                    await self._assert_approval_binding(
+                        session,
+                        record=record,
+                        permit=permit,
+                        approval_id=approval_id,
+                        wallet_id=wallet_id,
+                        public_tool_id=public_tool_id,
+                    )
 
                     existing = await self._get_by_idempotency_record(
                         session,
@@ -360,6 +428,7 @@ class McpDispatchAttemptService:
                             idempotency_record_id=idempotency_record_id,
                             wallet_id=wallet_id,
                             permit_id=permit_id,
+                            approval_id=approval_id,
                             key_id=key_id,
                             public_tool_id=public_tool_id,
                             upstream_tool_name=upstream_tool_name,
@@ -371,11 +440,6 @@ class McpDispatchAttemptService:
                             raise DispatchAttemptConflictError(
                                 "dispatch_prepare_already_advanced"
                             )
-                        permit = await session.get(PermitModel, permit_id)
-                        if permit is None:
-                            return PermitValidation(
-                                False, "permit_not_found", None
-                            ), None
                         replay_access = await permits.validate_replay_access(
                             permit_id=permit_id,
                             wallet_id=wallet_id,
@@ -384,13 +448,6 @@ class McpDispatchAttemptService:
                         )
                         return replay_access, existing
 
-                    permit = await session.get(
-                        PermitModel,
-                        permit_id,
-                        with_for_update=True,
-                    )
-                    if permit is None:
-                        return PermitValidation(False, "permit_not_found", None), None
                     validation = await permits._validate_model_for_action(
                         model=permit,
                         wallet_id=wallet_id,
@@ -409,6 +466,7 @@ class McpDispatchAttemptService:
                         idempotency_record_id=idempotency_record_id,
                         wallet_id=wallet_id,
                         permit_id=permit_id,
+                        approval_id=approval_id,
                         key_id=key_id,
                         public_tool_id=public_tool_id,
                         upstream_tool_name=upstream_tool_name,
@@ -436,6 +494,7 @@ class McpDispatchAttemptService:
                 idempotency_record_id=idempotency_record_id,
                 wallet_id=wallet_id,
                 permit_id=permit_id,
+                approval_id=approval_id,
                 key_id=key_id,
                 public_tool_id=public_tool_id,
                 upstream_tool_name=upstream_tool_name,
@@ -663,6 +722,21 @@ class McpDispatchAttemptService:
             if row is None:
                 return None
             attempt, record = row
+            permit = await session.get(PermitModel, attempt.permit_id)
+            if permit is None:
+                raise DispatchAttemptConflictError("dispatch_permit_not_found")
+            # Re-check durable approval evidence before a crash reconciler can
+            # use the attempt as authority for a newly signed audit or receipt.
+            # The prepare-time check prevents bad service writes; this read-time
+            # check fails closed on later corruption or out-of-band updates.
+            await self._assert_approval_binding(
+                session,
+                record=record,
+                permit=permit,
+                approval_id=attempt.approval_id,
+                wallet_id=attempt.wallet_id,
+                public_tool_id=attempt.public_tool_id,
+            )
             return DispatchAttemptContext(
                 attempt=attempt,
                 endpoint=record.endpoint,
