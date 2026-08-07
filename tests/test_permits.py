@@ -28,6 +28,63 @@ async def client():
 
 
 @pytest.mark.anyio
+async def test_permit_cannot_name_foreign_subject_wallet(client, clean_database):
+    """An issuer may only encumber its own wallet or one it funds.
+
+    Regression: issuance authorized only the issuer, so a wallet holder could
+    mint a signed permit naming an unrelated victim wallet as subject (and probe
+    that wallet's balance via the creation error). Verified against production.
+    """
+    attacker = await provision_agent_wallet(client)
+    victim = await provision_agent_wallet(client)
+
+    resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": attacker["agent_wallet_id"],
+            "subject_wallet_id": victim["agent_wallet_id"],
+            "allowed_tools": ["x"],
+            "scopes": ["tool:x:invoke", "billing:charge"],
+            "max_credits": 5,
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**attacker["agent_headers"], "Idempotency-Key": "foreign-subject-1"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "subject_wallet_access_denied"
+
+
+@pytest.mark.anyio
+async def test_sponsor_may_issue_permit_for_its_agent(client, clean_database):
+    """The legitimate delegation flow (issuer funds subject) still works."""
+    provisioned = await provision_agent_wallet(client)
+    sponsor_key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": provisioned["sponsor_wallet_id"], "key_name": "sponsor"},
+        headers=BOOTSTRAP_HEADERS,
+    )
+    sponsor_headers = {"X-API-Key": sponsor_key.json()["api_key"]}
+
+    resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": provisioned["sponsor_wallet_id"],
+            "subject_wallet_id": provisioned["agent_wallet_id"],
+            "allowed_tools": ["x"],
+            "scopes": ["tool:x:invoke", "billing:charge"],
+            "max_credits": 5,
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**sponsor_headers, "Idempotency-Key": "sponsor-for-agent-1"},
+    )
+    assert resp.status_code == 201
+
+
+@pytest.mark.anyio
 async def test_signed_permit_verifies_for_wallet_tool_and_budget(
     client,
     clean_database,

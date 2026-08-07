@@ -195,6 +195,93 @@ async def test_budget_exceeded_permit_is_denied_without_charge(client, clean_dat
 
 
 @pytest.mark.anyio
+async def test_replay_not_served_to_unauthorized_caller(client, clean_database):
+    """A caller who does not own the wallet must never be served that wallet's
+    stored receipt via the idempotency replay short-circuit.
+
+    Regression: idem.begin() used to run on the body-supplied wallet_id before
+    the ownership check, so replaying another wallet's (body, key) returned that
+    wallet's signed receipt to an unauthorized caller.
+    """
+    victim = await provision_agent_wallet(client)
+    attacker = await provision_agent_wallet(client)
+    tool_name = "replay-authz-tool"
+    _register_tool(tool_name)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=victim["agent_wallet_id"],
+            key_id=victim["key_id"],
+            tool_name=tool_name,
+        )
+        body = _mcp_call(
+            victim["agent_wallet_id"], permit["permit_id"], tool_name, "shared-idem-1"
+        )
+
+        # Victim performs the real governed invoke and obtains a receipt.
+        r1 = await client.post(
+            "/mcp/messages", json=body, headers=victim["agent_headers"]
+        )
+        assert r1.status_code == 200
+        victim_receipt = r1.json()["result"]["receipt"]["receipt_id"]
+
+        # Attacker replays the victim's exact body + idempotency key with its own
+        # key. It must be denied, and must not receive the victim's receipt.
+        r2 = await client.post(
+            "/mcp/messages", json=body, headers=attacker["agent_headers"]
+        )
+        assert r2.status_code == 200
+        payload = r2.json()
+        assert payload.get("result") is None
+        assert payload["error"]["message"] == "wallet_access_denied"
+        assert victim_receipt not in r2.text
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_denied_call_does_not_poison_idempotency_key(client, clean_database):
+    """A denied cross-tenant attempt must not lock the victim's (wallet, key).
+
+    Regression: the wallet_access_denied branch created its idempotency record
+    before authorizing, then raised without closing it, so the legitimate
+    owner's later use of that key failed permanently.
+    """
+    victim = await provision_agent_wallet(client)
+    attacker = await provision_agent_wallet(client)
+    tool_name = "poison-authz-tool"
+    _register_tool(tool_name)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=victim["agent_wallet_id"],
+            key_id=victim["key_id"],
+            tool_name=tool_name,
+        )
+        # Identical body for both callers; only the auth header differs.
+        body = _mcp_call(
+            victim["agent_wallet_id"], permit["permit_id"], tool_name, "poison-key-1"
+        )
+
+        atk = await client.post(
+            "/mcp/messages", json=body, headers=attacker["agent_headers"]
+        )
+        assert atk.json()["error"]["message"] == "wallet_access_denied"
+
+        # The rightful owner reuses that same key for its own real call. With the
+        # denial no longer planting a record, this must succeed rather than
+        # returning idempotency_in_progress / idempotency_key_reused.
+        vic = await client.post(
+            "/mcp/messages", json=body, headers=victim["agent_headers"]
+        )
+        assert vic.status_code == 200
+        assert "error" not in vic.json(), vic.json().get("error")
+        assert vic.json()["result"]["receipt"]["receipt_id"]
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
 async def test_unsigned_receipt_fails_verification(client, clean_database):
     provisioned = await provision_agent_wallet(client)
     tool_name = "unsigned-receipt-tool"

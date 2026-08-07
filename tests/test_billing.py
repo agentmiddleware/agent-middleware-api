@@ -891,6 +891,36 @@ async def test_bootstrap_key_can_manage_multiple_wallets(client, api_headers):
 
 
 @pytest.mark.anyio
+async def test_scoped_key_cannot_mint_sponsor_credits(client, api_headers):
+    """Creating a sponsor mints credits, so it must be admin-gated.
+
+    Regression: the endpoint accepted any valid API key, letting a scoped wallet
+    key mint arbitrary initial_credits — verified exploitable against production.
+    """
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={"sponsor_name": "Root", "email": "root@test.com", "initial_credits": 100},
+        headers=api_headers,
+    )
+    wallet_id = sponsor.json()["wallet_id"]
+    key_resp = await client.post(
+        "/v1/api-keys", json={"wallet_id": wallet_id}, headers=api_headers
+    )
+    scoped = {"X-API-Key": key_resp.json()["api_key"]}
+
+    resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Free Money",
+            "email": "free@test.com",
+            "initial_credits": 1_000_000,
+        },
+        headers=scoped,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
 async def test_topup_retry_with_same_idempotency_key_does_not_double_credit(
     client, api_headers, clean_database
 ):

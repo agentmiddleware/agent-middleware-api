@@ -374,6 +374,31 @@ async def _execute_registered_tool(
     if not wallet_id:
         raise ValueError("Missing wallet_id in mcpContext")
 
+    # Authorize wallet ownership BEFORE the idempotency store is touched. The
+    # idempotency lookup key is (wallet_id, endpoint, key) with wallet_id taken
+    # from the request body, so running idem.begin() first let an unauthorized
+    # caller (a) be served another wallet's stored signed receipt via the replay
+    # short-circuit and (b) plant an orphaned in-progress record in the victim's
+    # namespace on denial, permanently poisoning that (wallet, key). Gate here so
+    # a caller who does not own wallet_id never reaches the store. The priced
+    # decision below re-runs this check with the real cost for the audit record.
+    gate = evaluate_tool_invocation(
+        auth=auth,
+        wallet_id=wallet_id,
+        tool_name=tool_name,
+        estimated_cost=None,
+        request_id=request_id,
+    )
+    if not gate.allowed:
+        await _audit_mcp_invocation(
+            decision=gate,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=gate.reason,
+        )
+        raise PermissionError(gate.reason)
+
     governed_call = bool(permit_id) or (
         settings.TRUST_MODE_ENABLED and not settings.ALLOW_LEGACY_UNPERMITTED_MCP
     )

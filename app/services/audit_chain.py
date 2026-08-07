@@ -252,7 +252,23 @@ async def verify_audit_chain(
             wallet_ids_result = await session.execute(
                 select(cast(Any, ControlPlaneAuditEventModel.wallet_id)).distinct()
             )
-            distinct_wallets = [row[0] for row in wallet_ids_result.all()]
+            event_wallets = {row[0] for row in wallet_ids_result.all()}
+            # Also enumerate wallets from the chain-head table. Deriving the list
+            # from events alone let an attacker who deleted ALL of a wallet's
+            # events erase that wallet from the check entirely: with no events it
+            # never appears in distinct_wallets, so _verify_single_chain (which
+            # would flag the surviving head as audit_chain_truncated) is never
+            # called for it. The head row is the durable anchor, so a wallet with
+            # a head must always be verified even when its events are gone. Head
+            # keys use "" for the wallet-less chain; map it back to NULL.
+            head_keys_result = await session.execute(
+                select(cast(Any, AuditChainHeadModel.wallet_key)).distinct()
+            )
+            head_wallets = {
+                (row[0] if row[0] != "" else None)
+                for row in head_keys_result.all()
+            }
+            distinct_wallets = event_wallets | head_wallets
         checked = 0
         first_event_id: str | None = None
         last_event_id: str | None = None

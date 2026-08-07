@@ -292,14 +292,22 @@ class SigningKeyService:
         key = await self.get_public_key(key_id)
         if not key or key.status == "disabled":
             return False
-        public_raw = base64.b64decode(key.public_key_b64)
-        public_key = Ed25519PublicKey.from_public_bytes(public_raw)
+        # Verification must fail closed on malformed stored data, not raise. The
+        # base64 decodes and key construction were outside the try, so a bad
+        # signature/public-key with wrong padding or length raised
+        # binascii.Error / ValueError and surfaced as HTTP 500 from
+        # /v1/receipts/verify and /v1/audit/verify-chain instead of a clean
+        # "invalid" verdict — a single corrupt row could mask tampering behind a
+        # 500. Treat any decode/key/verify failure as "not verified".
         try:
+            public_key = Ed25519PublicKey.from_public_bytes(
+                base64.b64decode(key.public_key_b64)
+            )
             public_key.verify(
                 base64.b64decode(signature), canonical_json(payload).encode()
             )
             return True
-        except InvalidSignature:
+        except (InvalidSignature, ValueError, TypeError):
             return False
 
 

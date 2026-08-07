@@ -194,3 +194,37 @@ async def test_verify_detects_tail_truncation(clean_database):
     global_result = await verify_audit_chain(wallet_id=None)
     assert global_result.valid is False
     assert global_result.reason == "audit_chain_truncated"
+
+
+@pytest.mark.anyio
+async def test_global_verify_detects_fully_deleted_wallet_via_head(clean_database):
+    """Deleting ALL of a wallet's events must still be caught globally.
+
+    Regression: the global verify enumerated wallets from the events table, so a
+    wallet whose every event was deleted vanished from the check entirely. It is
+    enumerated from the surviving chain-head rows too, so the truncation is
+    caught.
+    """
+    wallet_id = "wlt-fulldelete-test"
+    for n in range(3):
+        await record_audit_event(
+            event="trust.fulldel", wallet_id=wallet_id, metadata={"n": n}
+        )
+    assert (await verify_audit_chain(wallet_id=None)).valid is True
+
+    factory = get_session_factory()
+    async with factory() as session:
+        events = (
+            await session.execute(
+                select(ControlPlaneAuditEventModel).where(
+                    ControlPlaneAuditEventModel.wallet_id == wallet_id
+                )
+            )
+        ).scalars().all()
+        for event in events:
+            await session.delete(event)
+        await session.commit()
+
+    result = await verify_audit_chain(wallet_id=None)
+    assert result.valid is False
+    assert result.reason == "audit_chain_truncated"

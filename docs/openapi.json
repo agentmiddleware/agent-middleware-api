@@ -828,15 +828,38 @@
         "summary": "Create a sponsor wallet (liability sink)",
         "description": "Create a human-owned root account that acts as the 'liability sink' for agent spending. Sponsors ingest fiat currency via payment rails and convert it to ecosystem credits. Agent wallets are provisioned from sponsor balances.",
         "operationId": "create_sponsor_wallet_v1_billing_wallets_sponsor_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateSponsorWalletRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -872,12 +895,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ]
+        }
       }
     },
     "/v1/billing/wallets/agent": {

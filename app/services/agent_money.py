@@ -84,6 +84,19 @@ settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
+# Wallet statuses that must block any outbound movement of funds — spending,
+# transferring out, or delegating to a child. Without this, an auto-frozen
+# wallet (velocity_monitor sets status="frozen") kept spending, and could drain
+# via transfer or spawn a fresh unfrozen child, because the money layer never
+# read wallet.status. ACTIVE and PENDING_KYC keep their existing behaviour.
+_NON_SPENDABLE_WALLET_STATUSES = frozenset(
+    {
+        WalletStatus.FROZEN.value,
+        WalletStatus.SUSPENDED.value,
+        WalletStatus.CLOSED.value,
+    }
+)
+
 
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
@@ -477,6 +490,21 @@ class AgentMoney:
                     raise ValueError(
                         "Only agent or child wallets can spawn child wallets"
                     )
+                # A frozen/suspended/closed parent must not delegate funds to a
+                # fresh (unfrozen) child and resume spending through it.
+                if parent.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    raise ValueError(
+                        f"Parent wallet is {parent.status} and cannot spawn child wallets"
+                    )
+                # Delegating to a child debits the parent, so a capped child
+                # parent must not delegate beyond its own remaining lifetime cap
+                # — otherwise it spawns a higher-cap grandchild and escapes.
+                if (
+                    parent.wallet_type == WalletType.CHILD.value
+                    and parent.max_spend
+                    and parent.lifetime_debits + budget_credits > parent.max_spend
+                ):
+                    raise ValueError("Child wallet lifetime spend cap exceeded")
                 if parent.balance < budget_credits:
                     raise InsufficientFundsError(
                         parent_wallet_id,
@@ -671,6 +699,22 @@ class AgentMoney:
                 if not dest:
                     raise WalletNotFoundError(to_wallet_id)
 
+                # A frozen/suspended/closed wallet must not move funds out —
+                # otherwise a frozen wallet drains its balance to an unfrozen one.
+                if source.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    raise ValueError(
+                        f"Source wallet is {source.status} and cannot transfer credits"
+                    )
+                # A child's lifetime spend cap bounds outbound transfers too; a
+                # transfer is a debit, so without this a capped child escapes its
+                # cap by moving its balance to an uncapped wallet.
+                if (
+                    source.wallet_type == WalletType.CHILD.value
+                    and source.max_spend
+                    and source.lifetime_debits + amount > source.max_spend
+                ):
+                    raise ValueError("Child wallet lifetime spend cap exceeded")
+
                 if source.balance < amount:
                     raise InsufficientFundsError(from_wallet_id, source.balance, amount)
 
@@ -719,6 +763,39 @@ class AgentMoney:
                 "to_balance_after": dest.balance,
                 "status": "completed",
             }
+
+    async def is_wallet_or_descendant(
+        self, wallet_id: str, ancestor_wallet_id: str, *, max_depth: int = 32
+    ) -> bool:
+        """True if ``wallet_id`` is ``ancestor_wallet_id`` or below it in the
+        sponsor -> agent -> child hierarchy.
+
+        Used to authorize which wallet a permit may encumber: an issuer may name
+        itself or any wallet it funds as the permit subject, but not an
+        unrelated wallet. Walks the ``parent_wallet_id`` chain with a depth cap
+        so a malformed cycle cannot loop forever.
+        """
+        if wallet_id == ancestor_wallet_id:
+            return True
+        async with self._session_factory()() as session:
+            current = wallet_id
+            seen: set[str] = set()
+            for _ in range(max_depth):
+                if current in seen:
+                    return False
+                seen.add(current)
+                result = await session.execute(
+                    select(cast(Any, WalletModel.parent_wallet_id)).where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == current)
+                    )
+                )
+                row = result.scalar_one_or_none()
+                if not row:
+                    return False
+                if row == ancestor_wallet_id:
+                    return True
+                current = row
+        return False
 
     async def get_swarm_budget(self, parent_wallet_id: str) -> dict:
         """Get hierarchical budget summary for an agent's child swarm."""
@@ -913,6 +990,26 @@ class AgentMoney:
                     )
                     wallet.daily_spent = max(
                         Decimal("0"), wallet.daily_spent - charge_amount
+                    )
+
+                # A frozen/suspended/closed wallet must not spend, even in a new
+                # velocity window where should_freeze no longer trips. Returned
+                # as an InsufficientFundsResponse (not raised) so the governed
+                # MCP path releases any reserved permit budget and writes a
+                # denial receipt, and the billing route returns 402, exactly as
+                # for a funds shortfall.
+                if wallet.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    _reverse_velocity_record()
+                    return InsufficientFundsResponse(
+                        wallet_id=wallet_id,
+                        current_balance=float(wallet.balance),
+                        current_balance_exact=str(wallet.balance),
+                        required_amount=float(charge_amount),
+                        required_amount_exact=str(charge_amount),
+                        shortfall=0.0,
+                        shortfall_exact="0",
+                        top_up_url="",
+                        message=f"Wallet is {wallet.status} and cannot be charged.",
                     )
 
                 # Check child wallet lifetime spend cap
