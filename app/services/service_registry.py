@@ -144,6 +144,8 @@ def _service_to_mcp_tool(service: dict) -> dict:
         "unitName": service.get("unit_name", "call"),
         "category": service.get("category", "custom"),
     }
+    if service.get("credits_per_unit_exact") is not None:
+        annotations["creditsPerCallExact"] = service["credits_per_unit_exact"]
 
     if service.get("require_permit"):
         annotations["requirePermit"] = True
@@ -154,7 +156,7 @@ def _service_to_mcp_tool(service: dict) -> dict:
     if service.get("output_schema"):
         annotations["hasOutputSchema"] = True
 
-    if not service.get("is_local", True):
+    if service.get("external") or not service.get("is_local", True):
         annotations["external"] = True
 
     tool["annotations"] = annotations
@@ -180,6 +182,7 @@ class ServiceRegistry:
         self._session_factory = get_session_factory
         self._local_registry: dict[str, dict] = {}
         self._func_registry: dict[str, Callable] = {}
+        self._executor_registry: dict[str, Any] = {}
 
     def register_local(
         self,
@@ -192,7 +195,6 @@ class ServiceRegistry:
         output_model: type[BaseModel] | None = None,
         credits_per_unit: float = 1.0,
         unit_name: str = "call",
-        owner_key: str | None = None,
         owner_wallet_id: str | None = None,
         require_permit: bool = False,
     ) -> dict:
@@ -221,11 +223,13 @@ class ServiceRegistry:
             "unit_name": unit_name,
             "input_schema": input_schema,
             "output_schema": output_schema,
-            "owner_key": owner_key,
             "owner_wallet_id": owner_wallet_id,
             "require_permit": bool(require_permit),
             "is_active": True,
             "is_local": True,
+            "external": False,
+            "is_executable": True,
+            "execution_backend": "local",
             "func": func,
             "created_at": datetime.now(timezone.utc),
         }
@@ -236,17 +240,67 @@ class ServiceRegistry:
         logger.info(f"Registered local service: {service_id} ({name})")
         return service_record
 
+    def register_upstream(
+        self,
+        *,
+        service_id: str,
+        name: str,
+        description: str,
+        category: ServiceCategory,
+        executor: Any,
+        input_schema: dict[str, Any],
+        output_schema: dict[str, Any] | None,
+        credits_per_unit: float,
+        upstream_tool_name: str,
+        upstream_origin: str,
+        credits_per_unit_exact: str | None = None,
+    ) -> dict[str, Any]:
+        """Register one runtime-backed remote MCP tool without persisting secrets."""
+        existing = self._local_registry.get(service_id)
+        if existing and existing.get("execution_backend") != "upstream_mcp":
+            raise ValueError(f"Service ID already registered: {service_id}")
+
+        service_record: dict[str, Any] = {
+            "service_id": service_id,
+            "name": name,
+            "description": description,
+            "category": category.value,
+            "credits_per_unit": credits_per_unit,
+            "credits_per_unit_exact": credits_per_unit_exact,
+            "unit_name": "call",
+            "input_schema": input_schema,
+            "output_schema": output_schema,
+            "owner_wallet_id": None,
+            "require_permit": True,
+            "is_active": True,
+            "is_local": False,
+            "external": True,
+            "is_executable": True,
+            "execution_backend": "upstream_mcp",
+            "upstream_tool_name": upstream_tool_name,
+            "upstream_origin": upstream_origin,
+            "created_at": datetime.now(timezone.utc),
+        }
+        self._local_registry[service_id] = service_record
+        self._executor_registry[service_id] = executor
+        self._func_registry.pop(service_id, None)
+        logger.info(
+            "Registered upstream MCP service: %s (%s)",
+            service_id,
+            name,
+        )
+        return service_record
+
     async def register_persistent(
         self,
-        owner_key: str,
         name: str,
         description: str,
         category: ServiceCategory,
         credits_per_unit: float,
+        owner_wallet_id: str,
         unit_name: str = "call",
         input_schema: dict | None = None,
         output_schema: dict | None = None,
-        owner_wallet_id: str | None = None,
         mcp_metadata: dict | None = None,
     ) -> dict:
         """
@@ -268,8 +322,7 @@ class ServiceRegistry:
                 service_id=service_id,
                 name=name,
                 description=description,
-                owner_key=owner_key,
-                owner_wallet_id=owner_wallet_id or "",
+                owner_wallet_id=owner_wallet_id,
                 category=category.value,
                 credits_per_unit=Decimal(str(credits_per_unit)),
                 unit_name=unit_name,
@@ -293,6 +346,9 @@ class ServiceRegistry:
             "owner_wallet_id": owner_wallet_id,
             "is_active": True,
             "is_local": False,
+            "external": True,
+            "is_executable": False,
+            "execution_backend": "metadata_only",
             "created_at": datetime.now(timezone.utc),
         }
 
@@ -303,6 +359,10 @@ class ServiceRegistry:
     def get_local_func(self, service_id: str) -> Callable | None:
         """Get the callable for a locally registered service."""
         return self._func_registry.get(service_id)
+
+    def get_executor(self, service_id: str) -> Any | None:
+        """Get a non-callable runtime executor such as the upstream MCP adapter."""
+        return self._executor_registry.get(service_id)
 
     async def get(self, service_id: str) -> dict | None:
         """Get a service from local or persistent registry."""
@@ -345,6 +405,9 @@ class ServiceRegistry:
                 "owner_wallet_id": service.owner_wallet_id,
                 "is_active": service.is_active,
                 "is_local": False,
+                "external": True,
+                "is_executable": False,
+                "execution_backend": "metadata_only",
                 "created_at": service.created_at,
             }
 
@@ -394,6 +457,9 @@ class ServiceRegistry:
                         "owner_wallet_id": service.owner_wallet_id,
                         "is_active": service.is_active,
                         "is_local": False,
+                        "external": True,
+                        "is_executable": False,
+                        "execution_backend": "metadata_only",
                         "created_at": service.created_at,
                     }
                 )
@@ -412,6 +478,24 @@ class ServiceRegistry:
             ]
 
         return [s for s in all_services if s.get("is_active", True)]
+
+    async def list_executable(
+        self,
+        category: ServiceCategory | None = None,
+    ) -> list[dict]:
+        """List only runtime-executable tools; metadata-only DB rows are omitted."""
+        services = await self.list_local()
+        if category:
+            services = [
+                service
+                for service in services
+                if service.get("category") == category.value
+            ]
+        return [
+            service
+            for service in services
+            if service.get("is_active", True) and service.get("is_executable", False)
+        ]
 
     async def get_pricing(self, service_id: str) -> tuple[float, str] | None:
         """
@@ -438,8 +522,20 @@ class ServiceRegistry:
             del self._local_registry[service_id]
             if service_id in self._func_registry:
                 del self._func_registry[service_id]
+            self._executor_registry.pop(service_id, None)
             return True
         return False
+
+    def unregister_execution_backend(self, execution_backend: str) -> int:
+        """Remove runtime registrations for one backend, returning the count."""
+        service_ids = [
+            service_id
+            for service_id, service in self._local_registry.items()
+            if service.get("execution_backend") == execution_backend
+        ]
+        for service_id in service_ids:
+            self.unregister_local(service_id)
+        return len(service_ids)
 
 
 _service_registry: ServiceRegistry | None = None

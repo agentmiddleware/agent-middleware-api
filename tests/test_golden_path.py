@@ -23,7 +23,11 @@ async def client():
 
 
 @pytest.mark.anyio
-async def test_wallet_scoped_agent_golden_path(client, clean_database):
+async def test_wallet_scoped_agent_golden_path(
+    client,
+    clean_database,
+    enforce_naive_utc_datetime_columns,
+):
     bootstrap_headers = {"X-API-Key": "test-key"}
 
     # Agent-facing discovery surfaces should be reachable.
@@ -138,10 +142,7 @@ async def test_wallet_scoped_agent_golden_path(client, clean_database):
         assert mcp_resp.status_code == 200
         mcp_payload = mcp_resp.json()
         assert "tools" in mcp_payload
-        assert any(
-            tool["name"] == "golden-path-echo"
-            for tool in mcp_payload["tools"]
-        )
+        assert any(tool["name"] == "golden-path-echo" for tool in mcp_payload["tools"])
 
         permit_resp = await client.post(
             "/v1/permits",

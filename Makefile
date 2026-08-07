@@ -1,4 +1,4 @@
-.PHONY: test test-all test-proof prove-trust-plane demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate railway-preflight railway-preflight-live
+.PHONY: test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate railway-preflight railway-preflight-live
 
 # Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
 # are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.
@@ -14,6 +14,11 @@ test-all:
 
 test-proof:
 	uv run --with-requirements requirements.txt pytest tests/ -q -m proof
+
+# Reproducible whole-application coverage baseline. Production-posture tests run
+# in their dedicated CI job because they require a different environment.
+coverage:
+	uv run --with-requirements requirements.txt pytest tests/ -q -m "not production_trust" --cov=app --cov-report=term-missing
 
 prove-trust-plane:
 	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert

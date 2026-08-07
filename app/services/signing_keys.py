@@ -56,7 +56,12 @@ def validate_signing_key_configuration(settings: Settings | None = None) -> str:
     return "ephemeral"
 
 
-def canonical_json(payload: dict[str, Any]) -> str:
+def canonical_json(
+    payload: dict[str, Any],
+    *,
+    ensure_ascii: bool = True,
+    allow_nan: bool = True,
+) -> str:
     """Serialize a payload into stable JSON before hashing or signing."""
 
     def normalize(value: Any) -> Any:
@@ -75,7 +80,13 @@ def canonical_json(payload: dict[str, Any]) -> str:
             return [normalize(v) for v in value]
         return value
 
-    return json.dumps(normalize(payload), separators=(",", ":"), sort_keys=True)
+    return json.dumps(
+        normalize(payload),
+        separators=(",", ":"),
+        sort_keys=True,
+        ensure_ascii=ensure_ascii,
+        allow_nan=allow_nan,
+    )
 
 
 def sha256_hex(payload: dict[str, Any] | str | bytes) -> str:
@@ -128,6 +139,23 @@ class SigningKeyService:
         raw = public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
         return base64.b64encode(raw).decode()
 
+    @staticmethod
+    def _assert_public_key_mapping(
+        key: SigningKeyModel,
+        public_key_b64: str,
+    ) -> None:
+        """Reject attempts to bind existing key metadata to new key material."""
+
+        if key.public_key_b64 != public_key_b64:
+            raise SigningKeyError("signing_key_id_public_key_mismatch")
+
+    @staticmethod
+    def _assert_key_not_disabled(key: SigningKeyModel) -> None:
+        """Keep explicit key revocation terminal for future signing."""
+
+        if key.status == "disabled":
+            raise SigningKeyError("signing_key_disabled")
+
     async def ensure_active_key(self) -> SigningKeyModel:
         factory = get_session_factory()
         public_key_b64 = self._public_key_b64()
@@ -141,18 +169,13 @@ class SigningKeyService:
             # Read-mostly fast path: when the active key already matches, do no
             # write. This keeps the common (per-signature) call free of write
             # contention and the first-time insert race below.
-            if (
-                key
-                and key.public_key_b64 == public_key_b64
-                and key.status == "active"
-                and key.retired_at is None
-            ):
-                return key
             if key:
-                if key.public_key_b64 != public_key_b64:
-                    key.public_key_b64 = public_key_b64
-                    key.activated_at = utc_now()
+                self._assert_public_key_mapping(key, public_key_b64)
+                self._assert_key_not_disabled(key)
+                if key.status == "active" and key.retired_at is None:
+                    return key
                 key.status = "active"
+                key.activated_at = utc_now()
                 key.retired_at = None
                 session.add(key)
             else:
@@ -178,6 +201,8 @@ class SigningKeyService:
                         )
                     )
                 ).scalar_one()
+                self._assert_public_key_mapping(key, public_key_b64)
+                self._assert_key_not_disabled(key)
             return key
 
     async def get_active_key(self) -> SigningKeyModel:
@@ -215,10 +240,10 @@ class SigningKeyService:
         """
         Move future signatures to a new key id while preserving old public metadata.
 
-        This intentionally rotates metadata only. Operators can still perform
-        private-key rotation via environment configuration; tests and local
-        control-plane flows can exercise key lifecycle without exposing private
-        key material or invalidating existing signatures.
+        This intentionally rotates metadata only. Private-key rotation through
+        environment configuration must pair new key material with a new key id;
+        reusing an existing id for different material is rejected so historical
+        signatures remain verifiable.
         """
 
         if not new_key_id.strip():
@@ -230,6 +255,11 @@ class SigningKeyService:
         public_key_b64 = self._public_key_b64()
         factory = get_session_factory()
         async with factory() as session:
+            key = await session.get(SigningKeyModel, new_key_id)
+            if key:
+                self._assert_public_key_mapping(key, public_key_b64)
+                self._assert_key_not_disabled(key)
+
             if old_key.key_id != new_key_id:
                 old = await session.get(SigningKeyModel, old_key.key_id)
                 if old and old.status != "disabled":
@@ -237,9 +267,7 @@ class SigningKeyService:
                     old.retired_at = now
                     session.add(old)
 
-            key = await session.get(SigningKeyModel, new_key_id)
             if key:
-                key.public_key_b64 = public_key_b64
                 key.status = "active"
                 key.activated_at = now
                 key.retired_at = None
@@ -301,13 +329,14 @@ class SigningKeyService:
         # 500. Treat any decode/key/verify failure as "not verified".
         try:
             public_key = Ed25519PublicKey.from_public_bytes(
-                base64.b64decode(key.public_key_b64)
+                base64.b64decode(key.public_key_b64, validate=True)
             )
             public_key.verify(
-                base64.b64decode(signature), canonical_json(payload).encode()
+                base64.b64decode(signature, validate=True),
+                canonical_json(payload).encode(),
             )
             return True
-        except (InvalidSignature, ValueError, TypeError):
+        except (binascii.Error, InvalidSignature, ValueError, TypeError):
             return False
 
 

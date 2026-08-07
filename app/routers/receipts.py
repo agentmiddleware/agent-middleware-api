@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.auth import AuthContext, get_auth_context
@@ -7,13 +10,22 @@ from app.schemas.trust import (
     ReceiptEvidenceResponse,
     ReceiptListResponse,
     ReceiptResponse,
+    RefundReconciliationListResponse,
+    RefundReconciliationRetryResponse,
     ReceiptVerifyRequest,
     ReceiptVerifyResponse,
 )
-from app.trust import get_permit_service, get_receipt_service
+from app.trust import (
+    RefundReconciliationError,
+    get_permit_service,
+    get_receipt_service,
+    get_refund_reconciliation_service,
+    record_audit_event,
+)
 from app.trust.evidence import authorize_receipt_access, build_receipt_evidence
 
 router = APIRouter(prefix="/v1/receipts", tags=["Trust Receipts"])
+logger = logging.getLogger(__name__)
 
 
 async def _authorize_receipt_list(
@@ -100,6 +112,121 @@ async def list_receipts_for_permit(
         has_more=next_offset is not None,
         next_offset=next_offset,
     )
+
+
+@router.get(
+    "/reconciliation/refunds",
+    response_model=RefundReconciliationListResponse,
+)
+async def list_refund_reconciliations(
+    status: Literal["pending", "resolved"] | None = Query("pending"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
+) -> RefundReconciliationListResponse:
+    auth.require_bootstrap_admin()
+    try:
+        items, total = await get_refund_reconciliation_service().list_items(
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    except RefundReconciliationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    next_offset = offset + len(items) if offset + len(items) < total else None
+    return RefundReconciliationListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=next_offset is not None,
+        next_offset=next_offset,
+    )
+
+
+@router.post(
+    "/reconciliation/refunds/{receipt_id}/retry",
+    response_model=RefundReconciliationRetryResponse,
+)
+async def retry_refund_reconciliation(
+    receipt_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> RefundReconciliationRetryResponse:
+    auth.require_bootstrap_admin()
+    service = get_refund_reconciliation_service()
+    item = None
+    try:
+        item = await service.get_item(receipt_id)
+        resolved, replayed = await service.retry(receipt_id)
+    except RefundReconciliationError as exc:
+        try:
+            await record_audit_event(
+                event="mcp.refund_reconciliation.failed",
+                wallet_id=item.wallet_id if item else None,
+                endpoint=f"/v1/receipts/reconciliation/refunds/{receipt_id}/retry",
+                auth_source=auth.source,
+                key_id=auth.key_id,
+                ok=False,
+                error=exc.reason,
+                metadata={
+                    "receipt_id": receipt_id,
+                    "ledger_entry_id": item.ledger_entry_id if item else None,
+                    "permit_id": item.permit_id if item else None,
+                    "status": item.status if item else "invalid",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to audit rejected refund reconciliation for %s",
+                receipt_id,
+            )
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    except Exception as exc:
+        try:
+            await record_audit_event(
+                event="mcp.refund_reconciliation.failed",
+                wallet_id=item.wallet_id if item else None,
+                endpoint=f"/v1/receipts/reconciliation/refunds/{receipt_id}/retry",
+                auth_source=auth.source,
+                key_id=auth.key_id,
+                ok=False,
+                error="refund_reconciliation_failed",
+                metadata={
+                    "receipt_id": receipt_id,
+                    "ledger_entry_id": item.ledger_entry_id if item else None,
+                    "permit_id": item.permit_id if item else None,
+                    "status": item.status if item else "unknown",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to audit errored refund reconciliation for %s",
+                receipt_id,
+            )
+        logger.exception("Refund reconciliation failed for %s", receipt_id)
+        raise HTTPException(
+            status_code=503,
+            detail="refund_reconciliation_failed",
+        ) from exc
+
+    await record_audit_event(
+        event="mcp.refund_reconciliation.resolved",
+        wallet_id=resolved.wallet_id,
+        endpoint=f"/v1/receipts/reconciliation/refunds/{receipt_id}/retry",
+        auth_source=auth.source,
+        key_id=auth.key_id,
+        ok=True,
+        metadata={
+            "receipt_id": resolved.receipt_id,
+            "ledger_entry_id": resolved.ledger_entry_id,
+            "refund_entry_id": resolved.refund_entry_id,
+            "permit_id": resolved.permit_id,
+            "credits": str(resolved.credits),
+            "status": resolved.status,
+            "replayed": replayed,
+        },
+    )
+    return RefundReconciliationRetryResponse(item=resolved, replayed=replayed)
 
 
 @router.get("/{receipt_id}", response_model=ReceiptResponse)

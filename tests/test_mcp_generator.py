@@ -245,7 +245,9 @@ class TestMcpGenerator:
 
         assert len(manifest["tools"]) == 2
 
-        video_tool = next(t for t in manifest["tools"] if t["name"] == "video-generator")
+        video_tool = next(
+            t for t in manifest["tools"] if t["name"] == "video-generator"
+        )
         assert video_tool["description"] == "Generate videos from URLs"
         assert video_tool["annotations"]["creditsPerCall"] == 50.0
         assert video_tool["annotations"]["unitName"] == "video"
@@ -338,6 +340,7 @@ class TestMcpGenerator:
             assert "call_b2a_service" in content
         finally:
             import os
+
             os.unlink(output_path)
 
 
@@ -354,6 +357,19 @@ class TestMcpGeneratorAsync:
         manifest = await generator.generate_tools_json_async()
         assert "tools" in manifest
         assert "generated_at" in manifest
+
+    @pytest.mark.asyncio
+    async def test_executable_discovery_omits_metadata_only_persistent_services(
+        self, generator, monkeypatch
+    ):
+        async def fail_if_loaded(*, category=None):
+            raise AssertionError("metadata-only registry should not be queried")
+
+        monkeypatch.setattr(generator.registry, "list_persistent", fail_if_loaded)
+
+        manifest = await generator.generate_tools_json_async()
+
+        assert manifest["tools"] == []
 
 
 class TestGlobalSingletons:
@@ -549,7 +565,9 @@ class TestMcpInvokeRoute:
         assert "tools" in payload["result"]
 
     @pytest.mark.anyio
-    async def test_messages_tools_call_rejects_cross_wallet_db_key(self, clean_database):
+    async def test_messages_tools_call_rejects_cross_wallet_db_key(
+        self, clean_database
+    ):
         registry = get_service_registry()
 
         def echo_tool(value: str = "ok") -> dict:
@@ -966,9 +984,7 @@ class TestMcpInvokeRoute:
                 entry for entry in tool_entries if entry["action"] == "debit"
             ]
             assert len(debit_entries) == 1
-            assert not [
-                entry for entry in tool_entries if entry["action"] == "refund"
-            ]
+            assert not [entry for entry in tool_entries if entry["action"] == "refund"]
         finally:
             registry.unregister_local("jsonrpc-refund-fails")
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from datetime import datetime
 
+from ..core.time import to_naive_utc
 from ..schemas.billing import (
     WalletResponse,
     WalletType,
@@ -137,13 +138,13 @@ def ledger_entry_model_to_schema(
         balance_after=float(entry.balance_after),
         balance_after_exact=str(entry.balance_after),
         service_category=(
-            ServiceCategory(entry.service_category)
-            if entry.service_category
-            else None
+            ServiceCategory(entry.service_category) if entry.service_category else None
         ),
         description=entry.description,
         request_path=entry.request_path,
-        compute_cost=float(entry.compute_cost) if entry.compute_cost is not None else None,
+        compute_cost=float(entry.compute_cost)
+        if entry.compute_cost is not None
+        else None,
         compute_cost_exact=(
             str(entry.compute_cost) if entry.compute_cost is not None else None
         ),
@@ -165,7 +166,9 @@ def billing_alert_model_to_schema(
         # Decimal -> float for the display field; the paired *_exact field
         # keeps the full-precision decimal string so no precision is lost.
         threshold_amount=(
-            float(alert.threshold_amount) if alert.threshold_amount is not None else None
+            float(alert.threshold_amount)
+            if alert.threshold_amount is not None
+            else None
         ),
         threshold_amount_exact=(
             str(alert.threshold_amount) if alert.threshold_amount is not None else None
@@ -204,6 +207,7 @@ def parse_metadata_json(metadata_json: str | None) -> dict[str, Any]:
 # Telemetry
 # ---------------------------------------------------------------------------
 
+
 def telemetry_event_to_model(
     event_id: str,
     batch_id: str,
@@ -220,8 +224,8 @@ def telemetry_event_to_model(
         message=event.message,
         stack_trace=event.stack_trace,
         payload_json=metadata_dict_to_json(event.metadata),
-        event_timestamp=event.timestamp,
-        ingested_at=ingested_at,
+        event_timestamp=(to_naive_utc(event.timestamp) if event.timestamp else None),
+        ingested_at=to_naive_utc(ingested_at),
     )
 
 
@@ -241,6 +245,7 @@ def telemetry_event_model_to_schema(row: TelemetryEventModel) -> TelemetryEvent:
 # ---------------------------------------------------------------------------
 # Oracle
 # ---------------------------------------------------------------------------
+
 
 def indexed_api_to_model(api: IndexedAPI) -> OracleIndexedAPIModel:
     """Flatten an IndexedAPI schema into its stored row."""
@@ -323,6 +328,7 @@ def registration_model_to_schema(
 # ---------------------------------------------------------------------------
 # Security scans (shared by red_team + rtaas)
 # ---------------------------------------------------------------------------
+
 
 def _str_list_to_json(values: list | None) -> str | None:
     if not values:
@@ -442,9 +448,7 @@ def scan_model_to_report(
         vulnerabilities_found=len(vulnerabilities),
         severity_breakdown=severity_breakdown,
         vulnerabilities=vulnerabilities,
-        recommendations=[
-            str(r) for r in _parse_json_list(scan.recommendations_json)
-        ],
+        recommendations=[str(r) for r in _parse_json_list(scan.recommendations_json)],
         score=scan.security_score,
     )
 
@@ -452,6 +456,7 @@ def scan_model_to_report(
 # ---------------------------------------------------------------------------
 # Content factory
 # ---------------------------------------------------------------------------
+
 
 def content_piece_to_model(piece: GeneratedContent) -> ContentPieceModel:
     return ContentPieceModel(

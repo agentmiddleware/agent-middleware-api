@@ -18,7 +18,7 @@ import uuid
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import select, delete, func
@@ -27,6 +27,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.durable_state import get_durable_state
 from ..core.runtime_mode import require_simulation
+from ..core.time import to_naive_utc, utc_now
 from ..db.converters import (
     telemetry_event_to_model,
     telemetry_event_model_to_schema,
@@ -47,9 +48,11 @@ logger = logging.getLogger(__name__)
 # Event Store
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StoredEvent:
     """An event with storage metadata."""
+
     event_id: str
     batch_id: str
     event: TelemetryEvent
@@ -96,7 +99,7 @@ class EventStore:
         factory = get_session_factory()
 
         errors: list[dict] = []
-        now = datetime.now(timezone.utc)
+        now = utc_now()
 
         rows: list[TelemetryEventModel] = []
         for i, event in enumerate(events):
@@ -135,16 +138,25 @@ class EventStore:
         factory = get_session_factory()
 
         stmt = select(TelemetryEventModel)
+        since = to_naive_utc(since) if since else None
+        until = to_naive_utc(until) if until else None
         if event_type:
             stmt = stmt.where(
-                cast(ColumnElement[bool], TelemetryEventModel.event_type == event_type.value)
+                cast(
+                    ColumnElement[bool],
+                    TelemetryEventModel.event_type == event_type.value,
+                )
             )
         if severity:
             stmt = stmt.where(
-                cast(ColumnElement[bool], TelemetryEventModel.severity == severity.value)
+                cast(
+                    ColumnElement[bool], TelemetryEventModel.severity == severity.value
+                )
             )
         if source:
-            stmt = stmt.where(cast(ColumnElement[bool], TelemetryEventModel.source == source))
+            stmt = stmt.where(
+                cast(ColumnElement[bool], TelemetryEventModel.source == source)
+            )
         if since:
             # Compare against the client-supplied event_timestamp when
             # present, else fall back to ingested_at so rows without a
@@ -186,9 +198,12 @@ class EventStore:
         factory = get_session_factory()
 
         async with factory() as session:
-            total = await session.scalar(
-                select(func.count()).select_from(TelemetryEventModel)
-            ) or 0
+            total = (
+                await session.scalar(
+                    select(func.count()).select_from(TelemetryEventModel)
+                )
+                or 0
+            )
 
             by_type: dict[str, int] = defaultdict(int)
             by_severity: dict[str, int] = defaultdict(int)
@@ -222,7 +237,7 @@ class EventStore:
         """Delete events older than the retention window. Returns row count."""
         self._require_db()
         factory = get_session_factory()
-        cutoff = datetime.now(timezone.utc) - self._retention
+        cutoff = utc_now() - self._retention
 
         async with factory() as session:
             result = await session.execute(
@@ -241,9 +256,11 @@ class EventStore:
 # Anomaly Detector
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AnomalyCandidate:
     """Internal anomaly representation before promotion to report."""
+
     category: str
     severity: Severity
     summary: str
@@ -367,7 +384,7 @@ class AnomalyDetector:
         anomalies.sort(key=lambda a: a.last_seen, reverse=True)
         total = len(anomalies)
         start = (page - 1) * per_page
-        return anomalies[start:start + per_page], total
+        return anomalies[start : start + per_page], total
 
     async def get_anomaly(self, anomaly_id: str) -> AnomalyReport | None:
         await self._hydrate_if_needed()
@@ -375,7 +392,7 @@ class AnomalyDetector:
 
     async def _detect_error_spike(self) -> AnomalyCandidate | None:
         """Detect if error rate exceeds 3x the baseline in the last 5 minutes."""
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         window = timedelta(minutes=5)
         baseline_window = timedelta(hours=1)
 
@@ -395,9 +412,7 @@ class AnomalyDetector:
         recent_rate = len(recent_errors) / window.total_seconds()
         baseline_seconds = (baseline_window - window).total_seconds()
         baseline_rate = (
-            len(baseline_errors) / baseline_seconds
-            if baseline_seconds > 0
-            else 0
+            len(baseline_errors) / baseline_seconds if baseline_seconds > 0 else 0
         )
 
         if baseline_rate > 0 and recent_rate > baseline_rate * 3:
@@ -418,7 +433,7 @@ class AnomalyDetector:
 
     async def _detect_source_concentration(self) -> AnomalyCandidate | None:
         """Detect if >80% of errors come from a single source."""
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         recent_errors = await self._store.query(
             event_type=TelemetryEventType.ERROR,
             since=now - timedelta(hours=1),
@@ -438,14 +453,12 @@ class AnomalyDetector:
                     category="source_concentration",
                     severity=Severity.MEDIUM,
                     summary=(
-                        f"{count}/{total} errors ({count/total:.0%}) "
+                        f"{count}/{total} errors ({count / total:.0%}) "
                         f"originate from '{source}'"
                     ),
                     affected_endpoints=[source],
                     event_ids=[
-                        se.event_id
-                        for se in recent_errors
-                        if se.event.source == source
+                        se.event_id for se in recent_errors if se.event.source == source
                     ],
                     first_seen=recent_errors[-1].ingested_at,
                     last_seen=recent_errors[0].ingested_at,
@@ -456,6 +469,7 @@ class AnomalyDetector:
 # ---------------------------------------------------------------------------
 # Auto-PR Generator
 # ---------------------------------------------------------------------------
+
 
 class AutoPRGenerator:
     """
@@ -482,7 +496,7 @@ class AutoPRGenerator:
         Generate a code fix for an anomaly.
         Returns diff, files_changed, test results, and optionally a PR URL.
         """
-        require_simulation("telemetry_pm", issue="#37")
+        require_simulation("telemetry_pm")
         # Build context for the LLM
         _context = self._build_context(anomaly, related_events)
 
@@ -567,6 +581,7 @@ class AutoPRGenerator:
 # Autonomous PM Orchestrator
 # ---------------------------------------------------------------------------
 
+
 class AutonomousPM:
     """
     Top-level orchestrator for the Autonomous Product Manager.
@@ -586,6 +601,7 @@ class AutonomousPM:
 
     async def start_background_analysis(self, interval_seconds: int = 60):
         """Start periodic anomaly analysis in the background."""
+
         async def _loop():
             while True:
                 try:

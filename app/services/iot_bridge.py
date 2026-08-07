@@ -581,7 +581,7 @@ class ProtocolBridge:
         """
         Send a message through the bridge with full ACL enforcement.
         """
-        require_simulation("iot_bridge", issue="#36")
+        require_simulation("iot_bridge")
         device = await self.registry.get(device_id)
         if not device:
             raise ValueError(f"Device '{device_id}' not found")

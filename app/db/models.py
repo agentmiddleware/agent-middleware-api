@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, Index, Text, UniqueConstraint, text
 from sqlmodel import SQLModel, Field
 
 from app.core.time import utc_now
@@ -26,11 +26,14 @@ class WalletModel(SQLModel, table=True):
     wallet_id: str = Field(primary_key=True, max_length=50)
     wallet_type: str = Field(max_length=20, index=True)
     owner_name: Optional[str] = Field(default=None, max_length=255)
-    owner_key: Optional[str] = Field(default=None, max_length=255, index=True)
     email: Optional[str] = Field(default=None, max_length=255)
 
     # Monetary fields - all Decimal for precision
-    balance: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=8)
+    # Provider-authoritative refunds can leave a sponsor with a negative
+    # balance after the corresponding credits have already been delegated or
+    # spent. In that state the balance is the durable liability and the Stripe
+    # settlement path keeps the wallet non-spendable for operator review.
+    balance: Decimal = Field(default=Decimal("0"), decimal_places=8)
     lifetime_credits: Decimal = Field(default=Decimal("0"), decimal_places=8)
     lifetime_debits: Decimal = Field(default=Decimal("0"), decimal_places=8)
 
@@ -86,6 +89,13 @@ class LedgerEntryModel(SQLModel, table=True):
     """
 
     __tablename__ = "ledger_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "wallet_id",
+            "operation_key",
+            name="uq_ledger_wallet_operation_key",
+        ),
+    )
 
     entry_id: str = Field(primary_key=True, max_length=50)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
@@ -93,7 +103,9 @@ class LedgerEntryModel(SQLModel, table=True):
     # Transaction details
     action: str = Field(max_length=20)
     amount: Decimal = Field(decimal_places=8)  # Positive = credit, negative = debit
-    balance_after: Decimal = Field(ge=0, decimal_places=8)
+    # May be negative only when a provider refund records an unfunded sponsor
+    # liability; the associated wallet is frozen in the same transaction.
+    balance_after: Decimal = Field(decimal_places=8)
 
     # Service categorization
     service_category: Optional[str] = Field(default=None, max_length=50, index=True)
@@ -109,6 +121,9 @@ class LedgerEntryModel(SQLModel, table=True):
     # Metadata
     metadata_json: Optional[str] = Field(default=None)
     correlation_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    # Wallet-scoped idempotency identity for governed financial operations.
+    # NULL preserves legacy/non-governed ledger behavior.
+    operation_key: Optional[str] = Field(default=None, max_length=128, index=True)
 
     # Stripe payment fields (for fiat top-up idempotency)
     payment_intent_id: Optional[str] = Field(
@@ -190,7 +205,6 @@ class ServiceRegistryModel(SQLModel, table=True):
     owner_wallet_id: str = Field(
         max_length=50, foreign_key="wallets.wallet_id", index=True
     )
-    owner_key: str = Field(max_length=255, index=True)
     category: str = Field(max_length=50, index=True)
     credits_per_unit: Decimal = Field(decimal_places=8)
     unit_name: str = Field(default="request", max_length=50)
@@ -762,6 +776,20 @@ class ReceiptModel(SQLModel, table=True):
     __tablename__ = "receipts"
 
     receipt_id: str = Field(primary_key=True, max_length=64)
+    idempotency_record_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        foreign_key="idempotency_records.record_id",
+        index=True,
+        unique=True,
+    )
+    dispatch_attempt_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        foreign_key="mcp_dispatch_attempts.attempt_id",
+        index=True,
+        unique=True,
+    )
     permit_id: str = Field(max_length=64, foreign_key="permits.permit_id", index=True)
     wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
     key_id: Optional[str] = Field(default=None, max_length=50, index=True)
@@ -856,6 +884,22 @@ class IdempotencyRecordModel(SQLModel, table=True):
             "idempotency_key",
             name="uq_idempotency_wallet_endpoint_key",
         ),
+        # Pre-023 workers keyed governed MCP calls by their physical transport
+        # endpoint. Current workers use /mcp/invoke. Keep both generations in
+        # one database identity so a rolling deployment cannot create one row
+        # (and therefore one debit/dispatch) under each endpoint spelling.
+        Index(
+            "uq_idempotency_governed_mcp_identity",
+            "wallet_id",
+            text(
+                "(CASE WHEN endpoint = '/mcp/invoke' "
+                "OR endpoint = '/mcp/messages' "
+                "OR endpoint LIKE '/mcp/tools/%/invoke' "
+                "THEN '/mcp/invoke' ELSE endpoint END)"
+            ),
+            "idempotency_key",
+            unique=True,
+        ),
     )
 
     record_id: str = Field(primary_key=True, max_length=64)
@@ -863,6 +907,9 @@ class IdempotencyRecordModel(SQLModel, table=True):
     endpoint: str = Field(max_length=256, index=True)
     idempotency_key: str = Field(max_length=128, index=True)
     request_hash: str = Field(max_length=64)
+    # Internal execution class used only for safe crash reconciliation. It is
+    # not part of the public idempotency identity or response contract.
+    operation_kind: Optional[str] = Field(default=None, max_length=32, index=True)
     response_reference: Optional[str] = Field(default=None, max_length=128)
     response_json: Optional[str] = Field(default=None)
     status_code: int = Field(default=200)
@@ -872,6 +919,68 @@ class IdempotencyRecordModel(SQLModel, table=True):
     # receipt/audit/complete finalization sequence runs. Lets a reconciliation
     # sweep tell "never charged" apart from "charged but never finalized".
     ledger_entry_id: Optional[str] = Field(default=None, max_length=64, index=True)
+
+
+class McpDispatchAttemptModel(SQLModel, table=True):
+    """Durable state for one governed dispatch to an upstream MCP server."""
+
+    __tablename__ = "mcp_dispatch_attempts"
+
+    attempt_id: str = Field(primary_key=True, max_length=64)
+    idempotency_record_id: str = Field(
+        max_length=64,
+        foreign_key="idempotency_records.record_id",
+        index=True,
+        unique=True,
+    )
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    permit_id: str = Field(max_length=64, foreign_key="permits.permit_id", index=True)
+    approval_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        foreign_key="human_approvals.approval_id",
+        index=True,
+    )
+    key_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        foreign_key="api_keys.key_id",
+        index=True,
+    )
+    public_tool_id: str = Field(max_length=128, index=True)
+    upstream_tool_name: str = Field(max_length=128)
+    # Scheme + host + optional port only. Credentials, paths, query strings,
+    # and fragments are deliberately excluded by the upstream adapter.
+    upstream_origin: str = Field(max_length=512)
+    request_hash: str = Field(max_length=64, index=True)
+    ledger_entry_id: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        foreign_key="ledger_entries.entry_id",
+        index=True,
+    )
+    credits_authorized: Decimal = Field(decimal_places=8)
+    credits_charged: Decimal = Field(default=Decimal("0"), decimal_places=8)
+    state: str = Field(default="prepared", max_length=32, index=True)
+    # Canonical JSON is capped by McpDispatchAttemptService before persistence.
+    result_json: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    result_size_bytes: Optional[int] = Field(default=None)
+    response_hash: Optional[str] = Field(default=None, max_length=64)
+    error_code: Optional[str] = Field(default=None, max_length=64, index=True)
+    # Compensation checkpoints make reconciliation retry-safe. A ledger
+    # refund is independently idempotent by correlation_id; permit budget
+    # release is not, so that release and this marker are committed together.
+    debit_refunded_at: Optional[datetime] = Field(default=None, index=True)
+    budget_released_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utc_now, index=True)
+    updated_at: datetime = Field(default_factory=utc_now, index=True)
+    dispatched_at: Optional[datetime] = Field(default=None, index=True)
+    completed_at: Optional[datetime] = Field(default=None, index=True)
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class RefreshTokenModel(SQLModel, table=True):

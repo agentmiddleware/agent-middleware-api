@@ -5,13 +5,19 @@ from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.time import utc_now
 from app.db.database import get_session_factory
-from app.db.models import ReceiptModel
+from app.db.models import IdempotencyRecordModel, ReceiptModel
 from app.schemas.trust import ReceiptResponse
-from app.services.signing_keys import get_signing_key_service, sha256_hex
+from app.services.signing_keys import (
+    canonical_json,
+    get_signing_key_service,
+    sha256_hex,
+)
 
 
 class ReceiptError(RuntimeError):
@@ -23,6 +29,8 @@ class ReceiptError(RuntimeError):
 def receipt_model_to_response(model: ReceiptModel) -> ReceiptResponse:
     return ReceiptResponse(
         receipt_id=model.receipt_id,
+        idempotency_record_id=model.idempotency_record_id,
+        dispatch_attempt_id=model.dispatch_attempt_id,
         permit_id=model.permit_id,
         wallet_id=model.wallet_id,
         key_id=model.key_id,
@@ -42,30 +50,99 @@ def receipt_model_to_response(model: ReceiptModel) -> ReceiptResponse:
 
 
 class ReceiptService:
-    async def create_receipt(
-        self,
+    @staticmethod
+    def _verification_payload(
+        model: ReceiptModel,
         *,
+        include_linkage: bool,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "receipt_id": model.receipt_id,
+            "permit_id": model.permit_id,
+            "wallet_id": model.wallet_id,
+            "key_id": model.key_id,
+            "tool": model.tool,
+            "request_hash": model.request_hash,
+            "response_hash": model.response_hash,
+            "ledger_entry_id": model.ledger_entry_id,
+            "credits_authorized": model.credits_authorized,
+            "credits_charged": model.credits_charged,
+            "outcome": model.outcome,
+            "audit_event_id": model.audit_event_id,
+            "created_at": model.created_at,
+            "alg": "Ed25519",
+            "kid": model.signature_key_id,
+        }
+        if include_linkage and model.idempotency_record_id is not None:
+            payload["idempotency_record_id"] = model.idempotency_record_id
+        if include_linkage and model.dispatch_attempt_id is not None:
+            payload["dispatch_attempt_id"] = model.dispatch_attempt_id
+        # Approval linkage predates the governed-dispatch linkage migration and
+        # remains part of both current and constrained legacy signatures.
+        if model.approval_id is not None:
+            payload["approval_id"] = model.approval_id
+        payload["payload_hash"] = sha256_hex(payload)
+        return payload
+
+    @staticmethod
+    async def _has_unambiguous_historical_idempotency_link(
+        model: ReceiptModel,
+    ) -> bool:
+        """Corroborate the only linkage migration was allowed to backfill."""
+        if model.idempotency_record_id is None or model.dispatch_attempt_id is not None:
+            return False
+
+        factory = get_session_factory()
+        async with factory() as session:
+            records = (
+                (
+                    await session.execute(
+                        select(IdempotencyRecordModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                IdempotencyRecordModel.response_reference
+                                == model.receipt_id,
+                            )
+                        )
+                        .limit(2)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        if len(records) != 1:
+            return False
+        record = records[0]
+        return (
+            record.record_id == model.idempotency_record_id
+            and record.wallet_id == model.wallet_id
+            and record.request_hash == model.request_hash
+        )
+
+    @staticmethod
+    def _assert_idempotent_match(
+        model: ReceiptModel,
+        *,
+        idempotency_record_id: str,
+        dispatch_attempt_id: str | None,
         permit_id: str,
         wallet_id: str,
         key_id: str | None,
         tool: str,
-        request_payload: dict[str, Any],
-        response_payload: dict[str, Any] | None,
+        request_hash: str,
+        response_hash: str | None,
         ledger_entry_id: str | None,
         credits_authorized: Decimal,
         credits_charged: Decimal,
         outcome: str,
         audit_event_id: str | None,
-        approval_id: str | None = None,
-    ) -> ReceiptResponse:
-        created_at = utc_now()
-        request_hash = sha256_hex(request_payload)
-        response_hash = (
-            sha256_hex(response_payload) if response_payload is not None else None
-        )
-        receipt_id = f"rcpt-{uuid.uuid4().hex[:16]}"
-        payload = {
-            "receipt_id": receipt_id,
+        approval_id: str | None,
+    ) -> None:
+        """Reject reuse of one idempotency record for different evidence."""
+        expected = {
+            "idempotency_record_id": idempotency_record_id,
+            "dispatch_attempt_id": dispatch_attempt_id,
             "permit_id": permit_id,
             "wallet_id": wallet_id,
             "key_id": key_id,
@@ -77,22 +154,161 @@ class ReceiptService:
             "credits_charged": credits_charged,
             "outcome": outcome,
             "audit_event_id": audit_event_id,
+            "approval_id": approval_id,
+        }
+        if any(getattr(model, name) != value for name, value in expected.items()):
+            raise ReceiptError("receipt_idempotency_conflict")
+
+    @staticmethod
+    async def _get_by_idempotency_record(
+        session: AsyncSession,
+        idempotency_record_id: str,
+    ) -> ReceiptModel | None:
+        return (
+            await session.execute(
+                select(ReceiptModel).where(
+                    cast(
+                        ColumnElement[bool],
+                        ReceiptModel.idempotency_record_id == idempotency_record_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def create_receipt(
+        self,
+        *,
+        permit_id: str,
+        wallet_id: str,
+        key_id: str | None,
+        tool: str,
+        request_payload: dict[str, Any] | None,
+        response_payload: dict[str, Any] | None,
+        ledger_entry_id: str | None,
+        credits_authorized: Decimal,
+        credits_charged: Decimal,
+        outcome: str,
+        audit_event_id: str | None,
+        idempotency_record_id: str | None = None,
+        dispatch_attempt_id: str | None = None,
+        request_hash: str | None = None,
+        response_hash_override: str | None = None,
+        session: AsyncSession | None = None,
+        approval_id: str | None = None,
+    ) -> ReceiptResponse:
+        if (request_payload is None) == (request_hash is None):
+            raise ReceiptError("receipt_request_identity_invalid")
+        if request_hash is not None:
+            if len(request_hash) != 64:
+                raise ReceiptError("receipt_request_hash_invalid")
+            try:
+                int(request_hash, 16)
+            except ValueError as exc:
+                raise ReceiptError("receipt_request_hash_invalid") from exc
+            effective_request_hash = request_hash.lower()
+        else:
+            assert request_payload is not None
+            effective_request_hash = sha256_hex(request_payload)
+        response_hash: str | None
+        if response_hash_override is not None:
+            if dispatch_attempt_id is None or response_payload is None:
+                raise ReceiptError("receipt_response_hash_override_invalid")
+            if len(response_hash_override) != 64:
+                raise ReceiptError("receipt_response_hash_invalid")
+            try:
+                int(response_hash_override, 16)
+                canonical_response = canonical_json(
+                    response_payload,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ReceiptError("receipt_response_hash_invalid") from exc
+            response_hash = response_hash_override.lower()
+            if sha256_hex(canonical_response) != response_hash:
+                raise ReceiptError("receipt_response_hash_mismatch")
+        else:
+            # Preserve the historical receipt hash for all callers that do not
+            # opt into the linked dispatch result's UTF-8 canonical bytes.
+            response_hash = (
+                sha256_hex(response_payload) if response_payload is not None else None
+            )
+
+        async def existing_response(
+            target_session: AsyncSession,
+        ) -> ReceiptResponse | None:
+            if idempotency_record_id is None:
+                return None
+            existing = await self._get_by_idempotency_record(
+                target_session,
+                idempotency_record_id,
+            )
+            if existing is None:
+                return None
+            self._assert_idempotent_match(
+                existing,
+                idempotency_record_id=idempotency_record_id,
+                dispatch_attempt_id=dispatch_attempt_id,
+                permit_id=permit_id,
+                wallet_id=wallet_id,
+                key_id=key_id,
+                tool=tool,
+                request_hash=effective_request_hash,
+                response_hash=response_hash,
+                ledger_entry_id=ledger_entry_id,
+                credits_authorized=credits_authorized,
+                credits_charged=credits_charged,
+                outcome=outcome,
+                audit_event_id=audit_event_id,
+                approval_id=approval_id,
+            )
+            return receipt_model_to_response(existing)
+
+        target_session = session
+        if target_session is not None:
+            existing = await existing_response(target_session)
+            if existing is not None:
+                return existing
+
+        created_at = utc_now()
+        receipt_id = f"rcpt-{uuid.uuid4().hex[:16]}"
+        payload = {
+            "receipt_id": receipt_id,
+            "permit_id": permit_id,
+            "wallet_id": wallet_id,
+            "key_id": key_id,
+            "tool": tool,
+            "request_hash": effective_request_hash,
+            "response_hash": response_hash,
+            "ledger_entry_id": ledger_entry_id,
+            "credits_authorized": credits_authorized,
+            "credits_charged": credits_charged,
+            "outcome": outcome,
+            "audit_event_id": audit_event_id,
             "created_at": created_at,
         }
+        # Keep historical receipt signatures valid: these additive fields are
+        # signed only on receipts that actually carry the new linkage.
+        if idempotency_record_id is not None:
+            payload["idempotency_record_id"] = idempotency_record_id
+        if dispatch_attempt_id is not None:
+            payload["dispatch_attempt_id"] = dispatch_attempt_id
         # Signed only when set, so signatures on receipts written before this
         # field existed keep verifying (verify_receipt mirrors this).
-        if approval_id:
+        if approval_id is not None:
             payload["approval_id"] = approval_id
         signature, signature_key_id, _ = await get_signing_key_service().sign_payload(
             payload
         )
         model = ReceiptModel(
             receipt_id=receipt_id,
+            idempotency_record_id=idempotency_record_id,
+            dispatch_attempt_id=dispatch_attempt_id,
             permit_id=permit_id,
             wallet_id=wallet_id,
             key_id=key_id,
             tool=tool,
-            request_hash=request_hash,
+            request_hash=effective_request_hash,
             response_hash=response_hash,
             ledger_entry_id=ledger_entry_id,
             credits_authorized=credits_authorized,
@@ -104,11 +320,59 @@ class ReceiptService:
             signature=signature,
             signature_key_id=signature_key_id,
         )
+        if target_session is not None:
+            if idempotency_record_id is None:
+                target_session.add(model)
+                await target_session.flush()
+                return receipt_model_to_response(model)
+            bind = target_session.get_bind()
+            if bind.dialect.name == "sqlite":
+                # Python's sqlite driver can treat a SAVEPOINT as the outermost
+                # transaction when no write has started yet; releasing it then
+                # survives a later caller rollback. Keep caller-owned SQLite
+                # work in the actual outer transaction. PostgreSQL below uses
+                # a savepoint for unique-key race recovery.
+                target_session.add(model)
+                await target_session.flush()
+                return receipt_model_to_response(model)
+            try:
+                # Isolate a unique-key race to a savepoint so the caller's
+                # wider finalization transaction remains usable.
+                async with target_session.begin_nested():
+                    target_session.add(model)
+                    await target_session.flush()
+            except IntegrityError:
+                existing = await existing_response(target_session)
+                if existing is None:
+                    raise
+                return existing
+            return receipt_model_to_response(model)
+
         factory = get_session_factory()
-        async with factory() as session:
-            session.add(model)
-            await session.commit()
-            await session.refresh(model)
+        async with factory() as owned_session:
+            existing = await existing_response(owned_session)
+            if existing is not None:
+                return existing
+            owned_session.add(model)
+            try:
+                await owned_session.commit()
+                await owned_session.refresh(model)
+            except Exception:
+                # A driver can lose the commit acknowledgement after the row
+                # is durable. Roll back local state, then recover through the
+                # unique idempotency link before deciding this really failed.
+                try:
+                    await owned_session.rollback()
+                except Exception:
+                    # Recovery uses a fresh session because this connection may
+                    # be exactly what lost the commit acknowledgement.
+                    pass
+                if idempotency_record_id is not None:
+                    async with factory() as recovery_session:
+                        existing = await existing_response(recovery_session)
+                    if existing is not None:
+                        return existing
+                raise
         return receipt_model_to_response(model)
 
     async def get_receipt(self, receipt_id: str) -> ReceiptResponse | None:
@@ -134,6 +398,18 @@ class ReceiptService:
                 .limit(1)
             )
             model = result.scalar_one_or_none()
+            return receipt_model_to_response(model) if model else None
+
+    async def get_receipt_by_idempotency_record_id(
+        self,
+        idempotency_record_id: str,
+    ) -> ReceiptResponse | None:
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await self._get_by_idempotency_record(
+                session,
+                idempotency_record_id,
+            )
             return receipt_model_to_response(model) if model else None
 
     async def list_receipts(
@@ -189,39 +465,36 @@ class ReceiptService:
             model = await session.get(ReceiptModel, receipt_id)
             if not model:
                 return False, "receipt_not_found", None
-            payload = {
-                "receipt_id": model.receipt_id,
-                "permit_id": model.permit_id,
-                "wallet_id": model.wallet_id,
-                "key_id": model.key_id,
-                "tool": model.tool,
-                "request_hash": model.request_hash,
-                "response_hash": model.response_hash,
-                "ledger_entry_id": model.ledger_entry_id,
-                "credits_authorized": model.credits_authorized,
-                "credits_charged": model.credits_charged,
-                "outcome": model.outcome,
-                "audit_event_id": model.audit_event_id,
-                "created_at": model.created_at,
-                "alg": "Ed25519",
-                "kid": model.signature_key_id,
-            }
-            # Mirror of create_receipt: present in the signed payload only
-            # when set, so tampering with the stored approval_id in either
-            # direction fails verification.
-            if model.approval_id:
-                payload["approval_id"] = model.approval_id
-            payload["payload_hash"] = sha256_hex(payload)
-            ok = await get_signing_key_service().verify_payload(
-                payload,
-                signature=model.signature,
-                key_id=model.signature_key_id,
-            )
+            ok = await self.verify_model(model)
             return (
                 ok,
                 None if ok else "receipt_signature_invalid",
                 receipt_model_to_response(model),
             )
+
+    async def verify_model(self, model: ReceiptModel) -> bool:
+        """Verify current signatures, then the constrained migration fallback."""
+        signing_keys = get_signing_key_service()
+        current_payload = self._verification_payload(model, include_linkage=True)
+        if await signing_keys.verify_payload(
+            current_payload,
+            signature=model.signature,
+            key_id=model.signature_key_id,
+        ):
+            return True
+
+        # Migration 026 backfilled one unambiguous idempotency link onto some
+        # receipts whose original signature predates linkage fields. Do not
+        # generalize legacy verification: dispatch-linked receipts and links
+        # that are absent, mismatched, or ambiguous must fail closed.
+        if not await self._has_unambiguous_historical_idempotency_link(model):
+            return False
+        legacy_payload = self._verification_payload(model, include_linkage=False)
+        return await signing_keys.verify_payload(
+            legacy_payload,
+            signature=model.signature,
+            key_id=model.signature_key_id,
+        )
 
 
 _service: ReceiptService | None = None

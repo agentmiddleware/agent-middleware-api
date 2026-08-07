@@ -9,6 +9,10 @@ The implemented trust boundary is governed MCP tool invocation. Other modules
 are proof surfaces unless they consume the same permit, receipt, idempotency,
 and audit-chain primitives.
 
+The remote pilot supports one operator-configured HTTPS Streamable HTTP MCP
+origin and one exact tool. Wallet checks provide application-layer isolation;
+there is no row-level-security or public multi-tenant security claim.
+
 High-risk AWI HTTP routes (`/v1/awi/execute`, passkey, rag index/query,
 `dom/sync`) also require `X-Permit-Id` + `Idempotency-Key` and emit receipts
 when invoked over HTTP. Prefer MCP for agent integrations.
@@ -23,6 +27,20 @@ Keep these out of the wedge until a design partner requires them:
 - Audit chains are wallet-scoped, but database administrators can still delete
   rows unless append-only storage or external anchoring is added.
 - Multi-protocol governed adapters beyond MCP are not implemented (MCP only).
+- A timeout or disconnect after the durable dispatch checkpoint is inherently
+  ambiguous. The gateway retains the debit, signs `delivery_uncertain`, never
+  redispatches automatically, and requires operator/upstream reconciliation.
+- Gateway exactly-once behavior does not make a remote side effect exactly
+  once unless the upstream honors the forwarded idempotency key.
+- URL validation rejects unsafe destinations and redirects, then pins one
+  validated resolved address through the later connection while preserving the
+  configured HTTP Host and TLS SNI. Production should still enforce a network
+  egress allowlist/proxy for the single partner origin as defense in depth.
+- The upstream limit is enforced on the streamed identity-encoded HTTP body,
+  including the JSON-RPC envelope, before buffering and parsing. Retained
+  decoded discovery and result payloads are bounded again after validation.
+- No public uptime SLA, compliance scope, RTO/RPO, tenant-isolation guarantee,
+  or immutable-ledger claim is made.
 - Sandbox and AWI/browser automation are not production isolation boundaries.
 - Auto-PR and agentic workflow automation must treat GitHub issues, PRs,
   comments, webhook bodies, tool outputs, and generated scripts as untrusted.

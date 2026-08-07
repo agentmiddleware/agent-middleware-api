@@ -1,9 +1,10 @@
-# Wedge: Exactly-once MCP permits
+# Wedge: Replay-safe MCP permits and receipts
 
 Agent Middleware API should not initially sell itself as a full platform for
 autonomous economic actors. The credible wedge is narrower:
 
-> Exactly-once permits and receipts for metered MCP calls.
+> Exactly-once gateway authorization, debit, and receipt finalization for
+> metered MCP calls.
 
 Or in one line:
 
@@ -18,9 +19,10 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 ```
 
 Category language (“MCP trust plane,” “governance gateway”) is occupied. The
-differentiating primitive is exactly-once economic authorization: one
-idempotency key returns the original receipt without a second tool execution or
-debit.
+differentiating primitive is exactly-once economic authorization at the
+gateway boundary: one idempotency key returns the original receipt without a
+second gateway dispatch or debit. A remote tool's own side effect is exactly
+once only when that tool also honors the forwarded idempotency key.
 
 ## Positioning vs nearby products
 
@@ -61,7 +63,8 @@ Partner swap checklist:
 Partner motion:
 
 1. Keep `ENABLE_PROOF_SURFACES=false` in the partner environment.
-2. Register **one** internal MCP tool (replace echo; do not mount AWI/media/etc.).
+2. Configure **one** internal Streamable HTTP MCP tool through the upstream
+   environment variables (do not mount AWI/media/etc.).
 3. Issue a wallet-scoped permit for that tool only.
 4. Walk permit → invoke → charge → receipt → replay → out-of-scope deny.
 5. Stop. Do not expand surface until that loop is trusted in their stack.
@@ -77,17 +80,20 @@ Partner motion:
 - Signed receipts for governed tool attempts.
 - Tamper-evident wallet audit chains.
 - Explicit denial reasons for out-of-scope or invalid governed attempts.
+- A persisted remote-dispatch state that distinguishes confirmed outcomes from
+  delivery uncertainty.
 
 ## What The Current Proof Shows
 
 - A permit can bind one agent wallet to one allowed MCP tool and budget.
-- A governed MCP invoke can validate that permit before the tool call proceeds.
+- A governed MCP invoke can validate that permit before the gateway dispatches
+  the tool call.
 - A successful governed invoke can charge the wallet and write a ledger entry.
 - The response can include a signed receipt linked to permit, ledger, and audit
   identifiers.
 - The audit chain can be verified after the fact.
 - Replaying the same governed invoke can return the same receipt without a
-  duplicate debit.
+  duplicate gateway dispatch or debit.
 - A request outside the permit scope can be denied with a concrete reason.
 
 ## What Is Proof Surface
@@ -123,4 +129,5 @@ Agent-executable remediation of known spine/discovery/deploy debt:
 - Compliance-grade ledger storage.
 - Full autonomous economic actor infrastructure.
 - Universal policy enforcement across every agent framework.
+- Distributed exactly-once side effects in arbitrary upstream MCP servers.
 - A replacement for enterprise IAM, secrets management, or sandbox isolation.

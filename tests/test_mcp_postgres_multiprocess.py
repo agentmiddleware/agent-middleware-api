@@ -1,0 +1,716 @@
+"""Opt-in two-process PostgreSQL proofs for governed MCP crash behavior.
+
+The API workers run on loopback and share one explicitly isolated PostgreSQL
+database.  This module is intentionally skipped unless both opt-in flags are
+present; an opted-in run fails closed if the database is not PostgreSQL, the
+application environment is production-like, the Alembic revision is stale, or
+any application table already contains data.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import os
+import secrets
+import socket
+import subprocess
+import sys
+import uuid
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TextIO
+
+import httpx
+import pytest
+import pytest_asyncio
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import inspect, text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.trust_mode import is_production_like_environment
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CONTROL_HEADER = "X-MCP-Stress-Control"
+GOVERNED_MCP_ENDPOINT = "/mcp/invoke"
+STRESS_TOOL = "stress-governed-tool"
+_ADVISORY_LOCK_ID = int.from_bytes(b"MCPSTRES", byteorder="big", signed=False)
+
+
+@dataclass(frozen=True)
+class StressHarness:
+    database_url: str
+    run_id: str
+    signing_private_key_b64: str
+    signing_key_id: str
+    control_token: str
+    temp_root: Path
+
+
+@dataclass
+class StressWorker:
+    process: subprocess.Popen[str]
+    base_url: str
+    marker_path: Path
+    release_path: Path
+    log_path: Path
+    log_stream: TextIO
+
+
+@dataclass(frozen=True)
+class SeededCall:
+    wallet_id: str
+    permit_id: str
+    idempotency_key: str
+    call_token: str
+    headers: dict[str, str]
+    body: dict[str, object]
+
+
+@dataclass(frozen=True)
+class OperationSnapshot:
+    execution_count: int
+    debit_count: int
+    receipt_ids: tuple[str, ...]
+
+
+def _require_explicit_isolation() -> str:
+    if os.environ.get("RUN_MCP_MULTIPROCESS_TESTS") != "1":
+        pytest.skip(
+            "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated "
+            "PostgreSQL multiprocess harness"
+        )
+    if os.environ.get("MCP_STRESS_DB_ISOLATED") != "1":
+        pytest.fail(
+            "MCP_STRESS_DB_ISOLATED=1 is required; refusing to inspect or "
+            "mutate an unacknowledged database",
+            pytrace=False,
+        )
+
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if not database_url:
+        pytest.fail("DATABASE_URL is required for the opt-in harness", pytrace=False)
+    if not database_url.startswith(
+        ("postgres://", "postgresql://", "postgresql+asyncpg://")
+    ):
+        pytest.fail(
+            "the opt-in harness requires a PostgreSQL DATABASE_URL",
+            pytrace=False,
+        )
+    if os.environ.get("STATE_BACKEND", "").strip().lower() != "postgres":
+        pytest.fail(
+            "STATE_BACKEND=postgres is required for the opt-in harness",
+            pytrace=False,
+        )
+    if is_production_like_environment(os.environ.get("ENVIRONMENT")):
+        pytest.fail(
+            "the multiprocess harness refuses production-like ENVIRONMENT values",
+            pytrace=False,
+        )
+
+    railway_project_id = os.environ.get("RAILWAY_PROJECT_ID", "").strip()
+    expected_project_id = os.environ.get(
+        "MCP_STRESS_EXPECTED_RAILWAY_PROJECT_ID", ""
+    ).strip()
+    if railway_project_id or expected_project_id:
+        if not railway_project_id or railway_project_id != expected_project_id:
+            pytest.fail(
+                "Railway runs must set MCP_STRESS_EXPECTED_RAILWAY_PROJECT_ID "
+                "to the disposable project's exact RAILWAY_PROJECT_ID",
+                pytrace=False,
+            )
+    return database_url
+
+
+def _tree_heads() -> set[str]:
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(REPO_ROOT / "migrations"))
+    return set(ScriptDirectory.from_config(config).get_heads())
+
+
+async def _assert_migrated_empty_database(connection: AsyncConnection) -> None:
+    table_names = set(
+        await connection.run_sync(lambda sync: inspect(sync).get_table_names())
+    )
+    if "alembic_version" not in table_names:
+        pytest.fail(
+            "isolated PostgreSQL database is not Alembic-managed; run "
+            "`alembic upgrade head` first",
+            pytrace=False,
+        )
+
+    current_heads = set(
+        (
+            await connection.execute(text("SELECT version_num FROM alembic_version"))
+        ).scalars()
+    )
+    expected_heads = _tree_heads()
+    if current_heads != expected_heads:
+        pytest.fail(
+            "isolated PostgreSQL database is not at the repository migration "
+            "head "
+            f"(current={sorted(current_heads)}, expected={sorted(expected_heads)})",
+            pytrace=False,
+        )
+
+    stress_table = "mcp_stress_tool_executions"
+    if stress_table in table_names:
+        pytest.fail(
+            f"{stress_table} already exists; refusing to reuse a prior stress run",
+            pytrace=False,
+        )
+
+    populated: list[str] = []
+    for table_name in sorted(table_names - {"alembic_version"}):
+        # table_name comes only from SQLAlchemy's database inspector.
+        count = await connection.scalar(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+        if int(count or 0):
+            populated.append(table_name)
+    if populated:
+        pytest.fail(
+            "isolated PostgreSQL database contains application data in: "
+            + ", ".join(populated)
+            + "; refusing to run destructive fault injection",
+            pytrace=False,
+        )
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
+async def stress_harness(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[StressHarness]:
+    database_url = _require_explicit_isolation()
+
+    from app.db.database import get_engine
+
+    engine = get_engine()
+    if engine is None or engine.dialect.name != "postgresql":
+        pytest.fail(
+            "configured database engine is not PostgreSQL",
+            pytrace=False,
+        )
+
+    connection = await engine.connect()
+    lock_acquired = False
+    table_created = False
+    try:
+        lock_acquired = bool(
+            await connection.scalar(
+                text("SELECT pg_try_advisory_lock(:lock_id)"),
+                {"lock_id": _ADVISORY_LOCK_ID},
+            )
+        )
+        if not lock_acquired:
+            pytest.fail(
+                "another MCP multiprocess stress run holds the database lock",
+                pytrace=False,
+            )
+
+        await _assert_migrated_empty_database(connection)
+        await connection.execute(
+            text(
+                """
+                CREATE TABLE mcp_stress_tool_executions (
+                    execution_id BIGSERIAL PRIMARY KEY,
+                    call_token TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    worker_pid INTEGER NOT NULL,
+                    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
+                        DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+                )
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                "CREATE INDEX ix_mcp_stress_tool_call_token "
+                "ON mcp_stress_tool_executions (call_token)"
+            )
+        )
+        await connection.commit()
+        table_created = True
+
+        run_id = f"mp-{uuid.uuid4().hex[:12]}"
+        yield StressHarness(
+            database_url=database_url,
+            run_id=run_id,
+            signing_private_key_b64=base64.b64encode(secrets.token_bytes(32)).decode(
+                "ascii"
+            ),
+            signing_key_id=f"stress-signing-{run_id}",
+            control_token=secrets.token_urlsafe(32),
+            temp_root=tmp_path_factory.mktemp("mcp-postgres-multiprocess"),
+        )
+    finally:
+        try:
+            if table_created:
+                await connection.execute(
+                    text("DROP TABLE IF EXISTS mcp_stress_tool_executions")
+                )
+                await connection.commit()
+        finally:
+            try:
+                if lock_acquired:
+                    await connection.execute(
+                        text("SELECT pg_advisory_unlock(:lock_id)"),
+                        {"lock_id": _ADVISORY_LOCK_ID},
+                    )
+            finally:
+                await connection.close()
+
+
+def _unused_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _worker_output(worker: StressWorker) -> str:
+    if not worker.log_stream.closed:
+        worker.log_stream.flush()
+    try:
+        return worker.log_path.read_text(encoding="utf-8")[-12000:]
+    except OSError:
+        return "<worker log unavailable>"
+
+
+def _stop_worker(worker: StressWorker) -> None:
+    try:
+        if worker.process.poll() is None:
+            worker.process.terminate()
+            try:
+                worker.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                worker.process.kill()
+                worker.process.wait(timeout=3)
+    finally:
+        if not worker.log_stream.closed:
+            worker.log_stream.close()
+
+
+async def _wait_for_worker(worker: StressWorker, control_token: str) -> None:
+    deadline = asyncio.get_running_loop().time() + 30
+    headers = {CONTROL_HEADER: control_token}
+    async with httpx.AsyncClient(base_url=worker.base_url, timeout=1) as client:
+        while asyncio.get_running_loop().time() < deadline:
+            if worker.process.poll() is not None:
+                pytest.fail(
+                    "stress worker exited during startup:\n" + _worker_output(worker),
+                    pytrace=False,
+                )
+            try:
+                response = await client.get("/__stress/pid", headers=headers)
+                if response.status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(0.05)
+    pytest.fail(
+        "stress worker did not become ready:\n" + _worker_output(worker),
+        pytrace=False,
+    )
+
+
+async def _start_worker(
+    harness: StressHarness,
+    *,
+    name: str,
+    fault_point: str = "",
+) -> StressWorker:
+    port = _unused_loopback_port()
+    marker_path = harness.temp_root / f"{name}.marker.json"
+    release_path = harness.temp_root / f"{name}.release"
+    log_path = harness.temp_root / f"{name}.log"
+    log_stream = log_path.open("w", encoding="utf-8")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "ALLOW_LEGACY_UNPERMITTED_MCP": "false",
+            "ALLOW_METADATA_CREATE_ALL": "false",
+            "DATABASE_URL": harness.database_url,
+            "ENABLE_DOGFOOD_TOOL": "false",
+            "ENABLE_PROOF_SURFACES": "false",
+            "ENVIRONMENT": "test",
+            "MCP_STRESS_CONTROL_TOKEN": harness.control_token,
+            "MCP_STRESS_DB_ISOLATED": "1",
+            "MCP_STRESS_FAULT_ACTION": "pause",
+            "MCP_STRESS_FAULT_POINT": fault_point,
+            "MCP_STRESS_FAULT_REPEAT": "once",
+            "MCP_STRESS_MARKER_PATH": str(marker_path),
+            "MCP_STRESS_RELEASE_PATH": str(release_path),
+            "MCP_UPSTREAM_ENABLED": "false",
+            "PUBLIC_URL": f"http://127.0.0.1:{port}",
+            "PYTHONUNBUFFERED": "1",
+            "REDIS_URL": "",
+            "RUN_MCP_MULTIPROCESS_TESTS": "1",
+            "SENTINEL_API_KEY": "",
+            "SENTINEL_API_URL": "",
+            "SIMULATION_MODE_HUMAN_APPROVAL": "true",
+            "STATE_BACKEND": "postgres",
+            "STATE_NAMESPACE": harness.run_id,
+            "STRIPE_SECRET_KEY": "",
+            "TRUST_MODE_ENABLED": "true",
+            "TRUST_SIGNING_KEY_ID": harness.signing_key_id,
+            "TRUST_SIGNING_PRIVATE_KEY_B64": harness.signing_private_key_b64,
+            "VALID_API_KEYS": "test-key",
+        }
+    )
+    try:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "tests.support.mcp_stress_app:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--workers",
+                "1",
+                "--lifespan",
+                "on",
+                "--no-access-log",
+            ],
+            cwd=REPO_ROOT,
+            env=environment,
+            stdout=log_stream,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except BaseException:
+        log_stream.close()
+        raise
+    worker = StressWorker(
+        process=process,
+        base_url=f"http://127.0.0.1:{port}",
+        marker_path=marker_path,
+        release_path=release_path,
+        log_path=log_path,
+        log_stream=log_stream,
+    )
+    try:
+        await _wait_for_worker(worker, harness.control_token)
+    except BaseException:
+        _stop_worker(worker)
+        raise
+    return worker
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
+async def steady_worker(stress_harness: StressHarness) -> AsyncIterator[StressWorker]:
+    worker = await _start_worker(stress_harness, name="steady")
+    try:
+        yield worker
+    finally:
+        _stop_worker(worker)
+
+
+async def _seed_call(
+    harness: StressHarness,
+    steady_worker: StressWorker,
+    *,
+    scenario: str,
+) -> SeededCall:
+    suffix = uuid.uuid4().hex[:12]
+    call_token = f"{harness.run_id}-{scenario}-{suffix}"
+    idempotency_key = f"invoke-{scenario}-{suffix}"
+    async with httpx.AsyncClient(base_url=steady_worker.base_url, timeout=20) as client:
+        provisioned = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=STRESS_TOOL,
+            max_credits=20,
+            idem_key=f"permit-{scenario}-{suffix}",
+        )
+    body: dict[str, object] = {
+        "jsonrpc": "2.0",
+        "id": f"request-{scenario}-{suffix}",
+        "method": "tools/call",
+        "params": {
+            "name": STRESS_TOOL,
+            "arguments": {"call_token": call_token},
+            "mcpContext": {
+                "wallet_id": provisioned["agent_wallet_id"],
+                "permit_id": permit["permit_id"],
+                "idempotency_key": idempotency_key,
+            },
+        },
+    }
+    return SeededCall(
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        idempotency_key=idempotency_key,
+        call_token=call_token,
+        headers=provisioned["agent_headers"],
+        body=body,
+    )
+
+
+async def _invoke(worker: StressWorker, seeded: SeededCall) -> httpx.Response:
+    async with httpx.AsyncClient(base_url=worker.base_url, timeout=30) as client:
+        return await client.post(
+            "/mcp/messages",
+            json=seeded.body,
+            headers=seeded.headers,
+        )
+
+
+async def _wait_for_marker(worker: StressWorker) -> dict[str, object]:
+    deadline = asyncio.get_running_loop().time() + 15
+    while asyncio.get_running_loop().time() < deadline:
+        if worker.process.poll() is not None:
+            pytest.fail(
+                "fault worker exited before writing its marker:\n"
+                + _worker_output(worker),
+                pytrace=False,
+            )
+        try:
+            return json.loads(worker.marker_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            await asyncio.sleep(0.02)
+    pytest.fail(
+        "fault marker was not written:\n" + _worker_output(worker),
+        pytrace=False,
+    )
+
+
+def _release_worker(worker: StressWorker) -> None:
+    worker.release_path.write_text("release\n", encoding="utf-8")
+
+
+def _assert_in_progress(response: httpx.Response) -> None:
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"]["message"] == "idempotency_in_progress"
+
+
+async def _reconcile(
+    harness: StressHarness,
+    worker: StressWorker,
+) -> dict[str, object]:
+    async with httpx.AsyncClient(base_url=worker.base_url, timeout=20) as client:
+        response = await client.post(
+            "/__stress/reconcile",
+            params={"idle_seconds": 0},
+            headers={CONTROL_HEADER: harness.control_token},
+        )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def _snapshot(seeded: SeededCall) -> OperationSnapshot:
+    from app.db.database import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        record_id = (
+            await session.execute(
+                text(
+                    """
+                    SELECT record_id
+                    FROM idempotency_records
+                    WHERE wallet_id = :wallet_id
+                      AND endpoint = :endpoint
+                      AND idempotency_key = :idempotency_key
+                    """
+                ),
+                {
+                    "wallet_id": seeded.wallet_id,
+                    "endpoint": GOVERNED_MCP_ENDPOINT,
+                    "idempotency_key": seeded.idempotency_key,
+                },
+            )
+        ).scalar_one()
+        execution_count = int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT COUNT(*) FROM mcp_stress_tool_executions "
+                        "WHERE call_token = :call_token"
+                    ),
+                    {"call_token": seeded.call_token},
+                )
+            ).scalar_one()
+        )
+        debit_count = int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT COUNT(*) FROM ledger_entries "
+                        "WHERE operation_key = :record_id AND action = 'debit'"
+                    ),
+                    {"record_id": record_id},
+                )
+            ).scalar_one()
+        )
+        receipt_ids = tuple(
+            (
+                await session.execute(
+                    text(
+                        "SELECT receipt_id FROM receipts "
+                        "WHERE idempotency_record_id = :record_id "
+                        "ORDER BY receipt_id"
+                    ),
+                    {"record_id": record_id},
+                )
+            ).scalars()
+        )
+    return OperationSnapshot(
+        execution_count=execution_count,
+        debit_count=debit_count,
+        receipt_ids=receipt_ids,
+    )
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_two_processes_serialize_one_governed_side_effect(
+    stress_harness: StressHarness,
+    steady_worker: StressWorker,
+) -> None:
+    async with httpx.AsyncClient(base_url=steady_worker.base_url, timeout=5) as client:
+        missing = await client.get("/__stress/pid")
+        wrong = await client.get(
+            "/__stress/pid",
+            headers={CONTROL_HEADER: "wrong-control-token"},
+        )
+        missing_reconcile = await client.post("/__stress/reconcile")
+        wrong_reconcile = await client.post(
+            "/__stress/reconcile",
+            headers={CONTROL_HEADER: "wrong-control-token"},
+        )
+    assert missing.status_code == 403
+    assert wrong.status_code == 403
+    assert missing_reconcile.status_code == 403
+    assert wrong_reconcile.status_code == 403
+
+    seeded = await _seed_call(stress_harness, steady_worker, scenario="overlap")
+    fault_worker = await _start_worker(
+        stress_harness,
+        name=f"overlap-{uuid.uuid4().hex[:8]}",
+        fault_point="after_tool_side_effect",
+    )
+    first_task: asyncio.Task[httpx.Response] | None = None
+    try:
+        first_task = asyncio.create_task(_invoke(fault_worker, seeded))
+        marker = await _wait_for_marker(fault_worker)
+        assert marker["point"] == "after_tool_side_effect"
+
+        competing = await _invoke(steady_worker, seeded)
+        _assert_in_progress(competing)
+
+        _release_worker(fault_worker)
+        first = await asyncio.wait_for(first_task, timeout=20)
+        assert first.status_code == 200
+        assert "result" in first.json()
+
+        replay = await _invoke(steady_worker, seeded)
+        assert replay.status_code == 200
+        assert replay.json()["result"] == first.json()["result"]
+
+        snapshot = await _snapshot(seeded)
+        assert snapshot.execution_count == 1
+        assert snapshot.debit_count == 1
+        assert len(snapshot.receipt_ids) == 1
+        assert (
+            first.json()["result"]["receipt"]["receipt_id"] == snapshot.receipt_ids[0]
+        )
+    finally:
+        _release_worker(fault_worker)
+        _stop_worker(fault_worker)
+        if first_task is not None:
+            await asyncio.gather(first_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_receipt_commit_survives_worker_death_and_reconciles(
+    stress_harness: StressHarness,
+    steady_worker: StressWorker,
+) -> None:
+    seeded = await _seed_call(stress_harness, steady_worker, scenario="receipt-crash")
+    fault_worker = await _start_worker(
+        stress_harness,
+        name=f"receipt-crash-{uuid.uuid4().hex[:8]}",
+        fault_point="after_receipt_commit",
+    )
+    first_task: asyncio.Task[httpx.Response] | None = None
+    try:
+        first_task = asyncio.create_task(_invoke(fault_worker, seeded))
+        marker = await _wait_for_marker(fault_worker)
+        assert marker["point"] == "after_receipt_commit"
+        receipt_id = str(marker["context"]["receipt_id"])  # type: ignore[index]
+
+        _stop_worker(fault_worker)
+        await asyncio.gather(first_task, return_exceptions=True)
+
+        blocked = await _invoke(steady_worker, seeded)
+        _assert_in_progress(blocked)
+
+        reconciliation = await _reconcile(stress_harness, steady_worker)
+        assert reconciliation["idempotency_repaired"] == 1
+        assert reconciliation["idempotency_needs_review"] == 0
+
+        replay = await _invoke(steady_worker, seeded)
+        assert replay.status_code == 200
+        result = replay.json()["result"]
+        assert result["reconciled"] is True
+        assert result["outcome"] == "success"
+        assert result["isError"] is False
+        assert result["receipt_id"] == receipt_id
+
+        snapshot = await _snapshot(seeded)
+        assert snapshot.execution_count == 1
+        assert snapshot.debit_count == 1
+        assert snapshot.receipt_ids == (receipt_id,)
+    finally:
+        _stop_worker(fault_worker)
+        if first_task is not None:
+            await asyncio.gather(first_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_post_side_effect_crash_requires_review_without_redispatch(
+    stress_harness: StressHarness,
+    steady_worker: StressWorker,
+) -> None:
+    seeded = await _seed_call(stress_harness, steady_worker, scenario="manual-review")
+    fault_worker = await _start_worker(
+        stress_harness,
+        name=f"manual-review-{uuid.uuid4().hex[:8]}",
+        fault_point="after_tool_side_effect",
+    )
+    first_task: asyncio.Task[httpx.Response] | None = None
+    try:
+        first_task = asyncio.create_task(_invoke(fault_worker, seeded))
+        marker = await _wait_for_marker(fault_worker)
+        assert marker["point"] == "after_tool_side_effect"
+
+        _stop_worker(fault_worker)
+        await asyncio.gather(first_task, return_exceptions=True)
+
+        blocked = await _invoke(steady_worker, seeded)
+        _assert_in_progress(blocked)
+        before = await _snapshot(seeded)
+        assert before.execution_count == 1
+        assert before.debit_count == 1
+        assert before.receipt_ids == ()
+
+        reconciliation = await _reconcile(stress_harness, steady_worker)
+        assert reconciliation["idempotency_repaired"] == 0
+        assert reconciliation["idempotency_needs_review"] == 1
+
+        replay = await _invoke(steady_worker, seeded)
+        _assert_in_progress(replay)
+        after = await _snapshot(seeded)
+        assert after == before
+    finally:
+        _stop_worker(fault_worker)
+        if first_task is not None:
+            await asyncio.gather(first_task, return_exceptions=True)

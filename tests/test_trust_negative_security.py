@@ -13,15 +13,18 @@ test_idempotency.py, test_receipts.py, and test_audit_chain.py.)
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import PermitModel, ReceiptModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
+from app.services.policies import evaluate_wallet_policy as real_evaluate_wallet_policy
 from app.services.receipts import get_receipt_service
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
@@ -94,9 +97,7 @@ async def test_expired_permit_is_denied_without_charge(client, clean_database):
         factory = get_session_factory()
         async with factory() as session:
             result = await session.execute(
-                select(PermitModel).where(
-                    PermitModel.permit_id == permit["permit_id"]
-                )
+                select(PermitModel).where(PermitModel.permit_id == permit["permit_id"])
             )
             model = result.scalar_one()
             model.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
@@ -156,6 +157,76 @@ async def test_revoked_permit_is_denied_without_charge(client, clean_database):
         assert error["data"]["receipt"]["outcome"] == "denied"
         assert error["data"]["receipt"]["ledger_entry_id"] is None
         assert await _ledger_debits(client, provisioned, tool_name) == []
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_reason"),
+    [
+        ("revoked", "permit_revoked"),
+        ("expired", "permit_expired"),
+    ],
+)
+async def test_terminal_permit_between_precheck_and_reservation_is_denied(
+    client,
+    clean_database,
+    terminal_state,
+    expected_reason,
+):
+    """Revocation/expiry racing after the precheck cannot reach charging."""
+    provisioned = await provision_agent_wallet(client)
+    tool_name = f"racing-{terminal_state}-permit-tool"
+    _register_tool(tool_name)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+        )
+
+        async def transition_permit_during_policy(**kwargs):
+            factory = get_session_factory()
+            async with factory() as session:
+                model = await session.get(PermitModel, permit["permit_id"])
+                assert model is not None
+                if terminal_state == "revoked":
+                    model.status = "revoked"
+                    model.revoked_at = utc_now()
+                else:
+                    model.expires_at = utc_now() - timedelta(seconds=1)
+                session.add(model)
+                await session.commit()
+            return await real_evaluate_wallet_policy(**kwargs)
+
+        with patch(
+            "app.routers.mcp.evaluate_wallet_policy",
+            new=transition_permit_during_policy,
+        ):
+            resp = await client.post(
+                "/mcp/messages",
+                json=_mcp_call(
+                    provisioned["agent_wallet_id"],
+                    permit["permit_id"],
+                    tool_name,
+                    f"racing-{terminal_state}-invoke-1",
+                ),
+                headers=provisioned["agent_headers"],
+            )
+
+        assert resp.status_code == 200
+        error = resp.json()["error"]
+        assert error["message"] == expected_reason
+        assert error["data"]["receipt"]["outcome"] == "denied"
+        assert await _ledger_debits(client, provisioned, tool_name) == []
+
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit["permit_id"])
+            assert model is not None
+            assert model.spent_credits == 0
     finally:
         get_service_registry().unregister_local(tool_name)
 

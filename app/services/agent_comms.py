@@ -471,11 +471,12 @@ class MessageRouter:
     ) -> bool:
         """Deliver message via webhook.
 
-        Real HTTP delivery is not implemented (#35). Under simulation this
-        logs and returns True as an explicitly simulated success; flipping
-        SIMULATION_MODE_AGENT_COMMS off raises until a real client lands.
+        Real HTTP delivery is outside the frozen proof-surface scope. Under
+        simulation this logs and returns True as an explicitly simulated
+        success; flipping SIMULATION_MODE_AGENT_COMMS off raises unless the
+        surface is explicitly unfrozen and a real client lands.
         """
-        require_simulation("agent_comms", issue="#35")
+        require_simulation("agent_comms")
         logger.info(
             f"Simulated webhook delivery to {recipient.webhook_url} for "
             f"{message.message_id}"

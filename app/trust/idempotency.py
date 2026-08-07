@@ -7,6 +7,8 @@ Re-exports the canonical idempotency implementation from
 from __future__ import annotations
 
 from app.services.idempotency import (
+    GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyReplay,
@@ -15,6 +17,8 @@ from app.services.idempotency import (
 )
 
 __all__ = [
+    "GOVERNED_MCP_IDEMPOTENCY_ENDPOINT",
+    "IdempotencyBegin",
     "IdempotencyConflictError",
     "IdempotencyInProgressError",
     "IdempotencyReplay",

@@ -1,15 +1,25 @@
 {
   "schema_version": "1.0",
   "name": "permit-trust-plane",
-  "description": "Marketing host pointer for the governed MCP trust plane (exactly-once permits, metered tools, signed receipts). Canonical machine discovery lives on the API host — follow discovery URLs below.",
+  "description": "Autonomy needs receipts. This marketing host points autonomous agents to a governed MCP trust plane for scoped authority, metered tool calls, signed receipts, and replay-safe accounting.",
   "primary_audience": "autonomous_agents",
   "product_wedge": "governed_mcp_trust_plane",
+  "thesis": "Before an autonomous agent acts, it needs bounded authority and portable proof.",
+  "product_loop": [
+    "discover",
+    "authenticate",
+    "authorize",
+    "invoke",
+    "meter",
+    "receipt",
+    "audit",
+    "govern"
+  ],
   "canonical_api": "https://api-service-production-433c.up.railway.app",
-  "human_site": "https://site-tawny-seven-33.vercel.app",
+  "human_site": "https://agent-middleware-web.vercel.app",
   "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
   "discovery": {
     "agent_manifest": "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
-    "awi_manifest": "https://api-service-production-433c.up.railway.app/.well-known/awi.json",
     "llm_txt": "https://api-service-production-433c.up.railway.app/llm.txt",
     "mcp_tools": "https://api-service-production-433c.up.railway.app/mcp/tools.json",
     "openapi": "https://api-service-production-433c.up.railway.app/openapi.json",
@@ -20,9 +30,24 @@
     "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
     "https://api-service-production-433c.up.railway.app/llm.txt",
     "https://api-service-production-433c.up.railway.app/mcp/tools.json",
-    "https://api-service-production-433c.up.railway.app/openapi.json",
-    "https://api-service-production-433c.up.railway.app/health/dependencies"
+    "https://api-service-production-433c.up.railway.app/openapi.json"
   ],
+  "simulation_and_dependency_truth": "https://api-service-production-433c.up.railway.app/health/dependencies",
+  "try_it": {
+    "mode": "local_self_hosted",
+    "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
+    "command": "make prove-trust-plane",
+    "live_access": "operator_issued",
+    "requires_live_credentials": false,
+    "proves": [
+      "scoped_permit",
+      "metered_mcp_invoke",
+      "signed_receipt",
+      "replay_without_second_charge",
+      "out_of_scope_denial"
+    ],
+    "note": "Runs the real FastAPI trust path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim."
+  },
   "authentication": {
     "type": "api_key",
     "header": "X-API-Key",

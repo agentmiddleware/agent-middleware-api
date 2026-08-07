@@ -12,17 +12,21 @@ import json
 
 import pytest
 from httpx import AsyncClient, ASGITransport
+from pydantic import SecretStr
 
 from app.core import health as health_module
 from app.core.config import get_settings
 from app.core.health import (
     CHECK_TIMEOUT_SECONDS,
     _OK_STATUSES,
+    _check_upstream_mcp,
     _run_check,
     gather_dependency_report,
 )
 from app.core.runtime_degradation import reset_runtime_degradation
 from app.main import app
+from app.schemas.billing import ServiceCategory
+from app.services.service_registry import get_service_registry
 
 
 @pytest.fixture
@@ -45,6 +49,9 @@ def _restore_env():
         "LLM_PROVIDER",
         "SIMULATION_MODE_IOT_BRIDGE",
         "SIMULATION_MODE_TELEMETRY_PM",
+        "MCP_UPSTREAM_ENABLED",
+        "MCP_UPSTREAM_PUBLIC_TOOL_ID",
+        "MCP_UPSTREAM_BEARER_TOKEN",
         "TRUST_MODE_ENABLED",
         "TRUST_SIGNING_PRIVATE_KEY_B64",
     ]
@@ -54,6 +61,40 @@ def _restore_env():
     for f, v in saved.items():
         setattr(settings, f, v)
     reset_runtime_degradation()
+
+
+@pytest.mark.anyio
+async def test_upstream_health_exposes_payload_free_metrics(clean_database):
+    settings = get_settings()
+    settings.MCP_UPSTREAM_ENABLED = True
+    settings.MCP_UPSTREAM_PUBLIC_TOOL_ID = "partner.lookup"
+    settings.MCP_UPSTREAM_BEARER_TOKEN = SecretStr("never-report-this-token")
+    registry = get_service_registry()
+    registry.unregister_execution_backend("upstream_mcp")
+    registry.register_upstream(
+        service_id="partner.lookup",
+        name="partner_lookup",
+        description="Gateway-owned partner tool",
+        category=ServiceCategory.PLATFORM_FEE,
+        executor=object(),
+        input_schema={"type": "object"},
+        output_schema=None,
+        credits_per_unit=1.0,
+        upstream_tool_name="partner_lookup",
+        upstream_origin="https://partner.example",
+    )
+    try:
+        result = await _check_upstream_mcp()
+    finally:
+        registry.unregister_execution_backend("upstream_mcp")
+
+    assert result["status"] == "up"
+    assert "state_counts" in result["dispatch_metrics"]
+    assert "reconciliation_backlog" in result["dispatch_metrics"]
+    assert "latency_seconds_average" in result["call_metrics"]
+    rendered = json.dumps(result)
+    assert "never-report-this-token" not in rendered
+    assert "result_json" not in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +118,7 @@ async def test_report_default_shape():
         "mqtt",
         "stripe",
         "llm",
+        "upstream_mcp",
         "signing_key",
         "sentinel",
     }
@@ -91,6 +133,7 @@ async def test_report_default_shape():
     assert report["dependencies"]["redis"]["status"] == "not_configured"
     assert report["dependencies"]["stripe"]["status"] == "not_configured"
     assert report["dependencies"]["llm"]["status"] == "not_configured"
+    assert report["dependencies"]["upstream_mcp"]["status"] == "not_configured"
     assert report["dependencies"]["signing_key"]["status"] == "up"
     assert report["dependencies"]["signing_key"]["state"] == "ephemeral"
 
@@ -272,6 +315,7 @@ async def test_health_dependencies_endpoint_returns_report(client):
         "mqtt",
         "stripe",
         "llm",
+        "upstream_mcp",
         "signing_key",
         "sentinel",
     }

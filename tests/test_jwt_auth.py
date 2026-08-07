@@ -1,16 +1,10 @@
-"""Regression coverage for the JWT bearer path.
-
-`_auth_from_jwt` awaited the synchronous `verify_access_token`, so every
-request presenting a valid access token raised TypeError instead of
-authenticating — a 500 on the `Bearer ` branch, and a silent fall-through to
-API-key auth on the raw-token branch (the `except Exception: pass` there hid
-it). The `JWTPayload.exp` annotation claimed `datetime` while PyJWT decodes
-epoch ints, which `_exp_to_datetime` then converts.
-"""
+"""Regression coverage for JWT bearer authentication."""
 
 import pytest
+from fastapi import Depends, FastAPI
+from httpx import ASGITransport, AsyncClient
 
-from app.core.auth import get_auth_context
+from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
 from app.core.jwt import get_jwt_service
 from app.routers.auth import _exp_to_datetime
@@ -18,6 +12,18 @@ from app.routers.auth import _exp_to_datetime
 
 # 32 raw bytes, strict base64 — same non-secret test material CI uses.
 TEST_SIGNING_KEY = "dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU="
+
+auth_app = FastAPI()
+
+
+@auth_app.get("/protected")
+async def protected(auth: AuthContext = Depends(get_auth_context)) -> dict:
+    return {
+        "source": auth.source,
+        "wallet_id": auth.wallet_id,
+        "key_id": auth.key_id,
+        "is_bootstrap_admin": auth.is_bootstrap_admin,
+    }
 
 
 @pytest.fixture
@@ -28,6 +34,13 @@ def jwt_service(monkeypatch):
         yield get_jwt_service()
     finally:
         get_settings.cache_clear()
+
+
+@pytest.fixture
+async def auth_client():
+    transport = ASGITransport(app=auth_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
 
 
 @pytest.mark.anyio
@@ -55,6 +68,99 @@ async def test_raw_access_token_authenticates(jwt_service):
 
     assert auth.source == "jwt"
     assert auth.wallet_id == "wallet_raw"
+
+
+@pytest.mark.anyio
+async def test_http_bearer_access_token_takes_priority_over_api_key(
+    jwt_service, auth_client
+):
+    token = jwt_service.create_access_token(
+        wallet_id="wallet_http", key_id="key_http", scopes=["billing:read"]
+    )
+
+    response = await auth_client.get(
+        "/protected",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-API-Key": "test-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "source": "jwt",
+        "wallet_id": "wallet_http",
+        "key_id": "key_http",
+        "is_bootstrap_admin": False,
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "Basic opaque",
+        "Bearer",
+        "Bearer ",
+        "Bearer  opaque",
+        "Bearer opaque extra",
+        "bearer opaque",
+    ],
+)
+async def test_malformed_authorization_does_not_fall_back_to_api_key(
+    authorization, auth_client
+):
+    response = await auth_client.get(
+        "/protected",
+        headers={"Authorization": authorization, "X-API-Key": "test-key"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "invalid_token"
+
+
+@pytest.mark.anyio
+async def test_invalid_bearer_does_not_fall_back_to_api_key(auth_client):
+    response = await auth_client.get(
+        "/protected",
+        headers={
+            "Authorization": "Bearer not-a-signed-token",
+            "X-API-Key": "test-key",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "invalid_token"
+
+
+@pytest.mark.anyio
+async def test_refresh_bearer_does_not_fall_back_to_api_key(jwt_service, auth_client):
+    refresh_token = jwt_service.create_refresh_token(wallet_id="wallet_refresh")
+
+    response = await auth_client.get(
+        "/protected",
+        headers={
+            "Authorization": f"Bearer {refresh_token}",
+            "X-API-Key": "test-key",
+        },
+    )
+
+    assert response.status_code == 401
+    detail = response.json()["detail"]
+    assert detail["error"] == "invalid_token"
+    assert "token_type_mismatch" in detail["message"]
+
+
+@pytest.mark.anyio
+async def test_http_x_api_key_remains_supported(auth_client):
+    response = await auth_client.get(
+        "/protected",
+        headers={"X-API-Key": "test-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "env"
+    assert response.json()["is_bootstrap_admin"] is True
 
 
 def test_payload_exp_is_epoch_seconds(jwt_service):

@@ -1,112 +1,97 @@
-# B2A SDK
+# Agent Middleware Python SDK
 
-Python SDK for the Agent-Native Middleware API.
+Typed async client for the governed MCP trust loop:
+
+`discover → authenticate → authorize → invoke → meter → receipt → audit → govern`
+
+CI builds version `0.4.0` as wheel and source artifacts. Pushing the
+`python-sdk-v0.4.0` tag attaches them to a GitHub release. The package is not
+published to PyPI.
 
 ## Installation
 
+Install a downloaded release wheel:
+
 ```bash
-pip install b2a-sdk
+python -m pip install ./b2a_sdk-0.4.0-py3-none-any.whl
 ```
 
-## Quick Start
+For repository development:
 
-```python
-from b2a_sdk import B2AClient, monitored, billable
-
-# Initialize the client
-b2a = B2AClient(api_key="agt-your-api-key")
-
-# Monitor a function (telemetry is fire-and-forget)
-@monitored(b2a, service_name="web_scraper")
-async def scrape_website(url: str):
-    # Your agent logic here...
-    pass
-
-# Gate execution behind billing
-@billable(b2a, wallet_id="agt-123", service_category="content_factory", units=5.0)
-async def generate_video(url: str):
-    # This only runs if wallet has 5+ credits
-    pass
+```bash
+python -m pip install -e './b2a_sdk[dev]'
 ```
 
-## Decorators
+`httpx` is the only runtime dependency.
 
-### `@monitored`
-
-Wires a function to the Autonomous PM for telemetry:
-
-```python
-@monitored(b2a, service_name="my_service", capture_args=True)
-async def my_function(url: str):
-    return url
-```
-
-### `@billable`
-
-Gates execution behind the billing engine:
-
-```python
-@billable(b2a, wallet_id="wallet-123", service_category="iot_bridge", units=2.0)
-async def send_iot_message(device_id: str):
-    pass
-```
-
-### `@combined`
-
-Combines both decorators:
-
-```python
-@combined(
-    b2a,
-    wallet_id="wallet-123",
-    service_category="content_factory",
-    service_name="video_generator",
-    units=5.0,
-)
-async def generate_video(url: str):
-    pass
-```
-
-## Client Usage
+## Governed tool call
 
 ```python
 import asyncio
-from b2a_sdk import B2AClient, InsufficientFundsError
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
-async def main():
-    b2a = B2AClient(api_key="agt-your-api-key")
+from b2a_sdk import AgentMiddlewareClient, PermitRequest
 
-    try:
-        # Charge a wallet
-        result = await b2a.charge("wallet-123", "iot_bridge", units=10)
-        print(f"Charged: {result}")
 
-        # Create a wallet
-        wallet = await b2a.create_sponsor_wallet(
-            sponsor_name="Test Corp",
-            email="test@example.com",
-            initial_credits=10000.0,
+async def main() -> None:
+    async with AgentMiddlewareClient(
+        api_key="agt-your-api-key",
+        base_url="https://your-gateway.example.com",
+    ) as client:
+        tools = await client.discover_tools()
+        tool = next(item for item in tools if item.name == "partner.search")
+
+        permit = await client.create_permit(
+            PermitRequest(
+                issuer_wallet_id="agt-wallet",
+                subject_wallet_id="agt-wallet",
+                subject_key_id="key-runtime",
+                scopes=[f"tool:{tool.name}:invoke", "billing:charge"],
+                allowed_tools=[tool.name],
+                max_credits=Decimal("25"),
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+            ),
+            idempotency_key="permit-run-001",
         )
 
-        # Get pricing
-        pricing = await b2a.get_pricing()
+        invocation = await client.invoke_tool(
+            tool.name,
+            {"query": "quarterly risk"},
+            wallet_id="agt-wallet",
+            permit_id=permit.permit_id,
+            idempotency_key="invoke-run-001",
+        )
 
-    except InsufficientFundsError as e:
-        print(f"Wallet needs top-up: {e.top_up_url}")
+        verification = await client.verify_receipt(
+            invocation.receipt.receipt_id
+        )
+        evidence = await client.get_evidence(invocation.receipt.receipt_id)
+        assert verification.valid and evidence.valid
 
-    finally:
-        await b2a.close()
 
 asyncio.run(main())
 ```
 
-## Environment Variables
+Callers must provide nonblank idempotency keys when creating permits and
+invoking tools. Reusing a key with a different request raises
+`IdempotencyConflictError`.
+
+If a remote tool was dispatched but its outcome could not be confirmed,
+`invoke_tool` raises `DeliveryUncertainError`. Its `receipt_id` identifies the
+signed, charged uncertainty receipt; the SDK never retries the dispatch.
+
+## Compatibility
+
+`B2AClient` remains available for existing integrations and emits a
+`DeprecationWarning`. Legacy wallet, telemetry, dry-run, decorator, and edge
+client methods remain available during the `0.4.x` transition. New code should
+use `AgentMiddlewareClient` and the typed trust-loop methods.
+
+## Build and test
 
 ```bash
-# Optional: Set default base URL
-export B2A_BASE_URL=https://api.agentnative.io
+uv build b2a_sdk
+python -m pytest b2a_sdk/tests
+ruff check b2a_sdk/src b2a_sdk/tests
 ```
-
-## License
-
-MIT

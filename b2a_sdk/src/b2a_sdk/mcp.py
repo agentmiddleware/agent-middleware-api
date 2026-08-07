@@ -1,5 +1,5 @@
 """
-B2A MCP CLI & Helpers
+Legacy B2A MCP CLI & Helpers
 =====================
 
 Command-line tools for MCP server generation and management.
@@ -269,6 +269,7 @@ async def serve_async(
                     wallet_id=os.getenv("B2A_WALLET_ID", ""),
                     api_key=os.getenv("B2A_API_KEY", ""),
                 )
+
             return handler
 
         mcp.add_tool(name, desc, await create_handler(name, desc))
@@ -315,7 +316,9 @@ def main() -> None:
     list_parser.add_argument("--category", help="Category filter")
 
     serve_parser = subparsers.add_parser("serve", help="Start MCP server")
-    serve_parser.add_argument("--transport", default="stdio", choices=["stdio", "sse"], help="Transport")
+    serve_parser.add_argument(
+        "--transport", default="stdio", choices=["stdio", "sse"], help="Transport"
+    )
     serve_parser.add_argument("--port", type=int, default=8001, help="Port for SSE")
     serve_parser.add_argument("--api-url", default=DEFAULT_API_URL, help="B2A API URL")
 

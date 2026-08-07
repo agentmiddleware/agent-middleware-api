@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import PermitModel
 from app.main import app
@@ -255,7 +256,9 @@ async def test_verify_does_not_leak_permit_to_unauthorized_caller(
         headers=other_headers,
     )
     assert resp.status_code == 403
-    assert "permit" not in resp.text or resp.json().get("detail") == "permit_access_denied"
+    assert (
+        "permit" not in resp.text or resp.json().get("detail") == "permit_access_denied"
+    )
 
 
 @pytest.mark.anyio
@@ -296,9 +299,7 @@ async def test_permit_create_rejects_in_progress_idempotency_key(
         "allowed_tools": ["in-progress-permit-tool"],
         "scopes": ["tool:in-progress-permit-tool:invoke", "billing:charge"],
         "max_credits": 50,
-        "expires_at": (
-            datetime.now(timezone.utc) + timedelta(minutes=30)
-        ).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
     }
     await get_idempotency_service().begin(
         wallet_id=provisioned["agent_wallet_id"],
@@ -339,12 +340,24 @@ async def test_permit_service_rejects_invalid_issuance_requests(
     invalid_cases = [
         ({**base_request, "max_credits": Decimal("0")}, "max_credits_must_be_positive"),
         (
-            {**base_request, "expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)},
+            {
+                **base_request,
+                "expires_at": datetime.now(timezone.utc) - timedelta(seconds=1),
+            },
             "permit_expired_at_creation",
         ),
-        ({**base_request, "issuer_wallet_id": "missing-wallet"}, "issuer_wallet_not_found"),
-        ({**base_request, "subject_wallet_id": "missing-wallet"}, "subject_wallet_not_found"),
-        ({**base_request, "max_credits": Decimal("100000")}, "permit_budget_exceeds_wallet_balance"),
+        (
+            {**base_request, "issuer_wallet_id": "missing-wallet"},
+            "issuer_wallet_not_found",
+        ),
+        (
+            {**base_request, "subject_wallet_id": "missing-wallet"},
+            "subject_wallet_not_found",
+        ),
+        (
+            {**base_request, "max_credits": Decimal("100000")},
+            "permit_budget_exceeds_wallet_balance",
+        ),
     ]
 
     for payload, reason in invalid_cases:
@@ -354,7 +367,11 @@ async def test_permit_service_rejects_invalid_issuance_requests(
 
 
 @pytest.mark.anyio
-async def test_permit_service_budget_lifecycle_and_filters(client, clean_database):
+async def test_permit_service_budget_lifecycle_and_filters(
+    client,
+    clean_database,
+    enforce_naive_utc_datetime_columns,
+):
     provisioned = await provision_agent_wallet(client)
     service = get_permit_service()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
@@ -424,6 +441,77 @@ async def test_permit_service_budget_lifecycle_and_filters(client, clean_databas
     )
     assert validation.allowed is False
     assert validation.reason == "permit_revoked"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_reason"),
+    [
+        ("revoked", "permit_revoked"),
+        ("expired", "permit_expired"),
+    ],
+)
+async def test_authorize_and_reserve_rechecks_terminal_state_after_stale_precheck(
+    client,
+    clean_database,
+    terminal_state,
+    expected_reason,
+):
+    """A stale precheck cannot authorize a later budget reservation.
+
+    This models a revocation or expiry racing with an invocation after an
+    earlier read-only permit check. The final locked operation must recheck the
+    complete authorization state before it mutates ``spent_credits``.
+    """
+    provisioned = await provision_agent_wallet(client)
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=provisioned["agent_wallet_id"],
+            subject_wallet_id=provisioned["agent_wallet_id"],
+            subject_key_id=provisioned["key_id"],
+            allowed_tools=["final-authorization-tool"],
+            scopes=["tool:final-authorization-tool:invoke", "billing:charge"],
+            max_credits=Decimal("10"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    stale_precheck = await service.validate_for_action(
+        permit_id=permit.permit_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        tool_name="final-authorization-tool",
+        estimated_credits=Decimal("2"),
+        key_id=provisioned["key_id"],
+    )
+    assert stale_precheck.allowed is True
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        if terminal_state == "revoked":
+            model.status = "revoked"
+            model.revoked_at = utc_now()
+        else:
+            model.expires_at = utc_now() - timedelta(seconds=1)
+        session.add(model)
+        await session.commit()
+
+    final_authorization = await service.authorize_and_reserve(
+        permit_id=permit.permit_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        tool_name="final-authorization-tool",
+        estimated_credits=Decimal("2"),
+        key_id=provisioned["key_id"],
+    )
+
+    assert final_authorization.allowed is False
+    assert final_authorization.reason == expected_reason
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("0")
 
 
 @pytest.mark.anyio
@@ -506,7 +594,9 @@ async def test_permit_service_validation_denial_reasons(client, clean_database):
     async with factory() as session:
         model = await session.get(PermitModel, permit.permit_id)
         assert model is not None
-        model.scopes_json = json.dumps(["tool:service-validate-tool:invoke", "billing:charge"])
+        model.scopes_json = json.dumps(
+            ["tool:service-validate-tool:invoke", "billing:charge"]
+        )
         model.signature = "tampered"
         session.add(model)
         await session.commit()

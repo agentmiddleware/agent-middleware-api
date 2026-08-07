@@ -482,7 +482,7 @@ def _build_awi_endpoints() -> list[AWIEndpoint]:
 
 
 def _build_pricing() -> list[PricingTier]:
-    """Build pricing tiers for the trust-plane wedge (not proof surfaces)."""
+    """Describe the controlled pilot without inventing public commercial tiers."""
     return [
         PricingTier(
             tier_name="self_hosted",
@@ -496,22 +496,13 @@ def _build_pricing() -> list[PricingTier]:
         ),
         PricingTier(
             tier_name="design_partner",
-            price_per_credit=0.001,
-            minimum_purchase=10.0,
+            price_per_credit=0.0,
+            minimum_purchase=0.0,
             features=[
                 "Same trust loop as self-hosted",
-                "One partner-registered MCP tool",
-                "Operator runbook + dogfood path",
-            ],
-        ),
-        PricingTier(
-            tier_name="enterprise",
-            price_per_credit=0.0008,
-            minimum_purchase=1000.0,
-            features=[
-                "Wallet-scoped multi-tenant isolation",
-                "Custom MCP tool registration",
-                "Dedicated support (when contracted)",
+                "One environment-configured upstream MCP tool",
+                "Operator-provisioned wallet, key, credits, and permit",
+                "No public SLA, pricing, compliance, or tenant-isolation claim",
             ],
         ),
     ]

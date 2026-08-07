@@ -61,6 +61,15 @@ jobs:
             exit 1
           fi
 
+      - name: Require the API service deploy path
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          if [ "$SERVICE" != "api-service" ]; then
+            echo "::error::This workflow's migration and posture gates are specific to api-service."
+            exit 1
+          fi
+
       - name: Require green CI for ${{ steps.sha.outputs.sha }}
         if: ${{ !inputs.skip_ci_gate }}
         env:
@@ -87,13 +96,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Migration parity needs DATABASE_URL, which only exists inside the
-      # Railway service env — so pre-deploy we check live posture only. The
-      # post-deploy step below runs the full preflight via `railway run`.
+      # Before deploy, check live posture only. Post-deploy schema parity uses
+      # the Postgres service's explicit public URL because `railway run`
+      # executes here on the GitHub runner, outside Railway private DNS.
       - name: Preflight — current service posture
         env:
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}
-        run: python scripts/railway_preflight.py --live
+        run: python scripts/railway_preflight.py --live --strict
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
@@ -101,18 +110,78 @@ jobs:
       - name: Deploy (railway up)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up --service "${{ inputs.service }}" --ci
+        run: railway up --service "${{ inputs.service }}" --environment production --ci
 
-      # Runs inside the service environment, so DATABASE_URL and PUBLIC_URL are
-      # both present: this is the check that catches a deploy whose schema did
-      # not migrate (RUN_MIGRATIONS_ON_START unset, or a create_all-bootstrapped
-      # DB that was never stamped).
-      - name: Verify deploy — migrations + posture
+      # `railway run` executes on this GitHub runner. Wait until Railway reports
+      # that the new deployment is the only active deployment before scrubbing
+      # compatibility columns that an old worker could still write.
+      - name: Wait for old workers to drain
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SERVICE: ${{ inputs.service }}
+          EXPECTED_SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          latest=$(railway deployment list \
+            --service "$SERVICE" \
+            --environment production \
+            --limit 1 \
+            --json)
+          deployment_id=$(jq -er '.[0].id' <<<"$latest")
+          deployment_sha=$(jq -r '.[0].meta.commitHash // ""' <<<"$latest")
+          if [ "$deployment_sha" != "$EXPECTED_SHA" ]; then
+            echo "::error::Latest Railway deployment is not the checked-out commit."
+            exit 1
+          fi
+
+          for _attempt in $(seq 1 60); do
+            snapshot=$(railway status --environment production --json)
+            state=$(jq -r \
+              --arg service "$SERVICE" \
+              --arg deployment "$deployment_id" '
+                ([
+                  .environments.edges[].node
+                  | select(.name == "production")
+                  | .serviceInstances.edges[].node
+                  | select(.serviceName == $service)
+                ][0] // null) as $instance
+                | if $instance == null then "missing"
+                  elif (($instance.activeDeployments | length) == 1
+                    and $instance.activeDeployments[0].id == $deployment
+                    and $instance.activeDeployments[0].status == "SUCCESS")
+                  then "ready"
+                  else "waiting"
+                  end
+              ' <<<"$snapshot")
+            if [ "$state" = "ready" ]; then
+              echo "New deployment is the only active worker set."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Old Railway workers did not drain before timeout."
+          exit 1
+
+      - name: Retire legacy credentials after drain
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          railway run --service "${{ inputs.service }}" -- \
-            python scripts/railway_preflight.py --strict
+          railway run --service Postgres --environment production -- \
+            python scripts/retire_owner_keys.py
+
+      # `railway run` is local, so the API service's private DATABASE_URL is
+      # unusable here. Load the Postgres service environment and require its
+      # explicit public URL; the preflight never prints the URL or falls back.
+      - name: Verify deploy — migrations + posture
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: |
+          railway run --service Postgres --environment production -- \
+            python scripts/railway_preflight.py \
+              --public-db \
+              --strict \
+              --url "$PUBLIC_URL"
 
       - name: Summary
         if: always()

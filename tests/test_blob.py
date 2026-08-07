@@ -2,8 +2,9 @@
 Tests for the blob abstraction introduced in #31.
 
 The LocalFilesystemBlob is the only backend fully implemented today.
-S3 and Vercel backends raise NotImplementedError until #39 wires them
-up — tests pin that contract so the stubs don't silently succeed.
+S3 and Vercel backends raise NotImplementedError while the media proof
+surface is frozen — tests pin that contract so the stubs do not silently
+succeed.
 """
 
 from pathlib import Path
@@ -114,13 +115,13 @@ def test_s3_and_vercel_stubs_raise_not_implemented(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_stub_methods_raise_not_implemented_with_issue_ref():
+async def test_stub_methods_raise_not_implemented_with_freeze_guidance():
     stub = _UnimplementedBlob("s3")
-    with pytest.raises(NotImplementedError, match="#39"):
-        await stub.put("k", b"d")
-    with pytest.raises(NotImplementedError, match="#39"):
-        await stub.get("k")
-    with pytest.raises(NotImplementedError, match="#39"):
-        await stub.delete("k")
-    with pytest.raises(NotImplementedError, match="#39"):
-        await stub.url("k")
+    for operation in (
+        lambda: stub.put("k", b"d"),
+        lambda: stub.get("k"),
+        lambda: stub.delete("k"),
+        lambda: stub.url("k"),
+    ):
+        with pytest.raises(NotImplementedError, match="docs/PROOF_SURFACES.md"):
+            await operation()

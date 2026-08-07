@@ -1,5 +1,8 @@
+from datetime import timedelta, timezone
+
 import pytest
 
+from app.core.time import to_naive_utc
 from app.db.database import get_session_factory
 from app.db.models import ControlPlaneAuditEventModel
 from app.services.audit_log import list_audit_events, record_audit_event
@@ -40,6 +43,27 @@ async def test_list_audit_events_filters_by_tool(clean_database):
 
     assert len(events) == 1
     assert events[0].tool == "echo"
+
+
+@pytest.mark.anyio
+async def test_list_audit_events_normalizes_offset_time_filters(
+    clean_database,
+    enforce_naive_utc_datetime_columns,
+):
+    event = await record_audit_event(event="mcp.invoke", wallet_id="wallet-1")
+    event_utc = event.created_at.replace(tzinfo=timezone.utc)
+
+    events = await list_audit_events(
+        created_after=(event_utc - timedelta(minutes=1)).astimezone(
+            timezone(timedelta(hours=5, minutes=30))
+        ),
+        created_before=(event_utc + timedelta(minutes=1)).astimezone(
+            timezone(timedelta(hours=-7))
+        ),
+    )
+
+    assert [item.event_id for item in events] == [event.event_id]
+    assert to_naive_utc(event_utc) == event.created_at
 
 
 @pytest.mark.anyio

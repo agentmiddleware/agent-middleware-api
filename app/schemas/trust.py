@@ -64,6 +64,8 @@ class PermitVerifyResponse(BaseModel):
 
 class ReceiptResponse(BaseModel):
     receipt_id: str
+    idempotency_record_id: str | None = None
+    dispatch_attempt_id: str | None = None
     permit_id: str
     wallet_id: str
     key_id: str | None
@@ -89,6 +91,33 @@ class ReceiptListResponse(BaseModel):
     offset: int
     has_more: bool
     next_offset: int | None = None
+
+
+class RefundReconciliationItem(BaseModel):
+    record_id: str
+    receipt_id: str
+    wallet_id: str
+    permit_id: str
+    ledger_entry_id: str
+    refund_entry_id: str
+    credits: Decimal
+    status: Literal["pending", "resolved"]
+    created_at: datetime
+    resolved_at: datetime | None = None
+
+
+class RefundReconciliationListResponse(BaseModel):
+    items: list[RefundReconciliationItem]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
+
+
+class RefundReconciliationRetryResponse(BaseModel):
+    item: RefundReconciliationItem
+    replayed: bool
 
 
 class ReceiptVerifyRequest(BaseModel):
@@ -123,6 +152,25 @@ class ReceiptEvidenceCheck(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class DispatchEvidenceResponse(BaseModel):
+    """Sanitized upstream-dispatch evidence; result payloads and secrets stay private."""
+
+    attempt_id: str
+    state: str
+    public_tool_id: str
+    upstream_tool_name: str
+    upstream_origin: str
+    request_hash: str
+    response_hash: str | None = None
+    ledger_entry_id: str | None = None
+    credits_authorized: Decimal
+    credits_charged: Decimal
+    error_code: str | None = None
+    created_at: datetime
+    dispatched_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
 class ReceiptEvidenceResponse(BaseModel):
     receipt_id: str
     valid: bool
@@ -132,6 +180,7 @@ class ReceiptEvidenceResponse(BaseModel):
     audit_event: dict[str, Any] | None = None
     audit_chain: AuditChainVerifyResponse | None = None
     ledger_entry: dict[str, Any] | None = None
+    dispatch: DispatchEvidenceResponse | None = None
 
 
 class EvidenceBundleResponse(BaseModel):
@@ -143,6 +192,7 @@ class EvidenceBundleResponse(BaseModel):
     permit: PermitResponse | None = None
     ledger_entry: dict[str, Any] | None = None
     audit_event: dict[str, Any] | None = None
+    dispatch: DispatchEvidenceResponse | None = None
     verification: dict[str, str] = Field(default_factory=dict)
 
 

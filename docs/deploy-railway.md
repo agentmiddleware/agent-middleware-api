@@ -72,6 +72,10 @@ fails, so it works as a gate in a shell or in CI:
   request touching a new table. It also detects a `create_all`-bootstrapped DB
   with no `alembic_version` row and tells you to `alembic stamp head` once
   before enabling `RUN_MIGRATIONS_ON_START`.
+- **Off-platform migration parity** (`--public-db`, needs
+  `DATABASE_PUBLIC_URL`) — uses only the explicit public PostgreSQL URL. It
+  never falls back to the private `DATABASE_URL`; missing, local, or
+  private-looking values fail closed without printing the URL.
 - **Live posture** (needs `PUBLIC_URL` or `--url`) — asserts the deployed
   service is healthy, has no unhealthy dependency, did **not** fall back to
   memory state, and has `ENABLE_PROOF_SURFACES=false`.
@@ -83,6 +87,10 @@ railway run python scripts/railway_preflight.py
 # Schema parity only:
 DATABASE_URL=postgresql://… python scripts/railway_preflight.py --db
 
+# Schema parity from GitHub Actions or another off-platform runner:
+railway run --service Postgres --environment production -- \
+  python scripts/railway_preflight.py --db --public-db --strict
+
 # Posture only, against any origin:
 python scripts/railway_preflight.py --live --url "$API_URL"
 ```
@@ -91,6 +99,33 @@ A check whose input is absent is **skipped**, not failed; pass `--strict` to
 turn a skip into a failure (what CI and the deploy workflow use). Shorthands:
 `make railway-preflight` and `make railway-preflight-live`.
 
+### Rolling retirement of legacy owner keys
+
+Migration `025_remove_plaintext_owner_keys` scrubs `wallets.owner_key` and
+`service_registry.owner_key`, but deliberately retains both empty columns and
+their indexes for this release. The previously deployed worker still selects
+and writes those columns, so dropping them during an overlapping Railway
+deployment would break requests before that worker drains.
+
+An old worker can write a plaintext owner credential after migration 025
+performs its first scrub, or an unbound refresh token after migration 028 runs.
+Therefore a deploy is incomplete until Railway reports that the new deployment
+is the only active worker set and the idempotent post-deploy retirement passes:
+
+```bash
+# Run only after the old deployment has fully drained. This loads the Postgres
+# service's explicit DATABASE_PUBLIC_URL and never prints it.
+railway run --service Postgres --environment production -- \
+  python scripts/retire_owner_keys.py
+```
+
+The command locks all three affected tables for its transaction, replaces any
+late non-empty owner-key value with the empty compatibility marker, revokes any
+NULL-bound refresh token, and verifies both invariants. It fails if
+`DATABASE_PUBLIC_URL` or any required retirement column is missing. A later
+contract migration may drop the owner-key columns only after this release can
+no longer be running.
+
 ## Deploying from CI (optional)
 
 `.github/workflows/railway-deploy.yml` is a **manual** (`workflow_dispatch`)
@@ -98,9 +133,12 @@ deploy that runs the same canonical `railway up` from a checkout of the ref you
 pick. It is not a push trigger, and it does not use Railway's *Redeploy from
 GitHub source* — both remain forbidden above. Before deploying it requires the
 CI workflow to have concluded `success` for that exact commit (override with
-`skip_ci_gate` for emergencies), then runs the live posture preflight; after
-deploying it runs the full preflight via `railway run --strict`, which is what
-catches a shipped-but-unmigrated schema.
+`skip_ci_gate` for emergencies), then runs the live posture preflight. After
+deploying, it waits until the new deployment is the only active worker set,
+re-scrubs the retained owner-key columns, and loads the Postgres service
+environment so the off-platform runner can perform strict schema parity through
+`DATABASE_PUBLIC_URL`. This catches a shipped-but-unmigrated schema without
+trying to resolve Railway's private database hostname from GitHub Actions.
 
 The workflow is inert until an operator adds:
 

@@ -49,7 +49,9 @@ async def test_tools_json_envelope_is_trust_plane_not_marketplace(client):
     assert "B2A Service Marketplace" not in body["name"]
     assert "B2A" not in body["name"]
     assert "trust plane" in body["description"].lower()
-    assert "ops-registered" in body["description"].lower()
+    assert "executable" in body["description"].lower()
+    assert "configured upstream" in body["description"].lower()
+    assert "metadata-only" in body["description"].lower()
 
 
 @pytest.mark.anyio
@@ -99,10 +101,12 @@ async def test_agent_json_sdk_integrations_are_honest(client):
 
     python_sdk = integrations["python_sdk"]
     assert isinstance(python_sdk, dict)
-    assert python_sdk["status"] == "provisional_in_repo"
+    assert python_sdk["status"] == "release_artifact_only"
+    assert python_sdk["version"] == "0.4.0"
     assert python_sdk["install"] == "pip install -e ./b2a_sdk"
     assert "pip install b2a-sdk" not in json.dumps(python_sdk)
     assert "not published" in python_sdk["note"].lower()
+    assert "python-sdk-v0.4.0" in python_sdk["note"]
 
     typescript_sdk = integrations["typescript_sdk"]
     assert isinstance(typescript_sdk, dict)

@@ -8,8 +8,9 @@ Agents pass credentials via:
 
 import hmac
 from dataclasses import dataclass
+from typing import Annotated
 
-from fastapi import HTTPException, Security, status
+from fastapi import Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from .config import get_settings
 from .trust_mode import is_production_like_environment
@@ -74,7 +75,7 @@ class AuthContext:
 
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),
-    authorization: str | None = None,  # Will be extracted from headers manually
+    authorization: Annotated[str | None, Header()] = None,
 ) -> AuthContext:
     """
     Validate credentials and return caller context.
@@ -89,12 +90,16 @@ async def get_auth_context(
     serving the stale key list.
     """
     settings = get_settings()
-    # FastAPI doesn't auto-extract Authorization header for us in this pattern,
-    # so we use Request directly in the router dependency. For now, check JWT
-    # via a simpler approach: if api_key looks like a JWT, verify it as JWT.
-    # Otherwise, fall through to API key validation.
 
-    # Check if the "api_key" is actually a JWT (Bearer token passed in X-API-Key)
+    # A presented Authorization header is authoritative. Never fall back to a
+    # concurrently supplied API key when its scheme, shape, or token is invalid:
+    # doing so would let an invalid bearer credential authenticate as a different
+    # principal than the caller intended.
+    if authorization is not None:
+        token = _parse_bearer_authorization(authorization)
+        return await _auth_from_jwt(token)
+
+    # Preserve the pre-header direct-call/X-API-Key compatibility path.
     if api_key and api_key.startswith("Bearer "):
         token = api_key[7:].strip()
         return await _auth_from_jwt(token)
@@ -175,6 +180,25 @@ async def get_auth_context(
         raw_key=stripped,
         is_bootstrap_admin=True,
     )
+
+
+def _parse_bearer_authorization(authorization: str) -> str:
+    """Accept exactly ``Bearer <nonempty-token>`` with no extra whitespace."""
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        token = ""
+    else:
+        token = authorization[len(prefix) :]
+
+    if not token or token != token.strip() or any(char.isspace() for char in token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "invalid_token",
+                "message": "Authorization header must be exactly 'Bearer <token>'.",
+            },
+        )
+    return token
 
 
 async def _auth_from_jwt(token: str) -> AuthContext:

@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
+from sqlmodel import col
 
 from app.core.time import utc_now
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, ReceiptModel
+from app.db.models import (
+    IdempotencyRecordModel,
+    McpDispatchAttemptModel,
+    ReceiptModel,
+)
 from app.services.signing_keys import sha256_hex
+
+GOVERNED_MCP_IDEMPOTENCY_ENDPOINT = "/mcp/invoke"
 
 
 class IdempotencyConflictError(RuntimeError):
@@ -29,6 +39,15 @@ class IdempotencyReplay:
     response_reference: str | None
     response_json: dict[str, Any] | None
     status_code: int
+
+
+@dataclass(frozen=True)
+class IdempotencyBegin:
+    """Identity and replay result for one idempotent request."""
+
+    record_id: str
+    request_hash: str
+    replay: IdempotencyReplay | None
 
 
 def _idempotency_predicates(
@@ -64,14 +83,57 @@ def _replay_from_record(
 
 
 class IdempotencyService:
-    async def begin(
+    async def _wait_for_replay(
+        self,
+        session: AsyncSession,
+        *,
+        wallet_id: str,
+        endpoint: str,
+        idempotency_key: str,
+        request_hash: str,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+    ) -> IdempotencyReplay:
+        """Wait boundedly for an identical concurrent request to finalize."""
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            await session.rollback()
+            await asyncio.sleep(poll_interval_seconds)
+            session.expire_all()
+            existing = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        *_idempotency_predicates(
+                            wallet_id,
+                            endpoint,
+                            idempotency_key,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                raise IdempotencyInProgressError("idempotency_in_progress")
+            try:
+                replay = _replay_from_record(existing, request_hash)
+            except IdempotencyInProgressError:
+                continue
+            assert replay is not None
+            return replay
+        raise IdempotencyInProgressError("idempotency_in_progress")
+
+    async def begin_with_record(
         self,
         *,
         wallet_id: str,
         endpoint: str,
         idempotency_key: str,
         request_payload: dict[str, Any],
-    ) -> IdempotencyReplay | None:
+        operation_kind: str | None = None,
+        wait_timeout_seconds: float = 0.0,
+        poll_interval_seconds: float = 0.05,
+    ) -> IdempotencyBegin:
+        if wait_timeout_seconds < 0 or poll_interval_seconds <= 0:
+            raise ValueError("idempotency_wait_invalid")
         request_hash = sha256_hex(request_payload)
         factory = get_session_factory()
         async with factory() as session:
@@ -82,17 +144,35 @@ class IdempotencyService:
             )
             existing = result.scalar_one_or_none()
             if existing:
-                return _replay_from_record(existing, request_hash)
-
-            session.add(
-                IdempotencyRecordModel(
-                    record_id=f"idm-{uuid.uuid4().hex[:16]}",
-                    wallet_id=wallet_id,
-                    endpoint=endpoint,
-                    idempotency_key=idempotency_key,
+                try:
+                    replay = _replay_from_record(existing, request_hash)
+                except IdempotencyInProgressError:
+                    if wait_timeout_seconds <= 0:
+                        raise
+                    replay = await self._wait_for_replay(
+                        session,
+                        wallet_id=wallet_id,
+                        endpoint=endpoint,
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        timeout_seconds=wait_timeout_seconds,
+                        poll_interval_seconds=poll_interval_seconds,
+                    )
+                return IdempotencyBegin(
+                    record_id=existing.record_id,
                     request_hash=request_hash,
+                    replay=replay,
                 )
+
+            record = IdempotencyRecordModel(
+                record_id=f"idm-{uuid.uuid4().hex[:16]}",
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                operation_kind=operation_kind,
             )
+            session.add(record)
             try:
                 await session.commit()
             except IntegrityError:
@@ -109,28 +189,132 @@ class IdempotencyService:
                 existing = result.scalar_one_or_none()
                 if existing is None:
                     raise
-                return _replay_from_record(existing, request_hash)
+                try:
+                    replay = _replay_from_record(existing, request_hash)
+                except IdempotencyInProgressError:
+                    if wait_timeout_seconds <= 0:
+                        raise
+                    replay = await self._wait_for_replay(
+                        session,
+                        wallet_id=wallet_id,
+                        endpoint=endpoint,
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        timeout_seconds=wait_timeout_seconds,
+                        poll_interval_seconds=poll_interval_seconds,
+                    )
+                return IdempotencyBegin(
+                    record_id=existing.record_id,
+                    request_hash=request_hash,
+                    replay=replay,
+                )
             except OperationalError as exc:
-                # SQLite under heavy write contention can exhaust busy_timeout
-                # and fail the INSERT with "database is locked" instead of a
-                # clean unique-constraint error. For an idempotent begin that
-                # is the same situation as losing the race: another request on
-                # this key (or another writer) holds the database. Surface the
-                # in-progress/replay contract, never a raw 500. Postgres does
-                # not produce this message; anything else re-raises.
+                # SQLite can report a write-contention race as "database is
+                # locked" instead of a unique-key IntegrityError. Preserve the
+                # same bounded replay behavior and never expose a raw 500.
                 if "database is locked" not in str(exc):
                     raise
                 await session.rollback()
                 result = await session.execute(
                     select(IdempotencyRecordModel).where(
-                        *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
+                        *_idempotency_predicates(
+                            wallet_id,
+                            endpoint,
+                            idempotency_key,
+                        )
                     )
                 )
                 existing = result.scalar_one_or_none()
                 if existing is None:
                     raise IdempotencyInProgressError("idempotency_in_progress")
-                return _replay_from_record(existing, request_hash)
-            return None
+                try:
+                    replay = _replay_from_record(existing, request_hash)
+                except IdempotencyInProgressError:
+                    if wait_timeout_seconds <= 0:
+                        raise
+                    replay = await self._wait_for_replay(
+                        session,
+                        wallet_id=wallet_id,
+                        endpoint=endpoint,
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        timeout_seconds=wait_timeout_seconds,
+                        poll_interval_seconds=poll_interval_seconds,
+                    )
+                return IdempotencyBegin(
+                    record_id=existing.record_id,
+                    request_hash=request_hash,
+                    replay=replay,
+                )
+            return IdempotencyBegin(
+                record_id=record.record_id,
+                request_hash=request_hash,
+                replay=None,
+            )
+
+    async def begin(
+        self,
+        *,
+        wallet_id: str,
+        endpoint: str,
+        idempotency_key: str,
+        request_payload: dict[str, Any],
+    ) -> IdempotencyReplay | None:
+        """Compatibility wrapper returning only the optional replay."""
+        begun = await self.begin_with_record(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            request_payload=request_payload,
+        )
+        return begun.replay
+
+    async def get_record(
+        self,
+        *,
+        wallet_id: str,
+        endpoint: str,
+        idempotency_key: str,
+    ) -> IdempotencyRecordModel | None:
+        factory = get_session_factory()
+        async with factory() as session:
+            return (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        *_idempotency_predicates(
+                            wallet_id,
+                            endpoint,
+                            idempotency_key,
+                        )
+                    )
+                )
+            ).scalar_one_or_none()
+
+    async def get_governed_mcp_record(
+        self,
+        *,
+        wallet_id: str,
+        idempotency_key: str,
+    ) -> IdempotencyRecordModel | None:
+        """Return the one row protected by the normalized MCP identity index."""
+        factory = get_session_factory()
+        async with factory() as session:
+            return (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        col(IdempotencyRecordModel.wallet_id) == wallet_id,
+                        col(IdempotencyRecordModel.idempotency_key) == idempotency_key,
+                        or_(
+                            col(IdempotencyRecordModel.endpoint)
+                            == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                            col(IdempotencyRecordModel.endpoint) == "/mcp/messages",
+                            col(IdempotencyRecordModel.endpoint).like(
+                                "/mcp/tools/%/invoke"
+                            ),
+                        ),
+                    )
+                )
+            ).scalar_one_or_none()
 
     async def complete(
         self,
@@ -153,7 +337,9 @@ class IdempotencyService:
             if not record:
                 return
             record.response_reference = response_reference
-            record.response_json = json.dumps(response_json, default=str) if response_json else None
+            record.response_json = (
+                json.dumps(response_json, default=str) if response_json else None
+            )
             record.status_code = status_code
             session.add(record)
             await session.commit()
@@ -222,14 +408,13 @@ class IdempotencyService:
     async def reconcile_stuck_records(
         self, *, idle_seconds: int = 900
     ) -> tuple[int, int]:
-        """Repair idempotency records orphaned by a crash between charge and
-        finalization (receipt write, audit write, complete()).
+        """Repair governed idempotency records orphaned around finalization.
 
-        A governed invoke calls mark_charged() right after the wallet charge
-        lands and before finalization, so the only way a record can be both
-        idle and still "in progress" (response_json is null) is a process
-        death somewhere in that window. For each such record idle for at
-        least idle_seconds (so live in-flight requests are never touched):
+        Effect-free canonical MCP rows that never reached the atomic prepared
+        checkpoint are deleted so the same key can safely retry. A governed
+        invoke that did debit calls mark_charged() before finalization. For
+        each such record idle for at least ``idle_seconds`` (so live in-flight
+        requests are never touched):
         if a receipt already exists for its ledger_entry_id (finalization got
         as far as writing the receipt but not completing this record), the
         record is completed from that receipt so a retry replays cleanly
@@ -251,39 +436,142 @@ class IdempotencyService:
         needs_review = 0
         async with factory() as session:
             async with session.begin():
-                stuck = (
-                    await session.execute(
-                        select(IdempotencyRecordModel).where(
-                            cast(
-                                ColumnElement[bool],
-                                cast(Any, IdempotencyRecordModel.response_json).is_(None),
-                            ),
-                            cast(
-                                ColumnElement[bool],
+                # The upstream pipeline creates its idempotency row before the
+                # atomic permit-reservation/prepared-attempt transaction. A
+                # crash in that narrow, effect-free gap leaves no budget,
+                # debit, attempt, or receipt to recover. Expire only this
+                # upstream MCP identity so a retry can safely start again.
+                # Local tools share the canonical replay scope but have
+                # different side-effect ordering and are excluded by the
+                # internal operation kind.
+                unstarted = (
+                    (
+                        await session.execute(
+                            select(IdempotencyRecordModel)
+                            .where(
                                 cast(
-                                    Any, IdempotencyRecordModel.ledger_entry_id
-                                ).is_not(None),
-                            ),
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.endpoint
+                                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.operation_kind
+                                    == "upstream_mcp",
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, IdempotencyRecordModel.response_json).is_(
+                                        None
+                                    ),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(
+                                        Any, IdempotencyRecordModel.ledger_entry_id
+                                    ).is_(None),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.created_at < cutoff,
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for record in unstarted:
+                    attempt_id = await session.scalar(
+                        select(cast(Any, McpDispatchAttemptModel.attempt_id)).where(
                             cast(
                                 ColumnElement[bool],
-                                IdempotencyRecordModel.created_at < cutoff,
-                            ),
+                                McpDispatchAttemptModel.idempotency_record_id
+                                == record.record_id,
+                            )
                         )
-                        .with_for_update()
                     )
-                ).scalars().all()
+                    receipt_id = await session.scalar(
+                        select(cast(Any, ReceiptModel.receipt_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                ReceiptModel.idempotency_record_id == record.record_id,
+                            )
+                        )
+                    )
+                    if attempt_id is None and receipt_id is None:
+                        await session.delete(record)
+                        repaired += 1
+
+                stuck = (
+                    (
+                        await session.execute(
+                            select(IdempotencyRecordModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, IdempotencyRecordModel.response_json).is_(
+                                        None
+                                    ),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(
+                                        Any, IdempotencyRecordModel.ledger_entry_id
+                                    ).is_not(None),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.created_at < cutoff,
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 for record in stuck:
+                    # Remote MCP attempts retain a bounded canonical upstream
+                    # result and have a state-aware reconciler that can rebuild
+                    # the exact replay contract. A generic receipt-only repair
+                    # would discard that result and erase delivery uncertainty.
+                    dispatch_attempt_id = await session.scalar(
+                        select(cast(Any, McpDispatchAttemptModel.attempt_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                McpDispatchAttemptModel.idempotency_record_id
+                                == record.record_id,
+                            )
+                        )
+                    )
+                    if dispatch_attempt_id is not None:
+                        continue
                     receipt = (
                         await session.execute(
                             select(ReceiptModel).where(
                                 cast(
                                     ColumnElement[bool],
-                                    ReceiptModel.ledger_entry_id
-                                    == record.ledger_entry_id,
+                                    ReceiptModel.idempotency_record_id
+                                    == record.record_id,
                                 )
                             )
                         )
                     ).scalar_one_or_none()
+                    if receipt is None:
+                        # Legacy receipts predate the explicit idempotency FK.
+                        receipt = (
+                            await session.execute(
+                                select(ReceiptModel).where(
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.ledger_entry_id
+                                        == record.ledger_entry_id,
+                                    )
+                                )
+                            )
+                        ).scalar_one_or_none()
                     if receipt is None:
                         needs_review += 1
                         continue
@@ -299,6 +587,8 @@ class IdempotencyService:
                         "success": 200,
                         "insufficient_funds": 402,
                         "denied": 403,
+                        "delivery_uncertain": 504,
+                        "response_rejected": 502,
                     }.get(receipt.outcome, 500)
                     recovered_response = {
                         "reconciled": True,

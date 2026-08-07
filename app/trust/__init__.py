@@ -56,6 +56,8 @@ from .evidence import (
     build_receipt_evidence,
 )
 from .idempotency import (
+    GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyReplay,
@@ -86,6 +88,12 @@ from .policy import (
     record_governed_action,
 )
 from .receipts import ReceiptError, ReceiptService, get_receipt_service
+from .refund_reconciliation import (
+    RefundReconciliationError,
+    RefundReconciliationService,
+    build_pending_refund_reconciliation,
+    get_refund_reconciliation_service,
+)
 from .signing import (
     SigningKeyError,
     SigningKeyService,
@@ -122,6 +130,11 @@ __all__ = [
     "ReceiptService",
     "ReceiptError",
     "get_receipt_service",
+    # failed-refund reconciliation
+    "RefundReconciliationError",
+    "RefundReconciliationService",
+    "build_pending_refund_reconciliation",
+    "get_refund_reconciliation_service",
     # signing (cryptographic root)
     "SigningKeyService",
     "SigningKeyError",
@@ -129,6 +142,8 @@ __all__ = [
     "canonical_json",
     "sha256_hex",
     # idempotency
+    "GOVERNED_MCP_IDEMPOTENCY_ENDPOINT",
+    "IdempotencyBegin",
     "IdempotencyService",
     "IdempotencyReplay",
     "IdempotencyConflictError",

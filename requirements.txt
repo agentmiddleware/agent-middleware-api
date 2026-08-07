@@ -14,7 +14,8 @@ aiomqtt>=2.5.1          # Async MQTT client
 aiocoap>=0.4.17          # CoAP protocol support
 
 # --- Telemetry / Autonomous PM ---
-httpx>=0.28.1           # Async HTTP client (git API calls + test client)
+httpx>=0.28.1,<0.29     # Upstream MCP DNS pinning relies on httpcore's sni_hostname extension contract
+httpcore==1.0.9         # Verified implementation of the DNS-pin + TLS SNI handoff; update only with its integration test
 
 # --- Media Engine ---
 python-multipart>=0.0.32 # File upload support (>=0.0.30 fixes CVE-2026-53538/53539, >=0.0.31 fixes CVE-2026-53540)

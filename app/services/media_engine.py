@@ -123,7 +123,7 @@ class HookDetector:
         """
         Analyze a video and return ranked viral hooks.
         """
-        require_simulation("media_engine", issue="#39")
+        require_simulation("media_engine")
         if not video.transcript:
             logger.warning(
                 f"No transcript for {video.video_id}, using duration-based detection"
@@ -274,8 +274,8 @@ class PlatformDistributor:
     ) -> DistributionResult:
         """Distribute a single clip to a platform."""
 
-        # Stub path only — real platform APIs are not wired (#39).
-        require_simulation("media_engine", issue="#39")
+        # Stub path only — real platform APIs are outside the frozen surface.
+        require_simulation("media_engine")
 
         post_id = uuid.uuid4().hex[:12]
 

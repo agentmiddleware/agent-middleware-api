@@ -1,16 +1,39 @@
 """
-B2A SDK - Agent-Native Middleware API Client
+Agent Middleware API client
 ============================================
 
 Async Python client for the Agent-Native Middleware API.
 Provides wallet management, telemetry, and billing for agent swarms.
 """
 
+from __future__ import annotations
+
 import logging
+import warnings
 from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
+
+from .errors import (
+    APIError,
+    AuthenticationError,
+    AuthorizationError,
+    DeliveryUncertainError,
+    IdempotencyConflictError,
+    InsufficientFundsError,
+    PermitDeniedError,
+    TransportError,
+)
+from .models import (
+    EvidenceBundle,
+    InvocationResult,
+    Permit,
+    PermitRequest,
+    Receipt,
+    ReceiptVerification,
+    ToolDefinition,
+)
 
 logger = logging.getLogger("b2a_sdk")
 
@@ -31,7 +54,7 @@ class DryRunSimulation:
 
     def __init__(
         self,
-        client: "B2AClient",
+        client: AgentMiddlewareClient,
         wallet_id: str,
         session_id: str | None = None,
     ):
@@ -93,21 +116,23 @@ class DryRunSimulation:
         }
 
 
-class B2AClient:
+class AgentMiddlewareClient:
     """
     Core async client for the Agent-Native Middleware API.
 
     Usage:
-        b2a = B2AClient(api_key="agt-xyz123")
-        await b2a.charge("wallet_123", "iot_bridge", units=10)
+        client = AgentMiddlewareClient(api_key="agt-xyz123")
+        await client.discover_tools()
     """
 
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.agentnative.io",
+        base_url: str = "https://api-service-production-433c.up.railway.app",
         timeout: float = 10.0,
-    ):
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         """
         Initialize the B2A client.
 
@@ -115,6 +140,7 @@ class B2AClient:
             api_key: API key for authentication (X-API-Key header)
             base_url: Base URL of the middleware API
             timeout: Request timeout in seconds
+            transport: Optional HTTPX transport, primarily for in-process tests
         """
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -123,9 +149,325 @@ class B2AClient:
             headers={
                 "X-API-Key": api_key,
                 "Content-Type": "application/json",
-                "User-Agent": "b2a-sdk/0.2.0",
+                "User-Agent": "b2a-sdk/0.4.0",
             },
             timeout=timeout,
+            transport=transport,
+            follow_redirects=False,
+        )
+
+    @staticmethod
+    def _validate_idempotency_key(idempotency_key: str) -> str:
+        key = idempotency_key.strip()
+        if not key:
+            raise ValueError("idempotency_key must not be blank")
+        if len(key) > 128:
+            raise ValueError("idempotency_key must be at most 128 characters")
+        return key
+
+    @staticmethod
+    def _error_detail(payload: dict[str, Any], fallback: str) -> str:
+        detail = payload.get("detail")
+        if isinstance(detail, str) and detail:
+            return detail
+        if isinstance(detail, dict):
+            nested = detail.get("error") or detail.get("detail")
+            if isinstance(nested, str) and nested:
+                return nested
+        error = payload.get("error")
+        if isinstance(error, str) and error:
+            return error
+        return fallback
+
+    def _raise_http_error(
+        self,
+        *,
+        status_code: int,
+        payload: dict[str, Any],
+        wallet_id: str | None,
+    ) -> None:
+        detail = self._error_detail(payload, f"HTTP {status_code}")
+        if status_code == 401:
+            raise AuthenticationError(
+                detail,
+                status_code=status_code,
+                payload=payload,
+            )
+        if status_code == 402:
+            body_detail = payload.get("detail")
+            detail_payload = body_detail if isinstance(body_detail, dict) else {}
+            raise InsufficientFundsError(
+                wallet_id=wallet_id or "unknown",
+                shortfall=detail_payload.get("shortfall"),
+                top_up_url=detail_payload.get("top_up_url"),
+                payload=payload,
+            )
+        if status_code == 403:
+            if detail.startswith("permit_"):
+                raise PermitDeniedError(detail, payload=payload)
+            raise AuthorizationError(
+                detail,
+                status_code=status_code,
+                payload=payload,
+            )
+        if status_code == 409:
+            raise IdempotencyConflictError(
+                detail,
+                status_code=status_code,
+                payload=payload,
+            )
+        raise APIError(detail, status_code=status_code, payload=payload)
+
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        wallet_id: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        try:
+            response = await self._client.request(method, path, **kwargs)
+        except httpx.HTTPError as exc:
+            raise TransportError(f"{method} {path} failed: {exc}") from exc
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise APIError(
+                "invalid_json_response",
+                status_code=response.status_code,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise APIError(
+                "invalid_object_response",
+                status_code=response.status_code,
+            )
+        if response.is_error:
+            self._raise_http_error(
+                status_code=response.status_code,
+                payload=payload,
+                wallet_id=wallet_id,
+            )
+        return payload
+
+    @staticmethod
+    def _parse_receipt(data: Any, *, response_name: str) -> Receipt:
+        if not isinstance(data, dict):
+            raise APIError(f"{response_name}_missing_receipt")
+        try:
+            return Receipt.from_dict(data)
+        except ValueError as exc:
+            raise APIError(f"invalid_{response_name}_receipt: {exc}") from exc
+
+    async def discover_tools(self) -> list[ToolDefinition]:
+        """Return the executable tools advertised by the MCP gateway."""
+        payload = await self._request_json("GET", "/mcp/tools.json")
+        tools = payload.get("tools")
+        if not isinstance(tools, list):
+            raise APIError("invalid_tools_response")
+        if not all(isinstance(tool, dict) for tool in tools):
+            raise APIError("invalid_tools_response", payload=payload)
+        try:
+            return [ToolDefinition.from_dict(tool) for tool in tools]
+        except (TypeError, ValueError) as exc:
+            raise APIError(f"invalid_tools_response: {exc}", payload=payload) from exc
+
+    async def create_permit(
+        self,
+        request: PermitRequest,
+        *,
+        idempotency_key: str,
+    ) -> Permit:
+        """Create a signed permit using a caller-owned idempotency key."""
+        key = self._validate_idempotency_key(idempotency_key)
+        payload = await self._request_json(
+            "POST",
+            "/v1/permits",
+            wallet_id=request.issuer_wallet_id,
+            headers={"Idempotency-Key": key},
+            json=request.to_payload(),
+        )
+        try:
+            return Permit.from_dict(payload)
+        except ValueError as exc:
+            raise APIError(f"invalid_permit_response: {exc}", payload=payload) from exc
+
+    def _raise_mcp_error(
+        self,
+        error: dict[str, Any],
+        *,
+        wallet_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
+        reason = str(error.get("message") or "mcp_call_failed")
+        data = error.get("data")
+        error_data = data if isinstance(data, dict) else {}
+        receipt_data = error_data.get("receipt")
+        receipt: Receipt | None = None
+        if isinstance(receipt_data, dict):
+            receipt = self._parse_receipt(receipt_data, response_name="mcp_error")
+        receipt_id = receipt.receipt_id if receipt else None
+        outcome = receipt.outcome if receipt else None
+
+        if outcome == "delivery_uncertain" or reason in {
+            "delivery_uncertain",
+            "outcome_unknown",
+        }:
+            if not receipt_id:
+                raise APIError("delivery_uncertain_without_receipt", payload=envelope)
+            raise DeliveryUncertainError(
+                receipt_id=receipt_id,
+                detail=reason,
+                payload=envelope,
+            )
+        if reason == "insufficient_funds" or outcome == "insufficient_funds":
+            raise InsufficientFundsError(
+                wallet_id=wallet_id,
+                receipt_id=receipt_id,
+                payload=envelope,
+            )
+        if reason in {"idempotency_in_progress", "idempotency_key_reused"}:
+            raise IdempotencyConflictError(
+                reason,
+                status_code=409,
+                payload=envelope,
+            )
+        if reason.startswith("permit_"):
+            raise PermitDeniedError(
+                reason,
+                receipt_id=receipt_id,
+                payload=envelope,
+            )
+        if error.get("code") == -32003:
+            raise AuthorizationError(reason, status_code=403, payload=envelope)
+        raise APIError(reason, payload=envelope)
+
+    async def invoke_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        wallet_id: str,
+        permit_id: str,
+        idempotency_key: str,
+    ) -> InvocationResult:
+        """Invoke one MCP tool through the governed permit and receipt loop."""
+        key = self._validate_idempotency_key(idempotency_key)
+        request_payload = {
+            "jsonrpc": "2.0",
+            "id": key,
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments,
+                "mcpContext": {
+                    "wallet_id": wallet_id,
+                    "permit_id": permit_id,
+                    "idempotency_key": key,
+                },
+            },
+        }
+        envelope = await self._request_json(
+            "POST",
+            "/mcp/messages",
+            wallet_id=wallet_id,
+            headers={"Idempotency-Key": key},
+            json=request_payload,
+        )
+        error = envelope.get("error")
+        if isinstance(error, dict):
+            self._raise_mcp_error(error, wallet_id=wallet_id, envelope=envelope)
+
+        result = envelope.get("result")
+        if not isinstance(result, dict):
+            raise APIError("invalid_mcp_result", payload=envelope)
+        receipt = self._parse_receipt(result.get("receipt"), response_name="mcp")
+        if receipt.outcome == "delivery_uncertain":
+            raise DeliveryUncertainError(
+                receipt_id=receipt.receipt_id,
+                payload=envelope,
+            )
+        if result.get("isError") is True:
+            raise APIError(
+                str(result.get("error") or "mcp_call_failed"),
+                payload=envelope,
+            )
+        content = result.get("content")
+        if not isinstance(content, list) or not all(isinstance(item, dict) for item in content):
+            raise APIError("invalid_mcp_content", payload=envelope)
+        structured_content = result.get("structuredContent")
+        if structured_content is not None and not isinstance(structured_content, dict):
+            raise APIError("invalid_mcp_structured_content", payload=envelope)
+        return InvocationResult(
+            content=content,
+            structured_content=(
+                dict(structured_content) if isinstance(structured_content, dict) else None
+            ),
+            receipt=receipt,
+            raw=result,
+        )
+
+    async def get_receipt(self, receipt_id: str) -> Receipt:
+        """Fetch a wallet-authorized signed receipt."""
+        payload = await self._request_json("GET", f"/v1/receipts/{receipt_id}")
+        return self._parse_receipt(payload, response_name="get")
+
+    async def verify_receipt(self, receipt_id: str) -> ReceiptVerification:
+        """Ask the trust plane to verify a receipt signature and linkage."""
+        payload = await self._request_json(
+            "POST",
+            "/v1/receipts/verify",
+            json={"receipt_id": receipt_id},
+        )
+        receipt_data = payload.get("receipt")
+        receipt = (
+            self._parse_receipt(receipt_data, response_name="verify")
+            if receipt_data is not None
+            else None
+        )
+        valid = payload.get("valid")
+        if not isinstance(valid, bool):
+            raise APIError("invalid_receipt_verification", payload=payload)
+        return ReceiptVerification(
+            valid=valid,
+            reason=(str(payload["reason"]) if payload.get("reason") is not None else None),
+            receipt=receipt,
+            raw=payload,
+        )
+
+    async def get_evidence(self, receipt_id: str) -> EvidenceBundle:
+        """Fetch the buyer-facing verification bundle for a receipt."""
+        payload = await self._request_json("GET", f"/v1/evidence/{receipt_id}")
+        receipt = self._parse_receipt(payload.get("receipt"), response_name="evidence")
+        permit_data = payload.get("permit")
+        permit: Permit | None = None
+        if permit_data is not None:
+            if not isinstance(permit_data, dict):
+                raise APIError("invalid_evidence_permit", payload=payload)
+            try:
+                permit = Permit.from_dict(permit_data)
+            except ValueError as exc:
+                raise APIError(f"invalid_evidence_permit: {exc}", payload=payload) from exc
+        verification_data = payload.get("verification")
+        if not isinstance(verification_data, dict):
+            raise APIError("invalid_evidence_verification", payload=payload)
+        valid = payload.get("valid")
+        if not isinstance(valid, bool):
+            raise APIError("invalid_evidence_validity", payload=payload)
+        ledger_entry = payload.get("ledger_entry")
+        audit_event = payload.get("audit_event")
+        dispatch = payload.get("dispatch")
+        return EvidenceBundle(
+            receipt_id=str(payload.get("receipt_id") or receipt.receipt_id),
+            valid=valid,
+            receipt=receipt,
+            permit=permit,
+            ledger_entry=(dict(ledger_entry) if isinstance(ledger_entry, dict) else None),
+            audit_event=(dict(audit_event) if isinstance(audit_event, dict) else None),
+            verification={str(key): str(value) for key, value in verification_data.items()},
+            dispatch=(dict(dispatch) if isinstance(dispatch, dict) else None),
+            raw=payload,
         )
 
     async def charge(
@@ -152,7 +494,7 @@ class B2AClient:
         Raises:
             InsufficientFundsError: If wallet has insufficient balance
         """
-        params = {
+        params: dict[str, str | float] = {
             "wallet_id": wallet_id,
             "service": service_category,
             "units": units,
@@ -470,34 +812,23 @@ class B2AClient:
         """Close the underlying HTTP client."""
         await self._client.aclose()
 
-    async def __aenter__(self) -> "B2AClient":
+    async def __aenter__(self) -> AgentMiddlewareClient:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.close()
 
 
-class InsufficientFundsError(Exception):
-    """
-    Raised when a wallet has insufficient funds for a charge.
+class B2AClient(AgentMiddlewareClient):
+    """Deprecated compatibility name for :class:`AgentMiddlewareClient`."""
 
-    Attributes:
-        wallet_id: The wallet that ran out of funds
-        shortfall: How many more credits were needed
-        top_up_url: URL to top up the wallet
-    """
-
-    def __init__(
-        self,
-        wallet_id: str,
-        shortfall: float | str,
-        top_up_url: str,
-    ):
-        self.wallet_id = wallet_id
-        self.shortfall = float(shortfall) if shortfall != "unknown" else None
-        self.top_up_url = top_up_url
-        super().__init__(
-            f"Insufficient funds in wallet {wallet_id}. "
-            f"Shortfall: {self.shortfall} credits. "
-            f"Top up at: {top_up_url}"
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "B2AClient is deprecated; use AgentMiddlewareClient",
+            DeprecationWarning,
+            stacklevel=2,
         )
+        super().__init__(*args, **kwargs)
+
+
+__all__ = ["AgentMiddlewareClient", "B2AClient", "DryRunSimulation"]

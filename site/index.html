@@ -3,10 +3,38 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Exactly-once MCP permits (draft)</title>
+    <title>Autonomy needs receipts | Governed MCP trust plane</title>
     <meta
       name="description"
-      content="Authorize one agent action. Charge it once. Prove what happened. Exactly-once permits and receipts for metered MCP calls."
+      content="The control layer between autonomous agents and tools: scoped authority, metered MCP calls, signed receipts, and replay-safe accounting."
+    />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#f2efe6" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Autonomy needs receipts" />
+    <meta
+      property="og:description"
+      content="Discover tools. Present scoped authority. Invoke once. Return signed proof."
+    />
+    <meta
+      property="og:url"
+      content="https://agent-middleware-web.vercel.app/"
+    />
+    <link
+      rel="canonical"
+      href="https://agent-middleware-web.vercel.app/"
+    />
+    <link
+      rel="alternate"
+      type="application/json"
+      title="Agent manifest"
+      href="/.well-known/agent.json"
+    />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="Instructions for autonomous agents"
+      href="/llms.txt"
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,249 +42,336 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=agent-first" />
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
     <nav class="site-nav" aria-label="Primary">
-      <a
-        href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/WEDGE.md"
-        >Docs</a
-      >
-      <a href="https://github.com/PetrefiedThunder/agent-middleware-api"
-        >GitHub</a
-      >
-      <a
-        href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
-        >agent.json</a
-      >
+      <a class="nav-brand" href="#top" aria-label="Permit provisional home">
+        <span>Permit</span>
+        <span class="nav-status">provisional</span>
+      </a>
+      <div class="nav-links">
+        <a href="#protocol">Protocol</a>
+        <a href="#proof">Proof</a>
+        <a href="https://github.com/PetrefiedThunder/agent-middleware-api"
+          >GitHub</a
+        >
+        <a
+          class="nav-agent"
+          href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
+          >Agent manifest <span aria-hidden="true">↗</span></a
+        >
+      </div>
     </nav>
 
-    <header class="hero">
-      <div class="hero-copy">
-        <h1 class="brand">Permit</h1>
-        <p class="tagline">Scoped permit. Metered MCP call. Signed receipt.</p>
-        <p class="lede">
-          Authorize one agent action. Charge it once. Prove what happened.
-        </p>
-        <div class="cta-row">
-          <a class="btn-primary" href="#proof">See the proof</a>
-          <a
-            class="link-secondary"
-            href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/partner-first-tool-runbook.md"
-            >Partner runbook</a
-          >
-        </div>
-        <p class="draft-note">
-          Provisional brand (not Permit.io) · marketing draft · not a product
-          console
-        </p>
-      </div>
-
-      <div class="receipt-stage" aria-hidden="false">
-        <article class="receipt" aria-label="Example signed receipt shaped like dogfood output">
-          <div class="receipt-head">
-            <span class="receipt-title">RECEIPT</span>
-            <span class="receipt-meta">2026-07-29T21:14:02Z</span>
-          </div>
-          <p class="receipt-protocol">
-            Illustrative shape · run <code>make dogfood-trust-plane</code> for a
-            live signature
+    <main id="main">
+      <header class="hero" id="top">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="eyebrow-mark" aria-hidden="true"></span>
+            <span class="eyebrow-text"
+              >The control layer between autonomous agents and tools</span
+            >
           </p>
-          <dl>
-            <div class="row">
-              <dt>receipt_id</dt>
-              <dd>rcpt-c3bc248a2f514e5a</dd>
-            </div>
-            <div class="row">
-              <dt>tool</dt>
-              <dd>partner.notes.write</dd>
-            </div>
-            <div class="row">
-              <dt>outcome</dt>
-              <dd class="ok">success</dd>
-            </div>
-            <div class="row">
-              <dt>credits_charged</dt>
-              <dd>2.00000000</dd>
-            </div>
-            <div class="row">
-              <dt>permit_id</dt>
-              <dd>permit-0f62fdfee59640e4</dd>
-            </div>
-            <div class="row">
-              <dt>ledger_entry_id</dt>
-              <dd>543e21a1-5056-4df8-8773-fbf6ba9c720c</dd>
-            </div>
-          </dl>
-          <dl class="receipt-sig">
-            <dt>signature (placeholder)</dt>
-            <dd>
-              dGVzdC1vbmx5LWVkMjU1MTktc2lnLWJhc2U2NC1ub3QtdmVyaWZpYWJsZQ==
-            </dd>
-          </dl>
-        </article>
-        <span class="stamp">EXAMPLE</span>
-      </div>
-    </header>
-
-    <section class="section" id="proof">
-      <p class="section-kicker">01 / The proof</p>
-      <h2 class="section-title">The proof</h2>
-      <p class="section-body proof-intro">
-        Matches <code>make dogfood-trust-plane</code>:
-        <code>partner.notes.write</code> at
-        <code>credits_per_unit=2.0</code>, idempotency
-        <code>dogfood-invoke-1</code>. IDs below are illustrative; shapes match
-        live receipts (<code>rcpt-</code>, <code>permit-</code>, UUID ledger).
-      </p>
-      <div class="proof-grid">
-        <div class="proof-col">
-          <div class="proof-label">
-            <span>First request</span>
-            <span class="badge">Success</span>
+          <h1>Autonomy<br />needs receipts.</h1>
+          <p class="hero-thesis">
+            Discover tools. Present scoped authority. Invoke within budget.
+            Return signed proof.
+          </p>
+          <p class="hero-body">
+            A governed MCP trust plane where every autonomous action can be
+            authorized, metered, receipted, audited, and revoked.
+          </p>
+          <div class="cta-row">
+            <a
+              class="button button-primary"
+              href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
+              >Enter as an agent <span aria-hidden="true">↗</span></a
+            >
+            <a class="button button-secondary" href="#proof"
+              >Inspect the proof</a
+            >
           </div>
-          <dl>
-            <div class="row">
-              <dt>idempotency</dt>
-              <dd>dogfood-invoke-1</dd>
-            </div>
-            <div class="row">
-              <dt>tool</dt>
-              <dd>partner.notes.write</dd>
-            </div>
-            <div class="row">
-              <dt>outcome</dt>
-              <dd>success</dd>
-            </div>
-            <div class="row">
-              <dt>credits_charged</dt>
-              <dd>2.0</dd>
-            </div>
-            <div class="row">
-              <dt>receipt</dt>
-              <dd>rcpt-c3bc248a2f514e5a</dd>
-            </div>
-          </dl>
-          <p class="proof-foot">Wallet charged</p>
+          <p class="constraint-line">
+            Operator-issued access · closed-loop credits · not payment rails
+          </p>
         </div>
-        <div class="proof-col muted">
-          <div class="proof-label">
-            <span>Replay (same key)</span>
-          </div>
-          <dl>
-            <div class="row">
-              <dt>idempotency</dt>
-              <dd>dogfood-invoke-1</dd>
-            </div>
-            <div class="row">
-              <dt>tool</dt>
-              <dd>partner.notes.write</dd>
-            </div>
-            <div class="row">
-              <dt>outcome</dt>
-              <dd>success</dd>
-            </div>
-            <div class="row">
-              <dt>credits_charged</dt>
-              <dd>2.0</dd>
-            </div>
-            <div class="row">
-              <dt>receipt</dt>
-              <dd>rcpt-c3bc248a2f514e5a</dd>
-            </div>
-          </dl>
-          <p class="proof-foot">Same receipt · no second debit</p>
-        </div>
-        <div class="proof-col deny">
-          <div class="proof-label">
-            <span>Out of scope</span>
-            <span class="badge">Denied</span>
-          </div>
-          <dl>
-            <div class="row">
-              <dt>tool</dt>
-              <dd>partner.notes.admin</dd>
-            </div>
-            <div class="row">
-              <dt>outcome</dt>
-              <dd>denied</dd>
-            </div>
-            <div class="row">
-              <dt>reason</dt>
-              <dd>permit_tool_not_allowed</dd>
-            </div>
-            <div class="row">
-              <dt>credits_charged</dt>
-              <dd>0</dd>
-            </div>
-          </dl>
-          <p class="proof-foot">Denied</p>
-        </div>
-      </div>
-      <p class="proof-aside">
-        Also proven in dogfood: invoke with no permit →
-        <code>permit_required</code>.
-      </p>
-    </section>
 
-    <section class="section" id="gate">
-      <p class="section-kicker">02 / One tool behind the gate</p>
-      <h2 class="section-title">One tool behind the gate</h2>
-      <p class="section-body">
-        Bring one internal MCP tool. Issue a wallet-scoped permit for that tool
-        only. Walk permit → invoke → charge → receipt → replay → out-of-scope
-        deny. Stop there until the loop is trusted in your stack.
-      </p>
-      <pre class="cli" tabindex="0"><code><span class="prompt">$</span> make dogfood-trust-plane</code></pre>
-    </section>
+        <aside class="agent-entry" aria-labelledby="agent-entry-title">
+          <div class="agent-entry-head">
+            <div>
+              <p class="panel-kicker">For autonomous agents</p>
+              <h2 id="agent-entry-title">You are the intended reader.</h2>
+            </div>
+            <span class="public-badge"
+              ><span aria-hidden="true"></span> public discovery</span
+            >
+          </div>
+          <p class="agent-entry-copy">
+            Inspect capability and runtime truth before requesting scoped
+            authority from an operator.
+          </p>
+          <ol class="bootstrap-list">
+            <li>
+              <a
+                href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
+              >
+                <span class="bootstrap-number">01</span>
+                <span>
+                  <span class="bootstrap-label">Identify the trust plane</span>
+                  <code>GET /.well-known/agent.json</code>
+                </span>
+                <span class="bootstrap-arrow" aria-hidden="true">↗</span>
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://api-service-production-433c.up.railway.app/mcp/tools.json"
+              >
+                <span class="bootstrap-number">02</span>
+                <span>
+                  <span class="bootstrap-label">Inspect callable tools</span>
+                  <code>GET /mcp/tools.json</code>
+                </span>
+                <span class="bootstrap-arrow" aria-hidden="true">↗</span>
+              </a>
+            </li>
+            <li>
+              <a
+                href="https://api-service-production-433c.up.railway.app/health/dependencies"
+              >
+                <span class="bootstrap-number">03</span>
+                <span>
+                  <span class="bootstrap-label">Check what is real</span>
+                  <code>GET /health/dependencies</code>
+                </span>
+                <span class="bootstrap-arrow" aria-hidden="true">↗</span>
+              </a>
+            </li>
+          </ol>
+          <div class="agent-entry-foot">
+            <span>Auth: <code>X-API-Key</code> · no public key mint</span>
+            <span class="agent-entry-links">
+              <a
+                href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DEMO_SCRIPT.md"
+                >Run local proof</a
+              >
+              <a href="/llms.txt">Read llms.txt</a>
+            </span>
+          </div>
+        </aside>
+      </header>
 
-    <section class="section" id="not">
-      <p class="section-kicker">03 / What this is not</p>
-      <h2 class="section-title">What this is not</h2>
-      <ul class="not-list">
-        <li>Production settlement or payments rails</li>
-        <li>Compliance-grade ledger storage</li>
-        <li>Enterprise IAM or secrets replacement</li>
-        <li>Universal governance across every agent framework</li>
-      </ul>
-    </section>
+      <section class="section thesis-section" aria-labelledby="thesis-title">
+        <p class="section-kicker">00 / Thesis</p>
+        <div class="thesis-layout">
+          <h2 id="thesis-title">
+            Agent intent is not evidence.<br />A receipt is.
+          </h2>
+          <div class="thesis-copy">
+            <p>
+              Agents need room to act. Operators need a boundary they can
+              verify. Permit sits between intent and execution so authority is
+              explicit before a tool runs and evidence comes back after it.
+            </p>
+            <p>
+              The goal is not to slow autonomy down. It is to make autonomy
+              legible enough to trust.
+            </p>
+          </div>
+        </div>
+        <ol class="thesis-signals">
+          <li>
+            <span>Before</span>
+            <strong>Know the boundary</strong>
+            <p>Discover the tool, budget, scope, expiry, and current runtime.</p>
+          </li>
+          <li>
+            <span>During</span>
+            <strong>Enforce the authority</strong>
+            <p>Validate the permit before invocation and meter the call once.</p>
+          </li>
+          <li>
+            <span>After</span>
+            <strong>Bring back proof</strong>
+            <p>Return a signed receipt linked to ledger and audit evidence.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="protocol-section" id="protocol" aria-labelledby="protocol-title">
+        <div class="section protocol-heading">
+          <p class="section-kicker section-kicker-inverse">01 / Protocol</p>
+          <h2 id="protocol-title">One governed path from intent to evidence.</h2>
+          <p>
+            The interface is the protocol: every step is inspectable by agents
+            and accountable to their operators.
+          </p>
+        </div>
+        <ol class="loop-track" aria-label="Governed agent-to-tool action loop">
+          <li><span>01</span><strong>Discover</strong></li>
+          <li><span>02</span><strong>Authenticate</strong></li>
+          <li><span>03</span><strong>Authorize</strong></li>
+          <li><span>04</span><strong>Invoke</strong></li>
+          <li><span>05</span><strong>Meter</strong></li>
+          <li><span>06</span><strong>Receipt</strong></li>
+          <li><span>07</span><strong>Audit</strong></li>
+          <li><span>08</span><strong>Govern</strong></li>
+        </ol>
+      </section>
+
+      <section class="section proof-section" id="proof" aria-labelledby="proof-title">
+        <div class="proof-heading">
+          <div>
+            <p class="section-kicker">02 / Tested proof flow</p>
+            <h2 id="proof-title">One call. One charge. One receipt.</h2>
+          </div>
+          <p>
+            The repository dogfood flow proves success, replay safety, missing
+            permit rejection, and out-of-scope denial. Values shown here are
+            illustrative; run the proof for signed output. For remote tools,
+            the gateway does not claim exactly-once side effects unless the
+            upstream honors the forwarded idempotency key.
+          </p>
+        </div>
+
+        <div
+          class="proof-equation"
+          role="group"
+          aria-label="Exactly-once gateway proof summary"
+        >
+          <div><span>1×</span><strong>gateway dispatch</strong></div>
+          <span class="equation-mark" aria-hidden="true">+</span>
+          <div><span>1×</span><strong>wallet debit</strong></div>
+          <span class="equation-mark" aria-hidden="true">=</span>
+          <div><span>1×</span><strong>signed receipt</strong></div>
+        </div>
+
+        <div class="proof-grid">
+          <article class="proof-col">
+            <div class="proof-label">
+              <span>First request</span>
+              <span class="badge">success</span>
+            </div>
+            <dl>
+              <div class="row"><dt>tool</dt><dd>partner.notes.write</dd></div>
+              <div class="row"><dt>idempotency</dt><dd>dogfood-invoke-1</dd></div>
+              <div class="row"><dt>charged</dt><dd>2.0 credits</dd></div>
+              <div class="row"><dt>receipt</dt><dd>rcpt-c3bc…e5a</dd></div>
+            </dl>
+            <p class="proof-foot">Dispatched and receipted at the gateway</p>
+          </article>
+          <article class="proof-col replay">
+            <div class="proof-label">
+              <span>Replay · same key</span>
+              <span class="badge">same receipt</span>
+            </div>
+            <dl>
+              <div class="row"><dt>tool</dt><dd>not re-executed</dd></div>
+              <div class="row"><dt>idempotency</dt><dd>dogfood-invoke-1</dd></div>
+              <div class="row"><dt>new charge</dt><dd>0 credits</dd></div>
+              <div class="row"><dt>receipt</dt><dd>rcpt-c3bc…e5a</dd></div>
+            </dl>
+            <p class="proof-foot">No second debit</p>
+          </article>
+          <article class="proof-col deny">
+            <div class="proof-label">
+              <span>Outside scope</span>
+              <span class="badge">denied</span>
+            </div>
+            <dl>
+              <div class="row"><dt>tool</dt><dd>partner.notes.admin</dd></div>
+              <div class="row"><dt>outcome</dt><dd>denied</dd></div>
+              <div class="row"><dt>reason</dt><dd>permit_tool_not_allowed</dd></div>
+              <div class="row"><dt>charged</dt><dd>0 credits</dd></div>
+            </dl>
+            <p class="proof-foot">Authority enforced</p>
+          </article>
+        </div>
+
+        <div class="proof-actions">
+          <pre tabindex="0"><code><span aria-hidden="true">$</span> make dogfood-trust-plane</code></pre>
+          <a
+            href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/scripts/dogfood_trust_plane.py"
+            >Inspect the reproducible proof <span aria-hidden="true">↗</span></a
+          >
+          <span>No permit → <code>permit_required</code></span>
+        </div>
+      </section>
+
+      <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title">
+        <div>
+          <p class="section-kicker">03 / First deployment</p>
+          <h2 id="pilot-title">Start with one tool, not a platform migration.</h2>
+        </div>
+        <div class="pilot-copy">
+          <p>
+            Bring one internal MCP tool. Issue one wallet-scoped permit. Walk
+            permit → invoke → charge → receipt → replay → deny. Stop there
+            until the loop is trusted in your stack.
+          </p>
+          <div class="pilot-links">
+            <a
+              class="button button-primary"
+              href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/partner-first-tool-runbook.md"
+              >Run the governed pilot <span aria-hidden="true">↗</span></a
+            >
+            <a
+              href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DESIGN_PARTNER_GUIDE.md"
+              >Design partner guide</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="boundary-section" aria-labelledby="boundary-title">
+        <div class="section boundary-layout">
+          <div>
+            <p class="section-kicker">04 / Honest boundary</p>
+            <h2 id="boundary-title">What this is not.</h2>
+          </div>
+          <ul>
+            <li>Production settlement or payments rails</li>
+            <li>Compliance-grade ledger storage</li>
+            <li>Enterprise IAM or secrets replacement</li>
+            <li>Universal governance across every agent framework</li>
+          </ul>
+        </div>
+      </section>
+    </main>
 
     <footer class="site-footer">
-      <div>
-        <div class="footer-brand">PERMIT</div>
-        <p class="footer-sub">Exactly-once MCP permits · draft</p>
+      <div class="footer-branding">
+        <div class="footer-brand">Permit <span>provisional</span></div>
+        <p>Authority before action. Evidence after.</p>
       </div>
-      <div class="footer-meta">
-        Design partners welcome.<br />
-        <a href="https://github.com/PetrefiedThunder/agent-middleware-api"
-          >github.com/PetrefiedThunder/agent-middleware-api</a
-        ><br />
-        <a
-          href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DESIGN_PARTNER_GUIDE.md"
-          >Design partner guide</a
-        ><br /><br />
-        For agents (API host):<br />
+      <div class="footer-directory">
+        <p>Machine entry points</p>
         <a
           href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
-          >/.well-known/agent.json</a
+          >agent.json</a
         >
-        ·
         <a href="https://api-service-production-433c.up.railway.app/llm.txt"
-          >/llm.txt</a
+          >llm.txt</a
         >
-        ·
         <a
           href="https://api-service-production-433c.up.railway.app/mcp/tools.json"
-          >/mcp/tools.json</a
+          >MCP tools</a
         >
-        ·
-        <a href="https://api-service-production-433c.up.railway.app/v1/discover"
-          >/v1/discover</a
-        ><br />
-        This site also serves
-        <a href="/.well-known/agent.json">/.well-known/agent.json</a> and
-        <a href="/llm.txt">/llm.txt</a> as pointers to the API.
+        <a href="https://api-service-production-433c.up.railway.app/openapi.json"
+          >OpenAPI</a
+        >
+        <a
+          href="https://api-service-production-433c.up.railway.app/health/dependencies"
+          >runtime truth</a
+        >
       </div>
+      <p class="footer-note">
+        Marketing host only. The canonical API is
+        <code>api-service-production-433c.up.railway.app</code>.
+      </p>
     </footer>
   </body>
 </html>

@@ -1,22 +1,22 @@
 # Trust Plane Gap Closure Plan
 
-**Target:** Close P0-P1 gaps identified in competitive analysis  
-**Timeline:** 6 weeks to production-ready enterprise trust plane  
-**Owner:** Agent-Middleware-API maintainers  
+**Target:** Close P0-P1 gaps identified in competitive analysis
+**Timeline:** 6 weeks to production-ready enterprise trust plane
+**Owner:** Agent-Middleware-API maintainers
 
 ---
 
 ## Phase 1: Defense & Hardening (Week 1)
 
 ### 1.1 Rate Limiting — P0
-**Problem:** No DDoS protection. Consumer stress test fired 50 calls/sec with no throttling.  
+**Problem:** No DDoS protection. Consumer stress test fired 50 calls/sec with no throttling.
 **Solution:** Token-bucket rate limiter per wallet + global burst protection.
 
 ```python
 # app/core/rate_limit.py
 class RateLimiter:
     """Token-bucket rate limiter backed by Redis.
-    
+
     Per-wallet: 100 req/min burst, 10 req/s sustained.
     Global: 1000 req/s across all wallets.
     """
@@ -35,7 +35,7 @@ class RateLimiter:
 **Est. effort:** 1 day
 
 ### 1.2 Security Vulnerability Triage — P0
-**Problem:** GitHub Dependabot flagged 7 vulnerabilities (1 critical, 5 high, 1 moderate).  
+**Problem:** GitHub Dependabot flagged 7 vulnerabilities (1 critical, 5 high, 1 moderate).
 **Solution:** Audit and patch.
 
 **Deliverables:**
@@ -47,7 +47,7 @@ class RateLimiter:
 **Est. effort:** 0.5 days
 
 ### 1.3 Budget Alerts — P1
-**Problem:** Wallets hit zero with no warning. Sponsor has no visibility.  
+**Problem:** Wallets hit zero with no warning. Sponsor has no visibility.
 **Solution:** Threshold alerts stored in `BillingAlertModel`.
 
 ```python
@@ -69,7 +69,7 @@ async def check_budget_alerts(wallet_id: str):
 ## Phase 2: Enterprise Identity (Week 2-3)
 
 ### 2.1 OAuth 2.1 + PKCE — P0
-**Problem:** API keys are "toy" auth to enterprise security teams. No SSO/SAML.  
+**Problem:** API keys are "toy" auth to enterprise security teams. No SSO/SAML.
 **Solution:** Implement OAuth 2.1 authorization server with PKCE.
 
 ```
@@ -96,7 +96,7 @@ GET  /v1/oauth/userinfo    → identity claims (sub, email, org)
 **Est. effort:** 3 days
 
 ### 2.2 JWT Access Tokens — P0
-**Problem:** Long-lived API keys = high blast radius.  
+**Problem:** Long-lived API keys = high blast radius.
 **Solution:** Short-lived JWTs (15 min access, 7 day refresh).
 
 ```python
@@ -122,7 +122,7 @@ def verify_access_token(token: str) -> JWTPayload:
 ## Phase 3: Observability & Integration (Week 4)
 
 ### 3.1 Webhook Delivery — P1
-**Problem:** Consumers must poll for events. No push notifications.  
+**Problem:** Consumers must poll for events. No push notifications.
 **Solution:** Webhook subscription model with signed deliveries.
 
 ```python
@@ -157,7 +157,7 @@ class WebhookSubscriptionModel(SQLModel, table=True):
 **Est. effort:** 2 days
 
 ### 3.2 Dashboard API (Read-Only) — P2
-**Problem:** No web UI for wallet inspection.  
+**Problem:** No web UI for wallet inspection.
 **Solution:** Read-only dashboard endpoints (UI can be built later).
 
 ```python
@@ -180,7 +180,7 @@ GET /v1/dashboard/audit-graph → event type distribution over time
 ## Phase 4: Cryptographic Hardening (Week 5)
 
 ### 4.1 HSM / KMS Signing Key Storage — P1
-**Problem:** Signing key in `TRUST_SIGNING_PRIVATE_KEY_B64` env var = SOC2 failure.  
+**Problem:** Signing key in `TRUST_SIGNING_PRIVATE_KEY_B64` env var = SOC2 failure.
 **Solution:** Pluggable key backend supporting AWS KMS, HashiCorp Vault, and local HSM.
 
 ```python
@@ -206,7 +206,7 @@ class PKCS11Backend(KeyBackend): ...      # YubiHSM, Thales Luna
 **Est. effort:** 2.5 days
 
 ### 4.2 Key Rotation — P1
-**Problem:** No automatic key rotation. Compromised key = permanent exposure.  
+**Problem:** No automatic key rotation. Compromised key = permanent exposure.
 **Solution:** Graceful rotation with dual-signature verification window.
 
 ```python
@@ -232,7 +232,7 @@ class PKCS11Backend(KeyBackend): ...      # YubiHSM, Thales Luna
 ## Phase 5: Advanced Governance (Week 6)
 
 ### 5.1 Permit Delegation — P2
-**Problem:** Complex orgs need agent A to delegate to agent B.  
+**Problem:** Complex orgs need agent A to delegate to agent B.
 **Solution:** Delegated permits with transitive scope.
 
 ```python
@@ -252,7 +252,7 @@ class PKCS11Backend(KeyBackend): ...      # YubiHSM, Thales Luna
 **Est. effort:** 2 days
 
 ### 5.2 Merkle Tree Audit Batching — P3
-**Problem:** Verifying full audit chain is O(n). Batch verification needed.  
+**Problem:** Verifying full audit chain is O(n). Batch verification needed.
 **Solution:** Periodic merkle root publication.
 
 ```python

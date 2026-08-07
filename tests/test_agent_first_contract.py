@@ -44,3 +44,19 @@ async def test_agent_first_declares_product_wedge(client):
     assert "proof_surface_note" in meta
     resp = await client.get("/.well-known/agent.json")
     assert resp.json()["agent_first"] == meta
+
+
+@pytest.mark.anyio
+async def test_agent_manifest_offers_honest_credential_free_local_proof(client):
+    resp = await client.get("/.well-known/agent.json")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    trial = data["try_it"]
+    assert trial["mode"] == "local_self_hosted"
+    assert trial["command"] == "make prove-trust-plane"
+    assert trial["requires_live_credentials"] is False
+    assert trial["live_access"] == "operator_issued"
+    assert "signed_receipt" in trial["proves"]
+    assert "replay_without_second_charge" in trial["proves"]
+    assert data["authentication"]["public_self_serve"] is False

@@ -50,9 +50,7 @@ async def test_refresh_works_while_the_key_is_active(
 ):
     """Control: the happy path must keep working."""
     provisioned = await provision_agent_wallet(client)
-    tokens = await _mint_tokens(
-        client, provisioned["agent_headers"]["X-API-Key"]
-    )
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
 
     resp = await client.post(
         "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
@@ -68,9 +66,7 @@ async def test_emergency_revocation_kills_refresh_tokens(
     """Emergency revocation must revoke derived refresh tokens, not just keys."""
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
-    tokens = await _mint_tokens(
-        client, provisioned["agent_headers"]["X-API-Key"]
-    )
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
 
     result = await get_api_key_service().emergency_revocation(
         wallet_id=wallet_id,
@@ -99,9 +95,7 @@ async def test_refresh_denied_once_the_wallet_has_no_active_key(
     revocation route, which does not touch refresh tokens directly.
     """
     provisioned = await provision_agent_wallet(client)
-    tokens = await _mint_tokens(
-        client, provisioned["agent_headers"]["X-API-Key"]
-    )
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
 
     await get_api_key_service().revoke_key(
         wallet_id=provisioned["agent_wallet_id"],
@@ -142,12 +136,16 @@ async def test_refresh_denied_once_every_key_has_expired(
     factory = get_session_factory()
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(APIKeyModel).where(
-                    APIKeyModel.wallet_id == provisioned["agent_wallet_id"]
+            (
+                await session.execute(
+                    select(APIKeyModel).where(
+                        APIKeyModel.wallet_id == provisioned["agent_wallet_id"]
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in rows:
             row.expires_at = utc_now() - timedelta(minutes=5)
             session.add(row)
@@ -220,9 +218,7 @@ async def test_rotation_carries_the_key_binding_forward(
     """Refreshing must not launder a bound chain into an unbound one."""
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
-    tokens = await _mint_tokens(
-        client, provisioned["agent_headers"]["X-API-Key"]
-    )
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
 
     rotated = await client.post(
         "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
@@ -251,9 +247,49 @@ async def test_rotation_carries_the_key_binding_forward(
 
 
 @pytest.mark.anyio
-async def test_revoked_key_cannot_mint_new_tokens(
+async def test_legacy_unbound_refresh_token_fails_closed(
     client, clean_database, signing_key
 ):
+    """A pre-migration token cannot renew through a live sibling key."""
+    from app.core.jwt import get_jwt_service
+    from app.db.database import get_session_factory
+    from app.db.models import RefreshTokenModel
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
+    payload = get_jwt_service().verify_refresh_token(tokens["refresh_token"])
+
+    sibling = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "replacement"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert sibling.status_code == 201
+
+    # Recreate the only state available for rows written before migration 025.
+    factory = get_session_factory()
+    async with factory() as session:
+        record = await session.get(RefreshTokenModel, payload.jti)
+        assert record is not None
+        record.key_id = None
+        session.add(record)
+        await session.commit()
+
+    denied = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    assert denied.status_code == 401
+    assert denied.json()["detail"]["error"] == "unbound_refresh_token"
+
+    async with factory() as session:
+        record = await session.get(RefreshTokenModel, payload.jti)
+        assert record is not None
+        assert record.revoked is True
+
+
+@pytest.mark.anyio
+async def test_revoked_key_cannot_mint_new_tokens(client, clean_database, signing_key):
     """The front door closes too: a revoked key cannot exchange for tokens."""
     provisioned = await provision_agent_wallet(client)
     api_key = provisioned["agent_headers"]["X-API-Key"]

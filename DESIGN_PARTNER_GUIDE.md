@@ -126,9 +126,11 @@ Then walk the partner through the live flow:
 Use:
 
 - "Authorize one agent action. Charge it once. Prove what happened."
-- "Exactly-once permits and receipts for metered MCP calls."
+- "Exactly-once gateway authorization, debit, and receipt finalization for
+  metered MCP calls."
 - "Signed proof of authorization, execution, and credit debit for one tool."
-- "Replay-safe metering: same idempotency key, same receipt, no second debit."
+- "Replay-safe metering: same idempotency key, same receipt, no second gateway
+  dispatch or debit."
 
 Avoid:
 
@@ -138,6 +140,8 @@ Avoid:
 - "Complete policy layer for all agent frameworks."
 - "Compliance-grade ledger or audit storage."
 - Claiming a marketing-page signature is live cryptographic proof.
+- Claiming an arbitrary remote tool's side effect is exactly once when that
+  tool does not honor the forwarded idempotency key.
 ## Do Not Promise Yet
 
 - Settlement rails.

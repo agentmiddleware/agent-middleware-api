@@ -66,17 +66,43 @@ logger = logging.getLogger(__name__)
 # Keywords that indicate high compatibility with this control plane
 COMPATIBILITY_KEYWORDS = {
     "native": [
-        "agent", "api", "headless", "programmatic", "machine-to-machine",
-        "webhook", "mqtt", "iot", "telemetry", "media", "content",
-        "scheduling", "automation", "b2a", "mcp",
+        "agent",
+        "api",
+        "headless",
+        "programmatic",
+        "machine-to-machine",
+        "webhook",
+        "mqtt",
+        "iot",
+        "telemetry",
+        "media",
+        "content",
+        "scheduling",
+        "automation",
+        "b2a",
+        "mcp",
     ],
     "compatible": [
-        "rest", "json", "openapi", "oauth", "api-key", "webhook",
-        "streaming", "async", "batch", "graphql",
+        "rest",
+        "json",
+        "openapi",
+        "oauth",
+        "api-key",
+        "webhook",
+        "streaming",
+        "async",
+        "batch",
+        "graphql",
     ],
     "bridgeable": [
-        "gui", "dashboard", "web-app", "saas", "portal",
-        "manual", "interactive", "form",
+        "gui",
+        "dashboard",
+        "web-app",
+        "saas",
+        "portal",
+        "manual",
+        "interactive",
+        "form",
     ],
 }
 
@@ -155,8 +181,7 @@ SIMULATED_DIRECTORY: list[dict] = [
         "url": "https://api.openai.com",
         "name": "OpenAI API",
         "description": (
-            "Large language model API with GPT-4, embeddings, "
-            "and assistants."
+            "Large language model API with GPT-4, embeddings, and assistants."
         ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
@@ -164,25 +189,25 @@ SIMULATED_DIRECTORY: list[dict] = [
                 "name": "chat-completion",
                 "description": "Generate text with LLMs",
                 "endpoint": "/v1/chat/completions",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "embeddings",
                 "description": "Generate text embeddings",
                 "endpoint": "/v1/embeddings",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "assistants",
                 "description": "Programmatic agent creation and management",
                 "endpoint": "/v1/assistants",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "function-calling",
                 "description": "Structured tool use for agents",
                 "endpoint": "/v1/chat/completions",
-                "method": "POST"
+                "method": "POST",
             },
         ],
     },
@@ -190,8 +215,7 @@ SIMULATED_DIRECTORY: list[dict] = [
         "url": "https://api.anthropic.com",
         "name": "Anthropic API",
         "description": (
-            "Claude models with tool use, MCP integration, "
-            "and agent-native features."
+            "Claude models with tool use, MCP integration, and agent-native features."
         ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
@@ -199,25 +223,25 @@ SIMULATED_DIRECTORY: list[dict] = [
                 "name": "messages",
                 "description": "Generate responses with Claude models",
                 "endpoint": "/v1/messages",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "tool-use",
                 "description": "Structured tool calling for agent workflows",
                 "endpoint": "/v1/messages",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "mcp-integration",
                 "description": "Model Context Protocol server support",
                 "endpoint": "/v1/messages",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "batch-api",
                 "description": "Async batch processing for high-volume agent tasks",
                 "endpoint": "/v1/messages/batches",
-                "method": "POST"
+                "method": "POST",
             },
         ],
     },
@@ -234,25 +258,25 @@ SIMULATED_DIRECTORY: list[dict] = [
                 "name": "payments",
                 "description": "Process payments programmatically",
                 "endpoint": "/v1/payment_intents",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "subscriptions",
                 "description": "Recurring billing and subscription management",
                 "endpoint": "/v1/subscriptions",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "webhooks",
                 "description": "Event-driven webhook notifications",
                 "endpoint": "/v1/webhook_endpoints",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "usage-billing",
                 "description": "Metered API billing for agent consumption",
                 "endpoint": "/v1/billing/meters",
-                "method": "POST"
+                "method": "POST",
             },
         ],
     },
@@ -266,19 +290,19 @@ SIMULATED_DIRECTORY: list[dict] = [
                 "name": "sms",
                 "description": "Send and receive SMS messages programmatically",
                 "endpoint": "/2010-04-01/Accounts/{sid}/Messages",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "voice",
                 "description": "Programmable voice calls",
                 "endpoint": "/2010-04-01/Accounts/{sid}/Calls",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "webhooks",
                 "description": "Event webhooks for message status",
                 "endpoint": "/v1/webhooks",
-                "method": "POST"
+                "method": "POST",
             },
         ],
     },
@@ -295,25 +319,25 @@ SIMULATED_DIRECTORY: list[dict] = [
                 "name": "repositories",
                 "description": "Repository management and code access",
                 "endpoint": "/repos/{owner}/{repo}",
-                "method": "GET"
+                "method": "GET",
             },
             {
                 "name": "pull-requests",
                 "description": "Automated PR creation and review",
                 "endpoint": "/repos/{owner}/{repo}/pulls",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "actions",
                 "description": "CI/CD pipeline automation",
                 "endpoint": "/repos/{owner}/{repo}/actions",
-                "method": "GET"
+                "method": "GET",
             },
             {
                 "name": "webhooks",
                 "description": "Repository event notifications",
                 "endpoint": "/repos/{owner}/{repo}/hooks",
-                "method": "POST"
+                "method": "POST",
             },
         ],
     },
@@ -321,8 +345,7 @@ SIMULATED_DIRECTORY: list[dict] = [
         "url": "https://api.cloudflare.com",
         "name": "Cloudflare API",
         "description": (
-            "Edge computing, DNS, CDN, and security "
-            "for agent-deployed infrastructure."
+            "Edge computing, DNS, CDN, and security for agent-deployed infrastructure."
         ),
         "directory_type": DirectoryType.OPENAPI,
         "capabilities": [
@@ -330,19 +353,19 @@ SIMULATED_DIRECTORY: list[dict] = [
                 "name": "workers",
                 "description": "Edge compute for agent workloads",
                 "endpoint": "/client/v4/accounts/{id}/workers/scripts",
-                "method": "PUT"
+                "method": "PUT",
             },
             {
                 "name": "dns",
                 "description": "Programmatic DNS management",
                 "endpoint": "/client/v4/zones/{id}/dns_records",
-                "method": "POST"
+                "method": "POST",
             },
             {
                 "name": "r2-storage",
                 "description": "S3-compatible object storage",
                 "endpoint": "/client/v4/accounts/{id}/r2/buckets",
-                "method": "POST"
+                "method": "POST",
             },
         ],
     },
@@ -366,8 +389,8 @@ class CrawlEngine:
         tags: list[str],
     ) -> IndexedAPI | None:
         """Crawl a URL and extract API metadata."""
-        # Production still uses deterministic/synthetic extraction (#34); simulation
-        # only gates durable hash + integration metadata, not this code path.
+        # The frozen proof surface still uses deterministic/synthetic extraction;
+        # simulation only gates durable hash + integration metadata, not this path.
         # Simulate network crawl (production: real HTTP requests)
         match = next((d for d in SIMULATED_DIRECTORY if d["url"] == url), None)
 
@@ -386,7 +409,7 @@ class CrawlEngine:
                     "name": "api-access",
                     "description": f"REST API at {domain}",
                     "endpoint": "/",
-                    "method": "GET"
+                    "method": "GET",
                 },
             ]
 
@@ -465,7 +488,7 @@ class RegistrationEngine:
         profile_overrides: dict | None = None,
     ) -> RegistrationResult:
         """Register our API with an external directory."""
-        require_simulation("oracle", issue="#34")
+        require_simulation("oracle")
         profile = {**OUR_PROFILE}
         if profile_overrides:
             profile.update(profile_overrides)
@@ -496,6 +519,7 @@ def domain_host_from_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Oracle Store
 # ---------------------------------------------------------------------------
+
 
 class OracleStore:
     """PostgreSQL-backed store for crawl targets, indexed APIs, registrations, and discovery hits."""
@@ -618,13 +642,9 @@ class OracleStore:
         factory = get_session_factory()
         filters: list = []
         if tier:
-            filters.append(
-                OracleIndexedAPIModel.compatibility_tier == tier.value
-            )
+            filters.append(OracleIndexedAPIModel.compatibility_tier == tier.value)
         if directory_type:
-            filters.append(
-                OracleIndexedAPIModel.directory_type == directory_type.value
-            )
+            filters.append(OracleIndexedAPIModel.directory_type == directory_type.value)
         count_stmt = select(func.count()).select_from(OracleIndexedAPIModel)
         stmt = select(OracleIndexedAPIModel)
         if filters:
@@ -636,9 +656,7 @@ class OracleStore:
         if limit is not None:
             stmt = stmt.limit(limit).offset(offset)
         async with factory() as session:
-            total = int(
-                (await session.execute(count_stmt)).scalar_one()
-            )
+            total = int((await session.execute(count_stmt)).scalar_one())
             result = await session.execute(stmt)
             rows = list(result.scalars().all())
         return [indexed_api_model_to_schema(r) for r in rows], total
@@ -656,9 +674,7 @@ class OracleStore:
         needle = f"%{domain.strip()}%"
         filt = cast(ColumnElement[str], OracleCrawlTargetModel.url).ilike(needle)
         count_stmt = (
-            select(func.count())
-            .select_from(OracleCrawlTargetModel)
-            .where(filt)
+            select(func.count()).select_from(OracleCrawlTargetModel).where(filt)
         )
         stmt = (
             select(OracleCrawlTargetModel)
@@ -729,18 +745,30 @@ class OracleStore:
         self._require_db()
         factory = get_session_factory()
         async with factory() as session:
-            targets = await session.scalar(
-                select(func.count()).select_from(OracleCrawlTargetModel)
-            ) or 0
-            indexed = await session.scalar(
-                select(func.count()).select_from(OracleIndexedAPIModel)
-            ) or 0
-            registrations = await session.scalar(
-                select(func.count()).select_from(OracleRegistrationModel)
-            ) or 0
-            hits = await session.scalar(
-                select(func.count()).select_from(OracleDiscoveryHitModel)
-            ) or 0
+            targets = (
+                await session.scalar(
+                    select(func.count()).select_from(OracleCrawlTargetModel)
+                )
+                or 0
+            )
+            indexed = (
+                await session.scalar(
+                    select(func.count()).select_from(OracleIndexedAPIModel)
+                )
+                or 0
+            )
+            registrations = (
+                await session.scalar(
+                    select(func.count()).select_from(OracleRegistrationModel)
+                )
+                or 0
+            )
+            hits = (
+                await session.scalar(
+                    select(func.count()).select_from(OracleDiscoveryHitModel)
+                )
+                or 0
+            )
 
             referrer_rows = await session.execute(
                 select(
@@ -778,6 +806,7 @@ def _parse_iso(value: object) -> datetime | None:
 # Agent Oracle Orchestrator
 # ---------------------------------------------------------------------------
 
+
 class AgentOracle:
     """
     Top-level orchestrator for Agent Oracle Infiltration.
@@ -805,13 +834,16 @@ class AgentOracle:
         target_id = str(uuid.uuid4())
         raw_hash: str | None = None
 
-        await self.store.store_target(target_id, {
-            "target_id": target_id,
-            "url": url,
-            "directory_type": directory_type.value,
-            "status": OracleStatus.CRAWLING.value,
-            "queued_at": datetime.now(timezone.utc).isoformat(),
-        })
+        await self.store.store_target(
+            target_id,
+            {
+                "target_id": target_id,
+                "url": url,
+                "directory_type": directory_type.value,
+                "status": OracleStatus.CRAWLING.value,
+                "queued_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
         # Execute crawl
         indexed = await self.crawler.crawl_target(url, directory_type, tags or [])
@@ -864,9 +896,7 @@ class AgentOracle:
         audit_context: dict[str, Any] | None = None,
     ) -> list[IndexedAPI]:
         """Crawl multiple URLs concurrently."""
-        tasks = [
-            self.crawl(url, audit_context=audit_context) for url in urls
-        ]
+        tasks = [self.crawl(url, audit_context=audit_context) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return [r for r in results if isinstance(r, IndexedAPI)]
 
@@ -986,13 +1016,15 @@ class AgentOracle:
             )
             nodes.append(node)
             self_node.connections.append(api.api_id)
-            edges.append({
-                "source": "self",
-                "target": api.api_id,
-                "relationship": "indexed",
-                "compatibility": api.compatibility_tier.value,
-                "score": api.compatibility_score,
-            })
+            edges.append(
+                {
+                    "source": "self",
+                    "target": api.api_id,
+                    "relationship": "indexed",
+                    "compatibility": api.compatibility_tier.value,
+                    "score": api.compatibility_score,
+                }
+            )
 
         # Add registered directories
         for reg in registrations:
@@ -1007,11 +1039,13 @@ class AgentOracle:
                 )
                 nodes.append(node)
                 self_node.connections.append(reg_id)
-                edges.append({
-                    "source": "self",
-                    "target": reg_id,
-                    "relationship": "registered",
-                })
+                edges.append(
+                    {
+                        "source": "self",
+                        "target": reg_id,
+                        "relationship": "registered",
+                    }
+                )
 
         return NetworkGraphResponse(
             nodes=nodes,

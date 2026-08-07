@@ -10,6 +10,7 @@ from sqlalchemy import desc, select
 from sqlalchemy import func
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.time import to_naive_utc
 from app.db.database import get_session_factory
 from app.db.models import ControlPlaneAuditEventModel
 
@@ -70,6 +71,8 @@ def _to_event(row: ControlPlaneAuditEventModel) -> AuditEvent:
 async def record_audit_event(
     *,
     event: str,
+    event_id: str | None = None,
+    created_at: datetime | None = None,
     wallet_id: str | None = None,
     tool: str | None = None,
     endpoint: str | None = None,
@@ -81,8 +84,11 @@ async def record_audit_event(
     error: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> AuditEvent:
+    if event_id is not None and (not event_id or len(event_id) > 50):
+        raise ValueError("audit_event_id_invalid")
     model = ControlPlaneAuditEventModel(
-        event_id=f"audit-{uuid.uuid4().hex[:16]}",
+        event_id=event_id or f"audit-{uuid.uuid4().hex[:16]}",
+        **({"created_at": to_naive_utc(created_at)} if created_at is not None else {}),
         event=event,
         wallet_id=wallet_id,
         tool=tool,
@@ -99,8 +105,8 @@ async def record_audit_event(
 
     # Sign + persist under a per-wallet chain-head lock so concurrent writers
     # cannot fork the hash chain.
-    await append_chained_audit_event(model)
-    return _to_event(model)
+    persisted = await append_chained_audit_event(model)
+    return _to_event(persisted)
 
 
 async def list_audit_events(
@@ -120,7 +126,9 @@ async def list_audit_events(
 ) -> list[AuditEvent]:
     stmt = (
         select(ControlPlaneAuditEventModel)
-        .order_by(desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at)))
+        .order_by(
+            desc(cast(ColumnElement[Any], ControlPlaneAuditEventModel.created_at))
+        )
         .limit(limit)
         .offset(offset)
     )
@@ -239,7 +247,9 @@ def _apply_audit_filters(stmt, **filters):
     if ok is not None:
         stmt = stmt.where(ControlPlaneAuditEventModel.ok == ok)
     if created_after:
+        created_after = to_naive_utc(created_after)
         stmt = stmt.where(ControlPlaneAuditEventModel.created_at >= created_after)
     if created_before:
+        created_before = to_naive_utc(created_before)
         stmt = stmt.where(ControlPlaneAuditEventModel.created_at <= created_before)
     return stmt

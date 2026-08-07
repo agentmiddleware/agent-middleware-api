@@ -9,7 +9,7 @@ Local development: stripe listen --forward-to localhost:8000/v1/webhooks/stripe
 import logging
 from fastapi import APIRouter, Request, HTTPException, status
 
-from ..services.stripe_integration import get_stripe_integration
+from ..services.stripe_integration import StripeSettlementError, get_stripe_integration
 from ..services.kyc_service import get_kyc_service
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,17 @@ async def handle_stripe_webhook(request: Request):
         )
 
     stripe_integration = get_stripe_integration()
-    success = await stripe_integration.handle_webhook(payload, sig_header)
+    try:
+        success = await stripe_integration.handle_webhook(payload, sig_header)
+    except StripeSettlementError as exc:
+        logger.warning("Rejected invalid Stripe settlement: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "invalid_stripe_settlement",
+                "message": str(exc),
+            },
+        ) from exc
 
     if not success:
         raise HTTPException(

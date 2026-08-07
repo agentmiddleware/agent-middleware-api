@@ -36,6 +36,10 @@ from app.services.human_approval import (
     HumanApprovalService,
     HumanApprovalUnavailableError,
 )
+from app.services.idempotency import (
+    GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    get_idempotency_service,
+)
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
@@ -56,8 +60,10 @@ async def client():
 @pytest.fixture
 def registered_tool():
     registry = get_service_registry()
+    executions = {"count": 0}
 
     def approval_echo(message: str = "ok") -> dict:
+        executions["count"] += 1
         return {"message": message}
 
     registry.register_local(
@@ -69,7 +75,7 @@ def registered_tool():
         credits_per_unit=2.0,
         unit_name="call",
     )
-    yield
+    yield executions
     registry.unregister_local(TOOL)
 
 
@@ -766,8 +772,8 @@ async def test_one_approval_cannot_charge_twice_across_transports(
     client, clean_database, registered_tool, fresh_service, monkeypatch
 ):
     """A single human decision authorizes exactly one invoke, even though the
-    same (wallet, permit, tool, key) reaches the pipeline from both the
-    JSON-RPC and REST endpoints (which use different idempotency endpoints)."""
+    same logical (wallet, permit, tool, key) reaches the pipeline over both
+    JSON-RPC and REST transports."""
     _sentinel_env(monkeypatch, simulated=False)
     fake = FakeSentinel(status="pending")
     monkeypatch.setattr(fresh_service, "_sentinel", lambda: fake)
@@ -782,10 +788,16 @@ async def test_one_approval_cannot_charge_twice_across_transports(
     first = await client.post(
         "/mcp/messages", json=body, headers=provisioned["agent_headers"]
     )
-    assert first.json()["result"]["receipt"]["outcome"] == "success"
+    first_result = first.json()["result"]
+    receipt = first_result["receipt"]
+    assert receipt["outcome"] == "success"
+    assert registered_tool["count"] == 1
     assert await _ledger_debits(client, provisioned["agent_wallet_id"]) == 1
 
-    # Same key over the REST transport must not re-spend the approval.
+    # Same logical request over REST replays the signed terminal result. It
+    # must not re-enter the approval gate, execute the tool, or charge again.
+    approvals_created = len(fake.created)
+    approval_polls = fake.polls
     rest = await client.post(
         f"/mcp/tools/{TOOL}/invoke",
         json={
@@ -799,9 +811,32 @@ async def test_one_approval_cannot_charge_twice_across_transports(
         },
         headers=provisioned["agent_headers"],
     )
-    assert rest.status_code == 403
-    assert rest.json()["detail"]["error"] == "human_approval_consumed"
+    assert rest.status_code == 200
+    rest_result = rest.json()
+    assert {key: value for key, value in rest_result.items() if value is not None} == (
+        first_result
+    )
+    assert rest_result["receipt"]["receipt_id"] == receipt["receipt_id"]
+    assert len(fake.created) == approvals_created == 1
+    assert fake.polls == approval_polls == 1
+    assert registered_tool["count"] == 1
     assert await _ledger_debits(client, provisioned["agent_wallet_id"]) == 1
+    record = await get_idempotency_service().get_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key="xport-invoke-1",
+    )
+    assert record is not None
+    assert record.status_code == 200
+    assert record.response_reference == receipt["receipt_id"]
+
+    verify = await client.post(
+        "/v1/receipts/verify",
+        json={"receipt_id": receipt["receipt_id"]},
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert verify.status_code == 200
+    assert verify.json()["valid"] is True
 
 
 @pytest.mark.anyio

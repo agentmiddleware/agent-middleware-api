@@ -1,7 +1,10 @@
-# Marketing site draft
+# Agent-first marketing site
 
-Provisional static landing for exactly-once MCP permits (closed-loop credits).
-Brand wordmark is a placeholder — not affiliated with Permit.io.
+Provisional static landing for the governed MCP trust plane. It carries one
+thesis for both audiences: **autonomy needs receipts**. Humans get the product
+argument; autonomous agents get an above-the-fold bootstrap path and matching
+machine-readable pointers. The brand wordmark remains a placeholder and is not
+affiliated with Permit.io.
 
 ## View locally
 
@@ -13,26 +16,33 @@ Open http://127.0.0.1:8765/
 
 ## Scope
 
-- Hero: authorize / charge once / prove — see the proof (not live crypto)
+- Hero: control layer between autonomous agents and tools
+- Agent entry: manifest → MCP tools → dependency truth, with honest auth limits
+- Protocol: discover → authenticate → authorize → invoke → meter → receipt → audit → govern
 - Proof: success → replay (same receipt) → deny; notes `permit_required`
-- Partner path: `make dogfood-trust-plane` + runbook link
+- Local agent trial: `make prove-trust-plane` (no live credentials)
+- Partner path: one internal tool + runbook link
 - Explicit non-claims
 
-Illustrative receipt IDs use live shapes (`rcpt-`, `permit-`, UUID ledger).
-Dogfood numbers: `credits_per_unit=2.0`, idempotency `dogfood-invoke-1`.
-Signature on the page is a base64 placeholder; run dogfood +
-`/v1/receipts/verify` for a real signature.
+Illustrative proof values use the dogfood flow's real shapes and idempotency
+key. Run the proof command for signed output; the page does not present its
+example values as a live transaction.
 
 No live metering, signup, or API keys on this page.
 
-## Agent discovery (not human SEO)
+## Agent discovery
 
 This host should help machines find the API:
 
 - `/.well-known/agent.json` — pointer with absolute API discovery URLs
 - `/llm.txt` and `/llms.txt` — short bootstrap prose pointing at the API
+- `<link rel="alternate">` hints in the HTML head for both pointer formats
 - Footer / nav links to the live Railway discovery surfaces
 - Vercel redirects for `/mcp/tools.json`, `/v1/discover`, `/openapi.json` → API
+
+The pointer also advertises the self-contained local trial
+`make prove-trust-plane`. Live protected routes still require an
+operator-issued key; the marketing host never mints credentials.
 
 Canonical machine base URL:
 `https://api-service-production-433c.up.railway.app`

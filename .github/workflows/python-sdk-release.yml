@@ -1,0 +1,68 @@
+name: Python SDK Release
+
+on:
+  push:
+    tags:
+      - "python-sdk-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Verify tag matches the package version
+        run: |
+          SDK_VERSION=$(python -c "import tomllib; print(tomllib.load(open('b2a_sdk/pyproject.toml', 'rb'))['project']['version'])")
+          test "$GITHUB_REF_NAME" = "python-sdk-v$SDK_VERSION"
+          echo "SDK_VERSION=$SDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Build wheel and source distribution
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv pytest pytest-asyncio ruff mypy twine
+          uv build b2a_sdk --out-dir sdk-dist
+
+      - name: Validate clean wheel installation
+        run: |
+          python -m venv /tmp/b2a-sdk-release-smoke
+          /tmp/b2a-sdk-release-smoke/bin/python -m pip install "sdk-dist/b2a_sdk-${SDK_VERSION}-py3-none-any.whl"
+          cd /tmp
+          /tmp/b2a-sdk-release-smoke/bin/python -c "import b2a_sdk; assert b2a_sdk.__version__ == '${SDK_VERSION}'"
+
+      - name: Test and inspect the release artifacts
+        run: |
+          pip install "sdk-dist/b2a_sdk-${SDK_VERSION}-py3-none-any.whl"
+          cd /tmp
+          python -m pytest "$GITHUB_WORKSPACE/b2a_sdk/tests" -q
+          cd "$GITHUB_WORKSPACE"
+          ruff check b2a_sdk/src b2a_sdk/tests tests/test_python_sdk_trust_loop.py
+          mypy --follow-imports=skip \
+            b2a_sdk/src/b2a_sdk/client.py \
+            b2a_sdk/src/b2a_sdk/models.py \
+            b2a_sdk/src/b2a_sdk/errors.py
+          twine check \
+            "sdk-dist/b2a_sdk-${SDK_VERSION}-py3-none-any.whl" \
+            "sdk-dist/b2a_sdk-${SDK_VERSION}.tar.gz"
+
+      - name: Attach artifacts to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" sdk-dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" sdk-dist/* \
+              --verify-tag \
+              --title "Python SDK ${SDK_VERSION}" \
+              --generate-notes
+          fi

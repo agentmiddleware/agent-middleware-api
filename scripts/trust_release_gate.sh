@@ -14,6 +14,7 @@ TRUST_TESTS=(
   tests/test_golden_path.py
   tests/test_demo_trust_plane.py
   tests/test_mcp_trust.py
+  tests/test_refund_reconciliation.py
   tests/test_mcp_trust_mode.py
   tests/test_trust_operator_inspection.py
   tests/test_signing_key_lifecycle.py

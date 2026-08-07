@@ -1,9 +1,9 @@
 # Hyper-Focused Sprints: Trust Plane Gap Closure
 
-**Target:** Production-ready enterprise trust plane  
-**Sprint cadence:** 2-week sprints  
-**Team size:** 1-2 engineers  
-**Total duration:** 8 sprints (16 weeks)  
+**Target:** Production-ready enterprise trust plane
+**Sprint cadence:** 2-week sprints
+**Team size:** 1-2 engineers
+**Total duration:** 8 sprints (16 weeks)
 
 ---
 

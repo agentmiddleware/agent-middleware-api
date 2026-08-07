@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
 
+from app.core.time import to_naive_utc
 from app.services.velocity_monitor import (
     VelocityMonitor,
     VelocityCheckResult,
@@ -65,7 +66,7 @@ class TestVelocityMonitorReset:
         monitor._reset_if_needed(wallet, now)
 
         assert wallet.hourly_spent == Decimal("0")
-        assert wallet.hourly_reset_at == now
+        assert wallet.hourly_reset_at == to_naive_utc(now)
 
     def test_reset_daily_after_midnight(self):
         monitor = VelocityMonitor()
@@ -73,7 +74,9 @@ class TestVelocityMonitorReset:
         yesterday = datetime.now(timezone.utc) - timedelta(days=1)
         wallet.hourly_reset_at = yesterday
         wallet.hourly_spent = Decimal("500")
-        wallet.daily_reset_at = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+        wallet.daily_reset_at = yesterday.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         wallet.daily_spent = Decimal("1000")
 
         now = datetime.now(timezone.utc)
@@ -158,7 +161,11 @@ class TestVelocityMonitorIntegration:
 
             resp = await client.post(
                 "/v1/billing/wallets/sponsor",
-                json={"sponsor_name": "Test", "email": "t@t.com", "initial_credits": 10000},
+                json={
+                    "sponsor_name": "Test",
+                    "email": "t@t.com",
+                    "initial_credits": 10000,
+                },
                 headers=headers,
             )
             wallet_id = resp.json()["wallet_id"]

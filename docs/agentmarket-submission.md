@@ -3,85 +3,68 @@
 ## Listing Information
 
 **Service Name:** Agent-Native Middleware API
-**Category:** Infrastructure / Agent Platform
-**Pricing:** Free tier (1000 credits/month) + Pay-as-you-go
+**Category:** MCP authorization and metering infrastructure
+**Pricing:** Design-partner pilot; no public SLA or commercial tier is committed
 
 ## Listing Content
 
 ```markdown
 # Agent-Native Middleware API
 
-**Operational control plane for autonomous agents.**
+**Governed control point for autonomous agent tool calls.**
 
-Agent Middleware API provides identity, billing, discovery, policy, and execution governance for machine-native software tenants.
+Agent Middleware API authorizes, meters, dispatches, receipts, and audits one
+MCP tool call under a wallet-scoped permit.
 
-Canonical loop: `discover -> authenticate -> invoke -> meter -> govern`.
+Canonical loop: `discover -> authenticate -> authorize -> meter -> dispatch -> receipt -> audit -> govern`.
 
 ## Capabilities
 
-### Core Infrastructure
-- **Identity & Authority** — Wallet-scoped agents, delegated credentials, API-key rotation, KYC hooks
-- **Discovery & Negotiation** — MCP, `.well-known/agent.json`, `llm.txt`, OpenAPI, `/v1/discover`
-- **Execution Governance** — Tool invocation, planner constraints, service health, simulation state
-- **Economics** — Dry-run pricing, spend limits, ledgering, Stripe integration
-- **Governance** — Telemetry, audit surfaces, readiness, security posture
+- **Scoped authority** — signed permits bind wallet, key, tool, budget, and expiry
+- **Replay-safe metering** — one gateway debit and dispatch per idempotency key
+- **Remote MCP dispatch** — one operator-configured HTTPS Streamable HTTP tool
+- **Signed evidence** — receipts link permit, ledger, dispatch state, and audit
+- **Explicit uncertainty** — ambiguous post-dispatch failures are signed and not retried
 
-### Protocol Support
-- **MCP (Model Context Protocol)** — Native tool discovery and execution
-- **AWI Standard** — Proof-of-usefulness surface for standardized web automation
-- **REST API** — Full REST API for all services
-
-### Proof Surfaces
-- **AWI (Agentic Web Interface)** — Web automation without DOM fighting, human pause/steer
-- **Agent Communication** — Agent-to-agent messaging, swarm coordination
-- **AI Decision Making** — Autonomous decisions, self-healing, natural language queries, memory
-- **Sandboxing** — Dry-run and bounded execution environments
-
-### Framework Integrations
-- LangGraph ✓
-- CrewAI ✓
-- AutoGen ✓
-- LlamaIndex ✓
+AWI, browser, RAG, sandbox, telemetry, and orchestration code in the repository
+is disabled proof-surface scaffolding, not part of this listing.
 
 ## Quick Start
 
 ```python
-from agent_middleware import B2AClient
+from b2a_sdk import AgentMiddlewareClient, PermitRequest
 
-client = B2AClient(
+client = AgentMiddlewareClient(
     api_url="https://api.agent-middleware.dev",
-    api_key="your-api-key",
-    wallet_id="your-wallet-id"
+    api_key="your-api-key"
 )
 
-# Check balance
-balance = await client.get_balance()
-
-# Emit telemetry
-await client.emit_telemetry("task_completed", {"task": "data_processing"})
-
-# Make AI decision
-decision = await client.decide(
-    context={"options": ["proceed", "wait", "abort"]},
-    options=["proceed", "wait", "abort"]
+permit = await client.create_permit(
+    PermitRequest(...),
+    idempotency_key="permit-01",
+)
+result = await client.invoke_tool(
+    "partner.tool",
+    {"input": "value"},
+    wallet_id="wallet-id",
+    permit_id=permit.permit_id,
+    idempotency_key="invoke-01",
 )
 ```
 
 ## Pricing
 
-| Tier | Price | Credits | Features |
-|------|-------|---------|----------|
-| Free | $0 | 1000/month | Basic telemetry, messaging |
-| Pro | $10/mo | Unlimited | AI decisions, AWI, priority support |
-| Enterprise | Custom | Unlimited | Multi-tenant, SLA, dedicated support |
+No public pricing, free-credit grant, uptime SLA, or compliance commitment is
+currently offered. This submission describes a controlled design-partner
+pilot.
 
 ## Documentation
 
 - [API Reference](https://api.agent-middleware.dev/docs)
 - [OpenAPI Spec](https://api.agent-middleware.dev/openapi.json)
 - [LLM Docs](https://api.agent-middleware.dev/llm.txt)
-- [AWI Adoption Guide](https://github.com/PetrefiedThunder/agent-middleware-api/blob/master/docs/awi-adoption-guide.md)
-- [Agent Recipes](https://github.com/PetrefiedThunder/agent-middleware-api/blob/master/docs/agent-recipes.md)
+- [Security limitations](https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md)
+- [Design-partner guide](https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DESIGN_PARTNER_GUIDE.md)
 
 ## Repository
 
@@ -89,7 +72,7 @@ https://github.com/PetrefiedThunder/agent-middleware-api
 
 ## Demo
 
-Public demo instance: https://api.agent-middleware.dev
+No public production demo or SLA is promised by this document.
 ```
 
 ## Submission URLs

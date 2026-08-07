@@ -6,7 +6,7 @@
 python scripts/generate_sim_inventory.py
 ```
 
-- **Local MCP tools:** 9
+- **Local MCP tools:** 0
 
 _Canonical timestamp and machine-readable snapshot: `docs/sim-inventory.json`._
 
@@ -28,12 +28,3 @@ _Canonical timestamp and machine-readable snapshot: `docs/sim-inventory.json`._
 
 | Tool | simulation | integrationStatus | runtimeService | category |
 |------|------------|-------------------|----------------|----------|
-| `awi_dom_action_preview` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_dom_bridge_session` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_dom_state` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_dom_sync` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_memory_index` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_passkey_challenge` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_passkey_verify` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_rag_query` | `True` | `simulated` | `agent_comms` | `agent_comms` |
-| `awi_session_context` | `True` | `simulated` | `agent_comms` | `agent_comms` |

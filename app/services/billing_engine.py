@@ -1,0 +1,878 @@
+"""Billing, metering, ledger, and reporting engine for AgentMoney.
+
+The HTTP and Python compatibility surface remains app.services.agent_money.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any, cast
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
+
+from ..core.config import Settings
+from ..core.time import utc_now
+from ..db.converters import billing_alert_model_to_schema, ledger_entry_model_to_schema
+from ..db.models import (
+    BillingAlertModel,
+    IdempotencyRecordModel,
+    LedgerEntryModel,
+    ServiceRegistryModel,
+    WalletModel,
+)
+from ..schemas.billing import (
+    AlertSeverity,
+    AlertType,
+    ArbitrageReport,
+    BillingAlert,
+    InsufficientFundsResponse,
+    LedgerAction,
+    LedgerEntry,
+    ServiceCategory,
+    ServicePricing,
+    ServiceRegistration,
+    TopUpResponse,
+    WalletStatus,
+    WalletType,
+)
+from .shadow_ledger import SimulatedChargeResult, get_shadow_ledger
+from .velocity_monitor import WalletFrozenError, get_velocity_monitor
+from .wallet_engine import (
+    SessionFactoryProvider,
+    WalletEngine,
+    WalletNotFoundFactory,
+)
+
+KYCRequiredFactory = Callable[[str, str], Exception]
+
+logger = logging.getLogger(__name__)
+
+_NON_SPENDABLE_WALLET_STATUSES = frozenset(
+    {
+        WalletStatus.FROZEN.value,
+        WalletStatus.SUSPENDED.value,
+        WalletStatus.CLOSED.value,
+    }
+)
+
+
+class DirectTopUpDisabledError(RuntimeError):
+    """Raised when code attempts to mint credits without provider settlement."""
+
+
+class LedgerOperationConflictError(RuntimeError):
+    """Raised when one governed operation key describes different debits."""
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _timestamp_in_current_period(
+    timestamp: datetime,
+    period_start: datetime | None,
+) -> bool:
+    if period_start is None:
+        return True
+    return _as_utc(timestamp) >= _as_utc(period_start)
+
+
+class BillingEngine:
+    """Internal billing and ledger implementation behind AgentMoney."""
+
+    def __init__(
+        self,
+        *,
+        session_factory: SessionFactoryProvider,
+        settings: Settings,
+        wallet_engine: WalletEngine,
+        default_pricing: dict[ServiceCategory, tuple[str, Decimal, str]],
+        compute_costs: dict[ServiceCategory, Decimal],
+        exchange_rate: Decimal,
+        wallet_not_found_error: WalletNotFoundFactory,
+        kyc_required_error: KYCRequiredFactory,
+    ) -> None:
+        self._session_factory = session_factory
+        self._settings = settings
+        self._wallet_engine = wallet_engine
+        self._default_pricing = default_pricing
+        self._compute_costs = compute_costs
+        self._exchange_rate = exchange_rate
+        self._wallet_not_found_error = wallet_not_found_error
+        self._kyc_required_error = kyc_required_error
+
+    @staticmethod
+    async def _get_operation_debit(
+        session: AsyncSession,
+        *,
+        wallet_id: str,
+        operation_key: str,
+    ) -> LedgerEntryModel | None:
+        return (
+            await session.execute(
+                select(LedgerEntryModel).where(
+                    cast(
+                        ColumnElement[bool],
+                        LedgerEntryModel.wallet_id == wallet_id,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        LedgerEntryModel.operation_key == operation_key,
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
+    def _assert_operation_debit_matches(
+        entry: LedgerEntryModel,
+        *,
+        wallet_id: str,
+        operation_key: str,
+        service_category: ServiceCategory,
+        charge_amount: Decimal,
+        request_path: str | None,
+    ) -> None:
+        if (
+            entry.wallet_id != wallet_id
+            or entry.operation_key != operation_key
+            or entry.action != LedgerAction.DEBIT.value
+            or entry.amount != -charge_amount
+            or entry.service_category != service_category.value
+            or entry.request_path != request_path
+        ):
+            raise LedgerOperationConflictError("ledger_operation_key_reused")
+
+    async def _dry_run_charge(
+        self,
+        wallet_id: str,
+        service_category: ServiceCategory,
+        units: Decimal,
+        charge_amount: Decimal,
+        description: str,
+        session_id: str | None,
+    ) -> SimulatedChargeResult:
+        """
+        Simulate a charge without affecting real balance or velocity.
+
+        This is a dry-run operation that:
+        - Does NOT record to the real ledger
+        - Does NOT trigger velocity monitoring
+        - Returns cost estimate with virtual balance impact
+
+        If session_id is provided, uses the shadow ledger for stateful tracking.
+        If session_id is None, returns a single-shot estimate based on real balance.
+        """
+        if session_id:
+            shadow_ledger = get_shadow_ledger()
+            try:
+                result = await shadow_ledger.simulate_charge(
+                    session_id=session_id,
+                    service_category=service_category,
+                    units=float(units),
+                    description=description,
+                )
+                return result
+            except ValueError as e:
+                if "Session not found" in str(e):
+                    raise ValueError(f"Dry-run session not found: {session_id}")
+                raise
+
+        wallet = await self._wallet_engine.get_wallet(wallet_id)
+        if not wallet:
+            raise self._wallet_not_found_error(wallet_id)
+
+        # Bug fix: SimulatedChargeResult declares these fields as Decimal for
+        # monetary precision. `wallet` here is the WalletResponse schema,
+        # whose `balance` is already a display float; use the paired
+        # `balance_exact` decimal string (falling back to the float only if
+        # it's somehow absent) instead of round-tripping through float twice.
+        wallet_balance = (
+            Decimal(wallet.balance_exact)
+            if wallet.balance_exact is not None
+            else Decimal(str(wallet.balance))
+        )
+
+        return SimulatedChargeResult(
+            session_id=session_id or "",
+            wallet_id=wallet_id,
+            service_category=service_category.value,
+            units=float(units),
+            credits_would_charge=charge_amount,
+            simulated_balance_before=wallet_balance,
+            simulated_balance_after=wallet_balance - charge_amount,
+            would_succeed=wallet_balance >= charge_amount,
+            reason=(
+                None
+                if wallet_balance >= charge_amount
+                else "insufficient_simulated_funds"
+            ),
+            dry_run=True,
+        )
+
+    async def _apply_charge_to_locked_wallet(
+        self,
+        session: AsyncSession,
+        *,
+        wallet_id: str,
+        service_category: ServiceCategory,
+        units: Decimal,
+        unit_name: str,
+        credits_per_unit: Decimal,
+        charge_amount: Decimal,
+        compute_cost: Decimal,
+        margin: Decimal,
+        request_path: str | None,
+        description: str,
+        operation_key: str | None,
+    ) -> LedgerEntry | InsufficientFundsResponse:
+        result = await session.execute(
+            select(WalletModel)
+            .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
+            .with_for_update()
+        )
+        wallet = result.scalar_one_or_none()
+
+        if not wallet:
+            # The velocity monitor returns early without recording when the
+            # wallet is absent, so there is nothing to reverse here.
+            raise self._wallet_not_found_error(wallet_id)
+
+        def reverse_velocity_record() -> None:
+            # The velocity monitor committed these counters before this
+            # transaction acquired the wallet lock. A rejected debit must
+            # reverse exactly that increment.
+            wallet.hourly_spent = max(Decimal("0"), wallet.hourly_spent - charge_amount)
+            wallet.daily_spent = max(Decimal("0"), wallet.daily_spent - charge_amount)
+
+        if wallet.status in _NON_SPENDABLE_WALLET_STATUSES:
+            reverse_velocity_record()
+            return InsufficientFundsResponse(
+                wallet_id=wallet_id,
+                current_balance=float(wallet.balance),
+                current_balance_exact=str(wallet.balance),
+                required_amount=float(charge_amount),
+                required_amount_exact=str(charge_amount),
+                shortfall=0.0,
+                shortfall_exact="0",
+                top_up_url="",
+                message=f"Wallet is {wallet.status} and cannot be charged.",
+            )
+
+        if wallet.wallet_type == WalletType.CHILD.value and wallet.max_spend:
+            new_debits = wallet.lifetime_debits + charge_amount
+            if new_debits > wallet.max_spend:
+                remaining = wallet.max_spend - wallet.lifetime_debits
+                shortfall = charge_amount - remaining
+                reverse_velocity_record()
+                return InsufficientFundsResponse(
+                    wallet_id=wallet_id,
+                    current_balance=float(wallet.balance),
+                    current_balance_exact=str(wallet.balance),
+                    required_amount=float(charge_amount),
+                    required_amount_exact=str(charge_amount),
+                    shortfall=float(shortfall),
+                    shortfall_exact=str(shortfall),
+                    top_up_url="/v1/billing/top-up/prepare",
+                    message="Child wallet lifetime spend cap exceeded.",
+                )
+
+        if wallet.daily_limit and wallet.daily_spent > wallet.daily_limit:
+            prior_daily_spent = wallet.daily_spent - charge_amount
+            remaining = wallet.daily_limit - prior_daily_spent
+            shortfall = charge_amount - remaining
+            reverse_velocity_record()
+            return InsufficientFundsResponse(
+                wallet_id=wallet_id,
+                current_balance=float(wallet.balance),
+                current_balance_exact=str(wallet.balance),
+                required_amount=float(charge_amount),
+                required_amount_exact=str(charge_amount),
+                shortfall=float(shortfall),
+                shortfall_exact=str(shortfall),
+                top_up_url="/v1/billing/top-up/prepare",
+                message="Daily spending limit exceeded.",
+            )
+
+        if wallet.balance < charge_amount:
+            shortfall = charge_amount - wallet.balance
+            reverse_velocity_record()
+            return InsufficientFundsResponse(
+                wallet_id=wallet_id,
+                current_balance=float(wallet.balance),
+                current_balance_exact=str(wallet.balance),
+                required_amount=float(charge_amount),
+                required_amount_exact=str(charge_amount),
+                shortfall=float(shortfall),
+                shortfall_exact=str(shortfall),
+                top_up_url="/v1/billing/top-up/prepare",
+            )
+
+        wallet.balance -= charge_amount
+        wallet.lifetime_debits += charge_amount
+        wallet.updated_at = utc_now()
+
+        entry = LedgerEntryModel(
+            entry_id=str(uuid.uuid4()),
+            wallet_id=wallet_id,
+            action=LedgerAction.DEBIT.value,
+            amount=-charge_amount,
+            balance_after=wallet.balance,
+            service_category=service_category.value,
+            description=(
+                description or f"{units} × {unit_name} @ {credits_per_unit} credits"
+            ),
+            request_path=request_path,
+            compute_cost=compute_cost,
+            margin=margin,
+            operation_key=operation_key,
+        )
+        session.add(entry)
+
+        if wallet.balance < (wallet.auto_refill_threshold or Decimal("100")):
+            session.add(
+                BillingAlertModel(
+                    alert_id=str(uuid.uuid4())[:12],
+                    wallet_id=wallet_id,
+                    alert_type=AlertType.LOW_BALANCE.value,
+                    current_balance=wallet.balance,
+                    message=(
+                        f"Wallet balance low: {wallet.balance} credits remaining."
+                    ),
+                    severity=AlertSeverity.WARNING.value,
+                )
+            )
+
+        return ledger_entry_model_to_schema(entry)
+
+    # --- Micro-Metering & Charging ---
+
+    async def charge(
+        self,
+        wallet_id: str,
+        service_category: ServiceCategory,
+        units: Decimal = Decimal("1"),
+        request_path: str | None = None,
+        description: str = "",
+        dry_run: bool = False,
+        dry_run_session_id: str | None = None,
+        operation_key: str | None = None,
+    ) -> LedgerEntry | InsufficientFundsResponse | SimulatedChargeResult:
+        """
+        Charge an agent wallet for API usage with ACID transaction.
+
+        Uses SELECT ... FOR UPDATE to lock the wallet row during the transaction.
+        Also checks spend velocity and auto-freezes on anomalous patterns.
+
+        If dry_run=True, simulates the charge without affecting real balance
+        or triggering velocity monitoring. Uses the shadow ledger for tracking.
+        """
+        pricing = self._default_pricing.get(service_category)
+        if not pricing:
+            raise ValueError(f"No pricing for {service_category.value}")
+
+        unit_name, credits_per_unit, _ = pricing
+        charge_amount = units * credits_per_unit
+
+        if dry_run:
+            return await self._dry_run_charge(
+                wallet_id=wallet_id,
+                service_category=service_category,
+                units=units,
+                charge_amount=charge_amount,
+                description=description or f"{units} × {unit_name}",
+                session_id=dry_run_session_id,
+            )
+
+        compute_cost = units * self._compute_costs.get(service_category, Decimal("0"))
+        margin = charge_amount - compute_cost
+
+        if operation_key is not None:
+            if (
+                not operation_key
+                or operation_key != operation_key.strip()
+                or len(operation_key) > 128
+            ):
+                raise ValueError("invalid_ledger_operation_key")
+
+        velocity_monitor = get_velocity_monitor()
+
+        try:
+            async with self._session_factory()() as session:
+                async with session.begin():
+                    if operation_key is not None:
+                        # The idempotency record is the durable lock for this
+                        # governed financial operation. Holding it across the
+                        # velocity check and debit prevents a concurrent retry
+                        # from recording velocity or balance changes twice.
+                        operation_record = (
+                            await session.execute(
+                                select(IdempotencyRecordModel)
+                                .where(
+                                    cast(
+                                        ColumnElement[bool],
+                                        IdempotencyRecordModel.record_id
+                                        == operation_key,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        IdempotencyRecordModel.wallet_id == wallet_id,
+                                    ),
+                                )
+                                .with_for_update()
+                            )
+                        ).scalar_one_or_none()
+                        if operation_record is None:
+                            raise ValueError("ledger_operation_record_not_found")
+                        existing_entry = await self._get_operation_debit(
+                            session,
+                            wallet_id=wallet_id,
+                            operation_key=operation_key,
+                        )
+                        if existing_entry is not None:
+                            self._assert_operation_debit_matches(
+                                existing_entry,
+                                wallet_id=wallet_id,
+                                operation_key=operation_key,
+                                service_category=service_category,
+                                charge_amount=charge_amount,
+                                request_path=request_path,
+                            )
+                            return ledger_entry_model_to_schema(existing_entry)
+
+                    velocity_result = await velocity_monitor.check_and_record_charge(
+                        wallet_id, charge_amount
+                    )
+
+                    if velocity_result.should_freeze:
+                        raise WalletFrozenError(wallet_id, velocity_result.reason)
+
+                    return await self._apply_charge_to_locked_wallet(
+                        session,
+                        wallet_id=wallet_id,
+                        service_category=service_category,
+                        units=units,
+                        unit_name=unit_name,
+                        credits_per_unit=credits_per_unit,
+                        charge_amount=charge_amount,
+                        compute_cost=compute_cost,
+                        margin=margin,
+                        request_path=request_path,
+                        description=description,
+                        operation_key=operation_key,
+                    )
+        except IntegrityError:
+            if operation_key is None:
+                raise
+            # The unique wallet/operation-key constraint is the final guard if
+            # a non-service writer raced the locked governed path. The failed
+            # transaction rolled back its balance mutation; adopt only an
+            # invariant-equivalent durable debit.
+            async with self._session_factory()() as recovery_session:
+                existing_entry = await self._get_operation_debit(
+                    recovery_session,
+                    wallet_id=wallet_id,
+                    operation_key=operation_key,
+                )
+                if existing_entry is None:
+                    raise
+                self._assert_operation_debit_matches(
+                    existing_entry,
+                    wallet_id=wallet_id,
+                    operation_key=operation_key,
+                    service_category=service_category,
+                    charge_amount=charge_amount,
+                    request_path=request_path,
+                )
+                return ledger_entry_model_to_schema(existing_entry)
+
+    async def refund_charge(
+        self,
+        *,
+        wallet_id: str,
+        charge_entry_id: str,
+        description: str = "",
+    ) -> LedgerEntry:
+        """Reverse a prior debit with a correlated refund ledger entry."""
+        async with self._session_factory()() as session:
+            async with session.begin():
+                refund_entry_id = f"refund-{charge_entry_id}"
+                wallet_result = await session.execute(
+                    select(WalletModel)
+                    .where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+                    )
+                    .with_for_update()
+                )
+                wallet = wallet_result.scalar_one_or_none()
+                if not wallet:
+                    raise self._wallet_not_found_error(wallet_id)
+
+                charge_result = await session.execute(
+                    select(LedgerEntryModel).where(
+                        cast(
+                            ColumnElement[bool],
+                            LedgerEntryModel.entry_id == charge_entry_id,
+                        ),
+                        cast(
+                            ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            LedgerEntryModel.action == LedgerAction.DEBIT.value,
+                        ),
+                    )
+                )
+                charge_entry = charge_result.scalar_one_or_none()
+                if not charge_entry:
+                    raise ValueError(f"Debit ledger entry not found: {charge_entry_id}")
+
+                existing_refund_result = await session.execute(
+                    select(LedgerEntryModel).where(
+                        cast(
+                            ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            LedgerEntryModel.action == LedgerAction.REFUND.value,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            LedgerEntryModel.correlation_id == charge_entry_id,
+                        ),
+                    )
+                )
+                existing_refund = existing_refund_result.scalar_one_or_none()
+                if existing_refund:
+                    return ledger_entry_model_to_schema(existing_refund)
+
+                existing_refund_result = await session.execute(
+                    select(LedgerEntryModel).where(
+                        cast(
+                            ColumnElement[bool],
+                            LedgerEntryModel.entry_id == refund_entry_id,
+                        ),
+                        cast(
+                            ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            LedgerEntryModel.action == LedgerAction.REFUND.value,
+                        ),
+                    )
+                )
+                existing_refund = existing_refund_result.scalar_one_or_none()
+                if existing_refund:
+                    return ledger_entry_model_to_schema(existing_refund)
+
+                refund_amount = abs(charge_entry.amount)
+                wallet.balance += refund_amount
+                wallet.lifetime_debits = max(
+                    Decimal("0"),
+                    wallet.lifetime_debits - refund_amount,
+                )
+                if _timestamp_in_current_period(
+                    charge_entry.timestamp,
+                    wallet.hourly_reset_at,
+                ):
+                    wallet.hourly_spent = max(
+                        Decimal("0"),
+                        wallet.hourly_spent - refund_amount,
+                    )
+                if _timestamp_in_current_period(
+                    charge_entry.timestamp,
+                    wallet.daily_reset_at,
+                ):
+                    # daily_spent is incremented exactly once per charge (by the
+                    # velocity monitor), so reverse exactly one increment.
+                    wallet.daily_spent = max(
+                        Decimal("0"),
+                        wallet.daily_spent - refund_amount,
+                    )
+                wallet.updated_at = utc_now()
+
+                entry = LedgerEntryModel(
+                    entry_id=refund_entry_id,
+                    wallet_id=wallet_id,
+                    action=LedgerAction.REFUND.value,
+                    amount=refund_amount,
+                    balance_after=wallet.balance,
+                    service_category=charge_entry.service_category,
+                    description=description or f"Refund for {charge_entry.description}",
+                    request_path=charge_entry.request_path,
+                    compute_cost=Decimal("0"),
+                    margin=Decimal("0"),
+                    correlation_id=charge_entry_id,
+                )
+                session.add(entry)
+
+            await session.commit()
+            return ledger_entry_model_to_schema(entry)
+
+    # --- Top-Up (Fiat Ingestion) ---
+
+    async def top_up(
+        self,
+        wallet_id: str,
+        amount_fiat: Decimal,
+        payment_method: str = "stripe",
+        payment_token: str | None = None,
+    ) -> TopUpResponse:
+        """Reject direct credit minting that lacks verified provider settlement."""
+        raise DirectTopUpDisabledError(
+            "direct_top_up_disabled: use the Stripe prepare and verified webhook flow"
+        )
+
+    # --- Arbitrage Reporting ---
+
+    async def get_arbitrage_report(self) -> ArbitrageReport:
+        """Compute swarm arbitrage profitability across all services."""
+        async with self._session_factory()() as session:
+            result = await session.execute(
+                select(LedgerEntryModel).where(
+                    cast(
+                        ColumnElement[bool],
+                        LedgerEntryModel.action == LedgerAction.DEBIT.value,
+                    )
+                )
+            )
+            entries = list(result.scalars().all())
+
+            total_revenue = Decimal("0")
+            total_cost = Decimal("0")
+            by_service: dict[str, dict] = {}
+
+            for entry in entries:
+                charge = abs(entry.amount)
+                cost = entry.compute_cost or Decimal("0")
+                margin = entry.margin or Decimal("0")
+
+                total_revenue += charge
+                total_cost += cost
+
+                cat = entry.service_category or "unknown"
+                if cat not in by_service:
+                    by_service[cat] = {
+                        "revenue": Decimal("0"),
+                        "cost": Decimal("0"),
+                        "margin": Decimal("0"),
+                        "transactions": 0,
+                    }
+                by_service[cat]["revenue"] += charge
+                by_service[cat]["cost"] += cost
+                by_service[cat]["margin"] += margin
+                by_service[cat]["transactions"] += 1
+
+            # Compute percentages
+            for cat_data in by_service.values():
+                rev = cat_data["revenue"]
+                cat_data["margin_pct"] = (
+                    (Decimal("100") * cat_data["margin"] / rev)
+                    if rev > 0
+                    else Decimal("0")
+                )
+
+            gross_margin = total_revenue - total_cost
+            margin_pct = (
+                (Decimal("100") * gross_margin / total_revenue)
+                if total_revenue > 0
+                else Decimal("0")
+            )
+
+            # Top profitable actions
+            top_actions = sorted(
+                entries,
+                key=lambda e: e.margin or Decimal("0"),
+                reverse=True,
+            )[:5]
+
+            now = datetime.now(timezone.utc)
+            yesterday = (now - __import__("datetime").timedelta(days=1)).strftime(
+                "%Y-%m-%d"
+            )
+            today = now.strftime("%Y-%m-%d")
+
+            return ArbitrageReport(
+                period=f"{yesterday} to {today}",
+                total_revenue=float(total_revenue),
+                total_revenue_exact=str(total_revenue),
+                total_compute_cost=float(total_cost),
+                total_compute_cost_exact=str(total_cost),
+                gross_margin=float(gross_margin),
+                gross_margin_exact=str(gross_margin),
+                margin_percentage=float(margin_pct),
+                margin_percentage_exact=str(margin_pct),
+                by_service=by_service,
+                top_profitable_actions=[
+                    {
+                        "entry_id": e.entry_id,
+                        "service": e.service_category or "unknown",
+                        "charge": abs(e.amount),
+                        "cost": e.compute_cost or Decimal("0"),
+                        "margin": e.margin or Decimal("0"),
+                        "path": e.request_path,
+                    }
+                    for e in top_actions
+                ],
+            )
+
+    # --- Pricing ---
+
+    def get_pricing_table(self) -> list[ServicePricing]:
+        """Return the full pricing table."""
+        return [
+            ServicePricing(
+                service_category=cat,
+                unit=unit,
+                credits_per_unit=float(price),
+                credits_per_unit_exact=str(price),
+                description=desc,
+            )
+            for cat, (unit, price, desc) in self._default_pricing.items()
+        ]
+
+    # --- Alerts ---
+
+    async def get_alerts(self, wallet_id: str | None = None) -> list[BillingAlert]:
+        """Get billing alerts."""
+        async with self._session_factory()() as session:
+            if wallet_id:
+                result = await session.execute(
+                    select(BillingAlertModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            BillingAlertModel.wallet_id == wallet_id,
+                        )
+                    )
+                    .order_by(
+                        cast(ColumnElement[Any], BillingAlertModel.created_at).desc()
+                    )
+                )
+            else:
+                result = await session.execute(
+                    select(BillingAlertModel).order_by(
+                        cast(ColumnElement[Any], BillingAlertModel.created_at).desc()
+                    )
+                )
+            alerts = list(result.scalars().all())
+            return [billing_alert_model_to_schema(a) for a in alerts]
+
+    # --- Wallet Queries ---
+
+    async def get_ledger(self, wallet_id: str, limit: int = 50) -> list[LedgerEntry]:
+        """Get ledger entries for a wallet."""
+        async with self._session_factory()() as session:
+            result = await session.execute(
+                select(LedgerEntryModel)
+                .where(
+                    cast(ColumnElement[bool], LedgerEntryModel.wallet_id == wallet_id)
+                )
+                .order_by(cast(ColumnElement[Any], LedgerEntryModel.timestamp).desc())
+                .limit(limit)
+            )
+            entries = list(result.scalars().all())
+            return [ledger_entry_model_to_schema(e) for e in entries]
+
+    # --- Service Registry ---
+
+    async def register_service(
+        self,
+        owner_wallet_id: str,
+        name: str,
+        description: str,
+        category: ServiceCategory,
+        credits_per_unit: Decimal,
+        unit_name: str = "request",
+        mcp_manifest: dict | None = None,
+    ) -> ServiceRegistration:
+        """Register a billable service in the marketplace."""
+        service_id = f"svc-{uuid.uuid4().hex[:12]}"
+
+        async with self._session_factory()() as session:
+            service = ServiceRegistryModel(
+                service_id=service_id,
+                name=name,
+                description=description,
+                owner_wallet_id=owner_wallet_id,
+                category=category.value,
+                credits_per_unit=credits_per_unit,
+                unit_name=unit_name,
+                mcp_manifest=json.dumps(mcp_manifest) if mcp_manifest else None,
+                is_active=True,
+            )
+            session.add(service)
+            await session.commit()
+
+        logger.info(f"Registered service {service_id}: {name}")
+
+        return ServiceRegistration(
+            service_id=service_id,
+            name=name,
+            description=description,
+            owner_wallet_id=owner_wallet_id,
+            category=category,
+            credits_per_unit=float(credits_per_unit),
+            credits_per_unit_exact=str(credits_per_unit),
+            unit_name=unit_name,
+            mcp_manifest=mcp_manifest,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+
+    async def list_services(
+        self,
+        category: ServiceCategory | None = None,
+        active_only: bool = True,
+    ) -> list[ServiceRegistration]:
+        """List services in the marketplace."""
+        async with self._session_factory()() as session:
+            query = select(ServiceRegistryModel)
+            if category:
+                query = query.where(
+                    cast(
+                        ColumnElement[bool],
+                        ServiceRegistryModel.category == category.value,
+                    )
+                )
+            if active_only:
+                query = query.where(
+                    cast(
+                        ColumnElement[bool],
+                        # SQLModel exposes is_active as a plain `bool` at the
+                        # class level to mypy, but at runtime it's an
+                        # InstrumentedAttribute with SQL comparator methods
+                        # like `.is_()`.
+                        cast(Any, ServiceRegistryModel.is_active).is_(True),
+                    )
+                )
+
+            result = await session.execute(query)
+            services = result.scalars().all()
+
+            return [
+                ServiceRegistration(
+                    service_id=s.service_id,
+                    name=s.name,
+                    description=s.description,
+                    owner_wallet_id=s.owner_wallet_id,
+                    category=ServiceCategory(s.category),
+                    credits_per_unit=float(s.credits_per_unit),
+                    credits_per_unit_exact=str(s.credits_per_unit),
+                    unit_name=s.unit_name,
+                    mcp_manifest=json.loads(s.mcp_manifest) if s.mcp_manifest else None,
+                    is_active=s.is_active,
+                    created_at=s.created_at,
+                )
+                for s in services
+            ]

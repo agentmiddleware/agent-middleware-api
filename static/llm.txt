@@ -46,20 +46,11 @@ GET /openapi.json
 Use `/v1/discover` as an optional expanded catalog after the bootstrap sequence.
 Treat `/mcp/tools.json` as authoritative for callable MCP tools.
 
-### 2. Get Your API Key
+### 2. Get Operator-Provisioned Access
 
-Contact the service operator. Pass it as `X-API-Key: your-key` on every request.
-
-### 3. Create a Wallet
-
-```bash
-POST /v1/billing/wallets/agent
-{
-  "wallet_id": "your-agent-id",
-  "parent_wallet_id": "sponsor-001",
-  "max_spend": 1000
-}
-```
+There is no public signup or unauthenticated key mint. The operator provisions
+the sponsor/partner wallet, wallet-scoped API key, credits, and permit. Pass the
+key as `X-API-Key: your-key` on every protected request.
 
 ### 4. Governed Tool Loop (dogfood)
 
@@ -103,9 +94,9 @@ Phase9 AWI / marketplace preview stubs (`awi_*`, `data-indexer`, etc.) are
 ## Billing & Pricing
 
 ### Credit System
-- 1 credit = $0.001 USD
-- Free tier: 1000 credits/month
-- Purchase credits via Stripe at `/v1/billing/top-up`
+- Credits are a closed-loop metering unit for the pilot, not payment rails.
+- There is no public pricing tier, free-credit grant, SLA, or settlement claim.
+- Operators provision partner credits; public self-serve top-up is out of scope.
 
 ### Rate Limits
 - 120 requests/minute per API key
@@ -118,31 +109,35 @@ Wallets are auto-frozen if spending exceeds:
 
 ---
 
-## SDKs (provisional)
+## SDKs
 
 Prefer the HTTP trust loop above (permits → MCP invoke → receipts). Client
 libraries are optional and not required for the wedge.
 
-### Python (in-repo only)
+### Python 0.4.0 (release artifact only)
 
-The provisional package lives at `b2a_sdk/` in this repository. It is **not**
-published to PyPI. From a clone:
+CI builds a wheel and sdist and attaches them to the
+`python-sdk-v0.4.0` GitHub release. It is **not** published to PyPI. Install a
+downloaded wheel, or install from a clone for development:
 
 ```bash
+pip install ./b2a_sdk-0.4.0-py3-none-any.whl
 pip install -e ./b2a_sdk
 ```
 
 ```python
-from b2a_sdk import B2AClient, billable
+from b2a_sdk import AgentMiddlewareClient
 
-client = B2AClient(api_url="...", api_key="...", wallet_id="...")
-
-@billable(client, wallet_id="...", units=1.0)
-async def my_tool():
-    return result
+async with AgentMiddlewareClient(api_key="...", base_url="...") as client:
+    tools = await client.discover_tools()
+    result = await client.invoke_tool(
+        tools[0].name,
+        {"input": "..."},
+        wallet_id="...",
+        permit_id="...",
+        idempotency_key="caller-owned-key",
+    )
 ```
-
-Package rename is deferred pending product brand decision.
 
 ### TypeScript
 

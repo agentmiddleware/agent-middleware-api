@@ -23,7 +23,6 @@ from ..services.agent_money import (
     EXCHANGE_RATE,
     InsufficientFundsError,
     WalletNotFoundError,
-    KYCVerificationRequiredError,
 )
 from ..services.governance import record_governed_action
 from ..services.idempotency import (
@@ -47,7 +46,6 @@ from ..schemas.billing import (
     WalletListResponse,
     LedgerResponse,
     TopUpRequest,
-    TopUpResponse,
     InsufficientFundsResponse,
     ServiceCategory,
     PricingTableResponse,
@@ -226,17 +224,23 @@ router = APIRouter(
 
 # --- Wallet Management ---
 
+
 @router.post(
     "/wallets/sponsor",
     response_model=WalletResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a sponsor wallet (liability sink)",
     description=(
-        "Create a human-owned root account that acts as the 'liability sink' "
-        "for agent spending. Sponsors ingest fiat currency via payment rails "
-        "and convert it to ecosystem credits. Agent wallets are provisioned "
-        "from sponsor balances."
+        "Bootstrap operator provisioning only. Create a human-owned root "
+        "account that acts as the 'liability sink' for agent spending. "
+        "Sponsors ingest fiat currency via payment rails and convert it to "
+        "ecosystem credits. Agent wallets are provisioned from sponsor balances."
     ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Bootstrap administrator access required"
+        }
+    },
 )
 async def create_sponsor_wallet(
     request: CreateSponsorWalletRequest,
@@ -261,7 +265,6 @@ async def create_sponsor_wallet(
         initial_credits=initial,
         currency=request.currency,
         metadata=request.metadata,
-        owner_key=auth.raw_key,
         require_kyc=request.require_kyc,
     )
 
@@ -290,14 +293,11 @@ async def create_agent_wallet(
             agent_id=request.agent_id,
             budget_credits=Decimal(str(request.budget_credits)),
             daily_limit=(
-                Decimal(str(request.daily_limit))
-                if request.daily_limit
-                else None
+                Decimal(str(request.daily_limit)) if request.daily_limit else None
             ),
             auto_refill=request.auto_refill,
             auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),
             auto_refill_amount=Decimal(str(request.auto_refill_amount)),
-            owner_key=auth.raw_key,
         )
     except WalletNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -350,7 +350,6 @@ async def create_child_wallet(
             task_description=request.task_description,
             ttl_seconds=request.ttl_seconds,
             auto_reclaim=request.auto_reclaim,
-            owner_key=auth.raw_key,
         )
         return ChildWalletResponse(
             wallet_id=response.wallet_id,
@@ -486,6 +485,7 @@ async def list_wallets(
 
 # --- Ledger ---
 
+
 @router.get(
     "/ledger/{wallet_id}",
     response_model=LedgerResponse,
@@ -513,6 +513,7 @@ async def get_ledger(
 
 
 # --- Charging ---
+
 
 @router.post(
     "/charge",
@@ -700,124 +701,74 @@ async def charge_wallet(
 
 # --- Top-Up ---
 
+
 @router.post(
     "/top-up",
-    response_model=TopUpResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Top up a sponsor wallet",
+    response_model=None,
+    status_code=status.HTTP_410_GONE,
+    summary="Direct top-ups are disabled",
+    description=(
+        "Deprecated. Direct requests cannot prove payment settlement. Use "
+        "`POST /v1/billing/top-up/prepare`; credits are minted only after the "
+        "payment provider's verified webhook."
+    ),
+    deprecated=True,
+    responses={
+        status.HTTP_410_GONE: {
+            "description": (
+                "Direct top-ups are disabled; use `/v1/billing/top-up/prepare`."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "error": "direct_top_up_disabled",
+                            "message": (
+                                "Direct top-ups cannot verify payment settlement. "
+                                "Create a Stripe PaymentIntent; credits are minted "
+                                "only after its verified webhook."
+                            ),
+                            "prepare_url": "/v1/billing/top-up/prepare",
+                        }
+                    }
+                }
+            },
+        }
+    },
 )
 async def top_up_wallet(
     request: TopUpRequest,
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     auth: AuthContext = Depends(get_auth_context),
-    money: AgentMoney = Depends(get_agent_money),
 ):
     _require_wallet_access(auth, request.wallet_id)
     endpoint = "/v1/billing/top-up"
-    # Opt-in idempotency: a retried top-up (e.g. after a client timeout) with
-    # the same Idempotency-Key replays the original result instead of minting
-    # credits twice.
-    guard, replay = await _begin_idempotency(
-        idempotency_key=idempotency_key,
+    # Client-supplied payment tokens are not proof of a settled payment. The
+    # only supported fiat credit path is the Stripe PaymentIntent flow below,
+    # whose signed webhook performs the idempotent mint after settlement.
+    await _record_billing_governance(
+        event="billing.top_up",
+        auth=auth,
         wallet_id=request.wallet_id,
+        service_category="top_up",
         endpoint=endpoint,
-        request_payload={
-            "wallet_id": request.wallet_id,
-            "amount_fiat": str(request.amount_fiat),
+        ok=False,
+        error="direct_top_up_disabled",
+        metadata={
+            "amount_fiat": request.amount_fiat,
             "payment_method": request.payment_method,
-            "payment_token": request.payment_token,
         },
     )
-    if replay is not None:
-        return replay
-    try:
-        result = await money.top_up(
-            wallet_id=request.wallet_id,
-            amount_fiat=Decimal(str(request.amount_fiat)),
-            payment_method=request.payment_method,
-            payment_token=request.payment_token,
-        )
-        await _record_billing_governance(
-            event="billing.top_up",
-            auth=auth,
-            wallet_id=request.wallet_id,
-            service_category="top_up",
-            endpoint=endpoint,
-            committed_cost=float(result.credits_added),
-            ok=True,
-            metadata={
-                "amount_fiat": request.amount_fiat,
-                "payment_method": request.payment_method,
-                "top_up_id": result.top_up_id,
-            },
-        )
-        await guard.complete(
-            result.model_dump(mode="json"),
-            status.HTTP_202_ACCEPTED,
-            response_reference=result.top_up_id,
-        )
-        return result
-    except WalletNotFoundError as e:
-        await _record_billing_governance(
-            event="billing.top_up",
-            auth=auth,
-            wallet_id=request.wallet_id,
-            service_category="top_up",
-            endpoint="/v1/billing/top-up",
-            ok=False,
-            error="wallet_not_found",
-            metadata={"amount_fiat": request.amount_fiat},
-        )
-        await guard.complete({"error": "wallet_not_found", "message": str(e)}, 404)
-        raise HTTPException(status_code=404, detail=str(e))
-    except KYCVerificationRequiredError as e:
-        await _record_billing_governance(
-            event="billing.top_up",
-            auth=auth,
-            wallet_id=request.wallet_id,
-            service_category="top_up",
-            endpoint="/v1/billing/top-up",
-            ok=False,
-            error="kyc_required",
-            metadata={"amount_fiat": request.amount_fiat, "kyc_status": e.kyc_status},
-        )
-        kyc_detail = {
-            "error": "kyc_required",
-            "wallet_id": e.wallet_id,
-            "kyc_status": e.kyc_status,
-            "message": str(e),
-            "verification_url": f"/v1/kyc/sessions?wallet_id={e.wallet_id}",
-        }
-        await guard.complete(kyc_detail, status.HTTP_403_FORBIDDEN)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "kyc_required",
-                "wallet_id": e.wallet_id,
-                "kyc_status": e.kyc_status,
-                "message": str(e),
-                "verification_url": f"/v1/kyc/sessions?wallet_id={e.wallet_id}",
-            },
-        )
-    except ValueError as e:
-        await _record_billing_governance(
-            event="billing.top_up",
-            auth=auth,
-            wallet_id=request.wallet_id,
-            service_category="top_up",
-            endpoint="/v1/billing/top-up",
-            ok=False,
-            error="topup_error",
-            metadata={"amount_fiat": request.amount_fiat, "message": str(e)},
-        )
-        await guard.complete(
-            {"error": "topup_error", "message": str(e)},
-            status.HTTP_400_BAD_REQUEST,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "topup_error", "message": str(e)},
-        )
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "error": "direct_top_up_disabled",
+            "message": (
+                "Direct top-ups cannot verify payment settlement. Create a Stripe "
+                "PaymentIntent; credits are minted only after its verified webhook."
+            ),
+            "prepare_url": "/v1/billing/top-up/prepare",
+        },
+    )
 
 
 @router.post(
@@ -855,10 +806,12 @@ async def prepare_top_up(
         }
     """
     from ..core.config import get_settings
+
     settings = get_settings()
 
     if settings.KYC_REQUIRED_FOR_TOPUP:
         from ..services.kyc_service import get_kyc_service
+
         kyc_service = get_kyc_service()
         kyc_status = await kyc_service.get_verification_status(wallet_id)
         if kyc_status["kyc_status"] != "verified":
@@ -960,9 +913,7 @@ async def transfer_wallets(
                 "description": description,
             },
         )
-        await guard.complete(
-            result, 200, response_reference=result.get("transfer_id")
-        )
+        await guard.complete(result, 200, response_reference=result.get("transfer_id"))
         return result
     except WalletNotFoundError as e:
         await _record_billing_governance(
@@ -1027,6 +978,7 @@ async def transfer_wallets(
 
 # --- Pricing ---
 
+
 @router.get(
     "/pricing",
     response_model=PricingTableResponse,
@@ -1037,6 +989,7 @@ async def get_pricing(
     money: AgentMoney = Depends(get_agent_money),
 ):
     from datetime import datetime, timezone
+
     return PricingTableResponse(
         pricing=money.get_pricing_table(),
         exchange_rate=float(EXCHANGE_RATE),
@@ -1045,6 +998,7 @@ async def get_pricing(
 
 
 # --- Arbitrage ---
+
 
 @router.get(
     "/arbitrage",
@@ -1059,6 +1013,7 @@ async def get_arbitrage_report(
 
 
 # --- Alerts ---
+
 
 @router.get(
     "/alerts",
@@ -1097,7 +1052,7 @@ async def get_alerts(
 )
 async def register_service(
     request: RegisterServiceRequest,
-    api_key: str = Depends(verify_api_key),
+    auth: AuthContext = Depends(get_auth_context),
     money: AgentMoney = Depends(get_agent_money),
 ):
     """
@@ -1106,9 +1061,17 @@ async def register_service(
     The service will be discoverable by other agents via the services endpoint.
     Charges for this service will be credited to the owner's wallet.
     """
+    if auth.wallet_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "wallet_identity_required",
+                "message": ("Service registration requires a wallet-scoped API key."),
+            },
+        )
     try:
         registration = await money.register_service(
-            owner_key=api_key,
+            owner_wallet_id=auth.wallet_id,
             name=request.name,
             description=request.description,
             category=request.category,
@@ -1159,13 +1122,16 @@ async def get_velocity_status(
 
 # --- Dry-Run Sandbox Endpoints ---
 
+
 class CreateDryRunSessionRequest(BaseModel):
     """Start a dry-run session for simulating billing operations."""
+
     wallet_id: str = Field(..., description="Wallet to simulate charges against")
 
 
 class DryRunSessionResponse(ExactDecimalFieldsMixin):
     """Response when creating a dry-run session."""
+
     _decimal_exact_fields: ClassVar[dict[str, str]] = {
         "real_balance": "real_balance_exact",
         "virtual_balance": "virtual_balance_exact",
@@ -1183,6 +1149,7 @@ class DryRunSessionResponse(ExactDecimalFieldsMixin):
 
 class SimulatedChargeRequest(BaseModel):
     """Simulate a charge without affecting real balance."""
+
     wallet_id: str = Field(..., description="Wallet being simulated")
     service: ServiceCategory = Field(..., description="Service category to simulate")
     units: float = Field(default=1.0, description="Number of units")
@@ -1195,6 +1162,7 @@ class SimulatedChargeRequest(BaseModel):
 
 class SimulatedChargeResponse(ExactDecimalFieldsMixin):
     """Result of a simulated charge."""
+
     _decimal_exact_fields: ClassVar[dict[str, str]] = {
         "credits_would_charge": "credits_would_charge_exact",
         "simulated_balance_before": "simulated_balance_before_exact",

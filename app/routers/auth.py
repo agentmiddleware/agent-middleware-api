@@ -111,7 +111,10 @@ async def refresh_access_token(
         if not record or record.revoked:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "revoked_refresh_token", "message": "Token has been revoked."},
+                detail={
+                    "error": "revoked_refresh_token",
+                    "message": "Token has been revoked.",
+                },
             )
 
         # Mark old refresh token as revoked
@@ -133,17 +136,26 @@ async def refresh_access_token(
     # also makes the revoke/refresh race benign — a token that wins the timing
     # window is still bound to the revoked key, so it cannot be renewed.
     #
-    # Tokens issued before binding existed carry no key_id; they fall back to
-    # wallet-level liveness, which is no weaker than what they were issued
-    # under, and they age out within the refresh lifetime.
+    # Tokens issued before binding existed carry no key_id. They cannot be
+    # safely associated with a still-live credential, so fail closed and force
+    # the caller to exchange an API key again. The migration also revokes all
+    # such rows, but this guard protects partially migrated/restored databases.
+    if origin_key_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "unbound_refresh_token",
+                "message": (
+                    "This refresh token predates API-key binding and cannot be "
+                    "renewed; authenticate with an active API key."
+                ),
+            },
+        )
+
     from app.services.api_key_service import get_api_key_service
 
     key_svc = get_api_key_service()
-    still_live = (
-        await key_svc.is_key_live(origin_key_id)
-        if origin_key_id
-        else await key_svc.has_live_key(payload.sub)
-    )
+    still_live = await key_svc.is_key_live(origin_key_id)
     if not still_live:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

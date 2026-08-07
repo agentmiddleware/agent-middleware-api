@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 
 import pytest
@@ -13,6 +14,9 @@ from app.core.trust_mode import (
     validate_trust_mode_guardrails,
     warn_if_trust_mode_permissive,
 )
+
+
+VALID_SIGNING_PRIVATE_KEY_B64 = base64.b64encode(bytes(range(32))).decode()
 
 
 @pytest.mark.parametrize(
@@ -58,6 +62,25 @@ def test_production_trust_mode_requires_signing_private_key():
     assert "TRUST_SIGNING_PRIVATE_KEY_B64" in str(exc_info.value)
 
 
+@pytest.mark.parametrize(
+    "signing_private_key_b64",
+    ["not-base64!", base64.b64encode(b"too-short").decode()],
+)
+def test_production_trust_mode_rejects_invalid_signing_private_key_material(
+    signing_private_key_b64: str,
+):
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment="production",
+            trust_mode_enabled=True,
+            signing_private_key_b64=signing_private_key_b64,
+            allow_legacy_unpermitted_mcp=False,
+            enable_proof_surfaces=False,
+        )
+
+    assert "valid 32-byte Ed25519 private key" in str(exc_info.value)
+
+
 def test_production_trust_mode_rejects_legacy_unpermitted_mcp():
     with pytest.raises(TrustModeGuardrailError) as exc_info:
         validate_trust_mode_config(
@@ -84,18 +107,22 @@ def test_production_trust_mode_reports_all_fail_closed_violations():
     assert "ALLOW_LEGACY_UNPERMITTED_MCP" in message
 
 
-def test_production_without_trust_mode_stays_compatible():
-    # Trust-mode opt-out is allowed in production-like, but proof surfaces,
-    # DEBUG, and WebAuthn mock still must stay fail-closed.
-    validate_trust_mode_config(
-        environment="production",
-        trust_mode_enabled=False,
-        signing_private_key_b64="",
-        allow_legacy_unpermitted_mcp=True,
-        enable_proof_surfaces=False,
-        debug=False,
-        webauthn_allow_mock=False,
-    )
+@pytest.mark.parametrize("allow_legacy_unpermitted_mcp", [False, True])
+def test_production_rejects_disabled_trust_mode(
+    allow_legacy_unpermitted_mcp: bool,
+):
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment="production",
+            trust_mode_enabled=False,
+            signing_private_key_b64="",
+            allow_legacy_unpermitted_mcp=allow_legacy_unpermitted_mcp,
+            enable_proof_surfaces=False,
+            debug=False,
+            webauthn_allow_mock=False,
+        )
+
+    assert "TRUST_MODE_ENABLED" in str(exc_info.value)
 
 
 def test_production_rejects_debug_webauthn_mock_and_proof_surfaces():
@@ -120,7 +147,7 @@ def test_settings_wrapper_uses_environment_field():
     settings = Settings(
         ENVIRONMENT="staging",
         TRUST_MODE_ENABLED=True,
-        TRUST_SIGNING_PRIVATE_KEY_B64="private-key-material",
+        TRUST_SIGNING_PRIVATE_KEY_B64=VALID_SIGNING_PRIVATE_KEY_B64,
         ALLOW_LEGACY_UNPERMITTED_MCP=False,
         ENABLE_PROOF_SURFACES=False,
         DEBUG=False,

@@ -65,6 +65,49 @@ async def test_create_sponsor_zero_balance(client, api_headers):
 
 
 @pytest.mark.anyio
+async def test_wallet_key_cannot_create_sponsor_or_seed_credits(
+    client,
+    api_headers,
+    clean_database,
+):
+    sponsor = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Existing tenant",
+            "email": "existing-tenant@example.com",
+            "initial_credits": 0,
+        },
+        headers=api_headers,
+    )
+    wallet_id = sponsor.json()["wallet_id"]
+    key = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "tenant-key"},
+        headers=api_headers,
+    )
+
+    response = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Unauthorized liability",
+            "email": "unauthorized-liability@example.com",
+            "initial_credits": 1_000_000,
+        },
+        headers={"X-API-Key": key.json()["api_key"]},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "admin_access_denied"
+
+
+def test_sponsor_creation_openapi_declares_bootstrap_admin_boundary():
+    operation = app.openapi()["paths"]["/v1/billing/wallets/sponsor"]["post"]
+
+    assert "bootstrap operator" in operation["description"].lower()
+    assert "403" in operation["responses"]
+
+
+@pytest.mark.anyio
 async def test_create_sponsor_with_credits_writes_ledger(
     client, api_headers, clean_database
 ):
@@ -476,7 +519,7 @@ async def test_charge_insufficient_funds_returns_402(client, api_headers):
     detail = resp.json()["detail"]
     assert detail["error"] == "insufficient_funds"
     assert detail["wallet_id"] == agent_wallet_id
-    assert "top_up_url" in detail
+    assert detail["top_up_url"] == "/v1/billing/top-up/prepare"
     assert detail["shortfall"] > 0
 
 
@@ -535,8 +578,23 @@ async def test_ledger_records_transactions(client, api_headers):
 # --- Top-Up ---
 
 
+def test_direct_top_up_openapi_contract_is_deprecated_and_410_only():
+    operation = app.openapi()["paths"]["/v1/billing/top-up"]["post"]
+
+    assert operation["deprecated"] is True
+    assert "410" in operation["responses"]
+    assert "202" not in operation["responses"]
+    assert all(
+        parameter["name"] != "Idempotency-Key"
+        for parameter in operation.get("parameters", [])
+    )
+
+
 @pytest.mark.anyio
-async def test_top_up_sponsor(client, api_headers):
+@pytest.mark.parametrize("payment_token", [None, "tok_attacker_controlled"])
+async def test_direct_top_up_rejects_unverified_payment(
+    client, api_headers, clean_database, payment_token
+):
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
         json={"sponsor_name": "Topup Test", "email": "t@t.com", "initial_credits": 0},
@@ -544,21 +602,60 @@ async def test_top_up_sponsor(client, api_headers):
     )
     wallet_id = sponsor_resp.json()["wallet_id"]
 
+    body = {"wallet_id": wallet_id, "amount_fiat": 50.0}
+    if payment_token is not None:
+        body["payment_token"] = payment_token
+
     resp = await client.post(
         "/v1/billing/top-up",
-        json={"wallet_id": wallet_id, "amount_fiat": 50.0},
+        json=body,
         headers=api_headers,
     )
-    assert resp.status_code == 202
-    data = resp.json()
-    assert data["amount_fiat"] == 50.0
-    assert data["credits_added"] == 50000.0  # $50 × 1000 credits/$
-    assert data["exchange_rate"] == 1000.0
-    assert data["status"] == "completed"
+    assert resp.status_code == 410
+    detail = resp.json()["detail"]
+    assert detail["error"] == "direct_top_up_disabled"
+    assert detail["prepare_url"] == "/v1/billing/top-up/prepare"
 
-    # Verify balance updated
+    # Neither an absent nor an attacker-controlled token is payment proof.
     wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
-    assert wallet.json()["balance"] == 50000.0
+    assert wallet.json()["balance"] == 0.0
+
+    factory = get_session_factory()
+    async with factory() as session:
+        entries = await session.execute(
+            select(LedgerEntryModel).where(LedgerEntryModel.wallet_id == wallet_id)
+        )
+        assert list(entries.scalars()) == []
+
+
+@pytest.mark.anyio
+async def test_internal_top_up_rejects_unverified_payment_without_mutation(
+    client, api_headers, clean_database
+):
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Internal Topup Test",
+            "email": "internal-topup@example.com",
+            "initial_credits": 0,
+        },
+        headers=api_headers,
+    )
+    wallet_id = sponsor_resp.json()["wallet_id"]
+    money = get_agent_money()
+
+    with pytest.raises(RuntimeError, match="direct_top_up_disabled"):
+        await money.top_up(
+            wallet_id=wallet_id,
+            amount_fiat=Decimal("50"),
+            payment_method="stripe",
+            payment_token="tok_attacker_controlled",
+        )
+
+    wallet = await money.get_wallet(wallet_id)
+    assert wallet is not None
+    assert Decimal(wallet.balance_exact) == Decimal("0")
+    assert await money.get_ledger(wallet_id) == []
 
 
 @pytest.mark.anyio
@@ -583,7 +680,7 @@ async def test_top_up_agent_wallet_fails(client, api_headers):
         json={"wallet_id": agent_resp.json()["wallet_id"], "amount_fiat": 10.0},
         headers=api_headers,
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 410
 
 
 # --- Pricing Table ---
@@ -921,7 +1018,7 @@ async def test_scoped_key_cannot_mint_sponsor_credits(client, api_headers):
 
 
 @pytest.mark.anyio
-async def test_topup_retry_with_same_idempotency_key_does_not_double_credit(
+async def test_topup_idempotency_key_cannot_bypass_payment_verification(
     client, api_headers, clean_database
 ):
     sponsor = await client.post(
@@ -939,20 +1036,16 @@ async def test_topup_retry_with_same_idempotency_key_does_not_double_credit(
     body = {"wallet_id": wallet_id, "amount_fiat": 50.0}
 
     first = await client.post("/v1/billing/top-up", json=body, headers=headers)
-    assert first.status_code == 202
-    first_id = first.json()["top_up_id"]
-
-    # Retry with the same key replays the original outcome, no second credit.
     second = await client.post("/v1/billing/top-up", json=body, headers=headers)
-    assert second.status_code == 202
-    assert second.json()["top_up_id"] == first_id
+    assert first.status_code == 410
+    assert second.status_code == 410
 
     wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
-    assert wallet.json()["balance"] == 50000.0  # credited once, not twice
+    assert wallet.json()["balance"] == 0.0
 
 
 @pytest.mark.anyio
-async def test_topup_reused_key_different_amount_conflicts(
+async def test_topup_reused_key_different_amount_remains_disabled(
     client, api_headers, clean_database
 ):
     sponsor = await client.post(
@@ -967,7 +1060,7 @@ async def test_topup_reused_key_different_amount_conflicts(
     wallet_id = sponsor.json()["wallet_id"]
     headers = {**api_headers, "Idempotency-Key": "topup-conflict-1"}
 
-    await client.post(
+    first = await client.post(
         "/v1/billing/top-up",
         json={"wallet_id": wallet_id, "amount_fiat": 50.0},
         headers=headers,
@@ -977,7 +1070,11 @@ async def test_topup_reused_key_different_amount_conflicts(
         json={"wallet_id": wallet_id, "amount_fiat": 99.0},
         headers=headers,
     )
-    assert conflict.status_code == 409
+    assert first.status_code == 410
+    assert conflict.status_code == 410
+
+    wallet = await client.get(f"/v1/billing/wallets/{wallet_id}", headers=api_headers)
+    assert wallet.json()["balance"] == 0.0
 
 
 @pytest.mark.anyio

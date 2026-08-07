@@ -7,16 +7,15 @@ for removal. Keep call sites simple: replace `datetime.utcnow()` with
 naive UTC; introducing tz-aware datetimes at random call sites would break
 comparisons against values loaded from the database. A full tz-aware
 migration is tracked separately.
+
+Use `to_naive_utc` at persistence/query boundaries that accept externally
+supplied aware datetimes; it preserves the represented instant before removing
+the timezone marker.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-
-
-def utc_now() -> datetime:
-    """Return the current UTC time as a naive datetime."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def to_naive_utc(value: datetime) -> datetime:
@@ -26,9 +25,13 @@ def to_naive_utc(value: datetime) -> datetime:
     instant is preserved. Naive input is returned unchanged (already the
     storage convention). Every datetime column in this schema is
     ``TIMESTAMP WITHOUT TIME ZONE`` (see ``migrations/versions``), and asyncpg
-    refuses a tz-aware value for such a column with ``DataError: can't
-    subtract offset-naive and offset-aware datetimes``.
+    refuses a tz-aware value for such a column.
     """
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def utc_now() -> datetime:
+    """Return the current UTC time as a naive datetime."""
+    return to_naive_utc(datetime.now(timezone.utc))

@@ -1,5 +1,5 @@
 """
-B2A SDK Decorators
+Legacy B2A SDK decorators
 ==================
 
 Developer Experience decorators for agent tools.
@@ -41,7 +41,9 @@ def register_mcp_tool_callback(callback: Callable) -> None:
     _registration_callbacks.append(callback)
 
 
-def _notify_registration(service_id: str, func: Callable, input_schema: dict | None, output_schema: dict | None) -> None:
+def _notify_registration(
+    service_id: str, func: Callable, input_schema: dict | None, output_schema: dict | None
+) -> None:
     """Notify all registered callbacks of a new MCP tool."""
     for callback in _registration_callbacks:
         try:
@@ -77,11 +79,15 @@ def _extract_schema_from_func(func: Callable) -> tuple[dict | None, dict | None]
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)
 
-        input_schema = {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        } if properties else None
+        input_schema = (
+            {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            }
+            if properties
+            else None
+        )
 
         return_type = hints.get("return")
         output_schema = None
@@ -125,6 +131,7 @@ def monitored(
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @functools.wraps(func)
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
@@ -272,6 +279,7 @@ def billable(
     Raises:
         InsufficientFundsError: If wallet balance is insufficient
     """
+
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @functools.wraps(func)
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
@@ -299,8 +307,7 @@ def billable(
         @functools.wraps(func)
         def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             raise RuntimeError(
-                "@billable requires an async function. "
-                f"Got sync function: {func.__name__}"
+                f"@billable requires an async function. Got sync function: {func.__name__}"
             )
 
         if asyncio.iscoroutinefunction(func):
@@ -341,11 +348,10 @@ def combined(
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         monitored_decorator = monitored(client, service_name)
-        billable_decorator = billable(
-            client, wallet_id, service_category, units, request_path
-        )
+        billable_decorator = billable(client, wallet_id, service_category, units, request_path)
 
         decorated = billable_decorator(monitored_decorator(func))
 
@@ -395,6 +401,7 @@ def mcp_tool(
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         actual_name = name or func.__name__
         actual_description = description or func.__doc__ or "No description"
