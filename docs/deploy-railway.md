@@ -107,10 +107,10 @@ their indexes for this release. The previously deployed worker still selects
 and writes those columns, so dropping them during an overlapping Railway
 deployment would break requests before that worker drains.
 
-An old worker can write a credential after migration 025 performs its first
-scrub. Therefore a deploy is incomplete until Railway reports that the new
-deployment is the only active worker set and the idempotent post-deploy scrub
-passes:
+An old worker can write a plaintext owner credential after migration 025
+performs its first scrub, or an unbound refresh token after migration 028 runs.
+Therefore a deploy is incomplete until Railway reports that the new deployment
+is the only active worker set and the idempotent post-deploy retirement passes:
 
 ```bash
 # Run only after the old deployment has fully drained. This loads the Postgres
@@ -119,11 +119,12 @@ railway run --service Postgres --environment production -- \
   python scripts/retire_owner_keys.py
 ```
 
-The command locks both tables for its scrub transaction, replaces any late
-non-empty value with the empty compatibility marker, and asserts that no
-plaintext value remains. It fails if `DATABASE_PUBLIC_URL` or either retained
-column is missing. A later contract migration may drop the columns only after
-this release can no longer be running.
+The command locks all three affected tables for its transaction, replaces any
+late non-empty owner-key value with the empty compatibility marker, revokes any
+NULL-bound refresh token, and verifies both invariants. It fails if
+`DATABASE_PUBLIC_URL` or any required retirement column is missing. A later
+contract migration may drop the owner-key columns only after this release can
+no longer be running.
 
 ## Deploying from CI (optional)
 

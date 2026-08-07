@@ -109,9 +109,11 @@ Recent work substantially tightened the trust and accounting boundary:
 - **Safer key custody.** Current wallet and service-registry models no longer
   persist legacy plaintext owner keys. Migration 025 scrubs existing values
   but retains empty compatibility columns for one rolling release; the deploy
-  gate re-scrubs and asserts them after old workers drain. Wallet API keys are
-  stored as SHA-256 hashes, while the trust-signing private key is injected at
-  runtime and only public signing metadata is persisted.
+  gate re-scrubs and asserts them after old workers drain. That post-drain pass
+  also revokes any refresh token an old worker wrote without an originating
+  API-key binding. Wallet API keys are stored as SHA-256 hashes, while the
+  trust-signing private key is injected at runtime and only public signing
+  metadata is persisted.
 - **Signing-key lifecycle checks.** Reusing a key ID with different material is
   rejected, disabled keys stay disabled, and retired public metadata remains
   available for historical verification.

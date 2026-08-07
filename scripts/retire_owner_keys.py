@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Idempotently scrub retained legacy ``owner_key`` compatibility columns.
+"""Idempotently retire credentials that old workers can write during rollout.
 
 Run this only after the previous Railway deployment has fully drained. The
 025 migration performs the same scrub before a rolling deploy, but an old
 worker can write a credential again while it is still serving traffic. This
 post-deploy pass closes that race and verifies that no non-empty value remains.
+It also revokes refresh-token rows that old workers can still write without the
+API-key binding introduced by the published refresh-token migration.
 
 The command intentionally accepts only ``DATABASE_PUBLIC_URL`` because it runs
 off-platform in GitHub Actions. It never falls back to the application's
@@ -34,6 +36,11 @@ from app.core.db_urls import as_sqlalchemy_url  # noqa: E402
 
 
 _LEGACY_TABLES = ("wallets", "service_registry")
+_REQUIRED_COLUMNS = {
+    "wallets": {"owner_key"},
+    "service_registry": {"owner_key"},
+    "refresh_tokens": {"key_id", "revoked"},
+}
 OK = "[owner-key-retirement] PASS"
 BAD = "[owner-key-retirement] FAIL"
 
@@ -78,7 +85,7 @@ def load_public_database_url(
     return url
 
 
-def _owner_key_schema(sync_connection: Connection) -> dict[str, set[str]]:
+def _retirement_schema(sync_connection: Connection) -> dict[str, set[str]]:
     inspector = inspect(sync_connection)
     table_names = set(inspector.get_table_names())
     return {
@@ -87,31 +94,33 @@ def _owner_key_schema(sync_connection: Connection) -> dict[str, set[str]]:
             if table in table_names
             else set()
         )
-        for table in _LEGACY_TABLES
+        for table in _REQUIRED_COLUMNS
     }
 
 
 async def retire_owner_keys(database_url: str) -> dict[str, int]:
-    """Scrub and verify both compatibility columns in one transaction."""
+    """Scrub owner keys and revoke unbound refresh tokens transactionally."""
     engine = create_async_engine(
         as_sqlalchemy_url(database_url),
         poolclass=NullPool,
     )
     try:
         async with engine.begin() as connection:
-            schema = await connection.run_sync(_owner_key_schema)
+            schema = await connection.run_sync(_retirement_schema)
             missing = [
-                table for table, columns in schema.items() if "owner_key" not in columns
+                table
+                for table, required in _REQUIRED_COLUMNS.items()
+                if not required.issubset(schema[table])
             ]
             if missing:
                 raise OwnerKeyRetirementError(
-                    "expected retained owner_key compatibility columns are missing"
+                    "expected post-drain retirement columns are missing"
                 )
 
             if connection.dialect.name == "postgresql":
                 await connection.execute(
                     text(
-                        "LOCK TABLE wallets, service_registry "
+                        "LOCK TABLE wallets, service_registry, refresh_tokens "
                         "IN SHARE ROW EXCLUSIVE MODE"
                     )
                 )
@@ -126,6 +135,17 @@ async def retire_owner_keys(database_url: str) -> dict[str, int]:
                 )
                 scrubbed[table] = max(0, int(result.rowcount or 0))
 
+            refresh_result = await connection.execute(
+                text(
+                    "UPDATE refresh_tokens SET revoked = :revoked "
+                    "WHERE key_id IS NULL AND revoked = :not_revoked"
+                ),
+                {"revoked": True, "not_revoked": False},
+            )
+            scrubbed["unbound_refresh_tokens"] = max(
+                0, int(refresh_result.rowcount or 0)
+            )
+
             remaining = 0
             for table in _LEGACY_TABLES:
                 count = await connection.scalar(
@@ -139,6 +159,19 @@ async def retire_owner_keys(database_url: str) -> dict[str, int]:
                 raise OwnerKeyRetirementError(
                     "legacy owner_key retirement assertion failed for "
                     f"{remaining} row(s)"
+                )
+
+            unbound_refresh_tokens = await connection.scalar(
+                text(
+                    "SELECT COUNT(*) FROM refresh_tokens "
+                    "WHERE key_id IS NULL AND revoked = :not_revoked"
+                ),
+                {"not_revoked": False},
+            )
+            if unbound_refresh_tokens:
+                raise OwnerKeyRetirementError(
+                    "unbound refresh-token retirement assertion failed for "
+                    f"{int(unbound_refresh_tokens)} row(s)"
                 )
             return scrubbed
     finally:
@@ -159,10 +192,11 @@ def main() -> int:
         )
         return 1
 
-    total = sum(scrubbed.values())
+    owner_keys = sum(scrubbed[table] for table in _LEGACY_TABLES)
+    refresh_tokens = scrubbed["unbound_refresh_tokens"]
     print(
-        f"{OK} scrubbed {total} compatibility value(s); "
-        "verified no legacy owner_key value remains"
+        f"{OK} scrubbed {owner_keys} compatibility value(s), revoked "
+        f"{refresh_tokens} unbound refresh token(s); verified retirement state"
     )
     return 0
 

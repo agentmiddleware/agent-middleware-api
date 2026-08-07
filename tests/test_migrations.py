@@ -483,7 +483,9 @@ def test_refresh_token_binding_migration_revokes_unbound_rows(tmp_path, monkeypa
     sync_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("DATABASE_URL", async_url)
     config = Config("alembic.ini")
-    command.upgrade(config, "024_human_approval_hardening")
+    # Reproduce the real upgrade path: revision 025 is already published, so
+    # the data fix must live in a later migration.
+    command.upgrade(config, "025_refresh_token_key_binding")
 
     engine = create_engine(sync_url)
     with engine.begin() as connection:
@@ -503,9 +505,12 @@ def test_refresh_token_binding_migration_revokes_unbound_rows(tmp_path, monkeypa
             text(
                 """
                 INSERT INTO refresh_tokens (
-                    jti, wallet_id, revoked, created_at, expires_at
+                    jti, wallet_id, key_id, revoked, created_at, expires_at
                 ) VALUES (
-                    'legacy-refresh-jti', 'agt-legacy-refresh', 0,
+                    'legacy-refresh-jti', 'agt-legacy-refresh', NULL, 0,
+                    '2026-08-01 00:00:00', '2026-08-08 00:00:00'
+                ), (
+                    'bound-refresh-jti', 'agt-legacy-refresh', 'key-live', 0,
                     '2026-08-01 00:00:00', '2026-08-08 00:00:00'
                 )
                 """
@@ -513,22 +518,24 @@ def test_refresh_token_binding_migration_revokes_unbound_rows(tmp_path, monkeypa
         )
     engine.dispose()
 
-    command.upgrade(config, "025_refresh_token_key_binding")
+    command.upgrade(config, "head")
     asyncio.set_event_loop(asyncio.new_event_loop())
 
     engine = create_engine(sync_url)
     with engine.connect() as connection:
-        row = connection.execute(
+        rows = connection.execute(
             text(
                 """
-                SELECT key_id, revoked
+                SELECT jti, key_id, revoked
                 FROM refresh_tokens
-                WHERE jti = 'legacy-refresh-jti'
+                ORDER BY jti
                 """
             )
-        ).one()
-    assert row.key_id is None
-    assert row.revoked == 1
+        ).all()
+    assert rows == [
+        ("bound-refresh-jti", "key-live", 0),
+        ("legacy-refresh-jti", None, 1),
+    ]
     engine.dispose()
 
 

@@ -48,12 +48,13 @@ Do not mount AWI/media/oracle for this session.
 
 ## Rolling deployment safety
 
-Apply Alembic migration `027_governed_mcp_identity` before current workers take
-traffic. Its additive unique index is compatible with pre-026 workers and
-serializes their physical MCP endpoint keys with the current `/mcp/invoke`
-identity during a rolling deployment.
+Apply Alembic through the current head (`028_revoke_unbound_refresh_tokens`)
+before current workers take traffic. Revision `027_governed_mcp_identity` adds
+a rolling-compatible unique index that serializes pre-026 physical MCP endpoint
+keys with the current `/mcp/invoke` identity. Revision 028 revokes historical
+refresh tokens that cannot be safely bound to their originating API key.
 
-The migration stops with only an aggregate conflict count if historical rows
+Revision 027 stops with only an aggregate conflict count if historical rows
 already reuse one wallet/key across MCP endpoint generations. Do not pick or
 delete one automatically; adjudicate those operations from their receipts,
 ledger entries, and audit evidence, then rerun the migration.

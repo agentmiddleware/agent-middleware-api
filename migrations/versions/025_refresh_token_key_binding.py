@@ -11,12 +11,10 @@ that matter most:
     issues a replacement, so the wallet is never keyless and the attacker's
     token survives the very rotation meant to contain it.
 
-``key_id`` is nullable so historical rows remain representable, but the upgrade
-revokes every unbound token. There is no reliable way to infer which API key
-minted an existing row, and allowing one to rotate would let a token derived
-from a revoked key survive whenever the wallet still has a sibling key. The
-application also rejects NULL bindings so restored or partially migrated data
-fails closed.
+``key_id`` is nullable: rows written before this migration have no binding and
+fall back to the wallet-level liveness check, which is no weaker than the
+behaviour they were issued under. Those tokens age out within the refresh
+lifetime, after which every live token carries a binding.
 
 Deliberately no foreign key to ``api_keys``: this is a soft historical
 reference to the minting key. A revoked key stays in the table (revocation is a
@@ -48,11 +46,6 @@ def upgrade() -> None:
         "ix_refresh_tokens_key_id",
         "refresh_tokens",
         ["key_id"],
-    )
-    op.execute(
-        sa.text(
-            "UPDATE refresh_tokens SET revoked = :revoked WHERE key_id IS NULL"
-        ).bindparams(revoked=True)
     )
 
 

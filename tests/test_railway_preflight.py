@@ -162,7 +162,7 @@ def test_deploy_workflow_drains_then_rescrubs_and_uses_public_db() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "railway-deploy.yml").read_text()
 
     drain = workflow.index("- name: Wait for old workers to drain")
-    rescrub = workflow.index("- name: Re-scrub retired owner keys")
+    rescrub = workflow.index("- name: Retire legacy credentials after drain")
     verify = workflow.index("- name: Verify deploy — migrations + posture")
     assert drain < rescrub < verify
     assert "python scripts/retire_owner_keys.py" in workflow

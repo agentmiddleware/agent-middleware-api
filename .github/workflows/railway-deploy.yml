@@ -162,7 +162,7 @@ jobs:
           echo "::error::Old Railway workers did not drain before timeout."
           exit 1
 
-      - name: Re-scrub retired owner keys
+      - name: Retire legacy credentials after drain
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |

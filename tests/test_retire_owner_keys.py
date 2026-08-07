@@ -10,7 +10,12 @@ from sqlalchemy import create_engine, text
 from scripts import retire_owner_keys
 
 
-def _create_legacy_schema(sync_url: str, *, complete: bool = True) -> None:
+def _create_legacy_schema(
+    sync_url: str,
+    *,
+    complete: bool = True,
+    include_refresh_tokens: bool = True,
+) -> None:
     engine = create_engine(sync_url)
     with engine.begin() as connection:
         connection.execute(
@@ -39,6 +44,19 @@ def _create_legacy_schema(sync_url: str, *, complete: bool = True) -> None:
                 """
             )
         )
+        if include_refresh_tokens:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE refresh_tokens (
+                        jti VARCHAR(64) PRIMARY KEY,
+                        key_id VARCHAR(50),
+                        revoked BOOLEAN NOT NULL
+                    )
+                    """
+                )
+            )
+    engine.dispose()
 
 
 def test_post_deploy_rescrub_closes_old_worker_write_race_and_is_idempotent(
@@ -73,13 +91,33 @@ def test_post_deploy_rescrub_closes_old_worker_write_race_and_is_idempotent(
             text("UPDATE service_registry SET owner_key = :secret"),
             {"secret": secret},
         )
+        # Simulate an old worker writing after migration 028 ran. Bound rows
+        # from current workers and rows already revoked must remain unchanged.
+        connection.execute(
+            text(
+                """
+                INSERT INTO refresh_tokens (jti, key_id, revoked) VALUES
+                    ('late-unbound', NULL, 0),
+                    ('current-bound', 'key-current', 0),
+                    ('already-revoked', NULL, 1)
+                """
+            )
+        )
     engine.dispose()
 
     first = asyncio.run(retire_owner_keys.retire_owner_keys(async_url))
     second = asyncio.run(retire_owner_keys.retire_owner_keys(async_url))
 
-    assert first == {"wallets": 1, "service_registry": 1}
-    assert second == {"wallets": 0, "service_registry": 0}
+    assert first == {
+        "wallets": 1,
+        "service_registry": 1,
+        "unbound_refresh_tokens": 1,
+    }
+    assert second == {
+        "wallets": 0,
+        "service_registry": 0,
+        "unbound_refresh_tokens": 0,
+    }
 
     engine = create_engine(sync_url)
     with engine.connect() as connection:
@@ -96,9 +134,23 @@ def test_post_deploy_rescrub_closes_old_worker_write_race_and_is_idempotent(
             .scalars()
             .all()
         )
+        refresh_rows = connection.execute(
+            text(
+                """
+                SELECT jti, key_id, revoked
+                FROM refresh_tokens
+                ORDER BY jti
+                """
+            )
+        ).all()
     engine.dispose()
     assert values == ["", ""]
     assert secret not in repr(values)
+    assert refresh_rows == [
+        ("already-revoked", None, 1),
+        ("current-bound", "key-current", 0),
+        ("late-unbound", None, 1),
+    ]
 
 
 def test_rescrub_fails_before_writing_when_compatibility_schema_is_incomplete(
@@ -123,7 +175,7 @@ def test_rescrub_fails_before_writing_when_compatibility_schema_is_incomplete(
 
     with pytest.raises(
         retire_owner_keys.OwnerKeyRetirementError,
-        match="compatibility columns are missing",
+        match="retirement columns are missing",
     ):
         asyncio.run(retire_owner_keys.retire_owner_keys(async_url))
 
@@ -134,6 +186,19 @@ def test_rescrub_fails_before_writing_when_compatibility_schema_is_incomplete(
         ).scalar_one()
     engine.dispose()
     assert retained == secret
+
+
+def test_rescrub_requires_refresh_token_binding_schema(tmp_path):
+    db_path = tmp_path / "missing-refresh-token-schema.db"
+    sync_url = f"sqlite:///{db_path}"
+    async_url = f"sqlite+aiosqlite:///{db_path}"
+    _create_legacy_schema(sync_url, include_refresh_tokens=False)
+
+    with pytest.raises(
+        retire_owner_keys.OwnerKeyRetirementError,
+        match="retirement columns are missing",
+    ):
+        asyncio.run(retire_owner_keys.retire_owner_keys(async_url))
 
 
 def test_command_requires_public_url_without_private_fallback(
