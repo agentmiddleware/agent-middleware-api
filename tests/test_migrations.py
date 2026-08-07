@@ -476,6 +476,62 @@ def test_owner_key_migration_scrubs_values_but_retains_rolling_compatible_column
     engine.dispose()
 
 
+def test_refresh_token_binding_migration_revokes_unbound_rows(tmp_path, monkeypatch):
+    """Historical refresh tokens cannot be safely assigned to a live API key."""
+    db_path = tmp_path / "refresh-token-binding-migration.db"
+    async_url = f"sqlite+aiosqlite:///{db_path}"
+    sync_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    config = Config("alembic.ini")
+    command.upgrade(config, "024_human_approval_hardening")
+
+    engine = create_engine(sync_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO wallets (
+                    wallet_id, wallet_type, owner_key, balance, lifetime_credits,
+                    lifetime_debits, daily_spent, auto_refill, status
+                ) VALUES (
+                    'agt-legacy-refresh', 'agent', '', 0, 0, 0, 0, 0, 'active'
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO refresh_tokens (
+                    jti, wallet_id, revoked, created_at, expires_at
+                ) VALUES (
+                    'legacy-refresh-jti', 'agt-legacy-refresh', 0,
+                    '2026-08-01 00:00:00', '2026-08-08 00:00:00'
+                )
+                """
+            )
+        )
+    engine.dispose()
+
+    command.upgrade(config, "025_refresh_token_key_binding")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+    engine = create_engine(sync_url)
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT key_id, revoked
+                FROM refresh_tokens
+                WHERE jti = 'legacy-refresh-jti'
+                """
+            )
+        ).one()
+    assert row.key_id is None
+    assert row.revoked == 1
+    engine.dispose()
+
+
 def test_024_repairs_sqlite_boolean_backfill(tmp_path, monkeypatch):
     """Verify 024 repairs 023's SQLite text-boolean backfill."""
     from sqlalchemy import Boolean, Column, MetaData, String, Table, select

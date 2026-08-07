@@ -1,7 +1,7 @@
 """Retire plaintext API-key ownership values without breaking old workers.
 
 Revision ID: 025_remove_plaintext_owner_keys
-Revises: 024_human_approval_hardening
+Revises: 025_refresh_token_key_binding
 Create Date: 2026-08-05
 
 Wallet and service ownership is represented by wallet identifiers and the
@@ -24,7 +24,7 @@ import sqlalchemy as sa
 
 
 revision: str = "025_remove_plaintext_owner_keys"
-down_revision: Union[str, None] = "024_human_approval_hardening"
+down_revision: Union[str, None] = "025_refresh_token_key_binding"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
