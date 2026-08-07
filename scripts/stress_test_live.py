@@ -1,9 +1,6 @@
 """Hyper-edge-case stress test against live trust plane."""
 
 import asyncio
-import base64
-import json
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -129,10 +126,9 @@ async def test_concurrent_governed_invokes(spn, agt):
     results = await asyncio.gather(*[invoke(i) for i in range(20)])
     elapsed = time.monotonic() - start
     codes = [r.status_code for r in results]
-    ok_count = codes.count(200)
     success = sum(1 for r in results if "error" not in r.json())
     print(f"  20 parallel invokes in {elapsed:.2f}s: {success}/20 success, codes={set(codes)}")
-    assert success == 20, f"expected all success, got failures"
+    assert success == 20, "expected all success, got failures"
 
 
 async def test_unicode_payload(spn, agt):
@@ -273,7 +269,6 @@ async def test_rapid_fire_idempotency(spn, agt):
     results = await asyncio.gather(*tasks)
     elapsed = time.monotonic() - start
 
-    codes = [r.status_code for r in results]
     successes = sum(1 for r in results if "error" not in r.json())
     # First should succeed, rest should be idempotent replays
     print(f"  50 calls in {elapsed:.2f}s: {successes}/50 success")
@@ -315,7 +310,7 @@ async def test_permit_reuse_after_replay(spn, agt):
               "params": {"name": "partner.notes.write", "arguments": {"text": "final"},
                          "mcpContext": {"wallet_id": agt, "permit_id": pid}}})
     assert "error" not in r.json()
-    print(f"  25th call (spent=50/100): ✅")
+    print("  25th call (spent=50/100): ✅")
 
 
 async def test_health_under_load():

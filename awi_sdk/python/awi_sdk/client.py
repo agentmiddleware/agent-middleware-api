@@ -6,9 +6,7 @@ Lightweight client for interacting with AWI-enabled services.
 Based on arXiv:2506.10953v1 - "Build the web for agents, not agents for the web"
 """
 
-import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx

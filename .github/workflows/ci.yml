@@ -204,7 +204,7 @@ jobs:
           pip install ruff mypy
 
       - name: Run ruff
-        run: ruff check app/ tests/
+        run: ruff check .
 
       - name: Run mypy
         run: mypy app/

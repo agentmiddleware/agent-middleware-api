@@ -81,22 +81,22 @@ async def demo_simulation():
         print(f"Initial virtual balance: {sim.total_cost} credits")
 
         result1 = await generate_video_hook("https://example.com/video1.mp4")
-        print(f"\n1. Simulated generate_video:")
+        print("\n1. Simulated generate_video:")
         print(f"   Result: {result1}")
         print(f"   Session total: {sim.total_cost} credits")
 
         result2 = await distribute_clip("clip-123", platform="tiktok")
-        print(f"\n2. Simulated distribute_clip:")
+        print("\n2. Simulated distribute_clip:")
         print(f"   Result: {result2}")
         print(f"   Session total: {sim.total_cost} credits")
 
         result3 = await send_iot_message("device-001", "status=ok")
-        print(f"\n3. Simulated send_iot_message:")
+        print("\n3. Simulated send_iot_message:")
         print(f"   Result: {result3}")
         print(f"   Session total: {sim.total_cost} credits")
 
         print(f"\n{'=' * 60}")
-        print(f"SIMULATION SUMMARY")
+        print("SIMULATION SUMMARY")
         print(f"{'=' * 60}")
         print(f"Total estimated cost: {sim.total_cost} credits")
         print(f"Number of operations: {sim.charge_count}")
@@ -117,7 +117,7 @@ async def demo_simulation():
         description="Bulk video generation",
     )
 
-    print(f"\nSingle charge simulation:")
+    print("\nSingle charge simulation:")
     print(f"  Would charge: {result['credits_would_charge']} credits")
     print(f"  Virtual balance before: {result['simulated_balance_before']}")
     print(f"  Virtual balance after: {result['simulated_balance_after']}")

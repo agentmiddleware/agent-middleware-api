@@ -4,7 +4,7 @@ Framework-Specific Tool Adapters
 Convert B2A tools to framework-specific formats.
 """
 
-from typing import Any, Callable, TypeVar, Union
+from typing import Any, TypeVar
 from .client import B2AClient
 
 T = TypeVar("T")
@@ -139,7 +139,6 @@ def get_crewai_tools(client: B2AClient) -> list[Any]:
     """
     try:
         from crewai.tools import BaseTool
-        from pydantic import Field
     except ImportError:
         raise ImportError("CrewAI not installed. Run: pip install crewai")
 

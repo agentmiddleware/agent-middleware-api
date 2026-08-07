@@ -7,7 +7,6 @@ breaks asyncpg connection pools across test boundaries.
 import asyncio
 import base64
 import os
-import sys
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
