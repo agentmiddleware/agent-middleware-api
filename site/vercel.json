@@ -32,6 +32,17 @@
   ],
   "redirects": [
     {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "site-tawny-seven-33.vercel.app"
+        }
+      ],
+      "destination": "https://agent-middleware-web.vercel.app/",
+      "permanent": true
+    },
+    {
       "source": "/:path*",
       "has": [
         {
