@@ -8,8 +8,11 @@ Tests for:
 - AWI RAG engine
 """
 
-import pytest
+import sys
 from datetime import timedelta
+from types import ModuleType
+
+import pytest
 
 from app.core.time import utc_now
 from app.services.webauthn_provider import WebAuthnProvider
@@ -577,6 +580,43 @@ class TestAWIRAGEngine:
     @pytest.fixture
     def engine(self):
         return AWIRAGEngine(embedding_dimension=32)
+
+    @pytest.mark.asyncio
+    async def test_chromadb_backend_fails_closed_when_package_is_present(
+        self, engine, monkeypatch, caplog
+    ):
+        """An ambient vulnerable ChromaDB package must not be activated."""
+        client_calls = 0
+
+        class FakeClient:
+            def get_or_create_collection(self, **_kwargs):
+                return object()
+
+        def fake_persistent_client(**_kwargs):
+            nonlocal client_calls
+            client_calls += 1
+            return FakeClient()
+
+        chromadb_module = ModuleType("chromadb")
+        chromadb_config_module = ModuleType("chromadb.config")
+        setattr(chromadb_module, "PersistentClient", fake_persistent_client)
+        setattr(chromadb_config_module, "Settings", lambda **_kwargs: object())
+        monkeypatch.setitem(sys.modules, "chromadb", chromadb_module)
+        monkeypatch.setitem(sys.modules, "chromadb.config", chromadb_config_module)
+
+        engine._use_chroma = True
+        engine._chroma_client = object()
+        engine._chroma_collection = object()
+
+        with caplog.at_level("WARNING"):
+            initialized = await engine.init_chroma()
+
+        assert initialized is False
+        assert client_calls == 0
+        assert engine._use_chroma is False
+        assert engine._chroma_client is None
+        assert engine._chroma_collection is None
+        assert "GHSA-f4j7-r4q5-qw2c" in caplog.text
 
     @pytest.mark.asyncio
     async def test_index_session(self, engine):

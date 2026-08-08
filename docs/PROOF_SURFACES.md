@@ -58,7 +58,7 @@ Leave as-is; do not “finish” them into product:
 |------|----------|------|
 | Blob S3 / Vercel | `app/core/blob.py` | Unimplemented backends fall back to local |
 | CoAP translator | `app/services/iot_bridge.py` (`CoAPTranslator`) | Stub translator |
-| Mock embeddings | `app/services/awi_rag_engine.py` | Deterministic fallback embeddings |
+| Mock embeddings / RAG | `app/services/awi_rag_engine.py` | In-memory only; ChromaDB initialization fails closed and the legacy `rag` / `chromadb` extras are no-ops while the Dependabot alert for [GHSA-f4j7-r4q5-qw2c](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c) reports no patched release |
 | LLM mock | `app/services/llm.py` | Mock response when `LLM_API_KEY` unset |
 | Phase9 MCP stubs | `app/services/mcp_phase9_tools.py` | Registered only when proof surfaces on |
 
