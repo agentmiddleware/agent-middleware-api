@@ -1616,6 +1616,9 @@
               }
             }
           },
+          "403": {
+            "description": "Wallet frozen or governance policy denied"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
