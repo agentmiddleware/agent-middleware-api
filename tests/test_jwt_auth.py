@@ -43,8 +43,18 @@ async def auth_client():
         yield client
 
 
+@pytest.fixture
+def live_key(monkeypatch):
+    from app.services.api_key_service import APIKeyService
+
+    async def is_key_live(_self, _key_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(APIKeyService, "is_key_live", is_key_live)
+
+
 @pytest.mark.anyio
-async def test_bearer_access_token_authenticates(jwt_service):
+async def test_bearer_access_token_authenticates(jwt_service, live_key):
     token = jwt_service.create_access_token(
         wallet_id="wallet_test", key_id="key_test", scopes=["billing:read"]
     )
@@ -58,10 +68,10 @@ async def test_bearer_access_token_authenticates(jwt_service):
 
 
 @pytest.mark.anyio
-async def test_raw_access_token_authenticates(jwt_service):
+async def test_raw_access_token_authenticates(jwt_service, live_key):
     """The non-Bearer branch swallows exceptions — assert it really verifies."""
     token = jwt_service.create_access_token(
-        wallet_id="wallet_raw", key_id=None, scopes=[]
+        wallet_id="wallet_raw", key_id="key_raw", scopes=[]
     )
 
     auth = await get_auth_context(api_key=token)
@@ -71,8 +81,23 @@ async def test_raw_access_token_authenticates(jwt_service):
 
 
 @pytest.mark.anyio
+async def test_unbound_access_token_fails_closed(jwt_service, auth_client):
+    token = jwt_service.create_access_token(
+        wallet_id="wallet_unbound", key_id=None, scopes=[]
+    )
+
+    response = await auth_client.get(
+        "/protected",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "unbound_access_token"
+
+
+@pytest.mark.anyio
 async def test_http_bearer_access_token_takes_priority_over_api_key(
-    jwt_service, auth_client
+    jwt_service, auth_client, live_key
 ):
     token = jwt_service.create_access_token(
         wallet_id="wallet_http", key_id="key_http", scopes=["billing:read"]

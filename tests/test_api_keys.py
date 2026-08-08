@@ -10,6 +10,7 @@ from app.main import app
 from app.db.database import get_session_factory
 from app.db.models import APIKeyModel
 
+
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
@@ -133,6 +134,19 @@ async def test_rotate_api_key(client, api_headers, sponsor_wallet):
     assert data["new_key"] is not None
     assert data["new_key"]["api_key"] != old_key["api_key"]
     assert data["rotation_type"] == "manual"
+    assert data["revoked_keys"] == [old_key["key_id"]]
+
+    old_key_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": old_key["api_key"]},
+    )
+    assert old_key_resp.status_code == 403
+
+    new_key_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": data["new_key"]["api_key"]},
+    )
+    assert new_key_resp.status_code == 200
 
 
 @pytest.mark.anyio
@@ -157,6 +171,98 @@ async def test_rotate_api_key_without_revoke(client, api_headers, sponsor_wallet
     assert resp.status_code == 200
     data = resp.json()
     assert data["revoked_keys"] == []
+    assert data["new_key"] is not None
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}",
+        headers=api_headers,
+    )
+    assert list_resp.json()["total_active"] == 2
+
+    old_key_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": old_key["api_key"]},
+    )
+    assert old_key_resp.status_code == 200
+
+    new_key_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": data["new_key"]["api_key"]},
+    )
+    assert new_key_resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_rotate_api_key_rejects_revoke_without_key_id(
+    client, api_headers, sponsor_wallet
+):
+    create_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    old_key = create_resp.json()
+
+    resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "revoke_old": True,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
+    assert "key_id is required when revoke_old is true" in str(resp.json()["detail"])
+
+    old_key_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": old_key["api_key"]},
+    )
+    assert old_key_resp.status_code == 200
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}",
+        headers=api_headers,
+    )
+    assert list_resp.json()["total_active"] == 1
+
+
+@pytest.mark.anyio
+async def test_rotate_api_key_without_key_id_creates_only(
+    client, api_headers, sponsor_wallet
+):
+    create_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    old_key = create_resp.json()
+
+    resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "revoke_old": False,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["old_key_id"] is None
+    assert data["revoked_keys"] == []
+    assert data["new_key"] is not None
+
+    old_key_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": old_key["api_key"]},
+    )
+    assert old_key_resp.status_code == 200
+
+    new_key_resp = await client.get(
+        f"/v1/billing/wallets/{sponsor_wallet['wallet_id']}",
+        headers={"X-API-Key": data["new_key"]["api_key"]},
+    )
+    assert new_key_resp.status_code == 200
 
     list_resp = await client.get(
         f"/v1/api-keys/{sponsor_wallet['wallet_id']}",

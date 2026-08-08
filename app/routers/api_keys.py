@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from ..core.auth import AuthContext, get_auth_context
 from ..services.api_key_service import (
     get_api_key_service,
+    InvalidRotationRequestError,
     KeyNotFoundError,
     WalletNotFoundError,
 )
@@ -163,6 +164,8 @@ async def rotate_api_key(
         raise HTTPException(status_code=404, detail=str(e))
     except KeyNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except InvalidRotationRequestError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.delete(

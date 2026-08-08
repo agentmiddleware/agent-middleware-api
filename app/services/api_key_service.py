@@ -75,6 +75,12 @@ class KeyRevokedError(APIKeyError):
     pass
 
 
+class InvalidRotationRequestError(APIKeyError):
+    """Raised when rotation options cannot identify a key to revoke."""
+
+    pass
+
+
 def generate_api_key() -> tuple[str, str, str]:
     """
     Generate a new API key.
@@ -360,6 +366,11 @@ class APIKeyService:
                 "created_at": datetime,
             }
         """
+        if revoke_old and not key_id:
+            raise InvalidRotationRequestError(
+                "key_id is required when revoke_old is true"
+            )
+
         old_key_id = None
         now = utc_now()
         persisted_now = to_naive_utc(now)
@@ -391,11 +402,6 @@ class APIKeyService:
 
                 old_key_id = old_key.key_id
 
-                if revoke_old:
-                    old_key.status = APIKeyStatus.REVOKED.value
-                    old_key.revoked_at = persisted_now
-                    old_key.revoke_reason = reason
-
             full_key, key_hash, key_prefix = generate_api_key()
             new_key_id = f"key_{uuid4().hex[:12]}"
             new_key_prefix = key_prefix
@@ -410,7 +416,7 @@ class APIKeyService:
             session.add(new_key)
 
             if old_key_id:
-                await session.execute(
+                rotation_update = (
                     update(APIKeyModel)
                     .where(col(APIKeyModel.key_id) == old_key_id)
                     .values(
@@ -418,6 +424,13 @@ class APIKeyService:
                         last_rotated_at=persisted_now,
                     )
                 )
+                if revoke_old:
+                    rotation_update = rotation_update.values(
+                        status=APIKeyStatus.REVOKED.value,
+                        revoked_at=persisted_now,
+                        revoke_reason=reason,
+                    )
+                await session.execute(rotation_update)
 
             log_entry = KeyRotationLogModel(
                 log_id=rotation_id,
@@ -693,7 +706,7 @@ class APIKeyService:
         rotation_result = await self.rotate_key(
             wallet_id=wallet_id,
             key_id=key_id,
-            revoke_old=True,
+            revoke_old=key_id is not None,
             reason=f"AUTOMATIC: {reason}",
             triggered_by="security_system",
         )
