@@ -519,7 +519,9 @@ async def get_ledger(
     "/charge",
     summary="Charge a wallet for API usage",
     responses={
-        403: {"description": "Wallet frozen or governance policy denied"},
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Wallet expired, frozen, or denied by policy",
+        },
     },
 )
 async def charge_wallet(
@@ -632,12 +634,12 @@ async def charge_wallet(
             )
 
         if isinstance(result, InsufficientFundsResponse):
+            error_code = result.error
             denial_status = (
-                status.HTTP_403_FORBIDDEN
-                if result.error == "wallet_frozen"
-                else status.HTTP_402_PAYMENT_REQUIRED
+                status.HTTP_402_PAYMENT_REQUIRED
+                if error_code == "insufficient_funds"
+                else status.HTTP_403_FORBIDDEN
             )
-            denial_payload = result.model_dump(mode="json")
             await _record_billing_governance(
                 event="billing.charge",
                 auth=auth,
@@ -647,18 +649,19 @@ async def charge_wallet(
                 request_id=request_id,
                 estimated_cost=float(result.required_amount),
                 ok=False,
-                error=result.error,
+                error=error_code,
                 metadata={
                     "units": units,
                     "request_path": request_path,
                     "shortfall": float(result.shortfall),
                 },
             )
+            denial_detail = result.model_dump(mode="json")
             await _complete_idempotency(
-                {"detail": denial_payload},
+                {"detail": denial_detail},
                 denial_status,
             )
-            raise HTTPException(status_code=denial_status, detail=denial_payload)
+            raise HTTPException(status_code=denial_status, detail=denial_detail)
 
         await _record_billing_governance(
             event="billing.charge",

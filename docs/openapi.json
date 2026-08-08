@@ -1617,7 +1617,7 @@
             }
           },
           "403": {
-            "description": "Wallet frozen or governance policy denied"
+            "description": "Wallet expired, frozen, or denied by policy"
           },
           "422": {
             "description": "Validation Error",

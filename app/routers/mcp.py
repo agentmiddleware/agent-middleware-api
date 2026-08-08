@@ -1086,7 +1086,7 @@ async def _execute_registered_tool(
         raise exc
     if isinstance(charge_result, InsufficientFundsResponse):
         denial_reason = charge_result.error
-        denial_status = 403 if denial_reason == "wallet_frozen" else 402
+        denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:
             dispatch_attempt = await dispatch_service.complete(
                 attempt_id=dispatch_attempt.attempt_id,
@@ -1127,9 +1127,9 @@ async def _execute_registered_tool(
                 "failed_refunded"
                 if dispatch_attempt is not None
                 else (
-                    "denied"
-                    if denial_reason == "wallet_frozen"
-                    else "insufficient_funds"
+                    "insufficient_funds"
+                    if denial_reason == "insufficient_funds"
+                    else "denied"
                 )
             )
             receipt_payload = await _finalize_governed_denial(
@@ -1157,8 +1157,6 @@ async def _execute_registered_tool(
                 ),
                 approval_id=(approval_check.approval_id if approval_check else None),
             )
-            if denial_reason == "wallet_frozen":
-                raise ToolPermissionDenied(denial_reason, receipt=receipt_payload)
             raise GovernedToolError(
                 denial_reason,
                 receipt=receipt_payload,
@@ -1168,8 +1166,6 @@ async def _execute_registered_tool(
                     denial_reason,
                 ),
             )
-        if denial_reason == "wallet_frozen":
-            raise ToolPermissionDenied(denial_reason)
         raise ValueError(denial_reason)
 
     # money.charge() is only ever invoked here without dry_run=True, so a real
