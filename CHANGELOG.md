@@ -19,6 +19,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running a browser client on a separate origin must set `CORS_ORIGINS` to that
   origin's exact value. Added regression tests in `tests/test_cors_security.py`.
 
+## [v1.2.0] - 2026-08-08
+
+Trust-plane governance and security-hardening release — the version currently
+serving on the live Railway deployment (`/health/dependencies` reports
+`1.2.0`). Changes since v1.1.0.
+
+### 🔒 Security
+
+- Removed a leaked production API key, added secret scanning, and hardened the
+  live test harness (#201).
+- API key rotation: runbook, generator/verifier tooling, and incident record
+  (#202).
+- Closed confirmed trust-plane authorization and isolation gaps (#203).
+- Key revocation now contains compromises; negative-balance chargebacks are
+  contained (#204).
+- Removed plaintext owner keys and made owner-key retirement rolling-safe
+  (#205); closed the refresh-token rollout window.
+
+### 🛡️ Trust plane & governance
+
+- Hardened governed MCP dispatch and the SDK; closed MCP transport and refund
+  gaps.
+- Trust-plane P0 integrity hardening; permit creation captures `subject_key_id`
+  from the auth context.
+
+### ✨ Features
+
+- Human dashboard, observability endpoints, and accessibility tests.
+- Budget percentage alerts and `/v1/me/alerts`.
+- Opt-in `ENABLE_DOGFOOD_TOOL` for live `partner.notes.write`.
+- Agent-discovery pointers on the marketing site.
+
+### 🐛 Reliability & fixes
+
+- Validate the signing key at startup and in health checks.
+- Normalize tz-aware datetimes to naive UTC for PostgreSQL; keep migration
+  revisions PostgreSQL-compatible.
+- Fix sponsor-wallet ledger FK ordering; harden production migration boot.
+- Discovery honesty: stop advertising unpublished SDK installs; gate MCP
+  discovery behind the wedge.
+
+### 📦 Dependencies
+
+- Bumped `mcp`, `stripe`, `uvicorn`, and `redis` (Dependabot).
+
 ## [v1.0.0] - 2026-04-16
 
 ### 🚀 Major Release — Agent-Native Middleware Platform
