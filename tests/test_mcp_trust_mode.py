@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import timedelta
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -11,6 +12,9 @@ from cryptography.hazmat.primitives.serialization import (
 )
 from httpx import ASGITransport, AsyncClient
 
+from app.core.time import utc_now
+from app.db.database import get_session_factory
+from app.db.models import WalletModel
 from app.main import app
 from app.routers import mcp as mcp_router
 from app.schemas.billing import ServiceCategory
@@ -577,5 +581,128 @@ async def test_legacy_mode_still_allows_wallet_only_mcp_invoke(
         assert resp.status_code == 200
         assert payload["result"]["isError"] is False
         assert "receipt" not in payload["result"]
+    finally:
+        registry.unregister_local(tool_name)
+
+
+async def _force_wallet_status(wallet_id: str, status: str) -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        wallet = await session.get(WalletModel, wallet_id)
+        assert wallet is not None
+        wallet.status = status
+        session.add(wallet)
+        await session.commit()
+
+
+async def _force_child_expiry(wallet_id: str) -> None:
+    factory = get_session_factory()
+    async with factory() as session:
+        wallet = await session.get(WalletModel, wallet_id)
+        assert wallet is not None
+        assert wallet.ttl_seconds is not None
+        wallet.created_at = utc_now() - timedelta(seconds=wallet.ttl_seconds + 1)
+        session.add(wallet)
+        await session.commit()
+
+
+@pytest.mark.anyio
+async def test_legacy_mode_expired_wallet_is_permission_denial(
+    client,
+    clean_database,
+    legacy_trust_mode,
+):
+    """Legacy invokes must surface wallet_expired as a permission denial, not
+    a JSON-RPC internal error or an HTTP 400 caller error."""
+    provisioned = await provision_agent_wallet(client)
+    child_resp = await client.post(
+        "/v1/billing/wallets/child",
+        json={
+            "parent_wallet_id": provisioned["agent_wallet_id"],
+            "child_agent_id": "legacy-expired-child",
+            "budget_credits": 50,
+            "max_spend": 50,
+            "ttl_seconds": 60,
+        },
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert child_resp.status_code == 201, child_resp.text
+    child_wallet_id = child_resp.json()["wallet_id"]
+    await _force_child_expiry(child_wallet_id)
+
+    tool_name = "legacy-expired-wallet-tool"
+    registry = get_service_registry()
+    _register_echo_tool(tool_name)
+    try:
+        jsonrpc = await client.post(
+            "/mcp/messages",
+            json=_jsonrpc_body(
+                tool_name=tool_name,
+                wallet_id=child_wallet_id,
+                request_id="legacy-expired-call",
+            ),
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert jsonrpc.status_code == 200
+        error = jsonrpc.json()["error"]
+        assert error["code"] == -32003
+        assert error["message"] == "wallet_expired"
+
+        http = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json={
+                "name": tool_name,
+                "arguments": {"message": "hello"},
+                "mcp_context": {"wallet_id": child_wallet_id},
+            },
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert http.status_code == 403
+        assert http.json()["detail"]["error"] == "wallet_expired"
+    finally:
+        registry.unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_legacy_mode_frozen_wallet_is_permission_denial(
+    client,
+    clean_database,
+    legacy_trust_mode,
+):
+    """Legacy invokes must surface wallet_frozen as a permission denial, not
+    a JSON-RPC internal error or an HTTP 400 caller error."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    await _force_wallet_status(wallet_id, "frozen")
+
+    tool_name = "legacy-frozen-wallet-tool"
+    registry = get_service_registry()
+    _register_echo_tool(tool_name)
+    try:
+        jsonrpc = await client.post(
+            "/mcp/messages",
+            json=_jsonrpc_body(
+                tool_name=tool_name,
+                wallet_id=wallet_id,
+                request_id="legacy-frozen-call",
+            ),
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert jsonrpc.status_code == 200
+        error = jsonrpc.json()["error"]
+        assert error["code"] == -32003
+        assert error["message"] == "wallet_frozen"
+
+        http = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json={
+                "name": tool_name,
+                "arguments": {"message": "hello"},
+                "mcp_context": {"wallet_id": wallet_id},
+            },
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert http.status_code == 403
+        assert http.json()["detail"]["error"] == "wallet_frozen"
     finally:
         registry.unregister_local(tool_name)

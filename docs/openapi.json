@@ -1044,6 +1044,9 @@
               }
             }
           },
+          "403": {
+            "description": "Parent wallet expired or wallet access denied"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1953,6 +1956,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Source wallet expired or wallet access denied"
           },
           "422": {
             "description": "Validation Error",
