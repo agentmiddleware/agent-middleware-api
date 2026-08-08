@@ -446,15 +446,29 @@ app = FastAPI(
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
 
-# CORS — configurable via CORS_ORIGINS env var (comma-separated)
+def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:
+    """Attach CORS, enabling credentials only for an explicit allowlist.
+
+    Never pair credentialed CORS with a wildcard origin: with
+    ``allow_origins=["*"]`` and ``allow_credentials=True``, Starlette echoes the
+    caller's ``Origin`` back and still returns
+    ``Access-Control-Allow-Credentials: true``, letting any website make
+    credentialed cross-origin reads against the trust plane. A wildcard therefore
+    serves ``Access-Control-Allow-Origin: *`` with credentials disabled.
+    """
+    allow_all_origins = "*" in origins
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=not allow_all_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+# CORS origins are configurable via the CORS_ORIGINS env var (comma-separated).
 cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+add_cors_middleware(app, cors_origins)
 
 # --- Mount service routers ---
 
