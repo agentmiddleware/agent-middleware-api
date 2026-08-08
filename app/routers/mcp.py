@@ -203,8 +203,10 @@ async def get_tools_json(
     """
     Return the MCP tools.json manifest.
 
-    This is the standard MCP server discovery endpoint.
-    Agents should fetch this first to understand available tools.
+    This is an unauthenticated HTTP mirror of tool metadata exposed by this
+    project's governed JSON-RPC subset. Clients can obtain the same list by
+    sending ``tools/list`` to ``/mcp/messages``; that endpoint does not
+    implement the complete MCP initialization lifecycle.
 
     Query Parameters:
         category: Optional service category filter
@@ -2687,7 +2689,7 @@ async def get_tool(service_id: str) -> dict[str, Any]:
 
     Returns the full tool schema including:
     - inputSchema
-    - outputSchema (if available)
+    - output schema availability metadata
     - pricing and category annotations
     """
     _ensure_local_mcp_tools_registered()

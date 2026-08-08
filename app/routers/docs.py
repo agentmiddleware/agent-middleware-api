@@ -6,9 +6,10 @@ This is the new SEO: if an LLM can't parse your docs, agents won't
 recommend your product.
 
 Endpoints:
-- /llm.txt — Canonical copy in ``static/llm.txt`` (served by ``app/routers/static.py``)
+- /llms.txt — Canonical public path backed by ``static/llm.txt``
+- /llm.txt — Backward-compatible alias
 - /docs/index — Structured JSON doc index for agent navigation
-- /.well-known/agent.json — Standard agent discovery manifest (``app/routers/well_known.py``)
+- /.well-known/agent.json — Project discovery manifest (``app/routers/well_known.py``)
 """
 
 from fastapi import APIRouter
@@ -23,7 +24,7 @@ router = APIRouter(
 _TRUST_PLANE_SECTIONS = [
     {
         "id": "agent_manifest",
-        "title": "Agent plugin manifest",
+        "title": "Agent bootstrap manifest",
         "path": "/.well-known/agent.json",
         "content_type": "application/json",
         "summary": ("Canonical bootstrap: capabilities, endpoints, and agent_first."),
@@ -54,8 +55,8 @@ _TRUST_PLANE_SECTIONS = [
     },
     {
         "id": "overview",
-        "title": "API Overview (llm.txt)",
-        "path": "/llm.txt",
+        "title": "API Overview (llms.txt)",
+        "path": "/llms.txt",
         "content_type": "text/plain",
         "summary": "Full API documentation in LLM-optimized plaintext format.",
     },

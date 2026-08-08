@@ -35,6 +35,7 @@ async def test_root_returns_manifest(client):
     assert data["agent_first"] == get_agent_first_metadata()
     assert data["docs"].get("dependency_truth") == "/health/dependencies"
     assert data["docs"].get("capability_index") == "/v1/discover"
+    assert data["docs"].get("llms_txt") == "/llms.txt"
 
 
 @pytest.mark.anyio
@@ -71,6 +72,7 @@ async def test_doc_index(client):
     assert data["agent_first"]["design_principle"] == "agent_first"
     assert data["sections"][0]["path"] == "/.well-known/agent.json"
     assert any(s["path"] == "/WEDGE.md" for s in data["sections"])
+    assert any(s["path"] == "/llms.txt" for s in data["sections"])
     # Trust-plane services always; proof surfaces only when mounted.
     assert len(data["services"]) >= 5
     assert all("surface" in s for s in data["services"])
@@ -111,13 +113,16 @@ async def test_well_known_agent_json(client):
     assert data["authentication"]["type"] == "api_key"
 
 
-# --- LLM.txt ---
+# --- llms.txt ---
 
 
 @pytest.mark.anyio
-async def test_llm_txt_served(client):
-    resp = await client.get("/llm.txt")
-    # May be 200 or 404 depending on file availability in test env
-    assert resp.status_code in (200, 404)
-    if resp.status_code == 200:
-        assert "Agent-Native Middleware API" in resp.text
+async def test_llms_txt_and_legacy_alias_serve_identical_public_instructions(client):
+    canonical = await client.get("/llms.txt")
+    legacy = await client.get("/llm.txt")
+
+    assert canonical.status_code == 200
+    assert legacy.status_code == 200
+    assert canonical.text == legacy.text
+    assert "Agent-Native Middleware API" in canonical.text
+    assert canonical.headers["content-type"].startswith("text/plain")

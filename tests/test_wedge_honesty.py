@@ -85,7 +85,13 @@ async def test_agent_json_documentation_urls_resolve(client, proof_surfaces_off)
     assert manifest.status_code == 200
     docs = manifest.json()["documentation"]
     assert "agent_recipes" not in docs
-    for key in ("wedge", "security_limitations", "partner_guide", "llm_readable"):
+    for key in (
+        "wedge",
+        "security_limitations",
+        "partner_guide",
+        "llm_readable",
+        "llms_readable",
+    ):
         path = docs[key]
         resp = await client.get(path)
         assert resp.status_code == 200, f"{key}={path} returned {resp.status_code}"

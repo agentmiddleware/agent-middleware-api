@@ -25,7 +25,7 @@ mounted when `enable_proof_surfaces` is false.
 
 Core infrastructure:
 - **Identity & authority** — Wallet-scoped agents, API keys, signing keys, KYC hooks
-- **Discovery** — MCP tools, `.well-known/agent.json`, `llm.txt`, OpenAPI, `/v1/discover`
+- **Discovery** — MCP tools, `.well-known/agent.json`, `llms.txt`, OpenAPI, `/v1/discover`
 - **Execution governance** — Permit-gated MCP invocation, receipts, audit chain
 - **Economics** — Wallet budgets, ledger charges, idempotent replay without double-charge
 - **Readiness** — `/health/dependencies` (`simulation_modes`, `enable_proof_surfaces`)
@@ -38,13 +38,18 @@ Core infrastructure:
 
 ```bash
 GET /.well-known/agent.json
-GET /llm.txt
+GET /llms.txt
 GET /mcp/tools.json
 GET /openapi.json
 ```
 
+`GET /llm.txt` remains available as a backward-compatible alias.
+
 Use `/v1/discover` as an optional expanded catalog after the bootstrap sequence.
 Treat `/mcp/tools.json` as authoritative for callable MCP tools.
+Before invoking, inspect the `/health/dependencies` JSON body: HTTP 200 alone
+does not mean every dependency is ready. Health never replaces authentication,
+permit authorization, or receipt verification.
 
 ### 2. Get Operator-Provisioned Access
 
