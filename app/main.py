@@ -446,12 +446,18 @@ app = FastAPI(
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
 
-# CORS — configurable via CORS_ORIGINS env var (comma-separated)
+# CORS — configurable via CORS_ORIGINS env var (comma-separated).
+# Never pair credentialed CORS with a wildcard origin: with allow_origins=["*"]
+# and allow_credentials=True, Starlette echoes the caller's Origin back and
+# still returns Access-Control-Allow-Credentials: true, letting any website make
+# credentialed cross-origin reads against the trust plane. Credentials are only
+# enabled when CORS_ORIGINS is an explicit allowlist.
 cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+allow_all_origins = "*" in cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_credentials=not allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

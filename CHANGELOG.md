@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 🔒 Security
+
+- **CORS: never pair credentialed responses with a wildcard origin.** With
+  `CORS_ORIGINS="*"` (the default) and `allow_credentials=True`, Starlette
+  reflected the caller's `Origin` and still returned
+  `Access-Control-Allow-Credentials: true`, allowing any website to make
+  credentialed cross-origin reads against the trust plane. Credentials are now
+  enabled only when `CORS_ORIGINS` is an explicit allowlist; a wildcard origin
+  serves `Access-Control-Allow-Origin: *` with credentials disabled. Operators
+  running a browser client on a separate origin must set `CORS_ORIGINS` to that
+  origin's exact value. Added regression tests in `tests/test_cors_security.py`.
+
 ## [v1.0.0] - 2026-04-16
 
 ### 🚀 Major Release — Agent-Native Middleware Platform
