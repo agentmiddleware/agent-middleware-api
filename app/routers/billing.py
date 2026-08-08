@@ -328,6 +328,11 @@ async def create_agent_wallet(
     "/wallets/child",
     response_model=ChildWalletResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Parent wallet expired or wallet access denied",
+        },
+    },
     summary="Spawn a child sub-agent wallet",
     description=(
         "Create a spend-capped child wallet from a parent agent's balance. "
@@ -880,6 +885,11 @@ async def prepare_top_up(
     "/transfer",
     summary="Transfer credits between wallets",
     description="Transfer credits from one wallet to another (agent-to-agent handoff).",
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Source wallet expired or wallet access denied",
+        },
+    },
 )
 async def transfer_wallets(
     from_wallet_id: str = Query(..., description="Source wallet ID"),

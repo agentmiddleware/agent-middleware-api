@@ -2482,6 +2482,8 @@ def _value_error_jsonrpc_code(message: str) -> int:
         return -32003
     if message == "insufficient_funds":
         return -32004
+    if message in {"wallet_frozen", "wallet_expired"}:
+        return -32003
     return -32603
 
 
@@ -2636,6 +2638,8 @@ async def invoke_tool(
         message = str(exc)
         if message == "insufficient_funds":
             raise HTTPException(status_code=402, detail=message)
+        if message in {"wallet_frozen", "wallet_expired"}:
+            raise HTTPException(status_code=403, detail={"error": message})
         if message.startswith("Tool not found"):
             raise HTTPException(status_code=404, detail=message)
         if message.startswith("Tool not executable"):

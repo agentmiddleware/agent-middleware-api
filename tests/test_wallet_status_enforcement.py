@@ -536,7 +536,7 @@ async def test_dry_run_commit_reports_wallet_expired_when_session_crosses_deadli
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "invalid_ttl",
-    [0, -1, MAX_CHILD_WALLET_TTL_SECONDS + 1],
+    [0, -1, MAX_CHILD_WALLET_TTL_SECONDS + 1, True],
 )
 async def test_child_wallet_ttl_rejects_unsafe_values(
     client, clean_database, invalid_ttl
@@ -570,6 +570,22 @@ async def test_child_wallet_ttl_rejects_unsafe_values(
 
 def test_charge_openapi_documents_wallet_expired_denial():
     response = app.openapi()["paths"]["/v1/billing/charge"]["post"]["responses"]["403"]
+
+    assert "expired" in response["description"].lower()
+
+
+def test_child_wallet_openapi_documents_wallet_expired_denial():
+    response = app.openapi()["paths"]["/v1/billing/wallets/child"]["post"]["responses"][
+        "403"
+    ]
+
+    assert "expired" in response["description"].lower()
+
+
+def test_transfer_openapi_documents_wallet_expired_denial():
+    response = app.openapi()["paths"]["/v1/billing/transfer"]["post"]["responses"][
+        "403"
+    ]
 
     assert "expired" in response["description"].lower()
 

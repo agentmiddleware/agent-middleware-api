@@ -14,7 +14,7 @@ precision errors (e.g., 0.1 + 0.2 ≠ 0.3 with floats).
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
 from datetime import datetime
 import re
@@ -264,6 +264,15 @@ class CreateChildWalletRequest(BaseModel):
         default=True,
         description="Reclaim unspent credits when child completes.",
     )
+
+    @field_validator("ttl_seconds", mode="before")
+    @classmethod
+    def _reject_boolean_ttl(cls, value: Any) -> Any:
+        # bool is an int subclass, so lax coercion would turn true into a
+        # 1-second TTL before the service-layer guard ever sees it.
+        if isinstance(value, bool):
+            raise ValueError("ttl_seconds must be an integer, not a boolean")
+        return value
 
 
 class ChildWalletResponse(ExactDecimalFieldsMixin):
