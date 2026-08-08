@@ -129,6 +129,8 @@ async def get_auth_context(
     if stripped.count(".") == 2 and len(stripped) > 50:
         try:
             return await _auth_from_jwt(stripped)
+        except HTTPException:
+            raise
         except Exception:
             pass  # Not a valid JWT, fall through to API key
 
@@ -216,6 +218,31 @@ async def _auth_from_jwt(token: str) -> AuthContext:
                 "message": str(e),
             },
         ) from e
+
+    if payload.key_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "unbound_access_token",
+                "message": (
+                    "This access token is not bound to an API key; authenticate "
+                    "with an active API key."
+                ),
+            },
+        )
+
+    from ..services.api_key_service import get_api_key_service
+
+    if not await get_api_key_service().is_key_live(payload.key_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "no_active_api_key",
+                "message": (
+                    "The API key that issued this access token is no longer active."
+                ),
+            },
+        )
 
     return AuthContext(
         source="jwt",

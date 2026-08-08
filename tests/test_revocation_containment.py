@@ -247,6 +247,43 @@ async def test_rotation_carries_the_key_binding_forward(
 
 
 @pytest.mark.anyio
+async def test_rotation_revokes_access_token_derived_from_old_key(
+    client, clean_database, signing_key
+):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
+
+    rotated = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": wallet_id,
+            "key_id": provisioned["key_id"],
+            "revoke_old": True,
+            "reason": "compromise_response",
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert rotated.status_code == 200, rotated.text
+
+    denied = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "key_name": "revocation-escape"},
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert denied.status_code == 401
+    assert denied.json()["detail"]["error"] == "no_active_api_key"
+
+    listed = await client.get(
+        f"/v1/api-keys/{wallet_id}",
+        headers={"X-API-Key": "test-key"},
+    )
+    assert listed.status_code == 200
+    assert listed.json()["total_active"] == 1
+    assert listed.json()["total_revoked"] == 1
+
+
+@pytest.mark.anyio
 async def test_legacy_unbound_refresh_token_fails_closed(
     client, clean_database, signing_key
 ):

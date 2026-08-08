@@ -122,9 +122,7 @@ class TestPostgresTrustLoop:
         os.environ["ENABLE_DOGFOOD_TOOL"] = "true"
         os.environ["VALID_API_KEYS"] = "pg-test-key"
 
-        subprocess.run(
-            ["alembic", "upgrade", "head"], check=True, env=dict(os.environ)
-        )
+        subprocess.run(["alembic", "upgrade", "head"], check=True, env=dict(os.environ))
 
         # get_settings() and the engine are process-level singletons primed by
         # conftest's SQLite defaults; rebuild both against Postgres.
@@ -223,6 +221,44 @@ class TestPostgresTrustLoop:
         assert body["signature"]
         # Persisted timestamps must come back naive (no offset suffix).
         assert "+" not in body["issued_at"]
+
+    @pytest.mark.anyio
+    async def test_api_key_rotation_revokes_old_key_on_postgres(self, client, wallets):
+        """Revocation metadata must survive the atomic asyncpg update."""
+        _, agent_id = wallets
+        headers = {"X-API-Key": "pg-test-key"}
+        created = await client.post(
+            "/v1/api-keys",
+            headers=headers,
+            json={"wallet_id": agent_id, "key_name": "pg-rotation-old"},
+        )
+        assert created.status_code == 201, created.text
+        old_key = created.json()
+
+        rotated = await client.post(
+            "/v1/api-keys/rotate",
+            headers=headers,
+            json={
+                "wallet_id": agent_id,
+                "key_id": old_key["key_id"],
+                "revoke_old": True,
+                "reason": "pg_compromise_response",
+            },
+        )
+        assert rotated.status_code == 200, rotated.text
+        new_key = rotated.json()["new_key"]
+        assert rotated.json()["revoked_keys"] == [old_key["key_id"]]
+
+        old_auth = await client.get(
+            f"/v1/billing/wallets/{agent_id}",
+            headers={"X-API-Key": old_key["api_key"]},
+        )
+        new_auth = await client.get(
+            f"/v1/billing/wallets/{agent_id}",
+            headers={"X-API-Key": new_key["api_key"]},
+        )
+        assert old_auth.status_code == 403
+        assert new_auth.status_code == 200
 
     @pytest.mark.anyio
     async def test_permit_with_non_utc_offset_normalizes_correctly(
