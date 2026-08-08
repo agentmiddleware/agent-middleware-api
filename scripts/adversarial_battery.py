@@ -29,10 +29,19 @@ import os
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
 
-API_URL = os.environ.get("API_URL", "https://api-service-production-433c.up.railway.app").rstrip("/")
+# Name the target explicitly — never default to a live host, so an operator who
+# exports only BOOTSTRAP_KEY cannot unintentionally provision wallets and
+# permits against production.
+API_URL = os.environ.get("API_URL", "").rstrip("/")
 BOOTSTRAP_KEY = os.environ.get("BOOTSTRAP_KEY")
+
+# Per-run token so idempotency keys and resource names are unique each run;
+# otherwise the IdempotencyService cache can short-circuit a repeat run and
+# report PASS without re-exercising the governed path.
+RUN_ID = uuid.uuid4().hex[:8]
 
 RESULTS: list[tuple[str, str, str]] = []  # (name, PASS/FAIL/SKIP, detail)
 
@@ -70,26 +79,37 @@ def iso_in(minutes: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _require(status: int, body: object, what: str) -> object:
+    """Abort with a controlled message if a provisioning call did not 2xx."""
+    if not 200 <= status < 300:
+        print(f"ERROR: {what} failed (status={status}): {body}", file=sys.stderr)
+        raise SystemExit(2)
+    return body
+
+
 def provision():
     """Create sponsor + two agent wallets, keys, and a scoped permit."""
-    _, sponsor = req("POST", "/v1/billing/wallets/sponsor", BOOTSTRAP_KEY, {
-        "sponsor_name": "adv-battery", "email": "adv@example.com",
+    s, sponsor = req("POST", "/v1/billing/wallets/sponsor", BOOTSTRAP_KEY, {
+        "sponsor_name": f"adv-battery-{RUN_ID}", "email": "adv@example.com",
         "initial_credits": 500, "require_kyc": False,
     })
+    _require(s, sponsor, "create sponsor wallet")
     sponsor_id = sponsor["wallet_id"]
 
     agents = []
     for i in (1, 2):
-        _, a = req("POST", "/v1/billing/wallets/agent", BOOTSTRAP_KEY, {
-            "sponsor_wallet_id": sponsor_id, "agent_id": f"adv-agent-{i}",
+        s, a = req("POST", "/v1/billing/wallets/agent", BOOTSTRAP_KEY, {
+            "sponsor_wallet_id": sponsor_id, "agent_id": f"adv-agent-{i}-{RUN_ID}",
             "budget_credits": 100, "daily_limit": 50,
         })
-        _, k = req("POST", "/v1/api-keys", BOOTSTRAP_KEY, {
-            "wallet_id": a["wallet_id"], "key_name": f"adv-key-{i}", "expires_in_days": 1,
+        _require(s, a, f"create agent wallet {i}")
+        s, k = req("POST", "/v1/api-keys", BOOTSTRAP_KEY, {
+            "wallet_id": a["wallet_id"], "key_name": f"adv-key-{i}-{RUN_ID}", "expires_in_days": 1,
         })
+        _require(s, k, f"issue agent key {i}")
         agents.append({"wallet_id": a["wallet_id"], "api_key": k["api_key"], "key_id": k["key_id"]})
 
-    _, permit = req("POST", "/v1/permits", BOOTSTRAP_KEY, {
+    s, permit = req("POST", "/v1/permits", BOOTSTRAP_KEY, {
         "issuer_wallet_id": agents[0]["wallet_id"],
         "subject_wallet_id": agents[0]["wallet_id"],
         "subject_key_id": agents[0]["key_id"],
@@ -97,7 +117,8 @@ def provision():
         "scopes": ["tool:golden-path-echo:invoke", "billing:charge"],
         "max_credits": 5,
         "expires_at": iso_in(30),
-    }, {"Idempotency-Key": "adv-permit-1"})
+    }, {"Idempotency-Key": f"adv-permit-{RUN_ID}"})
+    _require(s, permit, "issue scoped permit")
     return sponsor_id, agents, permit
 
 
@@ -110,10 +131,15 @@ def cleanup(agents):
 
 
 def main() -> int:
+    if not API_URL:
+        print("ERROR: set API_URL to the deployment you want to test, e.g. "
+              "export API_URL=https://api-service-production-433c.up.railway.app",
+              file=sys.stderr)
+        return 2
     if not BOOTSTRAP_KEY:
         print("ERROR: set BOOTSTRAP_KEY (operator key from Railway variables).", file=sys.stderr)
         return 2
-    print(f"Target: {API_URL}\n")
+    print(f"Target: {API_URL}  (run {RUN_ID})\n")
 
     sponsor_id, agents, permit = provision()
     a, b = agents
@@ -138,10 +164,10 @@ def main() -> int:
 
     # 4. Permit/key binding: agent B's key may not use agent A's permit.
     s, body = req("POST", "/mcp/messages", b["api_key"], {
-        "jsonrpc": "2.0", "id": "adv-bind-1", "method": "tools/call",
+        "jsonrpc": "2.0", "id": f"adv-bind-{RUN_ID}", "method": "tools/call",
         "params": {"name": "golden-path-echo", "arguments": {"message": "x"},
                    "mcpContext": {"wallet_id": b["wallet_id"], "permit_id": permit_id,
-                                  "idempotency_key": "adv-bind-1"}},
+                                  "idempotency_key": f"adv-bind-{RUN_ID}"}},
     })
     denied = s in (401, 403) or (isinstance(body, dict) and body.get("error"))
     record("permit_key_binding", bool(denied), f"status={s} (cross-key permit use must be denied)")
@@ -152,15 +178,15 @@ def main() -> int:
         "subject_key_id": a["key_id"], "allowed_tools": ["golden-path-echo"],
         "scopes": ["tool:golden-path-echo:invoke"], "max_credits": 5,
         "expires_at": iso_in(-30),
-    }, {"Idempotency-Key": "adv-permit-expired"})
+    }, {"Idempotency-Key": f"adv-permit-expired-{RUN_ID}"})
     if s >= 400:
         record("expired_permit_denied", True, f"creation rejected status={s}")
     else:
         si, bi = req("POST", "/mcp/messages", a["api_key"], {
-            "jsonrpc": "2.0", "id": "adv-exp-1", "method": "tools/call",
+            "jsonrpc": "2.0", "id": f"adv-exp-{RUN_ID}", "method": "tools/call",
             "params": {"name": "golden-path-echo", "arguments": {"message": "x"},
                        "mcpContext": {"wallet_id": a["wallet_id"], "permit_id": exp.get("permit_id"),
-                                      "idempotency_key": "adv-exp-1"}},
+                                      "idempotency_key": f"adv-exp-{RUN_ID}"}},
         })
         d = si in (401, 403) or (isinstance(bi, dict) and bi.get("error"))
         record("expired_permit_denied", bool(d), f"invoke status={si} (expired permit must be denied)")
@@ -181,10 +207,10 @@ def main() -> int:
                f"no invokable 'golden-path-echo' tool exposed (tools={tool_names[:5]}); "
                "wire an echo tool to exercise replay")
     else:
-        call = {"jsonrpc": "2.0", "id": "adv-replay", "method": "tools/call",
+        call = {"jsonrpc": "2.0", "id": f"adv-replay-{RUN_ID}", "method": "tools/call",
                 "params": {"name": "golden-path-echo", "arguments": {"message": "hello"},
                            "mcpContext": {"wallet_id": a["wallet_id"], "permit_id": permit_id,
-                                          "idempotency_key": "adv-replay-1"}}}
+                                          "idempotency_key": f"adv-replay-{RUN_ID}"}}}
         _, r1 = req("POST", "/mcp/messages", a["api_key"], call)
         _, r2 = req("POST", "/mcp/messages", a["api_key"], call)
         def rid(x):
