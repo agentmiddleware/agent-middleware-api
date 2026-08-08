@@ -81,6 +81,84 @@ async def test_raw_access_token_authenticates(jwt_service, live_key):
 
 
 @pytest.mark.anyio
+async def test_raw_unbound_access_token_fails_closed(jwt_service, auth_client):
+    token = jwt_service.create_access_token(
+        wallet_id="wallet_raw_unbound", key_id=None, scopes=[]
+    )
+
+    response = await auth_client.get(
+        "/protected",
+        headers={"X-API-Key": token},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "unbound_access_token"
+
+
+@pytest.mark.anyio
+async def test_raw_revoked_access_token_fails_closed(
+    jwt_service, auth_client, monkeypatch
+):
+    from app.services.api_key_service import APIKeyService
+
+    async def is_key_live(_self, _key_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(APIKeyService, "is_key_live", is_key_live)
+    token = jwt_service.create_access_token(
+        wallet_id="wallet_raw_revoked", key_id="key_revoked", scopes=[]
+    )
+
+    response = await auth_client.get(
+        "/protected",
+        headers={"X-API-Key": token},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "no_active_api_key"
+
+
+@pytest.mark.anyio
+async def test_raw_rejected_token_cannot_fall_through_to_configured_env_key(
+    jwt_service, auth_client, monkeypatch
+):
+    token = jwt_service.create_access_token(
+        wallet_id="wallet_raw_configured", key_id=None, scopes=[]
+    )
+    monkeypatch.setenv("VALID_API_KEYS", token)
+    get_settings.cache_clear()
+
+    response = await auth_client.get(
+        "/protected",
+        headers={"X-API-Key": token},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "unbound_access_token"
+
+
+@pytest.mark.anyio
+async def test_raw_rejected_token_cannot_fall_through_to_debug_bootstrap(
+    jwt_service, auth_client, monkeypatch
+):
+    token = jwt_service.create_access_token(
+        wallet_id="wallet_raw_debug", key_id=None, scopes=[]
+    )
+    monkeypatch.setenv("VALID_API_KEYS", "")
+    monkeypatch.setenv("DEBUG", "true")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    get_settings.cache_clear()
+
+    response = await auth_client.get(
+        "/protected",
+        headers={"X-API-Key": token},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "unbound_access_token"
+
+
+@pytest.mark.anyio
 async def test_unbound_access_token_fails_closed(jwt_service, auth_client):
     token = jwt_service.create_access_token(
         wallet_id="wallet_unbound", key_id=None, scopes=[]

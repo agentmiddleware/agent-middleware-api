@@ -129,6 +129,8 @@ async def get_auth_context(
     if stripped.count(".") == 2 and len(stripped) > 50:
         try:
             return await _auth_from_jwt(stripped)
+        except HTTPException:
+            raise
         except Exception:
             pass  # Not a valid JWT, fall through to API key
 
