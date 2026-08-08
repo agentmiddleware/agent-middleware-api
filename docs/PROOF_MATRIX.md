@@ -1,0 +1,194 @@
+# Proof Matrix
+
+Which command proves which invariant, and what each one does **not** prove.
+
+The trust plane's differentiator is that its claims are executable: a reviewer
+can run one command and watch an invariant hold or fail. This document is the
+index of those commands. It is descriptive, not aspirational — every row below
+maps to a target in the [`Makefile`](../Makefile) or a job in
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) that exists today.
+
+For the product thesis these proofs defend, see [`WEDGE.md`](../WEDGE.md). For
+the claims the project deliberately does not make, see
+[`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md).
+
+## Local proofs (no credentials, no external services)
+
+| Command | Proves | Backend |
+|---|---|---|
+| `make prove-trust-plane` | The full trust loop plus replay and tamper detection — see the breakdown below | Throwaway SQLite |
+| `make prove-trust-plane-postgres` | **Migrations only** — see the defect note below | Throwaway SQLite, after migrating PostgreSQL |
+| `make red-team-trust-plane` | Ten distinct attacks are each denied with a specific reason code and none produces a debit | Throwaway SQLite |
+| `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |
+| `make agent-ops-war-room` | The operator narrative: discovery, provisioning, invoke, replay, self-inspection, denial | Temp SQLite |
+
+### Known defect: `prove-trust-plane-postgres` does not prove PostgreSQL
+
+Recorded here rather than quietly omitted, because the target's name asserts
+something it does not do.
+
+`scripts/demo_trust_plane.py` unconditionally sets `DATABASE_URL` to a
+throwaway SQLite file inside `configure_environment()`, which runs *before* the
+FastAPI app is imported. The operator's `DATABASE_URL` is therefore overwritten
+before the application reads it. What `make prove-trust-plane-postgres`
+actually does is apply `alembic upgrade head` to the supplied PostgreSQL
+database — a genuine and useful migration check — and then run every assertion
+on SQLite.
+
+The same defect makes CI's `postgres_trust` job a SQLite run.
+
+Real PostgreSQL coverage in this repository comes from `make
+prove-crash-recovery` (the two-process harness fails closed unless the URL is
+PostgreSQL) and from the CI suites parameterized by `TEST_POSTGRES_URL`, not
+from the demo script. **Fixing this means having `configure_environment()`
+respect a caller-supplied `DATABASE_URL` instead of overwriting it** — a small
+change, deliberately left out of the documentation change that discovered it,
+because it alters what a proof command proves and deserves its own review.
+
+### What `make prove-trust-plane` asserts
+
+One run, in order: sponsor wallet, agent wallet, and wallet-bound key
+provisioning; MCP tool discovery; signed permit issuance and verification; active
+signing-key metadata exposed without leaking private material; a governed
+invoke producing a success receipt linked to a ledger entry; receipt signature
+verification; exactly one ledger debit; audit-chain verification and event
+linkage; **replay returning the identical receipt with no second debit**;
+out-of-scope denial (`permit_tool_not_allowed`) with a signed denial receipt
+and no charge; **denial replay returning the same denial receipt**; fail-closed
+`permit_required` denial when no permit is supplied; cross-wallet read denied
+with 403; a valid evidence bundle; and detection of both a tampered receipt and
+a tampered audit event.
+
+Replay is therefore already a proven invariant, not a gap — it is asserted here
+on both the success and denial paths, again in the dogfood proof against a real
+side effect, again across two OS processes by the crash proof, and again under
+15-way concurrency by the live conformance suite.
+
+### The ten attacks in `make red-team-trust-plane`
+
+`permit_required`, `permit_not_found`, `permit_tool_not_allowed`,
+`permit_scope_missing`, `permit_budget_exceeded`, `permit_wallet_mismatch`,
+`permit_key_mismatch`, `permit_expired`, `permit_revoked`, and
+`permit_signature_invalid`. The battery also asserts that no attack debited
+either wallet, that a positive-control call afterwards still charges exactly
+once, and that the audit chain remains valid throughout.
+
+## Crash-consistency proof
+
+```bash
+export DATABASE_URL=postgresql+asyncpg://...   # dedicated, EMPTY database
+make prove-crash-recovery
+```
+
+This starts two independent Uvicorn worker processes against one shared
+PostgreSQL database and injects faults at durable commit boundaries. It proves
+three things:
+
+1. **Concurrent invokes serialize.** While worker A is paused mid-side-effect,
+   an identical invoke on worker B receives `idempotency_in_progress`. After
+   release, the original succeeds, replay returns the identical result, and the
+   database shows exactly one tool execution, one debit, and one receipt.
+2. **A committed receipt survives worker death.** The worker is killed after
+   the receipt commit; replay is blocked until reconciliation repairs the
+   record, then returns the *same* receipt id — still exactly one execution,
+   debit, and receipt.
+3. **An ambiguous side effect fails closed.** The worker is killed after the
+   tool side effect but before the receipt. Reconciliation leaves the record
+   untouched and reports it in its `needs_review` count rather than repairing
+   it, replay stays `idempotency_in_progress`, and nothing is redispatched
+   automatically.
+
+Note that (3) is deliberately *not* a recovery. The correct behavior for an
+ambiguous post-side-effect crash is fail-closed manual review, because the
+gateway cannot know whether the remote effect landed. Describing this proof as
+"crash recovery" without that qualifier overstates it; the accurate framing is
+**crash consistency with reconciliation, and fail-closed review for ambiguous
+outcomes**.
+
+The harness refuses to run unless it is safe: it fails closed on a
+non-PostgreSQL URL, a production-like `ENVIRONMENT`, a stale Alembic revision,
+or any application table that already holds rows, and it takes an advisory lock
+so two runs cannot overlap. Without the opt-in environment variables it skips,
+so it never interferes with `make test`.
+
+CI runs the same three tests in the `postgres_permit_concurrency` job. That job
+installs dependencies with `pip` rather than `uv`, so its step is spelled
+inline; the Make target is the operator-facing equivalent, not a literal
+copy of the CI step.
+
+## Release gates
+
+| Command | Enforces |
+|---|---|
+| `make trust-coverage-gate` | 20 focused trust test files at an **80% coverage floor** across 18 named trust-plane control modules |
+| `make trust-release-gate` | A 12-file trust suite, then the coverage gate, then the demo proof, then discovery-drift tests, then committed-OpenAPI parity, then simulation-inventory parity |
+
+## Live suites (against a deployment you operate)
+
+Both write real rows to the target. Point them at staging.
+
+| Command | Proves | Requires |
+|---|---|---|
+| `make trust-conformance-live` | Golden path; sequential **and 15-way concurrent** replay collapsing to one receipt and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | `AGENT_MIDDLEWARE_API_KEY`; set `AGENT_MIDDLEWARE_API_URL` or it defaults to production |
+| `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency; always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
+
+The battery reports SKIP — never a false PASS — for MCP-invocation checks when
+the deployment exposes no invokable `golden-path-echo` tool. It does not
+exercise over-spend containment.
+
+## What is not proven
+
+Being explicit about the boundary is what makes the proofs worth anything.
+
+- **Exactly-once is gateway-scoped.** A remote tool's side effect is exactly
+  once only if that tool honors the forwarded idempotency key. A post-dispatch
+  transport failure is signed `delivery_uncertain`, stays charged, and is never
+  automatically retried or refunded.
+- **Audit chains are tamper-evident, not immutable.** An administrator who can
+  alter both the database and its chain metadata is inside the trust boundary.
+  Append-only storage and external anchoring are not implemented.
+- **Verification is first-party.** `/v1/receipts/verify`,
+  `/v1/audit/verify-chain`, and the evidence bundle are served by the same
+  operator that produced the artifacts. There is no external transparency log,
+  no third-party notarization, and no independent offline verifier. Until one
+  exists, these artifacts are *operator-verifiable*, not *independently
+  verifiable*.
+- **There is no Byzantine fault tolerance, and the term does not apply.** The
+  architecture is one API server, one database, and one operator-held signing
+  key. BFT addresses arbitrary faults among mutually distrusting replicas;
+  there are no replicas and no consensus here. The honest goal is
+  single-operator tamper-evidence today, with independent verification as the
+  named next step.
+- **The crash proof covers instrumented boundaries, not arbitrary failure.**
+  Faults are injected at specific durable commit points. It does not prove
+  survival of a kill at an arbitrary instruction, database crash or failover,
+  or multi-node high availability. The harness exposes more fault points than
+  the three CI-run scenarios currently exercise.
+- **`make prove-trust-plane` runs on SQLite with a hardcoded demo signing
+  seed.** It proves the logic, not the production posture. No target re-runs
+  these assertions against PostgreSQL — see the defect note above. PostgreSQL
+  behavior is covered instead by `make prove-crash-recovery` and the
+  `TEST_POSTGRES_URL` suites in CI; production configuration is enforced
+  separately by the `production_trust` CI job.
+- **Tenant isolation is application-layer.** PostgreSQL row-level security is
+  not implemented and no public multi-tenant isolation guarantee is made.
+
+## Where provability goes next
+
+Ordered by how much each would strengthen the differentiator per unit of work.
+
+1. **An independent offline verifier.** A script that takes exported receipts,
+   permits, and audit events plus published public-key metadata and verifies
+   them with no running server. This is the single highest-leverage item: it
+   converts "operator-verifiable" into "independently verifiable" without
+   requiring a transparency log, and it is self-contained tooling rather than
+   distributed infrastructure.
+2. **Exercise the remaining crash fault points.** The harness already
+   instruments more commit boundaries than the three proven scenarios use.
+3. **External anchoring or append-only storage**, which is what would let the
+   project retire the "tamper-evident, not immutable" caveat.
+4. **KMS-backed signing custody**, designed in
+   [`docs/key-management.md`](key-management.md) but not implemented.
+
+Items 3 and 4 are frozen by [`WEDGE.md`](../WEDGE.md) until a design partner
+requires them. They belong on a roadmap, not in product copy.

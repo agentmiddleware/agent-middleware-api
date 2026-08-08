@@ -4,16 +4,19 @@
 
 ## JSON Payload (copy-paste ready)
 
+Describe only what is mounted in a production-like deployment
+(`ENABLE_PROOF_SURFACES=false`). Proof surfaces are frozen and must not be
+listed as capabilities — see [`PROOF_SURFACES.md`](PROOF_SURFACES.md).
+
 ```json
 {
   "name": "Agent Middleware API",
-  "description": "Operational control plane for autonomous agents: identity, billing, discovery, policy, and execution governance for machine-native software tenants. Canonical loop: discover -> authenticate -> invoke -> meter -> govern.",
+  "description": "Trust plane for governed MCP tool calls: scoped signed permits, wallet metering, replay-safe invocation, signed receipts, and tamper-evident audit chains. Canonical loop: discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern.",
   "url": "https://api-service-production-433c.up.railway.app",
   "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
   "categories": [
     "infrastructure",
     "billing",
-    "telemetry",
     "agentic-ai"
   ],
   "verifications": {
@@ -22,7 +25,7 @@
   },
   "features": {
     "mcp": true,
-    "sse": true,
+    "sse": false,
     "stdio": false
   },
   "auth": {
@@ -30,25 +33,20 @@
     "header": "X-API-Key"
   },
   "capabilities": [
-    "MCP Server (Model Context Protocol) with auto-discovery",
-    "Wallet-scoped identity and delegated credentials",
-    "Billing, dry-run pricing, and ledgering with Stripe integration",
-    "Policy-constrained execution and planner optimization",
-    "Telemetry, audit surfaces, and readiness checks",
-    "Behavioral and dry-run sandboxes",
-    "Agentic Web Interface (AWI) proof surface",
-    "Agent-to-agent messaging and transfers",
-    "WebAuthn/passkey for high-risk actions",
-    "RAG memory over AWI session history"
+    "Governed MCP tool invocation requiring a signed permit and idempotency key",
+    "Wallet-scoped identity and operator-provisioned delegated credentials",
+    "Ed25519-signed permits binding wallet, key, tool, scope, budget, and expiry",
+    "Replay-safe metering: one idempotency key, one dispatch, one debit",
+    "Ed25519-signed receipts with request/response hashes and evidence bundles",
+    "Per-wallet tamper-evident hash-chain audit with verification endpoint"
   ],
   "mcpEndpoints": {
     "tools": "/mcp/tools.json",
-    "messages": "/mcp/messages",
-    "sse": "/mcp/sse"
+    "messages": "/mcp/messages"
   },
   "discoveryEndpoints": {
     "agentManifest": "/.well-known/agent.json",
-    "llmDocs": "/llm.txt",
+    "llmDocs": "/llms.txt",
     "openapi": "/openapi.json"
   },
   "contact": {
@@ -57,6 +55,13 @@
   }
 }
 ```
+
+`sse` and `stdio` are both `false`: the server implements the HTTP/JSON-RPC
+tools subset at `/mcp/messages` and nothing else. `/mcp/messages` does not
+implement the complete MCP initialization lifecycle, and `/mcp/tools.json` is a
+convenience mirror of the MCP-native `tools/list` method rather than a
+standard discovery path. Do not advertise a transport or lifecycle the server
+does not serve.
 
 ---
 
@@ -83,9 +88,11 @@ You can add a `.mcp.json` file to the repo root:
 ```json
 {
   "name": "Agent Middleware API",
-  "description": "Operational control plane for autonomous agents",
+  "description": "Trust plane for governed MCP tool calls: signed permits, wallet metering, replay-safe invocation, signed receipts, and audit chains",
   "url": "https://api-service-production-433c.up.railway.app"
 }
 ```
 
-This helps agents discover the MCP server when cloning the repo.
+This helps agents discover the MCP server when cloning the repo. Keep its
+description in sync with the payload above; a stale description here is the
+kind of drift the discovery honesty tests exist to catch elsewhere.

@@ -1,6 +1,6 @@
 {
   "name": "Agent Middleware API",
-  "description": "Open-source B2A control plane with MCP + Agentic Web Interface (AWI)",
+  "description": "Trust plane for governed MCP tool calls: signed permits, wallet metering, replay-safe invocation, signed receipts, and audit chains",
   "url": "https://api-service-production-433c.up.railway.app",
   "repository": "https://github.com/PetrefiedThunder/agent-middleware-api"
 }
