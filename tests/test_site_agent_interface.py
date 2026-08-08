@@ -110,16 +110,25 @@ def test_dynamic_machine_routes_redirect_to_the_canonical_api() -> None:
         assert destination.startswith("https://")
 
 
-def test_legacy_marketing_alias_redirects_to_canonical_host() -> None:
+def test_legacy_marketing_alias_redirects_root_and_nested_paths() -> None:
     config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
-    expected_redirect = {
-        "source": "/:path*",
-        "has": [{"type": "host", "value": LEGACY_MARKETING_HOST}],
-        "destination": f"{CANONICAL_MARKETING_SITE}/:path*",
-        "permanent": True,
-    }
+    host_condition = [{"type": "host", "value": LEGACY_MARKETING_HOST}]
+    expected_redirects = [
+        {
+            "source": "/",
+            "has": host_condition,
+            "destination": f"{CANONICAL_MARKETING_SITE}/",
+            "permanent": True,
+        },
+        {
+            "source": "/:path*",
+            "has": host_condition,
+            "destination": f"{CANONICAL_MARKETING_SITE}/:path*",
+            "permanent": True,
+        },
+    ]
 
-    assert config["redirects"][0] == expected_redirect
+    assert config["redirects"][:2] == expected_redirects
 
 
 def test_local_site_assets_exist() -> None:
