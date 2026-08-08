@@ -1,50 +1,74 @@
-"""CORS must never reflect an arbitrary Origin with credentials enabled.
+"""CORS credentials must never be served with a wildcard/reflected origin.
 
-Regression guard for the wildcard + ``allow_credentials`` misconfiguration:
-with ``CORS_ORIGINS="*"`` (the default) and ``allow_credentials=True``,
-Starlette echoes the caller's ``Origin`` back and still returns
-``Access-Control-Allow-Credentials: true`` — which lets any website make
-credentialed cross-origin reads against the trust plane. The app disables
-credentials whenever the origin list is a wildcard, so the dangerous
-combination can never be served.
+Exercises both branches of ``add_cors_middleware`` directly (rather than relying
+on the ambient ``CORS_ORIGINS`` env, which an allowlist in ``.env``/CI could make
+the negative assertions pass vacuously):
+
+* wildcard ``["*"]`` → ``Access-Control-Allow-Origin: *`` with credentials off,
+  and an arbitrary Origin is never reflected with credentials.
+* explicit allowlist → the allowed origin is reflected *with* credentials, and a
+  non-allowed origin is not reflected.
 """
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
+from app.main import add_cors_middleware
 
 EVIL_ORIGIN = "https://evil.example"
+GOOD_ORIGIN = "https://good.example"
 
 
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+def _app_with_origins(origins: list[str]) -> FastAPI:
+    application = FastAPI()
+    add_cors_middleware(application, origins)
+
+    @application.get("/ping")
+    async def ping():  # pragma: no cover - trivial probe route
+        return {"ok": True}
+
+    return application
 
 
-@pytest.mark.anyio
-async def test_wildcard_cors_does_not_reflect_origin_with_credentials(client):
-    resp = await client.get("/llm.txt", headers={"Origin": EVIL_ORIGIN})
-    acao = resp.headers.get("access-control-allow-origin")
-    acac = resp.headers.get("access-control-allow-credentials")
-
-    # The dangerous combination is a reflected caller Origin together with
-    # credentials. Under the wildcard default the origin must never be echoed
-    # back as the caller's, and credentials must not be allowed.
-    assert acao != EVIL_ORIGIN
-    assert acac != "true"
+def _client(application: FastAPI) -> AsyncClient:
+    return AsyncClient(transport=ASGITransport(app=application), base_url="http://test")
 
 
 @pytest.mark.anyio
-async def test_wildcard_cors_preflight_is_not_credentialed(client):
-    resp = await client.options(
-        "/v1/permits",
-        headers={
-            "Origin": EVIL_ORIGIN,
-            "Access-Control-Request-Method": "GET",
-        },
-    )
+async def test_wildcard_serves_star_without_credentials():
+    async with _client(_app_with_origins(["*"])) as client:
+        resp = await client.get("/ping", headers={"Origin": EVIL_ORIGIN})
+    # Under a wildcard the origin is never echoed back as the caller's, and
+    # credentials must be off.
+    assert resp.headers.get("access-control-allow-origin") == "*"
+    assert "access-control-allow-credentials" not in resp.headers
+
+
+@pytest.mark.anyio
+async def test_wildcard_preflight_is_not_credentialed():
+    async with _client(_app_with_origins(["*"])) as client:
+        resp = await client.options(
+            "/ping",
+            headers={
+                "Origin": EVIL_ORIGIN,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
     assert resp.headers.get("access-control-allow-origin") != EVIL_ORIGIN
     assert resp.headers.get("access-control-allow-credentials") != "true"
+
+
+@pytest.mark.anyio
+async def test_explicit_allowlist_reflects_allowed_origin_with_credentials():
+    async with _client(_app_with_origins([GOOD_ORIGIN])) as client:
+        resp = await client.get("/ping", headers={"Origin": GOOD_ORIGIN})
+    assert resp.headers.get("access-control-allow-origin") == GOOD_ORIGIN
+    assert resp.headers.get("access-control-allow-credentials") == "true"
+
+
+@pytest.mark.anyio
+async def test_explicit_allowlist_does_not_reflect_other_origins():
+    async with _client(_app_with_origins([GOOD_ORIGIN])) as client:
+        resp = await client.get("/ping", headers={"Origin": EVIL_ORIGIN})
+    assert resp.headers.get("access-control-allow-origin") != EVIL_ORIGIN

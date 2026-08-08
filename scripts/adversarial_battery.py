@@ -3,23 +3,34 @@
 
 Run this against a deployment YOU operate, with YOUR bootstrap key. It
 provisions throwaway, low-budget wallets/keys/permits, probes the governed
-path for the failure modes that matter (wallet isolation, permit scope,
-replay/idempotency, budget containment, expiry, revocation, receipt
-integrity), prints a PASS/FAIL/SKIP summary, and revokes what it created.
+path for the failure modes that matter, prints a PASS/FAIL/SKIP summary, and
+always revokes the keys it minted (even on error).
 
     export API_URL="https://api-service-production-433c.up.railway.app"
     export BOOTSTRAP_KEY=...     # from Railway variables — never commit or paste
     python3 scripts/adversarial_battery.py
 
+Checks
+------
+* wallet_isolation      — an agent key reads only its own wallet (403 on others)
+* invalid_key           — a bogus key is rejected on a guarded endpoint
+* forged_receipt        — verifying an unknown receipt reports valid=false
+* permit_key_binding    — a permit is denied for a different key on the SAME
+                          wallet (permit_key_mismatch), not merely a wallet
+                          mismatch
+* expired_permit        — an expired permit cannot be created or used
+* revoked_key           — a revoked key stops working immediately
+* replay_idempotent     — replaying a governed call reuses the same receipt
+
 Notes
 -----
-* This creates real rows on the target (tiny throwaway wallets). Point it at a
-  deployment you own. It cleans up the API keys it mints.
-* MCP-invocation checks are best-effort: they discover an invokable governed
-  tool from ``/mcp/tools.json`` and SKIP cleanly when the deployment exposes
-  none, so the isolation/auth/receipt checks still run everywhere.
-* Read-only against your data otherwise — it never touches wallets it did not
-  create.
+* This creates real rows on the target (tiny throwaway wallets). ``API_URL`` is
+  required — there is no default — so you can't accidentally hit production.
+* MCP-invocation checks require an invokable ``golden-path-echo`` governed tool;
+  when the deployment exposes none they are reported SKIP (never a false PASS),
+  and a failed ``/mcp/tools.json`` discovery is a FAIL.
+* Budget/over-spend containment is NOT exercised here (it needs a tool with a
+  known per-call cost); verify it manually against the ledger.
 """
 
 from __future__ import annotations
@@ -33,8 +44,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 # Name the target explicitly — never default to a live host, so an operator who
-# exports only BOOTSTRAP_KEY cannot unintentionally provision wallets and
-# permits against production.
+# exports only BOOTSTRAP_KEY cannot unintentionally provision against production.
 API_URL = os.environ.get("API_URL", "").rstrip("/")
 BOOTSTRAP_KEY = os.environ.get("BOOTSTRAP_KEY")
 
@@ -80,15 +90,28 @@ def iso_in(minutes: int) -> str:
 
 
 def _require(status: int, body: object, what: str) -> object:
-    """Abort with a controlled message if a provisioning call did not 2xx."""
     if not 200 <= status < 300:
         print(f"ERROR: {what} failed (status={status}): {body}", file=sys.stderr)
         raise SystemExit(2)
     return body
 
 
-def provision():
-    """Create sponsor + two agent wallets, keys, and a scoped permit."""
+def _issue_key(wallet_id: str, name: str, issued: list[dict]) -> dict:
+    s, k = req("POST", "/v1/api-keys", BOOTSTRAP_KEY, {
+        "wallet_id": wallet_id, "key_name": name, "expires_in_days": 1,
+    })
+    _require(s, k, f"issue key {name}")
+    entry = {"wallet_id": wallet_id, "key_id": k["key_id"], "api_key": k["api_key"], "label": name}
+    issued.append(entry)  # track before anything else can fail, so cleanup sees it
+    return entry
+
+
+def provision(issued: list[dict]) -> tuple[str, dict, dict, dict, dict]:
+    """Create sponsor + two agent wallets, keys, and a scoped permit.
+
+    Agent A gets two keys: key1 binds the permit; key2 is a different key on the
+    SAME wallet, used to isolate permit_key_mismatch from permit_wallet_mismatch.
+    """
     s, sponsor = req("POST", "/v1/billing/wallets/sponsor", BOOTSTRAP_KEY, {
         "sponsor_name": f"adv-battery-{RUN_ID}", "email": "adv@example.com",
         "initial_credits": 500, "require_kyc": False,
@@ -96,38 +119,155 @@ def provision():
     _require(s, sponsor, "create sponsor wallet")
     sponsor_id = sponsor["wallet_id"]
 
-    agents = []
-    for i in (1, 2):
+    def agent_wallet(i: int) -> str:
         s, a = req("POST", "/v1/billing/wallets/agent", BOOTSTRAP_KEY, {
             "sponsor_wallet_id": sponsor_id, "agent_id": f"adv-agent-{i}-{RUN_ID}",
             "budget_credits": 100, "daily_limit": 50,
         })
         _require(s, a, f"create agent wallet {i}")
-        s, k = req("POST", "/v1/api-keys", BOOTSTRAP_KEY, {
-            "wallet_id": a["wallet_id"], "key_name": f"adv-key-{i}-{RUN_ID}", "expires_in_days": 1,
-        })
-        _require(s, k, f"issue agent key {i}")
-        agents.append({"wallet_id": a["wallet_id"], "api_key": k["api_key"], "key_id": k["key_id"]})
+        return a["wallet_id"]
+
+    a_wallet = agent_wallet(1)
+    b_wallet = agent_wallet(2)
+    a_key1 = _issue_key(a_wallet, f"adv-a-key1-{RUN_ID}", issued)
+    a_key2 = _issue_key(a_wallet, f"adv-a-key2-{RUN_ID}", issued)
+    b_key = _issue_key(b_wallet, f"adv-b-key-{RUN_ID}", issued)
 
     s, permit = req("POST", "/v1/permits", BOOTSTRAP_KEY, {
-        "issuer_wallet_id": agents[0]["wallet_id"],
-        "subject_wallet_id": agents[0]["wallet_id"],
-        "subject_key_id": agents[0]["key_id"],
+        "issuer_wallet_id": a_wallet,
+        "subject_wallet_id": a_wallet,
+        "subject_key_id": a_key1["key_id"],
         "allowed_tools": ["golden-path-echo"],
         "scopes": ["tool:golden-path-echo:invoke", "billing:charge"],
         "max_credits": 5,
         "expires_at": iso_in(30),
     }, {"Idempotency-Key": f"adv-permit-{RUN_ID}"})
     _require(s, permit, "issue scoped permit")
-    return sponsor_id, agents, permit
+    if not permit.get("permit_id"):
+        print(f"ERROR: permit response missing permit_id: {permit}", file=sys.stderr)
+        raise SystemExit(2)
+
+    a = {"wallet_id": a_wallet, "key1": a_key1, "key2": a_key2}
+    b = {"wallet_id": b_wallet, "key": b_key}
+    return sponsor_id, a, b, permit, {}
 
 
-def cleanup(agents):
-    for a in agents:
-        try:
-            req("DELETE", f"/v1/api-keys/{a['wallet_id']}/{a['key_id']}", BOOTSTRAP_KEY)
-        except Exception:
-            pass
+def revoke_all(issued: list[dict]) -> None:
+    print("\n=== cleanup ===")
+    for k in issued:
+        s, _ = req("DELETE", f"/v1/api-keys/{k['wallet_id']}/{k['key_id']}", BOOTSTRAP_KEY)
+        if s in (200, 202, 204):
+            status = "revoked"
+        elif s in (404, 410):
+            status = "already-gone"
+        else:
+            status = f"FAILED(status={s}) — revoke manually"
+        print(f"  {k['label']}: {status}")
+
+
+def discover_echo_tool(agent_key: str) -> bool | None:
+    """True if golden-path-echo is invokable, False if discovery worked but the
+    tool is absent, None if discovery itself failed (a hard error)."""
+    s, tools = req("GET", "/mcp/tools.json", agent_key)
+    if not 200 <= s < 300:
+        record("mcp_discovery", False, f"/mcp/tools.json status={s} (discovery failed)")
+        return None
+    names = [t.get("name") for t in tools.get("tools", []) if isinstance(t, dict)] \
+        if isinstance(tools, dict) else []
+    return "golden-path-echo" in names
+
+
+def invoke(agent_key: str, wallet_id: str, permit_id: str, idem: str) -> tuple[int, object]:
+    return req("POST", "/mcp/messages", agent_key, {
+        "jsonrpc": "2.0", "id": idem, "method": "tools/call",
+        "params": {"name": "golden-path-echo", "arguments": {"message": "adv"},
+                   "mcpContext": {"wallet_id": wallet_id, "permit_id": permit_id,
+                                  "idempotency_key": idem}},
+    })
+
+
+def run_checks(sponsor_id: str, a: dict, b: dict, permit: dict) -> None:
+    permit_id = permit["permit_id"]
+    a_key1, a_key2 = a["key1"]["api_key"], a["key2"]["api_key"]
+
+    # 1. Cross-wallet isolation: agent A's key reads only its own wallet.
+    s1, _ = req("GET", f"/v1/billing/wallets/{sponsor_id}", a_key1)
+    s2, _ = req("GET", f"/v1/billing/wallets/{b['wallet_id']}", a_key1)
+    s3, _ = req("GET", f"/v1/billing/wallets/{a['wallet_id']}", a_key1)
+    record("wallet_isolation", s1 == 403 and s2 == 403 and s3 == 200,
+           f"sponsor={s1} otherAgent={s2} ownWallet={s3} (want 403/403/200)")
+
+    # 2. Invalid key rejected on a guarded endpoint.
+    s, _ = req("GET", "/v1/permits", "totally-invalid-key-0000")
+    record("invalid_key_rejected", s in (401, 403), f"status={s} (want 401/403)")
+
+    # 3. Forged receipt reports valid=false. An unknown receipt_id routes through
+    #    require_bootstrap_admin, so this probe uses the bootstrap key and reads
+    #    the `valid` field (not a status code).
+    s, body = req("POST", "/v1/receipts/verify", BOOTSTRAP_KEY, {"receipt_id": f"rcpt_forged_{RUN_ID}"})
+    valid = body.get("valid") if isinstance(body, dict) else None
+    record("forged_receipt_rejected", s == 200 and valid is False,
+           f"status={s} valid={valid} (want 200 / valid=False)")
+
+    # Discover the governed tool once; MCP-dependent checks gate on it.
+    echo = discover_echo_tool(a_key1)
+
+    # 4. Permit/key binding: a DIFFERENT key on the SAME wallet must be denied
+    #    with permit_key_mismatch (wallet matches, so this is not a wallet
+    #    mismatch). Requires the tool so the denial isn't a "Tool not found".
+    if echo is None:
+        record("permit_key_binding", None, "skipped: MCP discovery failed")
+    elif not echo:
+        record("permit_key_binding", None, "skipped: golden-path-echo not exposed")
+    else:
+        s, body = invoke(a_key2, a["wallet_id"], permit_id, f"adv-bind-{RUN_ID}")
+        blob = json.dumps(body) if not isinstance(body, str) else body
+        record("permit_key_binding", "permit_key_mismatch" in blob,
+               f"status={s} reason~={_short(blob)} (want permit_key_mismatch)")
+
+    # 5. Expired permit cannot be created or used.
+    s, exp = req("POST", "/v1/permits", BOOTSTRAP_KEY, {
+        "issuer_wallet_id": a["wallet_id"], "subject_wallet_id": a["wallet_id"],
+        "subject_key_id": a["key1"]["key_id"], "allowed_tools": ["golden-path-echo"],
+        "scopes": ["tool:golden-path-echo:invoke"], "max_credits": 5,
+        "expires_at": iso_in(-30),
+    }, {"Idempotency-Key": f"adv-permit-expired-{RUN_ID}"})
+    if s >= 400:
+        record("expired_permit_denied", True, f"creation rejected status={s}")
+    elif not echo:
+        record("expired_permit_denied", None,
+               "creation accepted; invoke check skipped (tool unavailable/discovery failed)")
+    else:
+        si, bi = invoke(a_key1, a["wallet_id"], exp.get("permit_id"), f"adv-exp-{RUN_ID}")
+        blob = json.dumps(bi) if not isinstance(bi, str) else bi
+        record("expired_permit_denied", "expire" in blob.lower(),
+               f"invoke status={si} reason~={_short(blob)} (want an expiry denial)")
+
+    # 6. Revocation containment: revoke agent B's key, then reuse must fail.
+    req("DELETE", f"/v1/api-keys/{b['wallet_id']}/{b['key']['key_id']}", BOOTSTRAP_KEY)
+    s, _ = req("GET", f"/v1/billing/wallets/{b['wallet_id']}", b["key"]["api_key"])
+    record("revoked_key_denied", s in (401, 403), f"status={s} after revoke (want 401/403)")
+
+    # 7. Replay / idempotency (needs an invokable tool).
+    if echo is None:
+        record("replay_idempotent", None, "skipped: MCP discovery failed")
+    elif not echo:
+        record("replay_idempotent", None, "skipped: golden-path-echo not exposed")
+    else:
+        idem = f"adv-replay-{RUN_ID}"
+        _, r1 = invoke(a_key1, a["wallet_id"], permit_id, idem)
+        _, r2 = invoke(a_key1, a["wallet_id"], permit_id, idem)
+
+        def rid(x):
+            return (x or {}).get("result", {}).get("receipt", {}).get("receipt_id") \
+                if isinstance(x, dict) else None
+        same = rid(r1) and rid(r1) == rid(r2)
+        record("replay_idempotent", bool(same),
+               f"receipt1={rid(r1)} receipt2={rid(r2)} (replay must reuse the receipt)")
+
+
+def _short(text: str, n: int = 120) -> str:
+    return text[:n]
 
 
 def main() -> int:
@@ -141,85 +281,12 @@ def main() -> int:
         return 2
     print(f"Target: {API_URL}  (run {RUN_ID})\n")
 
-    sponsor_id, agents, permit = provision()
-    a, b = agents
-    permit_id = permit.get("permit_id")
-
-    # 1. Cross-wallet isolation: agent A's key must not read sponsor or agent B.
-    s1, _ = req("GET", f"/v1/billing/wallets/{sponsor_id}", a["api_key"])
-    s2, _ = req("GET", f"/v1/billing/wallets/{b['wallet_id']}", a["api_key"])
-    s3, _ = req("GET", f"/v1/billing/wallets/{a['wallet_id']}", a["api_key"])
-    record("wallet_isolation", s1 == 403 and s2 == 403 and s3 == 200,
-           f"sponsor={s1} otherAgent={s2} ownWallet={s3} (want 403/403/200)")
-
-    # 2. Invalid key rejected on a guarded endpoint.
-    s, _ = req("GET", "/v1/permits", "totally-invalid-key-0000")
-    record("invalid_key_rejected", s in (401, 403), f"status={s} (want 401/403)")
-
-    # 3. Forged receipt fails verification.
-    s, body = req("POST", "/v1/receipts/verify", a["api_key"], {"receipt_id": "rcpt_forged_deadbeef"})
-    verified = isinstance(body, dict) and body.get("verified") is True
-    record("forged_receipt_rejected", s in (400, 404, 422) or (s == 200 and not verified),
-           f"status={s} verified={verified} (must not verify)")
-
-    # 4. Permit/key binding: agent B's key may not use agent A's permit.
-    s, body = req("POST", "/mcp/messages", b["api_key"], {
-        "jsonrpc": "2.0", "id": f"adv-bind-{RUN_ID}", "method": "tools/call",
-        "params": {"name": "golden-path-echo", "arguments": {"message": "x"},
-                   "mcpContext": {"wallet_id": b["wallet_id"], "permit_id": permit_id,
-                                  "idempotency_key": f"adv-bind-{RUN_ID}"}},
-    })
-    denied = s in (401, 403) or (isinstance(body, dict) and body.get("error"))
-    record("permit_key_binding", bool(denied), f"status={s} (cross-key permit use must be denied)")
-
-    # 5. Expired permit is unusable.
-    s, exp = req("POST", "/v1/permits", BOOTSTRAP_KEY, {
-        "issuer_wallet_id": a["wallet_id"], "subject_wallet_id": a["wallet_id"],
-        "subject_key_id": a["key_id"], "allowed_tools": ["golden-path-echo"],
-        "scopes": ["tool:golden-path-echo:invoke"], "max_credits": 5,
-        "expires_at": iso_in(-30),
-    }, {"Idempotency-Key": f"adv-permit-expired-{RUN_ID}"})
-    if s >= 400:
-        record("expired_permit_denied", True, f"creation rejected status={s}")
-    else:
-        si, bi = req("POST", "/mcp/messages", a["api_key"], {
-            "jsonrpc": "2.0", "id": f"adv-exp-{RUN_ID}", "method": "tools/call",
-            "params": {"name": "golden-path-echo", "arguments": {"message": "x"},
-                       "mcpContext": {"wallet_id": a["wallet_id"], "permit_id": exp.get("permit_id"),
-                                      "idempotency_key": f"adv-exp-{RUN_ID}"}},
-        })
-        d = si in (401, 403) or (isinstance(bi, dict) and bi.get("error"))
-        record("expired_permit_denied", bool(d), f"invoke status={si} (expired permit must be denied)")
-
-    # 6. Revocation containment: revoke agent B's key, then reuse must fail.
-    req("DELETE", f"/v1/api-keys/{b['wallet_id']}/{b['key_id']}", BOOTSTRAP_KEY)
-    s, _ = req("GET", f"/v1/billing/wallets/{b['wallet_id']}", b["api_key"])
-    record("revoked_key_denied", s in (401, 403), f"status={s} after revoke (want 401/403)")
-    agents = [a]  # b's key already revoked; skip in cleanup
-
-    # 7. Replay / idempotency (best-effort — needs an invokable governed tool).
-    s_tools, tools = req("GET", "/mcp/tools.json", a["api_key"])
-    tool_names = []
-    if isinstance(tools, dict):
-        tool_names = [t.get("name") for t in tools.get("tools", []) if isinstance(t, dict)]
-    if "golden-path-echo" not in tool_names:
-        record("replay_idempotent", None,
-               f"no invokable 'golden-path-echo' tool exposed (tools={tool_names[:5]}); "
-               "wire an echo tool to exercise replay")
-    else:
-        call = {"jsonrpc": "2.0", "id": f"adv-replay-{RUN_ID}", "method": "tools/call",
-                "params": {"name": "golden-path-echo", "arguments": {"message": "hello"},
-                           "mcpContext": {"wallet_id": a["wallet_id"], "permit_id": permit_id,
-                                          "idempotency_key": f"adv-replay-{RUN_ID}"}}}
-        _, r1 = req("POST", "/mcp/messages", a["api_key"], call)
-        _, r2 = req("POST", "/mcp/messages", a["api_key"], call)
-        def rid(x):
-            return (x or {}).get("result", {}).get("receipt", {}).get("receipt_id")
-        same = rid(r1) and rid(r1) == rid(r2)
-        record("replay_idempotent", bool(same),
-               f"receipt1={rid(r1)} receipt2={rid(r2)} (replay must reuse the same receipt)")
-
-    cleanup(agents)
+    issued: list[dict] = []
+    try:
+        sponsor_id, a, b, permit, _ = provision(issued)
+        run_checks(sponsor_id, a, b, permit)
+    finally:
+        revoke_all(issued)
 
     print("\n=== SUMMARY ===")
     for name, verdict, _ in RESULTS:
