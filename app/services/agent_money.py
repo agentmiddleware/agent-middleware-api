@@ -375,6 +375,9 @@ class AgentMoney:
     async def get_wallet(self, wallet_id: str) -> WalletResponse | None:
         return await self._wallet_engine.get_wallet(wallet_id)
 
+    async def wallet_is_expired(self, wallet_id: str) -> bool:
+        return await self._wallet_engine.wallet_is_expired(wallet_id)
+
     async def get_daily_spend(self, wallet_id: str) -> Decimal:
         return await self._wallet_engine.get_daily_spend(wallet_id)
 

@@ -358,6 +358,7 @@ class ShadowLedger:
         service_category: ServiceCategory,
         units: float = 1.0,
         description: str = "",
+        blocked_reason: str | None = None,
     ) -> SimulatedChargeResult:
         """
         Simulate a charge without affecting real balance or velocity.
@@ -385,10 +386,10 @@ class ShadowLedger:
 
         simulated_before = session.virtual_balance
         simulated_after = simulated_before - charge_amount
-        would_succeed = simulated_after >= Decimal("0")
+        would_succeed = blocked_reason is None and simulated_after >= Decimal("0")
 
-        reason = None
-        if not would_succeed:
+        reason = blocked_reason
+        if reason is None and not would_succeed:
             reason = "insufficient_simulated_funds"
 
         result = SimulatedChargeResult(
