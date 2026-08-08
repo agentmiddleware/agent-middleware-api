@@ -22,13 +22,17 @@ https://api-service-production-433c.up.railway.app
 Fetch in this order:
 
 1. GET https://api-service-production-433c.up.railway.app/.well-known/agent.json
-2. GET https://api-service-production-433c.up.railway.app/llm.txt
+2. GET https://api-service-production-433c.up.railway.app/llms.txt
 3. GET https://api-service-production-433c.up.railway.app/mcp/tools.json
 4. GET https://api-service-production-433c.up.railway.app/openapi.json
 
 Before assuming real side effects, fetch:
 
 GET https://api-service-production-433c.up.railway.app/health/dependencies
+
+Inspect the JSON body: HTTP 200 alone does not mean every dependency is ready.
+Check `status`, the selected tool's dependencies, `simulation_modes`, and
+`enable_proof_surfaces`. Health never replaces authentication or permit checks.
 
 ## Authority
 

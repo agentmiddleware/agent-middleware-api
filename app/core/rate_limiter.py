@@ -156,6 +156,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/",
             "/.well-known/agent.json",
             "/llm.txt",
+            "/llms.txt",
             "/docs/index",
             "/WEDGE.md",
             "/SECURITY_LIMITATIONS.md",

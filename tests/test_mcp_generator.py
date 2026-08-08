@@ -62,6 +62,8 @@ class TestSchemaExtraction:
         assert "inner" in schema["properties"]
         assert "count" in schema["properties"]
         assert "inner" in schema["required"]
+        assert schema["properties"]["inner"]["$ref"] == "#/$defs/Inner"
+        assert "Inner" in schema["$defs"]
 
     def test_none_model(self):
         assert pydantic_to_mcp_schema(None) is None
@@ -78,6 +80,8 @@ class TestSchemaExtraction:
         assert "count" in input_schema["properties"]
         assert "name" in input_schema["required"]
         assert "count" in input_schema["required"]
+        assert input_schema["properties"]["count"] == {"type": "integer"}
+        assert output_schema == {"type": "object"}
 
     def test_extract_from_callable_async(self):
         async def async_func(url: str, style: str = "default") -> str:
@@ -88,6 +92,21 @@ class TestSchemaExtraction:
         assert input_schema is not None
         assert "url" in input_schema["required"]
         assert "style" not in input_schema["required"]
+        assert output_schema == {"type": "string"}
+
+    def test_extract_typed_container_output(self):
+        def typed_func() -> dict[str, list[int]]:
+            return {"values": [1]}
+
+        _, output_schema = extract_schema_from_callable(typed_func)
+
+        assert output_schema == {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": {"type": "integer"},
+            },
+        }
 
 
 class TestServiceRegistry:
@@ -297,6 +316,11 @@ class TestMcpGenerator:
                 "properties": {"url": {"type": "string"}},
                 "required": ["url"],
             },
+            "output_schema": {
+                "type": "object",
+                "properties": {"result": {"type": "string"}},
+                "required": ["result"],
+            },
             "owner_wallet_id": "wallet-123",
         }
 
@@ -305,6 +329,8 @@ class TestMcpGenerator:
         assert tool["name"] == "test-tool"
         assert tool["description"] == "A test tool"
         assert tool["inputSchema"]["properties"]["url"]
+        assert "outputSchema" not in tool
+        assert tool["annotations"]["hasOutputSchema"] is True
         assert tool["annotations"]["creditsPerCall"] == 25.0
         assert tool["annotations"]["providerWallet"] == "wallet-123"
 

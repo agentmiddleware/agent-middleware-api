@@ -45,6 +45,11 @@
       "source": "/openapi.json",
       "destination": "https://api-service-production-433c.up.railway.app/openapi.json",
       "permanent": false
+    },
+    {
+      "source": "/health/dependencies",
+      "destination": "https://api-service-production-433c.up.railway.app/health/dependencies",
+      "permanent": false
     }
   ]
 }

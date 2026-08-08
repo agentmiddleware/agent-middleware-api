@@ -3,8 +3,8 @@ Agent Discovery Router — Phase 9
 ================================
 Machine-readable discovery endpoints for autonomous agents.
 
-Provides standardized endpoints that agents crawl first to discover
-capabilities, tools, pricing, and how to integrate.
+Provides project-defined endpoints clients can use to discover capabilities,
+tools, pricing, and integration guidance.
 """
 
 from fastapi import APIRouter, Depends
@@ -103,6 +103,7 @@ class DiscoveryManifest(BaseModel):
             "openapi": "/openapi.json",
             "interactive_docs": "/docs",
             "llm_readable": "/llm.txt",
+            "llms_readable": "/llms.txt",
             "agent_manifest": "/.well-known/agent.json",
             "wedge": "/WEDGE.md",
             "security_limitations": "/SECURITY_LIMITATIONS.md",
@@ -513,6 +514,7 @@ def _build_integration_guides() -> dict[str, str]:
     guides = {
         "mcp_server": "/mcp",
         "llm_txt": "/llm.txt",
+        "llms_txt": "/llms.txt",
         "wedge": "/WEDGE.md",
         "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
         "dogfood": "make dogfood-trust-plane (local partner.notes.write)",

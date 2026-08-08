@@ -60,6 +60,8 @@ async def test_agent_manifest_points_to_canonical_control_plane_surfaces(client)
     assert endpoints["health"] == "/health"
     assert endpoints["agent_manifest"] == "/.well-known/agent.json"
     assert endpoints["llm_docs"] == "/llm.txt"
+    assert endpoints["llms_docs"] == "/llms.txt"
+    assert "/llms.txt" in agent_first["bootstrap_sequence"]
     assert "/mcp/tools.json" in agent_first["bootstrap_sequence"]
     assert agent_first["simulation_and_dependency_truth"] == "/health/dependencies"
     assert agent_first["product_wedge"] == "governed_mcp_trust_plane"

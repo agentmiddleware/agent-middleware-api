@@ -32,7 +32,7 @@ project does not make yet.
 
 | Trust step | Implemented behavior | Primary surface |
 |---|---|---|
-| Discover | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth | `/.well-known/agent.json`, `/mcp/tools.json`, `/llm.txt`, `/openapi.json`, `/health/dependencies` |
+| Discover | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt` (`/llm.txt` alias), `/openapi.json`, `/health/dependencies` |
 | Authenticate | Bootstrap operator keys plus database-issued wallet keys; trust-core API keys are stored as hashes | `X-API-Key`, `/v1/api-keys` |
 | Authorize | Ed25519-signed permits bound to issuer wallet, subject wallet/key, tools, scopes, budget, nonce, and expiry | `/v1/permits` |
 | Invoke | The governed HTTP/JSON-RPC MCP subset requires a permit and idempotency key and can dispatch one configured Streamable HTTP partner tool | `/mcp/messages`, `/mcp/tools/{service_id}/invoke` |
@@ -44,6 +44,11 @@ project does not make yet.
 The end-to-end governed MCP path lives in
 [`app/routers/mcp.py`](app/routers/mcp.py). The protocol-facing trust facade is
 [`app/trust/`](app/trust/); MCP is currently the only live governed adapter.
+
+Protocol status matters: OpenAPI is a formal API-description standard, while
+`/llms.txt` is a proposal and `/.well-known/agent.json` is this project's
+bootstrap convention, not an A2A Agent Card. MCP-native tool discovery is the
+JSON-RPC `tools/list` method; `/mcp/tools.json` is a convenient public mirror.
 
 ## Product boundary
 

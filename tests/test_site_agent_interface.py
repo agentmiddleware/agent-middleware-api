@@ -73,6 +73,8 @@ def test_marketing_manifest_points_to_canonical_api_and_local_proof() -> None:
     assert manifest["primary_audience"] == "autonomous_agents"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
+    assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
+    assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
     assert "awi_manifest" not in manifest["discovery"]
 
 
@@ -86,6 +88,24 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
     assert CANONICAL_API in llm_txt
+
+
+def test_dynamic_machine_routes_redirect_to_the_canonical_api() -> None:
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    redirects = {
+        redirect["source"]: redirect for redirect in config.get("redirects", [])
+    }
+    expected = {
+        "/mcp/tools.json": f"{CANONICAL_API}/mcp/tools.json",
+        "/v1/discover": f"{CANONICAL_API}/v1/discover",
+        "/openapi.json": f"{CANONICAL_API}/openapi.json",
+        "/health/dependencies": f"{CANONICAL_API}/health/dependencies",
+    }
+
+    for source, destination in expected.items():
+        assert redirects[source]["destination"] == destination
+        assert redirects[source]["permanent"] is False
+        assert destination.startswith("https://")
 
 
 def test_local_site_assets_exist() -> None:

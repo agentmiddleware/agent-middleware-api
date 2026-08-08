@@ -407,7 +407,7 @@ app = FastAPI(
         "- **Signed receipts + evidence** — verifiable attempt outcomes\n"
         "- **Wallet audit chain** — tamper-evident per-wallet events\n"
         "- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, "
-        "`/llm.txt`, `/v1/discover`\n\n"
+        "`/llms.txt`, `/v1/discover`\n\n"
         "### Proof Surfaces\n\n"
         "AWI, browser, content, oracle, sandbox, media, IoT, red-team, and "
         "telemetry demos are labeled scaffolding. They mount only when "
@@ -415,7 +415,7 @@ app = FastAPI(
         "### Authentication\n\n"
         "Protected endpoints require an API key via the `X-API-Key` header.\n\n"
         "### For Agents\n\n"
-        "Start at `/.well-known/agent.json`, then `/llm.txt` and "
+        "Start at `/.well-known/agent.json`, then `/llms.txt` and "
         "`/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry."
     ),
     docs_url="/docs",
@@ -868,6 +868,7 @@ async def root(request: Request):
             "interactive": "/docs",
             "redoc": "/redoc",
             "llm_txt": "/llm.txt",
+            "llms_txt": "/llms.txt",
             "agent_manifest": "/.well-known/agent.json",
             "capability_index": "/v1/discover",
             "dependency_truth": "/health/dependencies",

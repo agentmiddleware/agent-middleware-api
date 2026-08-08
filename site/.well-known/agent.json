@@ -21,6 +21,7 @@
   "discovery": {
     "agent_manifest": "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
     "llm_txt": "https://api-service-production-433c.up.railway.app/llm.txt",
+    "llms_txt": "https://api-service-production-433c.up.railway.app/llms.txt",
     "mcp_tools": "https://api-service-production-433c.up.railway.app/mcp/tools.json",
     "openapi": "https://api-service-production-433c.up.railway.app/openapi.json",
     "capability_index": "https://api-service-production-433c.up.railway.app/v1/discover",
@@ -28,7 +29,7 @@
   },
   "bootstrap_sequence": [
     "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
-    "https://api-service-production-433c.up.railway.app/llm.txt",
+    "https://api-service-production-433c.up.railway.app/llms.txt",
     "https://api-service-production-433c.up.railway.app/mcp/tools.json",
     "https://api-service-production-433c.up.railway.app/openapi.json"
   ],

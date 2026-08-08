@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent-Native Middleware API",
-    "description": "## MCP Trust Plane\n\nAgent Middleware API is a **governed MCP trust plane** for autonomous agent tool calls — not a full agent middleware platform.\n\nCredible wedge: exactly-once gateway authorization, debit, and receipt finalization for metered MCP calls. Remote side effects require the upstream to honor the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`\n\n### Product Surface\n\n- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n- **Governed MCP invoke** — permit check, policy, idempotency, charge\n- **Wallet metering** — ledger-backed credits with exact decimals\n- **Signed receipts + evidence** — verifiable attempt outcomes\n- **Wallet audit chain** — tamper-evident per-wallet events\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llm.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAWI, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llm.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
+    "description": "## MCP Trust Plane\n\nAgent Middleware API is a **governed MCP trust plane** for autonomous agent tool calls — not a full agent middleware platform.\n\nCredible wedge: exactly-once gateway authorization, debit, and receipt finalization for metered MCP calls. Remote side effects require the upstream to honor the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`\n\n### Product Surface\n\n- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n- **Governed MCP invoke** — permit check, policy, idempotency, charge\n- **Wallet metering** — ledger-backed credits with exact decimals\n- **Signed receipts + evidence** — verifiable attempt outcomes\n- **Wallet audit chain** — tamper-evident per-wallet events\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAWI, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
     "contact": {
       "name": "Agent-Native Middleware",
       "email": "support@agent-middleware.dev"
@@ -4167,7 +4167,7 @@
           "MCP"
         ],
         "summary": "Mcp Tools Manifest",
-        "description": "Return the MCP tools.json manifest.\n\nThis is the standard MCP server discovery endpoint.\nAgents should fetch this first to understand available tools.\n\nQuery Parameters:\n    category: Optional service category filter\n\nReturns:\n    MCP tools.json manifest with tool definitions",
+        "description": "Return the MCP tools.json manifest.\n\nThis is an unauthenticated HTTP mirror of tool metadata exposed by this\nproject's governed JSON-RPC subset. Clients can obtain the same list by\nsending ``tools/list`` to ``/mcp/messages``; that endpoint does not\nimplement the complete MCP initialization lifecycle.\n\nQuery Parameters:\n    category: Optional service category filter\n\nReturns:\n    MCP tools.json manifest with tool definitions",
         "operationId": "MCP_Tools_Manifest_mcp_tools_json_get",
         "parameters": [
           {
@@ -4421,7 +4421,7 @@
           "MCP"
         ],
         "summary": "Get a specific MCP tool definition",
-        "description": "Get the MCP tool definition for a specific service.\n\nReturns the full tool schema including:\n- inputSchema\n- outputSchema (if available)\n- pricing and category annotations",
+        "description": "Get the MCP tool definition for a specific service.\n\nReturns the full tool schema including:\n- inputSchema\n- output schema availability metadata\n- pricing and category annotations",
         "operationId": "Get_MCP_Tool_mcp_tools__service_id__get",
         "parameters": [
           {
@@ -5948,12 +5948,12 @@
         "tags": [
           "Agent Discovery"
         ],
-        "summary": "Agent Plugin Manifest",
-        "description": "Returns a standard agent plugin manifest for agent directories and plugin registries. Product capabilities are the MCP trust plane; proof_surfaces are labeled demo/workload scaffolding.",
+        "summary": "Agent Discovery Manifest",
+        "description": "Returns this project's agent bootstrap manifest for discovery clients. It is not an A2A Agent Card. Product capabilities are the MCP trust plane; proof_surfaces are labeled demo/workload scaffolding.",
         "operationId": "get_agent_json__well_known_agent_json_get",
         "responses": {
           "200": {
-            "description": "Agent plugin manifest",
+            "description": "Project agent bootstrap manifest",
             "content": {
               "application/json": {
                 "schema": {}
@@ -5991,7 +5991,7 @@
           "Agent Discovery"
         ],
         "summary": "MCP Tools Manifest",
-        "description": "Returns the MCP tools manifest for tool discovery.",
+        "description": "Compatibility mirror of the project's public MCP-shaped tool list.",
         "operationId": "get_mcp_tools_json__well_known_mcp_tools_json_get",
         "responses": {
           "200": {
@@ -6010,9 +6010,31 @@
         "tags": [
           "Static"
         ],
-        "summary": "LLM-Readable Documentation",
-        "description": "Plain-text documentation optimized for LLM agents to understand this API.",
+        "summary": "Legacy LLM-Readable Instructions Alias",
+        "description": "Backward-compatible singular alias for /llms.txt; both routes serve identical plain-text instructions.",
         "operationId": "get_llm_txt_llm_txt_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llms.txt": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "LLM-Readable Instructions",
+        "description": "Plain-text instructions at the plural llms.txt proposal path. The legacy /llm.txt route serves identical content.",
+        "operationId": "get_llm_txt_llms_txt_get",
         "responses": {
           "200": {
             "description": "Successful Response",

@@ -38,7 +38,13 @@ This host should help machines find the API:
 - `/llm.txt` and `/llms.txt` — short bootstrap prose pointing at the API
 - `<link rel="alternate">` hints in the HTML head for both pointer formats
 - Footer / nav links to the live Railway discovery surfaces
-- Vercel redirects for `/mcp/tools.json`, `/v1/discover`, `/openapi.json` → API
+- Vercel redirects for `/mcp/tools.json`, `/v1/discover`, `/openapi.json`, and
+  `/health/dependencies` → API
+
+These are deliberately described as discovery conventions. The current A2A
+well-known path is `/.well-known/agent-card.json` (not this project's
+`agent.json`), `llms.txt` remains a proposal, and MCP-native tool discovery is
+the JSON-RPC `tools/list` method. This site does not claim A2A conformance.
 
 The pointer also advertises the self-contained local trial
 `make prove-trust-plane`. Live protected routes still require an

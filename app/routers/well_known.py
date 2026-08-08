@@ -1,7 +1,7 @@
 """
 Agent Well-Known Router — Phase 9
 =================================
-Standard agent discovery endpoints following common conventions.
+Project agent discovery endpoints following common web conventions.
 
 Implements /.well-known/agent.json for agent directory registration.
 Product capabilities are the MCP trust-plane wedge; AWI and related
@@ -111,7 +111,7 @@ def get_agent_first_metadata() -> dict[str, Any]:
     cfg = get_settings()
     bootstrap = [
         "/.well-known/agent.json",
-        "/llm.txt",
+        "/llms.txt",
         "/mcp/tools.json",
         "/openapi.json",
     ]
@@ -194,7 +194,7 @@ def _local_try_it_manifest() -> dict[str, Any]:
 
 
 class AgentPluginManifest(BaseModel):
-    """Standard agent plugin manifest format."""
+    """Project discovery manifest; this is not an A2A Agent Card."""
 
     schema_version: str = Field(default="1.0", description="Manifest schema version")
     name: str = Field(description="Service/plugin name")
@@ -287,6 +287,7 @@ class AgentPluginManifest(BaseModel):
             "api_reference": "/docs",
             "openapi": "/openapi.json",
             "llm_readable": "/llm.txt",
+            "llms_readable": "/llms.txt",
             "wedge": "/WEDGE.md",
             "security_limitations": "/SECURITY_LIMITATIONS.md",
             "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
@@ -320,6 +321,7 @@ def _product_endpoints() -> dict[str, str]:
         "health": "/health",
         "agent_manifest": "/.well-known/agent.json",
         "llm_docs": "/llm.txt",
+        "llms_docs": "/llms.txt",
         "dependency_truth": "/health/dependencies",
     }
 
@@ -338,7 +340,7 @@ def _proof_surface_endpoints() -> dict[str, str]:
 
 
 def _build_agent_manifest() -> AgentPluginManifest:
-    """Build the agent plugin manifest with honest product vs proof split."""
+    """Build the bootstrap manifest with an honest product vs proof split."""
     endpoints = _product_endpoints()
     proof_surfaces = list(PROOF_SURFACE_CATALOG)
     documentation = {
@@ -346,6 +348,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
         "api_reference": "/docs",
         "openapi": "/openapi.json",
         "llm_readable": "/llm.txt",
+        "llms_readable": "/llms.txt",
         "wedge": "/WEDGE.md",
         "security_limitations": "/SECURITY_LIMITATIONS.md",
         "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
@@ -448,22 +451,22 @@ def build_awi_manifest() -> dict[str, Any]:
 
 @router.get(
     "/.well-known/agent.json",
-    summary="Agent Plugin Manifest",
+    summary="Agent Discovery Manifest",
     description=(
-        "Returns a standard agent plugin manifest for agent directories "
-        "and plugin registries. Product capabilities are the MCP trust "
+        "Returns this project's agent bootstrap manifest for discovery clients. "
+        "It is not an A2A Agent Card. Product capabilities are the MCP trust "
         "plane; proof_surfaces are labeled demo/workload scaffolding."
     ),
     responses={
-        200: {"description": "Agent plugin manifest"},
+        200: {"description": "Project agent bootstrap manifest"},
     },
 )
 async def get_agent_json(request: Request):
     """
     Serve the agent.json manifest.
 
-    This follows the standard /.well-known/agent.json convention
-    used by agent frameworks and directories.
+    This preserves the project's established /.well-known/agent.json
+    convention. It is not the current A2A agent-card.json format.
     """
     manifest = _build_agent_manifest()
     return JSONResponse(
@@ -502,14 +505,14 @@ async def get_awi_json():
 @router.get(
     "/.well-known/mcp/tools.json",
     summary="MCP Tools Manifest",
-    description="Returns the MCP tools manifest for tool discovery.",
+    description="Compatibility mirror of the project's public MCP-shaped tool list.",
 )
 async def get_mcp_tools_json():
     """
-    Serve the MCP tools manifest.
+    Serve a compatibility mirror of the project's tool metadata.
 
-    This is the standard endpoint MCP clients use to discover
-    available tools.
+    Conformant MCP servers expose tool discovery through ``tools/list`` rather
+    than through a well-known JSON document.
     """
     from .mcp import build_mcp_tools_manifest
 

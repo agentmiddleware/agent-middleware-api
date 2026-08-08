@@ -17,7 +17,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable, get_type_hints
+from types import UnionType
+from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -27,6 +28,61 @@ from ..db.models import ServiceRegistryModel
 from ..schemas.billing import ServiceCategory
 
 logger = logging.getLogger(__name__)
+
+
+def _annotation_to_json_schema(annotation: Any) -> dict[str, Any] | None:
+    """Translate common callable annotations without inventing a string type."""
+    if annotation is Any:
+        return {}
+
+    if hasattr(annotation, "model_json_schema"):
+        return annotation.model_json_schema()
+    if hasattr(annotation, "schema"):
+        return annotation.schema()
+
+    primitive_types = {
+        str: "string",
+        bool: "boolean",
+        int: "integer",
+        float: "number",
+        dict: "object",
+        list: "array",
+    }
+    if annotation in primitive_types:
+        return {"type": primitive_types[annotation]}
+
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+
+    if origin is dict:
+        schema: dict[str, Any] = {"type": "object"}
+        if len(arguments) == 2:
+            value_schema = _annotation_to_json_schema(arguments[1])
+            if value_schema is not None:
+                schema["additionalProperties"] = value_schema
+        return schema
+
+    if origin in (list, set, frozenset):
+        schema = {"type": "array"}
+        if arguments:
+            item_schema = _annotation_to_json_schema(arguments[0])
+            if item_schema is not None:
+                schema["items"] = item_schema
+        return schema
+
+    if origin in (Union, UnionType):
+        variants = []
+        for argument in arguments:
+            if argument is type(None):
+                variants.append({"type": "null"})
+                continue
+            variant = _annotation_to_json_schema(argument)
+            if variant is not None:
+                variants.append(variant)
+        if variants:
+            return variants[0] if len(variants) == 1 else {"anyOf": variants}
+
+    return None
 
 
 def pydantic_to_mcp_schema(model: type[BaseModel] | None) -> dict[str, Any] | None:
@@ -40,7 +96,7 @@ def pydantic_to_mcp_schema(model: type[BaseModel] | None) -> dict[str, Any] | No
         return None
 
     if hasattr(model, "model_json_schema"):
-        schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
+        schema = model.model_json_schema()
         return {
             "type": "object",
             "properties": schema.get("properties", {}),
@@ -92,12 +148,7 @@ def extract_schema_from_callable(
 
             if param_name in type_hints:
                 hint = type_hints[param_name]
-                if hasattr(hint, "model_json_schema"):
-                    properties[param_name] = hint.model_json_schema()
-                elif hasattr(hint, "schema"):
-                    properties[param_name] = hint.schema()
-                else:
-                    properties[param_name] = {"type": "string"}
+                properties[param_name] = _annotation_to_json_schema(hint) or {}
 
                 if param.default is inspect.Parameter.empty:
                     required.append(param_name)
@@ -116,12 +167,7 @@ def extract_schema_from_callable(
         return_type = type_hints.get("return")
         output_schema = None
         if return_type and return_type is not type(None):
-            if hasattr(return_type, "model_json_schema"):
-                output_schema = return_type.model_json_schema()
-            elif hasattr(return_type, "schema"):
-                output_schema = return_type.schema()
-            else:
-                output_schema = {"type": "string"}
+            output_schema = _annotation_to_json_schema(return_type)
 
         return input_schema, output_schema
 
@@ -153,6 +199,8 @@ def _service_to_mcp_tool(service: dict) -> dict:
     if service.get("owner_wallet_id"):
         annotations["providerWallet"] = service["owner_wallet_id"]
 
+    # Keep output schema availability as project metadata until calls return and
+    # enforce MCP structuredContent against the declared object contract.
     if service.get("output_schema"):
         annotations["hasOutputSchema"] = True
 

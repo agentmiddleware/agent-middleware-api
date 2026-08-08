@@ -2,8 +2,8 @@
 MCP Server Generator
 ====================
 
-Generates MCP-compliant manifests and standalone Python servers from
-registered services.
+Generates MCP-shaped tool metadata and standalone Python servers from
+registered services. The HTTP tools.json envelope is project-specific.
 
 Supports two modes:
 1. Dynamic MCP Proxy: Live server mounted on FastAPI (zero infra for users)
@@ -29,7 +29,7 @@ MCP_SERVER_VERSION = "1.0"
 
 class McpGenerator:
     """
-    Generates MCP-compliant manifests and standalone servers.
+    Generates project tool manifests and standalone MCP servers.
 
     MCP Manifest Structure (tools.json):
     {
@@ -78,13 +78,13 @@ class McpGenerator:
         include_persistent: bool = False,
     ) -> dict[str, Any]:
         """
-        Generate a tools.json manifest for executable MCP discovery.
+        Generate a project tools.json manifest for executable MCP discovery.
 
-        This is the standard MCP server manifest format.
-        Agents can fetch this to discover available tools. Metadata-only
-        database registrations are excluded by default because the gateway has
-        no executable transport for them; callers that need an administrative
-        catalog may opt in explicitly.
+        Clients can request the same list with ``tools/list`` on this project's
+        governed JSON-RPC endpoint. They may fetch this HTTP mirror before
+        authenticating there. Metadata-only database registrations are excluded
+        by default because the gateway has no executable transport for them;
+        callers that need an administrative catalog may opt in explicitly.
         """
         services = []
 
@@ -175,6 +175,9 @@ class McpGenerator:
         if service.get("owner_wallet_id"):
             annotations["providerWallet"] = service["owner_wallet_id"]
 
+        # The local runtime currently serializes return values into text content
+        # rather than enforcing MCP structuredContent, so advertising the schema
+        # as MCP outputSchema would promise a contract the call path cannot honor.
         if service.get("output_schema"):
             annotations["hasOutputSchema"] = True
 

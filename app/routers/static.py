@@ -1,7 +1,7 @@
 """
 Static Files Router
 ====================
-Serves static discovery docs for agents (llm.txt + advertised markdown).
+Serves static discovery docs for agents (llms.txt + advertised markdown).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -38,14 +38,26 @@ def _serve_markdown(path: str) -> PlainTextResponse:
 
 
 @router.get(
+    "/llms.txt",
+    summary="LLM-Readable Instructions",
+    description=(
+        "Plain-text instructions at the plural llms.txt proposal path. "
+        "The legacy /llm.txt route serves identical content."
+    ),
+    response_class=PlainTextResponse,
+)
+@router.get(
     "/llm.txt",
-    summary="LLM-Readable Documentation",
-    description="Plain-text documentation optimized for LLM agents to understand this API.",
+    summary="Legacy LLM-Readable Instructions Alias",
+    description=(
+        "Backward-compatible singular alias for /llms.txt; both routes serve "
+        "identical plain-text instructions."
+    ),
     response_class=PlainTextResponse,
 )
 async def get_llm_txt():
     """
-    Serve the LLM-readable documentation.
+    Serve the LLM-readable instructions at both public paths.
 
     Substitutes ``{{PUBLIC_URL}}`` from settings so production agents do not
     treat localhost as the deployment base.
@@ -66,7 +78,7 @@ async def get_llm_txt():
 ## Quick Start
 
 1. GET /.well-known/agent.json — Bootstrap manifest (product wedge + labeled proof surfaces)
-2. GET /llm.txt — Full prose (if this fallback appears, static/llm.txt is missing on disk)
+2. GET /llms.txt — Full prose (if this fallback appears, static/llm.txt is missing on disk)
 3. GET /mcp/tools.json — MCP tools
 4. GET /openapi.json — API contract
 
