@@ -6,13 +6,14 @@ Governed MCP proxy for the agent trust plane (permits, metering, receipts).
 
 Provides:
 - /mcp/tools.json - MCP manifest discovery
-- /mcp/sse - Server-Sent Events transport
 - /mcp/messages - JSON-RPC message handling
 
 This enables agents to:
 1. Discover ops-registered tools via tools.json
 2. Invoke tools under permit + wallet metering + signed receipts
-3. Receive results in real-time via SSE
+
+There is no SSE transport. The governed surface is the HTTP/JSON-RPC tools
+subset only.
 """
 
 import asyncio

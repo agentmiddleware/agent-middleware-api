@@ -2,6 +2,64 @@
 
 Thanks for contributing to Agent-Native Middleware API.
 
+This project is maintained by one person. That is a real risk to anyone
+depending on it, and the fastest way to reduce it is to make the project easy
+to contribute to without a conversation first. Read
+[`GOVERNANCE.md`](GOVERNANCE.md) for how decisions get made and what happens if
+the maintainer goes quiet.
+
+## Before you start: two rules that are not negotiable
+
+**1. The product boundary is narrow, and most of the repository is outside
+it.** The product is the trust plane: governed MCP tool calls with signed
+permits, wallet metering, replay safety, signed receipts, and audit chains.
+Everything else — AWI, browser automation, content generation, oracle crawls,
+media utilities, IoT bridges, red-team services, RTaaS, telemetry auto-PR, and
+sandbox demos — is a **frozen proof surface**. Do not add features to them. See
+[`WEDGE.md`](WEDGE.md) and [`docs/PROOF_SURFACES.md`](docs/PROOF_SURFACES.md)
+for the inventory and the rules for unfreezing something.
+
+**2. Do not overclaim, in code or in prose.** This repository treats an
+inaccurate README line as a bug of the same class as an inaccurate response
+body, and has tests that enforce it — discovery manifests must match runtime
+truth, advertised capabilities must equal the actual product capability list,
+and proof surfaces must be labeled as such. If your change makes the software
+do less than the docs say, fix the docs in the same PR.
+[`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md) is the canonical list of
+things this project deliberately does not claim; adding a claim it contradicts
+will be rejected.
+
+## Where to start
+
+Good first contributions, roughly easiest first:
+
+- **Documentation drift.** Find a doc that disagrees with the code and fix the
+  doc. This is genuinely valuable here and needs no architectural context.
+- **Test coverage on trust modules.** `make trust-coverage-gate` enforces an
+  80% floor over the trust-plane control modules and prints exactly which lines
+  are uncovered. Raising real coverage on those modules is always welcome.
+- **Negative-path tests.** The security posture depends on things failing
+  closed. New tests that prove a denial, a fail-closed path, or a tamper
+  detection are high-value and low-risk.
+- **Hardening items in [`docs/settlement-rails.md`](docs/settlement-rails.md).**
+  The "fixes worth doing regardless" list at the end is a set of small, scoped,
+  in-boundary improvements to the money seam.
+- **An independent offline verifier.** The highest-leverage open item in
+  [`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md): a script that verifies
+  exported receipts and audit chains without a running server. Self-contained,
+  and it would upgrade a headline claim from operator-verifiable to
+  independently verifiable.
+
+There are currently no open issues, so nothing carries the `good first issue`
+label and this list is the entry point rather than the issue tracker. Note that
+[`docs/tech-debt-remediation-plan.md`](docs/tech-debt-remediation-plan.md) is
+**complete** — its remaining two items are blocked on product decisions, not on
+engineering capacity, so it is a historical record rather than a backlog.
+
+Please avoid, unless you have discussed it first: new proof surfaces, new
+governed adapters beyond MCP, settlement or payment rails, KMS integrations,
+and anything in the freeze list in [`WEDGE.md`](WEDGE.md).
+
 ## Development Setup
 
 1. Clone the repository.
@@ -31,7 +89,7 @@ lock without wiring the build/CI to consume it.
 
 ## Branching
 
-- Default branch: `master`
+- Default branch: `main`
 - Feature branches: `feature/<short-description>`
 - Fix branches: `fix/<short-description>`
 
@@ -56,6 +114,33 @@ PR checklist:
 - [ ] Backward compatibility considered
 - [ ] New env vars documented
 - [ ] Security impact reviewed
+- [ ] No new claim contradicts `SECURITY_LIMITATIONS.md`
+
+If your change touches the trust plane — permits, receipts, metering,
+idempotency, audit, or the governed MCP path — run the release gate before
+opening the PR:
+
+```bash
+make trust-release-gate
+```
+
+[`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md) lists every proof command and the
+invariant it asserts, which is the fastest way to find the one that covers the
+area you changed.
+
+### What review looks like
+
+One maintainer reviews everything, so throughput is the bottleneck and small,
+focused PRs get merged much faster than large ones. To make review cheap:
+
+- Say in the PR description what you verified and how, not just what changed.
+- Include the output of the relevant proof command when you change trust-plane
+  behavior.
+- Split mechanical changes (formatting, renames) into their own commit or PR so
+  the substantive diff stays readable.
+
+If a PR sits without response for two weeks, comment on it to bump. That is a
+reasonable thing to do, not a nuisance — see [`GOVERNANCE.md`](GOVERNANCE.md).
 
 ## Commit Style
 

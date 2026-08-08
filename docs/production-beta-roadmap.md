@@ -72,7 +72,7 @@ compete with it in product positioning.
   `scripts/trust_coverage_gate.sh`
 - Production env vars have a complete reference.
 - Migrations upgrade an empty database and the latest known production schema.
-- CI is green on `master`.
+- CI is green on `main`.
 - A release tag includes the exact tested commit.
 - Incident response and security reporting paths are documented.
 
@@ -124,7 +124,7 @@ evaluated constraints.
 
 ### Milestone 1: Green And Trustworthy Mainline
 
-- Keep `master` green for tests, ruff, mypy, and OpenAPI generation.
+- Keep `main` green for tests, ruff, mypy, and OpenAPI generation.
 - Add a short CI triage rule: no red mainline should sit without an owner.
 - Track type-checking debt separately from runtime security and correctness.
 

@@ -4,7 +4,7 @@
 
 | Version | Supported |
 | --- | --- |
-| `master` (latest) | Yes |
+| `main` (latest) | Yes |
 | older branches/tags | No |
 
 ## Reporting a Vulnerability

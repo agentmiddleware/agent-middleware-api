@@ -415,11 +415,21 @@ make trust-coverage-gate
 
 # Trust tests + coverage + demo + discovery/OpenAPI/inventory drift
 make trust-release-gate
+
+# Two-process crash-consistency proof; needs a dedicated, empty PostgreSQL
+# database in DATABASE_URL. Skips unless explicitly opted in.
+make prove-crash-recovery
 ```
 
 `make test`, `make test-all`, and `make coverage` provision requirements through
 `uv`. The focused coverage and release-gate targets assume the requirements are
 already installed in the active Python environment.
+
+[docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the
+invariant it asserts — and, just as importantly, to what it does not prove. Two
+live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run
+the same class of invariants against a deployment you operate; both write test
+data, so point them at staging.
 
 The CI workflows also run:
 
@@ -473,6 +483,8 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 ## Documentation
 
 - [WEDGE.md](WEDGE.md) — narrow product thesis and first design-partner motion
+- [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
+- [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
 - [docs/golden-path.md](docs/golden-path.md) — wallet-scoped end-to-end API flow
 - [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) — replace the demo tool with one internal tool
@@ -480,8 +492,11 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [docs/PROOF_SURFACES.md](docs/PROOF_SURFACES.md) — frozen surface inventory
 - [docs/tech-debt-remediation-plan.md](docs/tech-debt-remediation-plan.md) — agent-executable hardening plan and status
 - [docs/deploy-railway.md](docs/deploy-railway.md) — supported deployment SOP
+- [docs/settlement-rails.md](docs/settlement-rails.md) — rail conformance checklist (design note; settlement stays frozen)
+- [docs/discovery-standards-proposal.md](docs/discovery-standards-proposal.md) — discovery honesty profile draft
 - [b2a_sdk/README.md](b2a_sdk/README.md) — typed Python trust-loop client and release artifacts
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development and contribution guidance
+- [GOVERNANCE.md](GOVERNANCE.md) — maintainership, continuity, and funding posture
 
 ## License
 
