@@ -17,7 +17,7 @@ def get_langgraph_tools(client: B2AClient) -> list[Any]:
     Usage:
     ```python
     from langgraph.prebuilt import create_react_agent
-    from agent_middleware import B2AClient, get_langgraph_tools
+    from framework_integrations import B2AClient, get_langgraph_tools
 
     client = B2AClient(api_key="...", wallet_id="...")
     tools = get_langgraph_tools(client)
@@ -123,7 +123,7 @@ def get_crewai_tools(client: B2AClient) -> list[Any]:
     Usage:
     ```python
     from crewai import Agent
-    from agent_middleware import B2AClient, get_crewai_tools
+    from framework_integrations import B2AClient, get_crewai_tools
 
     client = B2AClient(api_key="...", wallet_id="...")
     tools = get_crewai_tools(client)
@@ -218,7 +218,7 @@ def get_autogen_tools(client: B2AClient) -> list[Any]:
     Usage:
     ```python
     import autogen
-    from agent_middleware import B2AClient, get_autogen_tools
+    from framework_integrations import B2AClient, get_autogen_tools
 
     client = B2AClient(api_key="...", wallet_id="...")
     tools = get_autogen_tools(client)
@@ -250,7 +250,7 @@ def get_llamaindex_tools(client: B2AClient) -> list[Any]:
     ```python
     from llama_index.core.agent import ReActAgent
     from llama_index.core.tools import FunctionTool
-    from agent_middleware import B2AClient, get_llamaindex_tools
+    from framework_integrations import B2AClient, get_llamaindex_tools
 
     client = B2AClient(api_key="...", wallet_id="...")
     tools = get_llamaindex_tools(client)

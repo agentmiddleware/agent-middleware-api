@@ -35,8 +35,8 @@ is disabled proof-surface scaffolding, not part of this listing.
 from b2a_sdk import AgentMiddlewareClient, PermitRequest
 
 client = AgentMiddlewareClient(
-    api_url="https://api.agent-middleware.dev",
-    api_key="your-api-key"
+    base_url="https://api.agent-middleware.dev",
+    api_key="your-api-key",
 )
 
 permit = await client.create_permit(

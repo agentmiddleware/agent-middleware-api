@@ -21,12 +21,11 @@ Practical examples for building autonomous agents with the Agent Middleware API.
 ### Basic Agent Initialization
 
 ```python
-from b2a_sdk import B2AClient
+from b2a_sdk import AgentMiddlewareClient
 
-client = B2AClient(
-    api_url="http://localhost:8000",
+client = AgentMiddlewareClient(
+    base_url="http://localhost:8000",
     api_key="your-api-key",
-    wallet_id="agent-001"
 )
 
 # Check wallet balance
@@ -37,9 +36,9 @@ print(f"Current balance: {balance}")
 ### Agent with Memory Persistence
 
 ```python
-from b2a_sdk import B2AClient
+from b2a_sdk import AgentMiddlewareClient
 
-client = B2AClient(api_url="http://localhost:8000", api_key="key", wallet_id="agent-001")
+client = AgentMiddlewareClient(base_url="http://localhost:8000", api_key="key")
 
 async def agent_loop():
     while True:
@@ -78,7 +77,7 @@ curl -X POST http://localhost:8000/v1/billing/wallets \
 ```python
 from b2a_sdk.decorators import billable
 
-b2a = B2AClient(api_key="key", wallet_id="agent-001")
+b2a = AgentMiddlewareClient(api_key="key")
 
 @billable(b2a, wallet_id="agent-001", service_category="content_factory", units=1.0)
 async def generate_report(data: dict) -> dict:
@@ -430,7 +429,7 @@ while True:
 
 ```python
 class SwarmCoordinator:
-    def __init__(self, client: B2AClient):
+    def __init__(self, client: AgentMiddlewareClient):
         self.client = client
         self.agents = {}
 
@@ -521,7 +520,7 @@ async def decompose_and_execute(task: str, budget: int):
 ```python
 async def batch_process_with_rate_limit(items: list, rate_limit: int = 60):
     """Process items with per-minute rate limiting."""
-    client = B2AClient(api_key="key", wallet_id="agent-001")
+    client = AgentMiddlewareClient(api_key="key")
     processed = 0
     window_start = time.time()
 

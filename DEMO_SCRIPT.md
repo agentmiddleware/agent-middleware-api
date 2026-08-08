@@ -27,7 +27,17 @@ See [`WEDGE.md`](WEDGE.md).
 
 ## Environment
 
-Run the API in trust mode:
+Trust mode requires an Ed25519 signing seed; without it the server exits at
+startup with `trust_signing_private_key_required`. Generate one **once** and
+save it — this demo uses a persistent `./trust-demo.db`, and rebinding the same
+`TRUST_SIGNING_KEY_ID` to new key material is rejected with
+`signing_key_id_public_key_mismatch`:
+
+```bash
+python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'
+```
+
+Run the API in trust mode, reusing that seed on every restart:
 
 ```bash
 export VALID_API_KEYS=dev-bootstrap-key
@@ -35,6 +45,8 @@ export DATABASE_URL=sqlite+aiosqlite:///./trust-demo.db
 export TRUST_MODE_ENABLED=true
 export ALLOW_LEGACY_UNPERMITTED_MCP=false
 export ENABLE_PROOF_SURFACES=false
+export TRUST_SIGNING_KEY_ID=local-dev-ed25519
+export TRUST_SIGNING_PRIVATE_KEY_B64='<paste-the-saved-seed>'
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 

@@ -5,6 +5,14 @@ Dry-Run Sandbox Example
 Demonstrates how agents can safely test billing operations without
 affecting real wallet balances or triggering velocity monitoring.
 
+.. warning::
+   **This example does not currently run to completion.** The SDK's
+   ``simulate_session`` posts to ``/v1/billing/dry-run/session``
+   (``b2a_sdk/client.py``), and the API does not implement that route — it
+   returns 404 even with ``ENABLE_PROOF_SURFACES=true``. Wallet setup below
+   succeeds; the first dry-run call then fails. The SDK feature and the server
+   are out of sync, and closing that gap is a product decision, not a docs fix.
+
 Usage:
     python examples/dry_run_example.py
 """
@@ -13,16 +21,22 @@ import asyncio
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The SDK sources live under b2a_sdk/src; inserting the repo root instead makes
+# "b2a_sdk" resolve to the bare directory and the import fails.
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "b2a_sdk", "src"
+    ),
+)
 
-from b2a_sdk import B2AClient
+from b2a_sdk import AgentMiddlewareClient
 from b2a_sdk.decorators import billable
 
 
-b2a = B2AClient(
+b2a = AgentMiddlewareClient(
     api_key=os.getenv("B2A_API_KEY", "test-key"),
     base_url=os.getenv("B2A_API_URL", "http://localhost:8000"),
-    wallet_id=os.getenv("B2A_WALLET_ID", "sponsor-0"),
 )
 
 

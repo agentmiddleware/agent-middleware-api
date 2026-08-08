@@ -4,9 +4,20 @@ LangChain integration for the Agent Middleware API, providing MCP tools and AWI 
 
 ## Installation
 
+This package is not published to PyPI. Install it from a checkout of
+this repository:
+
 ```bash
-pip install langchain-agent-middleware
+git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+cd agent-middleware-api
+python -m pip install -e ./b2a_sdk
+python -m pip install -e wrappers/langchain-agent-middleware
 ```
+
+`b2a_sdk` must be installed from the local path first: this package
+depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
+wrapper on its own fails to resolve. That installs the `langchain_b2a`
+module used below.
 
 ## Quick Start
 
