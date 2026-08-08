@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON_BIN="${PYTHON:-python3.12}"
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-fi
-if [[ -n "${PYTEST:-}" ]]; then
-  PYTEST_CMD=("$PYTEST")
-else
-  PYTEST_CMD=("$PYTHON_BIN" -m pytest)
-fi
+# shellcheck source=scripts/lib/python_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/python_env.sh"
+
 TRUST_TESTS=(
   tests/test_golden_path.py
   tests/test_demo_trust_plane.py
@@ -32,15 +26,15 @@ echo "[trust-gate] trust-core coverage gate"
 scripts/trust_coverage_gate.sh
 
 echo "[trust-gate] trust-plane demo proof"
-"$PYTHON_BIN" scripts/demo_trust_plane.py --assert
+"${PYTHON_CMD[@]}" scripts/demo_trust_plane.py --assert
 
 echo "[trust-gate] discovery drift checks"
 "${PYTEST_CMD[@]}" -q tests/test_discovery_drift.py
 
 echo "[trust-gate] OpenAPI parity"
-"$PYTHON_BIN" scripts/export_openapi.py --check
+"${PYTHON_CMD[@]}" scripts/export_openapi.py --check
 
 echo "[trust-gate] simulation inventory parity"
-"$PYTHON_BIN" scripts/generate_sim_inventory.py --check
+"${PYTHON_CMD[@]}" scripts/generate_sim_inventory.py --check
 
 echo "[trust-gate] trust release gate passed"

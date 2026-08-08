@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON_BIN="${PYTHON:-python3.12}"
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-fi
-
-if [[ -n "${PYTEST:-}" ]]; then
-  PYTEST_CMD=("$PYTEST")
-else
-  PYTEST_CMD=("$PYTHON_BIN" -m pytest)
-fi
+# shellcheck source=scripts/lib/python_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/python_env.sh"
 
 TRUST_COVERAGE_TESTS=(
   tests/test_golden_path.py
