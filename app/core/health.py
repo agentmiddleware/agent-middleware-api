@@ -23,6 +23,7 @@ from typing import Any, Awaitable, Callable
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
 from .runtime_degradation import get_runtime_degradation
+from .trust_mode import is_production_like_environment
 from ..services.signing_keys import (
     SigningKeyError,
     validate_signing_key_configuration,
@@ -356,6 +357,12 @@ async def gather_dependency_report() -> dict[str, Any]:
     return {
         "status": overall,
         "version": settings.APP_VERSION,
+        "environment": settings.ENVIRONMENT,
+        # Whether the production trust guardrails actually engage on this host.
+        # ENVIRONMENT defaults to "local", so a deploy that never sets it runs
+        # with those guardrails silently disabled; reporting the resolved value
+        # makes that externally auditable instead of guesswork.
+        "production_like": is_production_like_environment(settings.ENVIRONMENT),
         "dependencies": dependencies,
         "simulation_modes": sim_modes,
         "enable_proof_surfaces": bool(settings.ENABLE_PROOF_SURFACES),

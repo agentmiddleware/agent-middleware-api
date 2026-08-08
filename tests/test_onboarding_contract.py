@@ -243,3 +243,65 @@ def test_production_env_template_is_production_like() -> None:
         f"ENVIRONMENT={values['ENVIRONMENT']!r} is not production-like, so the "
         "production trust guardrails would not engage"
     )
+
+
+# --- Runnable examples -----------------------------------------------------
+
+
+def test_dry_run_example_uses_the_wallet_it_creates() -> None:
+    """The example must bill against the server-assigned wallet id.
+
+    It previously created a sponsor wallet and then billed `sponsor-0`, an id
+    the server never issues, so every dry-run call returned
+    `404 wallet_not_found` and the example died on its first scenario.
+    """
+
+    source = (REPO_ROOT / "examples" / "dry_run_example.py").read_text()
+    assert "sponsor-0" not in source, (
+        "wallet ids are server-assigned (e.g. spn-bde42b5c4606); a hardcoded id "
+        "returns 404 wallet_not_found"
+    )
+    assert 'wallet["wallet_id"]' in source, (
+        "the example must read the wallet id out of the creation response"
+    )
+
+
+def test_dry_run_example_states_its_proof_surface_prerequisite() -> None:
+    """Dry-run endpoints are on the billing router, which is a proof surface."""
+
+    source = (REPO_ROOT / "examples" / "dry_run_example.py").read_text()
+    assert "ENABLE_PROOF_SURFACES=true" in source, (
+        "without proof surfaces enabled the billing router is not mounted and "
+        "every dry-run call 404s; the example must say so"
+    )
+
+
+# --- Deployment posture is auditable ---------------------------------------
+
+
+@pytest.mark.anyio
+async def test_health_payload_exposes_guardrail_posture() -> None:
+    """`ENVIRONMENT` decides whether production guardrails engage.
+
+    It defaults to "local", so a deploy that never sets it runs unguarded. The
+    resolved value must be observable without reading the host's secret store.
+    """
+
+    from app.core.health import gather_dependency_report
+
+    report = await gather_dependency_report()
+
+    assert "environment" in report, "health must report the resolved ENVIRONMENT"
+    assert "production_like" in report, (
+        "health must report whether production trust guardrails engage"
+    )
+    assert isinstance(report["production_like"], bool)
+
+    from app.core.config import get_settings
+    from app.core.trust_mode import is_production_like_environment
+
+    settings = get_settings()
+    assert report["environment"] == settings.ENVIRONMENT
+    assert report["production_like"] is is_production_like_environment(
+        settings.ENVIRONMENT
+    )
