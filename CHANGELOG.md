@@ -7,22 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 🔒 Security
+### 🐛 Onboarding & developer experience
 
-- **CORS: never pair credentialed responses with a wildcard origin.** With
-  `CORS_ORIGINS="*"` (the default) and `allow_credentials=True`, Starlette
-  reflected the caller's `Origin` and still returned
-  `Access-Control-Allow-Credentials: true`, allowing any website to make
-  credentialed cross-origin reads against the trust plane. Credentials are now
-  enabled only when `CORS_ORIGINS` is an explicit allowlist; a wildcard origin
-  serves `Access-Control-Allow-Origin: *` with credentials disabled. Operators
-  running a browser client on a separate origin must set `CORS_ORIGINS` to that
-  origin's exact value. Added regression tests in `tests/test_cors_security.py`.
+- **`.env.example` now produces a server that boots.** `TRUST_MODE_ENABLED`
+  defaults to true and trust mode refuses to start without signing material, so
+  `TRUST_SIGNING_PRIVATE_KEY_B64` is required in *every* environment — but it
+  was documented only inside a commented-out block labelled "production
+  checklist". Copying the file and starting the API died with
+  `SigningKeyError: trust_signing_private_key_required`. The signing seed is now
+  a required top-level key with the generation command inline. The durable-state
+  defaults also moved from a placeholder PostgreSQL DSN (which failed with
+  `socket.gaierror` under `ENVIRONMENT=local`) to the local SQLite path the
+  README documents, with the PostgreSQL block kept as commented production
+  guidance.
+- **Failed startups now say how to fix themselves.** Signing-key validation
+  failures log an actionable `remediation` field — including the exact seed
+  generation command — next to the existing error code. The
+  `trust_signing_private_key_required` /
+  `invalid_trust_signing_private_key` codes are unchanged, so
+  `/health/dependencies` consumers are unaffected.
+- **Trust gate scripts no longer depend on a specific interpreter name.**
+  `scripts/trust_coverage_gate.sh` and `scripts/trust_release_gate.sh` resolved
+  `python3.12` by existence alone and fell back only to `python`, skipping
+  `python3`. On any machine where a bare `python3.12` is on `PATH` without the
+  project's dependencies, both gates failed with `No module named pytest`. They
+  now share `scripts/lib/python_env.sh`, which selects the first interpreter
+  that can actually import pytest and otherwise falls back to
+  `uv run --with-requirements requirements.txt`, matching every other Makefile
+  target. `PYTHON` and `PYTEST` overrides still work, and CI behaviour is
+  unchanged.
 
 ## [v1.2.0] - 2026-08-08
 
-Trust-plane governance and security-hardening release — the version currently
-serving on the live Railway deployment (`/health/dependencies` reports
+Trust-plane governance and security-hardening release. Tagged at `f365b69`, the
+commit serving on the live Railway deployment (`/health/dependencies` reports
 `1.2.0`). Changes since v1.1.0.
 
 ### 🔒 Security
@@ -36,6 +54,15 @@ serving on the live Railway deployment (`/health/dependencies` reports
   contained (#204).
 - Removed plaintext owner keys and made owner-key retirement rolling-safe
   (#205); closed the refresh-token rollout window.
+- **CORS: never pair credentialed responses with a wildcard origin** (#206).
+  With `CORS_ORIGINS="*"` (the default) and `allow_credentials=True`, Starlette
+  reflected the caller's `Origin` and still returned
+  `Access-Control-Allow-Credentials: true`, allowing any website to make
+  credentialed cross-origin reads against the trust plane. Credentials are now
+  enabled only when `CORS_ORIGINS` is an explicit allowlist; a wildcard origin
+  serves `Access-Control-Allow-Origin: *` with credentials disabled. Operators
+  running a browser client on a separate origin must set `CORS_ORIGINS` to that
+  origin's exact value. Added regression tests in `tests/test_cors_security.py`.
 
 ### 🛡️ Trust plane & governance
 
@@ -43,13 +70,26 @@ serving on the live Railway deployment (`/health/dependencies` reports
   gaps.
 - Trust-plane P0 integrity hardening; permit creation captures `subject_key_id`
   from the auth context.
+- **Key rotation now revokes the old authority** (#207). Rotation previously
+  left the superseded authority usable, so a rotation performed in response to a
+  compromise did not actually contain it.
+- **Frozen-wallet denial semantics preserved** (#208), keeping the distinct
+  frozen error code rather than collapsing it into a generic denial.
+- **Child-wallet TTL enforced across every governed spend path** (#209), with
+  follow-up review gaps closed (#213).
 
 ### ✨ Features
 
 - Human dashboard, observability endpoints, and accessibility tests.
 - Budget percentage alerts and `/v1/me/alerts`.
 - Opt-in `ENABLE_DOGFOOD_TOOL` for live `partner.notes.write`.
-- Agent-discovery pointers on the marketing site.
+- Agent-discovery pointers on the marketing site, plus published agent discovery
+  entrypoints (#210).
+
+### 🌐 Site
+
+- Canonicalized the legacy Vercel host (#211) and redirected the legacy Vercel
+  root (#212).
 
 ### 🐛 Reliability & fixes
 

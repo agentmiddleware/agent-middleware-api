@@ -38,7 +38,10 @@ from .core.trust_mode import (
 )
 from .db.database import SchemaInitError, init_db, close_db
 from .services.mcp_phase9_tools import sync_proof_surface_mcp_registration
-from .services.signing_keys import validate_signing_key_configuration
+from .services.signing_keys import (
+    SigningKeyError,
+    validate_signing_key_configuration,
+)
 from .routers.well_known import get_agent_first_metadata
 from .routers import (
     auth,
@@ -111,11 +114,48 @@ except ImportError:
     _USE_STRUCTLOG = False
 
 
+_GENERATE_SEED_COMMAND = (
+    "python3 -c 'import base64, secrets; "
+    "print(base64.b64encode(secrets.token_bytes(32)).decode())'"
+)
+
+_SIGNING_KEY_REMEDIATION_DEFAULT = (
+    "Check TRUST_SIGNING_PRIVATE_KEY_B64 and TRUST_SIGNING_KEY_ID. "
+    "See docs/key-management.md."
+)
+
+_SIGNING_KEY_REMEDIATION = {
+    "trust_signing_private_key_required": (
+        "TRUST_MODE_ENABLED is true, so TRUST_SIGNING_PRIVATE_KEY_B64 must hold an "
+        f"Ed25519 seed. Generate one with: {_GENERATE_SEED_COMMAND} — then set it in "
+        ".env (local) or your host secret store, and reuse the same seed on every "
+        "restart. See .env.example and docs/key-management.md."
+    ),
+    "invalid_trust_signing_private_key": (
+        "TRUST_SIGNING_PRIVATE_KEY_B64 is set but is not strict base64 of exactly 32 "
+        f"raw bytes. Regenerate it with: {_GENERATE_SEED_COMMAND} — and copy the value "
+        "without surrounding quotes or whitespace. See docs/key-management.md."
+    ),
+}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
-    signing_key_state = validate_signing_key_configuration(settings)
+    try:
+        signing_key_state = validate_signing_key_configuration(settings)
+    except SigningKeyError as exc:
+        # The exception message is a stable error code consumed by
+        # /health/dependencies. Log the operator remediation alongside it so a
+        # failed first boot says how to fix itself instead of only what broke.
+        logger.error(
+            "app_startup_failed",
+            phase="signing_key_validation",
+            error=str(exc),
+            remediation=_SIGNING_KEY_REMEDIATION.get(str(exc), _SIGNING_KEY_REMEDIATION_DEFAULT),
+        )
+        raise
     logger.info(
         "app_startup",
         phase="signing_key_validated",
