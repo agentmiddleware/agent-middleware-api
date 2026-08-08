@@ -44,7 +44,7 @@ from ..schemas.billing import (
     WalletType,
 )
 from .shadow_ledger import SimulatedChargeResult, get_shadow_ledger
-from .velocity_monitor import WalletFrozenError, get_velocity_monitor
+from .velocity_monitor import get_velocity_monitor
 from .wallet_engine import (
     SessionFactoryProvider,
     WalletEngine,
@@ -258,6 +258,11 @@ class BillingEngine:
         if wallet.status in _NON_SPENDABLE_WALLET_STATUSES:
             reverse_velocity_record()
             return InsufficientFundsResponse(
+                error=(
+                    "wallet_frozen"
+                    if wallet.status == WalletStatus.FROZEN.value
+                    else "insufficient_funds"
+                ),
                 wallet_id=wallet_id,
                 current_balance=float(wallet.balance),
                 current_balance_exact=str(wallet.balance),
@@ -450,12 +455,9 @@ class BillingEngine:
                             )
                             return ledger_entry_model_to_schema(existing_entry)
 
-                    velocity_result = await velocity_monitor.check_and_record_charge(
+                    await velocity_monitor.check_and_record_charge(
                         wallet_id, charge_amount
                     )
-
-                    if velocity_result.should_freeze:
-                        raise WalletFrozenError(wallet_id, velocity_result.reason)
 
                     return await self._apply_charge_to_locked_wallet(
                         session,

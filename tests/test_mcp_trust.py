@@ -8,8 +8,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel
+from app.db.models import IdempotencyRecordModel, WalletModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.idempotency import (
@@ -107,6 +108,213 @@ async def test_governed_mcp_invoke_returns_receipt_and_replay_does_not_double_ch
         assert stored_permit.spent_credits == 2
     finally:
         registry.unregister_local("trust-echo")
+
+
+@pytest.mark.anyio
+async def test_frozen_wallet_denial_returns_receipt_and_replays_without_charge(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    registry = get_service_registry()
+    calls = {"count": 0}
+
+    def frozen_guard_tool() -> dict:
+        calls["count"] += 1
+        return {"ran": True}
+
+    registry.register_local(
+        service_id="frozen-guard-tool",
+        name="Frozen Guard Tool",
+        description="Must not execute for a frozen wallet",
+        category=ServiceCategory.AGENT_COMMS,
+        func=frozen_guard_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=wallet_id,
+            key_id=provisioned["key_id"],
+            tool_name="frozen-guard-tool",
+            idem_key="frozen-guard-permit-create-1",
+        )
+
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet = (
+                await session.execute(
+                    select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                )
+            ).scalar_one()
+            balance_before = wallet.balance
+            lifetime_debits_before = wallet.lifetime_debits
+            hourly_spent_before = wallet.hourly_spent
+            daily_spent_before = wallet.daily_spent
+            wallet.status = "frozen"
+            await session.commit()
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": "frozen-guard-call-1",
+            "method": "tools/call",
+            "params": {
+                "name": "frozen-guard-tool",
+                "arguments": {},
+                "mcpContext": {
+                    "wallet_id": wallet_id,
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "frozen-guard-invoke-1",
+                },
+            },
+        }
+        first = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert first.status_code == 200
+        first_error = first.json()["error"]
+        assert first_error["code"] == -32003
+        assert first_error["message"] == "wallet_frozen"
+        receipt = first_error["data"]["receipt"]
+        assert receipt["outcome"] == "denied"
+        assert receipt["ledger_entry_id"] is None
+        assert receipt["credits_charged"] == "0"
+
+        assert replay.status_code == 200
+        assert replay.json()["error"] == first_error
+        assert calls["count"] == 0
+
+        stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == 0
+
+        valid, reason, _ = await ReceiptService().verify_receipt(receipt["receipt_id"])
+        assert (valid, reason) == (True, None)
+
+        async with factory() as session:
+            wallet = (
+                await session.execute(
+                    select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                )
+            ).scalar_one()
+            assert wallet.balance == balance_before
+            assert wallet.lifetime_debits == lifetime_debits_before
+            assert wallet.hourly_spent == hourly_spent_before
+            assert wallet.daily_spent == daily_spent_before
+    finally:
+        registry.unregister_local("frozen-guard-tool")
+
+
+@pytest.mark.anyio
+async def test_velocity_auto_freeze_returns_receipted_denial_and_releases_budget(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    registry = get_service_registry()
+    calls = {"count": 0}
+
+    def auto_freeze_guard_tool() -> dict:
+        calls["count"] += 1
+        return {"ran": True}
+
+    registry.register_local(
+        service_id="auto-freeze-guard-tool",
+        name="Auto Freeze Guard Tool",
+        description="Must not execute when the charge auto-freezes its wallet",
+        category=ServiceCategory.AGENT_COMMS,
+        func=auto_freeze_guard_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=wallet_id,
+            key_id=provisioned["key_id"],
+            tool_name="auto-freeze-guard-tool",
+            idem_key="auto-freeze-guard-permit-create-1",
+        )
+
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            assert wallet.status == "active"
+            balance_before = wallet.balance
+            lifetime_debits_before = wallet.lifetime_debits
+            hourly_spent_before = Decimal("2")
+            daily_spent_before = wallet.daily_spent
+            wallet.hourly_limit = Decimal("1")
+            wallet.hourly_spent = hourly_spent_before
+            wallet.velocity_alerts_triggered = get_settings().VELOCITY_FREEZE_THRESHOLD
+            await session.commit()
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": "auto-freeze-guard-call-1",
+            "method": "tools/call",
+            "params": {
+                "name": "auto-freeze-guard-tool",
+                "arguments": {},
+                "mcpContext": {
+                    "wallet_id": wallet_id,
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "auto-freeze-guard-invoke-1",
+                },
+            },
+        }
+        first = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert first.status_code == 200
+        first_error = first.json()["error"]
+        assert first_error["code"] == -32003
+        assert first_error["message"] == "wallet_frozen"
+        receipt = first_error["data"]["receipt"]
+        assert receipt["outcome"] == "denied"
+        assert receipt["ledger_entry_id"] is None
+        assert receipt["credits_charged"] == "0"
+        assert replay.status_code == 200
+        assert replay.json()["error"] == first_error
+        assert calls["count"] == 0
+
+        stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == 0
+
+        valid, reason, _ = await ReceiptService().verify_receipt(receipt["receipt_id"])
+        assert (valid, reason) == (True, None)
+
+        async with factory() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            assert wallet.status == "frozen"
+            assert wallet.balance == balance_before
+            assert wallet.lifetime_debits == lifetime_debits_before
+            assert wallet.hourly_spent == hourly_spent_before
+            assert wallet.daily_spent == daily_spent_before
+    finally:
+        registry.unregister_local("auto-freeze-guard-tool")
 
 
 @pytest.mark.anyio

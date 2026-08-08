@@ -58,11 +58,72 @@ async def test_frozen_wallet_cannot_charge(client, clean_database):
     _, agent = await _make_agent(client)
     await _set_status(agent, "frozen")
 
+    headers = {**BOOTSTRAP, "Idempotency-Key": "frozen-wallet-charge-1"}
     resp = await client.post(
         f"/v1/billing/charge?wallet_id={agent}&service=iot_bridge&units=1",
+        headers=headers,
+    )
+    replay = await client.post(
+        f"/v1/billing/charge?wallet_id={agent}&service=iot_bridge&units=1",
+        headers=headers,
+    )
+    assert resp.status_code == 403
+    assert replay.status_code == 403
+    assert replay.json() == resp.json()
+    detail = resp.json()["detail"]
+    assert detail["error"] == "wallet_frozen"
+    assert detail["wallet_id"] == agent
+    assert detail["shortfall"] == 0
+
+    wallet = await client.get(f"/v1/billing/wallets/{agent}", headers=BOOTSTRAP)
+    assert wallet.json()["balance"] == 5000
+    assert wallet.json()["status"] == "frozen"
+
+
+@pytest.mark.anyio
+async def test_frozen_wallet_dry_run_commit_reports_wallet_frozen(
+    client,
+    clean_database,
+):
+    _, agent = await _make_agent(client)
+    session = await client.post(
+        "/v1/billing/dry-run/session",
+        json={"wallet_id": agent},
         headers=BOOTSTRAP,
     )
-    assert resp.status_code == 402
+    assert session.status_code == 201
+    session_id = session.json()["session_id"]
+
+    simulated = await client.post(
+        "/v1/billing/dry-run/charge",
+        json={
+            "wallet_id": agent,
+            "service": "iot_bridge",
+            "units": 1,
+            "dry_run_session_id": session_id,
+        },
+        headers=BOOTSTRAP,
+    )
+    assert simulated.status_code == 200
+    assert simulated.json()["would_succeed"] is True
+
+    await _set_status(agent, "frozen")
+    committed = await client.post(
+        f"/v1/billing/dry-run/session/{session_id}/commit",
+        headers=BOOTSTRAP,
+    )
+
+    assert committed.status_code == 200
+    payload = committed.json()
+    assert payload["success"] is False
+    assert payload["committed_charges"] == 0
+    assert payload["total_credits_deducted"] == 0
+    assert payload["ledger_entries"][0]["error"] == "wallet_frozen"
+    assert "wallet_frozen" in payload["message"]
+
+    wallet = await client.get(f"/v1/billing/wallets/{agent}", headers=BOOTSTRAP)
+    assert wallet.json()["balance"] == 5000
+    assert wallet.json()["status"] == "frozen"
 
 
 @pytest.mark.anyio

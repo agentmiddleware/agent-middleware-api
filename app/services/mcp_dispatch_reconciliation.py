@@ -685,6 +685,8 @@ class McpDispatchReconciliationService:
         status_code = 504 if attempt.state == "delivery_uncertain" else 502
         if attempt.error_code == "insufficient_funds":
             status_code = 402
+        elif attempt.error_code == "wallet_frozen":
+            status_code = 403
         return error_response, status_code
 
     @staticmethod
@@ -704,6 +706,8 @@ class McpDispatchReconciliationService:
             return "response_rejected"
         if attempt.error_code == "insufficient_funds":
             return "insufficient_funds"
+        if attempt.error_code == "wallet_frozen":
+            return "wallet_frozen"
         if attempt.error_code == "upstream_returned_error":
             return "upstream_returned_error"
         if attempt.error_code == "reconciled_stale_prepared":
