@@ -12,7 +12,7 @@ recall and build upon previous interactions.
 Architecture:
 1. Session completes → AWIRAGEngine.index_session()
 2. Embeddings generated for session state
-3. Stored in vector store (ChromaDB/pgvector with SQLite fallback)
+3. Stored in the in-memory proof backend (the ChromaDB dependency is suspended)
 4. Agents query with natural language → AWIRAGEngine.search()
 5. Returns relevant past sessions with similarity scores
 
@@ -25,7 +25,6 @@ Features:
 
 import logging
 import math
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
@@ -88,9 +87,8 @@ class AWIRAGEngine:
     - research: Information gathering and comparison
 
     Storage Backend:
-    - Primary: ChromaDB (production)
-    - Fallback: SQLite with local embeddings (development)
-    - In-memory: Dict-based (testing)
+    - Supported: In-memory dict storage for the frozen proof surface
+    - Suspended: ChromaDB while its Dependabot alert reports no patched release
     """
 
     SESSION_TYPE_PATTERNS: dict[str, list[str]] = {
@@ -178,7 +176,7 @@ class AWIRAGEngine:
         Initialize the RAG engine.
 
         Args:
-            vector_store_path: Path for ChromaDB storage.
+            vector_store_path: Reserved path for a reviewed persistent backend.
             embedding_model: Model to use for embeddings.
             collection_name: Name of the collection in the vector store.
             embedding_dimension: Dimension of embedding vectors.
@@ -192,8 +190,8 @@ class AWIRAGEngine:
         self._session_index: dict[str, list[str]] = {}
         self._type_index: dict[str, set[str]] = {}
 
-        # Typed Any: populated lazily from the optional `chromadb` package,
-        # which may not be installed (see init_chroma's ImportError guard).
+        # Dormant legacy fields retained for proof-surface compatibility.
+        # init_chroma() fails closed and leaves them unset.
         self._chroma_client: Any = None
         self._chroma_collection: Any = None
         self._use_chroma = False
@@ -323,8 +321,8 @@ class AWIRAGEngine:
         """
         Semantic search over session memories.
 
-        Uses ChromaDB when available for persistent vector search,
-        falls back to in-memory similarity search.
+        Uses in-memory similarity search. The legacy ChromaDB branch remains
+        dormant while init_chroma() fails closed.
 
         Args:
             query: Natural language query.
@@ -338,7 +336,7 @@ class AWIRAGEngine:
         """
         query_embedding = await self._generate_embedding(query)
 
-        # Try ChromaDB first if available
+        # Dormant legacy branch; init_chroma() leaves _use_chroma false.
         if self._use_chroma and self._chroma_collection:
             results = await self._search_chroma(query_embedding, session_type, top_k)
             # Add raw_state if requested
@@ -1020,46 +1018,19 @@ class AWIRAGEngine:
         logger.debug(f"Indexed memory {memory.memory_id} to ChromaDB")
 
     async def init_chroma(self) -> bool:
+        """Refuse to activate ChromaDB as a conservative advisory mitigation.
+
+        The method remains for API compatibility with the frozen proof surface,
+        but fails closed even when an ambient ChromaDB package is installed.
         """
-        Initialize ChromaDB connection.
-
-        Returns:
-            True if successful, False if failed.
-        """
-        try:
-            import chromadb
-            from chromadb.config import Settings
-
-            os.makedirs(self._vector_store_path, exist_ok=True)
-
-            self._chroma_client = chromadb.PersistentClient(
-                path=self._vector_store_path,
-                settings=Settings(anonymized_telemetry=False),
-            )
-
-            self._chroma_collection = self._chroma_client.get_or_create_collection(
-                name=self._collection_name,
-                metadata={"description": "AWI session memories"},
-            )
-
-            self._use_chroma = True
-
-            logger.info(
-                f"Initialized ChromaDB at {self._vector_store_path}, "
-                f"collection: {self._collection_name}"
-            )
-
-            return True
-
-        except ImportError:
-            logger.warning(
-                "ChromaDB not installed. Using in-memory storage. "
-                "Install with: pip install chromadb"
-            )
-            return False
-        except Exception as e:
-            logger.error(f"Failed to initialize ChromaDB: {e}")
-            return False
+        self._use_chroma = False
+        self._chroma_client = None
+        self._chroma_collection = None
+        logger.warning(
+            "ChromaDB persistence is disabled as a conservative mitigation for "
+            "GHSA-f4j7-r4q5-qw2c. Using in-memory storage."
+        )
+        return False
 
 
 _rag_engine: Optional[AWIRAGEngine] = None
