@@ -33,6 +33,7 @@ from ..services.idempotency import (
 )
 from ..services.policies import evaluate_wallet_policy
 from ..services.velocity_monitor import WalletFrozenError
+from ..services.wallet_engine import WalletExpiredError
 from ..services.stripe_integration import get_stripe_integration
 from ..services.shadow_ledger import SimulatedChargeResult, get_shadow_ledger
 from ..schemas.billing import (
@@ -378,6 +379,16 @@ async def create_child_wallet(
                 "shortfall": str(e.shortfall),
             },
         )
+    except WalletExpiredError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "wallet_expired",
+                "wallet_id": e.wallet_id,
+                "expires_at": e.expires_at.isoformat(),
+                "message": str(e),
+            },
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -518,6 +529,11 @@ async def get_ledger(
 @router.post(
     "/charge",
     summary="Charge a wallet for API usage",
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Wallet expired, frozen, or denied by policy",
+        },
+    },
 )
 async def charge_wallet(
     request: Request,
@@ -629,6 +645,12 @@ async def charge_wallet(
             )
 
         if isinstance(result, InsufficientFundsResponse):
+            error_code = result.error
+            denial_status = (
+                status.HTTP_402_PAYMENT_REQUIRED
+                if error_code == "insufficient_funds"
+                else status.HTTP_403_FORBIDDEN
+            )
             await _record_billing_governance(
                 event="billing.charge",
                 auth=auth,
@@ -638,15 +660,19 @@ async def charge_wallet(
                 request_id=request_id,
                 estimated_cost=float(result.required_amount),
                 ok=False,
-                error="insufficient_funds",
+                error=error_code,
                 metadata={
                     "units": units,
                     "request_path": request_path,
                     "shortfall": float(result.shortfall),
                 },
             )
-            await _complete_idempotency(result.model_dump(mode="json"), 402)
-            raise HTTPException(status_code=402, detail=result.model_dump())
+            denial_detail = result.model_dump(mode="json")
+            await _complete_idempotency(
+                {"detail": denial_detail},
+                denial_status,
+            )
+            raise HTTPException(status_code=denial_status, detail=denial_detail)
 
         await _record_billing_governance(
             event="billing.charge",
@@ -952,6 +978,33 @@ async def transfer_wallets(
         raise HTTPException(
             status_code=402,
             detail=insufficient_detail,
+        )
+    except WalletExpiredError as e:
+        expired_detail = {
+            "error": "wallet_expired",
+            "wallet_id": e.wallet_id,
+            "expires_at": e.expires_at.isoformat(),
+            "message": str(e),
+        }
+        await _record_billing_governance(
+            event="billing.transfer",
+            auth=auth,
+            wallet_id=from_wallet_id,
+            service_category="transfer",
+            endpoint="/v1/billing/transfer",
+            request_id=correlation_id,
+            estimated_cost=amount,
+            ok=False,
+            error="wallet_expired",
+            metadata={"to_wallet_id": to_wallet_id},
+        )
+        await guard.complete(
+            {"detail": expired_detail},
+            status.HTTP_403_FORBIDDEN,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=expired_detail,
         )
     except ValueError as e:
         await _record_billing_governance(
@@ -1451,6 +1504,11 @@ async def simulate_charge(
             service_category=request.service,
             units=request.units,
             description=request.description or "",
+            blocked_reason=(
+                "wallet_expired"
+                if await money.wallet_is_expired(session.wallet_id)
+                else None
+            ),
         )
         await _record_billing_governance(
             event="billing.dry_run",

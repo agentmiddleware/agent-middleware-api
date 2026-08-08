@@ -49,7 +49,11 @@ from app.services.upstream_mcp import (
     UpstreamMcpResult,
     UpstreamMcpReturnedError,
 )
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 
 @pytest.fixture
@@ -1776,6 +1780,145 @@ async def test_charge_failure_is_immediately_signed_and_releases_remote_budget(
         assert attempt.state == "returned_error"
         assert attempt.budget_released_at is not None
         assert int(debit_count or 0) == 0
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_expired_child_wallet_denial_is_signed_released_and_replayable(
+    client: AsyncClient,
+    clean_database: None,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-expired-child-wallet"
+    idempotency_key = "partner-upstream-expired-child-wallet-1"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+    try:
+        child_response = await client.post(
+            "/v1/billing/wallets/child",
+            json={
+                "parent_wallet_id": provisioned["agent_wallet_id"],
+                "child_agent_id": "expired-governed-child",
+                "budget_credits": 100,
+                "max_spend": 100,
+                "ttl_seconds": 60,
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert child_response.status_code == 201
+        child_wallet_id = child_response.json()["wallet_id"]
+        key_response = await client.post(
+            "/v1/api-keys",
+            json={
+                "wallet_id": child_wallet_id,
+                "key_name": "expired-child-runtime",
+                "expires_in_days": 30,
+            },
+            headers=BOOTSTRAP_HEADERS,
+        )
+        assert key_response.status_code == 201
+        key_payload = key_response.json()
+        child_headers = {"X-API-Key": key_payload["api_key"]}
+        permit = await create_tool_permit(
+            client,
+            wallet_id=child_wallet_id,
+            key_id=key_payload["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-expired-child-wallet-permit",
+        )
+
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet = await session.get(WalletModel, child_wallet_id)
+            assert wallet is not None
+            wallet.created_at = utc_now() - timedelta(seconds=61)
+            session.add(wallet)
+            await session.commit()
+
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=child_wallet_id,
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        first = await client.post("/mcp/messages", json=body, headers=child_headers)
+        replay = await client.post("/mcp/messages", json=body, headers=child_headers)
+
+        assert first.status_code == 200
+        assert replay.status_code == 200
+        assert replay.json()["error"] == first.json()["error"]
+        error = first.json()["error"]
+        assert error["code"] == -32003
+        assert error["message"] == "wallet_expired"
+        receipt_payload = error["data"]["receipt"]
+        assert receipt_payload["outcome"] == "failed_refunded"
+        assert receipt_payload["ledger_entry_id"] is None
+        assert receipt_payload["credits_charged"] == "0"
+        assert executor.calls == []
+        assert executor.dispatch_count == 0
+        valid, reason, _ = await get_receipt_service().verify_receipt(
+            receipt_payload["receipt_id"]
+        )
+        assert (valid, reason) == (True, None)
+
+        permit_after = await get_permit_service().get_permit(permit["permit_id"])
+        assert permit_after is not None
+        assert permit_after.spent_credits == Decimal("0")
+        async with factory() as session:
+            record = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id == child_wallet_id,
+                        IdempotencyRecordModel.endpoint
+                        == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            attempt = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id
+                        == record.record_id
+                    )
+                )
+            ).scalar_one()
+            debit_count = await session.scalar(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(LedgerEntryModel.operation_key == record.record_id)
+            )
+            wallet = await session.get(WalletModel, child_wallet_id)
+        assert attempt.state == "returned_error"
+        assert attempt.error_code == "wallet_expired"
+        assert attempt.budget_released_at is not None
+        assert int(debit_count or 0) == 0
+        assert wallet is not None
+        assert wallet.balance == Decimal("100")
+        await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+            attempt.attempt_id
+        )
+        reconciled_replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=child_headers,
+        )
+        assert reconciled_replay.status_code == 200
+        assert reconciled_replay.json()["error"]["code"] == -32003
+        assert reconciled_replay.json()["error"]["message"] == "wallet_expired"
+        assert (
+            reconciled_replay.json()["error"]["data"]["receipt"]["receipt_id"]
+            == receipt_payload["receipt_id"]
+        )
+        evidence = await client.get(
+            f"/v1/receipts/{receipt_payload['receipt_id']}/evidence",
+            headers=child_headers,
+        )
+        assert evidence.status_code == 200
+        assert evidence.json()["valid"] is True
+        checks = {check["name"]: check for check in evidence.json()["checks"]}
+        assert checks["dispatch_linkage"]["status"] == "passed"
     finally:
         get_service_registry().unregister_local(tool_name)
 

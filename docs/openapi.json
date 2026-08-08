@@ -1616,6 +1616,9 @@
               }
             }
           },
+          "403": {
+            "description": "Wallet expired, frozen, or denied by policy"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -7642,6 +7645,7 @@
             "anyOf": [
               {
                 "type": "integer",
+                "maximum": 2147483647.0,
                 "exclusiveMinimum": 0.0
               },
               {

@@ -72,6 +72,8 @@ async def _seed_attempt(
     error_code: str | None = None,
     idempotency_endpoint: str = ENDPOINT,
     requires_human_approval: bool = False,
+    create_charge: bool = True,
+    mark_dispatched: bool = True,
 ) -> SeededAttempt:
     provisioned = await provision_agent_wallet(client)
     tool_name = f"reconcile-{suffix}"
@@ -146,22 +148,24 @@ async def _seed_attempt(
         assert attempt is not None
     else:
         attempt = await dispatch.prepare(**prepare_kwargs)
-    charge = await get_agent_money().charge(
-        wallet_id=provisioned["agent_wallet_id"],
-        service_category=ServiceCategory.AGENT_COMMS,
-        units=Decimal("1"),
-        request_path=ENDPOINT,
-        operation_key=begun.record_id,
-    )
-    assert hasattr(charge, "entry_id")
-    ledger_entry_id = charge.entry_id
-    if attach_charge:
-        attempt = await dispatch.attach_charge(
-            attempt_id=attempt.attempt_id,
-            ledger_entry_id=ledger_entry_id,
-            credits_charged=CREDITS,
+    ledger_entry_id = None
+    if create_charge:
+        charge = await get_agent_money().charge(
+            wallet_id=provisioned["agent_wallet_id"],
+            service_category=ServiceCategory.AGENT_COMMS,
+            units=Decimal("1"),
+            request_path=ENDPOINT,
+            operation_key=begun.record_id,
         )
-    if state != "prepared":
+        assert hasattr(charge, "entry_id")
+        ledger_entry_id = charge.entry_id
+        if attach_charge:
+            attempt = await dispatch.attach_charge(
+                attempt_id=attempt.attempt_id,
+                ledger_entry_id=ledger_entry_id,
+                credits_charged=CREDITS,
+            )
+    if state != "prepared" and mark_dispatched:
         attempt = await dispatch.mark_dispatched(attempt.attempt_id)
     if state not in {"prepared", "dispatched"}:
         attempt = await dispatch.complete(
@@ -682,6 +686,73 @@ async def test_terminal_returned_error_completes_crash_compensation(
     assert status == 502
     assert replay["error"] == "upstream_returned_error"
     assert replay["upstream_result"] == upstream_result
+
+
+@pytest.mark.anyio
+async def test_wallet_expired_terminal_reconciliation_is_refunded_and_replayable(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    seed = await _seed_attempt(
+        client,
+        suffix="wallet-expired-before-dispatch",
+        state="returned_error",
+        result_payload={"error": "wallet_expired"},
+        error_code="wallet_expired",
+        idempotency_endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        create_charge=False,
+        mark_dispatched=False,
+    )
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.terminal_recovered == 1
+    assert result.failed_attempt_ids == ()
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.state == "returned_error"
+    assert attempt.ledger_entry_id is None
+    assert attempt.debit_refunded_at is None
+    assert attempt.budget_released_at is not None
+    assert await _ledger_counts(seed.wallet_id) == (0, 0)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == Decimal("0")
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        attempt.idempotency_record_id
+    )
+    assert receipt is not None
+    assert receipt.outcome == "failed_refunded"
+    assert receipt.credits_charged == Decimal("0")
+    assert receipt.ledger_entry_id is None
+    valid, reason, _ = await get_receipt_service().verify_receipt(receipt.receipt_id)
+    assert (valid, reason) == (True, None)
+    replay, replay_status = await _replay(seed)
+    assert replay_status == 403
+    assert replay["error"] == "wallet_expired"
+    assert replay["receipt"]["receipt_id"] == receipt.receipt_id
+
+    # A crash after signing but before idempotency completion must adopt the
+    # same failed-refunded receipt and restore the same public replay contract.
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            record = await session.get(
+                IdempotencyRecordModel,
+                attempt.idempotency_record_id,
+            )
+            assert record is not None
+            record.response_json = None
+            record.response_reference = None
+            session.add(record)
+    await _make_stale(seed.attempt_id)
+
+    repaired = await get_mcp_dispatch_reconciliation_service().reconcile(
+        idle_seconds=300
+    )
+
+    assert repaired.idempotency_recovered == 1
+    restored, restored_status = await _replay(seed)
+    assert restored_status == 403
+    assert restored == replay
 
 
 @pytest.mark.anyio

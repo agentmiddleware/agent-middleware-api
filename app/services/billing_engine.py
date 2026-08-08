@@ -48,6 +48,7 @@ from .velocity_monitor import WalletFrozenError, get_velocity_monitor
 from .wallet_engine import (
     SessionFactoryProvider,
     WalletEngine,
+    WalletExpiredError,
     WalletNotFoundFactory,
 )
 
@@ -176,11 +177,21 @@ class BillingEngine:
         if session_id:
             shadow_ledger = get_shadow_ledger()
             try:
+                session = await shadow_ledger.get_session(session_id)
+                if session is None:
+                    raise ValueError(f"Session not found: {session_id}")
                 result = await shadow_ledger.simulate_charge(
                     session_id=session_id,
                     service_category=service_category,
                     units=float(units),
                     description=description,
+                    blocked_reason=(
+                        "wallet_expired"
+                        if await self._wallet_engine.wallet_is_expired(
+                            session.wallet_id
+                        )
+                        else None
+                    ),
                 )
                 return result
             except ValueError as e:
@@ -202,6 +213,8 @@ class BillingEngine:
             if wallet.balance_exact is not None
             else Decimal(str(wallet.balance))
         )
+        wallet_expired = await self._wallet_engine.wallet_is_expired(wallet_id)
+        would_succeed = not wallet_expired and wallet_balance >= charge_amount
 
         return SimulatedChargeResult(
             session_id=session_id or "",
@@ -211,11 +224,11 @@ class BillingEngine:
             credits_would_charge=charge_amount,
             simulated_balance_before=wallet_balance,
             simulated_balance_after=wallet_balance - charge_amount,
-            would_succeed=wallet_balance >= charge_amount,
+            would_succeed=would_succeed,
             reason=(
-                None
-                if wallet_balance >= charge_amount
-                else "insufficient_simulated_funds"
+                "wallet_expired"
+                if wallet_expired
+                else (None if would_succeed else "insufficient_simulated_funds")
             ),
             dry_run=True,
         )
@@ -267,6 +280,23 @@ class BillingEngine:
                 shortfall_exact="0",
                 top_up_url="",
                 message=f"Wallet is {wallet.status} and cannot be charged.",
+            )
+
+        try:
+            await self._wallet_engine.ensure_wallet_not_expired(session, wallet)
+        except WalletExpiredError:
+            reverse_velocity_record()
+            return InsufficientFundsResponse(
+                error="wallet_expired",
+                wallet_id=wallet_id,
+                current_balance=float(wallet.balance),
+                current_balance_exact=str(wallet.balance),
+                required_amount=float(charge_amount),
+                required_amount_exact=str(charge_amount),
+                shortfall=0.0,
+                shortfall_exact="0",
+                top_up_url="",
+                message="Child wallet TTL expired and cannot be charged.",
             )
 
         if wallet.wallet_type == WalletType.CHILD.value and wallet.max_spend:

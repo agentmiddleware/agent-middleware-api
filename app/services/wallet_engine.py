@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.config import Settings
+from ..core.time import utc_now
 from ..db.converters import wallet_model_to_response
 from ..db.models import LedgerEntryModel, WalletModel
 from ..schemas.billing import (
@@ -42,6 +43,39 @@ SessionFactoryProvider = Callable[[], async_sessionmaker[AsyncSession]]
 WalletNotFoundFactory = Callable[[str], Exception]
 InsufficientFundsFactory = Callable[[str, Decimal, Decimal], Exception]
 MetadataSerializer = Callable[[dict | None], str | None]
+MAX_CHILD_WALLET_TTL_SECONDS = 2_147_483_647
+_MAX_WALLET_HIERARCHY_DEPTH = 32
+
+
+class WalletExpiredError(RuntimeError):
+    """Raised when an operation targets an expired wallet authority."""
+
+    def __init__(self, wallet_id: str, expires_at: datetime):
+        self.wallet_id = wallet_id
+        self.expires_at = expires_at
+        super().__init__(f"Wallet {wallet_id} expired at {expires_at.isoformat()}")
+
+
+def _validate_child_wallet_ttl(ttl_seconds: int | None) -> None:
+    """Keep service callers within the persisted PostgreSQL INTEGER range."""
+    if ttl_seconds is None:
+        return
+    if (
+        isinstance(ttl_seconds, bool)
+        or not isinstance(ttl_seconds, int)
+        or ttl_seconds <= 0
+        or ttl_seconds > MAX_CHILD_WALLET_TTL_SECONDS
+    ):
+        raise ValueError(
+            f"ttl_seconds must be between 1 and {MAX_CHILD_WALLET_TTL_SECONDS}"
+        )
+
+
+def child_wallet_expires_at(wallet: WalletModel) -> datetime | None:
+    """Return this row's own child-wallet expiry, if it has one."""
+    if wallet.wallet_type != WalletType.CHILD.value or wallet.ttl_seconds is None:
+        return None
+    return wallet.created_at + timedelta(seconds=wallet.ttl_seconds)
 
 
 class WalletEngine:
@@ -61,6 +95,62 @@ class WalletEngine:
         self._wallet_not_found_error = wallet_not_found_error
         self._insufficient_funds_error = insufficient_funds_error
         self._metadata_to_json = metadata_to_json
+
+    async def _effective_expiry(
+        self,
+        session: AsyncSession,
+        wallet: WalletModel,
+    ) -> datetime | None:
+        """Return the earliest TTL deadline in a wallet's authority chain.
+
+        Parent expiry constrains every descendant. This runtime walk protects
+        wallets created before expiry attenuation was enforced at creation.
+        Malformed cycles, missing parents, and over-deep chains fail closed.
+        """
+        current = wallet
+        effective_expiry: datetime | None = None
+        seen: set[str] = set()
+
+        for _ in range(_MAX_WALLET_HIERARCHY_DEPTH):
+            if current.wallet_id in seen:
+                return datetime.min
+            seen.add(current.wallet_id)
+
+            own_expiry = child_wallet_expires_at(current)
+            if own_expiry is not None and (
+                effective_expiry is None or own_expiry < effective_expiry
+            ):
+                effective_expiry = own_expiry
+
+            if not current.parent_wallet_id:
+                return effective_expiry
+            parent = await session.get(WalletModel, current.parent_wallet_id)
+            if parent is None:
+                return datetime.min
+            current = parent
+
+        return datetime.min
+
+    async def ensure_wallet_not_expired(
+        self,
+        session: AsyncSession,
+        wallet: WalletModel,
+        *,
+        now: datetime | None = None,
+    ) -> datetime | None:
+        expires_at = await self._effective_expiry(session, wallet)
+        if expires_at is not None and expires_at <= (now or utc_now()):
+            raise WalletExpiredError(wallet.wallet_id, expires_at)
+        return expires_at
+
+    async def wallet_is_expired(self, wallet_id: str) -> bool:
+        """Return whether a wallet or any ancestor authority has expired."""
+        async with self._session_factory()() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            if wallet is None:
+                return False
+            expires_at = await self._effective_expiry(session, wallet)
+            return expires_at is not None and expires_at <= utc_now()
 
     async def _lock_wallets_in_order(
         self, session: AsyncSession, wallet_ids: list[str]
@@ -257,6 +347,7 @@ class WalletEngine:
         auto_reclaim: bool = True,
     ) -> WalletResponse:
         """Spawn a child sub-agent wallet from a parent agent's balance."""
+        _validate_child_wallet_ttl(ttl_seconds)
         async with self._session_factory()() as session:
             async with session.begin():
                 # Lock parent wallet
@@ -285,6 +376,12 @@ class WalletEngine:
                     raise ValueError(
                         f"Parent wallet is {parent.status} and cannot spawn child wallets"
                     )
+                now = utc_now()
+                parent_expires_at = await self.ensure_wallet_not_expired(
+                    session,
+                    parent,
+                    now=now,
+                )
                 if (
                     parent.wallet_type == WalletType.CHILD.value
                     and parent.max_spend
@@ -304,6 +401,16 @@ class WalletEngine:
 
                 # Create child wallet
                 child_wallet_id = f"chd-{uuid.uuid4().hex[:12]}"
+                effective_ttl_seconds = ttl_seconds
+                if parent_expires_at is not None:
+                    remaining_seconds = int((parent_expires_at - now).total_seconds())
+                    if remaining_seconds <= 0:
+                        raise WalletExpiredError(parent.wallet_id, parent_expires_at)
+                    if (
+                        effective_ttl_seconds is None
+                        or effective_ttl_seconds > remaining_seconds
+                    ):
+                        effective_ttl_seconds = remaining_seconds
                 child = WalletModel(
                     wallet_id=child_wallet_id,
                     wallet_type=WalletType.CHILD.value,
@@ -314,7 +421,9 @@ class WalletEngine:
                     child_agent_id=child_agent_id,
                     max_spend=max_spend,
                     task_description=task_description,
-                    ttl_seconds=ttl_seconds,
+                    ttl_seconds=effective_ttl_seconds,
+                    created_at=now,
+                    updated_at=now,
                 )
                 session.add(child)
                 # Persist new wallet before ledger rows that FK to it.
@@ -488,6 +597,7 @@ class WalletEngine:
                     raise ValueError(
                         f"Source wallet is {source.status} and cannot transfer credits"
                     )
+                await self.ensure_wallet_not_expired(session, source)
                 if (
                     source.wallet_type == WalletType.CHILD.value
                     and source.max_spend
