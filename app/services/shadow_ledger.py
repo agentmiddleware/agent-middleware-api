@@ -102,6 +102,7 @@ KEY_PREFIX = "dryrun"
 @dataclass
 class SimulatedCharge:
     """A simulated charge in the shadow ledger."""
+
     charge_id: str
     service_category: str
     units: float
@@ -113,6 +114,7 @@ class SimulatedCharge:
 @dataclass
 class DryRunSession:
     """A dry-run session for simulating billing operations."""
+
     session_id: str
     wallet_id: str
     real_balance: Decimal
@@ -137,6 +139,7 @@ class DryRunSession:
 @dataclass
 class SimulatedChargeResult:
     """Result of a simulated charge operation."""
+
     session_id: str
     wallet_id: str
     service_category: str
@@ -153,6 +156,7 @@ class SimulatedChargeResult:
 @dataclass
 class SessionSummary:
     """Summary of a completed dry-run session."""
+
     session_id: str
     wallet_id: str
     created_at: datetime
@@ -167,6 +171,7 @@ class SessionSummary:
 @dataclass
 class CommitResult:
     """Result of committing a sandbox session to real billing."""
+
     session_id: str
     wallet_id: str
     committed_charges: int
@@ -181,6 +186,7 @@ class CommitResult:
 @dataclass
 class RevertResult:
     """Result of reverting a sandbox session."""
+
     session_id: str
     wallet_id: str
     reverted: bool
@@ -557,6 +563,7 @@ class ShadowLedger:
         for charge in session.simulated_charges:
             try:
                 from ..schemas.billing import ServiceCategory
+
                 category = ServiceCategory(charge.service_category)
 
                 result = await agent_money.charge(
@@ -568,43 +575,49 @@ class ShadowLedger:
                 )
 
                 if isinstance(result, InsufficientFundsResponse):
-                    errors.append(f"{charge.service_category}: insufficient_funds")
-                    ledger_entries.append({
+                    errors.append(f"{charge.service_category}: {result.error}")
+                    ledger_entries.append(
+                        {
+                            "charge_id": charge.charge_id,
+                            "service_category": charge.service_category,
+                            "units": charge.units,
+                            "credits": float(charge.credits),
+                            "description": charge.description,
+                            "committed": False,
+                            "error": result.error,
+                        }
+                    )
+                    continue
+
+                total_deducted += charge.credits
+                committed_count += 1
+
+                ledger_entries.append(
+                    {
+                        "charge_id": charge.charge_id,
+                        "service_category": charge.service_category,
+                        "units": charge.units,
+                        "credits": float(charge.credits),
+                        "description": charge.description,
+                        "committed": True,
+                    }
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to commit charge {charge.charge_id}: {e}")
+                errors.append(f"{charge.service_category}: {str(e)}")
+
+                ledger_entries.append(
+                    {
                         "charge_id": charge.charge_id,
                         "service_category": charge.service_category,
                         "units": charge.units,
                         "credits": float(charge.credits),
                         "description": charge.description,
                         "committed": False,
-                        "error": "insufficient_funds",
-                    })
-                    continue
-
-                total_deducted += charge.credits
-                committed_count += 1
-
-                ledger_entries.append({
-                    "charge_id": charge.charge_id,
-                    "service_category": charge.service_category,
-                    "units": charge.units,
-                    "credits": float(charge.credits),
-                    "description": charge.description,
-                    "committed": True,
-                })
-
-            except Exception as e:
-                logger.error(f"Failed to commit charge {charge.charge_id}: {e}")
-                errors.append(f"{charge.service_category}: {str(e)}")
-
-                ledger_entries.append({
-                    "charge_id": charge.charge_id,
-                    "service_category": charge.service_category,
-                    "units": charge.units,
-                    "credits": float(charge.credits),
-                    "description": charge.description,
-                    "committed": False,
-                    "error": str(e),
-                })
+                        "error": str(e),
+                    }
+                )
 
         wallet = await agent_money.get_wallet(session.wallet_id)
         real_balance_after = wallet.balance if wallet else real_balance_before
@@ -705,14 +718,16 @@ class ShadowLedger:
         """Deserialize session from JSON."""
         charges = []
         for c in data.get("simulated_charges", []):
-            charges.append(SimulatedCharge(
-                charge_id=c["charge_id"],
-                service_category=c["service_category"],
-                units=c["units"],
-                credits=Decimal(str(c["credits"])),
-                description=c["description"],
-                timestamp=datetime.fromisoformat(c["timestamp"]),
-            ))
+            charges.append(
+                SimulatedCharge(
+                    charge_id=c["charge_id"],
+                    service_category=c["service_category"],
+                    units=c["units"],
+                    credits=Decimal(str(c["credits"])),
+                    description=c["description"],
+                    timestamp=datetime.fromisoformat(c["timestamp"]),
+                )
+            )
 
         return DryRunSession(
             session_id=data["session_id"],

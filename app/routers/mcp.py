@@ -1087,12 +1087,14 @@ async def _execute_registered_tool(
             return replayed.replay.response_json
         raise exc
     if isinstance(charge_result, InsufficientFundsResponse):
+        denial_reason = charge_result.error
+        denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:
             dispatch_attempt = await dispatch_service.complete(
                 attempt_id=dispatch_attempt.attempt_id,
                 state="returned_error",
-                result_payload={"error": "insufficient_funds"},
-                error_code="insufficient_funds",
+                result_payload={"error": denial_reason},
+                error_code=denial_reason,
                 max_result_bytes=settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES,
             )
             await get_permit_service().release_dispatch_budget_once(
@@ -1108,7 +1110,7 @@ async def _execute_registered_tool(
             endpoint=endpoint,
             transport=transport,
             ok=False,
-            error="insufficient_funds",
+            error=denial_reason,
             dispatch_attempt=dispatch_attempt,
             extra_metadata={
                 **policy_metadata,
@@ -1126,7 +1128,11 @@ async def _execute_registered_tool(
             receipt_outcome = (
                 "failed_refunded"
                 if dispatch_attempt is not None
-                else "insufficient_funds"
+                else (
+                    "insufficient_funds"
+                    if denial_reason == "insufficient_funds"
+                    else "denied"
+                )
             )
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
@@ -1140,9 +1146,9 @@ async def _execute_registered_tool(
                 arguments=arguments,
                 registered_cost=registered_cost,
                 audit_event_id=audit_event.event_id,
-                reason="insufficient_funds",
+                reason=denial_reason,
                 outcome=receipt_outcome,
-                status_code=402,
+                status_code=denial_status,
                 idempotency_record_id=(
                     idem_begin.record_id if idem_begin is not None else None
                 ),
@@ -1154,12 +1160,15 @@ async def _execute_registered_tool(
                 approval_id=(approval_check.approval_id if approval_check else None),
             )
             raise GovernedToolError(
-                "insufficient_funds",
+                denial_reason,
                 receipt=receipt_payload,
-                status_code=402,
-                jsonrpc_code=-32004,
+                status_code=denial_status,
+                jsonrpc_code=_status_to_jsonrpc_code(
+                    denial_status,
+                    denial_reason,
+                ),
             )
-        raise ValueError("insufficient_funds")
+        raise ValueError(denial_reason)
 
     # money.charge() is only ever invoked here without dry_run=True, so a real
     # (non-simulated) LedgerEntry is the only non-error outcome; this also

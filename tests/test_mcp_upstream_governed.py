@@ -845,6 +845,105 @@ async def test_confirmed_result_rejected_by_persistence_is_terminal_and_replayab
 
 
 @pytest.mark.anyio
+async def test_frozen_wallet_is_denied_before_upstream_dispatch_and_replays(
+    client: AsyncClient,
+    clean_database: None,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tool_name = "partner-upstream-frozen-wallet"
+    idempotency_key = "partner-upstream-frozen-wallet-1"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=wallet_id,
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-frozen-wallet-permit",
+        )
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            balance_before = wallet.balance
+            wallet.status = "frozen"
+            await session.commit()
+
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=wallet_id,
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        first = await client.post(
+            "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+        )
+        replay = await client.post(
+            "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+        )
+
+        first_error = first.json()["error"]
+        assert first_error["code"] == -32003
+        assert first_error["message"] == "wallet_frozen"
+        assert replay.json()["error"] == first_error
+        receipt_payload = first_error["data"]["receipt"]
+        assert receipt_payload["outcome"] == "failed_refunded"
+        assert receipt_payload["ledger_entry_id"] is None
+        assert receipt_payload["credits_charged"] == "0"
+        assert executor.calls == []
+        assert executor.dispatch_count == 0
+
+        async with factory() as session:
+            record = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id == wallet_id,
+                        IdempotencyRecordModel.endpoint
+                        == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            attempt = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id
+                        == record.record_id
+                    )
+                )
+            ).scalar_one()
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            assert wallet.balance == balance_before
+
+        assert attempt.state == "returned_error"
+        assert attempt.error_code == "wallet_frozen"
+        assert attempt.dispatched_at is None
+        assert attempt.ledger_entry_id is None
+        assert attempt.credits_charged == Decimal("0")
+
+        stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("0")
+
+        await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+            attempt.attempt_id
+        )
+        evidence = await client.get(
+            f"/v1/receipts/{receipt_payload['receipt_id']}/evidence",
+            headers=provisioned["agent_headers"],
+        )
+        assert evidence.status_code == 200
+        assert evidence.json()["valid"] is True
+        checks = {check["name"]: check for check in evidence.json()["checks"]}
+        assert checks["dispatch_linkage"]["status"] == "passed"
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
 async def test_unicode_returned_error_keeps_linked_evidence_if_refund_fails(
     client: AsyncClient,
     clean_database: None,

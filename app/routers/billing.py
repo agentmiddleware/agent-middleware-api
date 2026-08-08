@@ -518,6 +518,11 @@ async def get_ledger(
 @router.post(
     "/charge",
     summary="Charge a wallet for API usage",
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Wallet expired, frozen, or denied by policy",
+        },
+    },
 )
 async def charge_wallet(
     request: Request,
@@ -629,6 +634,12 @@ async def charge_wallet(
             )
 
         if isinstance(result, InsufficientFundsResponse):
+            error_code = result.error
+            denial_status = (
+                status.HTTP_402_PAYMENT_REQUIRED
+                if error_code == "insufficient_funds"
+                else status.HTTP_403_FORBIDDEN
+            )
             await _record_billing_governance(
                 event="billing.charge",
                 auth=auth,
@@ -638,15 +649,19 @@ async def charge_wallet(
                 request_id=request_id,
                 estimated_cost=float(result.required_amount),
                 ok=False,
-                error="insufficient_funds",
+                error=error_code,
                 metadata={
                     "units": units,
                     "request_path": request_path,
                     "shortfall": float(result.shortfall),
                 },
             )
-            await _complete_idempotency(result.model_dump(mode="json"), 402)
-            raise HTTPException(status_code=402, detail=result.model_dump())
+            denial_detail = result.model_dump(mode="json")
+            await _complete_idempotency(
+                {"detail": denial_detail},
+                denial_status,
+            )
+            raise HTTPException(status_code=denial_status, detail=denial_detail)
 
         await _record_billing_governance(
             event="billing.charge",
@@ -692,7 +707,10 @@ async def charge_wallet(
                 "Contact sponsor."
             ),
         }
-        await _complete_idempotency(frozen_detail, status.HTTP_403_FORBIDDEN)
+        await _complete_idempotency(
+            {"detail": frozen_detail},
+            status.HTTP_403_FORBIDDEN,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=frozen_detail,
