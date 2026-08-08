@@ -32,6 +32,17 @@
   ],
   "redirects": [
     {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "site-tawny-seven-33.vercel.app"
+        }
+      ],
+      "destination": "https://agent-middleware-web.vercel.app/:path*",
+      "permanent": true
+    },
+    {
       "source": "/mcp/tools.json",
       "destination": "https://api-service-production-433c.up.railway.app/mcp/tools.json",
       "permanent": false

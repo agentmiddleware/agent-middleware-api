@@ -12,6 +12,8 @@ from app.routers.well_known import _local_try_it_manifest, get_agent_first_metad
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
 CANONICAL_API = "https://api-service-production-433c.up.railway.app"
+CANONICAL_MARKETING_SITE = "https://agent-middleware-web.vercel.app"
+LEGACY_MARKETING_HOST = "site-tawny-seven-33.vercel.app"
 
 
 class _TextExtractor(HTMLParser):
@@ -69,7 +71,7 @@ def test_marketing_manifest_points_to_canonical_api_and_local_proof() -> None:
     )
 
     assert manifest["canonical_api"] == CANONICAL_API
-    assert manifest["human_site"] == "https://agent-middleware-web.vercel.app"
+    assert manifest["human_site"] == CANONICAL_MARKETING_SITE
     assert manifest["primary_audience"] == "autonomous_agents"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
@@ -106,6 +108,18 @@ def test_dynamic_machine_routes_redirect_to_the_canonical_api() -> None:
         assert redirects[source]["destination"] == destination
         assert redirects[source]["permanent"] is False
         assert destination.startswith("https://")
+
+
+def test_legacy_marketing_alias_redirects_to_canonical_host() -> None:
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    expected_redirect = {
+        "source": "/:path*",
+        "has": [{"type": "host", "value": LEGACY_MARKETING_HOST}],
+        "destination": f"{CANONICAL_MARKETING_SITE}/:path*",
+        "permanent": True,
+    }
+
+    assert config["redirects"][0] == expected_redirect
 
 
 def test_local_site_assets_exist() -> None:

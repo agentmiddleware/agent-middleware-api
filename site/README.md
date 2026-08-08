@@ -55,7 +55,9 @@ Canonical machine base URL:
 
 Marketing host (Vercel):
 `https://agent-middleware-web.vercel.app`
-(legacy alias still live: `https://site-tawny-seven-33.vercel.app`)
+
+Legacy alias (permanent redirect to the canonical marketing host):
+`https://site-tawny-seven-33.vercel.app`
 
 Redeploy Vercel project `agent-middleware-web` after changing these files for them to go live.
 
@@ -70,7 +72,7 @@ Prefix everything with **`agent-middleware-`** so GitHub, Vercel, Railway, and l
 | Local marketing | `site/` | Keep folder name; maps to Vercel project below |
 | Vercel team | `petrefiedthunders-projects` | Account scope |
 | Vercel project | `agent-middleware-web` | Static marketing + discovery redirects |
-| Vercel production URL | `https://agent-middleware-web.vercel.app` | Prefer this; older `site-*` aliases retained |
+| Vercel production URL | `https://agent-middleware-web.vercel.app` | Canonical; the legacy `site-tawny-*` alias redirects here |
 | Railway project | `agent-middleware-api` | Matches GitHub |
 | Railway service | `api-service` *(legacy)* | Prefer rename to `agent-middleware-api` when safe; do not break `*.up.railway.app` without updating redirects |
 | Railway public URL | `https://api-service-production-433c.up.railway.app` | Live API; update `site/vercel.json` redirects if this changes |
