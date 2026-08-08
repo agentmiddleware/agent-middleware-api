@@ -15,13 +15,22 @@ DEBUG=false
 STATE_BACKEND=postgres
 DATABASE_URL=${{PostgreSQL.DATABASE_URL}}
 
+# Trust plane — REQUIRED. Trust mode is on by default and the service will not
+# start without a signing seed. Generate one and set it as a Railway variable:
+#   python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'
+# Generate once and keep it; rebinding the same key ID to new material is
+# rejected with signing_key_id_public_key_mismatch.
+TRUST_SIGNING_PRIVATE_KEY_B64=<strict base64 of exactly 32 raw bytes>
+TRUST_SIGNING_KEY_ID=demo-ed25519
+
 # Authentication (demo keys)
 VALID_API_KEYS=demo-key-001,demo-key-002,demo-key-003
 
 # Rate Limits
 RATE_LIMIT_PER_MINUTE=60
 
-# CORS
+# CORS — a wildcard origin disables credentialed responses. List explicit
+# origins if a browser client needs credentials.
 CORS_ORIGINS=https://agentmarket.cloud,https://smithery.ai,*
 ```
 
@@ -29,8 +38,11 @@ CORS_ORIGINS=https://agentmarket.cloud,https://smithery.ai,*
 
 ## Option 2: Docker Compose (Local Demo)
 
+This repository does not ship a `docker-compose.demo.yml`; save the following as
+that filename first. `TRUST_SIGNING_PRIVATE_KEY_B64` is required — the container
+exits at startup without it.
+
 ```yaml
-version: '3.8'
 services:
   api:
     image: ghcr.io/petrefiedthunder/agent-middleware-api:latest
@@ -41,14 +53,20 @@ services:
       - VALID_API_KEYS=demo-key-001
       - DEBUG=false
       - RATE_LIMIT_PER_MINUTE=60
+      - TRUST_SIGNING_KEY_ID=demo-ed25519
+      - TRUST_SIGNING_PRIVATE_KEY_B64=${TRUST_SIGNING_PRIVATE_KEY_B64:?generate with python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'}
     volumes:
       - ./demo.db:/app/demo.db
 ```
 
 Run with:
 ```bash
+export TRUST_SIGNING_PRIVATE_KEY_B64=$(python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())')
 docker-compose -f docker-compose.demo.yml up
 ```
+
+`STATE_BACKEND=memory` keeps no durable state, so a fresh seed per run is fine
+here. Anything with a persistent database must reuse one saved seed.
 
 ## Demo API Keys (Development Only)
 

@@ -1,5 +1,12 @@
 # AWI Adoption Guide — Phase 8
 
+> **Status: frozen proof surface, partly aspirational.** AWI is not the product
+> wedge (see [WEDGE.md](../WEDGE.md)) and production-like deploys keep
+> `ENABLE_PROOF_SURFACES=false`, so the AWI routers are not mounted. Sections
+> below are marked **[implemented]** or **[not implemented]**. Do not plan
+> against a section marked not implemented — no such API exists in this
+> repository today. See [PROOF_SURFACES.md](PROOF_SURFACES.md).
+
 **Based on arXiv:2506.10953v1 — "Build the web for agents, not agents for the web"**
 
 This guide helps website owners and framework authors expose an **Agentic Web Interface (AWI)** that plugs into the Agent Middleware API control plane — without changing their existing human-facing UI.
@@ -20,13 +27,22 @@ AWI is a standardized, stateful interface layer that lets autonomous agents inte
 
 ## Quick Start (15 minutes)
 
-### 1. Install the AWI Kit
+### 1. Install the AWI Kit — **[not implemented]**
+
+There is no `agent-middleware-awi` package on PyPI, and `awi_sdk/` ships no
+`pyproject.toml`, so it cannot be pip-installed from this repository either.
+To use the Python client today, work from a checkout and put the SDK on your
+path:
 
 ```bash
-pip install agent-middleware-awi
+git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+cd agent-middleware-api
+python -m pip install -r requirements.txt
+export PYTHONPATH="$PWD/awi_sdk/python:$PYTHONPATH"
+python -c 'from awi_sdk import AWIClient, AWIClientConfig; print(AWIClient)'
 ```
 
-### 2. Generate Your AWI Manifest
+### 2. Generate Your AWI Manifest — **[implemented]**
 
 ```bash
 # For FastAPI apps
@@ -41,7 +57,12 @@ python -m app.tools.awi_manifest_generator \
   --output .well-known/awi.json
 ```
 
-### 3. Add AWI Endpoints to Your App
+### 3. Add AWI Endpoints to Your App — **[not implemented]**
+
+> `AWIAdapter` does not exist in this repository. The snippet below describes an
+> intended design, not a working API; `from agent_middleware.awi import
+> AWIAdapter` raises `ModuleNotFoundError`. The only adapter that exists today
+> is `AWIFallbackAdapter` (see MCP Fallback below).
 
 ```python
 from fastapi import FastAPI
@@ -63,7 +84,7 @@ async def awi_manifest():
     return FileResponse(".well-known/awi.json")
 ```
 
-### 4. Configure Security
+### 4. Configure Security — **[not implemented]**
 
 ```python
 awi = AWIAdapter(
@@ -152,7 +173,9 @@ curl -X POST /awi/intervene \
 
 ---
 
-## Framework Templates
+## Framework Templates — **[not implemented]**
+
+> These reference the unimplemented `AWIAdapter` above.
 
 ### FastAPI
 ```python
@@ -178,16 +201,16 @@ const client = new AWIClient({
 
 ---
 
-## MCP Fallback
+## MCP Fallback — **[implemented]**
 
 If AWI is unavailable, agents fall back to MCP proxy:
 
 ```python
-from agent_middleware.awi import AWIFallbackAdapter
+from app.services.awi_external_adapter import AWIFallbackAdapter
 
 adapter = AWIFallbackAdapter(
     middleware_url="https://your-middleware.example.com",
-    api_key="your-key"
+    api_key="your-key",
 )
 ```
 

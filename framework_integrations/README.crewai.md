@@ -4,15 +4,23 @@ Use Agent-Native Middleware tools in CrewAI agents and crews.
 
 ## Installation
 
+No PyPI package is published. Work from a checkout of this repository:
+
 ```bash
-pip install agent-middleware-api crewai
+git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+cd agent-middleware-api
+python -m pip install -r requirements.txt
+python -m pip install crewai
 ```
+
+Import from `framework_integrations` (the module in this repository); there is
+no `agent_middleware` package.
 
 ## Quick Start
 
 ```python
 from crewai import Agent, Crew
-from agent_middleware import B2AClient, get_crewai_tools
+from framework_integrations import B2AClient, get_crewai_tools
 
 # Initialize client
 client = B2AClient(

@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🔒 Security
+
+- **`.env.production` now sets `ENVIRONMENT=production`.** It omitted the
+  variable entirely, so `Settings.ENVIRONMENT` fell back to its `"local"`
+  default and `is_production_like_environment()` returned `False` — meaning a
+  host deployed from the file named `.env.production` ran with *every*
+  production trust guardrail silently disabled.
+
+### 📝 Documentation honesty
+
+An audit of the documented setup paths found 26 confirmed defects. The README
+was already accurate; almost everything else was not.
+
+- **Removed `pip install` commands for packages that are not published.**
+  `agent-middleware-api`, `agent-middleware-awi`, `langchain-agent-middleware`,
+  `crewai-agent-middleware`, and `autogen-agent-middleware` are all absent from
+  PyPI, yet were documented as plain installs across the four
+  `framework_integrations/README.*` files, the three `wrappers/*/README.md`
+  files, `docs/awi-adoption-guide.md`, and two package docstrings. Each now
+  documents the local path install that actually works. The wrapper
+  instructions install `./b2a_sdk` first, without which the editable install
+  fails to resolve its own `b2a-sdk>=0.3.0` dependency.
+- **Fixed imports of a module that does not exist.** Every
+  `framework_integrations` README documented `from agent_middleware import ...`;
+  the importable module is `framework_integrations`.
+- **Documented startup blocks now include the signing seed.**
+  `docs/golden-path.md`, `DEMO_SCRIPT.md`, and `docs/demo-instance.md` each
+  started the API without `TRUST_SIGNING_PRIVATE_KEY_B64`, so the server exited
+  before binding a port and every subsequent step in those guides was
+  unreachable. Each now generates the seed once and reuses it, because
+  rebinding a `TRUST_SIGNING_KEY_ID` to new material against a persistent
+  database is rejected with `signing_key_id_public_key_mismatch`.
+- **Corrected SDK constructor keywords.** `docs/agent-recipes.md` and
+  `docs/agentmarket-submission.md` passed `api_url=` and `wallet_id=`, both of
+  which raise `TypeError`; the parameter is `base_url=` and there is no
+  `wallet_id`. All five documented constructors are now verified to construct.
+- **Fixed the runnable examples.** `examples/dry_run_example.py` and
+  `examples/mcp_tool_example.py` inserted the repository root onto `sys.path`,
+  which shadowed the real package (sources live in `b2a_sdk/src`) and made
+  every run die at `ImportError: cannot import name 'B2AClient'`.
+- **Marked the aspirational parts of `docs/awi-adoption-guide.md`.** `AWIAdapter`
+  does not exist anywhere in the tree. AWI sections are now labelled
+  `[implemented]` or `[not implemented]`, and the guide leads with the frozen
+  proof-surface status. The one adapter that does exist, `AWIFallbackAdapter`,
+  now shows its real import path.
+- **Noted a live SDK/server gap.** `examples/dry_run_example.py` carries a
+  warning that the SDK's `simulate_session` posts to
+  `/v1/billing/dry-run/session`, a route the API does not implement — it 404s
+  even with `ENABLE_PROOF_SURFACES=true`. Closing that gap is a product
+  decision and is left open deliberately.
+- **`docs/demo-instance.md` no longer points at a missing compose file.**
+  `docker-compose.demo.yml` is not in the repository; the guide now says to save
+  the inline YAML under that name first.
+- **Corrected the `VALID_API_KEYS` comment in `.env.example`.** It promised that
+  an empty value yields open/development mode. Open mode also requires
+  `DEBUG=true`, and the file ships `DEBUG=false`, so an empty value actually
+  fails closed with `403 invalid_api_key`.
+
+### 🐛 Reliability & fixes
+
+- **Added the missing `scripts/core_quality_gate.sh`.**
+  `scripts/repo_guardian.py` has always invoked it, but the file did not exist,
+  so the guardian's "core quality gate" check failed unconditionally on every
+  run and inflated its failure count. It now runs the same `ruff` and `mypy`
+  checks as CI's lint job.
+
 ### 🐛 Onboarding & developer experience
 
 - **`.env.example` now produces a server that boots.** `TRUST_MODE_ENABLED`

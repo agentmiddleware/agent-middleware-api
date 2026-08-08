@@ -8,13 +8,29 @@ DB-created key scoped to its own wallet.
 
 ## Prerequisites
 
-Start the API with a local bootstrap key:
+Strict trust mode is on by default, so the API refuses to start without an
+Ed25519 signing seed. Generate one **once** and save it — this flow uses a
+persistent `./test.db`, and rebinding the same `TRUST_SIGNING_KEY_ID` to new key
+material is rejected with `signing_key_id_public_key_mismatch` to preserve
+historical verification. Reuse the same value on every restart:
+
+```bash
+python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'
+```
+
+Start the API with a local bootstrap key and that saved seed:
 
 ```bash
 export VALID_API_KEYS=dev-bootstrap-key
 export DATABASE_URL=sqlite+aiosqlite:///./test.db
+export TRUST_SIGNING_KEY_ID=local-dev-ed25519
+export TRUST_SIGNING_PRIVATE_KEY_B64='<paste-the-saved-seed>'
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+Keep the seed in the gitignored `.env` or another local secret store. If you
+lose it, delete `./test.db` and start from a fresh database. Do not reuse local
+secrets in a shared environment.
 
 Set shell helpers:
 

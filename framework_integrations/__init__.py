@@ -10,14 +10,13 @@ Integration packages for popular agent frameworks:
 
 ## Installation
 
-```bash
-pip install agent-middleware-api
-```
+No PyPI package is published; import this module from a checkout of the
+repository after `python -m pip install -r requirements.txt`.
 
 ## Quick Start
 
 ```python
-from agent_middleware import B2AClient, get_langgraph_tools, get_crewai_tools
+from framework_integrations import B2AClient, get_langgraph_tools, get_crewai_tools
 
 # Initialize client
 client = B2AClient(

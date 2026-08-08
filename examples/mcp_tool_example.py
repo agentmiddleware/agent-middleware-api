@@ -28,9 +28,16 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The SDK sources live under b2a_sdk/src; inserting the repo root instead makes
+# "b2a_sdk" resolve to the bare directory and the import fails.
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "b2a_sdk", "src"
+    ),
+)
 
-from b2a_sdk import B2AClient
+from b2a_sdk import AgentMiddlewareClient
 from b2a_sdk.decorators import mcp_tool, register_mcp_tool_callback
 from b2a_sdk.mcp import generate_manifest, list_tools
 
@@ -39,10 +46,9 @@ CLIENT = None
 
 def init_client():
     global CLIENT
-    CLIENT = B2AClient(
-        api_url=os.getenv("B2A_API_URL", "http://localhost:8000"),
+    CLIENT = AgentMiddlewareClient(
+        base_url=os.getenv("B2A_API_URL", "http://localhost:8000"),
         api_key=os.getenv("B2A_API_KEY", "test-key"),
-        wallet_id=os.getenv("B2A_WALLET_ID", "agent-001"),
     )
     return CLIENT
 
