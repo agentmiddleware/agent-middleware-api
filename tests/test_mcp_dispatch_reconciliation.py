@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
@@ -847,3 +848,159 @@ async def test_dispatch_summary_exposes_only_counts_and_backlog(
     assert metrics.terminal_idempotency_incomplete == 0
     assert metrics.reconciliation_backlog == 2
     assert "payload" not in repr(metrics)
+
+
+# --- Crash-window adversarial tests ---
+
+@pytest.mark.anyio
+async def test_crash_between_debit_and_dispatch_reconciles_refund(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """Prepared with attached debit (worker died before mark_dispatched)."""
+    seed = await _seed_attempt(
+        client,
+        suffix="prepared-with-debit",
+        state="prepared",
+        attach_charge=True,  # debit IS attached
+    )
+    # Verify initial state: prepared with ledger_entry_id
+    attempt_before = await _attempt(seed.attempt_id)
+    assert attempt_before.state == "prepared"
+    assert attempt_before.ledger_entry_id is not None
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.prepared_finalized == 1
+    assert result.failed_attempt_ids == ()
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.state == "returned_error"
+    assert attempt.debit_refunded_at is not None
+    assert attempt.budget_released_at is not None
+    assert await _ledger_counts(seed.wallet_id) == (1, 1)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == Decimal("0")
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        attempt.idempotency_record_id
+    )
+    assert receipt is not None
+    assert receipt.outcome == "failed_refunded"
+    assert receipt.credits_charged == Decimal("0")
+    replay, status = await _replay(seed)
+    assert status == 502
+    assert replay["error"] == "failed_refunded"
+
+
+@pytest.mark.anyio
+async def test_kill_between_dispatch_and_response_becomes_delivery_uncertain(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """Dispatched but no terminal outcome (worker died during upstream call)."""
+    seed = await _seed_attempt(
+        client,
+        suffix="dispatched-no-response",
+        state="dispatched",
+    )
+    # Verify initial state
+    attempt_before = await _attempt(seed.attempt_id)
+    assert attempt_before.state == "dispatched"
+    assert attempt_before.ledger_entry_id is not None
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    assert result.dispatched_uncertain == 1
+    assert result.failed_attempt_ids == ()
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.state == "delivery_uncertain"
+    assert attempt.debit_refunded_at is None
+    assert attempt.budget_released_at is None
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)
+    wallet = await get_agent_money().get_wallet(seed.wallet_id)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert wallet is not None and wallet.balance == Decimal("998.5")
+    assert permit is not None and permit.spent_credits == CREDITS
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        attempt.idempotency_record_id
+    )
+    assert receipt is not None
+    assert receipt.outcome == "delivery_uncertain"
+    assert receipt.credits_charged == CREDITS
+    replay, status = await _replay(seed)
+    assert status == 504
+    assert replay["error"] == "delivery_uncertain"
+
+
+@pytest.mark.anyio
+async def test_lost_commit_ack_recovery_no_double_charge(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """Lost COMMIT ack: retry adopts existing prepared row, budget not doubled."""
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "reconcile-lost-ack"
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name=tool_name,
+        idem_key="reconcile-permit-lost-ack",
+    )
+
+    # Create idempotency record (as the client would)
+    idem_key = "lost-ack-invoke-1"
+    request_payload = {
+        "tool": tool_name,
+        "arguments": {"value": "test"},
+        "wallet_id": provisioned["agent_wallet_id"],
+        "permit_id": permit["permit_id"],
+    }
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint=ENDPOINT,
+        idempotency_key=idem_key,
+        request_payload=request_payload,
+    )
+
+    # First call: reserve + prepare (simulates successful DB commit but lost ack)
+    validation1, attempt1 = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="partner_lookup",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=CREDITS,
+    )
+    assert validation1.allowed is True
+    assert attempt1 is not None
+    assert attempt1.state == "prepared"
+
+    # Record spent credits after first prepare
+    permit_after = await get_permit_service().get_permit(permit["permit_id"])
+    assert permit_after is not None
+    spent_after_first = permit_after.spent_credits
+
+    # Second call: retry (client never got ack, sends again)
+    validation2, attempt2 = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="partner_lookup",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=CREDITS,
+    )
+    assert validation2.allowed is True
+    assert attempt2 is not None
+    # Must be the SAME attempt (adopted, not recreated)
+    assert attempt2.attempt_id == attempt1.attempt_id
+
+    # Budget must NOT be doubled
+    permit_after_retry = await get_permit_service().get_permit(permit["permit_id"])
+    assert permit_after_retry is not None
+    assert permit_after_retry.spent_credits == spent_after_first
