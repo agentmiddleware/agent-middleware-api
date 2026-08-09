@@ -903,6 +903,55 @@ async def _execute_registered_tool(
             registered_cost=registered_cost,
         )
 
+    # Permit schema v2: recipient_domain constraint for upstream calls
+    if (
+        governed_call
+        and permit_model
+        and permit_model.recipient_domain
+        and execution_backend == "upstream_mcp"
+    ):
+        upstream_origin = str(service.get("upstream_origin", ""))
+        from urllib.parse import urlparse
+        parsed = urlparse(upstream_origin)
+        origin_domain = parsed.hostname or upstream_origin
+        if origin_domain != permit_model.recipient_domain:
+            audit_event = await _audit_mcp_invocation(
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error="permit_recipient_domain_mismatch",
+                extra_metadata={
+                    "permit_id": permit_id,
+                    "expected_domain": permit_model.recipient_domain,
+                    "actual_domain": origin_domain,
+                    "idempotency_key": idempotency_key,
+                },
+            )
+            receipt_payload = await _finalize_governed_denial(
+                idem=idem,
+                permit_model=permit_model,
+                wallet_id=wallet_id,
+                key_id=auth.key_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                tool_name=tool_name,
+                request_payload=effective_request_payload,
+                arguments=arguments,
+                registered_cost=registered_cost,
+                audit_event_id=audit_event.event_id,
+                reason="permit_recipient_domain_mismatch",
+                outcome="denied",
+                status_code=403,
+                approval_id=(
+                    approval_check.approval_id if approval_check else None
+                ),
+            )
+            raise ToolPermissionDenied(
+                "permit_recipient_domain_mismatch",
+                receipt=receipt_payload,
+            )
+
     dispatch_service: McpDispatchAttemptService | None = (
         get_mcp_dispatch_attempt_service()
         if execution_backend == "upstream_mcp"
@@ -988,6 +1037,7 @@ async def _execute_registered_tool(
                 tool_name=tool_name,
                 estimated_credits=registered_cost,
                 key_id=auth.key_id,
+                arguments=arguments,
             )
         permit_model = permit_validation.permit
         if not permit_validation.allowed:
@@ -1425,6 +1475,7 @@ async def _execute_registered_tool(
                         approval_id=(
                             approval_check.approval_id if approval_check else None
                         ),
+                        constraints_evaluated=_permit_constraints_snapshot(permit_model),
                     )
                     response_payload["receipt"] = _receipt_response_payload(receipt)
                 assert receipt is not None
@@ -2049,6 +2100,25 @@ async def _raise_charged_upstream_failure(
         status_code=status_code,
         jsonrpc_code=jsonrpc_code,
     )
+
+
+def _permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
+    """Build a snapshot of permit v2 constraints for receipt signing."""
+    from app.services.permits import _loads_dict, _loads_list
+    ce: dict[str, Any] = {}
+    max_calls = _loads_dict(permit_model.max_calls_per_tool_json or "{}")
+    if max_calls:
+        ce["max_calls_per_tool"] = max_calls
+    if permit_model.aggregate_value_cap is not None:
+        # Normalize to strip trailing zeros from decimal representation
+        normalized = permit_model.aggregate_value_cap.normalize()
+        ce["aggregate_value_cap"] = format(normalized, "f")
+    forbidden = _loads_list(permit_model.forbidden_fields_json or "[]")
+    if forbidden:
+        ce["forbidden_fields"] = forbidden
+    if permit_model.recipient_domain:
+        ce["recipient_domain"] = permit_model.recipient_domain
+    return ce
 
 
 def _registered_tool_cost(

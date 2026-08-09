@@ -16,6 +16,7 @@ from app.db.models import (
     BillingAlertModel,
     McpDispatchAttemptModel,
     PermitModel,
+    ReceiptModel,
     WalletModel,
 )
 from app.schemas.trust import PermitCreateRequest, PermitResponse
@@ -43,6 +44,14 @@ def _loads_list(value: str) -> list[str]:
     return [str(item) for item in decoded] if isinstance(decoded, list) else []
 
 
+def _loads_dict(value: str | None) -> dict[str, Any]:
+    try:
+        decoded = json.loads(value or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
     return PermitResponse(
         permit_id=model.permit_id,
@@ -61,6 +70,10 @@ def permit_model_to_response(model: PermitModel) -> PermitResponse:
         key_id=model.key_id,
         issued_at=model.issued_at,
         revoked_at=model.revoked_at,
+        max_calls_per_tool=_loads_dict(model.max_calls_per_tool_json),
+        aggregate_value_cap=model.aggregate_value_cap,
+        forbidden_fields=_loads_list(model.forbidden_fields_json or "[]"),
+        recipient_domain=model.recipient_domain,
     )
 
 
@@ -212,6 +225,15 @@ class PermitService:
         # field existed keep verifying (verify_signature mirrors this).
         if request.requires_human_approval:
             payload["requires_human_approval"] = True
+        # Permit schema v2 constraints — signed only when non-empty/non-null
+        if request.max_calls_per_tool:
+            payload["max_calls_per_tool"] = request.max_calls_per_tool
+        if request.aggregate_value_cap is not None:
+            payload["aggregate_value_cap"] = request.aggregate_value_cap
+        if request.forbidden_fields:
+            payload["forbidden_fields"] = request.forbidden_fields
+        if request.recipient_domain:
+            payload["recipient_domain"] = request.recipient_domain
         signature, key_id, _ = await get_signing_key_service().sign_payload(payload)
 
         model = PermitModel(
@@ -229,6 +251,10 @@ class PermitService:
             signature=signature,
             key_id=key_id,
             issued_at=now,
+            max_calls_per_tool_json=json.dumps(request.max_calls_per_tool) if request.max_calls_per_tool else None,
+            aggregate_value_cap=request.aggregate_value_cap,
+            forbidden_fields_json=json.dumps(request.forbidden_fields) if request.forbidden_fields else None,
+            recipient_domain=request.recipient_domain,
         )
         async with factory() as session:
             session.add(model)
@@ -257,6 +283,7 @@ class PermitService:
         tool_name: str,
         estimated_credits: Decimal,
         key_id: str | None = None,
+        arguments: dict[str, Any] | None = None,
     ) -> PermitValidation:
         factory = get_session_factory()
         async with factory() as session:
@@ -269,6 +296,7 @@ class PermitService:
                 tool_name=tool_name,
                 estimated_credits=estimated_credits,
                 key_id=key_id,
+                arguments=arguments,
             )
 
     async def validate_replay_access(
@@ -310,6 +338,7 @@ class PermitService:
         tool_name: str,
         estimated_credits: Decimal,
         key_id: str | None = None,
+        arguments: dict[str, Any] | None = None,
     ) -> PermitValidation:
         """Atomically authorize an action and reserve its permit budget.
 
@@ -330,6 +359,7 @@ class PermitService:
                     tool_name=tool_name,
                     estimated_credits=estimated_credits,
                     key_id=key_id,
+                    arguments=arguments,
                 )
                 if not validation.allowed:
                     return validation
@@ -346,6 +376,7 @@ class PermitService:
         tool_name: str,
         estimated_credits: Decimal,
         key_id: str | None,
+        arguments: dict[str, Any] | None = None,
     ) -> PermitValidation:
         if model.status != "active":
             return PermitValidation(False, f"permit_{model.status}", model)
@@ -365,9 +396,56 @@ class PermitService:
             return PermitValidation(False, "permit_scope_missing", model)
         if model.spent_credits + estimated_credits > model.max_credits:
             return PermitValidation(False, "permit_budget_exceeded", model)
+
+        # Permit schema v2 constraint checks
+        # 1. max_calls_per_tool
+        max_calls = _loads_dict(model.max_calls_per_tool_json or "{}")
+        if max_calls and tool_name in max_calls:
+            call_count = await self._count_tool_calls(model.permit_id, tool_name)
+            if call_count >= max_calls[tool_name]:
+                return PermitValidation(False, "permit_max_calls_exceeded", model)
+
+        # 2. aggregate_value_cap
+        if model.aggregate_value_cap is not None:
+            total_charged = await self._sum_permit_charges(model.permit_id)
+            if total_charged + estimated_credits > model.aggregate_value_cap:
+                return PermitValidation(False, "permit_aggregate_value_cap_exceeded", model)
+
+        # 3. forbidden_fields
+        forbidden = _loads_list(model.forbidden_fields_json or "[]")
+        if forbidden and arguments:
+            for field in forbidden:
+                if field in arguments:
+                    return PermitValidation(False, f"permit_forbidden_field:{field}", model)
+
         if not await self.verify_signature(model):
             return PermitValidation(False, "permit_signature_invalid", model)
         return PermitValidation(True, None, model)
+
+    async def _count_tool_calls(self, permit_id: str, tool_name: str) -> int:
+        """Count successful receipts for (permit_id, tool_name)."""
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(func.count()).select_from(ReceiptModel).where(
+                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
+                    cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
+                    cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
+                )
+            )
+            return int(result.scalar() or 0)
+
+    async def _sum_permit_charges(self, permit_id: str) -> Decimal:
+        """Sum credits_charged across all receipts for this permit."""
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(func.sum(ReceiptModel.credits_charged)).where(
+                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
+                )
+            )
+            total = result.scalar()
+            return Decimal(str(total)) if total is not None else Decimal("0")
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
         factory = get_session_factory()
@@ -717,6 +795,17 @@ class PermitService:
         # the rebuilt payload and fails verification.
         if model.requires_human_approval:
             payload["requires_human_approval"] = True
+        # Permit schema v2 constraints — mirrored from create_permit
+        max_calls = _loads_dict(model.max_calls_per_tool_json or "{}")
+        if max_calls:
+            payload["max_calls_per_tool"] = max_calls
+        if model.aggregate_value_cap is not None:
+            payload["aggregate_value_cap"] = model.aggregate_value_cap
+        forbidden = _loads_list(model.forbidden_fields_json or "[]")
+        if forbidden:
+            payload["forbidden_fields"] = forbidden
+        if model.recipient_domain:
+            payload["recipient_domain"] = model.recipient_domain
         from app.services.signing_keys import sha256_hex
 
         payload["payload_hash"] = sha256_hex(payload)
