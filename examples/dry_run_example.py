@@ -5,16 +5,15 @@ Dry-Run Sandbox Example
 Demonstrates how agents can safely test billing operations without
 affecting real wallet balances or triggering velocity monitoring.
 
-.. warning::
-   **This example does not currently run to completion.** The SDK's
-   ``simulate_session`` posts to ``/v1/billing/dry-run/session``
-   (``b2a_sdk/client.py``), and the API does not implement that route — it
-   returns 404 even with ``ENABLE_PROOF_SURFACES=true``. Wallet setup below
-   succeeds; the first dry-run call then fails. The SDK feature and the server
-   are out of sync, and closing that gap is a product decision, not a docs fix.
+.. note::
+   The dry-run endpoints live on the billing router, which is a **proof
+   surface**: production-like deploys keep ``ENABLE_PROOF_SURFACES=false`` and
+   do not mount it. Run the API with ``ENABLE_PROOF_SURFACES=true`` or every
+   call here returns 404. See ``docs/PROOF_SURFACES.md``.
 
 Usage:
-    python examples/dry_run_example.py
+    ENABLE_PROOF_SURFACES=true uvicorn app.main:app     # in another shell
+    B2A_API_KEY=<bootstrap-key> python examples/dry_run_example.py
 """
 
 import asyncio
@@ -40,57 +39,57 @@ b2a = AgentMiddlewareClient(
 )
 
 
-@billable(b2a, wallet_id="sponsor-0", service_category="content_factory", units=10.0)
-async def generate_video_hook(url: str, style: str = "cinematic") -> dict:
-    """Simulate a video generation call."""
-    return {
-        "video_url": f"https://example.com/{hash(url)}.mp4",
-        "style": style,
-        "status": "generated",
-    }
-
-
-@billable(b2a, wallet_id="sponsor-0", service_category="media_engine", units=5.0)
-async def distribute_clip(clip_id: str, platform: str = "youtube") -> dict:
-    """Simulate a clip distribution call."""
-    return {
-        "clip_id": clip_id,
-        "platform": platform,
-        "status": "distributed",
-    }
-
-
-@billable(b2a, wallet_id="sponsor-0", service_category="iot_bridge", units=1.0)
-async def send_iot_message(device_id: str, message: str) -> dict:
-    """Simulate an IoT message send."""
-    return {
-        "device_id": device_id,
-        "message": message,
-        "status": "sent",
-    }
-
-
 async def demo_simulation():
     """Demonstrate dry-run simulation."""
     print("\n" + "=" * 60)
     print("B2A Dry-Run Sandbox Demo")
     print("=" * 60)
 
-    try:
-        await b2a.create_sponsor_wallet(
-            sponsor_name="Demo Sponsor",
-            email="demo@example.com",
-            initial_credits=10000.0,
-        )
-        print("\n✓ Created sponsor wallet with 10,000 credits")
-    except Exception as e:
-        print(f"\n⚠ Wallet may already exist: {e}")
+    # The server assigns the wallet id (e.g. "spn-bde42b5c4606"); it cannot be
+    # chosen by the caller. Everything below bills against this exact id —
+    # using a made-up one returns 404 wallet_not_found.
+    wallet = await b2a.create_sponsor_wallet(
+        sponsor_name="Demo Sponsor",
+        email="demo@example.com",
+        initial_credits=10000.0,
+    )
+    wallet_id = wallet["wallet_id"]
+    print(f"\n✓ Created sponsor wallet {wallet_id} with 10,000 credits")
+
+    # @billable captures wallet_id at decoration time, so these are defined
+    # here rather than at import, where the wallet does not exist yet.
+    @billable(b2a, wallet_id=wallet_id, service_category="content_factory", units=10.0)
+    async def generate_video_hook(url: str, style: str = "cinematic") -> dict:
+        """Simulate a video generation call."""
+        return {
+            "video_url": f"https://example.com/{hash(url)}.mp4",
+            "style": style,
+            "status": "generated",
+        }
+
+    @billable(b2a, wallet_id=wallet_id, service_category="media_engine", units=5.0)
+    async def distribute_clip(clip_id: str, platform: str = "youtube") -> dict:
+        """Simulate a clip distribution call."""
+        return {
+            "clip_id": clip_id,
+            "platform": platform,
+            "status": "distributed",
+        }
+
+    @billable(b2a, wallet_id=wallet_id, service_category="iot_bridge", units=1.0)
+    async def send_iot_message(device_id: str, message: str) -> dict:
+        """Simulate an IoT message send."""
+        return {
+            "device_id": device_id,
+            "message": message,
+            "status": "sent",
+        }
 
     print("\n--- Scenario 1: Estimate Cost of Multi-Step Workflow ---")
     print("Agent wants to: generate_video → distribute_clip → send_iot_message")
     print("But doesn't know if it fits the budget...")
 
-    async with b2a.simulate_session(wallet_id="sponsor-0") as sim:
+    async with b2a.simulate_session(wallet_id=wallet_id) as sim:
         print(f"\nSession started: {sim.session_id}")
         print(f"Initial virtual balance: {sim.total_cost} credits")
 
@@ -125,7 +124,7 @@ async def demo_simulation():
     print("Quick estimate without session tracking:")
 
     result = await b2a.simulate_charge(
-        wallet_id="sponsor-0",
+        wallet_id=wallet_id,
         service_category="content_factory",
         units=100.0,
         description="Bulk video generation",
@@ -141,13 +140,13 @@ async def demo_simulation():
     print("Comparing two different workflow strategies...")
 
     workflow_a_total = 0
-    async with b2a.simulate_session(wallet_id="sponsor-0") as sim:
+    async with b2a.simulate_session(wallet_id=wallet_id) as sim:
         for i in range(3):
             await generate_video_hook(f"url-{i}")
         workflow_a_total = sim.total_cost
 
     workflow_b_total = 0
-    async with b2a.simulate_session(wallet_id="sponsor-0") as sim:
+    async with b2a.simulate_session(wallet_id=wallet_id) as sim:
         for i in range(3):
             await send_iot_message(f"device-{i}", "ping")
         workflow_b_total = sim.total_cost

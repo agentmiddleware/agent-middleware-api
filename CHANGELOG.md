@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🔍 Observability
+
+- **`/health/dependencies` now reports `environment` and `production_like`.**
+  Whether the production trust guardrails engage depends entirely on
+  `ENVIRONMENT`, which defaults to `"local"` — but no endpoint exposed the
+  resolved value, so the only way to audit a running host was to read its
+  secret store. A deploy that never sets the variable runs with those
+  guardrails silently disabled; both fields are non-secret and make that
+  externally verifiable. Additive: no existing field changed.
+
 ### 🔒 Security
 
 - **`.env.production` now sets `ENVIRONMENT=production`.** It omitted the
@@ -52,11 +62,15 @@ was already accurate; almost everything else was not.
   `[implemented]` or `[not implemented]`, and the guide leads with the frozen
   proof-surface status. The one adapter that does exist, `AWIFallbackAdapter`,
   now shows its real import path.
-- **Noted a live SDK/server gap.** `examples/dry_run_example.py` carries a
-  warning that the SDK's `simulate_session` posts to
-  `/v1/billing/dry-run/session`, a route the API does not implement — it 404s
-  even with `ENABLE_PROOF_SURFACES=true`. Closing that gap is a product
-  decision and is left open deliberately.
+- **`examples/dry_run_example.py` now runs to completion.** It created a sponsor
+  wallet, then billed every operation against the hardcoded id `sponsor-0`,
+  which never exists — the server assigns ids like `spn-bde42b5c4606`. Each
+  dry-run call returned `404 wallet_not_found`. The example now uses the id it
+  is given, and the `@billable` functions moved inside the demo because the
+  decorator captures `wallet_id` at decoration time, before any wallet exists.
+  Its docstring now records the real prerequisite: the dry-run endpoints are on
+  the billing router, a proof surface, so the API must run with
+  `ENABLE_PROOF_SURFACES=true`.
 - **`docs/demo-instance.md` no longer points at a missing compose file.**
   `docker-compose.demo.yml` is not in the repository; the guide now says to save
   the inline YAML under that name first.
