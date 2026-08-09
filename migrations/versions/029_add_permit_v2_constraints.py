@@ -1,7 +1,7 @@
 """Add permit schema v2 constraints and receipt constraints_evaluated.
 
-Revision ID: 028_add_permit_v2_constraints
-Revises: 027_add_governed_mcp_normalized_idempotency_key
+Revision ID: 029_add_permit_v2_constraints
+Revises: 028_revoke_unbound_refresh
 Create Date: 2026-08-09
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "028_add_permit_v2_constraints"
-down_revision: Union[str, None] = "027_add_governed_mcp_normalized_idempotency_key"
+revision: str = "029_add_permit_v2_constraints"
+down_revision: Union[str, None] = "028_revoke_unbound_refresh"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
