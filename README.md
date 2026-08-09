@@ -483,6 +483,7 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 ## Documentation
 
 - [WEDGE.md](WEDGE.md) — narrow product thesis and first design-partner motion
+- [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling
 - [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
 - [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
