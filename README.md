@@ -148,6 +148,14 @@ The remote path is covered by
 
 Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), and `make`.
 
+Install `uv` (one line, copy-paste):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then clone and prove:
+
 ```bash
 git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
 cd agent-middleware-api
@@ -471,7 +479,8 @@ matching `python-sdk-v0.4.0` tag attaches those artifacts to a GitHub release;
 the package is not published to PyPI. The typed `AgentMiddlewareClient` covers
 tool discovery, permit creation, governed invocation, receipt verification, and
 evidence retrieval, and exposes idempotency conflicts and delivery uncertainty
-as explicit errors. For repository development:
+as explicit errors. For repository development (installs from this repo, not
+PyPI):
 
 ```bash
 python -m pip install -e './b2a_sdk[dev]'
