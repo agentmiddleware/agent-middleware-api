@@ -766,6 +766,11 @@ class PermitModel(SQLModel, table=True):
     updated_at: Optional[datetime] = Field(
         sa_type=NaiveUTCDateTime, default=None, index=True
     )
+    # Permit schema v2 constraints — all optional for backwards compatibility
+    max_calls_per_tool_json: Optional[str] = Field(default=None)
+    aggregate_value_cap: Optional[Decimal] = Field(default=None, decimal_places=8)
+    forbidden_fields_json: Optional[str] = Field(default=None)
+    recipient_domain: Optional[str] = Field(default=None, max_length=255)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -816,6 +821,8 @@ class ReceiptModel(SQLModel, table=True):
     # receipt signatures stay valid. Plain string (no FK) — the column is
     # ALTER-added and SQLite cannot add FK constraints via ALTER (see 020).
     approval_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    # Permit schema v2: snapshot of constraints that were evaluated at invoke time
+    constraints_evaluated_json: Optional[str] = Field(default=None)
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )

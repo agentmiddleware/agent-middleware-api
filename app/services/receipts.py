@@ -26,6 +26,17 @@ class ReceiptError(RuntimeError):
         super().__init__(reason)
 
 
+import json
+
+
+def _loads_dict(value: str | None) -> dict[str, Any]:
+    try:
+        decoded = json.loads(value or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def receipt_model_to_response(model: ReceiptModel) -> ReceiptResponse:
     return ReceiptResponse(
         receipt_id=model.receipt_id,
@@ -43,6 +54,7 @@ def receipt_model_to_response(model: ReceiptModel) -> ReceiptResponse:
         outcome=model.outcome,
         audit_event_id=model.audit_event_id,
         approval_id=model.approval_id,
+        constraints_evaluated=_loads_dict(model.constraints_evaluated_json),
         created_at=model.created_at,
         signature=model.signature,
         signature_key_id=model.signature_key_id,
@@ -81,6 +93,14 @@ class ReceiptService:
         # remains part of both current and constrained legacy signatures.
         if model.approval_id is not None:
             payload["approval_id"] = model.approval_id
+        # Permit schema v2: constraints_evaluated signed when present
+        if model.constraints_evaluated_json is not None:
+            try:
+                ce = json.loads(model.constraints_evaluated_json)
+                if ce:
+                    payload["constraints_evaluated"] = ce
+            except json.JSONDecodeError:
+                pass
         payload["payload_hash"] = sha256_hex(payload)
         return payload
 
@@ -138,6 +158,7 @@ class ReceiptService:
         outcome: str,
         audit_event_id: str | None,
         approval_id: str | None,
+        constraints_evaluated: dict[str, Any] | None = None,
     ) -> None:
         """Reject reuse of one idempotency record for different evidence."""
         expected = {
@@ -195,6 +216,7 @@ class ReceiptService:
         response_hash_override: str | None = None,
         session: AsyncSession | None = None,
         approval_id: str | None = None,
+        constraints_evaluated: dict[str, Any] | None = None,
     ) -> ReceiptResponse:
         if (request_payload is None) == (request_hash is None):
             raise ReceiptError("receipt_request_identity_invalid")
@@ -261,6 +283,7 @@ class ReceiptService:
                 outcome=outcome,
                 audit_event_id=audit_event_id,
                 approval_id=approval_id,
+                constraints_evaluated=constraints_evaluated,
             )
             return receipt_model_to_response(existing)
 
@@ -297,6 +320,8 @@ class ReceiptService:
         # field existed keep verifying (verify_receipt mirrors this).
         if approval_id is not None:
             payload["approval_id"] = approval_id
+        if constraints_evaluated:
+            payload["constraints_evaluated"] = constraints_evaluated
         signature, signature_key_id, _ = await get_signing_key_service().sign_payload(
             payload
         )
@@ -316,6 +341,7 @@ class ReceiptService:
             outcome=outcome,
             audit_event_id=audit_event_id,
             approval_id=approval_id,
+            constraints_evaluated_json=json.dumps(constraints_evaluated) if constraints_evaluated else None,
             created_at=created_at,
             signature=signature,
             signature_key_id=signature_key_id,

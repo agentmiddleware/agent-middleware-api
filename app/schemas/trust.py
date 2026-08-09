@@ -19,6 +19,11 @@ class PermitCreateRequest(BaseModel):
     # Governed invokes under this permit block on a human decision (Sentinel)
     # before budget is reserved or credits are charged.
     requires_human_approval: bool = False
+    # Permit schema v2 constraints (all optional)
+    max_calls_per_tool: dict[str, int] = Field(default_factory=dict)
+    aggregate_value_cap: Decimal | None = None
+    forbidden_fields: list[str] = Field(default_factory=list)
+    recipient_domain: str | None = None
 
 
 class PermitResponse(BaseModel):
@@ -38,6 +43,11 @@ class PermitResponse(BaseModel):
     key_id: str
     issued_at: datetime
     revoked_at: datetime | None = None
+    # Permit schema v2 constraints
+    max_calls_per_tool: dict[str, int] = Field(default_factory=dict)
+    aggregate_value_cap: Decimal | None = None
+    forbidden_fields: list[str] = Field(default_factory=list)
+    recipient_domain: str | None = None
 
 
 class PermitListResponse(BaseModel):
@@ -79,6 +89,8 @@ class ReceiptResponse(BaseModel):
     audit_event_id: str | None
     # Human approval that authorized this invoke, when the permit required one.
     approval_id: str | None = None
+    # Permit schema v2: snapshot of constraints evaluated at invoke time
+    constraints_evaluated: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     signature: str
     signature_key_id: str
