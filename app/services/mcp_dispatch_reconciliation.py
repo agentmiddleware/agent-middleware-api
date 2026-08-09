@@ -18,6 +18,7 @@ from app.db.models import (
     ControlPlaneAuditEventModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
+    PermitModel,
 )
 from app.schemas.trust import ReceiptResponse
 from app.services.agent_money import AgentMoney, get_agent_money
@@ -32,7 +33,7 @@ from app.services.mcp_dispatch_attempts import (
     McpDispatchAttemptService,
     get_mcp_dispatch_attempt_service,
 )
-from app.services.permits import PermitService, get_permit_service
+from app.services.permits import PermitService, get_permit_service, _loads_dict, _loads_list
 from app.services.receipts import ReceiptError, ReceiptService, get_receipt_service
 from app.services.signing_keys import sha256_hex
 
@@ -270,6 +271,11 @@ class McpDispatchReconciliationService:
             context = await self._required_context(attempt.attempt_id)
             attempt = context.attempt
 
+        # Fetch permit constraints for the receipt snapshot
+        constraints_evaluated = await self._permit_constraints_snapshot(
+            attempt.permit_id
+        )
+
         result_payload = self._result_payload(attempt)
         outcome = self._receipt_outcome(attempt.state)
         audit = await self._get_or_create_audit(context)
@@ -278,6 +284,7 @@ class McpDispatchReconciliationService:
             result_payload=result_payload,
             outcome=outcome,
             audit_event_id=audit.event_id,
+            constraints_evaluated=constraints_evaluated,
         )
         response, status_code = self._replay_response(
             attempt=attempt,
@@ -292,6 +299,29 @@ class McpDispatchReconciliationService:
             response_json=response,
             status_code=status_code,
         )
+
+    async def _permit_constraints_snapshot(
+        self,
+        permit_id: str,
+    ) -> dict[str, Any] | None:
+        """Build a snapshot of permit v2 constraints for receipt signing."""
+        factory = get_session_factory()
+        async with factory() as session:
+            permit = await session.get(PermitModel, permit_id)
+        if permit is None:
+            return None
+        ce: dict[str, Any] = {}
+        max_calls = _loads_dict(permit.max_calls_per_tool_json or "{}")
+        if max_calls:
+            ce["max_calls_per_tool"] = max_calls
+        if permit.aggregate_value_cap is not None:
+            ce["aggregate_value_cap"] = str(permit.aggregate_value_cap)
+        forbidden = _loads_list(permit.forbidden_fields_json or "[]")
+        if forbidden:
+            ce["forbidden_fields"] = forbidden
+        if permit.recipient_domain:
+            ce["recipient_domain"] = permit.recipient_domain
+        return ce if ce else None
 
     async def _compensate_returned_error(
         self,
@@ -564,6 +594,7 @@ class McpDispatchReconciliationService:
         result_payload: dict[str, Any] | None,
         outcome: str,
         audit_event_id: str,
+        constraints_evaluated: dict[str, Any] | None = None,
     ) -> ReceiptResponse:
         existing = await self._receipts.get_receipt_by_idempotency_record_id(
             attempt.idempotency_record_id
@@ -602,6 +633,7 @@ class McpDispatchReconciliationService:
                 outcome=outcome,
                 audit_event_id=audit_event_id,
                 approval_id=attempt.approval_id,
+                constraints_evaluated=constraints_evaluated,
             )
         except ReceiptError:
             # Another process may have finalized the same attempt after our
