@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.12
+#!/usr/bin/env python3
 """Repo guardian for agent-middleware-api.
 
 Consolidates four recurring checks into one loop tick so the trust plane
@@ -13,9 +13,9 @@ Snapshots live in .git/repo_guardian/ (never committed). Exit code is the
 number of FAILED checks, so the loop can react to non-zero.
 
 Usage:
-  python3.12 scripts/repo_guardian.py            # quick tiers (1,2,4) + sweep only if code changed
-  python3.12 scripts/repo_guardian.py --full     # force the heavy test sweep too
-  python3.12 scripts/repo_guardian.py --no-sweep  # skip the heavy sweep entirely
+  python3 scripts/repo_guardian.py            # quick tiers (1,2,4) + sweep only if code changed
+  python3 scripts/repo_guardian.py --full     # force the heavy test sweep too
+  python3 scripts/repo_guardian.py --no-sweep  # skip the heavy sweep entirely
 """
 
 from __future__ import annotations
