@@ -46,7 +46,10 @@ async def get_policy(
     auth.require_bootstrap_admin()
     policy = await get_policy_bundle(policy_id)
     if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "policy_not_found", "message": f"Policy {policy_id} not found"},
+        )
     return policy
 
 
@@ -59,5 +62,8 @@ async def patch_policy(
     auth.require_bootstrap_admin()
     policy = await patch_policy_bundle(policy_id, request)
     if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "policy_not_found", "message": f"Policy {policy_id} not found"},
+        )
     return policy
