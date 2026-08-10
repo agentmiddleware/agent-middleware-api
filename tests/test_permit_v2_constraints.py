@@ -19,7 +19,6 @@ from app.schemas.billing import ServiceCategory
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
-    create_tool_permit,
     provision_agent_wallet,
 )
 
@@ -370,6 +369,7 @@ async def test_constraints_evaluated_on_receipt(client, clean_database):
 
 
 # --- recipient_domain upstream test ---
+
 
 class _FakeUpstreamExecutor:
     """Minimal fake executor for recipient_domain denial test."""
