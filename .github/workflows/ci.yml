@@ -132,7 +132,7 @@ jobs:
 
       - name: Upload SDK artifacts
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: python-sdk-${{ env.SDK_VERSION }}
           path: sdk-dist/*
