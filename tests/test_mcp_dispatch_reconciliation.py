@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
@@ -852,6 +851,7 @@ async def test_dispatch_summary_exposes_only_counts_and_backlog(
 
 # --- Crash-window adversarial tests ---
 
+
 @pytest.mark.anyio
 async def test_crash_between_debit_and_dispatch_reconciles_refund(
     client: AsyncClient,
@@ -963,7 +963,10 @@ async def test_lost_commit_ack_recovery_no_double_charge(
     )
 
     # First call: reserve + prepare (simulates successful DB commit but lost ack)
-    validation1, attempt1 = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+    (
+        validation1,
+        attempt1,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
         idempotency_record_id=begun.record_id,
         wallet_id=provisioned["agent_wallet_id"],
         permit_id=permit["permit_id"],
@@ -984,7 +987,10 @@ async def test_lost_commit_ack_recovery_no_double_charge(
     spent_after_first = permit_after.spent_credits
 
     # Second call: retry (client never got ack, sends again)
-    validation2, attempt2 = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+    (
+        validation2,
+        attempt2,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
         idempotency_record_id=begun.record_id,
         wallet_id=provisioned["agent_wallet_id"],
         permit_id=permit["permit_id"],
