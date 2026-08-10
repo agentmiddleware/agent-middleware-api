@@ -9131,6 +9131,46 @@
             "type": "boolean",
             "title": "Requires Human Approval",
             "default": false
+          },
+          "max_calls_per_tool": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Max Calls Per Tool"
+          },
+          "aggregate_value_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregate Value Cap"
+          },
+          "forbidden_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forbidden Fields"
+          },
+          "recipient_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Domain"
           }
         },
         "type": "object",
@@ -9280,6 +9320,43 @@
               }
             ],
             "title": "Revoked At"
+          },
+          "max_calls_per_tool": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Max Calls Per Tool"
+          },
+          "aggregate_value_cap": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aggregate Value Cap"
+          },
+          "forbidden_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Forbidden Fields"
+          },
+          "recipient_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Domain"
           }
         },
         "type": "object",
@@ -10191,6 +10268,11 @@
               }
             ],
             "title": "Approval Id"
+          },
+          "constraints_evaluated": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Constraints Evaluated"
           },
           "created_at": {
             "type": "string",
