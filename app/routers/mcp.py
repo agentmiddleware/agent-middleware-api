@@ -984,6 +984,7 @@ async def _execute_registered_tool(
                     upstream_origin=str(service["upstream_origin"]),
                     request_hash=idem_begin.request_hash,
                     credits_authorized=registered_cost,
+                    arguments=arguments,
                 )
             except Exception as exc:
                 reason = "upstream_prepare_failed"

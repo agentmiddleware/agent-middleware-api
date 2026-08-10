@@ -354,6 +354,7 @@ class McpDispatchAttemptService:
         upstream_origin: str,
         request_hash: str,
         credits_authorized: Decimal,
+        arguments: dict[str, Any] | None = None,
         permit_service: PermitService | None = None,
     ) -> tuple[PermitValidation, McpDispatchAttemptModel | None]:
         """Atomically reserve permit budget and establish ``prepared``.
@@ -454,6 +455,7 @@ class McpDispatchAttemptService:
                         tool_name=public_tool_id,
                         estimated_credits=credits_authorized,
                         key_id=key_id,
+                        arguments=arguments,
                     )
                     if not validation.allowed:
                         return validation, None

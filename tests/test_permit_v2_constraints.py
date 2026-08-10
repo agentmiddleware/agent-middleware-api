@@ -19,7 +19,6 @@ from app.schemas.billing import ServiceCategory
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
-    create_tool_permit,
     provision_agent_wallet,
 )
 
@@ -472,5 +471,118 @@ async def test_recipient_domain_denies_mismatch(client, clean_database):
             model = await session.get(PermitModel, permit_id)
             assert model is not None
             assert model.spent_credits == Decimal("0")
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+# --- forbidden_fields regression coverage (upstream path + nesting) ---
+
+
+@pytest.mark.anyio
+async def test_forbidden_fields_denies_on_upstream_path(client, clean_database):
+    """forbidden_fields must be enforced for upstream_mcp calls, not just local.
+
+    Regression: the upstream authorization path did not forward the invocation
+    arguments to permit validation, so forbidden_fields was silently skipped
+    for the higher-risk external-dispatch path.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    agent_headers = provisioned["agent_headers"]
+    tool_name = "v2-test-forbidden-upstream"
+    executor = _FakeUpstreamExecutor()
+
+    _register_upstream_tool(tool_name, executor, origin="https://partner.example")
+    try:
+        permit_resp = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": wallet_id,
+                "subject_wallet_id": wallet_id,
+                "subject_key_id": key_id,
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 50,
+                "forbidden_fields": ["secret_token"],
+                # Match the registered upstream origin so recipient_domain
+                # does not deny first — we want forbidden_fields to be the gate.
+                "recipient_domain": "partner.example",
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+            },
+            headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "fu-permit-1"},
+        )
+        assert permit_resp.status_code == 201
+        permit_id = permit_resp.json()["permit_id"]
+
+        r = await _invoke_governed(
+            client,
+            wallet_id=wallet_id,
+            permit_id=permit_id,
+            tool_name=tool_name,
+            arguments={"secret_token": "leak"},
+            idem_key="fu-1",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert "error" in body
+        assert "permit_forbidden_field" in body["error"]["message"]
+
+        # Upstream executor must never run, and no budget consumed.
+        assert executor.calls == []
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit_id)
+            assert model is not None
+            assert model.spent_credits == Decimal("0")
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_forbidden_fields_denies_nested_key(client, clean_database):
+    """A forbidden key nested below the top level must still be denied."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    agent_headers = provisioned["agent_headers"]
+    tool_name = "v2-test-forbidden-nested"
+    _register_test_tool(tool_name)
+    try:
+        permit_resp = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": wallet_id,
+                "subject_wallet_id": wallet_id,
+                "subject_key_id": key_id,
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 50,
+                "forbidden_fields": ["ssn"],
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+            },
+            headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "fn-permit-1"},
+        )
+        assert permit_resp.status_code == 201
+        permit_id = permit_resp.json()["permit_id"]
+
+        r = await _invoke_governed(
+            client,
+            wallet_id=wallet_id,
+            permit_id=permit_id,
+            tool_name=tool_name,
+            arguments={"profile": {"contact": {"ssn": "123-45-6789"}}},
+            idem_key="fn-1",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert "error" in body
+        assert "permit_forbidden_field" in body["error"]["message"]
     finally:
         get_service_registry().unregister_local(tool_name)
