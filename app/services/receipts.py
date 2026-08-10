@@ -295,7 +295,7 @@ class ReceiptService:
 
         created_at = utc_now()
         receipt_id = f"rcpt-{uuid.uuid4().hex[:16]}"
-        payload = {
+        payload: dict[str, Any] = {
             "receipt_id": receipt_id,
             "permit_id": permit_id,
             "wallet_id": wallet_id,

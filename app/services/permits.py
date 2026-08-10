@@ -52,6 +52,26 @@ def _loads_dict(value: str | None) -> dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {}
 
 
+def _find_forbidden_field(arguments: Any, forbidden: set[str]) -> str | None:
+    """Return the first forbidden key found anywhere in the argument tree.
+
+    Walks nested dicts and lists so a forbidden key cannot be smuggled past
+    the check by nesting it below the top level. Comparison is against dict
+    keys only (a forbidden name appearing as a string *value* is not a match).
+    """
+    stack: list[Any] = [arguments]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if key in forbidden:
+                    return str(key)
+                stack.append(child)
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
+    return None
+
+
 def permit_model_to_response(model: PermitModel) -> PermitResponse:
     return PermitResponse(
         permit_id=model.permit_id,
@@ -401,8 +421,15 @@ class PermitService:
         # 1. max_calls_per_tool
         max_calls = _loads_dict(model.max_calls_per_tool_json or "{}")
         if max_calls and tool_name in max_calls:
+            limit = max_calls[tool_name]
+            # Require a genuine JSON integer. `int()` would silently coerce
+            # 2.5 -> 2 or "3" -> 3 (and bool is an int subclass), turning a
+            # malformed constraint into a permissive one; fail closed instead
+            # of raising a 500 on the governed path.
+            if type(limit) is not int:
+                return PermitValidation(False, "permit_max_calls_exceeded", model)
             call_count = await self._count_tool_calls(model.permit_id, tool_name)
-            if call_count >= max_calls[tool_name]:
+            if call_count >= limit:
                 return PermitValidation(False, "permit_max_calls_exceeded", model)
 
         # 2. aggregate_value_cap
@@ -414,9 +441,9 @@ class PermitService:
         # 3. forbidden_fields
         forbidden = _loads_list(model.forbidden_fields_json or "[]")
         if forbidden and arguments:
-            for field in forbidden:
-                if field in arguments:
-                    return PermitValidation(False, f"permit_forbidden_field:{field}", model)
+            hit = _find_forbidden_field(arguments, set(forbidden))
+            if hit is not None:
+                return PermitValidation(False, f"permit_forbidden_field:{hit}", model)
 
         if not await self.verify_signature(model):
             return PermitValidation(False, "permit_signature_invalid", model)
