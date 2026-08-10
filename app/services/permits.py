@@ -421,11 +421,12 @@ class PermitService:
         # 1. max_calls_per_tool
         max_calls = _loads_dict(model.max_calls_per_tool_json or "{}")
         if max_calls and tool_name in max_calls:
-            try:
-                limit = int(max_calls[tool_name])
-            except (TypeError, ValueError):
-                # An uninterpretable limit is a malformed constraint; fail
-                # closed rather than raising a 500 on the governed path.
+            limit = max_calls[tool_name]
+            # Require a genuine JSON integer. `int()` would silently coerce
+            # 2.5 -> 2 or "3" -> 3 (and bool is an int subclass), turning a
+            # malformed constraint into a permissive one; fail closed instead
+            # of raising a 500 on the governed path.
+            if type(limit) is not int:
                 return PermitValidation(False, "permit_max_calls_exceeded", model)
             call_count = await self._count_tool_calls(model.permit_id, tool_name)
             if call_count >= limit:

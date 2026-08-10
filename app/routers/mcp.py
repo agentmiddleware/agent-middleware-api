@@ -779,6 +779,7 @@ async def _execute_registered_tool(
             tool_name=tool_name,
             estimated_credits=registered_cost,
             key_id=auth.key_id,
+            arguments=arguments,
         )
         permit_model = permit_validation.permit
         if not permit_validation.allowed:
@@ -1856,6 +1857,7 @@ async def _execute_upstream_after_charge(
         dispatch_attempt_id=terminal.attempt_id,
         response_hash_override=terminal.response_hash,
         approval_id=(approval_check.approval_id if approval_check else None),
+        constraints_evaluated=_permit_constraints_snapshot(permit_model),
     )
     response_payload = dict(upstream_result.payload)
     response_payload["receipt"] = _receipt_response_payload(receipt)

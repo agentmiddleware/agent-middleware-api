@@ -5,6 +5,7 @@ One test per constraint type, proving both denial and correct metering.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -571,6 +572,7 @@ async def test_forbidden_fields_denies_nested_key(client, clean_database):
         assert permit_resp.status_code == 201
         permit_id = permit_resp.json()["permit_id"]
 
+        # Forbidden key nested inside a dict.
         r = await _invoke_governed(
             client,
             wallet_id=wallet_id,
@@ -584,5 +586,86 @@ async def test_forbidden_fields_denies_nested_key(client, clean_database):
         body = r.json()
         assert "error" in body
         assert "permit_forbidden_field" in body["error"]["message"]
+
+        # Forbidden key nested inside a list element must also be denied.
+        r_list = await _invoke_governed(
+            client,
+            wallet_id=wallet_id,
+            permit_id=permit_id,
+            tool_name=tool_name,
+            arguments={"profiles": [{"ssn": "123-45-6789"}]},
+            idem_key="fn-2",
+            headers=agent_headers,
+        )
+        assert r_list.status_code == 200
+        body_list = r_list.json()
+        assert "error" in body_list
+        assert "permit_forbidden_field" in body_list["error"]["message"]
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_max_calls_fractional_limit_fails_closed(client, clean_database):
+    """A non-integer max_calls limit is malformed and must fail closed.
+
+    int(2.5) would coerce to 2 and silently permit calls; a stored fractional
+    limit must instead deny with permit_max_calls_exceeded.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    agent_headers = provisioned["agent_headers"]
+    tool_name = "v2-test-frac-limit"
+    _register_test_tool(tool_name)
+    try:
+        permit_resp = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": wallet_id,
+                "subject_wallet_id": wallet_id,
+                "subject_key_id": key_id,
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 50,
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+            },
+            headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "frac-permit-1"},
+        )
+        assert permit_resp.status_code == 201
+        permit_id = permit_resp.json()["permit_id"]
+
+        # The API coerces max_calls to dict[str, int], so inject a fractional
+        # limit directly at the storage layer to exercise the enforcement guard
+        # against a malformed row (migration/ops-written value).
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(PermitModel, permit_id)
+            assert model is not None
+            model.max_calls_per_tool_json = json.dumps({tool_name: 2.5})
+            session.add(model)
+            await session.commit()
+
+        r = await _invoke_governed(
+            client,
+            wallet_id=wallet_id,
+            permit_id=permit_id,
+            tool_name=tool_name,
+            arguments={"input": "hello"},
+            idem_key="frac-1",
+            headers=agent_headers,
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert "error" in body
+        assert "permit_max_calls_exceeded" in body["error"]["message"]
+
+        # No budget consumed on the fail-closed denial.
+        async with factory() as session:
+            model = await session.get(PermitModel, permit_id)
+            assert model is not None
+            assert model.spent_credits == Decimal("0")
     finally:
         get_service_registry().unregister_local(tool_name)
