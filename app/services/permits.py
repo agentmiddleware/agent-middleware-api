@@ -52,6 +52,30 @@ def _loads_dict(value: str | None) -> dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {}
 
 
+def permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
+    """Build the permit v2 ``constraints_evaluated`` snapshot for receipt signing.
+
+    This is the single source of the snapshot's byte representation. The live
+    invoke path and the crash reconciler both sign receipts containing it, so
+    they must format identically — ``aggregate_value_cap`` in particular is
+    normalized (``Decimal("10.00")`` → ``"10"``) so a receipt minted during
+    crash recovery hashes the same constraints a live receipt would.
+    """
+
+    ce: dict[str, Any] = {}
+    max_calls = _loads_dict(permit_model.max_calls_per_tool_json or "{}")
+    if max_calls:
+        ce["max_calls_per_tool"] = max_calls
+    if permit_model.aggregate_value_cap is not None:
+        ce["aggregate_value_cap"] = format(permit_model.aggregate_value_cap.normalize(), "f")
+    forbidden = _loads_list(permit_model.forbidden_fields_json or "[]")
+    if forbidden:
+        ce["forbidden_fields"] = forbidden
+    if permit_model.recipient_domain:
+        ce["recipient_domain"] = permit_model.recipient_domain
+    return ce
+
+
 def _find_forbidden_field(arguments: Any, forbidden: set[str]) -> str | None:
     """Return the first forbidden key found anywhere in the argument tree.
 

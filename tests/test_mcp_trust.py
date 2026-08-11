@@ -1219,3 +1219,111 @@ async def test_reconcile_stuck_records_preserves_failed_outcome(client, clean_da
         assert net == 0
     finally:
         registry.unregister_local("crash-in-denial-tool")
+
+
+@pytest.mark.anyio
+async def test_insufficient_funds_returns_receipt_and_replays_without_charge(
+    client,
+    clean_database,
+):
+    """A balance shortfall signs an `insufficient_funds` receipt at 402.
+
+    The tool must never execute, nothing may be debited, the reserved permit
+    budget must be released, and the replay must return the same envelope.
+    This was the one terminal receipt outcome with no test asserting it.
+    """
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    registry = get_service_registry()
+    calls = {"count": 0}
+
+    def broke_guard_tool() -> dict:
+        calls["count"] += 1
+        return {"ran": True}
+
+    registry.register_local(
+        service_id="broke-guard-tool",
+        name="Broke Guard Tool",
+        description="Must not execute when the balance cannot cover the charge",
+        category=ServiceCategory.AGENT_COMMS,
+        func=broke_guard_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=wallet_id,
+            key_id=provisioned["key_id"],
+            tool_name="broke-guard-tool",
+            idem_key="broke-guard-permit-create-1",
+        )
+
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet = (
+                await session.execute(
+                    select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                )
+            ).scalar_one()
+            wallet.balance = Decimal("1")
+            balance_before = wallet.balance
+            lifetime_debits_before = wallet.lifetime_debits
+            await session.commit()
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": "broke-guard-call-1",
+            "method": "tools/call",
+            "params": {
+                "name": "broke-guard-tool",
+                "arguments": {},
+                "mcpContext": {
+                    "wallet_id": wallet_id,
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "broke-guard-invoke-1",
+                },
+            },
+        }
+        first = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert first.status_code == 200
+        first_error = first.json()["error"]
+        assert first_error["code"] == -32004
+        assert first_error["message"] == "insufficient_funds"
+        receipt = first_error["data"]["receipt"]
+        assert receipt["outcome"] == "insufficient_funds"
+        assert receipt["ledger_entry_id"] is None
+        assert receipt["credits_charged"] == "0"
+
+        assert replay.status_code == 200
+        assert replay.json()["error"] == first_error
+        assert calls["count"] == 0
+
+        stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == 0
+
+        valid, reason, _ = await ReceiptService().verify_receipt(receipt["receipt_id"])
+        assert (valid, reason) == (True, None)
+
+        async with factory() as session:
+            wallet = (
+                await session.execute(
+                    select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+                )
+            ).scalar_one()
+            assert wallet.balance == balance_before
+            assert wallet.lifetime_debits == lifetime_debits_before
+    finally:
+        registry.unregister_local("broke-guard-tool")

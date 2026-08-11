@@ -670,3 +670,71 @@ async def test_max_calls_fractional_limit_fails_closed(client, clean_database):
             assert model.spent_credits == Decimal("0")
     finally:
         get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_reconciler_constraints_snapshot_matches_live_path(client, clean_database):
+    """A crash-recovered receipt must sign byte-identical constraints.
+
+    The live invoke path normalizes `aggregate_value_cap`
+    (`Decimal("10.50")` -> `"10.5"`); the reconciler previously used
+    `str(...)`, so a receipt minted during crash recovery could hash a
+    different `constraints_evaluated` than a live receipt for the same permit.
+    Both now delegate to `permit_constraints_snapshot`.
+    """
+
+    from app.routers.mcp import _permit_constraints_snapshot as live_snapshot
+    from app.services.mcp_dispatch_reconciliation import (
+        get_mcp_dispatch_reconciliation_service,
+    )
+    from app.services.permits import permit_constraints_snapshot
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+
+    permit_resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": key_id,
+            "allowed_tools": ["example.tool"],
+            "scopes": ["tool:example.tool:invoke", "billing:charge"],
+            "max_credits": 50,
+            "max_calls_per_tool": {"example.tool": 5},
+            "aggregate_value_cap": "10.50",
+            "forbidden_fields": ["secret_token"],
+            "recipient_domain": "allowed.example.com",
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "snapshot-parity-1"},
+    )
+    assert permit_resp.status_code == 201
+    permit_id = permit_resp.json()["permit_id"]
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit_id)
+        assert model is not None
+        live = live_snapshot(model)
+        shared = permit_constraints_snapshot(model)
+
+    reconciler = get_mcp_dispatch_reconciliation_service()
+    recovered = await reconciler._permit_constraints_snapshot(permit_id)
+
+    assert live == shared == recovered
+    # The normalized form, regardless of how the column stores the scale.
+    assert recovered["aggregate_value_cap"] == "10.5"
+
+
+@pytest.mark.anyio
+async def test_reconciler_constraints_snapshot_absent_permit_is_none(clean_database):
+    from app.services.mcp_dispatch_reconciliation import (
+        get_mcp_dispatch_reconciliation_service,
+    )
+
+    reconciler = get_mcp_dispatch_reconciliation_service()
+    assert await reconciler._permit_constraints_snapshot("permit-missing") is None
