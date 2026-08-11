@@ -2,7 +2,7 @@
   "mcpServers": {
     "agent-middleware": {
       "type": "http",
-      "url": "${AGENT_MIDDLEWARE_MCP_URL:-https://api-service-production-433c.up.railway.app/mcp}",
+      "url": "${AGENT_MIDDLEWARE_MCP_URL}",
       "headers": {
         "X-API-Key": "${AGENT_MIDDLEWARE_API_KEY:-}"
       }

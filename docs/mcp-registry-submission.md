@@ -22,9 +22,13 @@ not serve — the same class of overclaim
 prevent.
 
 The publish workflow enforces this gate: it sends a real MCP `initialize`
-request to the remote URL in `server.json` and refuses to publish unless the
-server answers with a negotiated protocol version. Do not bypass the
-preflight.
+request to the remote URL in `server.json`, then exercises `tools/list` on
+the negotiated session, and refuses to publish unless both succeed. That
+probe is a necessary condition for spec compliance, not proof of it — a
+server could pass it and still fail standard clients elsewhere (e.g. a
+`tools/call` path that demands out-of-band context). Do not bypass the
+preflight, and do not treat a passing preflight as a substitute for testing
+with a real MCP client.
 
 `app/partner_mcp.py` is the in-tree reference for a compliant Streamable HTTP
 server (official SDK, stateless HTTP, bearer auth middleware); the registrable
@@ -36,20 +40,27 @@ The repo-root [`server.json`](../server.json) is the complete submission.
 Field notes:
 
 - `name` — reverse-DNS namespace plus server name. GitHub authentication
-  grants `io.github.petrefiedthunder/*`. Publishing under a custom domain
+  grants `io.github.PetrefiedThunder/*`. Publishing under a custom domain
   namespace (e.g. `dev.agent-middleware/*`) requires DNS or HTTP domain
   verification with an Ed25519 key instead.
-- `remotes[0].url` — must be publicly reachable HTTPS; localhost and private
-  addresses are rejected. `streamable-http` is the recommended type (`sse` is
-  legacy-only).
+- `remotes[0].url` — must be HTTPS; localhost URLs are rejected at publish
+  time, and the registry requires (but does not itself verify) that remotes
+  are publicly accessible. `streamable-http` is the recommended type (`sse`
+  is legacy-only).
 - `remotes[0].headers` — declares the `X-API-Key` credential clients must
   send. Keys are operator-provisioned
   ([`partner-api-key-bootstrap.md`](partner-api-key-bootstrap.md)); there is
   no public self-serve issuance, and a registry listing does not change that.
 - `version` — unique and immutable per publish. Registry entries cannot be
-  edited or deleted after publish; metadata fixes require publishing a new
-  version (prerelease suffixes like `1.2.0-1` work for metadata-only bumps).
-  Version strings must not look like ranges (`^1.2.0`, `1.x` are rejected).
+  edited or deleted after publish; metadata fixes require publishing a new,
+  *higher* version (e.g. `1.2.1` after `1.2.0`). A prerelease like `1.2.0-1`
+  published after `1.2.0` sorts below it and is never marked "latest", so
+  aggregators will not surface it — prereleases only help when published
+  *before* the release version. Version strings must not look like ranges
+  (`^1.2.0`, `1.x` are rejected). This field currently mirrors the project
+  version (`pyproject.toml`, `APP_VERSION`); nothing checks the three stay
+  in sync, so bump it manually for `workflow_dispatch` publishes (tag-driven
+  publishes overwrite it from the tag).
 
 ## Publishing from CI (preferred)
 
@@ -71,7 +82,7 @@ authenticate its `initialize` probe if the compliant endpoint requires a key.
 
 ```bash
 brew install mcp-publisher   # or the release tarball from the registry repo
-mcp-publisher login github   # device flow; grants io.github.petrefiedthunder/*
+mcp-publisher login github   # device flow; grants io.github.PetrefiedThunder/*
 mcp-publisher publish        # reads ./server.json
 ```
 
@@ -81,7 +92,7 @@ the honesty gate applies regardless of which path publishes.
 ## Verification after publish
 
 ```bash
-curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.petrefiedthunder/agent-middleware-api"
+curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.PetrefiedThunder/agent-middleware-api"
 ```
 
 The registry lists the entry immediately; downstream aggregators pick it up
@@ -101,10 +112,12 @@ claude mcp add --transport http agent-middleware \
 ```
 
 **Project-scoped `.mcp.json`** — the repo-root [`.mcp.json`](../.mcp.json) is
-the Claude Code project-scoped format (top-level `mcpServers`); clones of
-this repo can opt in and set `AGENT_MIDDLEWARE_API_KEY` in the environment.
-Until the compliant endpoint ships, Claude Code reports this server as failed
-to connect — that is the honest current state, not a configuration error.
+the Claude Code project-scoped format (top-level `mcpServers`). It is
+deliberately inert by default: the entry has no baked-in URL, because there
+is currently no spec-compliant endpoint to point it at, and a checked-in
+default would advertise a transport the server does not serve. Once the
+compliant endpoint ships, opt in by setting `AGENT_MIDDLEWARE_MCP_URL` (the
+endpoint URL) and `AGENT_MIDDLEWARE_API_KEY` in the environment.
 
 **claude.ai / Claude Desktop custom connectors** require OAuth (dynamic
 client registration or a Client ID Metadata Document) or an authless server;

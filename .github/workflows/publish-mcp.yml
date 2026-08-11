@@ -22,35 +22,117 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Fail-closed gate: the remote URL in server.json must answer a real
+      # MCP initialize request AND serve tools/list on the negotiated
+      # session. This is a necessary condition for spec compliance, not
+      # proof of it — see docs/mcp-registry-submission.md.
       - name: Preflight — remote endpoint must speak spec MCP
         env:
           PREFLIGHT_API_KEY: ${{ secrets.MCP_PREFLIGHT_API_KEY }}
         run: |
-          set -euo pipefail
-          URL="$(jq -r '.remotes[0].url' server.json)"
-          echo "Probing ${URL} with an MCP initialize request"
-          BODY='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"registry-preflight","version":"0.0.0"}}}'
-          CURL_ARGS=(-sS --max-time 30 -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream")
-          if [ -n "${PREFLIGHT_API_KEY:-}" ]; then
-            CURL_ARGS+=(-H "X-API-Key: ${PREFLIGHT_API_KEY}")
-          fi
-          if ! RESPONSE="$(curl --fail-with-body "${CURL_ARGS[@]}" -d "${BODY}" "${URL}")"; then
-            echo "::error::Preflight failed: ${URL} rejected an MCP initialize request."
-            echo "::error::Do not publish a transport the server does not serve (docs/mcp-registry-submission.md)."
-            exit 1
-          fi
-          # The response may be plain JSON or a Streamable HTTP SSE frame
-          # ("data: {...}"); accept either.
-          PROTOCOL="$(printf '%s\n' "${RESPONSE}" | sed -n 's/^data: //p' | head -n 1 | jq -r '.result.protocolVersion // empty' 2>/dev/null || true)"
-          if [ -z "${PROTOCOL}" ]; then
-            PROTOCOL="$(printf '%s' "${RESPONSE}" | jq -r '.result.protocolVersion // empty' 2>/dev/null || true)"
-          fi
-          if [ -z "${PROTOCOL}" ]; then
-            echo "::error::Preflight failed: initialize returned no result.protocolVersion."
-            printf '%s\n' "${RESPONSE}"
-            exit 1
-          fi
-          echo "Preflight OK: server negotiated MCP protocol version ${PROTOCOL}"
+          python3 - <<'EOF'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          url = json.load(open("server.json"))["remotes"][0]["url"]
+
+          def post(payload, session_id=None):
+              headers = {
+                  "Content-Type": "application/json",
+                  "Accept": "application/json, text/event-stream",
+              }
+              key = os.environ.get("PREFLIGHT_API_KEY")
+              if key:
+                  headers["X-API-Key"] = key
+              if session_id:
+                  headers["Mcp-Session-Id"] = session_id
+              req = urllib.request.Request(
+                  url, data=json.dumps(payload).encode(), headers=headers
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return resp.status, dict(resp.headers), resp.read().decode(errors="replace")
+
+          def jsonrpc_result(body, request_id):
+              """Parse a plain-JSON or SSE response; return the matching result."""
+              body = body.strip()
+              candidates = []
+              if "data:" in body:
+                  # Join consecutive data lines per SSE event, then parse each.
+                  event, events = [], []
+                  for line in body.splitlines():
+                      line = line.rstrip("\r")
+                      if line.startswith("data:"):
+                          event.append(line[5:].lstrip())
+                      elif not line.strip() and event:
+                          events.append("\n".join(event))
+                          event = []
+                  if event:
+                      events.append("\n".join(event))
+                  candidates.extend(events)
+              candidates.append(body)
+              for candidate in candidates:
+                  try:
+                      msg = json.loads(candidate)
+                  except ValueError:
+                      continue
+                  if isinstance(msg, dict) and msg.get("id") == request_id and "result" in msg:
+                      return msg["result"]
+              return None
+
+          def fail(message, detail=""):
+              print(f"::error::Preflight failed: {message}")
+              print(
+                  "::error::Do not publish a transport the server does not serve"
+                  " (docs/mcp-registry-submission.md)."
+              )
+              if detail:
+                  print(detail)
+              sys.exit(1)
+
+          init = {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "method": "initialize",
+              "params": {
+                  "protocolVersion": "2025-06-18",
+                  "capabilities": {},
+                  "clientInfo": {"name": "registry-preflight", "version": "0.0.0"},
+              },
+          }
+          print(f"Probing {url} with an MCP initialize request")
+          try:
+              status, headers, body = post(init)
+          except (urllib.error.URLError, OSError) as exc:
+              fail(f"{url} rejected an MCP initialize request ({exc}).")
+
+          result = jsonrpc_result(body, 1)
+          protocol = (result or {}).get("protocolVersion")
+          if not protocol:
+              fail("initialize returned no result.protocolVersion.", body)
+
+          session_id = {k.lower(): v for k, v in headers.items()}.get("mcp-session-id")
+          try:
+              post({"jsonrpc": "2.0", "method": "notifications/initialized"}, session_id)
+          except (urllib.error.URLError, OSError):
+              pass  # some stateless servers reject notifications; tools/list decides
+
+          try:
+              status, headers, body = post(
+                  {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+                  session_id,
+              )
+          except (urllib.error.URLError, OSError) as exc:
+              fail(f"tools/list request failed ({exc}).")
+
+          tools = (jsonrpc_result(body, 2) or {}).get("tools")
+          if not isinstance(tools, list):
+              fail("tools/list returned no result.tools array.", body)
+
+          print(f"Preflight OK: protocol {protocol}, {len(tools)} tool(s) listed")
+          EOF
 
       - name: Sync server.json version from tag
         if: startsWith(github.ref, 'refs/tags/mcp-registry-v')
@@ -64,7 +146,7 @@ jobs:
       - name: Install mcp-publisher
         run: |
           set -euo pipefail
-          curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
 
       - name: Authenticate to MCP Registry (GitHub OIDC)
         run: ./mcp-publisher login github-oidc
@@ -72,9 +154,14 @@ jobs:
       - name: Publish
         run: ./mcp-publisher publish
 
-      - name: Verify listing
+      # Best-effort: the entry is already published; a transient registry
+      # read failure here must not mark the run failed.
+      - name: Verify listing (best-effort)
+        continue-on-error: true
         run: |
           set -euo pipefail
           NAME="$(jq -r '.name' server.json)"
+          ENCODED="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${NAME}")"
           sleep 5
-          curl -sS "https://registry.modelcontextprotocol.io/v0.1/servers?search=${NAME}" | jq .
+          curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers?search=${ENCODED}" \
+            | jq -e --arg name "${NAME}" '.servers[]? | select(.name == $name)'
