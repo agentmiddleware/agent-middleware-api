@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🔌 Standard MCP endpoint (opt-in)
+
+- **Added `POST /mcp`** (`app/routers/mcp_standard.py`): a spec-compliant
+  stateless Streamable HTTP surface for standard MCP clients — `initialize`
+  with protocol-version negotiation, notifications (202), `ping`,
+  `tools/list`, and `tools/call`. JSON responses only; no SSE stream, no
+  sessions, so GET/DELETE answer 405. Cross-origin browser calls are
+  rejected; batch requests are refused per the 2025-06-18 revision.
+- **Server-minted permits keep the trust loop intact.** Standard clients
+  cannot supply wallet/permit context, so `tools/call` mints a bounded,
+  signed, single-tool, short-lived permit from the caller's wallet
+  (`STANDARD_MCP_PERMIT_TTL_SECONDS`, default 120s) and delegates to the
+  same governed invoke path as `/mcp/messages` — metering, receipts, and
+  audit unchanged. Bootstrap/admin keys are refused (`-32003`): no wallet,
+  no call. A client `Idempotency-Key` reuses the same auto-minted permit on
+  retry, so governed replay returns the original receipt without a second
+  charge.
+- **Disabled by default.** `ENABLE_STANDARD_MCP_ENDPOINT=false` returns 404,
+  so the surface cannot be advertised — or pass the MCP registry publish
+  preflight — before an operator deliberately enables it.
+
 ### 📖 Failure semantics as a first-class spec
 
 - **Added [docs/failure-semantics.md](docs/failure-semantics.md).** The
