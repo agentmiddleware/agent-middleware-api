@@ -20,13 +20,14 @@ async def client():
 
 @pytest.mark.anyio
 async def test_root_content_negotiation_browser_html(client):
-    """Browser request with Accept: text/html returns the Human Control Deck HTML."""
+    """Browser request with Accept: text/html returns the public operator index."""
     headers = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9"}
     resp = await client.get("/", headers=headers)
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
-    assert "Agent Control Deck" in resp.text
-    assert "Trust & Governance Infrastructure" in resp.text
+    assert "Agent Middleware API" in resp.text
+    assert "Public operator index" in resp.text
+    assert "No tenant records or aggregate customer counts" in resp.text
 
 
 @pytest.mark.anyio
@@ -43,12 +44,58 @@ async def test_root_content_negotiation_agent_json(client):
 
 @pytest.mark.anyio
 async def test_dashboard_endpoint_returns_html(client):
-    """Direct /dashboard route returns 200 OK with dashboard HTML content."""
+    """Direct /dashboard is a public evidence index, not fake telemetry."""
     resp = await client.get("/dashboard")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
-    assert "Agent Control Deck" in resp.text
-    assert "Receipt Verifier" in resp.text
+    assert "Agent Middleware API" in resp.text
+    assert "Public operator index" in resp.text
+    assert "self-issued live gateway proof, not customer traction" in resp.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "path,headers", [("/dashboard", {}), ("/", {"Accept": "text/html"})]
+)
+async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
+    client, path, headers
+):
+    resp = await client.get(path, headers=headers)
+    assert resp.status_code == 200
+    page = resp.text
+
+    fabricated_markers = (
+        "agent_synth_01",
+        "agent_finance_bot",
+        "rcpt_99a8b7",
+        "pmt_8f9a2c",
+        "1,428",
+        "metric-permits",
+        'verification_status: "VALID"',
+        "Verify Ed25519 Signature",
+        "Load Sample",
+        "Control Plane Active",
+        "INTACT",
+    )
+    for marker in fabricated_markers:
+        assert marker not in page
+
+    browser_secret_markers = (
+        "localStorage",
+        "sessionStorage",
+        'type="password"',
+        "fetch('/v1/permits",
+        'fetch("/v1/permits',
+    )
+    for marker in browser_secret_markers:
+        assert marker not in page
+
+    assert "<script" not in page
+    assert "railway.app" not in page
+    assert "vercel.app" not in page
+    assert "https://www.thisisatest.tech/proof/" in page
+    assert "https://api.thisisatest.tech/health/dependencies" in page
+    assert "Keep the key in your environment" in page
 
 
 @pytest.mark.anyio
@@ -58,6 +105,9 @@ async def test_agent_first_metadata_declares_human_observability(client):
     assert "human_observability" in meta
     assert meta["human_observability"]["human_dashboard_url"] == "/dashboard"
     assert meta["human_observability"]["interactive_docs_url"] == "/docs"
+    note = meta["human_observability"]["note"]
+    assert "status and evidence index" in note
+    assert "active permits" not in note
 
     manifest_resp = await client.get("/.well-known/agent.json")
     assert manifest_resp.status_code == 200
@@ -70,7 +120,7 @@ async def test_docs_and_llm_txt_remain_accessible(client):
     """OpenAPI and LLM documentation endpoints remain accessible."""
     resp_llm = await client.get("/llm.txt")
     assert resp_llm.status_code == 200
-    assert "Agent-Native Middleware API" in resp_llm.text
+    assert "Agent Middleware API" in resp_llm.text
 
     resp_openapi = await client.get("/openapi.json")
     assert resp_openapi.status_code == 200

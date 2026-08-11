@@ -24,9 +24,7 @@ _MARKDOWN_DOCS: dict[str, Path] = {
     "/docs/partner-api-key-bootstrap.md": (
         _REPO_ROOT / "docs" / "partner-api-key-bootstrap.md"
     ),
-    "/docs/agent-accountability.md": (
-        _REPO_ROOT / "docs" / "agent-accountability.md"
-    ),
+    "/docs/agent-accountability.md": (_REPO_ROOT / "docs" / "agent-accountability.md"),
 }
 
 
@@ -70,7 +68,7 @@ async def get_llm_txt():
     if llm_path.exists():
         content = llm_path.read_text(encoding="utf-8")
     else:
-        content = f"""# Agent-Native Middleware API — LLM-Readable Documentation
+        content = f"""# Agent Middleware API — LLM-Readable Documentation
 
 **Agent-first:** Intended reader = autonomous agents. Fetch GET /.well-known/agent.json first (use `capabilities` vs `proof_surfaces`); use GET /health/dependencies (`simulation_modes`, `enable_proof_surfaces`) before assuming real side effects.
 
@@ -159,8 +157,11 @@ async def get_agent_accountability_md():
 
 @router.get(
     "/dashboard",
-    summary="Human Control Deck",
-    description="Human-accessible control plane, audit visualizer, and telemetry dashboard.",
+    summary="Public operator evidence index",
+    description=(
+        "Truthful public status and evidence links. It contains no fabricated "
+        "telemetry, authenticated tenant data, or browser credential handling."
+    ),
     response_class=HTMLResponse,
     responses={404: {"description": "Dashboard not found"}},
 )

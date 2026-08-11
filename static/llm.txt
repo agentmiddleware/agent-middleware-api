@@ -1,4 +1,4 @@
-# Agent-Native Middleware API — LLM-Readable Documentation
+# Agent Middleware API — LLM-Readable Documentation
 
 **Agent-first:** You are the intended reader. This file is primary prose for autonomous agents and orchestrators. Before acting, fetch `GET /.well-known/agent.json` and use `GET /health/dependencies` (`simulation_modes`, `enable_proof_surfaces`) so you do not treat simulated domains as real.
 
@@ -57,23 +57,41 @@ There is no public signup or unauthenticated key mint. The operator provisions
 the sponsor/partner wallet, wallet-scoped API key, credits, and permit. Pass the
 key as `X-API-Key: your-key` on every protected request.
 
-### 4. Governed Tool Loop (dogfood)
+### 3. Inspect the Published Live Proof
 
-Register one real tool (ops/scripts; local dogfood uses `partner.notes.write`),
-then:
+The human site publishes one non-sensitive portable `partner.echo` receipt and
+the matching public-key snapshot:
+
+```bash
+GET https://www.thisisatest.tech/proof/receipt.json
+GET https://www.thisisatest.tech/proof/trust-keys.json
+```
+
+Use the offline CLI command on `https://www.thisisatest.tech/proof/`. A valid
+signature proves the receipt matches the supplied snapshot. Authenticate or
+pin that snapshot through a trusted channel before treating issuer identity as
+independently established.
+
+### 4. Governed Tool Loop
+
+Register one real partner tool through the operator path, then:
 
 ```bash
 # Issue a scoped permit for that tool
 POST /v1/permits
-{"wallet_id": "...", "allowed_tools": ["partner.notes.write"], ...}
+{"wallet_id": "...", "allowed_tools": ["partner.tool"], ...}
 
 # Invoke via MCP with permit + idempotency key
 POST /mcp/messages
 {"jsonrpc":"2.0","method":"tools/call","params":{...}}
 
-# Verify the signed receipt
-GET /v1/receipts/{receipt_id}
+# Export the signed receipt for offline verification
+GET /v1/receipts/{receipt_id}/portable
 ```
+
+`partner.notes.write` is a local-only dogfood fixture. Production keeps
+`ENABLE_DOGFOOD_TOOL=false`; do not use that fixture as evidence of a partner
+integration.
 
 Do **not** start with telemetry, agent comms, or AI decide/heal endpoints —
 those are proof surfaces, not the wedge.

@@ -7,7 +7,7 @@ generated fresh or read from the environment, never from arguments or code:
     python scripts/rotate_api_keys.py generate [--count 2]
 
     # 2. Verify a completed rotation against a live deployment
-    export AGENT_MIDDLEWARE_API_URL=https://api-service-production-433c.up.railway.app
+    export AGENT_MIDDLEWARE_API_URL=https://api.thisisatest.tech
     export OLD_API_KEY=...   # the retired key — must now be rejected
     export NEW_API_KEY=...   # the replacement key — must authenticate
     python scripts/rotate_api_keys.py verify

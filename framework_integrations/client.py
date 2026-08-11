@@ -1,7 +1,7 @@
 """
 B2A Client — Framework Integration Core
 ======================================
-HTTP client for Agent-Native Middleware API.
+HTTP client for Agent Middleware API.
 """
 
 from dataclasses import dataclass
@@ -21,7 +21,7 @@ class B2AConfig:
 
 class B2AClient:
     """
-    Client for Agent-Native Middleware API.
+    Client for Agent Middleware API.
 
     Provides methods for:
     - Billing operations

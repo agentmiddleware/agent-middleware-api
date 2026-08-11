@@ -20,6 +20,7 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
+from .build_metadata import get_build_commit_sha
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
 from .runtime_degradation import get_runtime_degradation
@@ -36,6 +37,24 @@ CHECK_TIMEOUT_SECONDS: float = 2.0
 
 # Statuses that do not degrade the overall health verdict.
 _OK_STATUSES = {"up", "not_configured", "not_used"}
+
+# Metrics exposed by the upstream MCP health check do not all share the same
+# durability boundary. Keep this metadata present even when no upstream tool is
+# configured so monitoring clients never have to infer semantics from values.
+_METRIC_SCOPES = {
+    "upstream_mcp.call_metrics": {
+        "scope": "process_local",
+        "durable": False,
+        "reset_on": "process_restart",
+        "description": "In-memory counters for this API process only.",
+    },
+    "upstream_mcp.dispatch_metrics": {
+        "scope": "durable",
+        "durable": True,
+        "source": "mcp_dispatch_attempts",
+        "description": "Dispatch history summarized from the durable state backend.",
+    },
+}
 
 
 async def _run_check(
@@ -357,6 +376,7 @@ async def gather_dependency_report() -> dict[str, Any]:
     return {
         "status": overall,
         "version": settings.APP_VERSION,
+        "commit_sha": get_build_commit_sha(),
         "environment": settings.ENVIRONMENT,
         # Whether the production trust guardrails actually engage on this host.
         # ENVIRONMENT defaults to "local", so a deploy that never sets it runs
@@ -368,5 +388,6 @@ async def gather_dependency_report() -> dict[str, Any]:
         "enable_proof_surfaces": bool(settings.ENABLE_PROOF_SURFACES),
         "enable_dogfood_tool": bool(settings.ENABLE_DOGFOOD_TOOL),
         "runtime_degradation": runtime_degradation,
+        "metric_scopes": _METRIC_SCOPES,
         "unhealthy": unhealthy,
     }

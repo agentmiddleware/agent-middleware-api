@@ -2,14 +2,14 @@
 
 ## Listing Information
 
-**Service Name:** Agent-Native Middleware API
+**Service Name:** Agent Middleware API
 **Category:** MCP authorization and metering infrastructure
 **Pricing:** Design-partner pilot; no public SLA or commercial tier is committed
 
 ## Listing Content
 
 ```markdown
-# Agent-Native Middleware API
+# Agent Middleware API
 
 **Governed control point for autonomous agent tool calls.**
 
@@ -35,7 +35,7 @@ is disabled proof-surface scaffolding, not part of this listing.
 from b2a_sdk import AgentMiddlewareClient, PermitRequest
 
 client = AgentMiddlewareClient(
-    base_url="https://api.agent-middleware.dev",
+    base_url="https://api.thisisatest.tech",
     api_key="your-api-key",
 )
 
@@ -60,9 +60,9 @@ pilot.
 
 ## Documentation
 
-- [API Reference](https://api.agent-middleware.dev/docs)
-- [OpenAPI Spec](https://api.agent-middleware.dev/openapi.json)
-- [LLM Docs](https://api.agent-middleware.dev/llm.txt)
+- [API Reference](https://api.thisisatest.tech/docs)
+- [OpenAPI Spec](https://api.thisisatest.tech/openapi.json)
+- [LLM Docs](https://api.thisisatest.tech/llm.txt)
 - [Security limitations](https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md)
 - [Design-partner guide](https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DESIGN_PARTNER_GUIDE.md)
 
@@ -86,13 +86,14 @@ No public production demo or SLA is promised by this document.
 ## Tags
 
 ```
-agent-platform, mcp, awi, billing, telemetry, ai-agents,
-langgraph, crewai, autogen, llamaindex, web-automation,
-agentic-webs, autonomous-agents, b2a
+mcp, authorization, idempotency, audit-logs, agent-governance,
+signed-receipts, autonomous-agents
 ```
 
 ## Contact
 
 - GitHub Issues: https://github.com/PetrefiedThunder/agent-middleware-api/issues
-- Email: api@b2a.dev (placeholder)
+- Public operator email: intentionally omitted until a monitored address and
+  accountable identity pass the launch contact gate. Do not submit this listing
+  before those values are configured.
 ```

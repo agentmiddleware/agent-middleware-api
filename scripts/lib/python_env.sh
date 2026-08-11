@@ -14,15 +14,13 @@
 #
 # Selection order:
 #   1. Explicit PYTHON / PYTEST environment overrides, used verbatim.
-#   2. The first of python3.12, python3, python that can import every module in
-#      PYTHON_ENV_REQUIRE. Probing for the modules rather than mere existence is
-#      the point: a machine can have a bare system python3.12 on PATH while the
-#      project's dependencies live somewhere else entirely, and picking it
-#      produced "No module named pytest". In CI, setup-python puts the
-#      dependency-installed interpreter first, so this resolves as it always did.
-#   3. uv, matching how every other Makefile target runs this project
-#      (`uv run --with-requirements requirements.txt`), so a fresh checkout with
-#      nothing installed still runs the gates.
+#   2. uv, matching every Makefile test target and resolving the exact pinned
+#      requirements. A system interpreter can import a dependency by name while
+#      still holding an incompatible version (the MCP client caused this gate to
+#      collect against a stale global install).
+#   3. When uv is unavailable, the first of python3.12, python3, python that can
+#      import every module in PYTHON_ENV_REQUIRE. CI setup-python environments
+#      remain supported through this fallback.
 
 _python_env_repo_root() {
   local script_dir
@@ -52,6 +50,12 @@ PYTEST_CMD=()
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_CMD=("$PYTHON")
+elif command -v uv >/dev/null 2>&1; then
+  PYTHON_CMD=(uv run --with-requirements requirements.txt)
+  for _extra in $_python_env_extra_with; do
+    PYTHON_CMD+=(--with "$_extra")
+  done
+  PYTHON_CMD+=(python)
 else
   for _candidate in python3.12 python3 python; do
     if command -v "$_candidate" >/dev/null 2>&1 && _python_env_can_import_all "$_candidate"; then
@@ -62,20 +66,12 @@ else
 fi
 
 if [[ ${#PYTHON_CMD[@]} -eq 0 ]]; then
-  if command -v uv >/dev/null 2>&1; then
-    PYTHON_CMD=(uv run --with-requirements requirements.txt)
-    for _extra in $_python_env_extra_with; do
-      PYTHON_CMD+=(--with "$_extra")
-    done
-    PYTHON_CMD+=(python)
-  else
-    echo "[python-env] No interpreter provides: $_python_env_require" >&2
-    echo "[python-env] and uv is not available. Fix with one of:" >&2
-    echo "[python-env]   - install uv (https://docs.astral.sh/uv/) and re-run" >&2
-    echo "[python-env]   - python3 -m pip install -r requirements.txt $_python_env_extra_with" >&2
-    echo "[python-env]   - PYTHON=/path/to/python scripts/$(basename "$0")" >&2
-    exit 1
-  fi
+  echo "[python-env] No interpreter provides: $_python_env_require" >&2
+  echo "[python-env] and uv is not available. Fix with one of:" >&2
+  echo "[python-env]   - install uv (https://docs.astral.sh/uv/) and re-run" >&2
+  echo "[python-env]   - python3 -m pip install -r requirements.txt $_python_env_extra_with" >&2
+  echo "[python-env]   - PYTHON=/path/to/python scripts/$(basename "$0")" >&2
+  exit 1
 fi
 
 if [[ -n "${PYTEST:-}" ]]; then

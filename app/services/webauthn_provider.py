@@ -160,7 +160,7 @@ class WebAuthnProvider:
     def __init__(
         self,
         rp_id: str = "localhost",
-        rp_name: str = "Agent-Native Middleware",
+        rp_name: str = "Agent Middleware API",
         timeout_ms: int = 60000,
         challenge_expiry_seconds: int = 300,
         verification_validity_seconds: int = 300,

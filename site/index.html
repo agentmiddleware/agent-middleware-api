@@ -3,26 +3,48 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Autonomy needs receipts | Governed MCP trust plane</title>
+    <title>Agent Middleware API | Govern one MCP tool action</title>
     <meta
       name="description"
-      content="The control layer between autonomous agents and tools: scoped authority, metered MCP calls, signed receipts, and replay-safe accounting."
+      content="Scoped permissions, replay-safe charging, and signed receipts for governed MCP tool calls."
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#f2efe6" />
+    <link rel="canonical" href="https://www.thisisatest.tech/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Autonomy needs receipts" />
+    <meta property="og:site_name" content="Agent Middleware API" />
+    <meta
+      property="og:title"
+      content="Authorize one agent action. Charge it once. Prove what happened."
+    />
     <meta
       property="og:description"
-      content="Discover tools. Present scoped authority. Invoke once. Return signed proof."
+      content="Scoped permissions, replay-safe charging, and signed receipts for governed MCP tool calls."
+    />
+    <meta property="og:url" content="https://www.thisisatest.tech/" />
+    <meta
+      property="og:image"
+      content="https://www.thisisatest.tech/social-card.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Agent Middleware API: authorize, charge, and prove one agent action"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="Authorize one agent action. Charge it once. Prove what happened."
     />
     <meta
-      property="og:url"
-      content="https://agent-middleware-web.vercel.app/"
+      name="twitter:description"
+      content="Scoped permissions, replay-safe charging, and signed receipts for governed MCP tool calls."
     />
-    <link
-      rel="canonical"
-      href="https://agent-middleware-web.vercel.app/"
+    <meta
+      name="twitter:image"
+      content="https://www.thisisatest.tech/social-card.png"
     />
     <link
       rel="alternate"
@@ -39,29 +61,37 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Syne:wght@500;600;700;800&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=receipt-artifact" />
+    <link rel="stylesheet" href="/styles.css?v=design-partner" />
+    <script>
+      window.va =
+        window.va ||
+        function () {
+          (window.vaq = window.vaq || []).push(arguments);
+        };
+    </script>
+    <script defer src="/_vercel/insights/script.js"></script>
+    <script defer src="/analytics.js"></script>
+    <script defer src="/proof/proof.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
     <nav class="site-nav" aria-label="Primary">
-      <a class="nav-brand" href="#top" aria-label="Permit provisional home">
-        <span>Permit</span>
-        <span class="nav-status">provisional</span>
+      <a class="nav-brand" href="#top" aria-label="Agent Middleware API home">
+        <span>Agent Middleware API</span>
       </a>
       <div class="nav-links">
-        <a href="#protocol">Protocol</a>
+        <a href="#pilot">Pilot</a>
         <a href="#proof">Proof</a>
-        <a href="https://github.com/PetrefiedThunder/agent-middleware-api"
-          >GitHub</a
-        >
+        <a href="#machine-discovery">Machine discovery</a>
         <a
           class="nav-agent"
-          href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
-          >Agent manifest <span aria-hidden="true">↗</span></a
+          href="@@PUBLIC_BOOKING_URL@@"
+          data-analytics-event="booking_click"
+          >Book a pilot <span aria-hidden="true">↗</span></a
         >
       </div>
     </nav>
@@ -72,197 +102,116 @@
           <p class="eyebrow">
             <span class="eyebrow-mark" aria-hidden="true"></span>
             <span class="eyebrow-text"
-              >The control layer between autonomous agents and tools</span
+              >For platform engineering, AI infrastructure, and security teams</span
             >
           </p>
-          <h1>Autonomy<br />needs receipts.</h1>
-          <p class="hero-thesis">
-            Discover tools. Ask for scoped authority. Know the price. Invoke
-            within budget. Return signed proof.
-          </p>
-          <p class="hero-body">
-            A governed MCP trust plane where every autonomous action can be
-            authorized, metered, receipted, audited, and revoked.
+          <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
+          <p class="hero-body hero-body-lead">
+            Give AI agents scoped permissions and spending limits, prevent
+            duplicate charges on retries, and get a signed receipt for every
+            governed MCP tool call.
           </p>
           <div class="cta-row">
             <a
               class="button button-primary"
-              href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
-              >Enter as an agent <span aria-hidden="true">↗</span></a
+              href="@@PUBLIC_BOOKING_URL@@"
+              data-analytics-event="booking_click"
+              >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
-            <a class="button button-secondary" href="#proof"
-              >Inspect the proof</a
+            <a
+              class="button button-secondary"
+              href="/proof/"
+              data-analytics-event="proof_click"
+              >Verify a real receipt</a
             >
           </div>
+          <p class="email-fallback">
+            Prefer email?
+            <a
+              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              data-analytics-event="email_click"
+              >@@PUBLIC_CONTACT_EMAIL@@</a
+            >
+          </p>
           <p class="constraint-line">
-            Operator-issued access · closed-loop credits · not payment rails
+            One internal MCP tool · fit and scope discussed privately · no
+            self-serve rollout
           </p>
         </div>
 
-        <div class="receipt-stage">
-          <article
-            class="receipt"
-            aria-labelledby="hero-receipt-title"
-          >
-            <div class="receipt-head">
-              <span class="receipt-title" id="hero-receipt-title">Receipt</span>
-              <span class="receipt-meta">2026-07-29T21:14:02Z</span>
-            </div>
-            <p class="receipt-protocol">
-              Illustrative shape · run <code>make dogfood-trust-plane</code> for
-              a live signature
-            </p>
-            <dl>
-              <div class="row">
-                <dt>receipt_id</dt>
-                <dd>rcpt-c3bc248a2f514e5a</dd>
-              </div>
-              <div class="row">
-                <dt>tool</dt>
-                <dd>partner.notes.write</dd>
-              </div>
-              <div class="row">
-                <dt>outcome</dt>
-                <dd class="ok">success</dd>
-              </div>
-              <div class="row">
-                <dt>credits_charged</dt>
-                <dd>2.00000000</dd>
-              </div>
-              <div class="row">
-                <dt>permit_id</dt>
-                <dd>permit-0f62fdfee59640e4</dd>
-              </div>
-              <div class="row">
-                <dt>ledger_entry_id</dt>
-                <dd>543e21a1-5056-4df8-8773-fbf6ba9c720c</dd>
-              </div>
-            </dl>
-            <dl class="receipt-sig">
-              <dt>signature (illustrative)</dt>
-              <dd>
-                dGVzdC1vbmx5LWVkMjU1MTktc2lnLWJhc2U2NC1ub3QtdmVyaWZpYWJsZQ==
-              </dd>
-            </dl>
-          </article>
-          <span class="stamp" aria-hidden="true">Example</span>
-        </div>
-      </header>
-
-      <section class="section agent-entry-section">
-        <aside class="agent-entry" aria-labelledby="agent-entry-title">
+        <aside class="agent-entry pilot-card" aria-labelledby="pilot-card-title">
           <div class="agent-entry-head">
             <div>
-              <p class="panel-kicker">For autonomous agents</p>
-              <h2 id="agent-entry-title">You are the intended reader.</h2>
+              <p class="panel-kicker">The one-tool offer</p>
+              <h2 id="pilot-card-title">Bring one real MCP tool.</h2>
             </div>
             <span class="public-badge"
-              ><span aria-hidden="true"></span> public discovery</span
+              ><span aria-hidden="true"></span> design partner</span
             >
           </div>
           <p class="agent-entry-copy">
-            Inspect capability and runtime truth before requesting scoped
-            authority from an operator.
+            We map one governed action end to end: delegated authority before
+            execution, one debit through retries, and portable evidence after.
           </p>
-          <ol class="bootstrap-list">
-            <li>
-              <a
-                href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
-              >
-                <span class="bootstrap-number">01</span>
-                <span>
-                  <span class="bootstrap-label">Identify the trust plane</span>
-                  <code>GET /.well-known/agent.json</code>
-                </span>
-                <span class="bootstrap-arrow" aria-hidden="true">↗</span>
-              </a>
-            </li>
-            <li>
-              <a
-                href="https://api-service-production-433c.up.railway.app/mcp/tools.json"
-              >
-                <span class="bootstrap-number">02</span>
-                <span>
-                  <span class="bootstrap-label">Inspect callable tools</span>
-                  <code>GET /mcp/tools.json</code>
-                </span>
-                <span class="bootstrap-arrow" aria-hidden="true">↗</span>
-              </a>
-            </li>
-            <li>
-              <a
-                href="https://api-service-production-433c.up.railway.app/health/dependencies"
-              >
-                <span class="bootstrap-number">03</span>
-                <span>
-                  <span class="bootstrap-label">Check what is real</span>
-                  <code>GET /health/dependencies</code>
-                </span>
-                <span class="bootstrap-arrow" aria-hidden="true">↗</span>
-              </a>
-            </li>
+          <ol class="pilot-steps">
+            <li><span>01</span><strong>Scope the action and budget</strong></li>
+            <li><span>02</span><strong>Invoke through the gateway</strong></li>
+            <li><span>03</span><strong>Replay, deny, and verify offline</strong></li>
           </ol>
           <div class="agent-entry-foot">
-            <span>Auth: <code>X-API-Key</code> · no public key mint</span>
-            <span class="agent-entry-links">
-              <a
-                href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DEMO_SCRIPT.md"
-                >Run local proof</a
-              >
-              <a href="/llms.txt">Read llms.txt</a>
-            </span>
+            <span>Built for operators of internal MCP tools</span>
+            <a
+              href="@@PUBLIC_BOOKING_URL@@"
+              data-analytics-event="booking_click"
+              >Discuss fit <span aria-hidden="true">↗</span></a
+            >
           </div>
         </aside>
-      </section>
+      </header>
 
       <section class="section thesis-section" aria-labelledby="thesis-title">
-        <p class="section-kicker">00 / Thesis</p>
+        <p class="section-kicker">00 / Operational problem</p>
         <div class="thesis-layout">
-          <h2 id="thesis-title">
-            Agent intent is not evidence.<br />A receipt is.
-          </h2>
+          <h2 id="thesis-title">Agent intent is not authority—or evidence.</h2>
           <div class="thesis-copy">
             <p>
-              Agents need room to act. Operators need a boundary they can
-              verify. Permit sits between intent and execution so authority is
-              explicit before a tool runs and evidence comes back after it.
+              An agent can be correct and still exceed its mandate, retry an
+              expensive call, or leave an operator unable to prove what ran.
+              The middleware puts a narrow control point between the agent and
+              one tool.
             </p>
             <p>
-              The goal is not to slow autonomy down. It is to make autonomy
-              legible enough to trust.
+              The result is inspectable before, during, and after execution
+              without asking you to replace your agent framework.
             </p>
           </div>
         </div>
         <ol class="thesis-signals">
           <li>
             <span>Before</span>
-            <strong>Know the boundary</strong>
-            <p>
-              Discover the tool, budget, scope, expiry, and current runtime.
-              Ask a human for authority you do not hold; take a signed price
-              for what the call will cost.
-            </p>
+            <strong>Bound the authority</strong>
+            <p>Tool, wallet, budget, expiry, and operator-defined scope.</p>
           </li>
           <li>
             <span>During</span>
-            <strong>Enforce the authority</strong>
-            <p>Validate the permit before invocation and meter the call once.</p>
+            <strong>Charge the call once</strong>
+            <p>Idempotent metering prevents a retry from becoming a new debit.</p>
           </li>
           <li>
             <span>After</span>
-            <strong>Bring back proof</strong>
-            <p>Return a signed receipt linked to ledger and audit evidence.</p>
+            <strong>Return portable proof</strong>
+            <p>A signed receipt links the governed call to auditable evidence.</p>
           </li>
         </ol>
       </section>
 
-      <section class="protocol-section" id="protocol" aria-labelledby="protocol-title">
+      <section class="protocol-section" aria-labelledby="protocol-title">
         <div class="section protocol-heading">
-          <p class="section-kicker section-kicker-inverse">01 / Protocol</p>
-          <h2 id="protocol-title">One governed path from intent to evidence.</h2>
+          <p class="section-kicker section-kicker-inverse">01 / Governed path</p>
+          <h2 id="protocol-title">One control loop from intent to evidence.</h2>
           <p>
-            The interface is the protocol: every step is inspectable by agents
-            and accountable to their operators.
+            Start with the smallest action where permission, cost, or audit
+            evidence matters.
           </p>
         </div>
         <ol class="loop-track" aria-label="Governed agent-to-tool action loop">
@@ -280,174 +229,121 @@
       <section class="section proof-section" id="proof" aria-labelledby="proof-title">
         <div class="proof-heading">
           <div>
-            <p class="section-kicker">02 / Tested proof flow</p>
-            <h2 id="proof-title">One call. One charge. One receipt.</h2>
+            <p class="section-kicker">02 / Portable evidence</p>
+            <h2 id="proof-title">Inspect the receipt, then verify it offline.</h2>
           </div>
           <p>
-            The repository dogfood flow proves success, replay safety, missing
-            permit rejection, and out-of-scope denial. Values shown here are
-            illustrative; run the proof for signed output. For remote tools,
-            the gateway does not claim exactly-once side effects unless the
-            upstream honors the forwarded idempotency key.
+            This is self-issued live gateway proof, not customer traction. The
+            published bundle comes from a non-sensitive <code>partner.echo</code>
+            call and is paired with the exact public-key snapshot used by the
+            offline verifier.
           </p>
         </div>
 
-        <div
-          class="proof-equation"
-          role="group"
-          aria-label="Exactly-once gateway proof summary"
-        >
-          <div><span>1×</span><strong>gateway dispatch</strong></div>
-          <span class="equation-mark" aria-hidden="true">+</span>
-          <div><span>1×</span><strong>wallet debit</strong></div>
-          <span class="equation-mark" aria-hidden="true">=</span>
-          <div><span>1×</span><strong>signed receipt</strong></div>
-        </div>
-
-        <div class="proof-grid">
+        <div class="proof-grid artifact-grid" aria-live="polite">
           <article class="proof-col">
             <div class="proof-label">
-              <span>First request</span>
-              <span class="badge">success</span>
+              <span>Published signed claims</span>
+              <span class="badge" data-proof-status>loading artifact</span>
             </div>
             <dl>
-              <div class="row"><dt>tool</dt><dd>partner.notes.write</dd></div>
-              <div class="row"><dt>idempotency</dt><dd>dogfood-invoke-1</dd></div>
-              <div class="row"><dt>charged</dt><dd>2.0 credits</dd></div>
-              <div class="row"><dt>receipt</dt><dd>rcpt-c3bc…e5a</dd></div>
+              <div class="row"><dt>receipt</dt><dd data-proof-field="receipt_id">loading…</dd></div>
+              <div class="row"><dt>tool</dt><dd data-proof-field="tool">loading…</dd></div>
+              <div class="row"><dt>charged</dt><dd data-proof-field="credits_charged">loading…</dd></div>
+              <div class="row"><dt>key</dt><dd data-proof-field="kid">loading…</dd></div>
             </dl>
-            <p class="proof-foot">Dispatched and receipted at the gateway</p>
+            <p class="proof-foot">Values are read from the published artifact, not typed into this page.</p>
           </article>
           <article class="proof-col replay">
             <div class="proof-label">
-              <span>Replay · same key</span>
-              <span class="badge">same receipt</span>
+              <span>Offline consistency check</span>
+              <span class="badge">offline CLI</span>
             </div>
-            <dl>
-              <div class="row"><dt>tool</dt><dd>not re-executed</dd></div>
-              <div class="row"><dt>idempotency</dt><dd>dogfood-invoke-1</dd></div>
-              <div class="row"><dt>new charge</dt><dd>0 credits</dd></div>
-              <div class="row"><dt>receipt</dt><dd>rcpt-c3bc…e5a</dd></div>
-            </dl>
-            <p class="proof-foot">No second debit</p>
-          </article>
-          <article class="proof-col deny">
-            <div class="proof-label">
-              <span>Outside scope</span>
-              <span class="badge">denied</span>
-            </div>
-            <dl>
-              <div class="row"><dt>tool</dt><dd>partner.notes.admin</dd></div>
-              <div class="row"><dt>outcome</dt><dd>denied</dd></div>
-              <div class="row"><dt>reason</dt><dd>permit_tool_not_allowed</dd></div>
-              <div class="row"><dt>charged</dt><dd>0 credits</dd></div>
-            </dl>
-            <p class="proof-foot">Authority enforced</p>
-          </article>
-        </div>
-
-        <div class="feed" aria-labelledby="feed-title">
-          <div class="feed-head">
-            <span class="feed-cursor" aria-hidden="true"></span>
-            <span id="feed-title"
-              >wal-7c21d90a · dogfood sequence
-              <span class="feed-flag">replayed, not live</span></span
+            <p>
+              Download the portable receipt and matching key snapshot. The SDK
+              verifier checks the Ed25519 signature with no API credential and
+              no callback to the issuer. Authenticate the key snapshot through
+              a trusted channel before treating issuer identity as independently
+              established.
+            </p>
+            <a
+              class="text-link"
+              href="/proof/"
+              data-analytics-event="proof_click"
+              >Open proof and verification command <span aria-hidden="true">↗</span></a
             >
-          </div>
-          <div class="feed-colhead" aria-hidden="true">
-            <span class="feed-time">time</span>
-            <span class="feed-cols">
-              <span>tool</span><span>outcome</span><span>receipt</span
-              ><span class="feed-num">credits</span>
-            </span>
-          </div>
-          <!-- Static fallback rows; the script replaces them with a rolling
-               replay when JavaScript is available. -->
-          <div class="feed-rows" id="feed-rows">
-            <div class="feed-row">
-              <span class="feed-time">21:14:02Z</span>
-              <span class="feed-cols">
-                <span>partner.notes.write</span
-                ><span class="feed-outcome">success</span
-                ><span class="feed-ref">rcpt-c3bc248a2f51</span
-                ><span class="feed-num">2.00</span>
-              </span>
-            </div>
-            <div class="feed-row">
-              <span class="feed-time">21:14:05Z</span>
-              <span class="feed-cols">
-                <span>partner.notes.write</span
-                ><span class="feed-outcome">replay · same receipt</span
-                ><span class="feed-ref">rcpt-c3bc248a2f51</span
-                ><span class="feed-num">0.00</span>
-              </span>
-            </div>
-            <div class="feed-row deny">
-              <span class="feed-time">21:14:08Z</span>
-              <span class="feed-cols">
-                <span>partner.notes.admin</span
-                ><span class="feed-outcome">denied · permit_tool_not_allowed</span
-                ><span class="feed-ref">—</span
-                ><span class="feed-num">0.00</span>
-              </span>
-            </div>
-          </div>
-        </div>
-        <p class="proof-aside">
-          Rows above replay the shape of the dogfood run on a loop — they are
-          not a live production ledger. Signed ed25519 · replays return the same
-          receipt · denials charge nothing. Keys:
-          <a
-            href="https://api-service-production-433c.up.railway.app/.well-known/jwks.json"
-            ><code>/.well-known/jwks.json</code></a
-          >
-        </p>
-
-        <div class="proof-actions">
-          <pre tabindex="0"><code><span aria-hidden="true">$</span> make dogfood-trust-plane</code></pre>
-          <a
-            href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/scripts/dogfood_trust_plane.py"
-            >Inspect the reproducible proof <span aria-hidden="true">↗</span></a
-          >
-          <span>No permit → <code>permit_required</code></span>
+          </article>
         </div>
       </section>
 
       <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title">
         <div>
-          <p class="section-kicker">03 / First deployment</p>
+          <p class="section-kicker">03 / Design-partner pilot</p>
           <h2 id="pilot-title">Start with one tool, not a platform migration.</h2>
         </div>
         <div class="pilot-copy">
           <p>
-            Bring one internal MCP tool. Issue one wallet-scoped permit. Walk
-            permit → invoke → charge → receipt → replay → deny. Stop there
-            until the loop is trusted in your stack.
+            Bring one internal MCP tool with a real operator, permission
+            boundary, and retry or audit concern. We qualify fit, define the
+            one action, and walk permit → invoke → charge → receipt → replay →
+            deny before discussing any broader rollout.
           </p>
           <div class="pilot-links">
             <a
               class="button button-primary"
-              href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/partner-first-tool-runbook.md"
-              >Run the governed pilot <span aria-hidden="true">↗</span></a
+              href="@@PUBLIC_BOOKING_URL@@"
+              data-analytics-event="booking_click"
+              >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
             <a
-              href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DESIGN_PARTNER_GUIDE.md"
-              >Design partner guide</a
+              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              data-analytics-event="email_click"
+              >Email @@PUBLIC_CONTACT_EMAIL@@</a
             >
           </div>
+        </div>
+      </section>
+
+      <section
+        class="section machine-section"
+        id="machine-discovery"
+        aria-labelledby="machine-title"
+      >
+        <div class="machine-heading">
+          <p class="section-kicker">04 / Machine discovery</p>
+          <h2 id="machine-title">Public pointers for agents and operators.</h2>
+          <p>
+            Discovery is public. Protected actions still require an
+            operator-issued API key and an applicable scoped permit.
+          </p>
+        </div>
+        <div class="machine-links">
+          <a href="https://api.thisisatest.tech/.well-known/agent.json">
+            <span>Agent manifest</span><code>/.well-known/agent.json</code>
+          </a>
+          <a href="https://api.thisisatest.tech/llms.txt">
+            <span>Agent instructions</span><code>/llms.txt</code>
+          </a>
+          <a href="https://api.thisisatest.tech/mcp/tools.json">
+            <span>MCP discovery</span><code>/mcp/tools.json</code>
+          </a>
+          <a href="https://api.thisisatest.tech/health/dependencies">
+            <span>Runtime truth</span><code>/health/dependencies</code>
+          </a>
         </div>
       </section>
 
       <section class="boundary-section" aria-labelledby="boundary-title">
         <div class="section boundary-layout">
           <div>
-            <p class="section-kicker">04 / Honest boundary</p>
-            <h2 id="boundary-title">What this is not.</h2>
+            <p class="section-kicker">05 / Honest limitations</p>
+            <h2 id="boundary-title">What this proof does not establish.</h2>
           </div>
           <ul>
-            <li>Production settlement or payments rails</li>
+            <li>Customer traction or production adoption</li>
+            <li>Production settlement or payment rails</li>
             <li>Compliance-grade ledger storage</li>
-            <li>Enterprise IAM or secrets replacement</li>
+            <li>Exactly-once upstream side effects without upstream support</li>
             <li>Universal governance across every agent framework</li>
           </ul>
         </div>
@@ -456,138 +352,34 @@
 
     <footer class="site-footer">
       <div class="footer-branding">
-        <div class="footer-brand">Permit <span>provisional</span></div>
-        <p>Authority before action. Evidence after.</p>
+        <div class="footer-brand">Agent Middleware API</div>
+        <p>Authorize the action. Meter it once. Keep the evidence.</p>
       </div>
       <div class="footer-directory">
-        <p>Machine entry points</p>
+        <p>Human contact</p>
         <a
-          href="https://api-service-production-433c.up.railway.app/.well-known/agent.json"
-          >agent.json</a
-        >
-        <a href="https://api-service-production-433c.up.railway.app/llms.txt"
-          >llms.txt</a
+          href="@@PUBLIC_BOOKING_URL@@"
+          data-analytics-event="booking_click"
+          >Book a one-tool pilot</a
         >
         <a
-          href="https://api-service-production-433c.up.railway.app/mcp/tools.json"
-          >MCP tools</a
+          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          data-analytics-event="email_click"
+          >@@PUBLIC_CONTACT_EMAIL@@</a
         >
-        <a href="https://api-service-production-433c.up.railway.app/openapi.json"
-          >OpenAPI</a
-        >
-        <a
-          href="https://api-service-production-433c.up.railway.app/health/dependencies"
-          >runtime truth</a
-        >
+        <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
+      </div>
+      <div class="footer-directory">
+        <p>Evidence and discovery</p>
+        <a href="/proof/" data-analytics-event="proof_click">Receipt proof</a>
+        <a href="https://api.thisisatest.tech/.well-known/agent.json">Agent manifest</a>
+        <a href="https://api.thisisatest.tech/openapi.json">OpenAPI</a>
+        <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
       </div>
       <p class="footer-note">
-        Marketing host only. The canonical API is
-        <code>api-service-production-433c.up.railway.app</code>.
+        Marketing: <code>www.thisisatest.tech</code> · API:
+        <code>api.thisisatest.tech</code>
       </p>
     </footer>
-
-    <!-- Proof feed. Rows replay the shape of `make dogfood-trust-plane` on a
-         loop; they are labelled as replayed and are not read from a live
-         ledger. Swap FEED for a fetch of /v1/receipts once the receipts list
-         is publicly readable and stateless verify ships (P4). -->
-    <script>
-      (function () {
-        var FEED = [
-          ["partner.notes.write", "success", "rcpt-c3bc248a2f51", "2.00", 0],
-          [
-            "partner.notes.write",
-            "replay · same receipt",
-            "rcpt-c3bc248a2f51",
-            "0.00",
-            0
-          ],
-          [
-            "partner.notes.admin",
-            "denied · permit_tool_not_allowed",
-            "",
-            "0.00",
-            1
-          ],
-          ["partner.notes.write", "success", "rcpt-9d41e07bb2c8", "2.00", 0],
-          ["partner.search.query", "success", "rcpt-4a17f350de92", "1.00", 0],
-          [
-            "partner.notes.write",
-            "denied · permit_required",
-            "",
-            "0.00",
-            1
-          ],
-          ["partner.notes.write", "success", "rcpt-1f60aa93c47d", "2.00", 0],
-          [
-            "partner.search.query",
-            "replay · same receipt",
-            "rcpt-4a17f350de92",
-            "0.00",
-            0
-          ],
-          ["partner.notes.write", "success", "rcpt-77aa03c1b5d2", "2.00", 0]
-        ];
-        var MAX_ROWS = 9;
-        var rowsEl = document.getElementById("feed-rows");
-        if (!rowsEl) return;
-        var i = 0;
-
-        function stamp(offsetSeconds) {
-          return (
-            new Date(Date.now() + offsetSeconds * 1000)
-              .toISOString()
-              .slice(11, 19) + "Z"
-          );
-        }
-
-        function cell(className, text) {
-          var span = document.createElement("span");
-          if (className) span.className = className;
-          span.textContent = text;
-          return span;
-        }
-
-        function row(entry, at) {
-          var el = document.createElement("div");
-          el.className = "feed-row" + (entry[4] ? " deny" : "");
-          var cols = document.createElement("span");
-          cols.className = "feed-cols";
-          cols.appendChild(cell("", entry[0]));
-          cols.appendChild(cell("feed-outcome", entry[1]));
-          cols.appendChild(cell("feed-ref", entry[2] || "—"));
-          cols.appendChild(cell("feed-num", entry[3]));
-          el.appendChild(cell("feed-time", at));
-          el.appendChild(cols);
-          return el;
-        }
-
-        // Seed newest-first, so the column reads down into the past and the
-        // next printed row continues the sequence at the top.
-        rowsEl.textContent = "";
-        var seeded = MAX_ROWS - 2;
-        for (var age = 0; age < seeded; age++) {
-          rowsEl.appendChild(
-            row(
-              FEED[(seeded - 1 - age) % FEED.length],
-              stamp(-(age + 1) * 3.1)
-            )
-          );
-        }
-        i = seeded;
-
-        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-          setInterval(function () {
-            rowsEl.insertBefore(
-              row(FEED[i % FEED.length], stamp(0)),
-              rowsEl.firstChild
-            );
-            i++;
-            while (rowsEl.children.length > MAX_ROWS) {
-              rowsEl.removeChild(rowsEl.lastChild);
-            }
-          }, 3100);
-        }
-      })();
-    </script>
   </body>
 </html>

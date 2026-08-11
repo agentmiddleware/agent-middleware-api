@@ -167,7 +167,7 @@ def main() -> int:
     parser.add_argument(
         "--api-url",
         required=True,
-        help="Public API origin (PUBLIC_URL), e.g. https://….up.railway.app",
+        help="Canonical public API origin, https://api.thisisatest.tech",
     )
     parser.add_argument(
         "--bootstrap-key",

@@ -76,11 +76,11 @@ class NotificationService:
 Your agent wallet {wallet_id} has been frozen.
 
 Reason: {message}
-Wallet Owner: {wallet_owner or 'N/A'}
+Wallet Owner: {wallet_owner or "N/A"}
 
 Please log in to the B2A Dashboard to review the alert and take action.
 
-This is an automated alert from the Agent-Native Middleware Platform.
+This is an automated alert from Agent Middleware API.
                 """.strip(),
             )
 
@@ -101,10 +101,7 @@ This is an automated alert from the Agent-Native Middleware Platform.
             sponsor_email: Email to send warning to
         """
         subject = f"[B2A] Low Balance Warning for Wallet {wallet_id}"
-        message = (
-            f"Balance: {current_balance} credits "
-            f"(threshold: {threshold})"
-        )
+        message = f"Balance: {current_balance} credits (threshold: {threshold})"
 
         if self._slack_webhook_url:
             await self._send_slack_alert(
@@ -184,7 +181,7 @@ Your identity has been verified for wallet {wallet_id}.
 
 You can now top up your wallet using fiat payment methods.
 
-This is an automated notification from the Agent-Native Middleware Platform.
+This is an automated notification from Agent Middleware API.
                 """.strip(),
             )
 
@@ -223,7 +220,7 @@ Reason: {reason}
 
 Please contact support for assistance with re-verification.
 
-This is an automated alert from the Agent-Native Middleware Platform.
+This is an automated alert from Agent Middleware API.
                 """.strip(),
             )
 
@@ -258,7 +255,7 @@ Identity verification is required for wallet {wallet_id} before you can add fund
 
 Please complete the KYC verification process to enable fiat top-ups.
 
-This is an automated notification from the Agent-Native Middleware Platform.
+This is an automated notification from Agent Middleware API.
                 """.strip(),
             )
 
@@ -392,9 +389,7 @@ This is an automated notification from the Agent-Native Middleware Platform.
                 message=message,
                 wallet_id=wallet_id,
                 urgency=(
-                    "critical"
-                    if alert_type == "emergency_key_revocation"
-                    else "high"
+                    "critical" if alert_type == "emergency_key_revocation" else "high"
                 ),
             )
 

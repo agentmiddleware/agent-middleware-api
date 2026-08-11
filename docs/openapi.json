@@ -1,20 +1,16 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Agent-Native Middleware API",
+    "title": "Agent Middleware API",
     "description": "## MCP Trust Plane\n\nAgent Middleware API is a **governed MCP trust plane** for autonomous agent tool calls — not a full agent middleware platform.\n\nCredible wedge: exactly-once gateway authorization, debit, and receipt finalization for metered MCP calls. Remote side effects require the upstream to honor the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`\n\n### Product Surface\n\n- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n- **Governed MCP invoke** — permit check, policy, idempotency, charge\n- **Wallet metering** — ledger-backed credits with exact decimals\n- **Signed receipts + evidence** — verifiable attempt outcomes\n- **Wallet audit chain** — tamper-evident per-wallet events\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAWI, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
-    "contact": {
-      "name": "Agent-Native Middleware",
-      "email": "support@agent-middleware.dev"
-    },
     "license": {
       "name": "MIT"
     },
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "servers": [
     {
-      "url": "https://api.yourdomain.com",
+      "url": "https://api.thisisatest.tech",
       "description": "Public API (set PUBLIC_URL)"
     },
     {
@@ -6844,8 +6840,8 @@
         "tags": [
           "Static"
         ],
-        "summary": "Human Control Deck",
-        "description": "Human-accessible control plane, audit visualizer, and telemetry dashboard.",
+        "summary": "Public operator evidence index",
+        "description": "Truthful public status and evidence links. It contains no fabricated telemetry, authenticated tenant data, or browser credential handling.",
         "operationId": "get_human_dashboard_dashboard_get",
         "responses": {
           "200": {
@@ -6889,12 +6885,12 @@
         "tags": [
           "Discovery"
         ],
-        "summary": "API root — service index & human dashboard negotiation",
-        "description": "Returns a broad service catalog for API callers or HTML dashboard for browsers. For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`.",
+        "summary": "API root — service index and operator evidence negotiation",
+        "description": "Returns the API service index for JSON callers or the truthful public operator evidence index for browsers. For machine bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`.",
         "operationId": "root__get",
         "responses": {
           "200": {
-            "description": "JSON service index or HTML control deck",
+            "description": "JSON service index or HTML operator evidence index",
             "content": {
               "application/json": {
                 "schema": {}

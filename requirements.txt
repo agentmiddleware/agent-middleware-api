@@ -1,4 +1,4 @@
-# Agent-Native Middleware API - Dependencies
+# Agent Middleware API - Dependencies
 # Python 3.11+
 
 # --- Core Framework ---

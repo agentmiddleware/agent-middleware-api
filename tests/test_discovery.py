@@ -124,5 +124,5 @@ async def test_llms_txt_and_legacy_alias_serve_identical_public_instructions(cli
     assert canonical.status_code == 200
     assert legacy.status_code == 200
     assert canonical.text == legacy.text
-    assert "Agent-Native Middleware API" in canonical.text
+    assert "Agent Middleware API" in canonical.text
     assert canonical.headers["content-type"].startswith("text/plain")

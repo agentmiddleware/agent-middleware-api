@@ -2,7 +2,7 @@
 Agent Middleware API client
 ============================================
 
-Async Python client for the Agent-Native Middleware API.
+Async Python client for Agent Middleware API.
 Provides wallet management, telemetry, and billing for agent swarms.
 """
 
@@ -118,7 +118,7 @@ class DryRunSimulation:
 
 class AgentMiddlewareClient:
     """
-    Core async client for the Agent-Native Middleware API.
+    Core async client for Agent Middleware API.
 
     Usage:
         client = AgentMiddlewareClient(api_key="agt-xyz123")
@@ -128,7 +128,7 @@ class AgentMiddlewareClient:
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api-service-production-433c.up.railway.app",
+        base_url: str = "https://api.thisisatest.tech",
         timeout: float = 10.0,
         *,
         transport: httpx.AsyncBaseTransport | None = None,

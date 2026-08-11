@@ -46,7 +46,7 @@ _PROD_TRUST_ENV = {
     "DEBUG": "false",
     "WEBAUTHN_ALLOW_MOCK": "false",
     "TRUST_SIGNING_PRIVATE_KEY_B64": _TEST_SIGNING_PRIVATE_KEY_B64,
-    "PUBLIC_URL": "https://api-service-production-433c.up.railway.app",
+    "PUBLIC_URL": "https://api.thisisatest.tech",
 }
 
 

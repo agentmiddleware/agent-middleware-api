@@ -1,5 +1,5 @@
 """
-Central configuration for the Agent-Native Middleware API.
+Central configuration for Agent Middleware API.
 All settings are loaded from environment variables for zero-GUI deployment.
 """
 
@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     """
 
     # --- Application ---
-    APP_NAME: str = "Agent-Native Middleware API"
-    APP_VERSION: str = "1.2.0"
+    APP_NAME: str = "Agent Middleware API"
+    APP_VERSION: str = "1.3.0"
+    # Public build provenance. Railway's RAILWAY_GIT_COMMIT_SHA is also
+    # recognized by app.core.build_metadata when this explicit value is empty.
+    BUILD_COMMIT_SHA: str = ""
     ENVIRONMENT: str = "local"
     DEBUG: bool = False
 
@@ -28,8 +31,16 @@ class Settings(BaseSettings):
 
     # --- Public URL ---
     # Used for agent manifests and documentation links
-    # Example: https://api.yourdomain.com or https://yourapp.up.railway.app
+    # Set to the deployment's absolute public origin. Keep empty for local
+    # instances so receipts and manifests never claim the hosted issuer.
     PUBLIC_URL: str = ""
+
+    # --- Public operator identity ---
+    # OpenAPI contact metadata is omitted until real, monitored values are set.
+    # Never ship placeholder names or addresses on a public deployment.
+    PUBLIC_CONTACT_NAME: str = ""
+    PUBLIC_CONTACT_EMAIL: str = ""
+    PUBLIC_CONTACT_URL: str = ""
 
     # --- Durable Runtime State ---
     # Backends: auto, postgres, redis, sqlite, memory
@@ -199,7 +210,7 @@ class Settings(BaseSettings):
     # --- Phase 9: WebAuthn / Passkey ---
     # Relying Party configuration for FIDO2/WebAuthn
     WEBAUTHN_RP_ID: str = "localhost"
-    WEBAUTHN_RP_NAME: str = "Agent-Native Middleware"
+    WEBAUTHN_RP_NAME: str = "Agent Middleware API"
     WEBAUTHN_TIMEOUT_MS: int = 60000
     WEBAUTHN_CHALLENGE_EXPIRY: int = 300
     WEBAUTHN_VERIFICATION_VALIDITY: int = 300

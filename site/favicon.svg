@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agent Middleware API">
+  <rect width="64" height="64" rx="10" fill="#151512" />
+  <path d="M12 46 26 14h12l14 32H41l-2.5-6H25.2l-2.4 6Zm16.4-15h6.9L31.8 22Z" fill="#f2efe6" />
+  <rect x="47" y="8" width="9" height="9" fill="#e24b2a" />
+</svg>

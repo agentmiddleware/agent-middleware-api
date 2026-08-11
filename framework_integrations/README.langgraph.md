@@ -1,6 +1,6 @@
 # LangGraph Integration
 
-Use Agent-Native Middleware tools directly in LangGraph agents.
+Use Agent Middleware API tools directly in LangGraph agents.
 
 ## Installation
 

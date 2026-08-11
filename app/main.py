@@ -1,5 +1,5 @@
 """
-Agent-Native Middleware API
+Agent Middleware API
 ===========================
 Operational control plane for autonomous agents.
 
@@ -23,6 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
+from .core.build_metadata import get_build_commit_sha
 from .core.config import get_settings
 from .core.durable_state import (
     DurableStateConfigError,
@@ -30,6 +31,7 @@ from .core.durable_state import (
     get_durable_state,
 )
 from .core.health import gather_dependency_report
+from .core.public_contact import validated_public_contact as _public_contact_metadata
 from .core.rate_limiter import RateLimitMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
@@ -156,7 +158,9 @@ async def lifespan(app: FastAPI):
             "app_startup_failed",
             phase="signing_key_validation",
             error=str(exc),
-            remediation=_SIGNING_KEY_REMEDIATION.get(str(exc), _SIGNING_KEY_REMEDIATION_DEFAULT),
+            remediation=_SIGNING_KEY_REMEDIATION.get(
+                str(exc), _SIGNING_KEY_REMEDIATION_DEFAULT
+            ),
         )
         raise
     logger.info(
@@ -428,6 +432,9 @@ async def lifespan(app: FastAPI):
     )
 
 
+public_contact = _public_contact_metadata(settings)
+
+
 app = FastAPI(
     lifespan=lifespan,
     title=settings.APP_NAME,
@@ -464,16 +471,15 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
-    contact={
-        "name": "Agent-Native Middleware",
-        "email": "support@agent-middleware.dev",
-    },
+    # Omit contact metadata until an accountable, monitored identity is set.
+    # This avoids presenting placeholder support details as a real escalation path.
+    contact=public_contact or None,
     license_info={
         "name": "MIT",
     },
     servers=[
         {
-            "url": settings.PUBLIC_URL or "https://api.yourdomain.com",
+            "url": settings.PUBLIC_URL or "https://api.thisisatest.tech",
             "description": "Public API (set PUBLIC_URL)",
         },
         *(
@@ -488,6 +494,7 @@ app = FastAPI(
 
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
+
 
 def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:
     """Attach CORS, enabling credentials only for an explicit allowlist.
@@ -581,14 +588,15 @@ else:
 @app.get(
     "/",
     tags=["Discovery"],
-    summary="API root — service index & human dashboard negotiation",
+    summary="API root — service index and operator evidence negotiation",
     description=(
-        "Returns a broad service catalog for API callers or HTML dashboard for browsers. "
-        "For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`."
+        "Returns the API service index for JSON callers or the truthful public "
+        "operator evidence index for browsers. For machine bootstrap, follow "
+        "`GET /.well-known/agent.json` → field `agent_first`."
     ),
     responses={
         200: {
-            "description": "JSON service index or HTML control deck",
+            "description": "JSON service index or HTML operator evidence index",
             "content": {"text/html": {"schema": {"type": "string"}}},
         }
     },
@@ -940,6 +948,7 @@ async def health():
     return {
         "status": "healthy",
         "version": settings.APP_VERSION,
+        "commit_sha": get_build_commit_sha(),
     }
 
 

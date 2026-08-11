@@ -1,9 +1,10 @@
 """Offline verification of trust-plane receipts.
 
-A receipt is only evidence if someone who does not trust the issuer can check
-it. Everything in this module therefore runs with no network, no database, and
-no credential: it takes a portable receipt bundle plus a published key set and
-answers whether the signature holds.
+A receipt is portable evidence when someone can check its signature using a
+public key they trust. Everything in this module therefore runs with no
+network, no database, and no credential: it takes a portable receipt bundle
+plus a caller-supplied key set and answers whether the signature holds. Key
+distribution and issuer identity remain the caller's trust decision.
 
 Two rules keep that answer meaningful:
 
@@ -214,16 +215,16 @@ def verify_bundle(
             either as a dict or a JSON string.
         key_set: Mapping of key id to raw 32-byte Ed25519 public key, as
             produced by :func:`key_set_from_document`.
-        expected_issuer: When given, the bundle's ``issuer`` must match. Use
-            this when you know which plane the receipt should have come from;
-            without it, a valid receipt from *some other* plane still verifies.
+        expected_issuer: When given, the unauthenticated envelope's ``issuer``
+            label must match. This catches accidental relabeling but does not
+            authenticate the issuer; that requires a trusted public key.
 
     Returns:
         A :class:`VerificationResult`. Inspect ``status`` rather than only
         ``ok`` when the difference between "invalid" and "cannot tell"
         matters.
     """
-    if isinstance(bundle, (str, bytes)):
+    if isinstance(bundle, str | bytes):
         try:
             bundle = json.loads(bundle)
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -312,9 +313,7 @@ def verify_bundle(
     # object here would silently "fix" a payload whose bytes were altered in a
     # way that survives a JSON round trip, so the original string is used.
     try:
-        _load_verifier(raw_public_key).verify(
-            signature, signing_input.encode("utf-8")
-        )
+        _load_verifier(raw_public_key).verify(signature, signing_input.encode("utf-8"))
     except VerificationError:
         raise
     except Exception:

@@ -8,6 +8,9 @@
 #   1. the CI workflow concluded successfully for that exact commit, and
 #   2. the deployed service is currently in the expected posture.
 #
+# The post-deploy gate additionally proves that health reports the exact
+# version and full commit SHA selected by this run.
+#
 # Inert until an operator adds the RAILWAY_TOKEN secret (a project token for
 # the target Railway project). Without it the job stops before touching
 # anything.
@@ -48,9 +51,11 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - name: Resolve commit
+      - name: Resolve release identity
         id: sha
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" >> "$GITHUB_OUTPUT"
 
       - name: Require RAILWAY_TOKEN
         env:
@@ -106,6 +111,20 @@ jobs:
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
+
+      # Persist the resolved source identity without starting a variable-change
+      # deployment. The following `railway up` builds and starts this exact
+      # checkout with that identity available to /health and
+      # /health/dependencies.
+      - name: Inject build commit SHA
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          EXPECTED_SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          railway variable set BUILD_COMMIT_SHA="$EXPECTED_SHA" \
+            --service "${{ inputs.service }}" \
+            --environment production \
+            --skip-deploys
 
       - name: Deploy (railway up)
         env:
@@ -176,12 +195,16 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+          EXPECTED_VERSION: ${{ steps.sha.outputs.version }}
+          EXPECTED_SHA: ${{ steps.sha.outputs.sha }}
         run: |
           railway run --service Postgres --environment production -- \
             python scripts/railway_preflight.py \
               --public-db \
               --strict \
-              --url "$PUBLIC_URL"
+              --url "$PUBLIC_URL" \
+              --expected-version "$EXPECTED_VERSION" \
+              --expected-commit-sha "$EXPECTED_SHA"
 
       - name: Summary
         if: always()
@@ -190,6 +213,7 @@ jobs:
             echo "### Railway deploy"
             echo ""
             echo "- ref: \`${{ inputs.ref }}\` (\`${{ steps.sha.outputs.sha }}\`)"
+            echo "- expected version: \`${{ steps.sha.outputs.version }}\`"
             echo "- service: \`${{ inputs.service }}\`"
             echo "- CI gate: ${{ inputs.skip_ci_gate && 'SKIPPED (emergency)' || 'enforced' }}"
             echo "- result: ${{ job.status }}"

@@ -45,7 +45,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-DEFAULT_API_URL = "https://api-service-production-433c.up.railway.app"
+DEFAULT_API_URL = "https://api.thisisatest.tech"
 API_URL = os.environ.get("AGENT_MIDDLEWARE_API_URL", DEFAULT_API_URL)
 API_KEY = os.environ.get("AGENT_MIDDLEWARE_API_KEY", "")
 
@@ -105,12 +105,20 @@ def invoke_body(wallet_id: str, permit_id: str, text: str, req_id: int = 1) -> d
     }
 
 
-async def make_permit(c, admin, spn, wallet, name, *, max_credits="20",
-                      expires="2099-01-01T00:00:00Z"):
-    r = await c.post("/v1/permits", headers=admin_headers({"Idempotency-Key": f"{TAG}-{name}"}),
-                     json={"issuer_wallet_id": spn, "subject_wallet_id": wallet,
-                           "allowed_tools": ["partner.notes.write"],
-                           "max_credits": max_credits, "expires_at": expires})
+async def make_permit(
+    c, admin, spn, wallet, name, *, max_credits="20", expires="2099-01-01T00:00:00Z"
+):
+    r = await c.post(
+        "/v1/permits",
+        headers=admin_headers({"Idempotency-Key": f"{TAG}-{name}"}),
+        json={
+            "issuer_wallet_id": spn,
+            "subject_wallet_id": wallet,
+            "allowed_tools": ["partner.notes.write"],
+            "max_credits": max_credits,
+            "expires_at": expires,
+        },
+    )
     return r
 
 
@@ -118,27 +126,46 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
     admin = admin_headers()
 
     # ---- Setup: sponsor + two isolated agent wallets ---------------------
-    r = await c.post("/v1/billing/wallets/sponsor", headers=admin,
-                     json={"sponsor_name": TAG, "email": f"{TAG}@example.com",
-                           "initial_credits": 500})
+    r = await c.post(
+        "/v1/billing/wallets/sponsor",
+        headers=admin,
+        json={
+            "sponsor_name": TAG,
+            "email": f"{TAG}@example.com",
+            "initial_credits": 500,
+        },
+    )
     if not s.check("setup: create sponsor", r.status_code == 201, r.text[:120]):
         return
     spn = r.json()["wallet_id"]
 
     wallets = {}
     for role in ("a", "b"):
-        r = await c.post("/v1/billing/wallets/agent", headers=admin,
-                         json={"sponsor_wallet_id": spn, "agent_id": f"{TAG}-{role}",
-                               "budget_credits": 100})
-        if not s.check(f"setup: create agent wallet {role}", r.status_code == 201, r.text[:120]):
+        r = await c.post(
+            "/v1/billing/wallets/agent",
+            headers=admin,
+            json={
+                "sponsor_wallet_id": spn,
+                "agent_id": f"{TAG}-{role}",
+                "budget_credits": 100,
+            },
+        )
+        if not s.check(
+            f"setup: create agent wallet {role}", r.status_code == 201, r.text[:120]
+        ):
             return
         wallets[role] = r.json()["wallet_id"]
     wallet_a, wallet_b = wallets["a"], wallets["b"]
 
     # A scoped, DB-backed API key bound to wallet B — the "other tenant".
-    r = await c.post("/v1/api-keys", headers=admin,
-                     json={"wallet_id": wallet_b, "key_name": f"{TAG}-b"})
-    if not s.check("setup: mint scoped key for wallet B", r.status_code == 201, r.text[:120]):
+    r = await c.post(
+        "/v1/api-keys",
+        headers=admin,
+        json={"wallet_id": wallet_b, "key_name": f"{TAG}-b"},
+    )
+    if not s.check(
+        "setup: mint scoped key for wallet B", r.status_code == 201, r.text[:120]
+    ):
         return
     key_b = r.json()["api_key"]
 
@@ -157,38 +184,62 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
     # a *different* payload under the same key is a conflict, not a replay —
     # asserted separately below.
     golden_body = invoke_body(wallet_a, pid, f"golden {RUN}")
-    r = await c.post("/mcp/messages", headers=admin_headers({"Idempotency-Key": f"{TAG}-inv1"}),
-                     json=golden_body)
+    r = await c.post(
+        "/mcp/messages",
+        headers=admin_headers({"Idempotency-Key": f"{TAG}-inv1"}),
+        json=golden_body,
+    )
     body = r.json()
     rcpt = body.get("result", {}).get("receipt", {})
     rid = rcpt.get("receipt_id")
-    s.check("governed invoke succeeds", "error" not in body and bool(rid), rid or str(body)[:120])
-    s.check("receipt is signed", bool(rcpt.get("signature") or rcpt.get("signature_key_id")),
-            f"key_id={rcpt.get('signature_key_id')}")
+    s.check(
+        "governed invoke succeeds",
+        "error" not in body and bool(rid),
+        rid or str(body)[:120],
+    )
+    s.check(
+        "receipt is signed",
+        bool(rcpt.get("signature") or rcpt.get("signature_key_id")),
+        f"key_id={rcpt.get('signature_key_id')}",
+    )
 
     # ---- Exactly-once (sequential) --------------------------------------
-    r = await c.post("/mcp/messages", headers=admin_headers({"Idempotency-Key": f"{TAG}-inv1"}),
-                     json=golden_body)
+    r = await c.post(
+        "/mcp/messages",
+        headers=admin_headers({"Idempotency-Key": f"{TAG}-inv1"}),
+        json=golden_body,
+    )
     rid2 = r.json().get("result", {}).get("receipt", {}).get("receipt_id")
     s.check("replay returns identical receipt", rid2 == rid, f"{rid} vs {rid2}")
 
     r = await c.get(f"/v1/permits/{pid}", headers=admin)
     spent = str(r.json().get("spent_credits"))
-    s.check("replay did not double-charge", float(spent) == COST_PER_CALL,
-            f"spent={spent}, expected {COST_PER_CALL}")
+    s.check(
+        "replay did not double-charge",
+        float(spent) == COST_PER_CALL,
+        f"spent={spent}, expected {COST_PER_CALL}",
+    )
 
     # Same key, different payload -> must NOT be silently served the cached
     # receipt, and must NOT charge again. A conflict error is the correct answer.
-    r = await c.post("/mcp/messages", headers=admin_headers({"Idempotency-Key": f"{TAG}-inv1"}),
-                     json=invoke_body(wallet_a, pid, "DIFFERENT payload under same key"))
+    r = await c.post(
+        "/mcp/messages",
+        headers=admin_headers({"Idempotency-Key": f"{TAG}-inv1"}),
+        json=invoke_body(wallet_a, pid, "DIFFERENT payload under same key"),
+    )
     j = r.json()
     served_cached = j.get("result", {}).get("receipt", {}).get("receipt_id") == rid
-    s.check("same key + different payload is not served the cached receipt",
-            not served_cached, str(j.get("error") or j.get("result"))[:120])
+    s.check(
+        "same key + different payload is not served the cached receipt",
+        not served_cached,
+        str(j.get("error") or j.get("result"))[:120],
+    )
     r = await c.get(f"/v1/permits/{pid}", headers=admin)
-    s.check("payload-mismatch replay did not charge again",
-            float(str(r.json().get("spent_credits"))) == COST_PER_CALL,
-            f"spent={r.json().get('spent_credits')}")
+    s.check(
+        "payload-mismatch replay did not charge again",
+        float(str(r.json().get("spent_credits"))) == COST_PER_CALL,
+        f"spent={r.json().get('spent_credits')}",
+    )
 
     # ---- Exactly-once (concurrent) --------------------------------------
     # Fresh permit so this check is independent of the counter above.
@@ -197,11 +248,15 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
     key = f"{TAG}-concurrent-once"
 
     async def fire(i):
-        return await c.post("/mcp/messages",
-                            headers=admin_headers({"Idempotency-Key": key}),
-                            json=invoke_body(wallet_a, pid_c, f"concurrent {i}", req_id=i))
+        return await c.post(
+            "/mcp/messages",
+            headers=admin_headers({"Idempotency-Key": key}),
+            json=invoke_body(wallet_a, pid_c, f"concurrent {i}", req_id=i),
+        )
 
-    responses = await asyncio.gather(*[fire(i) for i in range(15)], return_exceptions=True)
+    responses = await asyncio.gather(
+        *[fire(i) for i in range(15)], return_exceptions=True
+    )
     rids, errors = set(), 0
     for resp in responses:
         if isinstance(resp, Exception):
@@ -211,53 +266,84 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
         got = j.get("result", {}).get("receipt", {}).get("receipt_id")
         if got:
             rids.add(got)
-    s.check("15 concurrent same-key invokes collapse to one receipt",
-            len(rids) == 1 and errors == 0, f"distinct_receipts={len(rids)} errors={errors}")
+    s.check(
+        "15 concurrent same-key invokes collapse to one receipt",
+        len(rids) == 1 and errors == 0,
+        f"distinct_receipts={len(rids)} errors={errors}",
+    )
 
     r = await c.get(f"/v1/permits/{pid_c}", headers=admin)
     spent_c = str(r.json().get("spent_credits"))
-    s.check("concurrent replays charged exactly once", float(spent_c) == COST_PER_CALL,
-            f"spent={spent_c}, expected {COST_PER_CALL}")
+    s.check(
+        "concurrent replays charged exactly once",
+        float(spent_c) == COST_PER_CALL,
+        f"spent={spent_c}, expected {COST_PER_CALL}",
+    )
 
     # ---- Budget enforcement ---------------------------------------------
-    r = await make_permit(c, admin, spn, wallet_a, "budget", max_credits=str(COST_PER_CALL))
+    r = await make_permit(
+        c, admin, spn, wallet_a, "budget", max_credits=str(COST_PER_CALL)
+    )
     pid_b = r.json()["permit_id"]
     # First call consumes the whole budget.
-    await c.post("/mcp/messages", headers=admin_headers({"Idempotency-Key": f"{TAG}-budget-1"}),
-                 json=invoke_body(wallet_a, pid_b, "fills budget"))
+    await c.post(
+        "/mcp/messages",
+        headers=admin_headers({"Idempotency-Key": f"{TAG}-budget-1"}),
+        json=invoke_body(wallet_a, pid_b, "fills budget"),
+    )
     # Second call must be denied.
-    r = await c.post("/mcp/messages", headers=admin_headers({"Idempotency-Key": f"{TAG}-budget-2"}),
-                     json=invoke_body(wallet_a, pid_b, "over budget"))
+    r = await c.post(
+        "/mcp/messages",
+        headers=admin_headers({"Idempotency-Key": f"{TAG}-budget-2"}),
+        json=invoke_body(wallet_a, pid_b, "over budget"),
+    )
     err = r.json().get("error", {})
-    s.check("over-budget invoke denied", err.get("message") == "permit_budget_exceeded",
-            err.get("message"))
+    s.check(
+        "over-budget invoke denied",
+        err.get("message") == "permit_budget_exceeded",
+        err.get("message"),
+    )
 
     # ---- Permit lifecycle: expired & forged -----------------------------
     past = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
     r = await make_permit(c, admin, spn, wallet_a, "expired", expires=past)
-    s.check("permit expiring in the past is rejected",
-            r.status_code == 400 or "permit_expired" in r.text, f"HTTP {r.status_code}")
+    s.check(
+        "permit expiring in the past is rejected",
+        r.status_code == 400 or "permit_expired" in r.text,
+        f"HTTP {r.status_code}",
+    )
 
-    r = await c.post("/mcp/messages", headers=admin_headers({"Idempotency-Key": f"{TAG}-forged"}),
-                     json=invoke_body(wallet_a, "permit-forged000000000", "forged"))
+    r = await c.post(
+        "/mcp/messages",
+        headers=admin_headers({"Idempotency-Key": f"{TAG}-forged"}),
+        json=invoke_body(wallet_a, "permit-forged000000000", "forged"),
+    )
     err = r.json().get("error", {})
-    s.check("forged permit id is rejected",
-            err.get("message") in ("permit_not_found", "permit_required"), err.get("message"))
+    s.check(
+        "forged permit id is rejected",
+        err.get("message") in ("permit_not_found", "permit_required"),
+        err.get("message"),
+    )
 
     # ---- Verification surface -------------------------------------------
     r = await c.post("/v1/receipts/verify", headers=admin, json={"receipt_id": rid})
     vr = r.json()
-    s.check("receipt verifies as valid", r.status_code == 200 and vr.get("valid") is True,
-            f"reason={vr.get('reason')}")
+    s.check(
+        "receipt verifies as valid",
+        r.status_code == 200 and vr.get("valid") is True,
+        f"reason={vr.get('reason')}",
+    )
 
     r = await c.get(f"/v1/receipts/{rid}/evidence", headers=admin)
     s.check("evidence bundle retrievable", r.status_code == 200)
 
     r = await c.post("/v1/audit/verify-chain", headers=admin, json={})
     av = r.json() if r.status_code == 200 else {}
-    s.check("audit chain verifies clean",
-            r.status_code == 200 and (av.get("valid") is True or av.get("ok") is True),
-            f"checked_events={av.get('checked_events')}")
+    s.check(
+        "audit chain verifies clean",
+        r.status_code == 200 and (av.get("valid") is True or av.get("ok") is True),
+        f"checked_events={av.get('checked_events')}",
+    )
 
     # ---- Tenant isolation (the crux) ------------------------------------
     # Wallet B's scoped key must not touch wallet A's permit, even when it
@@ -266,27 +352,39 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
     pid_v = r.json()["permit_id"]
 
     r = await c.get(f"/v1/permits/{pid_v}", headers=key_headers(key_b))
-    s.check("scoped key cannot READ another tenant's permit", r.status_code in (403, 404),
-            f"HTTP {r.status_code}")
+    s.check(
+        "scoped key cannot READ another tenant's permit",
+        r.status_code in (403, 404),
+        f"HTTP {r.status_code}",
+    )
 
-    r = await c.post("/mcp/messages",
-                     headers=key_headers(key_b, {"Idempotency-Key": f"{TAG}-crosstenant"}),
-                     json=invoke_body(wallet_a, pid_v, "cross-tenant spend"))
+    r = await c.post(
+        "/mcp/messages",
+        headers=key_headers(key_b, {"Idempotency-Key": f"{TAG}-crosstenant"}),
+        json=invoke_body(wallet_a, pid_v, "cross-tenant spend"),
+    )
     err = r.json().get("error", {})
     denied = err.get("message") in ("wallet_access_denied", "permit_wallet_mismatch")
-    s.check("scoped key cannot SPEND another tenant's permit", denied, err.get("message"))
+    s.check(
+        "scoped key cannot SPEND another tenant's permit", denied, err.get("message")
+    )
 
     # And the victim's permit must be untouched by the denied attempt.
     r = await c.get(f"/v1/permits/{pid_v}", headers=admin)
-    s.check("denied cross-tenant attempt did not charge the victim",
-            float(str(r.json().get("spent_credits"))) == 0.0,
-            f"spent={r.json().get('spent_credits')}")
+    s.check(
+        "denied cross-tenant attempt did not charge the victim",
+        float(str(r.json().get("spent_credits"))) == 0.0,
+        f"spent={r.json().get('spent_credits')}",
+    )
 
 
 async def main() -> int:
     if not API_KEY:
-        print("AGENT_MIDDLEWARE_API_KEY is not set. Export a key for the target "
-              "deployment before running; credentials are never hardcoded.", file=sys.stderr)
+        print(
+            "AGENT_MIDDLEWARE_API_KEY is not set. Export a key for the target "
+            "deployment before running; credentials are never hardcoded.",
+            file=sys.stderr,
+        )
         return 2
 
     s = Suite()
@@ -299,7 +397,11 @@ async def main() -> int:
         try:
             await run(c, s)
         except Exception as exc:  # noqa: BLE001 — a crash is a suite failure
-            s.check(f"suite completed without unhandled error ({type(exc).__name__})", False, str(exc))
+            s.check(
+                f"suite completed without unhandled error ({type(exc).__name__})",
+                False,
+                str(exc),
+            )
 
     print("\n" + "=" * 64)
     print(f"RESULT: {s.passed}/{s.passed + s.failed} invariants held")

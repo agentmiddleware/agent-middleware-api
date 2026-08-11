@@ -104,7 +104,7 @@ connect per client:
 
 ```bash
 claude mcp add --transport http agent-middleware \
-  https://api-service-production-433c.up.railway.app/mcp \
+  https://api.thisisatest.tech/mcp \
   --header "X-API-Key: <operator-provisioned key>"
 ```
 

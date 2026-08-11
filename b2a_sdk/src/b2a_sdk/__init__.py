@@ -32,8 +32,6 @@ from .receipt_verifier import (
 )
 
 __version__ = "0.4.0"
-__author__ = "Agent-Native Middleware"
-
 __all__ = [
     "APIError",
     "AgentMiddlewareClient",

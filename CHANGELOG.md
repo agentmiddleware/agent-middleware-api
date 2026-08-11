@@ -5,7 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — planned v1.3.0
+
+The next release consolidates the accumulated trust-plane and public-product
+work as `v1.3.0`. Create that tag only from the exact commit that passes the
+full release gate; do not backfill a final `v1.2.0` tag.
+
+### 🌐 Public product direction
+
+- Canonical public origins are `https://www.thisisatest.tech/` for the
+  buyer-first marketing site and `https://api.thisisatest.tech` for API and
+  machine discovery.
+- Public product naming is **Agent Middleware API**. Contact metadata is omitted
+  until an accountable display name and monitored address are configured.
+- The broad production-beta roadmap and launch-thread draft are explicitly
+  superseded by a one-tool design-partner pilot.
+- Added a buyer-first, contact-gated marketing build with canonical metadata,
+  robots/sitemap, favicon, social preview, and non-PII funnel analytics.
+- Published one self-issued live `partner.echo` portable receipt plus its
+  public-key snapshot and CI-covered offline tamper checks. The proof is
+  explicitly not customer traction or independent key-identity attestation.
+- Replaced the fabricated dashboard telemetry and parse-only verifier with a
+  truthful public status/evidence index that never requests browser API keys.
+- Added exact build commit metadata to both health endpoints and labeled
+  process-local call counters separately from durable dispatch history.
 
 ### 🔭 Self views for the two new front-door steps, and the positioning to match
 
@@ -231,11 +254,13 @@ was already accurate; almost everything else was not.
   target. `PYTHON` and `PYTEST` overrides still work, and CI behaviour is
   unchanged.
 
-## [v1.2.0] - 2026-08-08
+## 1.2.0 deployment (untagged) - 2026-08-08
 
-Trust-plane governance and security-hardening release. Tagged at `f365b69`, the
-commit serving on the live Railway deployment (`/health/dependencies` reports
-`1.2.0`). Changes since v1.1.0.
+The Railway deployment reported application version `1.2.0`, but no final
+`v1.2.0` tag was created. `f365b69` was part of the deployment history, not a
+final release tag. These are the accumulated changes since v1.1.0; they will be
+released together with subsequent public-product work as `v1.3.0` after the
+exact release commit passes the full gate.
 
 ### 🔒 Security
 
@@ -300,7 +325,7 @@ commit serving on the live Railway deployment (`/health/dependencies` reports
 
 ## [v1.0.0] - 2026-04-16
 
-### 🚀 Major Release — Agent-Native Middleware Platform
+### 🚀 Historical broad-platform release
 
 **This release completes the full Agentic Web Interface (AWI) vision from arXiv:2506.10953v1.**
 

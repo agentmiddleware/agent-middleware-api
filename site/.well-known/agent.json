@@ -1,8 +1,13 @@
 {
   "schema_version": "1.0",
-  "name": "permit-trust-plane",
-  "description": "Autonomy needs receipts. This marketing host points autonomous agents to a governed MCP trust plane for scoped authority, metered tool calls, signed receipts, and replay-safe accounting.",
+  "name": "agent-middleware-api",
+  "description": "This marketing host points machines to the Agent Middleware API trust plane for scoped authority, metered MCP calls, signed receipts, and replay-safe accounting.",
   "primary_audience": "autonomous_agents",
+  "buyer_audience": [
+    "platform_engineering",
+    "ai_infrastructure",
+    "security_teams_operating_internal_mcp_tools"
+  ],
   "product_wedge": "governed_mcp_trust_plane",
   "thesis": "Before an autonomous agent acts, it needs bounded authority and portable proof.",
   "product_loop": [
@@ -15,25 +20,25 @@
     "audit",
     "govern"
   ],
-  "canonical_api": "https://api-service-production-433c.up.railway.app",
-  "human_site": "https://agent-middleware-web.vercel.app",
+  "canonical_api": "https://api.thisisatest.tech",
+  "human_site": "https://www.thisisatest.tech/",
   "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
   "discovery": {
-    "agent_manifest": "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
-    "llm_txt": "https://api-service-production-433c.up.railway.app/llm.txt",
-    "llms_txt": "https://api-service-production-433c.up.railway.app/llms.txt",
-    "mcp_tools": "https://api-service-production-433c.up.railway.app/mcp/tools.json",
-    "openapi": "https://api-service-production-433c.up.railway.app/openapi.json",
-    "capability_index": "https://api-service-production-433c.up.railway.app/v1/discover",
-    "dependency_truth": "https://api-service-production-433c.up.railway.app/health/dependencies"
+    "agent_manifest": "https://api.thisisatest.tech/.well-known/agent.json",
+    "llm_txt": "https://api.thisisatest.tech/llm.txt",
+    "llms_txt": "https://api.thisisatest.tech/llms.txt",
+    "mcp_tools": "https://api.thisisatest.tech/mcp/tools.json",
+    "openapi": "https://api.thisisatest.tech/openapi.json",
+    "capability_index": "https://api.thisisatest.tech/v1/discover",
+    "dependency_truth": "https://api.thisisatest.tech/health/dependencies"
   },
   "bootstrap_sequence": [
-    "https://api-service-production-433c.up.railway.app/.well-known/agent.json",
-    "https://api-service-production-433c.up.railway.app/llms.txt",
-    "https://api-service-production-433c.up.railway.app/mcp/tools.json",
-    "https://api-service-production-433c.up.railway.app/openapi.json"
+    "https://api.thisisatest.tech/.well-known/agent.json",
+    "https://api.thisisatest.tech/llms.txt",
+    "https://api.thisisatest.tech/mcp/tools.json",
+    "https://api.thisisatest.tech/openapi.json"
   ],
-  "simulation_and_dependency_truth": "https://api-service-production-433c.up.railway.app/health/dependencies",
+  "simulation_and_dependency_truth": "https://api.thisisatest.tech/health/dependencies",
   "try_it": {
     "mode": "local_self_hosted",
     "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",

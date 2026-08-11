@@ -25,6 +25,8 @@ uv.lock
 
 # Environment & Secrets
 .env
+.env.local
+.env.*.local
 *.pem
 *.key
 
@@ -50,3 +52,4 @@ Thumbs.db
 
 # Docker
 *.log
+.vercel/

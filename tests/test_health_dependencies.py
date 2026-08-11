@@ -15,6 +15,7 @@ from httpx import AsyncClient, ASGITransport
 from pydantic import SecretStr
 
 from app.core import health as health_module
+from app.core.build_metadata import get_build_commit_sha
 from app.core.config import get_settings
 from app.core.health import (
     CHECK_TIMEOUT_SECONDS,
@@ -54,6 +55,7 @@ def _restore_env():
         "MCP_UPSTREAM_BEARER_TOKEN",
         "TRUST_MODE_ENABLED",
         "TRUST_SIGNING_PRIVATE_KEY_B64",
+        "BUILD_COMMIT_SHA",
     ]
     saved = {f: getattr(settings, f) for f in fields}
     reset_runtime_degradation()
@@ -320,7 +322,67 @@ async def test_health_dependencies_endpoint_returns_report(client):
         "sentinel",
     }
     assert "simulation_modes" in body
+    assert body["version"] == "1.3.0"
+    assert "commit_sha" in body
+    assert body["metric_scopes"] == {
+        "upstream_mcp.call_metrics": {
+            "scope": "process_local",
+            "durable": False,
+            "reset_on": "process_restart",
+            "description": "In-memory counters for this API process only.",
+        },
+        "upstream_mcp.dispatch_metrics": {
+            "scope": "durable",
+            "durable": True,
+            "source": "mcp_dispatch_attempts",
+            "description": (
+                "Dispatch history summarized from the durable state backend."
+            ),
+        },
+    }
     assert "unhealthy" in body
+
+
+@pytest.mark.anyio
+async def test_health_surfaces_report_validated_build_commit(client):
+    settings = get_settings()
+    settings.BUILD_COMMIT_SHA = "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+
+    liveness = await client.get("/health")
+    dependencies = await client.get("/health/dependencies")
+
+    assert liveness.status_code == 200
+    assert dependencies.status_code == 200
+    assert liveness.json()["commit_sha"] == "abcdef0123456789abcdef0123456789abcdef01"
+    assert dependencies.json()["commit_sha"] == (
+        "abcdef0123456789abcdef0123456789abcdef01"
+    )
+
+
+@pytest.mark.anyio
+async def test_health_does_not_echo_invalid_build_metadata(client):
+    settings = get_settings()
+    invalid = "not-a-git-sha; do-not-reflect"
+    settings.BUILD_COMMIT_SHA = invalid
+
+    liveness = await client.get("/health")
+    dependencies = await client.get("/health/dependencies")
+
+    assert liveness.json()["commit_sha"] is None
+    assert dependencies.json()["commit_sha"] is None
+    assert invalid not in liveness.text
+    assert invalid not in dependencies.text
+
+
+def test_build_commit_falls_back_to_railway_deployment_metadata(monkeypatch):
+    settings = get_settings()
+    settings.BUILD_COMMIT_SHA = ""
+    monkeypatch.setenv(
+        "RAILWAY_GIT_COMMIT_SHA",
+        "0123456789ABCDEF0123456789ABCDEF01234567",
+    )
+
+    assert get_build_commit_sha() == "0123456789abcdef0123456789abcdef01234567"
 
 
 @pytest.mark.anyio
