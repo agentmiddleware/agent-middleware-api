@@ -677,3 +677,34 @@ async def test_stored_scopes_survive_as_json_on_the_row(
     assert "billing:charge" in json.loads(model.scopes_json)
     assert model.reserved_permit_id.startswith("permit-")
     assert model.permit_id is None
+
+
+@pytest.mark.asyncio
+async def test_wallet_can_list_its_own_requests_without_advancing_them(
+    client, clean_database, monkeypatch, sentinel
+):
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+    stranger = await provision_agent_wallet(client)
+    request_id = (await _request(client, agent)).json()["request_id"]
+    await _request(client, stranger, idem="preq-stranger")
+
+    sentinel.status = "approved"
+    listed = await client.get("/v1/me/permit-requests", headers=agent["agent_headers"])
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["total"] == 1
+    assert body["requests"][0]["request_id"] == request_id
+    # Listing is a read: it must not poll Sentinel or mint the permit.
+    assert body["requests"][0]["status"] == "pending"
+    assert sentinel.polls == 0
+    assert (await _load(request_id)).status == "pending"
+
+    filtered = await client.get(
+        "/v1/me/permit-requests?status=rejected", headers=agent["agent_headers"]
+    )
+    assert filtered.json()["total"] == 0
+
+    assert (
+        await client.get("/v1/me/permit-requests", headers=BOOTSTRAP_HEADERS)
+    ).status_code == 403

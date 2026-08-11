@@ -27,6 +27,8 @@ from app.services.permit_requests import (
     card_view,
     get_permit_request_service,
     permit_request_hash,
+    poll_url,
+    request_to_response,
 )
 
 __all__ = [
@@ -44,6 +46,8 @@ __all__ = [
     "card_view",
     "get_permit_request_service",
     "permit_request_hash",
+    "poll_url",
+    "request_to_response",
     "render_email_html",
     "render_page_html",
     "render_text_summary",

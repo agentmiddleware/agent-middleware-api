@@ -13,13 +13,10 @@ Approve/reject lives in Sentinel.
 
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from fastapi.responses import HTMLResponse
 
 from app.core.auth import AuthContext, get_auth_context
-from app.core.config import get_settings
 from app.db.models import PermitRequestModel
 from app.schemas.trust import PermitRequestCreate, PermitRequestResponse
 from app.trust import (
@@ -33,43 +30,13 @@ from app.trust import (
     get_agent_money,
     get_permit_request_service,
     render_page_html,
+    request_to_response,
 )
 
 router = APIRouter(prefix="/v1/permit-requests", tags=["Trust Permits"])
 
 # Statuses that mean "keep polling"; everything else is terminal.
 _IN_FLIGHT = {REQUEST_STATUS_PENDING, REQUEST_STATUS_MINTING}
-
-
-def _poll_url(request_id: str) -> str:
-    base = (get_settings().PUBLIC_URL or "").strip().rstrip("/")
-    return f"{base}/v1/permit-requests/{request_id}"
-
-
-async def _to_response(model: PermitRequestModel) -> PermitRequestResponse:
-    permit = await get_permit_request_service().minted_permit(model)
-    return PermitRequestResponse(
-        request_id=model.request_id,
-        status=model.status,  # type: ignore[arg-type]
-        issuer_wallet_id=model.issuer_wallet_id,
-        subject_wallet_id=model.subject_wallet_id,
-        subject_key_id=model.subject_key_id,
-        allowed_tools=json.loads(model.allowed_tools_json),
-        scopes=json.loads(model.scopes_json),
-        max_credits=model.max_credits,
-        permit_expires_at=model.permit_expires_at,
-        requires_human_approval=model.requires_human_approval,
-        justification=model.justification,
-        requested_at=model.requested_at,
-        expires_at=model.expires_at,
-        decided_at=model.decided_at,
-        decided_by=model.decided_by,
-        reason=model.reason,
-        simulated=model.simulated,
-        permit_id=model.permit_id,
-        permit=permit,
-        poll_url=_poll_url(model.request_id),
-    )
 
 
 def _status_code(model: PermitRequestModel) -> int:
@@ -149,7 +116,7 @@ async def create_permit_request(
         raise HTTPException(status_code=503, detail=exc.reason)
 
     response.status_code = _status_code(model)
-    return await _to_response(model)
+    return await request_to_response(model)
 
 
 @router.get("/{request_id}", response_model=PermitRequestResponse)
@@ -174,7 +141,7 @@ async def get_permit_request(
         raise HTTPException(status_code=400, detail=exc.reason)
 
     response.status_code = _status_code(model)
-    return await _to_response(model)
+    return await request_to_response(model)
 
 
 @router.get("/{request_id}/card", response_class=HTMLResponse)
