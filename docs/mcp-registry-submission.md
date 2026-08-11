@@ -1,98 +1,116 @@
 # MCP Registry Submission
 
-## URL: https://registry.modelcontextprotocol.io/servers
+Publishing this server to the official MCP Registry
+(`registry.modelcontextprotocol.io`) is done with the checked-in
+[`server.json`](../server.json) and the `mcp-publisher` CLI. There is no
+form-based submission: an earlier version of this document described a
+copy-paste payload and an "Add Server" form that the registry does not have.
+The registry stores metadata only and is consumed by downstream aggregators
+(PulseMCP, the GitHub MCP registry, client marketplaces), which sync roughly
+hourly.
 
-## JSON Payload (copy-paste ready)
+## Publish gate (read first)
 
-Describe only what is mounted in a production-like deployment
-(`ENABLE_PROOF_SURFACES=false`). Proof surfaces are frozen and must not be
-listed as capabilities — see [`PROOF_SURFACES.md`](PROOF_SURFACES.md).
+The registry entry declares a `streamable-http` remote. The production
+gateway does **not** serve that transport yet: `/mcp/messages` implements the
+HTTP/JSON-RPC tools subset only (`tools/list`, `tools/call`), returns
+`-32601` for `initialize`, and requires out-of-band permit context that no
+standard MCP client can supply. Publishing before a spec-compliant Streamable
+HTTP endpoint ships would advertise a transport and lifecycle the server does
+not serve — the same class of overclaim
+[`discovery-standards-proposal.md`](discovery-standards-proposal.md) exists to
+prevent.
 
-```json
-{
-  "name": "Agent Middleware API",
-  "description": "Trust plane for governed MCP tool calls: scoped signed permits, wallet metering, replay-safe invocation, signed receipts, and tamper-evident audit chains. Canonical loop: discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern.",
-  "url": "https://api-service-production-433c.up.railway.app",
-  "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
-  "categories": [
-    "infrastructure",
-    "billing",
-    "agentic-ai"
-  ],
-  "verifications": {
-    "official": false,
-    "repository_verified": true
-  },
-  "features": {
-    "mcp": true,
-    "sse": false,
-    "stdio": false
-  },
-  "auth": {
-    "type": "api_key",
-    "header": "X-API-Key"
-  },
-  "capabilities": [
-    "Governed MCP tool invocation requiring a signed permit and idempotency key",
-    "Wallet-scoped identity and operator-provisioned delegated credentials",
-    "Ed25519-signed permits binding wallet, key, tool, scope, budget, and expiry",
-    "Replay-safe metering: one idempotency key, one dispatch, one debit",
-    "Ed25519-signed receipts with request/response hashes and evidence bundles",
-    "Per-wallet tamper-evident hash-chain audit with verification endpoint"
-  ],
-  "mcpEndpoints": {
-    "tools": "/mcp/tools.json",
-    "messages": "/mcp/messages"
-  },
-  "discoveryEndpoints": {
-    "agentManifest": "/.well-known/agent.json",
-    "llmDocs": "/llms.txt",
-    "openapi": "/openapi.json"
-  },
-  "contact": {
-    "email": "support@agent-middleware.dev",
-    "github": "https://github.com/PetrefiedThunder/agent-middleware-api/issues"
-  }
-}
-```
+The publish workflow enforces this gate: it sends a real MCP `initialize`
+request to the remote URL in `server.json` and refuses to publish unless the
+server answers with a negotiated protocol version. Do not bypass the
+preflight.
 
-`sse` and `stdio` are both `false`: the server implements the HTTP/JSON-RPC
-tools subset at `/mcp/messages` and nothing else. `/mcp/messages` does not
-implement the complete MCP initialization lifecycle, and `/mcp/tools.json` is a
-convenience mirror of the MCP-native `tools/list` method rather than a
-standard discovery path. Do not advertise a transport or lifecycle the server
-does not serve.
+`app/partner_mcp.py` is the in-tree reference for a compliant Streamable HTTP
+server (official SDK, stateless HTTP, bearer auth middleware); the registrable
+endpoint should generalize that pattern over the governed adapter.
 
----
+## The artifact: `server.json`
 
-## Manual Submission Steps
+The repo-root [`server.json`](../server.json) is the complete submission.
+Field notes:
 
-1. Go to: https://registry.modelcontextprotocol.io/servers
-2. Click "Add Server" or "Submit"
-3. Fill in the fields using the JSON above
-4. Submit
+- `name` — reverse-DNS namespace plus server name. GitHub authentication
+  grants `io.github.petrefiedthunder/*`. Publishing under a custom domain
+  namespace (e.g. `dev.agent-middleware/*`) requires DNS or HTTP domain
+  verification with an Ed25519 key instead.
+- `remotes[0].url` — must be publicly reachable HTTPS; localhost and private
+  addresses are rejected. `streamable-http` is the recommended type (`sse` is
+  legacy-only).
+- `remotes[0].headers` — declares the `X-API-Key` credential clients must
+  send. Keys are operator-provisioned
+  ([`partner-api-key-bootstrap.md`](partner-api-key-bootstrap.md)); there is
+  no public self-serve issuance, and a registry listing does not change that.
+- `version` — unique and immutable per publish. Registry entries cannot be
+  edited or deleted after publish; metadata fixes require publishing a new
+  version (prerelease suffixes like `1.2.0-1` work for metadata-only bumps).
+  Version strings must not look like ranges (`^1.2.0`, `1.x` are rejected).
 
-## Verification After Submission
+## Publishing from CI (preferred)
 
-After the registry lists your server, agents can discover it via:
+[`.github/workflows/publish-mcp.yml`](../.github/workflows/publish-mcp.yml)
+publishes on either:
+
+- a tag matching `mcp-registry-v*` (e.g. `mcp-registry-v1.2.0`; the tag
+  version is written into `server.json` before publish), or
+- a manual `workflow_dispatch` run.
+
+It is deliberately **not** wired to release tags (`v*`), so a routine release
+cannot publish a registry entry as a side effect.
+
+Authentication is GitHub OIDC (`id-token: write`) — no long-lived secret. The
+optional `MCP_PREFLIGHT_API_KEY` repository secret lets the preflight
+authenticate its `initialize` probe if the compliant endpoint requires a key.
+
+## Publishing manually
+
 ```bash
-curl https://registry.modelcontextprotocol.io/api/servers/agent-middleware-api
+brew install mcp-publisher   # or the release tarball from the registry repo
+mcp-publisher login github   # device flow; grants io.github.petrefiedthunder/*
+mcp-publisher publish        # reads ./server.json
 ```
 
----
+Run the same `initialize` probe as the workflow before publishing manually;
+the honesty gate applies regardless of which path publishes.
 
-## Server Metadata File (optional - add to repo root)
+## Verification after publish
 
-You can add a `.mcp.json` file to the repo root:
-
-```json
-{
-  "name": "Agent Middleware API",
-  "description": "Trust plane for governed MCP tool calls: signed permits, wallet metering, replay-safe invocation, signed receipts, and audit chains",
-  "url": "https://api-service-production-433c.up.railway.app"
-}
+```bash
+curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.petrefiedthunder/agent-middleware-api"
 ```
 
-This helps agents discover the MCP server when cloning the repo. Keep its
-description in sync with the payload above; a stale description here is the
-kind of drift the discovery honesty tests exist to catch elsewhere.
+The registry lists the entry immediately; downstream aggregators pick it up
+on their next sync (expect hours, not minutes). The registry is in preview —
+breaking changes or data resets may occur before GA.
+
+## Client registration
+
+Once the compliant endpoint is live, users connect per client:
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http agent-middleware \
+  https://api-service-production-433c.up.railway.app/mcp \
+  --header "X-API-Key: <operator-provisioned key>"
+```
+
+**Project-scoped `.mcp.json`** — the repo-root [`.mcp.json`](../.mcp.json) is
+the Claude Code project-scoped format (top-level `mcpServers`); clones of
+this repo can opt in and set `AGENT_MIDDLEWARE_API_KEY` in the environment.
+Until the compliant endpoint ships, Claude Code reports this server as failed
+to connect — that is the honest current state, not a configuration error.
+
+**claude.ai / Claude Desktop custom connectors** require OAuth (dynamic
+client registration or a Client ID Metadata Document) or an authless server;
+static API-key headers are an org-admin beta only. With `X-API-Key`-only
+auth, this server is not registrable on those hosted surfaces yet.
+
+**VS Code** (`.vscode/mcp.json`, top-level key `servers`) and **Cursor**
+(`.cursor/mcp.json`, top-level key `mcpServers`) both accept static headers
+on remote entries.

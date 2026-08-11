@@ -1,0 +1,26 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.petrefiedthunder/agent-middleware-api",
+  "title": "Agent Middleware API",
+  "description": "Governed MCP trust plane: signed permits, wallet metering, replay-safe invocation, signed receipts.",
+  "version": "1.2.0",
+  "websiteUrl": "https://agent-middleware-web.vercel.app",
+  "repository": {
+    "url": "https://github.com/PetrefiedThunder/agent-middleware-api",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api-service-production-433c.up.railway.app/mcp",
+      "headers": [
+        {
+          "name": "X-API-Key",
+          "description": "Operator-provisioned wallet API key; there is no public self-serve issuance",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
