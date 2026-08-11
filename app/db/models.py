@@ -945,6 +945,39 @@ class PermitRequestModel(SQLModel, table=True):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class QuoteModel(SQLModel, table=True):
+    """A signed, single-use price commitment for one tool call.
+
+    An agent asks what a call will cost and gets back a signed quote. Presenting
+    it on the governed invoke charges the quoted credits even if the tool's
+    registered price has moved since — the lock is the product. Single use and
+    short-lived, so the exposure is one call inside the quoted window rather
+    than an open-ended right to the old price.
+    """
+
+    __tablename__ = "quotes"
+
+    quote_id: str = Field(primary_key=True, max_length=64)
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id", index=True)
+    tool: str = Field(max_length=128, index=True)
+    # Price in credits, fixed at issue time. What the charge will use.
+    quoted_credits: Decimal = Field(decimal_places=8)
+    # Category the price was derived from, kept for drift diagnosis.
+    category: str = Field(max_length=50)
+    # active | consumed | expired
+    status: str = Field(default="active", max_length=16, index=True)
+    issued_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    expires_at: datetime = Field(sa_type=NaiveUTCDateTime, index=True)
+    consumed_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    # Set when the quote is spent, so a receipt can be traced back to the
+    # commitment that priced it. No FK: written after the invoke completes.
+    consumed_by_idempotency_key: Optional[str] = Field(default=None, max_length=128)
+    signature: str
+    key_id: str = Field(max_length=64, foreign_key="signing_keys.key_id", index=True)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
 class IdempotencyRecordModel(SQLModel, table=True):
     """Wallet-scoped replay protection for state-changing trust endpoints."""
 

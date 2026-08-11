@@ -57,7 +57,7 @@ from ..schemas.billing import InsufficientFundsResponse, LedgerEntry, ServiceCat
 from ..trust import (
     APPROVAL_STATUS_APPROVED,
     APPROVAL_STATUS_PENDING,
-    DEFAULT_PRICING,
+    QUOTE_REASON_CONSUMED,
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
     AgentMoney,
     HumanApprovalError,
@@ -72,11 +72,14 @@ from ..trust import (
     get_agent_money,
     get_human_approval_service,
     get_idempotency_service,
+    charge_units_for,
     get_permit_service,
+    get_quote_service,
     get_receipt_service,
     record_audit_event,
     get_refund_reconciliation_service,
     sha256_hex,
+    tool_price,
 )
 
 logger = logging.getLogger(__name__)
@@ -173,6 +176,9 @@ class McpContext(BaseModel):
         None, description="Optional request path for tracking"
     )
     permit_id: str | None = Field(None, description="Signed permit for governed calls")
+    quote_id: str | None = Field(
+        None, description="Signed price quote to charge against (locks the price)"
+    )
     idempotency_key: str | None = Field(
         None, description="Replay key for governed calls"
     )
@@ -514,6 +520,7 @@ async def _execute_registered_tool(
     endpoint: str,
     request_id: str | None,
     permit_id: str | None = None,
+    quote_id: str | None = None,
     idempotency_key: str | None = None,
     request_payload: dict[str, Any] | None = None,
 ) -> dict:
@@ -673,6 +680,47 @@ async def _execute_registered_tool(
         idempotency_endpoint = GOVERNED_MCP_IDEMPOTENCY_ENDPOINT
 
     registered_cost = _registered_tool_cost(service, category)
+
+    # A quote is a signed commitment to a price. Resolve it before anything
+    # downstream reads the cost, so the policy decision, the permit budget
+    # check, and the charge all see the number the caller was promised — not
+    # the live price it may have drifted from. Nothing is spent here; the
+    # single-use consume happens immediately before the charge.
+    quoted = None
+    if quote_id:
+        quoted = await get_quote_service().validate_for_action(
+            quote_id=quote_id,
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+        )
+        if not quoted.allowed or quoted.quote is None:
+            reason = quoted.reason or "quote_invalid"
+            await _audit_mcp_invocation(
+                decision=tenant_decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=reason,
+                extra_metadata={
+                    "quote_id": quote_id,
+                    "permit_id": permit_id,
+                    "idempotency_key": idempotency_key,
+                    "request_hash": effective_request_hash,
+                },
+            )
+            await _complete_governed_denial_idempotency(
+                idem=idem,
+                idem_started=idem_started,
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                reason=reason,
+            )
+            # Denying beats quietly charging a different number: a price lock
+            # that silently reprices is worse than no lock at all.
+            raise PermissionError(reason)
+        registered_cost = quoted.quote.quoted_credits
+
     charge_units = _charge_units_for_registered_cost(registered_cost, category)
     estimated_cost = float(registered_cost)
 
@@ -1090,6 +1138,41 @@ async def _execute_registered_tool(
             raise ToolPermissionDenied(reason, receipt=receipt_payload)
 
     description = f"MCP {transport} invoke {tool_name}"
+    if quoted is not None and quote_id:
+        # Single use, checked atomically against the window. Losing here means
+        # a concurrent invoke spent the quote, or it expired between the read
+        # above and now — either way this call has no locked price to stand on.
+        if not await get_quote_service().consume(
+            quote_id, idempotency_key=idempotency_key
+        ):
+            reason = QUOTE_REASON_CONSUMED
+            await _audit_mcp_invocation(
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=reason,
+                extra_metadata={
+                    "quote_id": quote_id,
+                    "permit_id": permit_id,
+                    "idempotency_key": idempotency_key,
+                    "request_hash": effective_request_hash,
+                },
+            )
+            if governed_call and permit_model:
+                await get_permit_service().release_budget(
+                    permit_model.permit_id,
+                    registered_cost,
+                )
+            await _complete_governed_denial_idempotency(
+                idem=idem,
+                idem_started=idem_started,
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                reason=reason,
+            )
+            raise PermissionError(reason)
     try:
         (
             charge_result,
@@ -1140,6 +1223,11 @@ async def _execute_registered_tool(
             return replayed.replay.response_json
         raise exc
     if isinstance(charge_result, InsufficientFundsResponse):
+        # The quote was consumed just above but no credits moved. Hand the
+        # commitment back so a wallet top-up inside the window can still use
+        # the price it was promised.
+        if quoted is not None and quote_id:
+            await get_quote_service().release(quote_id)
         denial_reason = charge_result.error
         denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:
@@ -2116,19 +2204,16 @@ def _registered_tool_cost(
     service: dict[str, Any],
     category: ServiceCategory,
 ) -> Decimal:
-    default_price = DEFAULT_PRICING[category][1]
-    exact_price = service.get("credits_per_unit_exact")
-    if exact_price is not None:
-        return Decimal(str(exact_price))
-    return Decimal(str(service.get("credits_per_unit", default_price)))
+    # Shared with the quote endpoint so a locked quote and the charge that
+    # honors it are computed from one definition of price.
+    return tool_price(service, category)
 
 
 def _charge_units_for_registered_cost(
     registered_cost: Decimal,
     category: ServiceCategory,
 ) -> Decimal:
-    default_price = DEFAULT_PRICING[category][1]
-    return registered_cost / default_price
+    return charge_units_for(registered_cost, category)
 
 
 def _receipt_response_payload(receipt: Any) -> dict[str, Any]:
@@ -2649,6 +2734,7 @@ async def invoke_tool(
             wallet_id=request.arguments.get("wallet_id", ""),
             request_path=None,
             permit_id=None,
+            quote_id=None,
             idempotency_key=None,
         )
 
@@ -2661,6 +2747,7 @@ async def invoke_tool(
         "mcpContext": {
             "wallet_id": mcp_context.wallet_id,
             "permit_id": mcp_context.permit_id,
+            "quote_id": mcp_context.quote_id,
             "idempotency_key": mcp_context.idempotency_key,
         },
     }

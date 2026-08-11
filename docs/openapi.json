@@ -3591,6 +3591,134 @@
         }
       }
     },
+    "/v1/quotes": {
+      "post": {
+        "tags": [
+          "Trust Permits"
+        ],
+        "summary": "Create Quote",
+        "description": "Quote one call of a tool for a wallet the caller owns.\n\nThe price is read from the tool's live registration and frozen into a\nsigned statement. No idempotency key: quoting is free, has no side effect\non the wallet, and a duplicate quote is simply a second unspent\ncommitment that expires on its own.",
+        "operationId": "create_quote_v1_quotes_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quotes/{quote_id}": {
+      "get": {
+        "tags": [
+          "Trust Permits"
+        ],
+        "summary": "Get Quote",
+        "operationId": "get_quote_v1_quotes__quote_id__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "quote_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Quote Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/receipts": {
       "get": {
         "tags": [
@@ -9184,6 +9312,18 @@
             "title": "Permit Id",
             "description": "Signed permit for governed calls"
           },
+          "quote_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Id",
+            "description": "Signed price quote to charge against (locks the price)"
+          },
           "idempotency_key": {
             "anyOf": [
               {
@@ -10635,6 +10775,103 @@
           "features"
         ],
         "title": "PricingTier"
+      },
+      "QuoteCreateRequest": {
+        "properties": {
+          "wallet_id": {
+            "type": "string",
+            "title": "Wallet Id"
+          },
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_id",
+          "tool"
+        ],
+        "title": "QuoteCreateRequest",
+        "description": "Ask what one call of a tool will cost this wallet."
+      },
+      "QuoteResponse": {
+        "properties": {
+          "quote_id": {
+            "type": "string",
+            "title": "Quote Id"
+          },
+          "wallet_id": {
+            "type": "string",
+            "title": "Wallet Id"
+          },
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "quoted_credits": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quoted Credits"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "consumed",
+              "expired"
+            ],
+            "title": "Status"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Issued At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "consumed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumed At"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          },
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "quote_id",
+          "wallet_id",
+          "tool",
+          "quoted_credits",
+          "category",
+          "status",
+          "issued_at",
+          "expires_at",
+          "signature",
+          "key_id"
+        ],
+        "title": "QuoteResponse"
       },
       "ReceiptEvidenceCheck": {
         "properties": {

@@ -106,6 +106,24 @@ from .policy import (
     evaluate_wallet_policy,
     record_governed_action,
 )
+from .quotes import (
+    QUOTE_REASON_CONSUMED,
+    QUOTE_REASON_EXPIRED,
+    QUOTE_REASON_NOT_FOUND,
+    QUOTE_REASON_TOOL_MISMATCH,
+    QUOTE_REASON_WALLET_MISMATCH,
+    QUOTE_STATUS_ACTIVE,
+    QUOTE_STATUS_CONSUMED,
+    QUOTE_STATUS_EXPIRED,
+    QuoteError,
+    QuoteService,
+    QuoteValidation,
+    charge_units_for,
+    get_quote_service,
+    quote_model_to_response,
+    quote_ttl_seconds,
+    tool_price,
+)
 from .receipts import ReceiptError, ReceiptService, get_receipt_service
 from .refund_reconciliation import (
     RefundReconciliationError,
@@ -164,6 +182,23 @@ __all__ = [
     "render_email_html",
     "render_page_html",
     "render_text_summary",
+    # signed price quotes
+    "QUOTE_REASON_CONSUMED",
+    "QUOTE_REASON_EXPIRED",
+    "QUOTE_REASON_NOT_FOUND",
+    "QUOTE_REASON_TOOL_MISMATCH",
+    "QUOTE_REASON_WALLET_MISMATCH",
+    "QUOTE_STATUS_ACTIVE",
+    "QUOTE_STATUS_CONSUMED",
+    "QUOTE_STATUS_EXPIRED",
+    "QuoteError",
+    "QuoteService",
+    "QuoteValidation",
+    "charge_units_for",
+    "get_quote_service",
+    "quote_model_to_response",
+    "quote_ttl_seconds",
+    "tool_price",
     # receipts
     "ReceiptService",
     "ReceiptError",
