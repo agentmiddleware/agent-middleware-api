@@ -152,6 +152,9 @@ class PermitVerifyRequest(BaseModel):
 class PermitVerifyResponse(BaseModel):
     valid: bool
     reason: str | None = None
+    # The evaluated constraint behind a denial: what was required, what is
+    # left, which limit was hit. Absent when the permit is valid.
+    details: dict[str, Any] | None = None
     permit: PermitResponse | None = None
 
 

@@ -31,9 +31,29 @@ class PermitError(RuntimeError):
 
 @dataclass(frozen=True)
 class PermitValidation:
+    """Verdict on one governed action, with the numbers behind a denial.
+
+    ``reason`` names what failed; ``details`` says by how much. An agent that
+    is told only ``permit_budget_exceeded`` can do nothing but retry and fail
+    again — the same denial with ``{"required": 50, "remaining": 12}`` tells it
+    what permit to ask for. Details describe the caller's own permit, so they
+    disclose nothing the permit holder cannot already read.
+    """
+
     allowed: bool
     reason: str | None
     permit: PermitModel | None
+    details: dict[str, Any] | None = None
+
+
+def _num(value: Decimal | None) -> str | None:
+    """Render a credit amount as an exact decimal string for a JSON payload."""
+    return None if value is None else str(value)
+
+
+def _stamp(value: datetime | None) -> str | None:
+    """Render a naive-UTC column value as an explicit UTC timestamp."""
+    return None if value is None else value.replace(microsecond=0).isoformat() + "Z"
 
 
 def _loads_list(value: str) -> list[str]:
@@ -432,24 +452,72 @@ class PermitService:
         key_id: str | None,
         arguments: dict[str, Any] | None = None,
     ) -> PermitValidation:
+        now = utc_now()
         if model.status != "active":
-            return PermitValidation(False, f"permit_{model.status}", model)
+            return PermitValidation(
+                False,
+                f"permit_{model.status}",
+                model,
+                {
+                    "status": model.status,
+                    "revoked_at": _stamp(model.revoked_at),
+                },
+            )
         expires_at = to_naive_utc(model.expires_at)
-        if expires_at <= utc_now():
-            return PermitValidation(False, "permit_expired", model)
+        if expires_at <= now:
+            return PermitValidation(
+                False,
+                "permit_expired",
+                model,
+                {
+                    "expired_at": _stamp(expires_at),
+                    "checked_at": _stamp(now),
+                },
+            )
+        # Binding mismatches carry no values: the caller failed to prove it is
+        # the subject, so telling it which wallet or key the permit is bound to
+        # would answer a question it has not earned.
         if model.subject_wallet_id != wallet_id:
-            return PermitValidation(False, "permit_wallet_mismatch", model)
+            return PermitValidation(
+                False, "permit_wallet_mismatch", model, {"bound_to": "subject_wallet_id"}
+            )
         if model.subject_key_id and model.subject_key_id != key_id:
-            return PermitValidation(False, "permit_key_mismatch", model)
+            return PermitValidation(
+                False, "permit_key_mismatch", model, {"bound_to": "subject_key_id"}
+            )
         allowed_tools = _loads_list(model.allowed_tools_json)
         if allowed_tools and tool_name not in allowed_tools:
-            return PermitValidation(False, "permit_tool_not_allowed", model)
+            return PermitValidation(
+                False,
+                "permit_tool_not_allowed",
+                model,
+                {"requested_tool": tool_name, "allowed_tools": allowed_tools},
+            )
         scopes = set(_loads_list(model.scopes_json))
         required_scope = f"tool:{tool_name}:invoke"
         if required_scope not in scopes or "billing:charge" not in scopes:
-            return PermitValidation(False, "permit_scope_missing", model)
+            required = [required_scope, "billing:charge"]
+            return PermitValidation(
+                False,
+                "permit_scope_missing",
+                model,
+                {
+                    "required_scopes": required,
+                    "missing_scopes": [s for s in required if s not in scopes],
+                },
+            )
         if model.spent_credits + estimated_credits > model.max_credits:
-            return PermitValidation(False, "permit_budget_exceeded", model)
+            return PermitValidation(
+                False,
+                "permit_budget_exceeded",
+                model,
+                {
+                    "required_credits": _num(estimated_credits),
+                    "remaining_credits": _num(model.max_credits - model.spent_credits),
+                    "spent_credits": _num(model.spent_credits),
+                    "max_credits": _num(model.max_credits),
+                },
+            )
 
         # Permit schema v2 constraint checks
         # 1. max_calls_per_tool
@@ -461,26 +529,57 @@ class PermitService:
             # malformed constraint into a permissive one; fail closed instead
             # of raising a 500 on the governed path.
             if type(limit) is not int:
-                return PermitValidation(False, "permit_max_calls_exceeded", model)
+                return PermitValidation(
+                    False,
+                    "permit_max_calls_exceeded",
+                    model,
+                    {"tool": tool_name, "limit": "malformed"},
+                )
             call_count = await self._count_tool_calls(model.permit_id, tool_name)
             if call_count >= limit:
-                return PermitValidation(False, "permit_max_calls_exceeded", model)
+                return PermitValidation(
+                    False,
+                    "permit_max_calls_exceeded",
+                    model,
+                    {"tool": tool_name, "limit": limit, "calls_made": call_count},
+                )
 
         # 2. aggregate_value_cap
         if model.aggregate_value_cap is not None:
             total_charged = await self._sum_permit_charges(model.permit_id)
             if total_charged + estimated_credits > model.aggregate_value_cap:
-                return PermitValidation(False, "permit_aggregate_value_cap_exceeded", model)
+                return PermitValidation(
+                    False,
+                    "permit_aggregate_value_cap_exceeded",
+                    model,
+                    {
+                        "required_credits": _num(estimated_credits),
+                        "charged_to_date": _num(total_charged),
+                        "aggregate_value_cap": _num(model.aggregate_value_cap),
+                    },
+                )
 
         # 3. forbidden_fields
         forbidden = _loads_list(model.forbidden_fields_json or "[]")
         if forbidden and arguments:
             hit = _find_forbidden_field(arguments, set(forbidden))
             if hit is not None:
-                return PermitValidation(False, f"permit_forbidden_field:{hit}", model)
+                # The field NAME is echoed, never its value: the value is the
+                # thing the permit forbade carrying.
+                return PermitValidation(
+                    False,
+                    f"permit_forbidden_field:{hit}",
+                    model,
+                    {"field": hit, "forbidden_fields": forbidden},
+                )
 
         if not await self.verify_signature(model):
-            return PermitValidation(False, "permit_signature_invalid", model)
+            return PermitValidation(
+                False,
+                "permit_signature_invalid",
+                model,
+                {"key_id": model.key_id},
+            )
         return PermitValidation(True, None, model)
 
     async def _count_tool_calls(self, permit_id: str, tool_name: str) -> int:

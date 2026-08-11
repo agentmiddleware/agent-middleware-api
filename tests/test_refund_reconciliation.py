@@ -170,25 +170,39 @@ async def test_failed_refund_receipt_preserves_consumed_human_approval(
 
 
 @pytest.mark.anyio
-async def test_refund_reconciliation_is_bootstrap_admin_only(
+async def test_refund_listing_is_wallet_scoped_and_retry_stays_admin_only(
     client,
     clean_database,
 ):
+    """A wallet can see money owed back to it; only an operator can move it."""
     case = await _create_unrefunded_failure(client)
     receipt_id = case["receipt"]["receipt_id"]
     agent_headers = case["provisioned"]["agent_headers"]
+    wallet_id = case["provisioned"]["agent_wallet_id"]
 
     listing = await client.get(
         "/v1/receipts/reconciliation/refunds",
         headers=agent_headers,
     )
+    assert listing.status_code == 200
+    items = listing.json()["items"]
+    assert items, "the wallet's own pending item should be visible to it"
+    assert all(item["wallet_id"] == wallet_id for item in items)
+
+    # A different wallet sees none of it.
+    other = await provision_agent_wallet(client)
+    theirs = await client.get(
+        "/v1/receipts/reconciliation/refunds",
+        headers=other["agent_headers"],
+    )
+    assert theirs.status_code == 200
+    assert theirs.json()["items"] == []
+
+    # Retrying moves money, so it is still operator-only.
     retry = await client.post(
         f"/v1/receipts/reconciliation/refunds/{receipt_id}/retry",
         headers=agent_headers,
     )
-
-    assert listing.status_code == 403
-    assert listing.json()["detail"]["error"] == "admin_access_denied"
     assert retry.status_code == 403
     assert retry.json()["detail"]["error"] == "admin_access_denied"
 

@@ -30,6 +30,30 @@ full release gate; do not backfill a final `v1.2.0` tag.
 - Added exact build commit metadata to both health endpoints and labeled
   process-local call counters separately from durable dispatch history.
 
+### 🧾 Denials an agent can act on, and trust reads a wallet can do itself
+
+- **Permit denials now carry `details`** — the evaluated constraint and its
+  numbers: `required_credits`/`remaining_credits` on a budget denial,
+  `limit`/`calls_made` on a call-cap denial, `requested_tool`/`allowed_tools`,
+  `missing_scopes`, `expired_at`, and so on. Surfaced on both governed
+  transports (`detail.details` and JSON-RPC `error.data.details`), on
+  `POST /v1/permits/verify`, on governed AWI actions, and as `denial_details`
+  in the signed audit metadata. The denial receipt is unchanged and still
+  signed; details sit beside it. See
+  [`docs/denial-details.md`](docs/denial-details.md).
+- **Binding mismatches stay silent about values.** `permit_wallet_mismatch` and
+  `permit_key_mismatch` report only which binding failed — a caller that has
+  not proved it is the subject learns nothing about the wallet or key the
+  permit belongs to. Forbidden-field denials echo the field name, never its
+  value.
+- **Trust reads that required an operator key are now wallet self-service**,
+  scoped to the caller: `GET /v1/permits` with no `wallet_id`,
+  `GET /v1/audit/events` (including `summary=true`), `GET /v1/audit/summary`,
+  `POST /v1/audit/verify-chain` with no wallet, and
+  `GET /v1/receipts/reconciliation/refunds`. Naming another wallet is still
+  refused, operator keys still get the cross-tenant view, and the refund
+  **retry** stays operator-only because it moves money.
+
 ### 🔭 Self views for the two new front-door steps, and the positioning to match
 
 - **Added `GET /v1/me/permit-requests` and `GET /v1/me/quotes`** — the calling

@@ -10422,6 +10422,18 @@
             ],
             "title": "Reason"
           },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
           "permit": {
             "anyOf": [
               {

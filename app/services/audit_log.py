@@ -190,10 +190,18 @@ async def summarize_audit_events(
     *,
     created_after: datetime | None = None,
     created_before: datetime | None = None,
+    wallet_id: str | None = None,
 ) -> dict[str, Any]:
+    """Aggregate audit events, optionally for a single wallet.
+
+    ``wallet_id`` scopes the aggregate to one tenant, which is what lets a
+    wallet key read a summary of its own activity without an operator key.
+    Unscoped (admin) summaries still span every wallet.
+    """
     events = await list_audit_events(
         created_after=created_after,
         created_before=created_before,
+        wallet_id=wallet_id,
         limit=10_000,
     )
     summary: dict[str, Any] = {

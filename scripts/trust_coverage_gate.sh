@@ -27,6 +27,7 @@ TRUST_COVERAGE_TESTS=(
   tests/test_human_approval_gate.py
   tests/test_permit_request_flow.py
   tests/test_signed_quotes.py
+  tests/test_denial_details_and_self_service.py
 )
 
 TRUST_COVERAGE_MODULES=(
