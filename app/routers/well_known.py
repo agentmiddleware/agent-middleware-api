@@ -9,15 +9,25 @@ workloads are labeled proof surfaces (often simulated) and must not be
 read as production-complete features.
 """
 
+import base64
+import binascii
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ..core.config import get_settings
+from ..core.config import get_settings, public_api_origin
 from ..schemas.awi import AWIDiscoveryManifest, AWIRepresentationType
 from ..services.awi_action_vocab import get_awi_vocabulary
+from ..services.signing_keys import (
+    RECEIPT_CANONICALIZATION,
+    SigningKeyError,
+    get_signing_key_service,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="", tags=["Agent Discovery"])
 
@@ -150,11 +160,6 @@ def get_agent_first_metadata() -> dict[str, Any]:
     }
 
 
-def _public_api_origin() -> str:
-    """Absolute public API origin from PUBLIC_URL (empty when unset)."""
-    return (get_settings().PUBLIC_URL or "").strip().rstrip("/")
-
-
 def _authentication_manifest() -> dict[str, Any]:
     """Honest auth discovery: no public self-serve key mint."""
     return {
@@ -184,6 +189,7 @@ def _local_try_it_manifest() -> dict[str, Any]:
             "signed_receipt",
             "replay_without_second_charge",
             "out_of_scope_denial",
+            "offline_receipt_verification",
         ],
         "note": (
             "Runs the real FastAPI trust path against a throwaway local SQLite "
@@ -292,6 +298,7 @@ class AgentPluginManifest(BaseModel):
             "security_limitations": "/SECURITY_LIMITATIONS.md",
             "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
             "partner_api_key_bootstrap": "/docs/partner-api-key-bootstrap.md",
+            "agent_accountability": "/docs/agent-accountability.md",
         }
     )
 
@@ -315,7 +322,10 @@ def _product_endpoints() -> dict[str, str]:
         "audit": "/v1/audit",
         "policies": "/v1/policies",
         "evidence": "/v1/evidence",
-        "keys": "/v1/keys",
+        # Mounted prefix is /v1/signing-keys; "/v1/keys" was advertised for a
+        # while and resolved to nothing, so discovery clients 404'd on it.
+        "keys": "/v1/signing-keys",
+        "trust_keys": "/.well-known/trust-keys.json",
         "api_keys": "/v1/api-keys",
         "me": "/v1/me",
         "health": "/health",
@@ -353,6 +363,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
         "security_limitations": "/SECURITY_LIMITATIONS.md",
         "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
         "partner_api_key_bootstrap": "/docs/partner-api-key-bootstrap.md",
+        "agent_accountability": "/docs/agent-accountability.md",
     }
 
     cfg = get_settings()
@@ -383,7 +394,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
             "Additional routers are labeled proof surfaces, not the product wedge."
         ),
         version=cfg.APP_VERSION,
-        canonical_api=_public_api_origin(),
+        canonical_api=public_api_origin(),
         capabilities=list(PRODUCT_CAPABILITIES),
         proof_surfaces=proof_surfaces,
         endpoints=endpoints,
@@ -500,6 +511,105 @@ async def get_awi_json():
             },
         )
     return JSONResponse(content=build_awi_manifest(), media_type="application/json")
+
+
+def _b64_to_b64url(value: str) -> str | None:
+    """Re-encode standard base64 key material as unpadded base64url for JWK."""
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _published_key(key: Any) -> dict[str, Any]:
+    """Project one signing key into its public, verifier-facing shape."""
+    entry: dict[str, Any] = {
+        "kid": key.key_id,
+        "alg": key.alg,
+        "status": key.status,
+        "public_key_b64": key.public_key_b64,
+        "created_at": key.created_at.isoformat() if key.created_at else None,
+        "activated_at": key.activated_at.isoformat() if key.activated_at else None,
+        "retired_at": key.retired_at.isoformat() if key.retired_at else None,
+    }
+    # JWK mirror for callers using an off-the-shelf JOSE library. Ed25519 lives
+    # in the OKP key type; `x` is the raw 32-byte public key as base64url.
+    x = _b64_to_b64url(key.public_key_b64)
+    if x is not None and key.alg == "Ed25519":
+        entry["jwk"] = {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": x,
+            "kid": key.key_id,
+            "alg": "EdDSA",
+            "use": "sig",
+        }
+    return entry
+
+
+@router.get(
+    "/.well-known/trust-keys.json",
+    summary="Trust-Plane Public Signing Keys",
+    description=(
+        "Unauthenticated publication of the Ed25519 public keys this plane "
+        "signs receipts, permits, and audit events with. Deliberately open: a "
+        "receipt is only portable evidence if someone who holds no credential "
+        "here can still check its signature. Retired keys stay listed so "
+        "historical receipts remain verifiable; disabled keys are withheld "
+        "because the plane itself refuses to verify against them."
+    ),
+)
+async def get_trust_keys_json():
+    """Serve the public verification keys for offline receipt checking."""
+    service = get_signing_key_service()
+    try:
+        # Materialize the active key so a freshly deployed plane publishes a
+        # usable key rather than an empty list.
+        await service.ensure_active_key()
+    except (SigningKeyError, RuntimeError):
+        # Misconfigured or absent signing material must not take down public
+        # verification of receipts already signed under earlier keys.
+        logger.warning("trust_keys_active_key_unavailable", exc_info=True)
+
+    try:
+        keys = await service.list_public_keys()
+    except (SigningKeyError, RuntimeError):
+        # Fail loudly rather than serving an empty key set. A verifier that
+        # sees zero keys would conclude the signing key does not exist and
+        # report the receipt as unverifiable — indistinguishable from a
+        # forgery. A 503 says "ask again", which is the truth.
+        logger.warning("trust_keys_unavailable", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "trust_keys_unavailable",
+                "detail": (
+                    "The signing key store is unreachable. Treat receipts as "
+                    "unverified-pending, not invalid, and retry."
+                ),
+            },
+        )
+
+    return JSONResponse(
+        content={
+            "schema_version": "1.0",
+            "issuer": public_api_origin(),
+            "alg": "Ed25519",
+            "canonicalization": RECEIPT_CANONICALIZATION,
+            "keys": [_published_key(key) for key in keys],
+            "verification": {
+                "portable_receipt": "/v1/receipts/{receipt_id}/portable",
+                "note": (
+                    "Verify signature over the bundle's `signing_input` bytes "
+                    "with the key whose `kid` matches. Reading a receipt "
+                    "requires authorization; verifying one you were given "
+                    "does not."
+                ),
+            },
+        },
+        media_type="application/json",
+    )
 
 
 @router.get(

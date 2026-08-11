@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🧾 Receipts that outlive the plane that issued them
+
+- **Receipts are now verifiable by parties who hold no credential here.**
+  Previously a receipt could only be checked by asking this plane, over an
+  authenticated endpoint, restricted to wallet parties — which made it a claim
+  backed by the issuer's word rather than portable evidence. Three additions
+  close that gap:
+  - `GET /.well-known/trust-keys.json` publishes the Ed25519 public keys
+    unauthenticated, in both raw and JWK form. Retired keys stay listed so
+    ordinary rotation does not invalidate historical receipts; `disabled` keys
+    are withheld, matching the plane's own refusal to verify against them.
+  - `GET /v1/receipts/{receipt_id}/portable` exports the exact canonical bytes
+    the signature covers, plus signature, `kid`, and canonicalization version.
+    Reading it is authorized as before; what comes back is not. The export
+    refuses (`409`) rather than emitting a bundle whose stored signature does
+    not verify.
+  - `b2a_sdk.receipt_verifier` verifies a bundle against a key set with no
+    import of this application, no database, and no network. A
+    `b2a-verify-receipt` CLI ships with it (`pip install "b2a-sdk[verify]"`).
+- **"Cannot tell" is never reported as "forged."** The verifier separates a
+  verdict on the receipt (`INVALID`) from a statement about the verifier's own
+  situation (`UNKNOWN_KEY`, `MALFORMED`, `UNSUPPORTED`), and the CLI mirrors
+  that split in its exit codes (`0`/`1`/`2`). For the same reason
+  `/.well-known/trust-keys.json` returns `503` instead of an empty key list
+  when the key store is unreachable — an empty list would read as "this key
+  does not exist," which is indistinguishable from a forgery.
+- **Every reported field is read from the signed bytes.** Envelope fields are
+  unauthenticated; a bundle whose outer `receipt_id` disagrees with the signed
+  one is rejected rather than quietly trusted.
+- **`make prove-trust-plane` now proves offline verification.** It exports a
+  receipt, fetches the keys with no credentials, verifies through the SDK
+  verifier, and asserts that editing the signed bytes is detected while a
+  missing key reports `unknown_key`. Added to the `try_it.proves` list in
+  discovery.
+- **Fixed a dead endpoint in discovery.** `/.well-known/agent.json` advertised
+  `keys: /v1/keys`, but the router is mounted at `/v1/signing-keys`, so any
+  client following discovery got a 404. A new drift test asserts that *every*
+  advertised endpoint resolves to a mounted route, rather than checking paths
+  one at a time.
+- **Added [docs/agent-accountability.md](docs/agent-accountability.md)** — why
+  an autonomous agent runs inside the permit/receipt loop, how to verify a
+  receipt, and a plainly-stated list of what receipts do not prove (tool
+  correctness, response content, issuer honesty, completeness, durability
+  across key revocation, or a compromised issuer origin).
+
 ### 📖 Failure semantics as a first-class spec
 
 - **Added [docs/failure-semantics.md](docs/failure-semantics.md).** The

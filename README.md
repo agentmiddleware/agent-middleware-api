@@ -192,7 +192,9 @@ asserts all of the following in one run:
 5. Signed receipt, evidence bundle, and valid audit chain.
 6. Replay returning the same receipt without a second debit or execution.
 7. Out-of-scope denial without a charge.
-8. Detection of tampered receipt and audit data.
+8. Offline verification of the receipt with no credentials, including
+   detection of an edited bundle.
+9. Detection of tampered receipt and audit data.
 
 To run the same proof without `uv`:
 
@@ -328,6 +330,8 @@ put one real internal tool behind the governed path.
 | `GET /v1/me/receipts` | Current wallet's receipt view | Wallet key |
 | `GET /v1/me/audit/events` | Current wallet's audit view | Wallet key |
 | `POST /v1/receipts/verify` | Verify signed receipt material | Authenticated |
+| `GET /v1/receipts/{receipt_id}/portable` | Export a receipt as offline-verifiable evidence | Authorized wallet/admin |
+| `GET /.well-known/trust-keys.json` | Public signing keys for offline receipt verification | Public, unauthenticated |
 | `GET /v1/evidence/{receipt_id}` | Permit, dispatch, ledger, receipt, and audit evidence bundle | Authorized wallet/admin |
 | `POST /v1/audit/verify-chain` | Verify a wallet audit chain | Authorized wallet/admin |
 | `GET /v1/receipts/reconciliation/refunds` | Inspect failed-refund work items | Bootstrap admin only |
@@ -518,6 +522,7 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
 - [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
 - [docs/failure-semantics.md](docs/failure-semantics.md) — every terminal outcome of a metered call that dies mid-flight, and the test that proves each
+- [docs/agent-accountability.md](docs/agent-accountability.md) — why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
 - [docs/golden-path.md](docs/golden-path.md) — wallet-scoped end-to-end API flow
 - [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) — replace the demo tool with one internal tool

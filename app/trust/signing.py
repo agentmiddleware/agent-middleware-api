@@ -8,6 +8,7 @@ from :mod:`app.services.signing_keys`.
 from __future__ import annotations
 
 from app.services.signing_keys import (
+    RECEIPT_CANONICALIZATION,
     SigningKeyError,
     SigningKeyService,
     canonical_json,
@@ -16,6 +17,7 @@ from app.services.signing_keys import (
 )
 
 __all__ = [
+    "RECEIPT_CANONICALIZATION",
     "SigningKeyError",
     "SigningKeyService",
     "canonical_json",

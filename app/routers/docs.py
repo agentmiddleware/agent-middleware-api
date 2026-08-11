@@ -54,6 +54,17 @@ _TRUST_PLANE_SECTIONS = [
         "summary": "Demo + dogfood path (partner.notes.write locally).",
     },
     {
+        "id": "agent_accountability",
+        "title": "Agent accountability",
+        "path": "/docs/agent-accountability.md",
+        "content_type": "text/markdown",
+        "summary": (
+            "Why an agent runs inside the permit/receipt loop, how to verify "
+            "a receipt offline with no credentials, and what receipts do not "
+            "prove."
+        ),
+    },
+    {
         "id": "overview",
         "title": "API Overview (llms.txt)",
         "path": "/llms.txt",

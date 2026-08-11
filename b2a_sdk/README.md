@@ -22,7 +22,12 @@ For repository development:
 python -m pip install -e './b2a_sdk[dev]'
 ```
 
-`httpx` is the only runtime dependency.
+`httpx` is the only runtime dependency. Offline receipt verification
+additionally needs `cryptography`, kept behind an extra:
+
+```bash
+python -m pip install './b2a_sdk[verify]'
+```
 
 ## Governed tool call
 
@@ -80,6 +85,44 @@ invoking tools. Reusing a key with a different request raises
 If a remote tool was dispatched but its outcome could not be confirmed,
 `invoke_tool` raises `DeliveryUncertainError`. Its `receipt_id` identifies the
 signed, charged uncertainty receipt; the SDK never retries the dispatch.
+
+## Verifying a receipt offline
+
+`b2a_sdk.receipt_verifier` checks a receipt with no server, no database, and
+no credential — it imports nothing from the middleware application. Use it to
+audit a receipt handed to you by another agent, or to re-check your own long
+after the call.
+
+```python
+from b2a_sdk.receipt_verifier import key_set_from_document, verify_bundle
+
+# bundle:   GET /v1/receipts/{receipt_id}/portable   (authorized)
+# keys:     GET /.well-known/trust-keys.json         (unauthenticated)
+result = verify_bundle(bundle, key_set_from_document(keys))
+
+if result.ok:
+    print(result.claims["tool"], result.claims["credits_charged"])
+elif result.is_tampered:
+    print("receipt does not verify:", result.reason)
+else:
+    print("cannot determine:", result.status.value, result.reason)
+```
+
+That three-way split is deliberate. `is_tampered` is a verdict on the receipt;
+`UNKNOWN_KEY`, `MALFORMED`, and `UNSUPPORTED` say only that this verifier could
+not decide — usually a stale key set. Treating them alike turns an outage into
+a fraud alarm.
+
+The same check from a shell:
+
+```bash
+b2a-verify-receipt --bundle receipt.json --keys trust-keys.json
+# exit 0 verified, 1 forged, 2 undetermined
+```
+
+Pass `--issuer https://api.example.com` to fetch the key set instead of
+supplying it, and `--expect-issuer` to require the bundle to name the origin
+you meant to audit.
 
 ## Compatibility
 

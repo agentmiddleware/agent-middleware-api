@@ -128,7 +128,9 @@ jobs:
           mypy --follow-imports=skip \
             b2a_sdk/src/b2a_sdk/client.py \
             b2a_sdk/src/b2a_sdk/models.py \
-            b2a_sdk/src/b2a_sdk/errors.py
+            b2a_sdk/src/b2a_sdk/errors.py \
+            b2a_sdk/src/b2a_sdk/receipt_verifier.py \
+            b2a_sdk/src/b2a_sdk/verify_cli.py
 
       - name: Upload SDK artifacts
         if: matrix.python-version == '3.12'

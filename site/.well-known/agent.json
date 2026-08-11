@@ -45,7 +45,8 @@
       "metered_mcp_invoke",
       "signed_receipt",
       "replay_without_second_charge",
-      "out_of_scope_denial"
+      "out_of_scope_denial",
+      "offline_receipt_verification"
     ],
     "note": "Runs the real FastAPI trust path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim."
   },
