@@ -143,6 +143,11 @@ class Settings(BaseSettings):
     SENTINEL_APPROVERS: str = ""
     # Sentinel risk_level attached to approval requests: low|medium|high|critical.
     SENTINEL_RISK_LEVEL: str = "high"
+    # How long a human has to decide a permit REQUEST (agent asking for
+    # authority) before it expires locally. Longer than the invoke gate's
+    # window: the agent polls rather than holding an invoke open. Clamped to
+    # Sentinel's 1..86400 bound.
+    PERMIT_REQUEST_TIMEOUT_SECONDS: int = 3600
 
     # --- Velocity Monitoring ---
     VELOCITY_HOURLY_LIMIT: Decimal = Decimal("1000.0")

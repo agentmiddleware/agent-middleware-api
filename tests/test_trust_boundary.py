@@ -38,6 +38,11 @@ SPINE_SERVICE_MODULES = {
     "app.services.governance",
     "app.services.human_approval",
     "app.services.idempotency",
+    "app.services.permit_requests",
+    # The approver-facing card is part of the permit-request spine: it is the
+    # rendering of a stored request, shared by the notification email and the
+    # hosted page so the two cannot show different terms.
+    "app.services.approval_card",
     "app.services.permits",
     "app.services.policies",
     "app.services.receipts",
@@ -49,6 +54,7 @@ SPINE_SERVICE_MODULES = {
 CORE_TRUST_ROUTERS = (
     "app/routers/mcp.py",
     "app/routers/permits.py",
+    "app/routers/permit_requests.py",
     "app/routers/receipts.py",
     "app/routers/evidence.py",
     "app/routers/audit.py",

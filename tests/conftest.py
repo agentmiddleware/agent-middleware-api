@@ -176,6 +176,7 @@ async def clean_database():
         await session.execute(text("DELETE FROM receipts"))
         await session.execute(text("DELETE FROM mcp_dispatch_attempts"))
         await session.execute(text("DELETE FROM human_approvals"))
+        await session.execute(text("DELETE FROM permit_requests"))
         await session.execute(text("DELETE FROM idempotency_records"))
         await session.execute(text("DELETE FROM permits"))
         await session.execute(text("DELETE FROM agent_comms_messages"))

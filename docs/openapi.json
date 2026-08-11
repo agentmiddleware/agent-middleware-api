@@ -3389,6 +3389,208 @@
         }
       }
     },
+    "/v1/permit-requests": {
+      "post": {
+        "tags": [
+          "Trust Permits"
+        ],
+        "summary": "Create Permit Request",
+        "description": "Ask a human for a permit this agent cannot mint itself.\n\nThe caller must hold the subject wallet — it is asking for authority over\nits own spend. The issuer must be that wallet or one above it in the\nsponsor -> agent -> child hierarchy, mirroring ``POST /v1/permits``: an\nagent may ask its funder for authority, never an unrelated wallet.",
+        "operationId": "create_permit_request_v1_permit_requests_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermitRequestCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/permit-requests/{request_id}": {
+      "get": {
+        "tags": [
+          "Trust Permits"
+        ],
+        "summary": "Get Permit Request",
+        "description": "Poll a request; returns the minted permit once a human has approved.",
+        "operationId": "get_permit_request_v1_permit_requests__request_id__get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/permit-requests/{request_id}/card": {
+      "get": {
+        "tags": [
+          "Trust Permits"
+        ],
+        "summary": "Get Permit Request Card",
+        "description": "The approver's card for this request, as a hosted page.\n\nSame rendering as the notification email, so the two surfaces cannot show\ndifferent terms for one decision. Read-only: the approve/reject action\nlives in Sentinel.",
+        "operationId": "get_permit_request_card_v1_permit_requests__request_id__card_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/receipts": {
       "get": {
         "tags": [
@@ -9387,6 +9589,235 @@
           "has_more"
         ],
         "title": "PermitListResponse"
+      },
+      "PermitRequestCreate": {
+        "properties": {
+          "issuer_wallet_id": {
+            "type": "string",
+            "title": "Issuer Wallet Id"
+          },
+          "subject_wallet_id": {
+            "type": "string",
+            "title": "Subject Wallet Id"
+          },
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Allowed Tools"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "max_credits": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Max Credits"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "justification": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Justification"
+          },
+          "requires_human_approval": {
+            "type": "boolean",
+            "title": "Requires Human Approval",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "issuer_wallet_id",
+          "subject_wallet_id",
+          "allowed_tools",
+          "max_credits",
+          "expires_at",
+          "justification"
+        ],
+        "title": "PermitRequestCreate",
+        "description": "An agent asking a human for authority it cannot mint itself."
+      },
+      "PermitRequestResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "minting",
+              "approved",
+              "rejected",
+              "expired",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "issuer_wallet_id": {
+            "type": "string",
+            "title": "Issuer Wallet Id"
+          },
+          "subject_wallet_id": {
+            "type": "string",
+            "title": "Subject Wallet Id"
+          },
+          "subject_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Key Id"
+          },
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Tools"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "max_credits": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Max Credits"
+          },
+          "permit_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Permit Expires At"
+          },
+          "requires_human_approval": {
+            "type": "boolean",
+            "title": "Requires Human Approval"
+          },
+          "justification": {
+            "type": "string",
+            "title": "Justification"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "simulated": {
+            "type": "boolean",
+            "title": "Simulated",
+            "default": false
+          },
+          "permit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permit Id"
+          },
+          "permit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermitResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "poll_url": {
+            "type": "string",
+            "title": "Poll Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "status",
+          "issuer_wallet_id",
+          "subject_wallet_id",
+          "allowed_tools",
+          "scopes",
+          "max_credits",
+          "permit_expires_at",
+          "requires_human_approval",
+          "justification",
+          "requested_at",
+          "expires_at",
+          "poll_url"
+        ],
+        "title": "PermitRequestResponse"
       },
       "PermitResponse": {
         "properties": {

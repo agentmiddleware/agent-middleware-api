@@ -320,16 +320,40 @@ This is an automated notification from the Agent-Native Middleware Platform.
         except Exception as e:
             logger.error(f"Failed to send Slack alert: {e}")
 
+    async def send_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        html: Optional[str] = None,
+    ) -> None:
+        """Send a notification email (public entry point).
+
+        ``body`` is always sent as the text part; ``html`` adds a rendered
+        alternative for clients that display it.
+        """
+        await self._send_email(to=to, subject=subject, body=body, html=html)
+
     async def _send_email(
         self,
         to: str,
         subject: str,
         body: str,
+        html: Optional[str] = None,
     ) -> None:
         """Send email via Resend API."""
         if not self._resend_api_key:
             logger.debug(f"Resend not configured, skipping email to {to}")
             return
+
+        payload: dict[str, Any] = {
+            "from": self._from_email,
+            "to": to,
+            "subject": subject,
+            "text": body,
+        }
+        if html:
+            payload["html"] = html
 
         try:
             resp = await self._http.post(
@@ -338,12 +362,7 @@ This is an automated notification from the Agent-Native Middleware Platform.
                     "Authorization": f"Bearer {self._resend_api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "from": self._from_email,
-                    "to": to,
-                    "subject": subject,
-                    "text": body,
-                },
+                json=payload,
             )
             resp.raise_for_status()
             logger.info(f"Alert email sent to {to}")

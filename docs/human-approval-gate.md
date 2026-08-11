@@ -5,6 +5,10 @@
 permit→invoke→receipt loop with a human-in-the-loop pause, backed by
 [Sentinel](https://pauseapi.app) (`sentinel-api`).
 
+For the step before this one — an agent with no authority asking a human for a
+permit — see [`permit-requests.md`](permit-requests.md). Both gates page the
+same Sentinel tenant.
+
 ## What it does
 
 A permit created with `requires_human_approval: true` makes every governed
