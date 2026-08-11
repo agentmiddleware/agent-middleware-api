@@ -109,6 +109,8 @@ async def test_budget_denial_says_what_was_needed_and_what_is_left(
     assert resp.status_code == 403
     detail = resp.json()["detail"]
     assert detail["error"] == "permit_budget_exceeded"
+    assert detail["receipt"]["reason_code"] == "permit_budget_exceeded"
+    assert detail["receipt"]["credits_charged"] == "0"
     numbers = detail["details"]
     # Enough to compute the permit to ask for next.
     assert Decimal(numbers["required_credits"]) == Decimal("5.0")
@@ -158,9 +160,9 @@ async def test_expired_denial_says_when_it_expired(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(PermitModel, permit["permit_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(minutes=5)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            minutes=5
+        )
         session.add(model)
         await session.commit()
 
@@ -305,6 +307,7 @@ async def test_jsonrpc_denial_carries_details_alongside_the_receipt(
     assert Decimal(error["data"]["details"]["required_credits"]) == Decimal("5.0")
     # The denial receipt is still there; details sit beside it, not instead.
     assert error["data"]["receipt"]["outcome"] == "denied"
+    assert error["data"]["receipt"]["reason_code"] == "permit_budget_exceeded"
 
 
 # --- P4: wallet-scoped trust reads ------------------------------------------
@@ -437,8 +440,7 @@ async def test_wallet_key_sees_only_its_own_refund_items_and_cannot_retry(
     )
     assert listed.status_code == 200
     assert all(
-        item["wallet_id"] == agent["agent_wallet_id"]
-        for item in listed.json()["items"]
+        item["wallet_id"] == agent["agent_wallet_id"] for item in listed.json()["items"]
     )
 
     # The operator queue is still reachable with an admin key.

@@ -335,6 +335,7 @@ async def complete_awi_http_governed(
                     credits_charged=credits_charged,
                     outcome="success",
                     audit_event_id=None,
+                    reason_code=None,
                 )
             assert receipt is not None
             receipt_payload = {

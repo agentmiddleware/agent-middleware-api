@@ -165,6 +165,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  permit      {claims.get('permit_id')}")
         print(f"  tool        {claims.get('tool')}")
         print(f"  outcome     {claims.get('outcome')}")
+        reason_code = claims.get("reason_code")
+        if reason_code:
+            print(f"  reason      {reason_code}")
         print(
             "  credits     "
             f"{claims.get('credits_charged')} charged "

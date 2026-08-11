@@ -3,6 +3,50 @@
 **Audience:** operators deploying the trust-plane API.  
 **Product lens:** [`WEDGE.md`](../WEDGE.md) + [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md).
 
+## Managed single-tenant compliance-evidence pilot
+
+The supported enterprise pilot is vendor-managed single-tenant. Each customer
+gets a separate Railway Enterprise project containing exactly one API service,
+one PostgreSQL service, and one Redis service, plus a unique public domain,
+administrator set, Ed25519 signing seed and key id, Sentinel tenant/key, and
+upstream MCP bearer token. Do not reuse infrastructure, credentials, signing
+material, or administrators between customers. Shared SaaS and customer-VPC
+deployments are not part of this pilot. Provision through the manual
+`railway up` path below; do not add Kubernetes, Helm, Terraform, or other pilot
+orchestration infrastructure.
+
+Keep PostgreSQL and Redis on Railway private networking and expose only the
+FastAPI gateway. During qualification, verify in the Railway control plane
+that neither data service has a public domain or TCP proxy and that the API's
+runtime connection variables resolve to the private services. The optional
+off-platform `--public-db` check requires public database exposure; do not use
+that mode as evidence of a qualified private pilot deployment. Run schema
+parity inside the deployed API container with `railway ssh` and its private
+`DATABASE_URL` instead. `railway run` executes locally with injected variables
+and therefore cannot resolve a private-only Railway database hostname.
+
+Configure exactly one real public HTTPS MCP upstream and keep
+`ENABLE_PROOF_SURFACES=false` and `ENABLE_DOGFOOD_TOOL=false`. `site/proof/`
+is self-issued public demo material only; never publish customer evidence
+there or describe it as an enterprise compliance dashboard.
+
+This release is an agent governance and audit-evidence pilot, not a SOC 2,
+HIPAA, PCI, or regulatory-compliance platform. Accept only synthetic or
+redacted, low-sensitivity workloads: no PHI, PCI data, regulated production
+records, secrets, or sensitive tool arguments. Arguments sent to Sentinel must
+also be synthetic or redacted. The signing seed remains a customer-specific
+Railway secret and is not KMS/HSM-backed custody.
+
+Durable permits, reservations, bounded replay/results, receipts, approvals,
+and audit records remain in that customer's PostgreSQL service. Do not export
+them to a shared customer data store for this pilot.
+
+Before onboarding a customer, enable provider backups and complete one
+successful restore drill for that customer's PostgreSQL service. Record the
+date, source backup, restored target, verification result, and operator without
+putting data or credentials in the record. Make no SLA, RTO, or RPO claim until
+the corresponding behavior has been measured and contractually approved.
+
 ## Canonical deploy path
 
 **Build and ship from this repo with the in-repo Dockerfile.**
@@ -23,7 +67,9 @@ stale and must fail the post-deploy parity gate.
 Railway uses `railway.json` → `build.builder = DOCKERFILE`. That is the only
 supported production image path for this project.
 
-The canonical public origin is `https://api.thisisatest.tech`. Railway's
+The canonical public origin for the existing first-party instance is
+`https://api.thisisatest.tech`; a customer pilot uses its manifest's unique
+domain instead. Railway's
 generated `https://api-service-production-433c.up.railway.app` hostname is a
 compatibility origin only: keep it reachable for existing integrations, but do
 not publish it in customer-facing links, discovery documents, or SDK defaults.
@@ -38,6 +84,9 @@ Do **not**:
   offline use — **not** as the live Railway ship path.
 - Commit secrets (`VALID_API_KEYS`, signing keys, Stripe keys) into
   `railway.json` or the git tree.
+- Keep secret files anywhere in the release checkout merely because Git
+  ignores them. The Railway upload context is not a credential store; keep
+  customer credentials in Railway variables or an external vault only.
 
 If you need a reproducible artifact for air-gapped review, pin a GHCR digest
 from a release tag (`ghcr.io/<owner>/agent-middleware-api@sha256:…`). Runtime
@@ -59,19 +108,25 @@ in committed defaults.
 | `TRUST_MODE_ENABLED` | `true` | Shipped default; keep it |
 | `ALLOW_LEGACY_UNPERMITTED_MCP` | `false` | Shipped default; keep it |
 | `TRUST_SIGNING_PRIVATE_KEY_B64` | strict base64 of exactly 32 raw bytes | Required when trust mode is on in prod-like; PEM, hex, 64-byte concatenations, and double-encoded base64 are invalid |
+| `TRUST_SIGNING_KEY_ID` | unique customer/environment key id | Must match the non-secret customer manifest; never bind a reused id to new material |
 | `STATE_BACKEND` | `postgres` | Use linked Postgres; avoid silent memory fallback |
 | `DATABASE_URL` | from Railway Postgres plugin | App normalizes `postgresql://` ↔ `postgresql+asyncpg://` |
-| `PUBLIC_URL` | public HTTPS API origin | `https://api.thisisatest.tech` |
+| `REDIS_URL` | from the customer's private Railway Redis service | Unique per customer; do not expose Redis publicly |
+| `PUBLIC_URL` | public HTTPS API origin | Customer manifest origin; `https://api.thisisatest.tech` only for the existing first-party instance |
 | `BUILD_COMMIT_SHA` | exact 40-character deployed Git SHA | The deploy workflow sets this without triggering a separate deploy before `railway up`. Manual deploys must do the same, as shown above. |
 | `PUBLIC_CONTACT_NAME` | accountable public person or entity | Launch-gated. Do not use the product name or a placeholder as the accountable identity. |
 | `PUBLIC_CONTACT_EMAIL` | monitored public email address | Launch-gated. This becomes the API/OpenAPI contact only when all public contact fields are valid. |
 | `PUBLIC_CONTACT_URL` | working public HTTPS booking URL | Launch-gated. Verify the booking flow manually; do not point this back to the product site. |
 | `VALID_API_KEYS` | operator-set secrets | Bootstrap/admin keys only; **never** `change-me` |
+| `MCP_UPSTREAM_URL` | one public HTTPS MCP origin | The pilot supports exactly one real upstream tool server |
+| `MCP_UPSTREAM_BEARER_TOKEN` | customer-specific secret | Never put it in the manifest or committed files |
+| `SENTINEL_API_URL` / `SENTINEL_API_KEY` | customer-specific Sentinel configuration | Send synthetic or redacted arguments only |
 | `RUN_MIGRATIONS_ON_START` | `true` (recommended; set via `railway variables`) | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If the DB was previously bootstrapped with `create_all` and has no `alembic_version` row, run `alembic stamp head` once before enabling this flag. |
 
-Optional but recommended: `CORS_ORIGINS` locked to known frontends;
-`REDIS_URL` only if you intend Redis rate limiting (prod-like fails closed on
-Redis outage when set).
+`REDIS_URL` is required for the managed pilot's isolated Redis service. Outside
+that pilot it remains optional when Redis rate limiting is unused; a
+production-like service fails closed on Redis outage whenever it is set.
+`CORS_ORIGINS` should be locked to known frontends.
 
 Committed `railway.json` may list **non-secret** defaults only
 (`STATE_BACKEND`, `PUBLIC_URL`, `ENABLE_PROOF_SURFACES`). It must not contain
@@ -101,9 +156,20 @@ fails, so it works as a gate in a shell or in CI:
   `--expected-commit-sha` after deployment to require exact release identity
   from both `/health` and `/health/dependencies`; the SHA must be the full
   40-character value.
+- **Customer deployment manifest** (`--manifest`) — validates the strict
+  non-secret JSON record, requires its Alembic revision and commit SHA to equal
+  this release checkout, and rejects tracked or ordinary untracked worktree
+  changes that could make the `railway up` source differ from that SHA. It
+  supplies its public URL and commit SHA to the live check and rejects a
+  separately supplied URL or SHA that disagrees. The live gate also requires
+  the configured signing key id: any id exposed by health must match, and
+  `/.well-known/trust-keys.json` must always publish that id exactly once as an
+  active Ed25519 key with valid 32-byte public material under the manifest
+  URL's issuer. The SHA-256 fingerprint of that raw public key must equal the
+  manifest's independently recorded fingerprint.
 
 ```bash
-# Both checks, inside the Railway service env:
+# Both checks for a deployment whose database is reachable from this machine:
 railway run python scripts/railway_preflight.py
 
 # Schema parity only:
@@ -120,11 +186,76 @@ python scripts/railway_preflight.py --live --url "$API_URL"
 python scripts/railway_preflight.py --live --strict --url "$API_URL" \
   --expected-version "1.3.0" \
   --expected-commit-sha "$(git rev-parse HEAD)"
+
+# Managed single-tenant post-deploy gate; URL, commit, revision, and key id
+# come from the non-secret manifest:
+python scripts/railway_preflight.py --live --strict \
+  --manifest /path/to/example-customer.production.json
+
+# Managed single-tenant schema parity, run inside the deployed API container
+# where private DATABASE_URL is reachable. This DB-only check intentionally
+# omits --manifest because the image does not contain .git or the external
+# customer operations record:
+railway ssh --service api-service --environment production -- \
+  python scripts/railway_preflight.py --db --strict
 ```
+
+[`railway ssh`](https://docs.railway.com/cli/ssh) requires an operator SSH key
+registered with Railway. Copy the exact SSH target command from the Railway
+service dashboard if the local CLI is not already linked. Run the in-container
+DB check and the local
+manifest-bound live check as separate post-deploy gates; both must pass.
 
 A check whose input is absent is **skipped**, not failed; pass `--strict` to
 turn a skip into a failure (what CI and the deploy workflow use). Shorthands:
 `make railway-preflight` and `make railway-preflight-live`.
+
+### Customer operations manifest
+
+Copy [`railway-customer-manifest.example.json`](railway-customer-manifest.example.json)
+to a controlled operations location **outside the release checkout** and
+replace every example value. Keeping the live manifest outside the checkout
+avoids a recursive commit-identity problem and lets the clean-source guard
+prove what `railway up` will upload. The manifest contains only these
+non-secret fields:
+
+- schema version, customer slug, Railway project id, environment, and region
+- canonical public HTTPS origin and Ed25519 signing key id (maximum 64
+  lowercase safe characters)
+- lowercase SHA-256 digest of the raw 32-byte Ed25519 public key
+- exact deployed 40-character Git SHA and Alembic head revision
+
+Compute and record `signing_public_key_sha256` from the intended key material
+before deployment as `sha256(raw 32-byte Ed25519 public key)`. Use the public
+key output from the controlled key-generation step; the seed must never be
+printed or put in the manifest. Do not populate the expected fingerprint by
+copying the deployed `/.well-known/trust-keys.json` value during qualification:
+that would make the verification tautological and allow the wrong deployed key
+to approve itself.
+
+Do not add database/Redis URLs, API keys, signing seeds, Sentinel keys, MCP
+tokens, administrator credentials, customer data, or other secrets. Unknown
+fields are rejected so the manifest cannot silently become a credential store.
+The committed example's all-zero commit is a format placeholder and must never
+be used for a deployment. Its public-key fingerprint is also synthetic example
+data and must be replaced from the intended customer's key-generation record.
+
+The preflight first binds the manifest's commit and revision to the local
+release checkout and refuses a dirty worktree, then can remotely attest the
+public URL, application commit, schema revision (when `--db` runs), and
+active signing-key publication and fingerprint. It records the Railway
+project id, environment, and region but cannot remotely
+attest those three values without Railway control-plane API access; the
+operator must compare them with the linked Railway project before
+qualification. A `railway up` source build does not currently expose a stable runtime image
+digest to this application, so `BUILD_COMMIT_SHA` is the attested release
+identity and image digest is explicitly **not verified** for this pilot. Do not
+invent or record a guessed digest.
+
+Store a copy of the completed manifest with the deployment record and update
+the expected commit and revision before every release. The preflight fails
+closed if the recorded revision is stale, the live URL or commit differs, or
+the active customer signing key cannot be verified.
 
 ### Rolling retirement of legacy owner keys
 
@@ -204,6 +335,43 @@ Expect:
   and exact 40-character deployed `commit_sha`.
 - `ENABLE_DOGFOOD_TOOL=false`; `/mcp/tools.json` contains no simulated dogfood
   tool ids.
+
+## Pilot qualification and rollout
+
+Qualify every customer stack with synthetic or redacted data before onboarding:
+
+1. Confirm the manifest against the linked Railway project, environment,
+   region, unique domain, and configured signing key id; run strict schema and
+   live preflight checks.
+2. Confirm the API is the only public service, PostgreSQL and Redis have no
+   public domain/TCP proxy, and the customer has unique database, Redis,
+   administrator, signing, Sentinel, and upstream credentials.
+3. Exercise the complete trust loop: provision → authenticate → permit → quote
+   → approve and deny → invoke → meter → receipt → audit → offline verification
+   → replay. Verify governed denials do not charge and portable evidence
+   verifies with the published customer key.
+4. Test cross-customer isolation from both directions: a customer-A key must be
+   rejected by customer B, a customer-B key must be rejected by customer A,
+   each trust-key document must omit the other customer's key id, and the
+   database/signing-key identifiers must differ. Never print or copy the key
+   values into the qualification record.
+5. Complete and record the provider-backup restore drill. Re-run the trust loop
+   against the restored disposable target, then remove that target through the
+   approved Railway operator process.
+
+Roll out first to an internal dedicated stack, then to one low-sensitivity
+design partner. Stop promotion if deployment provenance, schema parity,
+private data-service exposure, restore verification, denial portability,
+metering integrity, signing-key publication, or cross-customer rejection fails.
+
+Do not accept regulated production data or offer customer-VPC/BYOC until the
+product has KMS/HSM signing through workload identity, enterprise SSO/RBAC,
+private customer-tool connectivity, retention/deletion/legal-hold controls,
+SIEM export, tested backup and disaster-recovery targets, append-only or
+externally anchored audit evidence, and approved subprocessor/data-flow review.
+Do not introduce shared SaaS until organization tenancy, PostgreSQL RLS,
+tenant-scoped administration, per-tenant keys/upstreams, and adversarial
+isolation tests exist.
 
 ### Dogfood is local-only
 

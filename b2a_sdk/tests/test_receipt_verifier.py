@@ -11,9 +11,11 @@ import json
 
 import pytest
 
+from b2a_sdk import verify_cli
 from b2a_sdk.receipt_verifier import (
     CANONICALIZATION,
     VerificationError,
+    VerificationResult,
     VerificationStatus,
     canonical_json,
     key_set_from_document,
@@ -147,9 +149,7 @@ def test_non_object_bundle_is_malformed():
 
 
 def test_issuer_mismatch_is_checked_before_any_key_lookup():
-    result = verify_bundle(
-        _bundle(), {}, expected_issuer="https://other.example.com"
-    )
+    result = verify_bundle(_bundle(), {}, expected_issuer="https://other.example.com")
 
     assert result.status is VerificationStatus.INVALID
     assert "issuer" in (result.reason or "")
@@ -160,3 +160,60 @@ def test_malformed_public_key_is_not_reported_as_tampering():
 
     assert result.status is VerificationStatus.MALFORMED
     assert not result.is_tampered
+
+
+def _run_human_readable_cli(monkeypatch, capsys, claims):
+    def fake_read_json(path):
+        return {"keys": []} if path == "keys.json" else {}
+
+    monkeypatch.setattr(verify_cli, "_read_json", fake_read_json)
+    monkeypatch.setattr(
+        verify_cli,
+        "verify_bundle",
+        lambda bundle, key_set, expected_issuer=None: VerificationResult(
+            status=VerificationStatus.VERIFIED,
+            receipt_id="rcpt-1",
+            key_id="key-1",
+            claims=claims,
+        ),
+    )
+
+    exit_code = verify_cli.main(["--bundle", "bundle.json", "--keys", "keys.json"])
+
+    assert exit_code == verify_cli.EXIT_VERIFIED
+    return capsys.readouterr().out
+
+
+def test_human_readable_cli_displays_signed_denial_reason(monkeypatch, capsys):
+    output = _run_human_readable_cli(
+        monkeypatch,
+        capsys,
+        {
+            "permit_id": "permit-1",
+            "tool": "partner.echo",
+            "outcome": "denied",
+            "reason_code": "permit_budget_exceeded",
+            "credits_charged": "0",
+            "credits_authorized": "2",
+            "created_at": "2026-08-11T00:00:00Z",
+        },
+    )
+
+    assert "  reason      permit_budget_exceeded" in output
+
+
+def test_human_readable_cli_omits_reason_for_success_receipt(monkeypatch, capsys):
+    output = _run_human_readable_cli(
+        monkeypatch,
+        capsys,
+        {
+            "permit_id": "permit-1",
+            "tool": "partner.echo",
+            "outcome": "success",
+            "credits_charged": "1",
+            "credits_authorized": "1",
+            "created_at": "2026-08-11T00:00:00Z",
+        },
+    )
+
+    assert "\n  reason      " not in output

@@ -200,7 +200,7 @@ class TestPostgresTrustLoop:
         assert agent.status_code == 201, agent.text
         return sponsor_id, agent.json()["wallet_id"]
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_create_permit_does_not_500_on_postgres(self, client, wallets):
         """The exact live failure: 500 from the signing-key / permit inserts."""
         sponsor_id, agent_id = wallets
@@ -222,7 +222,7 @@ class TestPostgresTrustLoop:
         # Persisted timestamps must come back naive (no offset suffix).
         assert "+" not in body["issued_at"]
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_api_key_rotation_revokes_old_key_on_postgres(self, client, wallets):
         """Revocation metadata must survive the atomic asyncpg update."""
         _, agent_id = wallets
@@ -260,7 +260,7 @@ class TestPostgresTrustLoop:
         assert old_auth.status_code == 403
         assert new_auth.status_code == 200
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_permit_with_non_utc_offset_normalizes_correctly(
         self, client, wallets
     ):
@@ -320,7 +320,7 @@ class TestPostgresTrustLoop:
         assert "error" not in result, result
         assert result["result"]["receipt"]["receipt_id"]
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_unpermitted_mcp_call_is_denied_not_500(self, client, wallets):
         """Strict trust mode must return a JSON-RPC denial, not crash."""
         _, agent_id = wallets
@@ -343,7 +343,7 @@ class TestPostgresTrustLoop:
         assert error["code"] == -32003
         assert error["message"] == "permit_required"
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_governed_invoke_writes_receipt_and_audit_event(
         self, client, wallets
     ):

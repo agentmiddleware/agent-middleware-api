@@ -7,7 +7,9 @@ with memory state or proof surfaces on.
 """
 
 import asyncio
+import base64
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,12 @@ def _load_preflight():
 
 
 preflight = _load_preflight()
+
+
+@pytest.fixture(autouse=True)
+def clean_release_checkout(monkeypatch):
+    """Manifest tests run in a shared worktree containing intended edits."""
+    monkeypatch.setattr(preflight, "_tree_is_clean", lambda: True)
 
 
 @pytest.fixture
@@ -180,6 +188,16 @@ def test_deploy_workflow_drains_then_rescrubs_and_uses_public_db() -> None:
     assert '--expected-commit-sha "$EXPECTED_SHA"' in workflow
 
 
+def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+
+    assert (
+        "railway ssh --service api-service --environment production -- \\\n"
+        "  python scripts/railway_preflight.py --db --strict"
+    ) in sop
+    assert "`railway run` executes locally" in sop
+
+
 class _Response:
     def __init__(self, payload):
         self._payload = payload
@@ -192,6 +210,11 @@ class _Response:
 
 
 EXPECTED_COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567"
+EXPECTED_SIGNING_KEY_ID = "example-customer-production-ed25519-v1"
+EXPECTED_SIGNING_PUBLIC_KEY_SHA256 = (
+    "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd"
+)
+TREE_COMMIT_SHA = preflight._tree_commit_sha()
 
 
 HEALTHY = {
@@ -204,6 +227,48 @@ HEALTHY = {
     "enable_dogfood_tool": False,
     "runtime_degradation": {"durable_state": {"fell_back_to_memory": False}},
 }
+
+
+def _manifest_document(**overrides):
+    document = {
+        "schema_version": "1.0",
+        "customer_slug": "example-customer",
+        "railway_project_id": "123e4567-e89b-42d3-a456-426614174000",
+        "environment": "production",
+        "region": "us-west2",
+        "public_url": "https://api.example.com",
+        "signing_key_id": EXPECTED_SIGNING_KEY_ID,
+        "signing_public_key_sha256": EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
+        "expected_commit_sha": TREE_COMMIT_SHA,
+        "expected_alembic_revision": preflight._tree_head(),
+    }
+    document.update(overrides)
+    return document
+
+
+def _write_manifest(tmp_path, document):
+    path = tmp_path / "customer-manifest.json"
+    if isinstance(document, str):
+        path.write_text(document)
+    else:
+        path.write_text(json.dumps(document))
+    return path
+
+
+def _trust_keys(*, kid=EXPECTED_SIGNING_KEY_ID, status="active"):
+    return {
+        "schema_version": "1.0",
+        "issuer": "https://api.example.com",
+        "alg": "Ed25519",
+        "keys": [
+            {
+                "kid": kid,
+                "status": status,
+                "alg": "Ed25519",
+                "public_key_b64": base64.b64encode(bytes(range(32))).decode(),
+            }
+        ],
+    }
 
 
 def _patch_get(monkeypatch, payload):
@@ -226,6 +291,244 @@ def _patch_endpoint_get(monkeypatch, dependencies_payload, liveness_payload):
     monkeypatch.setattr(httpx, "get", get)
 
 
+def _patch_manifest_get(
+    monkeypatch,
+    *,
+    dependencies_payload=HEALTHY,
+    liveness_payload=HEALTHY,
+    key_payload=None,
+):
+    import httpx
+
+    key_payload = key_payload or _trust_keys()
+
+    def get(url, **_kwargs):
+        if url.endswith("/health/dependencies"):
+            return _Response(dependencies_payload)
+        if url.endswith("/.well-known/trust-keys.json"):
+            return _Response(key_payload)
+        return _Response(liveness_payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+
+def test_committed_customer_manifest_template_is_non_secret_and_current():
+    path = REPO_ROOT / "docs" / "railway-customer-manifest.example.json"
+    document = json.loads(path.read_text())
+
+    assert set(document) == preflight._MANIFEST_FIELDS
+    assert document["expected_alembic_revision"] == preflight._tree_head()
+    assert not any(
+        marker in key.lower()
+        for key in document
+        for marker in ("secret", "password", "token", "private_key", "database_url")
+    )
+    assert preflight._load_customer_manifest(path).public_url == (
+        "https://api.example.com"
+    )
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        ("{not-json", "readable UTF-8 JSON"),
+        ([], "root must be a JSON object"),
+        (
+            {
+                key: value
+                for key, value in _manifest_document().items()
+                if key != "region"
+            },
+            "missing required fields: region",
+        ),
+        (
+            {
+                key: value
+                for key, value in _manifest_document().items()
+                if key != "signing_public_key_sha256"
+            },
+            "missing required fields: signing_public_key_sha256",
+        ),
+    ],
+)
+def test_manifest_fails_closed_when_malformed_or_missing(
+    tmp_path,
+    capsys,
+    document,
+    message,
+):
+    path = _write_manifest(tmp_path, document)
+
+    assert preflight.main(["--live", "--manifest", str(path)]) == 1
+    assert message in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", 1),
+        ("customer_slug", "Example Customer"),
+        ("railway_project_id", "not-a-uuid"),
+        ("environment", "Production"),
+        ("region", "us/west2"),
+        ("public_url", "http://api.example.com"),
+        ("public_url", "https://api.example.com/customer"),
+        ("signing_key_id", "key id with spaces"),
+        ("signing_key_id", "a" * 65),
+        ("signing_public_key_sha256", "0" * 63),
+        ("expected_commit_sha", EXPECTED_COMMIT_SHA[:12]),
+        ("expected_alembic_revision", "../031_quotes"),
+    ],
+)
+def test_manifest_rejects_noncanonical_field_formats(tmp_path, field, value):
+    path = _write_manifest(tmp_path, _manifest_document(**{field: value}))
+
+    assert preflight.main(["--live", "--manifest", str(path)]) == 1
+
+
+def test_manifest_rejects_unsupported_fields_without_rendering_values(
+    tmp_path,
+    capsys,
+):
+    secret = "postgresql://operator:do-not-print@db.example.com/customer"
+    path = _write_manifest(
+        tmp_path,
+        _manifest_document(database_url=secret),
+    )
+
+    assert preflight.main(["--live", "--manifest", str(path)]) == 1
+    output = capsys.readouterr().out
+    assert "unsupported fields" in output
+    assert secret not in output
+    assert "do-not-print" not in output
+
+
+def test_manifest_rejects_tree_revision_mismatch(tmp_path, monkeypatch, capsys):
+    path = _write_manifest(
+        tmp_path,
+        _manifest_document(expected_alembic_revision="030_permit_requests"),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("live check must not run"),
+    )
+
+    assert preflight.main(["--live", "--manifest", str(path)]) == 1
+    assert "Alembic revision does not match this tree" in capsys.readouterr().out
+
+
+def test_manifest_rejects_release_checkout_mismatch(tmp_path, monkeypatch, capsys):
+    path = _write_manifest(
+        tmp_path,
+        _manifest_document(expected_commit_sha=EXPECTED_COMMIT_SHA),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("live check must not run"),
+    )
+
+    assert preflight.main(["--live", "--manifest", str(path)]) == 1
+    assert "does not match this release checkout" in capsys.readouterr().out
+
+
+def test_manifest_rejects_dirty_release_checkout(tmp_path, monkeypatch, capsys):
+    path = _write_manifest(tmp_path, _manifest_document())
+    monkeypatch.setattr(preflight, "_tree_is_clean", lambda: False)
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("live check must not run"),
+    )
+
+    assert preflight.main(["--live", "--manifest", str(path)]) == 1
+    output = capsys.readouterr().out
+    assert "requires a clean release checkout" in output
+    assert "customer-manifest.json" not in output
+
+
+def test_manifest_rejects_live_url_mismatch(tmp_path, monkeypatch, capsys):
+    path = _write_manifest(tmp_path, _manifest_document())
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("live check must not run"),
+    )
+
+    assert (
+        preflight.main(
+            [
+                "--live",
+                "--manifest",
+                str(path),
+                "--url",
+                "https://other.example.com",
+            ]
+        )
+        == 1
+    )
+    assert "live URL does not match" in capsys.readouterr().out
+
+
+def test_manifest_rejects_conflicting_expected_commit(tmp_path, capsys):
+    path = _write_manifest(tmp_path, _manifest_document())
+
+    assert (
+        preflight.main(
+            [
+                "--live",
+                "--manifest",
+                str(path),
+                "--expected-commit-sha",
+                "fedcba9876543210fedcba9876543210fedcba98",
+            ]
+        )
+        == 1
+    )
+    assert "commit SHA does not match" in capsys.readouterr().out
+
+
+def test_manifest_supplies_live_url_commit_and_signing_key(
+    tmp_path,
+    monkeypatch,
+):
+    path = _write_manifest(tmp_path, _manifest_document())
+    seen = []
+
+    def check_live(
+        url,
+        *,
+        expected_version=None,
+        expected_commit_sha=None,
+        expected_signing_key_id=None,
+        expected_signing_public_key_sha256=None,
+    ):
+        seen.append(
+            (
+                url,
+                expected_version,
+                expected_commit_sha,
+                expected_signing_key_id,
+                expected_signing_public_key_sha256,
+            )
+        )
+        return True
+
+    monkeypatch.setattr(preflight, "check_live", check_live)
+
+    assert preflight.main(["--live", "--strict", "--manifest", str(path)]) == 0
+    assert seen == [
+        (
+            "https://api.example.com",
+            None,
+            TREE_COMMIT_SHA,
+            EXPECTED_SIGNING_KEY_ID,
+            EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
+        )
+    ]
+
+
 def test_live_passes_on_expected_posture(monkeypatch):
     _patch_get(monkeypatch, HEALTHY)
     assert preflight.check_live("https://api.example.com") is True
@@ -241,6 +544,165 @@ def test_live_passes_on_exact_expected_release_identity(monkeypatch):
             expected_commit_sha=EXPECTED_COMMIT_SHA,
         )
         is True
+    )
+
+
+def test_live_uses_public_key_document_when_health_omits_signing_key_id(monkeypatch):
+    _patch_manifest_get(monkeypatch)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_signing_key_id=EXPECTED_SIGNING_KEY_ID,
+            expected_signing_public_key_sha256=(EXPECTED_SIGNING_PUBLIC_KEY_SHA256),
+        )
+        is True
+    )
+
+
+def test_live_validates_public_key_document_when_health_reports_key_id(monkeypatch):
+    _patch_manifest_get(
+        monkeypatch,
+        dependencies_payload={
+            **HEALTHY,
+            "signing_key_id": EXPECTED_SIGNING_KEY_ID,
+        },
+    )
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_signing_key_id=EXPECTED_SIGNING_KEY_ID,
+            expected_signing_public_key_sha256=(EXPECTED_SIGNING_PUBLIC_KEY_SHA256),
+        )
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    "key_payload",
+    [
+        _trust_keys(kid="another-production-ed25519-v1"),
+        _trust_keys(status="retired"),
+        {"issuer": "https://other.example.com", "keys": []},
+        {**_trust_keys(), "alg": "RSA"},
+        {
+            **_trust_keys(),
+            "keys": [
+                {
+                    "kid": EXPECTED_SIGNING_KEY_ID,
+                    "status": "active",
+                    "alg": "Ed25519",
+                    "public_key_b64": base64.b64encode(b"too-short").decode(),
+                }
+            ],
+        },
+        {
+            **_trust_keys(),
+            "keys": [
+                {
+                    "kid": EXPECTED_SIGNING_KEY_ID,
+                    "status": "active",
+                    "alg": "Ed25519",
+                    "public_key_b64": "!!!!",
+                }
+            ],
+        },
+        {
+            **_trust_keys(),
+            "keys": [
+                {
+                    "kid": EXPECTED_SIGNING_KEY_ID,
+                    "status": "active",
+                    "alg": "Ed25519",
+                }
+            ],
+        },
+    ],
+    ids=[
+        "wrong_key",
+        "retired_key",
+        "wrong_issuer_and_empty_keys",
+        "wrong_algorithm",
+        "invalid_public_material",
+        "malformed_public_material",
+        "missing_public_material",
+    ],
+)
+def test_live_fails_closed_when_public_key_document_mismatches(
+    monkeypatch,
+    key_payload,
+):
+    _patch_manifest_get(monkeypatch, key_payload=key_payload)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_signing_key_id=EXPECTED_SIGNING_KEY_ID,
+            expected_signing_public_key_sha256=(EXPECTED_SIGNING_PUBLIC_KEY_SHA256),
+        )
+        is False
+    )
+
+
+def test_live_fails_when_health_reports_wrong_signing_key_id(monkeypatch):
+    _patch_get(
+        monkeypatch,
+        {**HEALTHY, "signing_key_id": "another-production-ed25519-v1"},
+    )
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_signing_key_id=EXPECTED_SIGNING_KEY_ID,
+            expected_signing_public_key_sha256=(EXPECTED_SIGNING_PUBLIC_KEY_SHA256),
+        )
+        is False
+    )
+
+
+def test_live_fails_closed_when_public_key_document_is_unreachable(monkeypatch):
+    import httpx
+
+    def get(url, **_kwargs):
+        if url.endswith("/.well-known/trust-keys.json"):
+            raise httpx.ConnectError("no route")
+        return _Response({**HEALTHY, "signing_key_id": EXPECTED_SIGNING_KEY_ID})
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_signing_key_id=EXPECTED_SIGNING_KEY_ID,
+            expected_signing_public_key_sha256=(EXPECTED_SIGNING_PUBLIC_KEY_SHA256),
+        )
+        is False
+    )
+
+
+def test_live_fails_when_public_key_fingerprint_mismatches(monkeypatch):
+    _patch_manifest_get(monkeypatch)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_signing_key_id=EXPECTED_SIGNING_KEY_ID,
+            expected_signing_public_key_sha256="0" * 64,
+        )
+        is False
+    )
+
+
+def test_live_fails_when_public_key_fingerprint_is_missing(monkeypatch):
+    _patch_manifest_get(monkeypatch)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_signing_key_id=EXPECTED_SIGNING_KEY_ID,
+        )
+        is False
     )
 
 

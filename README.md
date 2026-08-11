@@ -18,6 +18,7 @@
 - [Core API surfaces](#core-api-surfaces)
 - [Security and accounting posture](#security-and-accounting-posture)
   - [Strict production configuration](#strict-production-configuration)
+  - [Managed single-tenant pilot boundary](#managed-single-tenant-pilot-boundary)
   - [Billing integrity](#billing-integrity)
   - [Remaining limits](#remaining-limits)
 - [Tests and release gates](#tests-and-release-gates)
@@ -126,7 +127,9 @@ Recent work substantially tightened the trust and accounting boundary:
   or raw request payload.
 - **Failure accounting and repair.** Local tool failures, confirmed
   pre-dispatch failures, and upstream-returned errors are refunded and
-  receipted. If a required refund fails, the system writes a signed
+  receipted. Terminal non-success receipts sign a stable `reason_code` when
+  one exists, while legacy and successful receipts omit that optional claim.
+  If a required refund fails, the system writes a signed
   `failed_unrefunded` receipt and a durable, bootstrap-admin-only
   reconciliation item that can be retried exactly once. Ambiguous or rejected
   post-dispatch outcomes remain charged.
@@ -389,6 +392,25 @@ identities behind one wallet/idempotency-key uniqueness boundary.
 The supported API deployment path is the repository Dockerfile on Railway:
 [docs/deploy-railway.md](docs/deploy-railway.md). The static agent-first site in
 [`site/`](site/) is a separate marketing/discovery surface, not the API runtime.
+
+### Managed single-tenant pilot boundary
+
+The supported enterprise pilot is **vendor-managed and single-tenant**: one
+Railway project, API service, PostgreSQL database, Redis instance, public
+origin, signing key, and bootstrap-admin set per design partner. Customer
+deployments must not share runtime services, databases, signing material, or
+operator credentials.
+
+This pilot accepts only synthetic or explicitly redacted, low-sensitivity
+workloads. It is not approved for PHI, PCI data, regulated production records,
+or sensitive tool arguments. The configured upstream MCP server must be one
+public HTTPS origin; customer-VPC/BYOC connectivity, shared multi-tenant SaaS,
+and an uptime or RTO/RPO commitment are not supported in this release.
+
+The public site and `/proof/` receipt are self-issued product demonstrations.
+Customer evidence stays in the customer's dedicated API and database and is
+exported through the authenticated receipt/evidence APIs plus the offline SDK
+verifier.
 
 ### Billing integrity
 

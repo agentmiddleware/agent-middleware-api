@@ -29,6 +29,10 @@ full release gate; do not backfill a final `v1.2.0` tag.
   truthful public status/evidence index that never requests browser API keys.
 - Added exact build commit metadata to both health endpoints and labeled
   process-local call counters separately from durable dispatch history.
+- Documented the supported enterprise pilot boundary: one vendor-managed
+  Railway project and dedicated API, PostgreSQL, Redis, origin, signing key,
+  and administrator set per low-sensitivity design partner. Shared SaaS,
+  customer-VPC/BYOC, and regulated production data remain out of scope.
 
 ### 🧾 Denials an agent can act on, and trust reads a wallet can do itself
 
@@ -38,9 +42,14 @@ full release gate; do not backfill a final `v1.2.0` tag.
   `missing_scopes`, `expired_at`, and so on. Surfaced on both governed
   transports (`detail.details` and JSON-RPC `error.data.details`), on
   `POST /v1/permits/verify`, on governed AWI actions, and as `denial_details`
-  in the signed audit metadata. The denial receipt is unchanged and still
-  signed; details sit beside it. See
+  in the signed audit metadata. New terminal denial receipts also sign an
+  optional stable `reason_code`, while richer details remain adjacent API and
+  audit context and legacy receipts remain valid. See
   [`docs/denial-details.md`](docs/denial-details.md).
+- **Offline verification now displays signed denial reasons.** Portable
+  receipt exports include `reason_code` in `signing_input` only when present;
+  successful and legacy receipts omit it. `b2a-verify-receipt` prints the
+  verified reason without trusting an unsigned response field.
 - **Binding mismatches stay silent about values.** `permit_wallet_mismatch` and
   `permit_key_mismatch` report only which binding failed — a caller that has
   not proved it is the subject learns nothing about the wallet or key the

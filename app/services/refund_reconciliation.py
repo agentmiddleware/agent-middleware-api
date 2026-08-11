@@ -198,6 +198,7 @@ class RefundReconciliationService:
                     credits_charged=credits_charged,
                     outcome="failed_unrefunded",
                     audit_event_id=audit_event_id,
+                    reason_code="refund_failed",
                     idempotency_record_id=record.record_id,
                     dispatch_attempt_id=dispatch_attempt_id,
                     approval_id=approval_id,
