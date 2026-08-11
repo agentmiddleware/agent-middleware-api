@@ -336,6 +336,7 @@ put one real internal tool behind the governed path.
 | `GET /v1/permit-requests/{request_id}` | Poll the decision; returns the minted permit once approved | Issuer wallet, subject wallet, or admin |
 | `POST /v1/quotes` | Get a signed price for one call of a tool | Authorized wallet |
 | `POST /mcp/messages` | JSON-RPC MCP list/call transport | Authentication; permit required for governed calls |
+| `GET /v1/permits` | List permits; a wallet key sees its own, an operator key sees all | Wallet key or admin |
 | `GET /v1/me/permits` | Current wallet's permit view | Wallet key |
 | `GET /v1/me/permit-requests` | Authority this wallet has asked a human for | Wallet key |
 | `GET /v1/me/quotes` | Price commitments this wallet holds | Wallet key |
@@ -542,6 +543,7 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [docs/agent-accountability.md](docs/agent-accountability.md) — why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
 - [docs/golden-path.md](docs/golden-path.md) — wallet-scoped end-to-end API flow
+- [docs/denial-details.md](docs/denial-details.md) — what a governed denial tells an agent, and what it deliberately withholds
 - [docs/permit-requests.md](docs/permit-requests.md) — an agent asks a human for authority; the middleware mints the permit from the reviewed terms
 - [docs/signed-quotes.md](docs/signed-quotes.md) — signed, single-use price commitments the charge honors
 - [docs/human-approval-gate.md](docs/human-approval-gate.md) — pausing a governed invoke on a human decision

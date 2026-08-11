@@ -173,7 +173,10 @@ async def test_db_wallet_key_can_list_own_wallet_audit_events(client, clean_data
 
 
 @pytest.mark.anyio
-async def test_db_wallet_key_cannot_list_global_audit_events(client, clean_database):
+async def test_db_wallet_key_unscoped_audit_list_is_scoped_to_itself(
+    client, clean_database
+):
+    """An unscoped list from a wallet key means "my events", not "everyone's"."""
     sponsor_response = await client.post(
         "/v1/billing/wallets/sponsor",
         json={
@@ -201,7 +204,11 @@ async def test_db_wallet_key_cannot_list_global_audit_events(client, clean_datab
         headers={"X-API-Key": wallet_api_key},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    # Whatever it returns belongs to this wallet and no other.
+    assert all(
+        event["wallet_id"] == wallet_id for event in response.json()["events"]
+    )
 
 
 @pytest.mark.anyio
@@ -240,7 +247,10 @@ async def test_db_wallet_key_cannot_list_other_wallet_audit_events(
 
 
 @pytest.mark.anyio
-async def test_db_wallet_key_cannot_request_audit_summary(client, clean_database):
+async def test_db_wallet_key_summary_is_scoped_to_its_own_events(
+    client, clean_database
+):
+    """The summarized form is computed over the same scoped rows."""
     sponsor_response = await client.post(
         "/v1/billing/wallets/sponsor",
         json={
@@ -268,7 +278,21 @@ async def test_db_wallet_key_cannot_request_audit_summary(client, clean_database
         headers={"X-API-Key": wallet_api_key},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    body = response.json()
+    # The summary is computed over the same wallet-filtered rows the list
+    # returns, so it can only ever describe this wallet.
+    assert body["summary"] is not None
+    assert body["summary"]["total"] == body["total"]
+    assert all(event["wallet_id"] == wallet_id for event in body["events"])
+
+    # Another wallet's summary is still refused outright.
+    assert (
+        await client.get(
+            "/v1/audit/events?wallet_id=wallet-other&summary=true",
+            headers={"X-API-Key": wallet_api_key},
+        )
+    ).status_code == 403
 
 
 @pytest.mark.anyio

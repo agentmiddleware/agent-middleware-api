@@ -57,6 +57,13 @@ async def list_permits(
 ) -> PermitListResponse:
     if wallet_id:
         auth.require_wallet_access(wallet_id)
+    elif auth.wallet_id:
+        # An unscoped list is an operator view. A wallet key asking for it means
+        # "my permits", so scope it to the caller rather than refusing: the
+        # data was already readable at /v1/me/permits, and needing an admin key
+        # to see your own permits by issuer/expiry filters was the gate in the
+        # wrong place.
+        wallet_id = auth.wallet_id
     else:
         auth.require_bootstrap_admin()
 
@@ -230,5 +237,6 @@ async def verify_permit(
     return PermitVerifyResponse(
         valid=validation.allowed,
         reason=validation.reason,
+        details=validation.details,
         permit=permit_model_to_response(permit) if permit else None,
     )

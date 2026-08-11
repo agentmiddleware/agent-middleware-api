@@ -132,15 +132,22 @@ class GovernedToolError(RuntimeError):
 
 
 class ToolPermissionDenied(PermissionError):
-    """Permission denial that may carry a signed receipt for governed calls."""
+    """Permission denial that may carry a signed receipt for governed calls.
+
+    ``details`` carries the evaluated constraint behind the denial — the
+    budget that was short, the limit that was hit — so the caller can act on
+    the refusal instead of only retrying it.
+    """
 
     def __init__(
         self,
         reason: str,
         receipt: dict[str, Any] | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(reason)
         self.receipt = receipt
+        self.details = details or {}
         self.status_code = 403
         self.jsonrpc_code = -32003
 
@@ -299,8 +306,13 @@ async def handle_messages(
                 "code": -32003,
                 "message": str(e),
             }
+            data: dict[str, Any] = {}
             if e.receipt:
-                error_payload["data"] = {"receipt": e.receipt}
+                data["receipt"] = e.receipt
+            if e.details:
+                data["details"] = e.details
+            if data:
+                error_payload["data"] = data
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -871,7 +883,11 @@ async def _execute_registered_tool(
                     idempotency_key=idempotency_key,
                     reason=permit_validation.reason,
                 )
-            raise ToolPermissionDenied(reason, receipt=receipt_payload)
+            raise ToolPermissionDenied(
+                reason,
+                receipt=receipt_payload,
+                details=permit_validation.details,
+            )
 
     simulation = False
     try:
@@ -931,7 +947,11 @@ async def _execute_registered_tool(
                 outcome="denied",
                 status_code=403,
             )
-            raise ToolPermissionDenied(reason, receipt=receipt_payload)
+            raise ToolPermissionDenied(
+                reason,
+                receipt=receipt_payload,
+                details=permit_validation.details,
+            )
         raise PermissionError(policy.reason)
 
     approval_check = None
@@ -1101,6 +1121,11 @@ async def _execute_registered_tool(
                     "permit_id": permit_id,
                     "idempotency_key": idempotency_key,
                     "request_hash": effective_request_hash,
+                    **(
+                        {"denial_details": permit_validation.details}
+                        if permit_validation.details
+                        else {}
+                    ),
                     **_approval_metadata(approval_check),
                 },
             )
@@ -1135,7 +1160,11 @@ async def _execute_registered_tool(
                     idempotency_key=idempotency_key,
                     reason=permit_validation.reason,
                 )
-            raise ToolPermissionDenied(reason, receipt=receipt_payload)
+            raise ToolPermissionDenied(
+                reason,
+                receipt=receipt_payload,
+                details=permit_validation.details,
+            )
 
     description = f"MCP {transport} invoke {tool_name}"
     if quoted is not None and quote_id:
@@ -2774,6 +2803,8 @@ async def invoke_tool(
         detail = {"error": str(exc)}
         if exc.receipt:
             detail["receipt"] = exc.receipt
+        if exc.details:
+            detail["details"] = exc.details
         raise HTTPException(status_code=403, detail=detail)
     except GovernedToolError as exc:
         detail = {"error": str(exc)}

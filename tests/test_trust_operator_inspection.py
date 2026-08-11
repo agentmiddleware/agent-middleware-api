@@ -67,15 +67,21 @@ async def test_admin_and_wallet_can_inspect_permits_with_filters(
 
 
 @pytest.mark.anyio
-async def test_wallet_permit_inspection_rejects_global_and_other_wallet_queries(
+async def test_wallet_permit_inspection_is_self_scoped_and_rejects_other_wallets(
     client,
     clean_database,
 ):
     wallet_a = await provision_agent_wallet(client)
     wallet_b = await provision_agent_wallet(client)
 
+    # An unscoped list from a wallet key is its own permits, not everyone's.
     global_resp = await client.get("/v1/permits", headers=wallet_a["agent_headers"])
-    assert global_resp.status_code == 403
+    assert global_resp.status_code == 200
+    assert all(
+        permit["subject_wallet_id"] == wallet_a["agent_wallet_id"]
+        or permit["issuer_wallet_id"] == wallet_a["agent_wallet_id"]
+        for permit in global_resp.json()["permits"]
+    )
 
     other_wallet_resp = await client.get(
         "/v1/permits",

@@ -32,14 +32,17 @@ def _authorize_audit_events_request(
     if auth.is_bootstrap_admin:
         return wallet_id, key_id
 
-    if summary or not wallet_id:
+    # A wallet key reads its own events, including the summarized form: the
+    # aggregate is computed over the same scoped rows, so summarizing reveals
+    # nothing the unsummarized list would not. Only a caller with no wallet at
+    # all (an unscoped, cross-tenant read) still needs an operator key.
+    effective_wallet_id = wallet_id or auth.wallet_id
+    if not effective_wallet_id:
         auth.require_bootstrap_admin()
 
-    # require_bootstrap_admin() above raises for non-admins, so the only way
-    # to reach this point is the branch where wallet_id was truthy.
-    assert wallet_id is not None
-    auth.require_wallet_access(wallet_id)
-    return wallet_id, None
+    assert effective_wallet_id is not None
+    auth.require_wallet_access(effective_wallet_id)
+    return effective_wallet_id, None
 
 
 @router.get("/events", response_model=AuditEventListResponse)
@@ -140,10 +143,17 @@ async def get_audit_summary(
     created_before: datetime | None = Query(None),
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuditSummaryResponse:
-    auth.require_bootstrap_admin()
+    # Cross-tenant totals stay an operator view; a wallet key gets the same
+    # shape computed over its own events only.
+    wallet_id = None
+    if not auth.is_bootstrap_admin:
+        if not auth.wallet_id:
+            auth.require_bootstrap_admin()
+        wallet_id = auth.wallet_id
     summary = await summarize_audit_events(
         created_after=created_after,
         created_before=created_before,
+        wallet_id=wallet_id,
     )
     return AuditSummaryResponse(**summary)
 
@@ -153,12 +163,18 @@ async def verify_chain(
     request: AuditChainVerifyRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> AuditChainVerifyResponse:
-    if request.wallet_id:
-        auth.require_wallet_access(request.wallet_id)
+    wallet_id = request.wallet_id
+    if wallet_id:
+        auth.require_wallet_access(wallet_id)
+    elif auth.wallet_id:
+        # Verifying your own chain is the point of publishing it; requiring an
+        # operator key to do so made the tamper-evidence claim unusable by the
+        # tenant it protects.
+        wallet_id = auth.wallet_id
     else:
         auth.require_bootstrap_admin()
     result = await verify_audit_chain(
-        wallet_id=request.wallet_id,
+        wallet_id=wallet_id,
         created_after=request.created_after,
         created_before=request.created_before,
     )

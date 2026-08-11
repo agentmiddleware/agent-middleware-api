@@ -127,10 +127,19 @@ async def list_refund_reconciliations(
     offset: int = Query(0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> RefundReconciliationListResponse:
-    auth.require_bootstrap_admin()
+    # Money owed back to a wallet is that wallet's business. Operators still
+    # get the cross-tenant queue; a wallet key sees only its own items. The
+    # retry below stays operator-only — it moves money, and this move is about
+    # reads.
+    wallet_id = None
+    if not auth.is_bootstrap_admin:
+        if not auth.wallet_id:
+            auth.require_bootstrap_admin()
+        wallet_id = auth.wallet_id
     try:
         items, total = await get_refund_reconciliation_service().list_items(
             status=status,
+            wallet_id=wallet_id,
             limit=limit,
             offset=offset,
         )

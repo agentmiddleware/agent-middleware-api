@@ -311,9 +311,16 @@ class RefundReconciliationService:
         self,
         *,
         status: Literal["pending", "resolved"] | None = "pending",
+        wallet_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[RefundReconciliationItem], int]:
+        """List failed-refund work items, optionally for one wallet.
+
+        ``wallet_id`` narrows the view to a single tenant so a wallet key can
+        see money owed back to *it* without an operator key. Applied before
+        pagination, so a wallet's own totals are its own.
+        """
         factory = get_session_factory()
         async with factory() as session:
             rows = (
@@ -348,6 +355,8 @@ class RefundReconciliationService:
                 )
                 for record, receipt in rows
             ]
+            if wallet_id is not None:
+                items = [item for item in items if item.wallet_id == wallet_id]
             if status is not None:
                 items = [item for item in items if item.status == status]
             for item in items:

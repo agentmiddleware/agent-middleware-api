@@ -164,13 +164,16 @@ async def begin_awi_http_governed(
         key_id=auth.key_id,
     )
     if not validation.allowed or validation.permit is None:
+        detail: dict[str, Any] = {
+            "error": validation.reason or "permit_denied",
+            "message": validation.reason or "permit_denied",
+            "tool": tool_name,
+        }
+        if validation.details:
+            detail["details"] = validation.details
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": validation.reason or "permit_denied",
-                "message": validation.reason or "permit_denied",
-                "tool": tool_name,
-            },
+            detail=detail,
         )
 
     idem = get_idempotency_service()
