@@ -206,8 +206,18 @@ class PermitService:
             return permits, int(total or 0)
 
     async def create_permit(
-        self, request: PermitCreateRequest, subject_key_id: str | None = None
+        self,
+        request: PermitCreateRequest,
+        subject_key_id: str | None = None,
+        permit_id: str | None = None,
     ) -> PermitResponse:
+        """Mint a signed permit.
+
+        ``permit_id`` lets a caller that pre-allocated an identifier (the
+        permit-request flow reserves one when the human is paged) mint under
+        it, so a retried mint collides on the primary key instead of issuing a
+        second permit carrying the same authority.
+        """
         if request.max_credits <= Decimal("0"):
             raise PermitError("max_credits_must_be_positive")
         # Normalize to naive UTC before any comparison, signing, or persistence.
@@ -246,7 +256,7 @@ class PermitService:
             if subject.balance < request.max_credits:
                 raise PermitError("permit_budget_exceeds_wallet_balance")
 
-        permit_id = f"permit-{uuid.uuid4().hex[:16]}"
+        permit_id = permit_id or f"permit-{uuid.uuid4().hex[:16]}"
         nonce = request.nonce or uuid.uuid4().hex
         # Prefer the explicitly-passed key_id (from auth context) over the
         # request body, so wallet-bound self-service permits show up in

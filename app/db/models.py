@@ -880,6 +880,71 @@ class HumanApprovalModel(SQLModel, table=True):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class PermitRequestModel(SQLModel, table=True):
+    """An agent's request for authority it cannot mint itself.
+
+    The subject agent asks the issuer for a scoped, budgeted permit; a human
+    approves or rejects in Sentinel; the middleware mints the permit from the
+    terms stored here — never from the polling request — and the agent polls
+    until ``permit_id`` appears.
+
+    ``reserved_permit_id`` is allocated at request time and used as the minted
+    permit's primary key, which makes minting idempotent: a mint retried after
+    a crash collides on the permits primary key instead of issuing a second
+    permit carrying the same authority.
+    """
+
+    __tablename__ = "permit_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "subject_wallet_id",
+            "idempotency_key",
+            name="uq_permit_requests_idempotency",
+        ),
+    )
+
+    request_id: str = Field(primary_key=True, max_length=64)
+    issuer_wallet_id: str = Field(
+        max_length=50, foreign_key="wallets.wallet_id", index=True
+    )
+    subject_wallet_id: str = Field(
+        max_length=50, foreign_key="wallets.wallet_id", index=True
+    )
+    subject_key_id: Optional[str] = Field(default=None, max_length=50, index=True)
+    idempotency_key: str = Field(max_length=128)
+    # The requested permit terms, frozen at request time.
+    scopes_json: str
+    allowed_tools_json: str
+    max_credits: Decimal = Field(decimal_places=8)
+    permit_expires_at: datetime = Field(sa_type=NaiveUTCDateTime)
+    requires_human_approval: bool = Field(default=False)
+    justification: str = Field(sa_column=Column(Text, nullable=False))
+    # sha256 of the terms above — what the human actually reviewed.
+    request_hash: str = Field(max_length=64)
+    # pending | minting | approved | rejected | expired | failed
+    status: str = Field(default="pending", max_length=16, index=True)
+    simulated: bool = Field(default=False)
+    sentinel_action_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    approval_url: Optional[str] = Field(default=None, max_length=512)
+    reserved_permit_id: str = Field(max_length=64)
+    # Set once the permit exists. No FK: the column is written in the same
+    # transaction shape as receipts.approval_id (see migration 023).
+    permit_id: Optional[str] = Field(default=None, max_length=64, index=True)
+    requested_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    # Local decision deadline; Sentinel never expires an approval server-side.
+    expires_at: datetime = Field(sa_type=NaiveUTCDateTime)
+    decided_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    decided_by: Optional[str] = Field(default=None, max_length=128)
+    reason: Optional[str] = Field(default=None)
+    # When the single mint claim was taken; recovers a mint interrupted by a
+    # crash without letting two workers mint concurrently.
+    mint_started_at: Optional[datetime] = Field(
+        sa_type=NaiveUTCDateTime, default=None
+    )
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
 class IdempotencyRecordModel(SQLModel, table=True):
     """Wallet-scoped replay protection for state-changing trust endpoints."""
 

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🙋 Permit requests — an agent can ask a human for authority
+
+- **Added `POST /v1/permit-requests` and `GET /v1/permit-requests/{id}`**
+  (`app/routers/permit_requests.py`): an agent states the scope, budget,
+  expiry, and justification it needs; a human is paged through Sentinel; the
+  middleware mints the signed permit on approval and the agent polls until it
+  appears. Backed by the new `permit_requests` table (migration
+  `030_permit_requests`). See [`docs/permit-requests.md`](docs/permit-requests.md).
+- **The decision binds to the reviewed terms.** Requested scopes, tools,
+  budget, and expiry are frozen on the row and hashed; the mint reads that row,
+  never the polling request, so an approved request cannot be re-aimed. Reusing
+  an `Idempotency-Key` with different terms is a `409`, not a second page.
+- **Minting happens exactly once.** The `pending → minting` transition is a
+  conditional UPDATE, and the permit id is reserved when the human is paged —
+  so a mint retried after a crash adopts the existing permit instead of issuing
+  a second one carrying the same authority.
+- **Expiry is enforced locally** (Sentinel keeps timed-out approvals "pending"
+  forever), and the fail-closed rules match the invoke gate: simulated
+  approvals never mint production authority, real mode without Sentinel config
+  refuses, and a Sentinel outage returns a retryable `503` having minted
+  nothing.
+- **Added the approver card** (`app/services/approval_card.py`): scope, budget,
+  and justification rendered from one template into both the notification email
+  and a hosted page at `GET /v1/permit-requests/{id}/card`, so the two surfaces
+  cannot show different terms for one decision. Read-only — approve/reject
+  stays in Sentinel.
+
 ### 🔌 Standard MCP endpoint (opt-in)
 
 - **Added `POST /mcp`** (`app/routers/mcp_standard.py`): a spec-compliant

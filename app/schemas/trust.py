@@ -50,6 +50,49 @@ class PermitResponse(BaseModel):
     recipient_domain: str | None = None
 
 
+class PermitRequestCreate(BaseModel):
+    """An agent asking a human for authority it cannot mint itself."""
+
+    issuer_wallet_id: str
+    subject_wallet_id: str
+    allowed_tools: list[str] = Field(min_length=1)
+    scopes: list[str] = Field(default_factory=list)
+    max_credits: Decimal = Field(gt=0)
+    expires_at: datetime
+    # Shown to the human approver: why the agent needs this authority.
+    justification: str = Field(min_length=1, max_length=2000)
+    # Carried onto the minted permit: invokes under it pause for a human too.
+    requires_human_approval: bool = False
+
+
+class PermitRequestResponse(BaseModel):
+    request_id: str
+    status: Literal[
+        "pending", "minting", "approved", "rejected", "expired", "failed"
+    ]
+    issuer_wallet_id: str
+    subject_wallet_id: str
+    subject_key_id: str | None = None
+    allowed_tools: list[str]
+    scopes: list[str]
+    max_credits: Decimal
+    permit_expires_at: datetime
+    requires_human_approval: bool
+    justification: str
+    requested_at: datetime
+    # Local decision deadline. A decision arriving after it is not honored.
+    expires_at: datetime
+    decided_at: datetime | None = None
+    decided_by: str | None = None
+    reason: str | None = None
+    simulated: bool = False
+    # Set once the permit exists; the whole point of polling.
+    permit_id: str | None = None
+    permit: PermitResponse | None = None
+    # Where the agent polls for the decision.
+    poll_url: str
+
+
 class PermitListResponse(BaseModel):
     permits: list[PermitResponse]
     total: int
