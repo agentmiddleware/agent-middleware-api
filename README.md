@@ -6,6 +6,26 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141%2B-009688)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
+## Table of Contents
+
+- [What is implemented](#what-is-implemented)
+- [Product boundary](#product-boundary)
+- [Hardening now in the tree](#hardening-now-in-the-tree)
+- [Quick start: prove the trust loop](#quick-start-prove-the-trust-loop)
+- [Run the API locally](#run-the-api-locally)
+  - [Optional: connect one upstream MCP tool](#optional-connect-one-upstream-mcp-tool)
+- [Governed MCP call shape](#governed-mcp-call-shape)
+- [Core API surfaces](#core-api-surfaces)
+- [Security and accounting posture](#security-and-accounting-posture)
+  - [Strict production configuration](#strict-production-configuration)
+  - [Billing integrity](#billing-integrity)
+  - [Remaining limits](#remaining-limits)
+- [Tests and release gates](#tests-and-release-gates)
+- [Repository map](#repository-map)
+  - [Python SDK 0.4.0](#python-sdk-040)
+- [Documentation](#documentation)
+- [License](#license)
+
 > **Production beta, not production complete.** Agent Middleware API is a
 > self-hostable trust plane for governed MCP tool calls. It is
 > **not a full agent middleware platform**, payment network, IAM replacement, or
