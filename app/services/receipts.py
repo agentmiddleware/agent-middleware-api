@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from decimal import Decimal
 from typing import Any, cast
@@ -18,6 +19,9 @@ from app.services.signing_keys import (
     get_signing_key_service,
     sha256_hex,
 )
+
+
+_REASON_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
 
 
 class ReceiptError(RuntimeError):
@@ -52,6 +56,7 @@ def receipt_model_to_response(model: ReceiptModel) -> ReceiptResponse:
         credits_authorized=model.credits_authorized,
         credits_charged=model.credits_charged,
         outcome=model.outcome,
+        reason_code=model.reason_code,
         audit_event_id=model.audit_event_id,
         approval_id=model.approval_id,
         constraints_evaluated=_loads_dict(model.constraints_evaluated_json),
@@ -85,6 +90,8 @@ class ReceiptService:
             "alg": "Ed25519",
             "kid": model.signature_key_id,
         }
+        if model.reason_code is not None:
+            payload["reason_code"] = model.reason_code
         if include_linkage and model.idempotency_record_id is not None:
             payload["idempotency_record_id"] = model.idempotency_record_id
         if include_linkage and model.dispatch_attempt_id is not None:
@@ -156,6 +163,7 @@ class ReceiptService:
         credits_authorized: Decimal,
         credits_charged: Decimal,
         outcome: str,
+        reason_code: str | None,
         audit_event_id: str | None,
         approval_id: str | None,
         constraints_evaluated: dict[str, Any] | None = None,
@@ -174,6 +182,7 @@ class ReceiptService:
             "credits_authorized": credits_authorized,
             "credits_charged": credits_charged,
             "outcome": outcome,
+            "reason_code": reason_code,
             "audit_event_id": audit_event_id,
             "approval_id": approval_id,
         }
@@ -210,6 +219,7 @@ class ReceiptService:
         credits_charged: Decimal,
         outcome: str,
         audit_event_id: str | None,
+        reason_code: str | None = None,
         idempotency_record_id: str | None = None,
         dispatch_attempt_id: str | None = None,
         request_hash: str | None = None,
@@ -218,6 +228,9 @@ class ReceiptService:
         approval_id: str | None = None,
         constraints_evaluated: dict[str, Any] | None = None,
     ) -> ReceiptResponse:
+        if reason_code is not None:
+            if outcome == "success" or not _REASON_CODE_PATTERN.fullmatch(reason_code):
+                raise ReceiptError("receipt_reason_code_invalid")
         if (request_payload is None) == (request_hash is None):
             raise ReceiptError("receipt_request_identity_invalid")
         if request_hash is not None:
@@ -281,6 +294,7 @@ class ReceiptService:
                 credits_authorized=credits_authorized,
                 credits_charged=credits_charged,
                 outcome=outcome,
+                reason_code=reason_code,
                 audit_event_id=audit_event_id,
                 approval_id=approval_id,
                 constraints_evaluated=constraints_evaluated,
@@ -310,6 +324,8 @@ class ReceiptService:
             "audit_event_id": audit_event_id,
             "created_at": created_at,
         }
+        if reason_code is not None:
+            payload["reason_code"] = reason_code
         # Keep historical receipt signatures valid: these additive fields are
         # signed only on receipts that actually carry the new linkage.
         if idempotency_record_id is not None:
@@ -339,9 +355,12 @@ class ReceiptService:
             credits_authorized=credits_authorized,
             credits_charged=credits_charged,
             outcome=outcome,
+            reason_code=reason_code,
             audit_event_id=audit_event_id,
             approval_id=approval_id,
-            constraints_evaluated_json=json.dumps(constraints_evaluated) if constraints_evaluated else None,
+            constraints_evaluated_json=json.dumps(constraints_evaluated)
+            if constraints_evaluated
+            else None,
             created_at=created_at,
             signature=signature,
             signature_key_id=signature_key_id,

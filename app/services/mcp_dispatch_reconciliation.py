@@ -612,6 +612,9 @@ class McpDispatchReconciliationService:
             if attempt.state == "returned_error"
             else attempt.credits_charged
         )
+        reason_code = (
+            None if attempt.state == "succeeded" else self._public_error(attempt)
+        )
         try:
             return await self._receipts.create_receipt(
                 idempotency_record_id=attempt.idempotency_record_id,
@@ -629,6 +632,7 @@ class McpDispatchReconciliationService:
                 credits_charged=credits_charged,
                 outcome=outcome,
                 audit_event_id=audit_event_id,
+                reason_code=reason_code,
                 approval_id=attempt.approval_id,
                 constraints_evaluated=constraints_evaluated,
             )
@@ -678,6 +682,19 @@ class McpDispatchReconciliationService:
             "approval_id": attempt.approval_id,
         }
         if any(getattr(receipt, key) != value for key, value in expected.items()):
+            raise DispatchAttemptError("dispatch_receipt_linkage_conflict")
+        expected_reason_code = (
+            None
+            if attempt.state == "succeeded"
+            else McpDispatchReconciliationService._public_error(attempt)
+        )
+        # Receipts minted before migration 032 did not carry this optional
+        # signed field. Preserve their recoverability; any present code must
+        # still match the terminal attempt exactly.
+        if (
+            receipt.reason_code is not None
+            and receipt.reason_code != expected_reason_code
+        ):
             raise DispatchAttemptError("dispatch_receipt_linkage_conflict")
 
     @classmethod

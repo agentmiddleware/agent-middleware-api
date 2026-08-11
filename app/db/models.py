@@ -810,6 +810,10 @@ class ReceiptModel(SQLModel, table=True):
     credits_authorized: Decimal = Field(decimal_places=8)
     credits_charged: Decimal = Field(default=Decimal("0"), decimal_places=8)
     outcome: str = Field(max_length=32, index=True)
+    # Stable machine-readable reason for a governed non-success outcome.
+    # Signed only when present so receipts created before migration 032 keep
+    # verifying byte-for-byte.
+    reason_code: Optional[str] = Field(default=None, max_length=128)
     audit_event_id: Optional[str] = Field(
         default=None,
         max_length=50,
@@ -938,9 +942,7 @@ class PermitRequestModel(SQLModel, table=True):
     reason: Optional[str] = Field(default=None)
     # When the single mint claim was taken; recovers a mint interrupted by a
     # crash without letting two workers mint concurrently.
-    mint_started_at: Optional[datetime] = Field(
-        sa_type=NaiveUTCDateTime, default=None
-    )
+    mint_started_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 

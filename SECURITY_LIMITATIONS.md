@@ -13,9 +13,18 @@ The remote pilot supports one operator-configured HTTPS Streamable HTTP MCP
 origin and one exact tool. Wallet checks provide application-layer isolation;
 there is no row-level-security or public multi-tenant security claim.
 
+The supported design-partner deployment is one vendor-managed Railway project
+per customer, with dedicated API, PostgreSQL, Redis, domain, signing material,
+and administrator credentials. It is restricted to synthetic or redacted,
+low-sensitivity data: PHI, PCI data, regulated production records, and
+sensitive tool arguments are out of scope. Shared SaaS, customer-VPC/BYOC, and
+customer-operated on-premises deployments are not supported in this pilot.
+
 High-risk AWI HTTP routes (`/v1/awi/execute`, passkey, rag index/query,
-`dom/sync`) also require `X-Permit-Id` + `Idempotency-Key` and emit receipts
-when invoked over HTTP. Prefer MCP for agent integrations.
+`dom/sync`) also require `X-Permit-Id` + `Idempotency-Key`; successful metered
+calls emit receipts. Their current abort paths do not have the durable
+dispatch/charge linkage needed to mint trustworthy denial receipts, so use the
+MCP gateway for portable denial evidence.
 
 ## Not Yet Solved (Deferred By Design)
 

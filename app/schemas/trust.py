@@ -98,9 +98,7 @@ class PermitRequestCreate(BaseModel):
 
 class PermitRequestResponse(BaseModel):
     request_id: str
-    status: Literal[
-        "pending", "minting", "approved", "rejected", "expired", "failed"
-    ]
+    status: Literal["pending", "minting", "approved", "rejected", "expired", "failed"]
     issuer_wallet_id: str
     subject_wallet_id: str
     subject_key_id: str | None = None
@@ -172,6 +170,7 @@ class ReceiptResponse(BaseModel):
     credits_authorized: Decimal
     credits_charged: Decimal
     outcome: str
+    reason_code: str | None = None
     audit_event_id: str | None
     # Human approval that authorized this invoke, when the permit required one.
     approval_id: str | None = None

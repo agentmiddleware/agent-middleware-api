@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -10,9 +12,14 @@ from app.db.database import get_session_factory
 from app.db.models import LedgerEntryModel, ReceiptModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
-from app.services.receipts import get_receipt_service
+from app.services.idempotency import get_idempotency_service
+from app.services.receipts import ReceiptError, get_receipt_service
 from app.services.service_registry import get_service_registry
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 
 @pytest.fixture
@@ -46,6 +53,13 @@ async def test_receipt_signature_verifies_and_detects_tampering(
         credits_charged=Decimal("0"),
         outcome="denied",
         audit_event_id=None,
+        reason_code="permit_forbidden_field:secret_token",
+    )
+    assert receipt.reason_code == "permit_forbidden_field:secret_token"
+    signing_input = await get_receipt_service().signing_input(receipt.receipt_id)
+    assert signing_input is not None
+    assert json.loads(signing_input)["reason_code"] == (
+        "permit_forbidden_field:secret_token"
     )
 
     verify_resp = await client.post(
@@ -62,7 +76,7 @@ async def test_receipt_signature_verifies_and_detects_tampering(
             select(ReceiptModel).where(ReceiptModel.receipt_id == receipt.receipt_id)
         )
         model = result.scalar_one()
-        model.outcome = "success"
+        model.reason_code = "permit_forbidden_field:different_field"
         session.add(model)
         await session.commit()
 
@@ -74,6 +88,202 @@ async def test_receipt_signature_verifies_and_detects_tampering(
     assert tampered_resp.status_code == 200
     assert tampered_resp.json()["valid"] is False
     assert tampered_resp.json()["reason"] == "receipt_signature_invalid"
+
+
+@pytest.mark.anyio
+async def test_reason_code_is_optional_for_success_and_legacy_receipts(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="receipt-optional-reason-tool",
+        idem_key="receipt-optional-reason-permit",
+    )
+    service = get_receipt_service()
+
+    success = await service.create_receipt(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool="receipt-optional-reason-tool",
+        request_payload={"attempt": "success"},
+        response_payload={"ok": True},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("1"),
+        credits_charged=Decimal("1"),
+        outcome="success",
+        audit_event_id=None,
+    )
+    legacy_denial = await service.create_receipt(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool="receipt-optional-reason-tool",
+        request_payload={"attempt": "legacy-denial"},
+        response_payload={"error": "denied"},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("1"),
+        credits_charged=Decimal("0"),
+        outcome="denied",
+        audit_event_id=None,
+    )
+
+    for receipt in (success, legacy_denial):
+        assert receipt.reason_code is None
+        signing_input = await service.signing_input(receipt.receipt_id)
+        assert signing_input is not None
+        assert "reason_code" not in json.loads(signing_input)
+        assert (await service.verify_receipt(receipt.receipt_id))[0] is True
+
+    with pytest.raises(ReceiptError, match="receipt_reason_code_invalid"):
+        await service.create_receipt(
+            permit_id=permit["permit_id"],
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool="receipt-optional-reason-tool",
+            request_payload={"attempt": "invalid-success"},
+            response_payload={"ok": True},
+            ledger_entry_id=None,
+            credits_authorized=Decimal("1"),
+            credits_charged=Decimal("1"),
+            outcome="success",
+            audit_event_id=None,
+            reason_code="should_not_exist",
+        )
+
+
+@pytest.mark.anyio
+async def test_receipt_idempotency_matches_reason_code(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="receipt-reason-idempotency-tool",
+        idem_key="receipt-reason-idempotency-permit",
+    )
+    request_payload = {"attempt": "reason-idempotency"}
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint="/mcp/messages",
+        idempotency_key="receipt-reason-idempotency-invoke",
+        request_payload=request_payload,
+    )
+    assert begun.replay is None
+    service = get_receipt_service()
+    kwargs = {
+        "permit_id": permit["permit_id"],
+        "wallet_id": provisioned["agent_wallet_id"],
+        "key_id": provisioned["key_id"],
+        "tool": "receipt-reason-idempotency-tool",
+        "request_payload": request_payload,
+        "response_payload": {"error": "denied"},
+        "ledger_entry_id": None,
+        "credits_authorized": Decimal("1"),
+        "credits_charged": Decimal("0"),
+        "outcome": "denied",
+        "audit_event_id": None,
+        "idempotency_record_id": begun.record_id,
+    }
+
+    receipt = await service.create_receipt(
+        **kwargs,
+        reason_code="permit_budget_exceeded",
+    )
+    replay = await service.create_receipt(
+        **kwargs,
+        reason_code="permit_budget_exceeded",
+    )
+    assert replay.receipt_id == receipt.receipt_id
+
+    with pytest.raises(ReceiptError, match="receipt_idempotency_conflict"):
+        await service.create_receipt(
+            **kwargs,
+            reason_code="permit_expired",
+        )
+
+
+@pytest.mark.anyio
+async def test_dynamic_forbidden_field_denial_signs_stable_reason_without_charge(
+    client,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tool_name = "receipt-dynamic-forbidden-field"
+    unsafe_field_name = "Secret Token/Raw"
+    _register_echo_tool(tool_name)
+    try:
+        permit_resp = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": wallet_id,
+                "subject_wallet_id": wallet_id,
+                "subject_key_id": provisioned["key_id"],
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 50,
+                "forbidden_fields": [unsafe_field_name],
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+            },
+            headers={
+                **BOOTSTRAP_HEADERS,
+                "Idempotency-Key": "receipt-dynamic-forbidden-permit",
+            },
+        )
+        assert permit_resp.status_code == 201, permit_resp.text
+        permit = permit_resp.json()
+        response = await client.post(
+            "/mcp/messages",
+            json={
+                "jsonrpc": "2.0",
+                "id": "receipt-dynamic-forbidden-call",
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": {unsafe_field_name: "must-not-be-logged"},
+                    "mcpContext": {
+                        "wallet_id": wallet_id,
+                        "permit_id": permit["permit_id"],
+                        "idempotency_key": "receipt-dynamic-forbidden-invoke",
+                    },
+                },
+            },
+            headers=provisioned["agent_headers"],
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+    assert response.status_code == 200, response.text
+    error = response.json()["error"]
+    assert error["message"] == f"permit_forbidden_field:{unsafe_field_name}"
+    receipt = error["data"]["receipt"]
+    assert receipt["reason_code"] == "permit_forbidden_field"
+    assert receipt["ledger_entry_id"] is None
+    assert receipt["credits_charged"] == "0"
+
+    portable = await client.get(
+        f"/v1/receipts/{receipt['receipt_id']}/portable",
+        headers=provisioned["agent_headers"],
+    )
+    assert portable.status_code == 200, portable.text
+    signed_claims = json.loads(portable.json()["signing_input"])
+    assert signed_claims["reason_code"] == "permit_forbidden_field"
+
+    ledger = await client.get(
+        f"/v1/billing/ledger/{wallet_id}",
+        headers=provisioned["agent_headers"],
+    )
+    assert ledger.status_code == 200, ledger.text
+    assert all(
+        tool_name not in entry["description"] for entry in ledger.json()["entries"]
+    )
 
 
 def _register_echo_tool(tool_name: str) -> None:

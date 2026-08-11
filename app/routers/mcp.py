@@ -871,6 +871,7 @@ async def _execute_registered_tool(
                     registered_cost=registered_cost,
                     audit_event_id=audit_event.event_id,
                     reason=reason,
+                    reason_code=reason,
                     outcome="denied",
                     status_code=403,
                 )
@@ -944,6 +945,7 @@ async def _execute_registered_tool(
                 registered_cost=registered_cost,
                 audit_event_id=audit_event.event_id,
                 reason=reason,
+                reason_code=reason,
                 outcome="denied",
                 status_code=403,
             )
@@ -981,6 +983,7 @@ async def _execute_registered_tool(
     ):
         upstream_origin = str(service.get("upstream_origin", ""))
         from urllib.parse import urlparse
+
         parsed = urlparse(upstream_origin)
         origin_domain = parsed.hostname or upstream_origin
         if origin_domain != permit_model.recipient_domain:
@@ -1010,11 +1013,10 @@ async def _execute_registered_tool(
                 registered_cost=registered_cost,
                 audit_event_id=audit_event.event_id,
                 reason="permit_recipient_domain_mismatch",
+                reason_code="permit_recipient_domain_mismatch",
                 outcome="denied",
                 status_code=403,
-                approval_id=(
-                    approval_check.approval_id if approval_check else None
-                ),
+                approval_id=(approval_check.approval_id if approval_check else None),
             )
             raise ToolPermissionDenied(
                 "permit_recipient_domain_mismatch",
@@ -1087,6 +1089,7 @@ async def _execute_registered_tool(
                     registered_cost=registered_cost,
                     audit_event_id=audit_event.event_id,
                     reason=reason,
+                    reason_code=reason,
                     outcome="failed_refunded",
                     status_code=502,
                     idempotency_record_id=idem_begin.record_id,
@@ -1145,6 +1148,7 @@ async def _execute_registered_tool(
                     registered_cost=registered_cost,
                     audit_event_id=audit_event.event_id,
                     reason=reason,
+                    reason_code=reason,
                     outcome="denied",
                     status_code=403,
                     approval_id=(
@@ -1317,6 +1321,7 @@ async def _execute_registered_tool(
                 registered_cost=registered_cost,
                 audit_event_id=audit_event.event_id,
                 reason=denial_reason,
+                reason_code=denial_reason,
                 outcome=receipt_outcome,
                 status_code=denial_status,
                 idempotency_record_id=(
@@ -1522,6 +1527,7 @@ async def _execute_registered_tool(
                 registered_cost=registered_cost,
                 audit_event_id=audit_event.event_id,
                 reason=str(exc),
+                reason_code="tool_execution_failed",
                 outcome="failed_refunded",
                 status_code=500,
                 ledger_entry_id=charge_result.entry_id,
@@ -1594,7 +1600,9 @@ async def _execute_registered_tool(
                         approval_id=(
                             approval_check.approval_id if approval_check else None
                         ),
-                        constraints_evaluated=_permit_constraints_snapshot(permit_model),
+                        constraints_evaluated=_permit_constraints_snapshot(
+                            permit_model
+                        ),
                     )
                     response_payload["receipt"] = _receipt_response_payload(receipt)
                 assert receipt is not None
@@ -2114,6 +2122,7 @@ async def _raise_refunded_upstream_failure(
         registered_cost=registered_cost,
         audit_event_id=audit_event.event_id,
         reason=reason,
+        reason_code=reason,
         outcome="failed_refunded",
         status_code=502,
         ledger_entry_id=ledger_entry_id,
@@ -2194,6 +2203,7 @@ async def _raise_charged_upstream_failure(
         credits_authorized=registered_cost,
         credits_charged=credits_charged,
         outcome=outcome,
+        reason_code=reason,
         audit_event_id=audit_event.event_id,
         idempotency_record_id=dispatch_attempt.idempotency_record_id,
         dispatch_attempt_id=dispatch_attempt.attempt_id,
@@ -2253,6 +2263,13 @@ def _receipt_response_payload(receipt: Any) -> dict[str, Any]:
     return payload
 
 
+def _stable_receipt_reason(reason: str) -> str:
+    """Collapse dynamic denial detail into a stable signed reason code."""
+    if reason.startswith("permit_forbidden_field:"):
+        return "permit_forbidden_field"
+    return reason
+
+
 def _governed_error_payload(
     reason: str,
     receipt: dict[str, Any] | None,
@@ -2305,6 +2322,7 @@ async def _finalize_governed_denial(
     registered_cost: Decimal,
     audit_event_id: str,
     reason: str,
+    reason_code: str,
     outcome: str,
     status_code: int,
     ledger_entry_id: str | None = None,
@@ -2339,6 +2357,7 @@ async def _finalize_governed_denial(
         credits_authorized=registered_cost,
         credits_charged=Decimal("0"),
         outcome=outcome,
+        reason_code=_stable_receipt_reason(reason_code),
         audit_event_id=audit_event_id,
         idempotency_record_id=idempotency_record_id,
         dispatch_attempt_id=dispatch_attempt_id,
@@ -2493,6 +2512,7 @@ async def _require_human_approval(
             registered_cost=registered_cost,
             audit_event_id=audit_event.event_id,
             reason=reason,
+            reason_code=reason,
             outcome="denied",
             status_code=403,
             approval_id=approval_id,

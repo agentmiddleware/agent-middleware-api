@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "customer_slug": "example-customer",
+  "railway_project_id": "123e4567-e89b-42d3-a456-426614174000",
+  "environment": "production",
+  "region": "us-west2",
+  "public_url": "https://api.example.com",
+  "signing_key_id": "example-customer-production-ed25519-v1",
+  "signing_public_key_sha256": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+  "expected_commit_sha": "0000000000000000000000000000000000000000",
+  "expected_alembic_revision": "032_receipt_reason_code"
+}

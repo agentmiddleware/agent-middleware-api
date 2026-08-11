@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Railway deploy preflight: migration-head parity + live posture check.
+"""Railway deploy preflight: customer manifest + deploy posture checks.
 
 Two independent checks, each skipped when its ordinary input is absent.
 Explicit ``--public-db`` mode is an exception and fails closed when absent:
@@ -26,13 +26,20 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
     commit expectation must be a full 40-character SHA.
 
+``--manifest`` (optional non-secret JSON)
+    Bind the checks to one managed single-tenant deployment. The manifest
+    supplies the public origin, expected commit, Alembic revision, and signing
+    key id/public fingerprint. Its expected commit and revision must match this
+    checkout, and the live service must publish the configured signing key.
+    Existing invocations without a manifest keep their current behavior.
+
 Exit code is non-zero if any *executed* check fails, so this works as a
 release gate. Skipped checks never fail the run; ``--strict`` turns a skip
 into a failure for CI, where both inputs are expected.
 
 Usage::
 
-    # Before `railway up`, with the service env loaded:
+    # Before `railway up`, when the database is reachable from this machine:
     railway run python scripts/railway_preflight.py
 
     # Schema parity only:
@@ -47,6 +54,10 @@ Usage::
       --expected-version 1.3.0 \
       --expected-commit-sha 0123456789abcdef0123456789abcdef01234567
 
+    # Managed single-tenant gate (URL and commit come from the manifest):
+    python scripts/railway_preflight.py --live --strict \
+      --manifest /path/to/customer.production.json
+
 See docs/deploy-railway.md.
 """
 
@@ -54,13 +65,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import binascii
+import hashlib
 import ipaddress
+import json
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlsplit
+from uuid import UUID
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -72,6 +90,213 @@ from app.core.db_urls import as_sqlalchemy_url  # noqa: E402
 OK = "[preflight] PASS"
 BAD = "[preflight] FAIL"
 SKIP = "[preflight] SKIP"
+
+MANIFEST_SCHEMA_VERSION = "1.0"
+_MANIFEST_FIELDS = frozenset(
+    {
+        "schema_version",
+        "customer_slug",
+        "railway_project_id",
+        "environment",
+        "region",
+        "public_url",
+        "signing_key_id",
+        "signing_public_key_sha256",
+        "expected_commit_sha",
+        "expected_alembic_revision",
+    }
+)
+_SLUG_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+_SAFE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._:-]{0,63}")
+_ALEMBIC_REVISION_RE = re.compile(r"[a-z0-9][a-z0-9_]{0,63}")
+_COMMIT_SHA_RE = re.compile(r"[0-9a-f]{40}")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_DNS_LABEL_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+class ManifestError(ValueError):
+    """Raised when a customer deployment manifest is not safe to use."""
+
+
+class CustomerManifest(NamedTuple):
+    schema_version: str
+    customer_slug: str
+    railway_project_id: str
+    environment: str
+    region: str
+    public_url: str
+    signing_key_id: str
+    signing_public_key_sha256: str
+    expected_commit_sha: str
+    expected_alembic_revision: str
+
+
+def _tree_commit_sha() -> str:
+    """Return the full commit SHA for the intended release checkout."""
+    try:
+        commit_sha = (
+            subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=REPO_ROOT,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            .stdout.strip()
+            .lower()
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("unable to resolve the tree commit SHA") from exc
+    if _COMMIT_SHA_RE.fullmatch(commit_sha) is None:
+        raise RuntimeError("tree commit SHA is not a full hexadecimal SHA")
+    return commit_sha
+
+
+def _tree_is_clean() -> bool:
+    """Return whether ``railway up`` would start from a clean Git checkout."""
+    try:
+        status = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=normal",
+                "--ignore-submodules=none",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("unable to inspect the release checkout") from exc
+    return not status.strip()
+
+
+def _canonical_public_url(value: str) -> str:
+    """Validate and return a canonical public HTTPS origin."""
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ManifestError("manifest public_url must be a valid HTTPS origin") from exc
+
+    hostname = parsed.hostname or ""
+    labels = hostname.split(".")
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or hostname != hostname.lower()
+        or len(hostname) > 253
+        or len(labels) < 2
+        or any(_DNS_LABEL_RE.fullmatch(label) is None for label in labels)
+        or hostname == "localhost"
+        or hostname.endswith(".internal")
+    ):
+        raise ManifestError(
+            "manifest public_url must be a canonical public HTTPS origin"
+        )
+
+    canonical = f"https://{hostname}"
+    if value.rstrip("/") != canonical:
+        raise ManifestError(
+            "manifest public_url must be a canonical public HTTPS origin"
+        )
+    return canonical
+
+
+def _load_customer_manifest(path: str | Path) -> CustomerManifest:
+    """Load a strict, non-secret customer deployment manifest."""
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ManifestError("manifest must be readable UTF-8 JSON") from exc
+
+    if not isinstance(document, dict):
+        raise ManifestError("manifest root must be a JSON object")
+
+    fields = set(document)
+    missing = sorted(_MANIFEST_FIELDS - fields)
+    if missing:
+        raise ManifestError(f"manifest missing required fields: {', '.join(missing)}")
+    unexpected = fields - _MANIFEST_FIELDS
+    if unexpected:
+        raise ManifestError("manifest contains unsupported fields")
+    if any(not isinstance(document[field], str) for field in _MANIFEST_FIELDS):
+        raise ManifestError("every manifest field must be a JSON string")
+
+    if document["schema_version"] != MANIFEST_SCHEMA_VERSION:
+        raise ManifestError(
+            f"manifest schema_version must be {MANIFEST_SCHEMA_VERSION!r}"
+        )
+    if _SLUG_RE.fullmatch(document["customer_slug"]) is None:
+        raise ManifestError("manifest customer_slug must be a lowercase DNS-style slug")
+    try:
+        project_id = UUID(document["railway_project_id"])
+    except ValueError as exc:
+        raise ManifestError(
+            "manifest railway_project_id must be a canonical UUID"
+        ) from exc
+    if str(project_id) != document["railway_project_id"] or project_id.int == 0:
+        raise ManifestError("manifest railway_project_id must be a canonical UUID")
+    if _SLUG_RE.fullmatch(document["environment"]) is None:
+        raise ManifestError("manifest environment must be a lowercase DNS-style slug")
+    if _SLUG_RE.fullmatch(document["region"]) is None:
+        raise ManifestError("manifest region must be a lowercase DNS-style slug")
+    public_url = _canonical_public_url(document["public_url"])
+    if _SAFE_ID_RE.fullmatch(document["signing_key_id"]) is None:
+        raise ManifestError(
+            "manifest signing_key_id must be a lowercase safe identifier"
+        )
+    if _SHA256_RE.fullmatch(document["signing_public_key_sha256"]) is None:
+        raise ManifestError(
+            "manifest signing_public_key_sha256 must be a lowercase SHA-256 digest"
+        )
+    if _COMMIT_SHA_RE.fullmatch(document["expected_commit_sha"]) is None:
+        raise ManifestError(
+            "manifest expected_commit_sha must be a lowercase full 40-character SHA"
+        )
+    if _ALEMBIC_REVISION_RE.fullmatch(document["expected_alembic_revision"]) is None:
+        raise ManifestError(
+            "manifest expected_alembic_revision must be a lowercase Alembic revision"
+        )
+
+    return CustomerManifest(
+        schema_version=document["schema_version"],
+        customer_slug=document["customer_slug"],
+        railway_project_id=document["railway_project_id"],
+        environment=document["environment"],
+        region=document["region"],
+        public_url=public_url,
+        signing_key_id=document["signing_key_id"],
+        signing_public_key_sha256=document["signing_public_key_sha256"],
+        expected_commit_sha=document["expected_commit_sha"],
+        expected_alembic_revision=document["expected_alembic_revision"],
+    )
+
+
+def _matches_ed25519_public_key(entry: object, expected_sha256: str) -> bool:
+    """Validate published Ed25519 material and compare its public fingerprint."""
+    if not isinstance(entry, dict) or entry.get("alg") != "Ed25519":
+        return False
+    public_key_b64 = entry.get("public_key_b64")
+    if not isinstance(public_key_b64, str):
+        return False
+    try:
+        raw_public_key = base64.b64decode(public_key_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return len(raw_public_key) == 32 and (
+        hashlib.sha256(raw_public_key).hexdigest() == expected_sha256
+    )
 
 
 def _tree_head() -> str:
@@ -170,6 +395,8 @@ def check_live(
     *,
     expected_version: str | None = None,
     expected_commit_sha: str | None = None,
+    expected_signing_key_id: str | None = None,
+    expected_signing_public_key_sha256: str | None = None,
 ) -> bool:
     import httpx
 
@@ -249,6 +476,77 @@ def check_live(
                         f"{normalized_expected_sha!r}"
                     )
 
+    if expected_signing_key_id is not None:
+        if (
+            expected_signing_public_key_sha256 is None
+            or _SHA256_RE.fullmatch(expected_signing_public_key_sha256) is None
+        ):
+            failures.append(
+                "expected signing public-key fingerprint must be a lowercase "
+                "SHA-256 digest"
+            )
+
+        health_signing_key_id = body.get("signing_key_id")
+        dependencies = body.get("dependencies")
+        if health_signing_key_id is None and isinstance(dependencies, dict):
+            signing_key = dependencies.get("signing_key")
+            if isinstance(signing_key, dict):
+                health_signing_key_id = signing_key.get("key_id")
+
+        if health_signing_key_id is not None:
+            if health_signing_key_id != expected_signing_key_id:
+                failures.append(
+                    "live health signing key id does not match the customer manifest"
+                )
+
+        try:
+            keys_resp = httpx.get(
+                f"{base}/.well-known/trust-keys.json",
+                timeout=30,
+            )
+            keys_resp.raise_for_status()
+            key_document = keys_resp.json()
+        except Exception:
+            failures.append(
+                "public trust-key document is unavailable; cannot verify the "
+                "manifest signing key id"
+            )
+        else:
+            published_keys = (
+                key_document.get("keys") if isinstance(key_document, dict) else None
+            )
+            issuer = (
+                key_document.get("issuer") if isinstance(key_document, dict) else None
+            )
+            document_alg = (
+                key_document.get("alg") if isinstance(key_document, dict) else None
+            )
+            active_matches = (
+                [
+                    key
+                    for key in published_keys
+                    if isinstance(key, dict)
+                    and key.get("kid") == expected_signing_key_id
+                    and key.get("status") == "active"
+                ]
+                if isinstance(published_keys, list)
+                else []
+            )
+            if issuer != base:
+                failures.append(
+                    "public trust-key issuer does not match the customer manifest URL"
+                )
+            if document_alg != "Ed25519":
+                failures.append("public trust-key document must use Ed25519")
+            if len(active_matches) != 1 or not _matches_ed25519_public_key(
+                active_matches[0] if len(active_matches) == 1 else None,
+                expected_signing_public_key_sha256 or "",
+            ):
+                failures.append(
+                    "manifest signing key id is not published exactly once as an "
+                    "active Ed25519 key with valid public material"
+                )
+
     if failures:
         for item in failures:
             print(f"{BAD} {item}")
@@ -296,6 +594,14 @@ def main(argv: list[str] | None = None) -> int:
         help="full 40-character commit SHA required from --live",
     )
     parser.add_argument(
+        "--manifest",
+        default="",
+        help=(
+            "strict non-secret customer deployment manifest; supplies the live "
+            "URL, commit SHA, Alembic revision, and signing key identity"
+        ),
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="treat a skipped check as a failure (for CI)",
@@ -307,6 +613,49 @@ def main(argv: list[str] | None = None) -> int:
     run_live = args.live or not (args.db or args.live)
 
     results: list[bool] = []
+    manifest: CustomerManifest | None = None
+    effective_url = args.url.strip()
+    effective_commit_sha = args.expected_commit_sha.strip()
+
+    if args.manifest:
+        try:
+            manifest = _load_customer_manifest(args.manifest)
+            tree_head = _tree_head()
+            tree_commit_sha = _tree_commit_sha()
+            tree_is_clean = _tree_is_clean()
+        except ManifestError as exc:
+            print(f"{BAD} customer manifest: {exc}")
+            return 1
+        except Exception:
+            print(f"{BAD} customer manifest: unable to resolve checkout provenance")
+            return 1
+
+        if manifest.expected_alembic_revision != tree_head:
+            print(f"{BAD} customer manifest Alembic revision does not match this tree")
+            return 1
+        if manifest.expected_commit_sha != tree_commit_sha:
+            print(
+                f"{BAD} customer manifest commit SHA does not match this "
+                "release checkout"
+            )
+            return 1
+        if not tree_is_clean:
+            print(
+                f"{BAD} customer manifest requires a clean release checkout; "
+                "tracked or untracked changes are present"
+            )
+            return 1
+        if effective_url and effective_url.rstrip("/") != manifest.public_url:
+            print(f"{BAD} live URL does not match the customer manifest")
+            return 1
+        effective_url = manifest.public_url
+        if (
+            effective_commit_sha
+            and effective_commit_sha.lower() != manifest.expected_commit_sha
+        ):
+            print(f"{BAD} expected commit SHA does not match the customer manifest")
+            return 1
+        effective_commit_sha = manifest.expected_commit_sha
 
     if run_db:
         database_url_load_failed = False
@@ -336,14 +685,24 @@ def main(argv: list[str] | None = None) -> int:
             results.append(not args.strict)
 
     if run_live:
-        if args.url:
-            results.append(
-                check_live(
-                    args.url,
+        if effective_url:
+            if manifest is not None:
+                live_result = check_live(
+                    effective_url,
                     expected_version=args.expected_version or None,
-                    expected_commit_sha=args.expected_commit_sha or None,
+                    expected_commit_sha=effective_commit_sha or None,
+                    expected_signing_key_id=manifest.signing_key_id,
+                    expected_signing_public_key_sha256=(
+                        manifest.signing_public_key_sha256
+                    ),
                 )
-            )
+            else:
+                live_result = check_live(
+                    effective_url,
+                    expected_version=args.expected_version or None,
+                    expected_commit_sha=effective_commit_sha or None,
+                )
+            results.append(live_result)
         else:
             print(f"{SKIP} live posture: no PUBLIC_URL and no --url")
             results.append(not args.strict)
