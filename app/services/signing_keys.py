@@ -28,6 +28,13 @@ class SigningKeyError(RuntimeError):
     """Raised when trust-plane signing or verification cannot proceed."""
 
 
+# Names the exact byte-level contract :func:`canonical_json` implements, so an
+# independent verifier can state which rules it was written against. Bump only
+# when the bytes a signature covers change shape — never for additive fields,
+# which are already handled by signing them only when present.
+RECEIPT_CANONICALIZATION = "awi-canonical-json/1"
+
+
 def _decode_private_key(configured: str) -> Ed25519PrivateKey:
     """Decode strict base64 Ed25519 seed material without exposing it."""
 
@@ -209,6 +216,31 @@ class SigningKeyService:
         """Return the current active public metadata, creating it if needed."""
 
         return await self.ensure_active_key()
+
+    async def list_public_keys(self) -> list[SigningKeyModel]:
+        """Return every published public key, newest activation first.
+
+        Retired keys stay in the list on purpose: a receipt signed under a
+        retired key must remain verifiable for as long as the receipt is
+        evidence. Only ``disabled`` keys are excluded, mirroring
+        :meth:`verify_payload`, which refuses them.
+        """
+
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(SigningKeyModel).where(
+                    cast(ColumnElement[bool], SigningKeyModel.status != "disabled")
+                )
+            )
+            keys = list(result.scalars())
+        # Sort in Python so the ordering is identical on SQLite and PostgreSQL
+        # regardless of how each backend collates NULL activated_at.
+        keys.sort(
+            key=lambda key: (key.activated_at or key.created_at),
+            reverse=True,
+        )
+        return keys
 
     async def get_public_key(self, key_id: str) -> SigningKeyModel | None:
         factory = get_session_factory()

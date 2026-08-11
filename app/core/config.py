@@ -261,3 +261,12 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+
+
+def public_api_origin() -> str:
+    """Absolute public API origin from PUBLIC_URL (empty when unset).
+
+    Returns empty rather than guessing localhost: a manifest or an exported
+    receipt that names the wrong issuer is worse than one that names none.
+    """
+    return (get_settings().PUBLIC_URL or "").strip().rstrip("/")

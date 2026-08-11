@@ -24,6 +24,9 @@ _MARKDOWN_DOCS: dict[str, Path] = {
     "/docs/partner-api-key-bootstrap.md": (
         _REPO_ROOT / "docs" / "partner-api-key-bootstrap.md"
     ),
+    "/docs/agent-accountability.md": (
+        _REPO_ROOT / "docs" / "agent-accountability.md"
+    ),
 }
 
 
@@ -139,6 +142,19 @@ async def get_design_partner_guide_md():
 )
 async def get_partner_api_key_bootstrap_md():
     return _serve_markdown("/docs/partner-api-key-bootstrap.md")
+
+
+@router.get(
+    "/docs/agent-accountability.md",
+    summary="Agent accountability",
+    description=(
+        "Why an autonomous agent runs inside the permit/receipt loop, how to "
+        "verify a receipt offline, and what receipts do not prove."
+    ),
+    response_class=PlainTextResponse,
+)
+async def get_agent_accountability_md():
+    return _serve_markdown("/docs/agent-accountability.md")
 
 
 @router.get(

@@ -208,6 +208,35 @@ class EvidenceBundleResponse(BaseModel):
     verification: dict[str, str] = Field(default_factory=dict)
 
 
+class PortableReceiptResponse(BaseModel):
+    """A receipt as self-contained, offline-verifiable evidence.
+
+    Everything needed to check the signature travels in this object, except
+    the public key — which is published unauthenticated at ``keys_url``. A
+    holder verifies it without an account, a credential, or any call back to
+    the plane that issued it.
+    """
+
+    schema_version: str = "1.0"
+    receipt_id: str
+    issuer: str = Field(
+        description="Public origin of the issuing plane; empty when PUBLIC_URL is unset."
+    )
+    alg: str = "Ed25519"
+    kid: str = Field(description="Identifies which published key signed this receipt.")
+    canonicalization: str = Field(
+        description="Canonical-JSON contract version the signing_input follows."
+    )
+    signing_input: str = Field(
+        description=(
+            "The exact UTF-8 string the signature covers. Verify over these "
+            "bytes verbatim; do not re-serialize the parsed object."
+        )
+    )
+    signature: str = Field(description="Base64 Ed25519 signature over signing_input.")
+    keys_url: str = Field(description="Where to fetch the public key for `kid`.")
+
+
 class TrustMcpMetadata(BaseModel):
     permit_id: str | None = None
     receipt_id: str | None = None

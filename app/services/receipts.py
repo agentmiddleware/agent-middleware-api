@@ -498,6 +498,44 @@ class ReceiptService:
                 receipt_model_to_response(model),
             )
 
+    async def signing_input_for_model(self, model: ReceiptModel) -> str | None:
+        """Return the exact canonical bytes this receipt's signature covers.
+
+        Mirrors :meth:`verify_model` branch for branch, so the exported bytes
+        are the ones that actually verify — including for receipts whose
+        signature predates the linkage fields. Returns ``None`` when neither
+        branch verifies, so a receipt that cannot be proven is never handed
+        out as evidence.
+        """
+        signing_keys = get_signing_key_service()
+        current_payload = self._verification_payload(model, include_linkage=True)
+        if await signing_keys.verify_payload(
+            current_payload,
+            signature=model.signature,
+            key_id=model.signature_key_id,
+        ):
+            return canonical_json(current_payload)
+
+        if not await self._has_unambiguous_historical_idempotency_link(model):
+            return None
+        legacy_payload = self._verification_payload(model, include_linkage=False)
+        if await signing_keys.verify_payload(
+            legacy_payload,
+            signature=model.signature,
+            key_id=model.signature_key_id,
+        ):
+            return canonical_json(legacy_payload)
+        return None
+
+    async def signing_input(self, receipt_id: str) -> str | None:
+        """Load a receipt and return the canonical bytes its signature covers."""
+        factory = get_session_factory()
+        async with factory() as session:
+            model = await session.get(ReceiptModel, receipt_id)
+            if model is None:
+                return None
+            return await self.signing_input_for_model(model)
+
     async def verify_model(self, model: ReceiptModel) -> bool:
         """Verify current signatures, then the constrained migration fallback."""
         signing_keys = get_signing_key_service()

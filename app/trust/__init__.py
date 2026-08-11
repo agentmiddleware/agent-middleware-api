@@ -95,6 +95,7 @@ from .refund_reconciliation import (
     get_refund_reconciliation_service,
 )
 from .signing import (
+    RECEIPT_CANONICALIZATION,
     SigningKeyError,
     SigningKeyService,
     canonical_json,
@@ -136,6 +137,7 @@ __all__ = [
     "build_pending_refund_reconciliation",
     "get_refund_reconciliation_service",
     # signing (cryptographic root)
+    "RECEIPT_CANONICALIZATION",
     "SigningKeyService",
     "SigningKeyError",
     "get_signing_key_service",

@@ -36,11 +36,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Ed25519 verification of portable receipts. Kept out of the base install so
+# clients that only call tools do not pull a native dependency.
+verify = [
+    "cryptography>=42.0.0",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
+    "cryptography>=42.0.0",
 ]
+
+[project.scripts]
+b2a-verify-receipt = "b2a_sdk.verify_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/PetrefiedThunder/agent-middleware-api"

@@ -56,8 +56,11 @@ linkage; **replay returning the identical receipt with no second debit**;
 out-of-scope denial (`permit_tool_not_allowed`) with a signed denial receipt
 and no charge; **denial replay returning the same denial receipt**; fail-closed
 `permit_required` denial when no permit is supplied; cross-wallet read denied
-with 403; a valid evidence bundle; and detection of both a tampered receipt and
-a tampered audit event.
+with 403; a valid evidence bundle; **offline verification of the exported
+receipt against the unauthenticated key document, through the SDK verifier
+that imports none of the application** — including detection of edited signed
+bytes and the separation of a missing key (`unknown_key`) from tampering; and
+detection of both a tampered receipt and a tampered audit event.
 
 Replay is therefore already a proven invariant, not a gap — it is asserted here
 on both the success and denial paths, again in the dogfood proof against a real
@@ -147,12 +150,26 @@ Being explicit about the boundary is what makes the proofs worth anything.
 - **Audit chains are tamper-evident, not immutable.** An administrator who can
   alter both the database and its chain metadata is inside the trust boundary.
   Append-only storage and external anchoring are not implemented.
-- **Verification is first-party.** `/v1/receipts/verify`,
-  `/v1/audit/verify-chain`, and the evidence bundle are served by the same
-  operator that produced the artifacts. There is no external transparency log,
-  no third-party notarization, and no independent offline verifier. Until one
-  exists, these artifacts are *operator-verifiable*, not *independently
-  verifiable*.
+- **Receipt signatures are independently verifiable; the rest of verification
+  is still first-party.** A receipt exported via
+  `GET /v1/receipts/{receipt_id}/portable` can be checked by anyone against the
+  unauthenticated `/.well-known/trust-keys.json`, using
+  `b2a_sdk.receipt_verifier`, which imports none of this application and needs
+  no network. That closes the "no independent offline verifier" gap for
+  signatures. Three limits remain, and they are not small:
+  - **Key distribution is first-party.** Keys are fetched over TLS from the
+    issuing origin, so an attacker controlling that origin can serve a key set
+    that validates forged receipts. Out-of-band key pinning is not
+    implemented.
+  - **No transparency log.** Receipts prove what happened, never what did not.
+    A plane can issue a receipt to one party and omit it from another's
+    listing, and no verifier can detect that.
+  - **`/v1/audit/verify-chain` and the evidence bundle remain first-party.**
+    Those are computed by the operator over the operator's database; only the
+    receipt signature travels.
+
+  See [agent-accountability.md](agent-accountability.md) for the full list of
+  what a receipt does and does not prove.
 - **There is no Byzantine fault tolerance, and the term does not apply.** The
   architecture is one API server, one database, and one operator-held signing
   key. BFT addresses arbitrary faults among mutually distrusting replicas;
@@ -177,18 +194,23 @@ Being explicit about the boundary is what makes the proofs worth anything.
 
 Ordered by how much each would strengthen the differentiator per unit of work.
 
-1. **An independent offline verifier.** A script that takes exported receipts,
-   permits, and audit events plus published public-key metadata and verifies
-   them with no running server. This is the single highest-leverage item: it
-   converts "operator-verifiable" into "independently verifiable" without
-   requiring a transparency log, and it is self-contained tooling rather than
-   distributed infrastructure.
-2. **Exercise the remaining crash fault points.** The harness already
+1. **Extend the offline verifier to permits and audit events.** Receipts are
+   done — `b2a_sdk.receipt_verifier` verifies an exported receipt against the
+   published key document with no running server, and `make prove-trust-plane`
+   asserts it. Permits and audit-chain events are still checked only by the
+   operator, so the same treatment for them is now the highest-leverage item:
+   an export carrying the exact signed bytes, plus verifier support.
+2. **Out-of-band key distribution.** Offline signature verification is only as
+   strong as the key set it runs against, and today that is fetched from the
+   origin being audited. Key pinning, or publication through an independent
+   channel, is what makes the verifier meaningful against a compromised
+   issuer.
+3. **Exercise the remaining crash fault points.** The harness already
    instruments more commit boundaries than the three proven scenarios use.
-3. **External anchoring or append-only storage**, which is what would let the
+4. **External anchoring or append-only storage**, which is what would let the
    project retire the "tamper-evident, not immutable" caveat.
-4. **KMS-backed signing custody**, designed in
+5. **KMS-backed signing custody**, designed in
    [`docs/key-management.md`](key-management.md) but not implemented.
 
-Items 3 and 4 are frozen by [`WEDGE.md`](../WEDGE.md) until a design partner
+Items 4 and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a design partner
 requires them. They belong on a roadmap, not in product copy.

@@ -23,6 +23,13 @@ from .models import (
     ReceiptVerification,
     ToolDefinition,
 )
+from .receipt_verifier import (
+    VerificationError,
+    VerificationResult,
+    VerificationStatus,
+    key_set_from_document,
+    verify_bundle,
+)
 
 __version__ = "0.4.0"
 __author__ = "Agent-Native Middleware"
@@ -47,7 +54,12 @@ __all__ = [
     "ReceiptVerification",
     "ToolDefinition",
     "TransportError",
+    "VerificationError",
+    "VerificationResult",
+    "VerificationStatus",
     "billable",
     "combined",
     "monitored",
+    "key_set_from_document",
+    "verify_bundle",
 ]

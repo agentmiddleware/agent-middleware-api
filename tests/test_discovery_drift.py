@@ -5,6 +5,7 @@ from app.main import app
 from app.services import mcp_phase9_tools
 from app.services.mcp_phase9_tools import MCP_PHASE9_TOOLS
 from app.services.service_registry import get_service_registry
+from tests.conftest import iter_routes
 
 
 _DEFAULT_MCP_TOOL_IDS = {
@@ -68,6 +69,39 @@ async def test_agent_manifest_points_to_canonical_control_plane_surfaces(client)
     assert "permits" in data["capabilities"]
     assert "passkey_auth" not in data["capabilities"]
     assert any(p["id"] == "passkey_auth" for p in data["proof_surfaces"])
+
+
+@pytest.mark.anyio
+async def test_every_advertised_endpoint_resolves_to_a_mounted_route(client):
+    """No entry in the manifest may point at nothing.
+
+    Discovery is the contract an autonomous client bootstraps from; an
+    advertised path that 404s costs it a wasted call and a wrong conclusion
+    about what this plane offers. `keys` pointed at `/v1/keys` while the
+    router was mounted at `/v1/signing-keys`, which is exactly the drift this
+    catches — generically, rather than one asserted path at a time.
+    """
+    response = await client.get("/.well-known/agent.json")
+    assert response.status_code == 200
+
+    mounted = {
+        route.path for route in iter_routes(app.routes) if hasattr(route, "path")
+    }
+
+    unresolved = []
+    for name, path in response.json()["endpoints"].items():
+        if not isinstance(path, str) or not path.startswith("/"):
+            continue
+        # A path resolves if it is a route itself or the prefix of one, so
+        # collection roots like /v1/signing-keys count via their subroutes.
+        if any(
+            route == path or route.startswith(path.rstrip("/") + "/")
+            for route in mounted
+        ):
+            continue
+        unresolved.append(f"{name} -> {path}")
+
+    assert not unresolved, f"advertised endpoints with no mounted route: {unresolved}"
 
 
 @pytest.mark.anyio

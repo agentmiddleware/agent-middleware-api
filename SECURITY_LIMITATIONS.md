@@ -23,7 +23,15 @@ Keep these out of the wedge until a design partner requires them:
 
 - No external KMS integration is implemented.
 - No settlement, dispute, or compliance reporting workflow is implemented.
-- Receipt signatures are verifiable, but no external transparency log exists.
+- Receipt signatures can be verified offline by any third party
+  (`/v1/receipts/{id}/portable` plus the unauthenticated
+  `/.well-known/trust-keys.json`), but no external transparency log exists. A
+  receipt proves what happened, never what did not: absence of a receipt is
+  not evidence that no action occurred.
+- Offline verification trusts the issuing origin for key distribution. Keys
+  arrive over TLS from the same origin being audited, so a compromised origin
+  can serve a key set that validates forged receipts. Out-of-band key pinning
+  is not implemented.
 - Audit chains are wallet-scoped, but database administrators can still delete
   rows unless append-only storage or external anchoring is added.
 - Multi-protocol governed adapters beyond MCP are not implemented (MCP only).

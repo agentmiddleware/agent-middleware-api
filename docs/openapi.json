@@ -3951,6 +3951,70 @@
         }
       }
     },
+    "/v1/receipts/{receipt_id}/portable": {
+      "get": {
+        "tags": [
+          "Trust Receipts"
+        ],
+        "summary": "Get Portable Receipt",
+        "description": "Export a receipt as evidence that survives leaving this plane.\n\nReading a receipt is authorized like any other tenant data. What the\ncaller gets back is not: the bundle can be handed to a downstream agent,\nan auditor, or an operator who holds no credential here, and they can\nstill check the signature against the published keys.",
+        "operationId": "get_portable_receipt_v1_receipts__receipt_id__portable_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Receipt Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortableReceiptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/receipts/verify": {
       "post": {
         "tags": [
@@ -6047,6 +6111,26 @@
         }
       }
     },
+    "/.well-known/trust-keys.json": {
+      "get": {
+        "tags": [
+          "Agent Discovery"
+        ],
+        "summary": "Trust-Plane Public Signing Keys",
+        "description": "Unauthenticated publication of the Ed25519 public keys this plane signs receipts, permits, and audit events with. Deliberately open: a receipt is only portable evidence if someone who holds no credential here can still check its signature. Retired keys stay listed so historical receipts remain verifiable; disabled keys are withheld because the plane itself refuses to verify against them.",
+        "operationId": "get_trust_keys_json__well_known_trust_keys_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/.well-known/mcp/tools.json": {
       "get": {
         "tags": [
@@ -6185,6 +6269,28 @@
         "summary": "Partner API key bootstrap",
         "description": "Gated operator flow to provision wallet-scoped agent API keys.",
         "operationId": "get_partner_api_key_bootstrap_md_docs_partner_api_key_bootstrap_md_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/agent-accountability.md": {
+      "get": {
+        "tags": [
+          "Static"
+        ],
+        "summary": "Agent accountability",
+        "description": "Why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove.",
+        "operationId": "get_agent_accountability_md_docs_agent_accountability_md_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -9849,6 +9955,66 @@
           "updated_at"
         ],
         "title": "PolicyBundleResponse"
+      },
+      "PortableReceiptResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "default": "1.0"
+          },
+          "receipt_id": {
+            "type": "string",
+            "title": "Receipt Id"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer",
+            "description": "Public origin of the issuing plane; empty when PUBLIC_URL is unset."
+          },
+          "alg": {
+            "type": "string",
+            "title": "Alg",
+            "default": "Ed25519"
+          },
+          "kid": {
+            "type": "string",
+            "title": "Kid",
+            "description": "Identifies which published key signed this receipt."
+          },
+          "canonicalization": {
+            "type": "string",
+            "title": "Canonicalization",
+            "description": "Canonical-JSON contract version the signing_input follows."
+          },
+          "signing_input": {
+            "type": "string",
+            "title": "Signing Input",
+            "description": "The exact UTF-8 string the signature covers. Verify over these bytes verbatim; do not re-serialize the parsed object."
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature",
+            "description": "Base64 Ed25519 signature over signing_input."
+          },
+          "keys_url": {
+            "type": "string",
+            "title": "Keys Url",
+            "description": "Where to fetch the public key for `kid`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "receipt_id",
+          "issuer",
+          "kid",
+          "canonicalization",
+          "signing_input",
+          "signature",
+          "keys_url"
+        ],
+        "title": "PortableReceiptResponse",
+        "description": "A receipt as self-contained, offline-verifiable evidence.\n\nEverything needed to check the signature travels in this object, except\nthe public key — which is published unauthenticated at ``keys_url``. A\nholder verifies it without an account, a credential, or any call back to\nthe plane that issued it."
       },
       "PreflightCheckResult": {
         "properties": {

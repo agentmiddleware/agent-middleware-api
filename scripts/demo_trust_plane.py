@@ -41,6 +41,9 @@ def configure_environment() -> None:
 
 configure_environment()
 sys.path.insert(0, str(ROOT))
+# The offline verifier ships in the SDK and must not import the app — that
+# independence is exactly what the proof below demonstrates.
+sys.path.insert(0, str(ROOT / "b2a_sdk" / "src"))
 
 from decimal import Decimal  # noqa: E402
 
@@ -52,6 +55,10 @@ from app.db.models import ControlPlaneAuditEventModel, ReceiptModel  # noqa: E40
 from app.main import app  # noqa: E402
 from app.schemas.billing import ServiceCategory  # noqa: E402
 from app.services.service_registry import get_service_registry  # noqa: E402
+from b2a_sdk.receipt_verifier import (  # noqa: E402
+    key_set_from_document,
+    verify_bundle,
+)
 
 
 def remove_demo_db() -> None:
@@ -611,6 +618,51 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 f"evidence bundle missing ledger linkage: {bundle}",
             )
 
+            step("proving the receipt verifies offline, with no credentials")
+            portable = await get_json(
+                client,
+                f"/v1/receipts/{receipt['receipt_id']}/portable",
+                headers=agent_headers,
+                expected_status=200,
+            )
+            # Deliberately unauthenticated: a third party holding this receipt
+            # has no key here, and must still be able to fetch what it takes to
+            # check the signature.
+            key_document = await get_json(
+                client,
+                "/.well-known/trust-keys.json",
+                headers={},
+                expected_status=200,
+            )
+            key_set = key_set_from_document(key_document)
+            offline_result = verify_bundle(portable, key_set)
+            require(
+                offline_result.ok,
+                f"receipt did not verify offline: {offline_result.reason}",
+            )
+            require(
+                offline_result.claims.get("permit_id") == permit["permit_id"],
+                "offline claims do not name the permit that authorized the call",
+            )
+
+            forged = dict(portable)
+            forged["signing_input"] = portable["signing_input"].replace(
+                '"outcome":"success"', '"outcome":"failed_refunded"'
+            )
+            require(
+                forged["signing_input"] != portable["signing_input"],
+                "forgery setup did not modify the signed bytes",
+            )
+            forged_result = verify_bundle(forged, key_set)
+            require(
+                forged_result.is_tampered,
+                f"edited receipt still verified offline: {forged_result.status}",
+            )
+            require(
+                verify_bundle(portable, {}).status.value == "unknown_key",
+                "a missing key was reported as tampering rather than unknown",
+            )
+
             # The remaining proofs mutate stored rows, so they run last on the
             # throwaway demo database.
             step("proving a tampered receipt fails verification")
@@ -665,6 +717,9 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 "ungoverned_denial_reason": unpermitted_error["message"],
                 "cross_wallet_status": cross_wallet.status_code,
                 "evidence_bundle_valid": bundle["valid"],
+                "offline_verified": offline_result.ok,
+                "offline_signing_key_id": offline_result.key_id,
+                "offline_forgery_detected": forged_result.is_tampered,
                 "tampered_receipt_valid": tampered_receipt_check["valid"],
                 "tampered_receipt_reason": tampered_receipt_check["reason"],
                 "tampered_audit_valid": tampered_audit_check["valid"],

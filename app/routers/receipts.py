@@ -6,7 +6,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.config import public_api_origin
 from app.schemas.trust import (
+    PortableReceiptResponse,
     ReceiptEvidenceResponse,
     ReceiptListResponse,
     ReceiptResponse,
@@ -16,6 +18,7 @@ from app.schemas.trust import (
     ReceiptVerifyResponse,
 )
 from app.trust import (
+    RECEIPT_CANONICALIZATION,
     RefundReconciliationError,
     get_permit_service,
     get_receipt_service,
@@ -251,6 +254,41 @@ async def get_receipt_evidence(
         raise HTTPException(status_code=404, detail="receipt_not_found")
     await authorize_receipt_access(auth=auth, receipt=receipt)
     return await build_receipt_evidence(receipt=receipt, auth=auth)
+
+
+@router.get("/{receipt_id}/portable", response_model=PortableReceiptResponse)
+async def get_portable_receipt(
+    receipt_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> PortableReceiptResponse:
+    """Export a receipt as evidence that survives leaving this plane.
+
+    Reading a receipt is authorized like any other tenant data. What the
+    caller gets back is not: the bundle can be handed to a downstream agent,
+    an auditor, or an operator who holds no credential here, and they can
+    still check the signature against the published keys.
+    """
+    receipt = await get_receipt_service().get_receipt(receipt_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="receipt_not_found")
+    await authorize_receipt_access(auth=auth, receipt=receipt)
+
+    signing_input = await get_receipt_service().signing_input(receipt_id)
+    if signing_input is None:
+        # The stored signature does not verify. Refuse rather than hand back a
+        # bundle that would fail in the holder's verifier and read as tampering
+        # by whoever presented it.
+        raise HTTPException(status_code=409, detail="receipt_signature_invalid")
+
+    return PortableReceiptResponse(
+        receipt_id=receipt.receipt_id,
+        issuer=public_api_origin(),
+        kid=receipt.signature_key_id,
+        canonicalization=RECEIPT_CANONICALIZATION,
+        signing_input=signing_input,
+        signature=receipt.signature,
+        keys_url="/.well-known/trust-keys.json",
+    )
 
 
 @router.post("/verify", response_model=ReceiptVerifyResponse)
