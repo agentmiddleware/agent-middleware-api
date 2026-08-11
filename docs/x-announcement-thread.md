@@ -62,7 +62,7 @@ If you're building agents (or want your website to be agent-native), this is the
 Repo: https://github.com/PetrefiedThunder/agent-middleware-api
 Try it: `curl https://api-service-production-433c.up.railway.app/mcp/tools.json`
 
-Also submitted to the official MCP Registry: https://registry.modelcontextprotocol.io/servers
+An official MCP Registry submission is prepared (`server.json`), gated until the spec-compliant endpoint ships — see docs/mcp-registry-submission.md.
 
 Feedback, stars, and PRs very welcome.
 

@@ -4533,6 +4533,59 @@
         }
       }
     },
+    "/mcp": {
+      "post": {
+        "tags": [
+          "MCP Standard Endpoint"
+        ],
+        "summary": "Standard MCP endpoint (stateless Streamable HTTP, JSON responses)",
+        "description": "Handle one standard MCP JSON-RPC message.\n\nSupports initialize, notifications (202), ping, tools/list, and\ntools/call with server-minted permits. Batch requests are rejected per\nthe 2025-06-18 revision.",
+        "operationId": "MCP_Streamable_HTTP_Endpoint_mcp_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/kyc/sessions": {
       "post": {
         "tags": [

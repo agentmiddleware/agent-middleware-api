@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.petrefiedthunder/agent-middleware-api",
+  "name": "io.github.PetrefiedThunder/agent-middleware-api",
   "title": "Agent Middleware API",
   "description": "Governed MCP trust plane: signed permits, wallet metering, replay-safe invocation, signed receipts.",
   "version": "1.2.0",

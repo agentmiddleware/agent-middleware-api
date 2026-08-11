@@ -97,6 +97,16 @@ class Settings(BaseSettings):
     TRUST_SIGNING_KEY_ID: str = "local-dev-ed25519"
     TRUST_SIGNING_PRIVATE_KEY_B64: str = ""
 
+    # --- Standard MCP endpoint (POST /mcp) ---
+    # Spec-compliant stateless Streamable HTTP surface for standard MCP
+    # clients. tools/call mints a bounded single-tool permit from the
+    # caller's wallet before entering the governed invoke path, so the
+    # permit -> meter -> receipt -> audit loop is unchanged. Off by default:
+    # do not advertise (or registry-publish) a transport that is not
+    # deliberately enabled.
+    ENABLE_STANDARD_MCP_ENDPOINT: bool = False
+    STANDARD_MCP_PERMIT_TTL_SECONDS: int = 120
+
     # --- Stripe Payment Processing ---
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

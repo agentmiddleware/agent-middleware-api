@@ -78,7 +78,9 @@ No public production demo or SLA is promised by this document.
 ## Submission URLs
 
 - AgentMarket.cloud: https://agentmarket.cloud/submit (submit listing)
-- MCP Registry: https://modelcontextprotocol.io/registry (register MCP server)
+- MCP Registry: via `server.json` + `mcp-publisher`, gated — see
+  [`mcp-registry-submission.md`](mcp-registry-submission.md); there is no
+  form-based registration URL
 - Smithery.ai: https://smithery.ai (MCP tools registry)
 
 ## Tags
