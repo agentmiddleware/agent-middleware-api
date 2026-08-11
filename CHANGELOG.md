@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 💵 Signed quotes — a price an agent can rely on
+
+- **Added `POST /v1/quotes` and `GET /v1/quotes/{id}`** (`app/routers/quotes.py`):
+  an agent asks what one call of a tool costs and gets a signed statement of
+  the price, valid for `QUOTE_TTL_SECONDS` (default 600). Backed by the new
+  `quotes` table (migration `031_quotes`). See
+  [`docs/signed-quotes.md`](docs/signed-quotes.md).
+- **The quote locks the price.** Passing `mcpContext.quote_id` on a governed
+  invoke charges the quoted credits even if the tool's registered price has
+  moved since — in either direction. The permit budget is checked against the
+  quoted price too, so the permit sees what will actually be charged.
+- **Single use.** A quote is spent by an atomic `active → consumed` UPDATE that
+  also requires the window to still be open, so concurrent invokes cannot both
+  ride one quote. An invoke that consumed a quote but could not charge returns
+  it to `active`.
+- **Invalid quotes deny rather than silently reprice** — `quote_expired`,
+  `quote_already_consumed`, `quote_wallet_mismatch`, `quote_tool_mismatch`,
+  `quote_not_found`. Substituting a different number is the one outcome a price
+  lock must never produce.
+- **Verifiable offline.** The signature covers the wallet, tool, credits, and
+  window under the same Ed25519 key as permits and receipts, and is pinned to
+  the `active` commitment so spending a quote does not invalidate the proof of
+  what was promised.
+- Tool pricing moved to `app/services/pricing.py` so the quote endpoint and the
+  governed invoke that honors the quote compute from one definition.
+
 ### 🙋 Permit requests — an agent can ask a human for authority
 
 - **Added `POST /v1/permit-requests` and `GET /v1/permit-requests/{id}`**

@@ -50,6 +50,28 @@ class PermitResponse(BaseModel):
     recipient_domain: str | None = None
 
 
+class QuoteCreateRequest(BaseModel):
+    """Ask what one call of a tool will cost this wallet."""
+
+    wallet_id: str
+    tool: str
+
+
+class QuoteResponse(BaseModel):
+    quote_id: str
+    wallet_id: str
+    tool: str
+    # What the invoke will charge if this quote is presented before it expires.
+    quoted_credits: Decimal
+    category: str
+    status: Literal["active", "consumed", "expired"]
+    issued_at: datetime
+    expires_at: datetime
+    consumed_at: datetime | None = None
+    signature: str
+    key_id: str
+
+
 class PermitRequestCreate(BaseModel):
     """An agent asking a human for authority it cannot mint itself."""
 

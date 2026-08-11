@@ -44,6 +44,10 @@ SPINE_SERVICE_MODULES = {
     # hosted page so the two cannot show different terms.
     "app.services.approval_card",
     "app.services.permits",
+    "app.services.quotes",
+    # One definition of a tool's price, shared by the quote endpoint and the
+    # governed invoke that honors the quote.
+    "app.services.pricing",
     "app.services.policies",
     "app.services.receipts",
     "app.services.refund_reconciliation",
@@ -55,6 +59,7 @@ CORE_TRUST_ROUTERS = (
     "app/routers/mcp.py",
     "app/routers/permits.py",
     "app/routers/permit_requests.py",
+    "app/routers/quotes.py",
     "app/routers/receipts.py",
     "app/routers/evidence.py",
     "app/routers/audit.py",
