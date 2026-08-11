@@ -395,7 +395,12 @@ The supported API deployment path is the repository Dockerfile on Railway:
   can alter both the database and its chain metadata.
 - MCP is the only live governed adapter; universal multi-protocol enforcement
   is not implemented.
-- The public MCP surface is an HTTP/JSON-RPC tools subset. Upstream execution is
+- The public MCP surface is an HTTP/JSON-RPC tools subset at `/mcp/messages`,
+  plus an opt-in standard endpoint at `POST /mcp`
+  (`ENABLE_STANDARD_MCP_ENDPOINT`, default off) serving the stateless
+  Streamable HTTP lifecycle (`initialize`, notifications, `ping`,
+  `tools/list`, `tools/call` with server-minted single-tool permits; JSON
+  responses only, no SSE stream or sessions). Upstream execution is
   intentionally limited to one operator-configured Streamable HTTP server and
   one exact tool; resources, prompts, OAuth, stdio, and multi-upstream registry
   management are not implemented.

@@ -11,28 +11,24 @@ hourly.
 
 ## Publish gate (read first)
 
-The registry entry declares a `streamable-http` remote. The production
-gateway does **not** serve that transport yet: `/mcp/messages` implements the
-HTTP/JSON-RPC tools subset only (`tools/list`, `tools/call`), returns
-`-32601` for `initialize`, and requires out-of-band permit context that no
-standard MCP client can supply. Publishing before a spec-compliant Streamable
-HTTP endpoint ships would advertise a transport and lifecycle the server does
-not serve — the same class of overclaim
-[`discovery-standards-proposal.md`](discovery-standards-proposal.md) exists to
-prevent.
+The registry entry declares a `streamable-http` remote at `POST /mcp`. That
+endpoint is implemented (`app/routers/mcp_standard.py`: stateless JSON-mode
+lifecycle with `initialize`, notifications, `ping`, `tools/list`, and
+`tools/call` backed by server-minted single-tool permits) but ships
+**disabled**: `ENABLE_STANDARD_MCP_ENDPOINT` defaults to false and returns
+404 until an operator enables it on the deployment. Publishing while the
+deployed endpoint is disabled would advertise a transport the server does
+not serve — the class of overclaim
+[`discovery-standards-proposal.md`](discovery-standards-proposal.md) exists
+to prevent.
 
 The publish workflow enforces this gate: it sends a real MCP `initialize`
 request to the remote URL in `server.json`, then exercises `tools/list` on
-the negotiated session, and refuses to publish unless both succeed. That
-probe is a necessary condition for spec compliance, not proof of it — a
-server could pass it and still fail standard clients elsewhere (e.g. a
-`tools/call` path that demands out-of-band context). Do not bypass the
-preflight, and do not treat a passing preflight as a substitute for testing
-with a real MCP client.
-
-`app/partner_mcp.py` is the in-tree reference for a compliant Streamable HTTP
-server (official SDK, stateless HTTP, bearer auth middleware); the registrable
-endpoint should generalize that pattern over the governed adapter.
+the negotiated session, and refuses to publish unless both succeed — which
+requires the deployed endpoint to be enabled. That probe is a necessary
+condition for spec compliance, not proof of it. Do not bypass the preflight,
+and do not treat a passing preflight as a substitute for testing with a real
+MCP client (e.g. `claude mcp add --transport http`).
 
 ## The artifact: `server.json`
 
@@ -101,7 +97,8 @@ breaking changes or data resets may occur before GA.
 
 ## Client registration
 
-Once the compliant endpoint is live, users connect per client:
+Once `ENABLE_STANDARD_MCP_ENDPOINT=true` is set on the deployment, users
+connect per client:
 
 **Claude Code**
 
@@ -113,11 +110,11 @@ claude mcp add --transport http agent-middleware \
 
 **Project-scoped `.mcp.json`** — the repo-root [`.mcp.json`](../.mcp.json) is
 the Claude Code project-scoped format (top-level `mcpServers`). It is
-deliberately inert by default: the entry has no baked-in URL, because there
-is currently no spec-compliant endpoint to point it at, and a checked-in
-default would advertise a transport the server does not serve. Once the
-compliant endpoint ships, opt in by setting `AGENT_MIDDLEWARE_MCP_URL` (the
-endpoint URL) and `AGENT_MIDDLEWARE_API_KEY` in the environment.
+deliberately inert by default: the entry has no baked-in URL, because the
+production deployment ships with the standard endpoint disabled, and a
+checked-in default would advertise a transport the server does not serve.
+Opt in by setting `AGENT_MIDDLEWARE_MCP_URL` (the deployment's `/mcp` URL,
+once enabled there) and `AGENT_MIDDLEWARE_API_KEY` in the environment.
 
 **claude.ai / Claude Desktop custom connectors** require OAuth (dynamic
 client registration or a Client ID Metadata Document) or an authless server;
