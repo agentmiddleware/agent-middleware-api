@@ -38,7 +38,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
@@ -180,6 +180,75 @@ class QuoteService:
         factory = get_session_factory()
         async with factory() as session:
             return await session.get(QuoteModel, quote_id)
+
+    async def list_quotes(
+        self,
+        *,
+        wallet_id: str,
+        status: str | None = None,
+        tool: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[QuoteResponse], int]:
+        """A wallet's quotes, newest first.
+
+        Reported statuses are honest about the window: an ``active`` row whose
+        window has passed reads as ``expired``, matching what the invoke path
+        would do with it. Filtering by ``expired`` therefore also matches rows
+        still stored as ``active`` but past their window.
+        """
+        factory = get_session_factory()
+        now = utc_now()
+        async with factory() as session:
+            filters = [cast(ColumnElement[bool], QuoteModel.wallet_id == wallet_id)]
+            if tool:
+                filters.append(cast(ColumnElement[bool], QuoteModel.tool == tool))
+            if status == QUOTE_STATUS_ACTIVE:
+                filters.append(
+                    cast(ColumnElement[bool], QuoteModel.status == QUOTE_STATUS_ACTIVE)
+                )
+                filters.append(cast(ColumnElement[bool], QuoteModel.expires_at > now))
+            elif status == QUOTE_STATUS_EXPIRED:
+                filters.append(
+                    cast(
+                        ColumnElement[bool],
+                        (QuoteModel.status == QUOTE_STATUS_EXPIRED)
+                        | (
+                            (QuoteModel.status == QUOTE_STATUS_ACTIVE)
+                            & (QuoteModel.expires_at <= now)
+                        ),
+                    )
+                )
+            elif status:
+                filters.append(cast(ColumnElement[bool], QuoteModel.status == status))
+
+            total = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(QuoteModel)
+                    .where(*filters)
+                )
+            ).scalar_one()
+            rows = (
+                (
+                    await session.execute(
+                        select(QuoteModel)
+                        .where(*filters)
+                        .order_by(cast(Any, QuoteModel.issued_at).desc())
+                        .limit(limit)
+                        .offset(offset)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        quotes = []
+        for model in rows:
+            if model.status == QUOTE_STATUS_ACTIVE and now >= model.expires_at:
+                model.status = QUOTE_STATUS_EXPIRED
+            quotes.append(quote_model_to_response(model))
+        return quotes, int(total)
 
     async def validate_for_action(
         self,

@@ -72,6 +72,15 @@ class QuoteResponse(BaseModel):
     key_id: str
 
 
+class QuoteListResponse(BaseModel):
+    quotes: list[QuoteResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
+
+
 class PermitRequestCreate(BaseModel):
     """An agent asking a human for authority it cannot mint itself."""
 
@@ -113,6 +122,15 @@ class PermitRequestResponse(BaseModel):
     permit: PermitResponse | None = None
     # Where the agent polls for the decision.
     poll_url: str
+
+
+class PermitRequestListResponse(BaseModel):
+    requests: list[PermitRequestResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
 
 
 class PermitListResponse(BaseModel):

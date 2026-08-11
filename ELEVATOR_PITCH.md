@@ -33,6 +33,11 @@ verify after the fact. Replay the same idempotency key and you get the original
 receipt back — no second dispatch, no second debit. Ask for something outside
 the permit and you get a denial with a concrete reason, also receipted.
 
+An agent that holds no permit can ask a human for one — stating scope, budget,
+and why — and gets a signed permit carrying exactly the terms the human
+reviewed. An agent that needs to know a call's cost before committing can take
+a signed quote, and the charge honors it.
+
 It self-hosts, it's MIT-licensed, and you can prove the whole loop on your
 laptop in one command.
 

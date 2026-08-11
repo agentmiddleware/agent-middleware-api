@@ -46,17 +46,21 @@ from decimal import Decimal
 from typing import Any, cast
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.config import get_settings
+from app.core.config import get_settings, public_api_origin
 from app.core.runtime_mode import is_simulation
 from app.core.time import to_naive_utc, utc_now
 from app.core.trust_mode import is_production_like_environment
 from app.db.database import get_session_factory
 from app.db.models import PermitRequestModel
-from app.schemas.trust import PermitCreateRequest, PermitResponse
+from app.schemas.trust import (
+    PermitCreateRequest,
+    PermitRequestResponse,
+    PermitResponse,
+)
 from app.services.approval_card import (
     ApprovalCardView,
     render_email_html,
@@ -635,6 +639,53 @@ class PermitRequestService:
 
     # --- read paths -------------------------------------------------------
 
+    async def list_requests(
+        self,
+        *,
+        subject_wallet_id: str,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[PermitRequestModel], int]:
+        """A subject wallet's requests, newest first.
+
+        Read-only: it never advances a request, so listing cannot page a human
+        or mint a permit as a side effect of looking.
+        """
+        factory = get_session_factory()
+        async with factory() as session:
+            filters = [
+                cast(
+                    ColumnElement[bool],
+                    PermitRequestModel.subject_wallet_id == subject_wallet_id,
+                )
+            ]
+            if status:
+                filters.append(
+                    cast(ColumnElement[bool], PermitRequestModel.status == status)
+                )
+            total = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(PermitRequestModel)
+                    .where(*filters)
+                )
+            ).scalar_one()
+            rows = (
+                (
+                    await session.execute(
+                        select(PermitRequestModel)
+                        .where(*filters)
+                        .order_by(cast(Any, PermitRequestModel.requested_at).desc())
+                        .limit(limit)
+                        .offset(offset)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return list(rows), int(total)
+
     async def get(self, request_id: str) -> PermitRequestModel | None:
         return await self._load(request_id)
 
@@ -648,6 +699,40 @@ class PermitRequestService:
         if not model.permit_id:
             return None
         return await get_permit_service().get_permit(model.permit_id)
+
+
+def poll_url(request_id: str) -> str:
+    return f"{public_api_origin()}/v1/permit-requests/{request_id}"
+
+
+async def request_to_response(model: PermitRequestModel) -> PermitRequestResponse:
+    """Project a stored request into the API shape, permit included once minted.
+
+    Shared by the request endpoint and the wallet's own view so both report a
+    request identically — the poll response and the list are the same record.
+    """
+    return PermitRequestResponse(
+        request_id=model.request_id,
+        status=model.status,  # type: ignore[arg-type]
+        issuer_wallet_id=model.issuer_wallet_id,
+        subject_wallet_id=model.subject_wallet_id,
+        subject_key_id=model.subject_key_id,
+        allowed_tools=json.loads(model.allowed_tools_json),
+        scopes=json.loads(model.scopes_json),
+        max_credits=model.max_credits,
+        permit_expires_at=model.permit_expires_at,
+        requires_human_approval=model.requires_human_approval,
+        justification=model.justification,
+        requested_at=model.requested_at,
+        expires_at=model.expires_at,
+        decided_at=model.decided_at,
+        decided_by=model.decided_by,
+        reason=model.reason,
+        simulated=model.simulated,
+        permit_id=model.permit_id,
+        permit=await get_permit_request_service().minted_permit(model),
+        poll_url=poll_url(model.request_id),
+    )
 
 
 def card_view(model: PermitRequestModel) -> ApprovalCardView:

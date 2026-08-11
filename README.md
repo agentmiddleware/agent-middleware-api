@@ -55,6 +55,8 @@ project does not make yet.
 | Discover | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt` (`/llm.txt` alias), `/openapi.json`, `/health/dependencies` |
 | Authenticate | Bootstrap operator keys plus database-issued wallet keys; trust-core API keys are stored as hashes | `X-API-Key`, `/v1/api-keys` |
 | Authorize | Ed25519-signed permits bound to issuer wallet, subject wallet/key, tools, scopes, budget, nonce, and expiry | `/v1/permits` |
+| Request | An agent with no authority asks a human for a scoped, budgeted permit; the permit is minted from the reviewed terms after approval | `/v1/permit-requests` |
+| Quote | Signed, single-use price commitments the metered charge honors, so a call's cost is known before it is committed to | `/v1/quotes` |
 | Invoke | The governed HTTP/JSON-RPC MCP subset requires a permit and idempotency key and can dispatch one configured Streamable HTTP partner tool | `/mcp/messages`, `/mcp/tools/{service_id}/invoke` |
 | Meter | Decimal wallet balances, row-locked debits, limits, ledger linkage, and replay-safe charging | `/v1/billing`, `/v1/me/*` |
 | Receipt | Signed post-permit success, denial, and failure receipts linked to permits, idempotency records, remote dispatch attempts, ledger entries, and audit events | `/v1/receipts`, `/v1/evidence/{receipt_id}` |
@@ -289,9 +291,14 @@ After an operator provisions a funded wallet and key, the normal flow is:
 1. Discover the tool through `/mcp/tools.json`.
 2. Create a signed permit through `POST /v1/permits` with an
    `Idempotency-Key` header.
-3. Invoke the permitted tool with the wallet, permit, and invocation
+3. Optionally take a signed price with `POST /v1/quotes` and pass its
+   `quote_id` in `mcpContext` to lock what the call will cost.
+4. Invoke the permitted tool with the wallet, permit, and invocation
    idempotency key in `mcpContext`.
-4. Verify the returned receipt or fetch its evidence bundle.
+5. Verify the returned receipt or fetch its evidence bundle.
+
+An agent that holds no permit can ask a human for one first with
+`POST /v1/permit-requests` and poll until the signed permit is minted.
 
 ```bash
 curl -sS -X POST "$API_URL/mcp/messages" \
@@ -325,8 +332,13 @@ put one real internal tool behind the governed path.
 | `GET /mcp/tools.json` | Currently registered MCP tools and permit requirements | Public discovery |
 | `POST /v1/api-keys` | Issue a wallet-scoped runtime key | Bootstrap admin or authorized wallet |
 | `POST /v1/permits` | Issue a scoped, signed permit | Authorized issuer wallet; idempotency required |
+| `POST /v1/permit-requests` | Ask a human for authority the agent cannot mint itself | Authorized subject wallet; idempotency required |
+| `GET /v1/permit-requests/{request_id}` | Poll the decision; returns the minted permit once approved | Issuer wallet, subject wallet, or admin |
+| `POST /v1/quotes` | Get a signed price for one call of a tool | Authorized wallet |
 | `POST /mcp/messages` | JSON-RPC MCP list/call transport | Authentication; permit required for governed calls |
 | `GET /v1/me/permits` | Current wallet's permit view | Wallet key |
+| `GET /v1/me/permit-requests` | Authority this wallet has asked a human for | Wallet key |
+| `GET /v1/me/quotes` | Price commitments this wallet holds | Wallet key |
 | `GET /v1/me/receipts` | Current wallet's receipt view | Wallet key |
 | `GET /v1/me/audit/events` | Current wallet's audit view | Wallet key |
 | `POST /v1/receipts/verify` | Verify signed receipt material | Authenticated |
@@ -530,6 +542,9 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [docs/agent-accountability.md](docs/agent-accountability.md) — why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
 - [docs/golden-path.md](docs/golden-path.md) — wallet-scoped end-to-end API flow
+- [docs/permit-requests.md](docs/permit-requests.md) — an agent asks a human for authority; the middleware mints the permit from the reviewed terms
+- [docs/signed-quotes.md](docs/signed-quotes.md) — signed, single-use price commitments the charge honors
+- [docs/human-approval-gate.md](docs/human-approval-gate.md) — pausing a governed invoke on a human decision
 - [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) — replace the demo tool with one internal tool
 - [docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md) — operator-gated key provisioning
 - [docs/PROOF_SURFACES.md](docs/PROOF_SURFACES.md) — frozen surface inventory

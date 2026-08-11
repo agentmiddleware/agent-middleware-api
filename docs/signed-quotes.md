@@ -73,6 +73,7 @@ spent quote to the invoke that spent it.
 |--------|------|-------|
 | `POST` | `/v1/quotes` | Body `{wallet_id, tool}`. Caller must own the wallet. No `Idempotency-Key`: quoting has no side effect on the wallet, and a duplicate quote is just a second unspent commitment that expires on its own. |
 | `GET` | `/v1/quotes/{quote_id}` | Wallet-scoped read. Reports `expired` once the window has passed. |
+| `GET` | `/v1/me/quotes` | The calling wallet's own quotes. `?status=active` lists the spendable ones; `?status=expired` also catches rows still stored as `active` but past their window. |
 
 Spending happens on the existing governed invoke — pass `quote_id` in
 `mcpContext` alongside `wallet_id`, `permit_id`, and `idempotency_key`.

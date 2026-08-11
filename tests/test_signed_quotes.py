@@ -538,3 +538,59 @@ async def test_concurrent_consume_spends_a_quote_once(
     # The winner's invoke is recorded on the quote, so a spent commitment can
     # be traced to the call that spent it.
     assert model.consumed_by_idempotency_key == "a"
+
+
+@pytest.mark.asyncio
+async def test_wallet_can_list_its_own_quotes(
+    client, clean_database, registered_tool
+):
+    agent = await provision_agent_wallet(client)
+    stranger = await provision_agent_wallet(client)
+    spendable = (
+        await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    ).json()
+    spent = (
+        await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    ).json()
+    await get_quote_service().consume(spent["quote_id"])
+    await _quote(client, stranger["agent_headers"], stranger["agent_wallet_id"])
+
+    listed = await client.get("/v1/me/quotes", headers=agent["agent_headers"])
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["total"] == 2
+    ids = {row["quote_id"] for row in body["quotes"]}
+    assert ids == {spendable["quote_id"], spent["quote_id"]}
+
+    active = await client.get(
+        "/v1/me/quotes?status=active", headers=agent["agent_headers"]
+    )
+    assert [row["quote_id"] for row in active.json()["quotes"]] == [
+        spendable["quote_id"]
+    ]
+
+    # An unspent quote whose window has passed reads as expired here too, so
+    # the list agrees with what the invoke path would do with it.
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(QuoteModel, spendable["quote_id"])
+        model.expires_at = datetime.now(timezone.utc).replace(
+            tzinfo=None
+        ) - timedelta(seconds=1)
+        session.add(model)
+        await session.commit()
+
+    assert (
+        await client.get("/v1/me/quotes?status=active", headers=agent["agent_headers"])
+    ).json()["quotes"] == []
+    stale = await client.get(
+        "/v1/me/quotes?status=expired", headers=agent["agent_headers"]
+    )
+    assert [row["quote_id"] for row in stale.json()["quotes"]] == [
+        spendable["quote_id"]
+    ]
+
+    # Bootstrap admins hold no wallet, so the self view refuses them.
+    assert (
+        await client.get("/v1/me/quotes", headers=BOOTSTRAP_HEADERS)
+    ).status_code == 403
