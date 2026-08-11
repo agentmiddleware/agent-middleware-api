@@ -42,7 +42,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=agent-first" />
+    <link rel="stylesheet" href="styles.css?v=receipt-artifact" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -99,6 +99,57 @@
           </p>
         </div>
 
+        <div class="receipt-stage">
+          <article
+            class="receipt"
+            aria-labelledby="hero-receipt-title"
+          >
+            <div class="receipt-head">
+              <span class="receipt-title" id="hero-receipt-title">Receipt</span>
+              <span class="receipt-meta">2026-07-29T21:14:02Z</span>
+            </div>
+            <p class="receipt-protocol">
+              Illustrative shape · run <code>make dogfood-trust-plane</code> for
+              a live signature
+            </p>
+            <dl>
+              <div class="row">
+                <dt>receipt_id</dt>
+                <dd>rcpt-c3bc248a2f514e5a</dd>
+              </div>
+              <div class="row">
+                <dt>tool</dt>
+                <dd>partner.notes.write</dd>
+              </div>
+              <div class="row">
+                <dt>outcome</dt>
+                <dd class="ok">success</dd>
+              </div>
+              <div class="row">
+                <dt>credits_charged</dt>
+                <dd>2.00000000</dd>
+              </div>
+              <div class="row">
+                <dt>permit_id</dt>
+                <dd>permit-0f62fdfee59640e4</dd>
+              </div>
+              <div class="row">
+                <dt>ledger_entry_id</dt>
+                <dd>543e21a1-5056-4df8-8773-fbf6ba9c720c</dd>
+              </div>
+            </dl>
+            <dl class="receipt-sig">
+              <dt>signature (illustrative)</dt>
+              <dd>
+                dGVzdC1vbmx5LWVkMjU1MTktc2lnLWJhc2U2NC1ub3QtdmVyaWZpYWJsZQ==
+              </dd>
+            </dl>
+          </article>
+          <span class="stamp" aria-hidden="true">Example</span>
+        </div>
+      </header>
+
+      <section class="section agent-entry-section">
         <aside class="agent-entry" aria-labelledby="agent-entry-title">
           <div class="agent-entry-head">
             <div>
@@ -162,7 +213,7 @@
             </span>
           </div>
         </aside>
-      </header>
+      </section>
 
       <section class="section thesis-section" aria-labelledby="thesis-title">
         <p class="section-kicker">00 / Thesis</p>
@@ -291,6 +342,63 @@
           </article>
         </div>
 
+        <div class="feed" aria-labelledby="feed-title">
+          <div class="feed-head">
+            <span class="feed-cursor" aria-hidden="true"></span>
+            <span id="feed-title"
+              >wal-7c21d90a · dogfood sequence
+              <span class="feed-flag">replayed, not live</span></span
+            >
+          </div>
+          <div class="feed-colhead" aria-hidden="true">
+            <span class="feed-time">time</span>
+            <span class="feed-cols">
+              <span>tool</span><span>outcome</span><span>receipt</span
+              ><span class="feed-num">credits</span>
+            </span>
+          </div>
+          <!-- Static fallback rows; the script replaces them with a rolling
+               replay when JavaScript is available. -->
+          <div class="feed-rows" id="feed-rows">
+            <div class="feed-row">
+              <span class="feed-time">21:14:02Z</span>
+              <span class="feed-cols">
+                <span>partner.notes.write</span
+                ><span class="feed-outcome">success</span
+                ><span class="feed-ref">rcpt-c3bc248a2f51</span
+                ><span class="feed-num">2.00</span>
+              </span>
+            </div>
+            <div class="feed-row">
+              <span class="feed-time">21:14:05Z</span>
+              <span class="feed-cols">
+                <span>partner.notes.write</span
+                ><span class="feed-outcome">replay · same receipt</span
+                ><span class="feed-ref">rcpt-c3bc248a2f51</span
+                ><span class="feed-num">0.00</span>
+              </span>
+            </div>
+            <div class="feed-row deny">
+              <span class="feed-time">21:14:08Z</span>
+              <span class="feed-cols">
+                <span>partner.notes.admin</span
+                ><span class="feed-outcome">denied · permit_tool_not_allowed</span
+                ><span class="feed-ref">—</span
+                ><span class="feed-num">0.00</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <p class="proof-aside">
+          Rows above replay the shape of the dogfood run on a loop — they are
+          not a live production ledger. Signed ed25519 · replays return the same
+          receipt · denials charge nothing. Keys:
+          <a
+            href="https://api-service-production-433c.up.railway.app/.well-known/jwks.json"
+            ><code>/.well-known/jwks.json</code></a
+          >
+        </p>
+
         <div class="proof-actions">
           <pre tabindex="0"><code><span aria-hidden="true">$</span> make dogfood-trust-plane</code></pre>
           <a
@@ -373,5 +481,109 @@
         <code>api-service-production-433c.up.railway.app</code>.
       </p>
     </footer>
+
+    <!-- Proof feed. Rows replay the shape of `make dogfood-trust-plane` on a
+         loop; they are labelled as replayed and are not read from a live
+         ledger. Swap FEED for a fetch of /v1/receipts once the receipts list
+         is publicly readable and stateless verify ships (P4). -->
+    <script>
+      (function () {
+        var FEED = [
+          ["partner.notes.write", "success", "rcpt-c3bc248a2f51", "2.00", 0],
+          [
+            "partner.notes.write",
+            "replay · same receipt",
+            "rcpt-c3bc248a2f51",
+            "0.00",
+            0
+          ],
+          [
+            "partner.notes.admin",
+            "denied · permit_tool_not_allowed",
+            "",
+            "0.00",
+            1
+          ],
+          ["partner.notes.write", "success", "rcpt-9d41e07bb2c8", "2.00", 0],
+          ["partner.search.query", "success", "rcpt-4a17f350de92", "1.00", 0],
+          [
+            "partner.notes.write",
+            "denied · permit_required",
+            "",
+            "0.00",
+            1
+          ],
+          ["partner.notes.write", "success", "rcpt-1f60aa93c47d", "2.00", 0],
+          [
+            "partner.search.query",
+            "replay · same receipt",
+            "rcpt-4a17f350de92",
+            "0.00",
+            0
+          ],
+          ["partner.notes.write", "success", "rcpt-77aa03c1b5d2", "2.00", 0]
+        ];
+        var MAX_ROWS = 9;
+        var rowsEl = document.getElementById("feed-rows");
+        if (!rowsEl) return;
+        var i = 0;
+
+        function stamp(offsetSeconds) {
+          return (
+            new Date(Date.now() + offsetSeconds * 1000)
+              .toISOString()
+              .slice(11, 19) + "Z"
+          );
+        }
+
+        function cell(className, text) {
+          var span = document.createElement("span");
+          if (className) span.className = className;
+          span.textContent = text;
+          return span;
+        }
+
+        function row(entry, at) {
+          var el = document.createElement("div");
+          el.className = "feed-row" + (entry[4] ? " deny" : "");
+          var cols = document.createElement("span");
+          cols.className = "feed-cols";
+          cols.appendChild(cell("", entry[0]));
+          cols.appendChild(cell("feed-outcome", entry[1]));
+          cols.appendChild(cell("feed-ref", entry[2] || "—"));
+          cols.appendChild(cell("feed-num", entry[3]));
+          el.appendChild(cell("feed-time", at));
+          el.appendChild(cols);
+          return el;
+        }
+
+        // Seed newest-first, so the column reads down into the past and the
+        // next printed row continues the sequence at the top.
+        rowsEl.textContent = "";
+        var seeded = MAX_ROWS - 2;
+        for (var age = 0; age < seeded; age++) {
+          rowsEl.appendChild(
+            row(
+              FEED[(seeded - 1 - age) % FEED.length],
+              stamp(-(age + 1) * 3.1)
+            )
+          );
+        }
+        i = seeded;
+
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          setInterval(function () {
+            rowsEl.insertBefore(
+              row(FEED[i % FEED.length], stamp(0)),
+              rowsEl.firstChild
+            );
+            i++;
+            while (rowsEl.children.length > MAX_ROWS) {
+              rowsEl.removeChild(rowsEl.lastChild);
+            }
+          }, 3100);
+        }
+      })();
+    </script>
   </body>
 </html>
