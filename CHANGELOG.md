@@ -30,6 +30,49 @@ full release gate; do not backfill a final `v1.2.0` tag.
 - Added exact build commit metadata to both health endpoints and labeled
   process-local call counters separately from durable dispatch history.
 
+### 🔭 Self views for the two new front-door steps, and the positioning to match
+
+- **Added `GET /v1/me/permit-requests` and `GET /v1/me/quotes`** — the calling
+  wallet's own outstanding asks and unspent price commitments, alongside the
+  existing `/v1/me/permits`, `/v1/me/receipts`, and `/v1/me/audit/events`.
+  Listing permit requests is strictly read-only: it never advances a decision,
+  so an agent can survey what it is waiting on without paging a human or
+  minting a permit as a side effect of looking. `/v1/me/quotes?status=active`
+  lists the spendable ones, and an unspent quote past its window reads as
+  `expired` here exactly as the invoke path would treat it.
+- **Positioning updated to cover the front door** — `WEDGE.md` (the ask/price
+  steps, what they prove, and what not to claim about them), `README.md`
+  (implemented table, API surfaces, docs index, governed call shape),
+  `ELEVATOR_PITCH.md`, and the landing copy in `site/`.
+- The permit-request API projection moved into the service layer so the poll
+  endpoint and the wallet's own view report a request identically.
+
+### 💵 Signed quotes — a price an agent can rely on
+
+- **Added `POST /v1/quotes` and `GET /v1/quotes/{id}`** (`app/routers/quotes.py`):
+  an agent asks what one call of a tool costs and gets a signed statement of
+  the price, valid for `QUOTE_TTL_SECONDS` (default 600). Backed by the new
+  `quotes` table (migration `031_quotes`). See
+  [`docs/signed-quotes.md`](docs/signed-quotes.md).
+- **The quote locks the price.** Passing `mcpContext.quote_id` on a governed
+  invoke charges the quoted credits even if the tool's registered price has
+  moved since — in either direction. The permit budget is checked against the
+  quoted price too, so the permit sees what will actually be charged.
+- **Single use.** A quote is spent by an atomic `active → consumed` UPDATE that
+  also requires the window to still be open, so concurrent invokes cannot both
+  ride one quote. An invoke that consumed a quote but could not charge returns
+  it to `active`.
+- **Invalid quotes deny rather than silently reprice** — `quote_expired`,
+  `quote_already_consumed`, `quote_wallet_mismatch`, `quote_tool_mismatch`,
+  `quote_not_found`. Substituting a different number is the one outcome a price
+  lock must never produce.
+- **Verifiable offline.** The signature covers the wallet, tool, credits, and
+  window under the same Ed25519 key as permits and receipts, and is pinned to
+  the `active` commitment so spending a quote does not invalidate the proof of
+  what was promised.
+- Tool pricing moved to `app/services/pricing.py` so the quote endpoint and the
+  governed invoke that honors the quote compute from one definition.
+
 ### 🙋 Permit requests — an agent can ask a human for authority
 
 - **Added `POST /v1/permit-requests` and `GET /v1/permit-requests/{id}`**

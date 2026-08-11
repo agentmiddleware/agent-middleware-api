@@ -50,6 +50,37 @@ class PermitResponse(BaseModel):
     recipient_domain: str | None = None
 
 
+class QuoteCreateRequest(BaseModel):
+    """Ask what one call of a tool will cost this wallet."""
+
+    wallet_id: str
+    tool: str
+
+
+class QuoteResponse(BaseModel):
+    quote_id: str
+    wallet_id: str
+    tool: str
+    # What the invoke will charge if this quote is presented before it expires.
+    quoted_credits: Decimal
+    category: str
+    status: Literal["active", "consumed", "expired"]
+    issued_at: datetime
+    expires_at: datetime
+    consumed_at: datetime | None = None
+    signature: str
+    key_id: str
+
+
+class QuoteListResponse(BaseModel):
+    quotes: list[QuoteResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
+
+
 class PermitRequestCreate(BaseModel):
     """An agent asking a human for authority it cannot mint itself."""
 
@@ -91,6 +122,15 @@ class PermitRequestResponse(BaseModel):
     permit: PermitResponse | None = None
     # Where the agent polls for the decision.
     poll_url: str
+
+
+class PermitRequestListResponse(BaseModel):
+    requests: list[PermitRequestResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None = None
 
 
 class PermitListResponse(BaseModel):

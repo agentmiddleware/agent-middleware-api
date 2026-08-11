@@ -8,13 +8,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.auth import AuthContext, get_auth_context
 from app.schemas.audit import AuditEventListResponse, AuditEventResponse
 from app.schemas.billing import AlertListResponse
-from app.schemas.trust import PermitListResponse, ReceiptListResponse
+from app.schemas.trust import (
+    PermitListResponse,
+    PermitRequestListResponse,
+    QuoteListResponse,
+    ReceiptListResponse,
+)
 from app.trust import (
     count_audit_events,
     get_agent_money,
+    get_permit_request_service,
     get_permit_service,
+    get_quote_service,
     get_receipt_service,
     list_audit_events,
+    request_to_response,
 )
 
 router = APIRouter(prefix="/v1/me", tags=["Agent Self Inspection"])
@@ -78,6 +86,65 @@ async def list_my_permits(
     next_offset = offset + len(permits) if offset + len(permits) < total else None
     return PermitListResponse(
         permits=permits,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=next_offset is not None,
+        next_offset=next_offset,
+    )
+
+
+@router.get("/permit-requests", response_model=PermitRequestListResponse)
+async def list_my_permit_requests(
+    status: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
+) -> PermitRequestListResponse:
+    """Authority this wallet has asked a human for.
+
+    Read-only: unlike polling one request by id, listing never advances a
+    decision, so an agent can survey what is outstanding without paging anyone
+    or minting anything.
+    """
+    wallet_id, _ = _require_wallet_key(auth)
+    requests, total = await get_permit_request_service().list_requests(
+        subject_wallet_id=wallet_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    next_offset = offset + len(requests) if offset + len(requests) < total else None
+    return PermitRequestListResponse(
+        requests=[await request_to_response(model) for model in requests],
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=next_offset is not None,
+        next_offset=next_offset,
+    )
+
+
+@router.get("/quotes", response_model=QuoteListResponse)
+async def list_my_quotes(
+    status: str | None = Query(None),
+    tool: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
+) -> QuoteListResponse:
+    """Price commitments this wallet holds — filter `status=active` for spendable."""
+    wallet_id, _ = _require_wallet_key(auth)
+    quotes, total = await get_quote_service().list_quotes(
+        wallet_id=wallet_id,
+        status=status,
+        tool=tool,
+        limit=limit,
+        offset=offset,
+    )
+    next_offset = offset + len(quotes) if offset + len(quotes) < total else None
+    return QuoteListResponse(
+        quotes=quotes,
         total=total,
         limit=limit,
         offset=offset,

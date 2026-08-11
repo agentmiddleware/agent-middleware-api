@@ -18,6 +18,19 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 -> ledger -> audit chain -> replay no double charge -> out-of-scope denial
 ```
 
+The loop now has a front door. Two questions an agent has to answer *before*
+it can act — "may I?" and "what will it cost?" — are answered in the same
+signed, checkable way as the action itself:
+
+```text
+permit request -> human approves -> minted permit
+signed quote   -> price locked   -> charge honors it
+```
+
+Both feed the same loop rather than sitting beside it: the human's decision
+mints an ordinary signed permit, and the quote is honored by the ordinary
+metered charge. Neither adds a second way to authorize or to spend.
+
 Category language (“MCP trust plane,” “governance gateway”) is occupied. The
 differentiating primitive is exactly-once economic authorization at the
 gateway boundary: one idempotency key returns the original receipt without a
@@ -75,6 +88,11 @@ Partner motion:
 - MCP discovery and invocation.
 - Signed permits for tool scope, wallet binding, key binding, budget, expiry,
   and nonce.
+- A request path for authority an agent cannot mint itself: the agent states
+  scope, budget, and justification; a human decides; the middleware mints the
+  permit from the reviewed terms.
+- Signed, single-use price quotes that the metered charge honors, so an agent
+  can know a call's cost before committing to it.
 - Idempotency keys for permit issuance and governed invokes.
 - Ledger-backed wallet charging.
 - Signed receipts for governed tool attempts.
@@ -95,6 +113,10 @@ Partner motion:
 - Replaying the same governed invoke can return the same receipt without a
   duplicate gateway dispatch or debit.
 - A request outside the permit scope can be denied with a concrete reason.
+- An agent with no authority can ask a human for a scoped, budgeted permit, and
+  the permit that gets minted carries exactly the terms the human reviewed.
+- A signed quote can fix the price of one call, and the charge honors it even
+  after the tool's registered price moves.
 
 ## What Is Proof Surface
 
@@ -130,4 +152,10 @@ Agent-executable remediation of known spine/discovery/deploy debt:
 - Full autonomous economic actor infrastructure.
 - Universal policy enforcement across every agent framework.
 - Distributed exactly-once side effects in arbitrary upstream MCP servers.
+- Quotes as a pricing or settlement product. A quote fixes what this gateway
+  will debit from an internal wallet for one call; it is not a market price, a
+  vendor commitment, or an invoice.
+- Permit requests as an approval-workflow product. The decision is delegated to
+  Sentinel and the surface is one ask and one poll — it is not a replacement
+  for an access-request or change-management system.
 - A replacement for enterprise IAM, secrets management, or sandbox isolation.

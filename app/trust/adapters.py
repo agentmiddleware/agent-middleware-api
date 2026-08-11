@@ -34,6 +34,8 @@ class GovernedRequest:
     auth: AuthContext
     money: AgentMoney
     permit_id: str | None = None
+    # Signed price commitment to charge against, if the caller holds one.
+    quote_id: str | None = None
     idempotency_key: str | None = None
     transport: str = "adapter"
     endpoint: str = "/mcp/messages"
@@ -99,6 +101,7 @@ class McpGovernedAdapter(GovernedInvocationAdapter):
             auth=auth,
             money=money,
             permit_id=mcp_context.get("permit_id"),
+            quote_id=mcp_context.get("quote_id"),
             idempotency_key=idempotency_key or mcp_context.get("idempotency_key"),
             transport=context.get("transport", "adapter"),
             endpoint=context.get("endpoint", "/mcp/messages"),
@@ -128,6 +131,7 @@ class McpGovernedAdapter(GovernedInvocationAdapter):
             endpoint=request.endpoint,
             request_id=request.request_id,
             permit_id=request.permit_id,
+            quote_id=request.quote_id,
             idempotency_key=request.idempotency_key,
             request_payload=request.request_payload,
         )

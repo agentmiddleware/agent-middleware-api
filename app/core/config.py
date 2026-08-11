@@ -154,6 +154,12 @@ class Settings(BaseSettings):
     SENTINEL_APPROVERS: str = ""
     # Sentinel risk_level attached to approval requests: low|medium|high|critical.
     SENTINEL_RISK_LEVEL: str = "high"
+    # --- Signed quotes ---
+    # How long a signed price quote stays valid. A quote locks the price for
+    # exactly one invoke inside this window; long enough for a human hop,
+    # short enough to bound exposure to price drift. Clamped to 30..3600.
+    QUOTE_TTL_SECONDS: int = 600
+
     # How long a human has to decide a permit REQUEST (agent asking for
     # authority) before it expires locally. Longer than the invoke gate's
     # window: the agent polls rather than holding an invoke open. Clamped to

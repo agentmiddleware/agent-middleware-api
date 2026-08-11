@@ -83,6 +83,13 @@ API forever. The middleware stamps
 **before** polling Sentinel, so a decision arriving after the window mints
 nothing.
 
+## Seeing what is outstanding
+
+`GET /v1/me/permit-requests` lists the calling wallet's own requests, newest
+first, with an optional `?status=` filter. Unlike polling one request by id, it
+**never advances a decision** — an agent can survey what it is waiting on
+without paging a human or minting anything as a side effect of looking.
+
 ## Authorization
 
 - The caller must hold the **subject** wallet — it is asking for authority over
