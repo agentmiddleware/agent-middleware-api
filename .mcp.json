@@ -1,6 +1,11 @@
 {
-  "name": "Agent Middleware API",
-  "description": "Trust plane for governed MCP tool calls: signed permits, wallet metering, replay-safe invocation, signed receipts, and audit chains",
-  "url": "https://api-service-production-433c.up.railway.app",
-  "repository": "https://github.com/PetrefiedThunder/agent-middleware-api"
+  "mcpServers": {
+    "agent-middleware": {
+      "type": "http",
+      "url": "${AGENT_MIDDLEWARE_MCP_URL:-https://api-service-production-433c.up.railway.app/mcp}",
+      "headers": {
+        "X-API-Key": "${AGENT_MIDDLEWARE_API_KEY:-}"
+      }
+    }
+  }
 }
