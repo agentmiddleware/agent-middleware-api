@@ -154,6 +154,44 @@ async def test_trust_keys_endpoint_needs_no_credential(client, clean_database):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "failure",
+    ["store_unreachable", "no_publishable_keys"],
+    ids=["unreachable_store", "empty_key_set"],
+)
+async def test_unusable_key_set_is_refused_rather_than_served_empty(
+    client, clean_database, monkeypatch, failure
+):
+    """Never answer 200 with a key set a verifier cannot use.
+
+    An empty `keys` list is not neutral: a verifier looking up the receipt's
+    kid finds nothing and can report the receipt as unverifiable, which reads
+    as a forgery. Both an unreachable store and a reachable-but-empty one are
+    "cannot tell", so both must answer 503.
+    """
+    from app.services import signing_keys as signing_keys_module
+
+    service = signing_keys_module.get_signing_key_service()
+
+    async def unreachable():
+        raise RuntimeError("DATABASE_URL not configured")
+
+    async def empty():
+        return []
+
+    monkeypatch.setattr(
+        service,
+        "list_public_keys",
+        unreachable if failure == "store_unreachable" else empty,
+    )
+
+    resp = await client.get("/.well-known/trust-keys.json")
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["error"] == "trust_keys_unavailable"
+
+
+@pytest.mark.anyio
 async def test_tampering_with_a_signed_field_fails_verification(
     client, clean_database
 ):

@@ -548,6 +548,27 @@ def _published_key(key: Any) -> dict[str, Any]:
     return entry
 
 
+def _trust_keys_unavailable() -> JSONResponse:
+    """Refuse rather than publish a key set a verifier cannot use.
+
+    An empty ``keys`` list is not a neutral answer. A verifier looking up the
+    ``kid`` on a receipt would find nothing and, depending on how strictly it
+    is written, report the receipt as unverifiable — which reads as a forgery.
+    Serving 503 keeps that situation in the "cannot tell, ask again" bucket
+    where it belongs.
+    """
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "trust_keys_unavailable",
+            "detail": (
+                "No usable signing key is published right now. Treat receipts "
+                "as unverified-pending, not invalid, and retry."
+            ),
+        },
+    )
+
+
 @router.get(
     "/.well-known/trust-keys.json",
     summary="Trust-Plane Public Signing Keys",
@@ -575,21 +596,16 @@ async def get_trust_keys_json():
     try:
         keys = await service.list_public_keys()
     except (SigningKeyError, RuntimeError):
-        # Fail loudly rather than serving an empty key set. A verifier that
-        # sees zero keys would conclude the signing key does not exist and
-        # report the receipt as unverifiable — indistinguishable from a
-        # forgery. A 503 says "ask again", which is the truth.
         logger.warning("trust_keys_unavailable", exc_info=True)
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": "trust_keys_unavailable",
-                "detail": (
-                    "The signing key store is unreachable. Treat receipts as "
-                    "unverified-pending, not invalid, and retry."
-                ),
-            },
-        )
+        return _trust_keys_unavailable()
+
+    if not keys:
+        # Reachable store, nothing publishable — e.g. signing material is
+        # misconfigured so ensure_active_key() failed above, or every stored
+        # key has been disabled. Same situation for a verifier as an
+        # unreachable store, so it gets the same answer.
+        logger.warning("trust_keys_empty")
+        return _trust_keys_unavailable()
 
     return JSONResponse(
         content={
