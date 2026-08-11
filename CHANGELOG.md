@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 📖 Failure semantics as a first-class spec
+
+- **Added [docs/failure-semantics.md](docs/failure-semantics.md).** The
+  complete contract for a metered call that dies mid-flight: all seven signed
+  terminal outcomes (`success`, `denied`, `insufficient_funds`,
+  `failed_refunded`, `delivery_uncertain`, `response_rejected`,
+  `failed_unrefunded`), the crash windows the reconciler finalizes (after
+  debit, after dispatch, after response, lost commit acks, effect-free), the
+  replay contract, exactly-once refunds, and — deliberately — the list of
+  things the system does not claim. Every behavioral row names the test that
+  asserts it; all 31 cited tests exist and run in CI.
+- **Crash-recovered receipts now sign byte-identical permit constraints.**
+  The live invoke path normalized `aggregate_value_cap`
+  (`Decimal("10.50")` → `"10.5"`) while the reconciler used `str(...)`, so a
+  receipt minted during crash recovery could hash a different
+  `constraints_evaluated` than a live receipt for the same permit. Both paths
+  now delegate to a single `permit_constraints_snapshot` in
+  `app/services/permits.py`, with a parity regression test.
+- **Closed the one untested terminal outcome.** No test asserted a receipt
+  with `outcome="insufficient_funds"`; `tests/test_mcp_trust.py` now proves a
+  balance shortfall signs that receipt at 402/`-32004`, executes nothing,
+  debits nothing, releases the reserved budget, and replays identically.
+
 ### 🔍 Observability
 
 - **`/health/dependencies` now reports `environment` and `production_like`.**

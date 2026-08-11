@@ -1,9 +1,8 @@
-{"event": "proof_surfaces_disabled: ENABLE_PROOF_SURFACES=false; only CORE_TRUST_ROUTERS are mounted", "level": "info", "timestamp": "2026-08-10T03:03:00.579896Z"}
 {
   "openapi": "3.1.0",
   "info": {
     "title": "Agent-Native Middleware API",
-    "description": "## MCP Trust Plane\n\nAgent Middleware API is a **governed MCP trust plane** for autonomous agent tool calls \u2014 not a full agent middleware platform.\n\nCredible wedge: exactly-once gateway authorization, debit, and receipt finalization for metered MCP calls. Remote side effects require the upstream to honor the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`\n\n### Product Surface\n\n- **Scoped signed permits** \u2014 tool, wallet, budget, expiry, nonce\n- **Governed MCP invoke** \u2014 permit check, policy, idempotency, charge\n- **Wallet metering** \u2014 ledger-backed credits with exact decimals\n- **Signed receipts + evidence** \u2014 verifiable attempt outcomes\n- **Wallet audit chain** \u2014 tamper-evident per-wallet events\n- **Discovery** \u2014 `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAWI, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
+    "description": "## MCP Trust Plane\n\nAgent Middleware API is a **governed MCP trust plane** for autonomous agent tool calls — not a full agent middleware platform.\n\nCredible wedge: exactly-once gateway authorization, debit, and receipt finalization for metered MCP calls. Remote side effects require the upstream to honor the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`\n\n### Product Surface\n\n- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n- **Governed MCP invoke** — permit check, policy, idempotency, charge\n- **Wallet metering** — ledger-backed credits with exact decimals\n- **Signed receipts + evidence** — verifiable attempt outcomes\n- **Wallet audit chain** — tamper-evident per-wallet events\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAWI, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
     "contact": {
       "name": "Agent-Native Middleware",
       "email": "support@agent-middleware.dev"
@@ -4086,7 +4085,7 @@
           "Preflight"
         ],
         "summary": "Pre-flight Readiness Check",
-        "description": "Runs a comprehensive validation sweep before production launch:\n\n1. **KEYS** \u2014 Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** \u2014 Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** \u2014 Validate agent directory registration URLs\n4. **ASSETS** \u2014 Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details.",
+        "description": "Runs a comprehensive validation sweep before production launch:\n\n1. **KEYS** — Reject test-key/placeholder API keys, validate Stripe tokens\n2. **DOMAIN** — Verify BASE_URL is a real domain, manifests will resolve\n3. **ORACLE** — Validate agent directory registration URLs\n4. **ASSETS** — Check content source URLs and crawl targets\n\nReturns a GO/NO-GO verdict with per-check details.",
         "operationId": "run_preflight_v1_launch_preflight_post",
         "requestBody": {
           "content": {
@@ -4137,7 +4136,7 @@
           "Webhooks"
         ],
         "summary": "Handle Stripe Webhook",
-        "description": "Receive and process Stripe webhook events.\n\nStripe will retry this endpoint if we return non-200.\nOur service layer handles idempotency internally via\nUNIQUE constraint on payment_intent_id + IntegrityError catch.\n\nEvents handled:\n- payment_intent.succeeded \u2192 Mint credits to wallet\n- payment_intent.payment_failed \u2192 Log and notify\n- charge.refunded \u2192 Debit wallet\n- identity.verification_session.verified \u2192 Approve KYC\n- identity.verification_session.requires_input \u2192 Log\n- identity.verification_session.redacted \u2192 Expire verification",
+        "description": "Receive and process Stripe webhook events.\n\nStripe will retry this endpoint if we return non-200.\nOur service layer handles idempotency internally via\nUNIQUE constraint on payment_intent_id + IntegrityError catch.\n\nEvents handled:\n- payment_intent.succeeded → Mint credits to wallet\n- payment_intent.payment_failed → Log and notify\n- charge.refunded → Debit wallet\n- identity.verification_session.verified → Approve KYC\n- identity.verification_session.requires_input → Log\n- identity.verification_session.redacted → Expire verification",
         "operationId": "handle_stripe_webhook_v1_webhooks_stripe_post",
         "responses": {
           "200": {
@@ -5979,7 +5978,7 @@
           "Agent Discovery"
         ],
         "summary": "AWI Discovery Manifest",
-        "description": "Returns the draft AWI-over-MCP manifest with action vocabulary, representation types, endpoints, safety capabilities, and known limits. Marked as a proof surface \u2014 not the product wedge.",
+        "description": "Returns the draft AWI-over-MCP manifest with action vocabulary, representation types, endpoints, safety capabilities, and known limits. Marked as a proof surface — not the product wedge.",
         "operationId": "get_awi_json__well_known_awi_json_get",
         "responses": {
           "200": {
@@ -6197,8 +6196,8 @@
         "tags": [
           "Discovery"
         ],
-        "summary": "API root \u2014 service index & human dashboard negotiation",
-        "description": "Returns a broad service catalog for API callers or HTML dashboard for browsers. For agent-first bootstrap, follow `GET /.well-known/agent.json` \u2192 field `agent_first`.",
+        "summary": "API root — service index & human dashboard negotiation",
+        "description": "Returns a broad service catalog for API callers or HTML dashboard for browsers. For agent-first bootstrap, follow `GET /.well-known/agent.json` → field `agent_first`.",
         "operationId": "root__get",
         "responses": {
           "200": {
@@ -9915,7 +9914,7 @@
           "summary"
         ],
         "title": "PreflightResponse",
-        "description": "Pre-flight readiness report \u2014 the checklist before you turn the key."
+        "description": "Pre-flight readiness report — the checklist before you turn the key."
       },
       "PricingTableResponse": {
         "properties": {

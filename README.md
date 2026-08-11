@@ -389,7 +389,9 @@ The supported API deployment path is the repository Dockerfile on Railway:
 - Replay safety is scoped to the governed gateway boundary. A post-dispatch
   transport failure is signed as `delivery_uncertain`; an invalid or oversized
   confirmed response is signed as `response_rejected`. Both remain charged and
-  are never automatically retried or refunded.
+  are never automatically retried or refunded. The complete outcome-by-outcome
+  contract, including every crash window, is
+  [docs/failure-semantics.md](docs/failure-semantics.md).
 - Wallet isolation is enforced by application authorization and query scoping;
   PostgreSQL row-level security and a public multi-tenant isolation guarantee
   are not implemented.
@@ -495,6 +497,7 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling
 - [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
 - [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
+- [docs/failure-semantics.md](docs/failure-semantics.md) — every terminal outcome of a metered call that dies mid-flight, and the test that proves each
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
 - [docs/golden-path.md](docs/golden-path.md) — wallet-scoped end-to-end API flow
 - [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) — replace the demo tool with one internal tool

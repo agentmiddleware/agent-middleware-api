@@ -2107,21 +2107,9 @@ async def _raise_charged_upstream_failure(
 
 def _permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
     """Build a snapshot of permit v2 constraints for receipt signing."""
-    from app.services.permits import _loads_dict, _loads_list
-    ce: dict[str, Any] = {}
-    max_calls = _loads_dict(permit_model.max_calls_per_tool_json or "{}")
-    if max_calls:
-        ce["max_calls_per_tool"] = max_calls
-    if permit_model.aggregate_value_cap is not None:
-        # Normalize to strip trailing zeros from decimal representation
-        normalized = permit_model.aggregate_value_cap.normalize()
-        ce["aggregate_value_cap"] = format(normalized, "f")
-    forbidden = _loads_list(permit_model.forbidden_fields_json or "[]")
-    if forbidden:
-        ce["forbidden_fields"] = forbidden
-    if permit_model.recipient_domain:
-        ce["recipient_domain"] = permit_model.recipient_domain
-    return ce
+    from app.services.permits import permit_constraints_snapshot
+
+    return permit_constraints_snapshot(permit_model)
 
 
 def _registered_tool_cost(

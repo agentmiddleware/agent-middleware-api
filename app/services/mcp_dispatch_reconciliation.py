@@ -33,7 +33,11 @@ from app.services.mcp_dispatch_attempts import (
     McpDispatchAttemptService,
     get_mcp_dispatch_attempt_service,
 )
-from app.services.permits import PermitService, get_permit_service, _loads_dict, _loads_list
+from app.services.permits import (
+    PermitService,
+    get_permit_service,
+    permit_constraints_snapshot,
+)
 from app.services.receipts import ReceiptError, ReceiptService, get_receipt_service
 from app.services.signing_keys import sha256_hex
 
@@ -310,17 +314,10 @@ class McpDispatchReconciliationService:
             permit = await session.get(PermitModel, permit_id)
         if permit is None:
             return None
-        ce: dict[str, Any] = {}
-        max_calls = _loads_dict(permit.max_calls_per_tool_json or "{}")
-        if max_calls:
-            ce["max_calls_per_tool"] = max_calls
-        if permit.aggregate_value_cap is not None:
-            ce["aggregate_value_cap"] = str(permit.aggregate_value_cap)
-        forbidden = _loads_list(permit.forbidden_fields_json or "[]")
-        if forbidden:
-            ce["forbidden_fields"] = forbidden
-        if permit.recipient_domain:
-            ce["recipient_domain"] = permit.recipient_domain
+        # Shared with the live invoke path so a receipt minted during crash
+        # recovery signs byte-identical constraints — str(Decimal("10.00"))
+        # here previously diverged from the live path's normalized "10".
+        ce = permit_constraints_snapshot(permit)
         return ce if ce else None
 
     async def _compensate_returned_error(
