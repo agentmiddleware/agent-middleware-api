@@ -68,8 +68,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="b2a-verify-receipt",
         description=(
-            "Verify a portable trust-plane receipt offline. Needs no account "
-            "on, and no trust in, the plane that issued it."
+            "Verify a portable trust-plane receipt offline with no account or "
+            "live issuer callback. Issuer authenticity requires a public key "
+            "obtained through a trusted channel."
         ),
     )
     parser.add_argument(
@@ -80,18 +81,20 @@ def _build_parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--keys",
-        help="Path to a trust-keys.json document held locally (fully offline).",
+        help=(
+            "Path to a trust-keys.json document held locally (fully offline). "
+            "The verifier treats this supplied key set as trusted input."
+        ),
     )
     source.add_argument(
         "--issuer",
-        help="Origin to fetch /.well-known/trust-keys.json from, e.g. "
-        "https://api.example.com",
+        help="Origin to fetch /.well-known/trust-keys.json from, e.g. https://api.example.com",
     )
     parser.add_argument(
         "--expect-issuer",
         help=(
-            "Require the bundle's issuer to equal this origin. Without it, a "
-            "valid receipt from a different plane still verifies."
+            "Require the bundle's unsigned issuer label to equal this origin. "
+            "This is a consistency guard, not issuer authentication."
         ),
     )
     parser.add_argument(

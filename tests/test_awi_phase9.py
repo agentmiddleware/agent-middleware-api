@@ -14,6 +14,7 @@ from types import ModuleType
 
 import pytest
 
+from app.core import url_guard
 from app.core.time import utc_now
 from app.services.webauthn_provider import WebAuthnProvider
 from app.services.awi_playwright_bridge import (
@@ -277,6 +278,15 @@ class TestWebAuthnProvider:
 
 class TestAWIPlaywrightBridge:
     """Tests for AWI Playwright Bridge."""
+
+    @pytest.fixture(autouse=True)
+    def _pin_public_documentation_dns(self, monkeypatch):
+        """Keep example-domain tests independent of workstation DNS policy."""
+
+        async def resolve(_host):
+            return [(None, None, None, None, ("93.184.216.34", 0))]
+
+        monkeypatch.setattr(url_guard, "_resolve_host", resolve)
 
     @pytest.fixture
     def bridge(self):

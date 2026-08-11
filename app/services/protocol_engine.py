@@ -31,11 +31,13 @@ logger = logging.getLogger(__name__)
 # Parsed Endpoint
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ParsedEndpoint:
     """An endpoint extracted from source code."""
-    method: str            # GET, POST, PUT, DELETE
-    path: str              # /v1/widgets
+
+    method: str  # GET, POST, PUT, DELETE
+    path: str  # /v1/widgets
     summary: str = ""
     description: str = ""
     parameters: list[dict] = field(default_factory=list)
@@ -47,6 +49,7 @@ class ParsedEndpoint:
 @dataclass
 class GenerationResult:
     """Result of a full protocol generation run."""
+
     generation_id: str
     service_name: str
     service_version: str
@@ -63,18 +66,18 @@ class GenerationResult:
 # Code Parser
 # ---------------------------------------------------------------------------
 
+
 class CodeParser:
     """Extract API endpoint definitions from source code."""
 
     # Pattern to match FastAPI-style decorators
     DECORATOR_RE = re.compile(
-        r'@\w+\.(get|post|put|delete|patch)\(\s*["\']([^"\']+)["\']',
-        re.IGNORECASE
+        r'@\w+\.(get|post|put|delete|patch)\(\s*["\']([^"\']+)["\']', re.IGNORECASE
     )
     SUMMARY_RE = re.compile(r'summary\s*=\s*["\']([^"\']+)["\']')
     DESC_RE = re.compile(r'description\s*=\s*["\']([^"\']+)["\']')
-    RESPONSE_RE = re.compile(r'response_model\s*=\s*(\w+)')
-    FUNC_RE = re.compile(r'(?:async\s+)?def\s+(\w+)\s*\(')
+    RESPONSE_RE = re.compile(r"response_model\s*=\s*(\w+)")
+    FUNC_RE = re.compile(r"(?:async\s+)?def\s+(\w+)\s*\(")
 
     def parse(
         self,
@@ -83,7 +86,7 @@ class CodeParser:
     ) -> list[ParsedEndpoint]:
         """Parse FastAPI-style source code and extract endpoint definitions."""
         endpoints = []
-        lines = source_code.split('\n')
+        lines = source_code.split("\n")
 
         i = 0
         while i < len(lines):
@@ -94,19 +97,21 @@ class CodeParser:
                 path = match.group(2)
 
                 # Look ahead for summary, description, response_model
-                context_block = '\n'.join(lines[i:min(i + 20, len(lines))])
+                context_block = "\n".join(lines[i : min(i + 20, len(lines))])
                 summary_match = self.SUMMARY_RE.search(context_block)
                 desc_match = self.DESC_RE.search(context_block)
                 resp_match = self.RESPONSE_RE.search(context_block)
 
-                endpoints.append(ParsedEndpoint(
-                    method=method,
-                    path=path,
-                    summary=summary_match.group(1) if summary_match else "",
-                    description=desc_match.group(1) if desc_match else "",
-                    response_model=resp_match.group(1) if resp_match else "",
-                    tags=[service_name],
-                ))
+                endpoints.append(
+                    ParsedEndpoint(
+                        method=method,
+                        path=path,
+                        summary=summary_match.group(1) if summary_match else "",
+                        description=desc_match.group(1) if desc_match else "",
+                        response_model=resp_match.group(1) if resp_match else "",
+                        tags=[service_name],
+                    )
+                )
             i += 1
 
         return endpoints
@@ -115,6 +120,7 @@ class CodeParser:
 # ---------------------------------------------------------------------------
 # Document Generators
 # ---------------------------------------------------------------------------
+
 
 class LlmTxtGenerator:
     """Generate LLM-optimized plaintext documentation."""
@@ -162,7 +168,7 @@ class LlmTxtGenerator:
             f"{datetime.now(timezone.utc).isoformat()}"
         )
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
 
 class OpenApiGenerator:
@@ -214,11 +220,7 @@ class OpenApiGenerator:
             if ep.request_body:
                 operation["requestBody"] = {
                     "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": ep.request_body
-                        }
-                    }
+                    "content": {"application/json": {"schema": ep.request_body}},
                 }
 
             paths[path_key][ep.method.lower()] = operation
@@ -256,11 +258,13 @@ class AgentJsonGenerator:
     ) -> dict:
         capabilities = []
         for ep in endpoints:
-            capabilities.append({
-                "method": ep.method,
-                "path": ep.path,
-                "summary": ep.summary,
-            })
+            capabilities.append(
+                {
+                    "method": ep.method,
+                    "path": ep.path,
+                    "summary": ep.summary,
+                }
+            )
 
         return {
             "schema_version": "1.0",
@@ -277,15 +281,13 @@ class AgentJsonGenerator:
                 "llm_txt": f"{base_url}/llm.txt",
                 "openapi": f"{base_url}/openapi.json",
             },
-            "contact": {
-                "email": "api@yourdomain.com",
-            },
         }
 
 
 # ---------------------------------------------------------------------------
 # Protocol Engine
 # ---------------------------------------------------------------------------
+
 
 class ProtocolEngine:
     """

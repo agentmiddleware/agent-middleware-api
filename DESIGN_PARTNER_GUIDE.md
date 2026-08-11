@@ -19,6 +19,10 @@ This is best for teams that can bring one real internal tool call to the demo.
 It is not yet a fit for teams seeking production settlement, a full IAM
 replacement, or universal governance across every agent framework.
 
+Before a paid partner uses anything beyond the constrained governed MCP path,
+conduct a fresh security review of the exact deployed commit. This guide and
+the public receipt are product evidence, not a security sign-off.
+
 ## Demo Path
 
 Run the focused one-command proof first:
@@ -39,16 +43,17 @@ Documented flow + script:
 
 Also advertised on `GET /.well-known/agent.json` → `authentication.bootstrap_docs`.
 
-To dogfood a fake partner tool with a real side effect (writes
-`data/dogfood_partner_notes.jsonl`):
+For local development only, dogfood a fake partner tool with a real side
+effect (writes `data/dogfood_partner_notes.jsonl`):
 
 ```bash
 make dogfood-trust-plane
 ```
 
-On Railway, set `ENABLE_DOGFOOD_TOOL=true` (keep `ENABLE_PROOF_SURFACES=false`)
-so `GET /mcp/tools.json` lists executable `partner.notes.write`. See
-[`docs/deploy-railway.md`](docs/deploy-railway.md#enable-live-dogfood-tool-ops).
+Keep `ENABLE_DOGFOOD_TOOL=false` on Railway. The public evidence fixture comes
+from the configured upstream `partner.echo`; it is labeled self-issued proof,
+not customer traction. `partner.notes.write` must never stand in for a real
+partner tool in production.
 
 For the live engagement checklist that replaces `trust-plane-echo` / 
 `partner.notes.write` with the partner's real tool id, use
@@ -56,12 +61,14 @@ For the live engagement checklist that replaces `trust-plane-echo` /
 
 ### MCP discovery gate (Phase 2)
 
-Live trust mode keeps `ENABLE_PROOF_SURFACES=false`. Phase9 AWI and
+Live trust mode keeps both `ENABLE_PROOF_SURFACES=false` and
+`ENABLE_DOGFOOD_TOOL=false`. Phase9 AWI and
 marketplace-style discovery stubs are **not** part of the wedge; with Phase 2
 they are gated/removed from `/mcp/tools.json` and MCP registration when proof
-surfaces are off. The dogfood path remains `partner.notes.write` (or your one
-registered internal tool). Inventory any dependency on Phase9 / AWI /
-marketplace stub tool ids and plan a swap to a real registered tool.
+surfaces are off. Use one operator-configured upstream tool in production;
+`partner.notes.write` remains a local test fixture only. Inventory any
+dependency on Phase9 / AWI / marketplace stub tool ids and plan a swap to a
+real registered tool.
 Details: [`docs/tech-debt-remediation-plan.md`](docs/tech-debt-remediation-plan.md)
 (Phase 2).
 

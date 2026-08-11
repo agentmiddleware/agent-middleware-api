@@ -129,7 +129,7 @@ Generated at: {datetime.now(timezone.utc).isoformat()}
 Usage:
     export B2A_API_KEY=your-api-key
     export B2A_WALLET_ID=your-wallet-id
-    export B2A_API_URL=https://api.b2a.dev  # optional
+    export B2A_API_URL=https://api.thisisatest.tech  # optional
     python {output_path.split("/")[-1]}
 """
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to Agent-Native Middleware API.
+Thanks for contributing to Agent Middleware API.
 
 This project is maintained by one person. That is a real risk to anyone
 depending on it, and the fastest way to reduce it is to make the project easy
@@ -44,11 +44,11 @@ Good first contributions, roughly easiest first:
 - **Hardening items in [`docs/settlement-rails.md`](docs/settlement-rails.md).**
   The "fixes worth doing regardless" list at the end is a set of small, scoped,
   in-boundary improvements to the money seam.
-- **An independent offline verifier.** The highest-leverage open item in
-  [`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md): a script that verifies
-  exported receipts and audit chains without a running server. Self-contained,
-  and it would upgrade a headline claim from operator-verifiable to
-  independently verifiable.
+- **Cross-language receipt fixtures.** The offline Ed25519 verifier and a
+  public portable-receipt fixture now ship. Small, self-contained ports or
+  compatibility tests that verify the same signed bytes without a running
+  server remain useful; do not describe the co-hosted key snapshot as an
+  independent issuer-identity proof.
 
 There are currently no open issues, so nothing carries the `good first issue`
 label and this list is the entry point rather than the issue tracker. Note that

@@ -46,6 +46,14 @@ def _address_blocked(address: str) -> bool:
     return not ip.is_global
 
 
+async def _resolve_host(host: str):
+    """Resolve a hostname through the event loop; split out for deterministic tests."""
+
+    return await asyncio.get_running_loop().getaddrinfo(
+        host, None, type=socket.SOCK_STREAM
+    )
+
+
 async def check_outbound_url(url: str) -> str | None:
     """Return a block reason for an agent-supplied outbound URL, or None."""
     try:
@@ -76,9 +84,7 @@ async def check_outbound_url(url: str) -> str | None:
         # A hostname, not a literal address: resolve it and require every
         # resolved address to be globally routable.
         try:
-            infos = await asyncio.get_running_loop().getaddrinfo(
-                host, None, type=socket.SOCK_STREAM
-            )
+            infos = await _resolve_host(host)
         except socket.gaierror:
             return None
         for info in infos:

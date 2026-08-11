@@ -1,106 +1,67 @@
-# Agent-first marketing site
+# Agent Middleware API design-partner site
 
-Provisional static landing for the governed MCP trust plane. It carries one
-thesis for both audiences: **autonomy needs receipts**. Humans get the product
-argument; autonomous agents get an above-the-fold bootstrap path and matching
-machine-readable pointers. The brand wordmark remains a placeholder and is not
-affiliated with Permit.io.
+Static, human-buyer-first marketing and proof surface for the governed MCP
+trust-plane wedge. The public site is `https://www.thisisatest.tech/`; the
+canonical API is `https://api.thisisatest.tech/`.
 
-## View locally
+The intended buyer is a platform engineering, AI infrastructure, or security
+team operating internal MCP tools. Machine discovery remains available below
+the one-tool pilot funnel and through the static pointer files.
+
+## Launch gate
+
+The deploy build refuses to emit `dist/` until all three values are provided:
+
+- `PUBLIC_DISPLAY_NAME`: accountable public person or entity
+- `PUBLIC_CONTACT_EMAIL`: monitored email address
+- `PUBLIC_BOOKING_URL`: working absolute HTTPS booking URL
+
+The builder rejects missing, unresolved, and obviously provisional values.
+These inputs must still be exercised manually before production because syntax
+validation cannot prove that a mailbox is monitored or a booking calendar works.
 
 ```bash
-cd site && python3 -m http.server 8765
+cd site
+PUBLIC_DISPLAY_NAME="..." \
+PUBLIC_CONTACT_EMAIL="..." \
+PUBLIC_BOOKING_URL="https://..." \
+python3 build_site.py
+python3 -m http.server 8765 --directory dist
 ```
 
-Open http://127.0.0.1:8765/
+Open `http://127.0.0.1:8765/`.
 
-## Scope
+## Public surfaces
 
-- Hero: control layer between autonomous agents and tools
-- Agent entry: manifest → MCP tools → dependency truth, with honest auth limits
-- Protocol: discover → authenticate → authorize → invoke → meter → receipt → audit → govern
-- Proof: success → replay (same receipt) → deny; notes `permit_required`
-- Local agent trial: `make prove-trust-plane` (no live credentials)
-- Partner path: one internal tool + runbook link
-- Explicit non-claims
+- `/` — human design-partner funnel
+- `/proof/` — portable receipt, matching key snapshot, and offline command
+- `/.well-known/agent.json` — marketing-origin pointer to API discovery
+- `/llm.txt` and `/llms.txt` — machine bootstrap prose
+- `/robots.txt` and `/sitemap.xml` — search discovery
 
-Illustrative proof values use the dogfood flow's real shapes and idempotency
-key. Run the proof command for signed output; the page does not present its
-example values as a live transaction.
+The proof page reads fields from `/proof/receipt.json`; it does not hard-code a
+receipt ID, amount, or verification verdict. If either proof file is absent or
+does not contain the receipt's matching key, the page says the artifact is not
+published and makes no validity claim. Cryptographic validity comes only from
+the offline verifier.
 
-No live metering, signup, or API keys on this page.
+## Analytics
 
-## Agent discovery
+Vercel Web Analytics records page views and three non-PII event names:
+`booking_click`, `email_click`, and `proof_click`. Event payloads never include
+the email address, booking URL, receipt fields, or link destination. Analytics
+must be enabled for the Vercel project before deploying the script.
 
-This host should help machines find the API:
+## Deployment
 
-- `/.well-known/agent.json` — pointer with absolute API discovery URLs
-- `/llm.txt` and `/llms.txt` — short bootstrap prose pointing at the API
-- `<link rel="alternate">` hints in the HTML head for both pointer formats
-- Footer / nav links to the live Railway discovery surfaces
-- Vercel redirects for `/mcp/tools.json`, `/v1/discover`, `/openapi.json`, and
-  `/health/dependencies` → API
+Keep `vercel.json`; this change intentionally does not migrate configuration
+formats. The linked Vercel project uses `site/` as its root directory and runs
+the stdlib-only `python3 build_site.py` command before serving `dist/`. The
+dependency-free `package.json` gives Vercel's static builder an explicit build
+entrypoint; without it, a standalone JavaScript asset can be mistaken for the
+entrypoint and the contact gate can be skipped.
 
-These are deliberately described as discovery conventions. The current A2A
-well-known path is `/.well-known/agent-card.json` (not this project's
-`agent.json`), `llms.txt` remains a proposal, and MCP-native tool discovery is
-the JSON-RPC `tools/list` method. This site does not claim A2A conformance.
-
-The pointer also advertises the self-contained local trial
-`make prove-trust-plane`. Live protected routes still require an
-operator-issued key; the marketing host never mints credentials.
-
-Canonical machine base URL:
-`https://api-service-production-433c.up.railway.app`
-
-Marketing host (Vercel):
-`https://agent-middleware-web.vercel.app`
-
-Legacy alias (permanent redirect to the canonical marketing host):
-`https://site-tawny-seven-33.vercel.app`
-
-Redeploy Vercel project `agent-middleware-web` after changing these files for them to go live.
-
-## Cross-tool naming convention
-
-Prefix everything with **`agent-middleware-`** so GitHub, Vercel, Railway, and local paths read as one product. Brand wordmarks (e.g. PERMIT) stay provisional and do **not** drive infra names.
-
-| Surface | Name | Notes |
-| --- | --- | --- |
-| GitHub repo | `PetrefiedThunder/agent-middleware-api` | Canonical product slug |
-| Local API / app | repo root (`app/`, …) | Python API |
-| Local marketing | `site/` | Keep folder name; maps to Vercel project below |
-| Vercel team | `petrefiedthunders-projects` | Account scope |
-| Vercel project | `agent-middleware-web` | Static marketing + discovery redirects |
-| Vercel production URL | `https://agent-middleware-web.vercel.app` | Canonical; the legacy `site-tawny-*` alias redirects here |
-| Railway project | `agent-middleware-api` | Matches GitHub |
-| Railway service | `api-service` *(legacy)* | Prefer rename to `agent-middleware-api` when safe; do not break `*.up.railway.app` without updating redirects |
-| Railway public URL | `https://api-service-production-433c.up.railway.app` | Live API; update `site/vercel.json` redirects if this changes |
-| Docker / GHCR | `ghcr.io/petrefiedthunder/agent-middleware-api` | Matches repo |
-
-**Rules**
-
-- Use `agent-middleware-{role}`: `api` (backend), `web` (marketing). Avoid generic names (`site`, `frontend`, `api-service`) for new resources.
-- Do not rename the `site/` directory solely for cosmetics — link it to the Vercel project named `agent-middleware-web`.
-- Deploy marketing with CLI from `site/` (`vercel --prod --scope petrefiedthunders-projects`).
-- **GitHub ↔ Vercel:** project `agent-middleware-web` is linked to
-  `PetrefiedThunder/agent-middleware-api` with **Root Directory = `site`**.
-  Confirm the first Git-triggered deploy still serves marketing + discovery
-  redirects before relying on it over CLI deploys.
-
-  Re-link / verify if needed:
-
-  ```bash
-  cd site
-  vercel link --yes --scope petrefiedthunders-projects --project agent-middleware-web
-  vercel git connect https://github.com/PetrefiedThunder/agent-middleware-api \
-    --scope petrefiedthunders-projects
-  ```
-- Leave Railway service `api-service` until a coordinated rename updates `PUBLIC_URL` + `site/vercel.json` redirects.
-- Custom domains later: prefer product DNS (not `site-*.vercel.app` leftovers).
-
-## Brand rename (deferred)
-
-Provisional marketing wordmark **PERMIT** stays until an explicit product
-decision. Infra names already use `agent-middleware-*`; do not mass-rename
-code, packages, or Railway hosts for cosmetics.
+The apex domain and known Vercel aliases redirect to
+`https://www.thisisatest.tech/`. Marketing discovery redirects target the
+custom API origin. The infrastructure provider hostname remains a compatibility
+origin only and must not appear on customer-facing pages.

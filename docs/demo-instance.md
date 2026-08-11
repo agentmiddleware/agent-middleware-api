@@ -1,4 +1,4 @@
-# Agent-Native Middleware API — Demo Configuration
+# Agent Middleware API — Demo Configuration
 
 This document describes how to set up a public demo instance.
 

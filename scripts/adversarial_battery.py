@@ -6,7 +6,7 @@ provisions throwaway, low-budget wallets/keys/permits, probes the governed
 path for the failure modes that matter, prints a PASS/FAIL/SKIP summary, and
 always revokes the keys it minted (even on error).
 
-    export API_URL="https://api-service-production-433c.up.railway.app"
+    export API_URL="https://api.thisisatest.tech"
     export BOOTSTRAP_KEY=...     # from Railway variables — never commit or paste
     python3 scripts/adversarial_battery.py
 
@@ -56,8 +56,13 @@ RUN_ID = uuid.uuid4().hex[:8]
 RESULTS: list[tuple[str, str, str]] = []  # (name, PASS/FAIL/SKIP, detail)
 
 
-def req(method: str, path: str, key: str | None = None, body: dict | None = None,
-        extra_headers: dict | None = None) -> tuple[int, object]:
+def req(
+    method: str,
+    path: str,
+    key: str | None = None,
+    body: dict | None = None,
+    extra_headers: dict | None = None,
+) -> tuple[int, object]:
     url = f"{API_URL}{path}"
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"}
@@ -86,7 +91,9 @@ def record(name: str, passed: bool | None, detail: str) -> None:
 
 
 def iso_in(minutes: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
 
 def _require(status: int, body: object, what: str) -> object:
@@ -97,11 +104,23 @@ def _require(status: int, body: object, what: str) -> object:
 
 
 def _issue_key(wallet_id: str, name: str, issued: list[dict]) -> dict:
-    s, k = req("POST", "/v1/api-keys", BOOTSTRAP_KEY, {
-        "wallet_id": wallet_id, "key_name": name, "expires_in_days": 1,
-    })
+    s, k = req(
+        "POST",
+        "/v1/api-keys",
+        BOOTSTRAP_KEY,
+        {
+            "wallet_id": wallet_id,
+            "key_name": name,
+            "expires_in_days": 1,
+        },
+    )
     _require(s, k, f"issue key {name}")
-    entry = {"wallet_id": wallet_id, "key_id": k["key_id"], "api_key": k["api_key"], "label": name}
+    entry = {
+        "wallet_id": wallet_id,
+        "key_id": k["key_id"],
+        "api_key": k["api_key"],
+        "label": name,
+    }
     issued.append(entry)  # track before anything else can fail, so cleanup sees it
     return entry
 
@@ -112,18 +131,32 @@ def provision(issued: list[dict]) -> tuple[str, dict, dict, dict, dict]:
     Agent A gets two keys: key1 binds the permit; key2 is a different key on the
     SAME wallet, used to isolate permit_key_mismatch from permit_wallet_mismatch.
     """
-    s, sponsor = req("POST", "/v1/billing/wallets/sponsor", BOOTSTRAP_KEY, {
-        "sponsor_name": f"adv-battery-{RUN_ID}", "email": "adv@example.com",
-        "initial_credits": 500, "require_kyc": False,
-    })
+    s, sponsor = req(
+        "POST",
+        "/v1/billing/wallets/sponsor",
+        BOOTSTRAP_KEY,
+        {
+            "sponsor_name": f"adv-battery-{RUN_ID}",
+            "email": "adv@example.com",
+            "initial_credits": 500,
+            "require_kyc": False,
+        },
+    )
     _require(s, sponsor, "create sponsor wallet")
     sponsor_id = sponsor["wallet_id"]
 
     def agent_wallet(i: int) -> str:
-        s, a = req("POST", "/v1/billing/wallets/agent", BOOTSTRAP_KEY, {
-            "sponsor_wallet_id": sponsor_id, "agent_id": f"adv-agent-{i}-{RUN_ID}",
-            "budget_credits": 100, "daily_limit": 50,
-        })
+        s, a = req(
+            "POST",
+            "/v1/billing/wallets/agent",
+            BOOTSTRAP_KEY,
+            {
+                "sponsor_wallet_id": sponsor_id,
+                "agent_id": f"adv-agent-{i}-{RUN_ID}",
+                "budget_credits": 100,
+                "daily_limit": 50,
+            },
+        )
         _require(s, a, f"create agent wallet {i}")
         return a["wallet_id"]
 
@@ -133,15 +166,21 @@ def provision(issued: list[dict]) -> tuple[str, dict, dict, dict, dict]:
     a_key2 = _issue_key(a_wallet, f"adv-a-key2-{RUN_ID}", issued)
     b_key = _issue_key(b_wallet, f"adv-b-key-{RUN_ID}", issued)
 
-    s, permit = req("POST", "/v1/permits", BOOTSTRAP_KEY, {
-        "issuer_wallet_id": a_wallet,
-        "subject_wallet_id": a_wallet,
-        "subject_key_id": a_key1["key_id"],
-        "allowed_tools": ["golden-path-echo"],
-        "scopes": ["tool:golden-path-echo:invoke", "billing:charge"],
-        "max_credits": 5,
-        "expires_at": iso_in(30),
-    }, {"Idempotency-Key": f"adv-permit-{RUN_ID}"})
+    s, permit = req(
+        "POST",
+        "/v1/permits",
+        BOOTSTRAP_KEY,
+        {
+            "issuer_wallet_id": a_wallet,
+            "subject_wallet_id": a_wallet,
+            "subject_key_id": a_key1["key_id"],
+            "allowed_tools": ["golden-path-echo"],
+            "scopes": ["tool:golden-path-echo:invoke", "billing:charge"],
+            "max_credits": 5,
+            "expires_at": iso_in(30),
+        },
+        {"Idempotency-Key": f"adv-permit-{RUN_ID}"},
+    )
     _require(s, permit, "issue scoped permit")
     if not permit.get("permit_id"):
         print(f"ERROR: permit response missing permit_id: {permit}", file=sys.stderr)
@@ -155,7 +194,9 @@ def provision(issued: list[dict]) -> tuple[str, dict, dict, dict, dict]:
 def revoke_all(issued: list[dict]) -> None:
     print("\n=== cleanup ===")
     for k in issued:
-        s, _ = req("DELETE", f"/v1/api-keys/{k['wallet_id']}/{k['key_id']}", BOOTSTRAP_KEY)
+        s, _ = req(
+            "DELETE", f"/v1/api-keys/{k['wallet_id']}/{k['key_id']}", BOOTSTRAP_KEY
+        )
         if s in (200, 202, 204):
             status = "revoked"
         elif s in (404, 410):
@@ -172,18 +213,36 @@ def discover_echo_tool(agent_key: str) -> bool | None:
     if not 200 <= s < 300:
         record("mcp_discovery", False, f"/mcp/tools.json status={s} (discovery failed)")
         return None
-    names = [t.get("name") for t in tools.get("tools", []) if isinstance(t, dict)] \
-        if isinstance(tools, dict) else []
+    names = (
+        [t.get("name") for t in tools.get("tools", []) if isinstance(t, dict)]
+        if isinstance(tools, dict)
+        else []
+    )
     return "golden-path-echo" in names
 
 
-def invoke(agent_key: str, wallet_id: str, permit_id: str, idem: str) -> tuple[int, object]:
-    return req("POST", "/mcp/messages", agent_key, {
-        "jsonrpc": "2.0", "id": idem, "method": "tools/call",
-        "params": {"name": "golden-path-echo", "arguments": {"message": "adv"},
-                   "mcpContext": {"wallet_id": wallet_id, "permit_id": permit_id,
-                                  "idempotency_key": idem}},
-    })
+def invoke(
+    agent_key: str, wallet_id: str, permit_id: str, idem: str
+) -> tuple[int, object]:
+    return req(
+        "POST",
+        "/mcp/messages",
+        agent_key,
+        {
+            "jsonrpc": "2.0",
+            "id": idem,
+            "method": "tools/call",
+            "params": {
+                "name": "golden-path-echo",
+                "arguments": {"message": "adv"},
+                "mcpContext": {
+                    "wallet_id": wallet_id,
+                    "permit_id": permit_id,
+                    "idempotency_key": idem,
+                },
+            },
+        },
+    )
 
 
 def run_checks(sponsor_id: str, a: dict, b: dict, permit: dict) -> None:
@@ -194,8 +253,11 @@ def run_checks(sponsor_id: str, a: dict, b: dict, permit: dict) -> None:
     s1, _ = req("GET", f"/v1/billing/wallets/{sponsor_id}", a_key1)
     s2, _ = req("GET", f"/v1/billing/wallets/{b['wallet_id']}", a_key1)
     s3, _ = req("GET", f"/v1/billing/wallets/{a['wallet_id']}", a_key1)
-    record("wallet_isolation", s1 == 403 and s2 == 403 and s3 == 200,
-           f"sponsor={s1} otherAgent={s2} ownWallet={s3} (want 403/403/200)")
+    record(
+        "wallet_isolation",
+        s1 == 403 and s2 == 403 and s3 == 200,
+        f"sponsor={s1} otherAgent={s2} ownWallet={s3} (want 403/403/200)",
+    )
 
     # 2. Invalid key rejected on a guarded endpoint.
     s, _ = req("GET", "/v1/permits", "totally-invalid-key-0000")
@@ -204,10 +266,18 @@ def run_checks(sponsor_id: str, a: dict, b: dict, permit: dict) -> None:
     # 3. Forged receipt reports valid=false. An unknown receipt_id routes through
     #    require_bootstrap_admin, so this probe uses the bootstrap key and reads
     #    the `valid` field (not a status code).
-    s, body = req("POST", "/v1/receipts/verify", BOOTSTRAP_KEY, {"receipt_id": f"rcpt_forged_{RUN_ID}"})
+    s, body = req(
+        "POST",
+        "/v1/receipts/verify",
+        BOOTSTRAP_KEY,
+        {"receipt_id": f"rcpt_forged_{RUN_ID}"},
+    )
     valid = body.get("valid") if isinstance(body, dict) else None
-    record("forged_receipt_rejected", s == 200 and valid is False,
-           f"status={s} valid={valid} (want 200 / valid=False)")
+    record(
+        "forged_receipt_rejected",
+        s == 200 and valid is False,
+        f"status={s} valid={valid} (want 200 / valid=False)",
+    )
 
     # Discover the governed tool once; MCP-dependent checks gate on it.
     echo = discover_echo_tool(a_key1)
@@ -222,31 +292,53 @@ def run_checks(sponsor_id: str, a: dict, b: dict, permit: dict) -> None:
     else:
         s, body = invoke(a_key2, a["wallet_id"], permit_id, f"adv-bind-{RUN_ID}")
         blob = json.dumps(body) if not isinstance(body, str) else body
-        record("permit_key_binding", "permit_key_mismatch" in blob,
-               f"status={s} reason~={_short(blob)} (want permit_key_mismatch)")
+        record(
+            "permit_key_binding",
+            "permit_key_mismatch" in blob,
+            f"status={s} reason~={_short(blob)} (want permit_key_mismatch)",
+        )
 
     # 5. Expired permit cannot be created or used.
-    s, exp = req("POST", "/v1/permits", BOOTSTRAP_KEY, {
-        "issuer_wallet_id": a["wallet_id"], "subject_wallet_id": a["wallet_id"],
-        "subject_key_id": a["key1"]["key_id"], "allowed_tools": ["golden-path-echo"],
-        "scopes": ["tool:golden-path-echo:invoke"], "max_credits": 5,
-        "expires_at": iso_in(-30),
-    }, {"Idempotency-Key": f"adv-permit-expired-{RUN_ID}"})
+    s, exp = req(
+        "POST",
+        "/v1/permits",
+        BOOTSTRAP_KEY,
+        {
+            "issuer_wallet_id": a["wallet_id"],
+            "subject_wallet_id": a["wallet_id"],
+            "subject_key_id": a["key1"]["key_id"],
+            "allowed_tools": ["golden-path-echo"],
+            "scopes": ["tool:golden-path-echo:invoke"],
+            "max_credits": 5,
+            "expires_at": iso_in(-30),
+        },
+        {"Idempotency-Key": f"adv-permit-expired-{RUN_ID}"},
+    )
     if s >= 400:
         record("expired_permit_denied", True, f"creation rejected status={s}")
     elif not echo:
-        record("expired_permit_denied", None,
-               "creation accepted; invoke check skipped (tool unavailable/discovery failed)")
+        record(
+            "expired_permit_denied",
+            None,
+            "creation accepted; invoke check skipped (tool unavailable/discovery failed)",
+        )
     else:
-        si, bi = invoke(a_key1, a["wallet_id"], exp.get("permit_id"), f"adv-exp-{RUN_ID}")
+        si, bi = invoke(
+            a_key1, a["wallet_id"], exp.get("permit_id"), f"adv-exp-{RUN_ID}"
+        )
         blob = json.dumps(bi) if not isinstance(bi, str) else bi
-        record("expired_permit_denied", "expire" in blob.lower(),
-               f"invoke status={si} reason~={_short(blob)} (want an expiry denial)")
+        record(
+            "expired_permit_denied",
+            "expire" in blob.lower(),
+            f"invoke status={si} reason~={_short(blob)} (want an expiry denial)",
+        )
 
     # 6. Revocation containment: revoke agent B's key, then reuse must fail.
     req("DELETE", f"/v1/api-keys/{b['wallet_id']}/{b['key']['key_id']}", BOOTSTRAP_KEY)
     s, _ = req("GET", f"/v1/billing/wallets/{b['wallet_id']}", b["key"]["api_key"])
-    record("revoked_key_denied", s in (401, 403), f"status={s} after revoke (want 401/403)")
+    record(
+        "revoked_key_denied", s in (401, 403), f"status={s} after revoke (want 401/403)"
+    )
 
     # 7. Replay / idempotency (needs an invokable tool).
     if echo is None:
@@ -259,11 +351,18 @@ def run_checks(sponsor_id: str, a: dict, b: dict, permit: dict) -> None:
         _, r2 = invoke(a_key1, a["wallet_id"], permit_id, idem)
 
         def rid(x):
-            return (x or {}).get("result", {}).get("receipt", {}).get("receipt_id") \
-                if isinstance(x, dict) else None
+            return (
+                (x or {}).get("result", {}).get("receipt", {}).get("receipt_id")
+                if isinstance(x, dict)
+                else None
+            )
+
         same = rid(r1) and rid(r1) == rid(r2)
-        record("replay_idempotent", bool(same),
-               f"receipt1={rid(r1)} receipt2={rid(r2)} (replay must reuse the receipt)")
+        record(
+            "replay_idempotent",
+            bool(same),
+            f"receipt1={rid(r1)} receipt2={rid(r2)} (replay must reuse the receipt)",
+        )
 
 
 def _short(text: str, n: int = 120) -> str:
@@ -272,12 +371,17 @@ def _short(text: str, n: int = 120) -> str:
 
 def main() -> int:
     if not API_URL:
-        print("ERROR: set API_URL to the deployment you want to test, e.g. "
-              "export API_URL=https://api-service-production-433c.up.railway.app",
-              file=sys.stderr)
+        print(
+            "ERROR: set API_URL to the deployment you want to test, e.g. "
+            "export API_URL=https://api.thisisatest.tech",
+            file=sys.stderr,
+        )
         return 2
     if not BOOTSTRAP_KEY:
-        print("ERROR: set BOOTSTRAP_KEY (operator key from Railway variables).", file=sys.stderr)
+        print(
+            "ERROR: set BOOTSTRAP_KEY (operator key from Railway variables).",
+            file=sys.stderr,
+        )
         return 2
     print(f"Target: {API_URL}  (run {RUN_ID})\n")
 

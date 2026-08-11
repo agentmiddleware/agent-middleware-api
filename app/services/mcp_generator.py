@@ -257,7 +257,7 @@ Usage:
     # Set environment variables
     export B2A_API_KEY=your-api-key
     export B2A_WALLET_ID=your-wallet-id
-    export B2A_API_URL=https://api.b2a.dev  # optional
+    export B2A_API_URL=https://api.thisisatest.tech  # optional
 
     # Run the server
     python {output_path.split("/")[-1]}

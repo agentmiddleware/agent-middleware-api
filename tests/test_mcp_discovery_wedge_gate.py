@@ -128,13 +128,11 @@ async def test_awi_manifest_404_when_proof_off(client, proof_surfaces_off):
 @pytest.mark.anyio
 async def test_llm_txt_uses_public_url_and_wedge_quickstart(client, monkeypatch):
     settings = get_settings()
-    monkeypatch.setattr(
-        settings, "PUBLIC_URL", "https://api-service-production-433c.up.railway.app"
-    )
+    monkeypatch.setattr(settings, "PUBLIC_URL", "https://api.thisisatest.tech")
     resp = await client.get("/llm.txt")
     assert resp.status_code == 200
     text = resp.text
-    assert "https://api-service-production-433c.up.railway.app" in text
+    assert "https://api.thisisatest.tech" in text
     assert "**Base URL:** http://localhost:8000" not in text
     assert "partner.notes.write" in text
     assert "POST /v1/telemetry/events" not in text

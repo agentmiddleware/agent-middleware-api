@@ -20,8 +20,11 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
 
 ``--live`` (needs ``PUBLIC_URL`` or ``--url``)
     Probe the deployed service and assert the production posture the SOP
-    requires: healthy, no memory fallback, proof surfaces off, no dependency
-    listed unhealthy.
+    requires: healthy, no memory fallback, proof surfaces and dogfood off, no
+    dependency listed unhealthy. ``--expected-version`` and
+    ``--expected-commit-sha`` add exact release-identity checks against both
+    ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
+    commit expectation must be a full 40-character SHA.
 
 Exit code is non-zero if any *executed* check fails, so this works as a
 release gate. Skipped checks never fail the run; ``--strict`` turns a skip
@@ -40,7 +43,9 @@ Usage::
       python scripts/railway_preflight.py --db --public-db --strict
 
     # Post-deploy verification only:
-    python scripts/railway_preflight.py --live --url https://api.example.com
+    python scripts/railway_preflight.py --live --url https://api.example.com \
+      --expected-version 1.3.0 \
+      --expected-commit-sha 0123456789abcdef0123456789abcdef01234567
 
 See docs/deploy-railway.md.
 """
@@ -51,6 +56,7 @@ import argparse
 import asyncio
 import ipaddress
 import os
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -159,7 +165,12 @@ def _public_database_url(environment: Mapping[str, str] | None = None) -> str:
     return url
 
 
-def check_live(url: str) -> bool:
+def check_live(
+    url: str,
+    *,
+    expected_version: str | None = None,
+    expected_commit_sha: str | None = None,
+) -> bool:
     import httpx
 
     base = url.rstrip("/")
@@ -176,6 +187,13 @@ def check_live(url: str) -> bool:
     if body.get("status") != "healthy":
         failures.append(f"status={body.get('status')!r}, expected 'healthy'")
 
+    production_like = body.get("production_like")
+    if production_like is not True:
+        failures.append(
+            f"production_like={production_like!r} — ENVIRONMENT must engage "
+            "production trust guardrails"
+        )
+
     unhealthy = body.get("unhealthy") or []
     if unhealthy:
         failures.append(f"unhealthy dependencies: {unhealthy}")
@@ -191,16 +209,57 @@ def check_live(url: str) -> bool:
     if body.get("enable_proof_surfaces"):
         failures.append("enable_proof_surfaces=true — must be false in production")
 
+    dogfood = body.get("enable_dogfood_tool")
+    if dogfood is not False:
+        failures.append(
+            f"enable_dogfood_tool={dogfood!r} — must be explicitly false in production"
+        )
+
+    identity_reports = [("/health/dependencies", body)]
+    if expected_version is not None or expected_commit_sha is not None:
+        try:
+            liveness_resp = httpx.get(f"{base}/health", timeout=30)
+            liveness_resp.raise_for_status()
+            identity_reports.append(("/health", liveness_resp.json()))
+        except Exception as exc:
+            failures.append(f"{base}/health unreachable: {exc}")
+
+    if expected_version is not None:
+        for endpoint, report in identity_reports:
+            version = report.get("version")
+            if version != expected_version:
+                failures.append(
+                    f"{endpoint} version={version!r}, expected exact version "
+                    f"{expected_version!r}"
+                )
+
+    normalized_expected_sha = None
+    if expected_commit_sha is not None:
+        normalized_expected_sha = expected_commit_sha.lower()
+        if re.fullmatch(r"[0-9a-f]{40}", normalized_expected_sha) is None:
+            failures.append(
+                "expected commit SHA must be the full 40-character hexadecimal SHA"
+            )
+        else:
+            for endpoint, report in identity_reports:
+                commit_sha = report.get("commit_sha")
+                if commit_sha != normalized_expected_sha:
+                    failures.append(
+                        f"{endpoint} commit_sha={commit_sha!r}, expected exact SHA "
+                        f"{normalized_expected_sha!r}"
+                    )
+
     if failures:
         for item in failures:
             print(f"{BAD} {item}")
         return False
 
-    version = body.get("version", "unknown")
-    dogfood = body.get("enable_dogfood_tool")
+    displayed_version = body.get("version") or "unknown"
+    displayed_commit_sha = body.get("commit_sha")
+    displayed_sha = f", sha={displayed_commit_sha}" if displayed_commit_sha else ""
     print(
-        f"{OK} {base} healthy (v{version}, proof_surfaces=false, "
-        f"dogfood_tool={str(bool(dogfood)).lower()}, no memory fallback)"
+        f"{OK} {base} healthy (v{displayed_version}{displayed_sha}, "
+        "proof_surfaces=false, dogfood_tool=false, no memory fallback)"
     )
     return True
 
@@ -225,6 +284,16 @@ def main(argv: list[str] | None = None) -> int:
         "--url",
         default=os.getenv("PUBLIC_URL", ""),
         help="service origin for --live (default: $PUBLIC_URL)",
+    )
+    parser.add_argument(
+        "--expected-version",
+        default="",
+        help="exact application version required from --live",
+    )
+    parser.add_argument(
+        "--expected-commit-sha",
+        default="",
+        help="full 40-character commit SHA required from --live",
     )
     parser.add_argument(
         "--strict",
@@ -268,7 +337,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if run_live:
         if args.url:
-            results.append(check_live(args.url))
+            results.append(
+                check_live(
+                    args.url,
+                    expected_version=args.expected_version or None,
+                    expected_commit_sha=args.expected_commit_sha or None,
+                )
+            )
         else:
             print(f"{SKIP} live posture: no PUBLIC_URL and no --url")
             results.append(not args.strict)

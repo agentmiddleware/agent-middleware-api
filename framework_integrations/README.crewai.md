@@ -1,6 +1,6 @@
 # CrewAI Integration
 
-Use Agent-Native Middleware tools in CrewAI agents and crews.
+Use Agent Middleware API tools in CrewAI agents and crews.
 
 ## Installation
 

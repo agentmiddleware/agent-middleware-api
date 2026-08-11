@@ -50,7 +50,7 @@ removes it from neither git history nor existing clones.
 3. **Verify** once the deploy is live:
 
    ```bash
-   export AGENT_MIDDLEWARE_API_URL=https://api-service-production-433c.up.railway.app
+   export AGENT_MIDDLEWARE_API_URL=https://api.thisisatest.tech
    export OLD_API_KEY=<retired key>
    export NEW_API_KEY=<replacement key>
    python scripts/rotate_api_keys.py verify

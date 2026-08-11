@@ -1,5 +1,4 @@
-/* PERMIT — provisional agent-first landing
-   Editorial paper + machine interface. No JavaScript required. */
+/* Agent Middleware API — design-partner landing and public proof index. */
 
 :root {
   --paper: #f2efe6;
@@ -32,6 +31,7 @@ html {
 
 body {
   margin: 0;
+  overflow-x: clip;
   color: var(--ink);
   background-color: var(--paper);
   background-image:
@@ -196,13 +196,13 @@ pre {
 }
 
 .hero h1 {
-  max-width: 8ch;
+  max-width: 11.5ch;
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(4.25rem, 7vw, 6.8rem);
+  font-size: clamp(3.25rem, 5.2vw, 5.7rem);
   font-weight: 800;
-  letter-spacing: -0.065em;
-  line-height: 0.82;
+  letter-spacing: -0.058em;
+  line-height: 0.91;
 }
 
 .hero-thesis {
@@ -220,6 +220,28 @@ pre {
   margin: 0;
   color: var(--ink-muted);
   font-size: 0.98rem;
+}
+
+.hero-body-lead {
+  max-width: 38rem;
+  margin-top: 1.6rem;
+  font-size: clamp(1rem, 1.5vw, 1.18rem);
+  line-height: 1.55;
+}
+
+.email-fallback {
+  margin: 1rem 0 0;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.email-fallback a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  color: var(--ink);
+  text-underline-offset: 0.22em;
 }
 
 .cta-row {
@@ -360,6 +382,34 @@ pre {
   font-size: 0.82rem;
 }
 
+.pilot-steps {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  list-style: none;
+}
+
+.pilot-steps li {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: center;
+  min-height: 4.5rem;
+  padding: 0.85rem 1.45rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.pilot-steps span {
+  color: rgba(255, 255, 255, 0.38);
+  font-family: var(--font-mono);
+  font-size: 0.63rem;
+}
+
+.pilot-steps strong {
+  font-size: 0.82rem;
+}
+
 .bootstrap-list {
   margin: 0;
   padding: 0;
@@ -439,6 +489,9 @@ pre {
 }
 
 .agent-entry-foot a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   color: var(--paper-light);
   text-underline-offset: 0.2em;
   white-space: nowrap;
@@ -705,6 +758,10 @@ pre {
   border: 1px solid var(--ink);
 }
 
+.proof-grid.artifact-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .proof-col {
   min-width: 0;
   padding: 1.25rem 1.2rem 1.4rem;
@@ -777,6 +834,27 @@ pre {
   text-transform: uppercase;
 }
 
+.proof-col > p {
+  color: var(--ink-muted);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  margin-top: 1rem;
+  font-weight: 600;
+  text-underline-offset: 0.25em;
+}
+
+.artifact-downloads .button {
+  width: 100%;
+  margin-top: 0.65rem;
+}
+
 .proof-actions {
   display: flex;
   flex-wrap: wrap;
@@ -805,6 +883,9 @@ pre {
 }
 
 .proof-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   color: var(--ink);
   text-underline-offset: 0.25em;
 }
@@ -839,9 +920,120 @@ pre {
 }
 
 .pilot-links > a:not(.button) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   font-family: var(--font-mono);
   font-size: 0.67rem;
   text-underline-offset: 0.25em;
+}
+
+.machine-section {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(24rem, 1.3fr);
+  gap: 3rem 7rem;
+  border-top: 1px solid var(--line);
+}
+
+.machine-heading h2 {
+  max-width: 14ch;
+  margin: 0;
+  font-size: clamp(2.5rem, 4.8vw, 4.7rem);
+  letter-spacing: -0.055em;
+  line-height: 0.96;
+}
+
+.machine-heading > p:last-child {
+  margin: 1.5rem 0 0;
+  color: var(--ink-muted);
+}
+
+.machine-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-self: center;
+  border-top: 1px solid var(--ink);
+  border-left: 1px solid var(--ink);
+}
+
+.machine-links a {
+  min-height: 7rem;
+  padding: 1.2rem;
+  border-right: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  text-decoration: none;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.machine-links a:hover {
+  color: var(--paper-light);
+  background: var(--ink);
+}
+
+.machine-links span,
+.machine-links code {
+  display: block;
+}
+
+.machine-links span {
+  margin-bottom: 1.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.machine-links code {
+  overflow-wrap: anywhere;
+  font-size: 0.7rem;
+}
+
+.proof-page-header {
+  padding-top: clamp(4rem, 8vw, 7rem);
+  padding-bottom: clamp(3.5rem, 6vw, 5rem);
+}
+
+.proof-page-header h1 {
+  max-width: 10ch;
+  margin: 0;
+  font-size: clamp(3.5rem, 8vw, 7.5rem);
+  letter-spacing: -0.065em;
+  line-height: 0.9;
+}
+
+.proof-page-lead {
+  max-width: 52rem;
+  margin: 2rem 0 0;
+  color: var(--ink-muted);
+  font-size: clamp(1rem, 1.7vw, 1.2rem);
+}
+
+.proof-artifact-section {
+  padding-top: 0;
+}
+
+.verify-section .protocol-heading {
+  display: block;
+}
+
+.verify-section .protocol-heading > p {
+  max-width: 52rem;
+}
+
+.verify-section pre {
+  max-width: 56rem;
+  margin: 2.5rem 0 0;
+  padding: 1.25rem;
+  overflow-x: auto;
+  color: var(--ink);
+  background: var(--success);
+  border: 1px solid var(--success);
+  font-size: 0.72rem;
+  line-height: 1.8;
+}
+
+.proof-contact {
+  border-bottom: 1px solid var(--line);
 }
 
 .boundary-section {
@@ -890,8 +1082,8 @@ pre {
 
 .site-footer {
   display: grid;
-  grid-template-columns: minmax(0, 0.7fr) minmax(20rem, 1.1fr);
-  gap: 2rem 4rem;
+  grid-template-columns: minmax(0, 0.9fr) repeat(2, minmax(12rem, 0.8fr));
+  gap: 2rem 3rem;
   max-width: var(--max);
   margin: 0 auto;
   padding: 3.5rem 1.75rem 4rem;
@@ -940,7 +1132,16 @@ pre {
 }
 
 .footer-directory a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   text-underline-offset: 0.22em;
+}
+
+.footer-directory span {
+  flex: 0 0 100%;
+  color: var(--ink-muted);
+  text-align: right;
 }
 
 .footer-note {
@@ -986,7 +1187,7 @@ pre {
   }
 
   .hero h1 {
-    font-size: clamp(4rem, 7.7vw, 5.8rem);
+    font-size: clamp(3.15rem, 6.2vw, 4.8rem);
   }
 
   .loop-track {
@@ -1030,7 +1231,7 @@ pre {
   }
 
   .hero h1 {
-    font-size: clamp(4.2rem, 15vw, 7rem);
+    font-size: clamp(3.3rem, 9vw, 5.4rem);
   }
 
   .agent-entry {
@@ -1041,6 +1242,7 @@ pre {
   .protocol-heading,
   .proof-heading,
   .pilot-section,
+  .machine-section,
   .boundary-layout {
     grid-template-columns: 1fr;
   }
@@ -1077,6 +1279,10 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .proof-grid.artifact-grid {
+    grid-template-columns: 1fr;
+  }
+
   .proof-col + .proof-col {
     border-top: 1px solid var(--ink);
     border-left: 0;
@@ -1095,6 +1301,10 @@ pre {
   }
 
   .footer-directory p {
+    text-align: left;
+  }
+
+  .footer-directory span {
     text-align: left;
   }
 }
@@ -1129,7 +1339,7 @@ pre {
   }
 
   .hero h1 {
-    font-size: clamp(2.8rem, 11.8vw, 3.6rem);
+    font-size: clamp(2.65rem, 11.2vw, 3.65rem);
   }
 
   .hero-thesis {
@@ -1151,6 +1361,7 @@ pre {
   .agent-entry-copy,
   .agent-entry-head,
   .bootstrap-list a,
+  .pilot-steps li,
   .agent-entry-foot {
     padding-right: 1rem;
     padding-left: 1rem;
@@ -1207,6 +1418,14 @@ pre {
 
   .boundary-section ul {
     grid-template-columns: 1fr;
+  }
+
+  .machine-links {
+    grid-template-columns: 1fr;
+  }
+
+  .proof-page-header h1 {
+    font-size: clamp(3rem, 16vw, 5rem);
   }
 
   .boundary-section li:nth-child(even) {

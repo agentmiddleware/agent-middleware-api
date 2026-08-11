@@ -449,7 +449,7 @@ class CrawlEngine:
 
 # Our API profile for registration
 OUR_PROFILE = {
-    "name": "Agent-Native Middleware API",
+    "name": "Agent Middleware API",
     "description": (
         "Operational control plane for autonomous agents: identity, billing, "
         "discovery, policy, and execution governance for machine-native "
@@ -997,7 +997,7 @@ class AgentOracle:
         # Our API is the center node
         self_node = NetworkGraphNode(
             node_id="self",
-            name="Agent-Native Middleware API",
+            name="Agent Middleware API",
             url="https://api.yourdomain.com",
             node_type="self",
             connections=[],

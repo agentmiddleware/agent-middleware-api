@@ -1,6 +1,6 @@
 # AutoGen Integration
 
-Use Agent-Native Middleware tools with Microsoft AutoGen agents.
+Use Agent Middleware API tools with Microsoft AutoGen agents.
 
 ## Installation
 

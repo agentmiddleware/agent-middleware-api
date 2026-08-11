@@ -74,7 +74,7 @@ def _client(handler) -> AgentMiddlewareClient:
 async def test_default_base_url_is_the_live_canonical_api() -> None:
     client = AgentMiddlewareClient(api_key="test-key")
     try:
-        assert client.base_url == ("https://api-service-production-433c.up.railway.app")
+        assert client.base_url == "https://api.thisisatest.tech"
     finally:
         await client.close()
 

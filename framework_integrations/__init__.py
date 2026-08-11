@@ -1,5 +1,5 @@
 """
-Agent-Native Middleware — Framework Integrations
+Agent Middleware API — Framework Integrations
 ================================================
 
 Integration packages for popular agent frameworks:

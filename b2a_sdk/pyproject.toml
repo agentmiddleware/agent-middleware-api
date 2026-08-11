@@ -9,9 +9,6 @@ description = "Python SDK for governed MCP permits, invocations, and receipts"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-authors = [
-    { name = "Agent-Native Middleware", email = "dev@agentnative.io" }
-]
 keywords = [
     "agent",
     "ai",
@@ -52,7 +49,7 @@ dev = [
 b2a-verify-receipt = "b2a_sdk.verify_cli:main"
 
 [project.urls]
-Homepage = "https://github.com/PetrefiedThunder/agent-middleware-api"
+Homepage = "https://www.thisisatest.tech/"
 Documentation = "https://github.com/PetrefiedThunder/agent-middleware-api#readme"
 Repository = "https://github.com/PetrefiedThunder/agent-middleware-api"
 Changelog = "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/b2a_sdk/CHANGELOG.md"

@@ -1,6 +1,6 @@
 # LlamaIndex Integration
 
-Use Agent-Native Middleware tools with LlamaIndex agents.
+Use Agent Middleware API tools with LlamaIndex agents.
 
 ## Installation
 

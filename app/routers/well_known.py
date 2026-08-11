@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core.config import get_settings, public_api_origin
+from ..core.public_contact import validated_public_contact
 from ..schemas.awi import AWIDiscoveryManifest, AWIRepresentationType
 from ..services.awi_action_vocab import get_awi_vocabulary
 from ..services.signing_keys import (
@@ -155,8 +156,24 @@ def get_agent_first_metadata() -> dict[str, Any]:
             "human_dashboard_url": "/dashboard",
             "interactive_docs_url": "/docs",
             "redoc_url": "/redoc",
-            "note": "Human operators can visually inspect active permits, receipts, and audit telemetry at /dashboard.",
+            "note": (
+                "The public /dashboard is a status and evidence index. "
+                "Authenticated tenant inspection remains API-only."
+            ),
         },
+    }
+
+
+def _provider_manifest(config: Any) -> dict[str, str]:
+    """Expose an accountable provider only when the full contact gate passes."""
+
+    contact = validated_public_contact(config)
+    if contact is None:
+        return {"status": "contact_not_configured"}
+    return {
+        "name": contact["name"],
+        "email": contact["email"],
+        "website": contact["url"],
     }
 
 
@@ -213,12 +230,7 @@ class AgentPluginManifest(BaseModel):
             "do not invent localhost as the canonical base."
         ),
     )
-    provider: dict = Field(
-        default_factory=lambda: {
-            "name": "Agent-Native Middleware",
-            "website": "https://github.com/PetrefiedThunder/agent-middleware-api",
-        }
-    )
+    provider: dict = Field(default_factory=lambda: {"status": "contact_not_configured"})
 
     capabilities: list[str] = Field(
         default_factory=lambda: list(PRODUCT_CAPABILITIES),
@@ -395,6 +407,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
         ),
         version=cfg.APP_VERSION,
         canonical_api=public_api_origin(),
+        provider=_provider_manifest(cfg),
         capabilities=list(PRODUCT_CAPABILITIES),
         proof_surfaces=proof_surfaces,
         endpoints=endpoints,

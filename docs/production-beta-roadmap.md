@@ -1,5 +1,12 @@
 # Production Beta Roadmap
 
+> **Status: superseded for the 30-day validation period.** This broad beta
+> roadmap is frozen. The active objective is one qualified operator bringing one
+> real MCP tool to a design-partner pilot. Do not resume self-serve onboarding,
+> public pricing, settlement, new proof surfaces, KMS/transparency-log work,
+> broad dashboard work, framework expansion, or package renaming until that
+> pilot validates the narrower authorization/metering/receipt wedge.
+
 This roadmap defines the minimum product shape for a credible production beta:
 an operational control plane for autonomous agents. The product is identity,
 billing, discovery, policy, and execution governance for machine-native

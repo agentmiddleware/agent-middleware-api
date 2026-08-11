@@ -179,7 +179,9 @@ def test_framework_integrations_import_the_module_that_exists() -> None:
         if path.suffix not in {".md", ".py"}:
             continue
         for lineno, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
-            if line.strip().startswith(("from agent_middleware", "import agent_middleware")):
+            if line.strip().startswith(
+                ("from agent_middleware", "import agent_middleware")
+            ):
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}")
     assert not offenders, (
         "there is no `agent_middleware` package; import `framework_integrations`. "
@@ -197,12 +199,22 @@ def test_gate_scripts_share_interpreter_resolution() -> None:
 
     helper = REPO_ROOT / "scripts" / "lib" / "python_env.sh"
     assert helper.is_file(), "scripts/lib/python_env.sh is the shared resolver"
+    helper_text = helper.read_text()
+    assert helper_text.index("elif command -v uv") < helper_text.index(
+        "for _candidate in python3.12"
+    ), "gates must prefer the requirements-resolved uv environment"
 
-    for name in ("trust_coverage_gate.sh", "trust_release_gate.sh", "core_quality_gate.sh"):
+    for name in (
+        "trust_coverage_gate.sh",
+        "trust_release_gate.sh",
+        "core_quality_gate.sh",
+    ):
         script = REPO_ROOT / "scripts" / name
         assert script.is_file(), f"scripts/{name} must exist"
         text = script.read_text()
-        assert "lib/python_env.sh" in text, f"scripts/{name} must source the shared resolver"
+        assert "lib/python_env.sh" in text, (
+            f"scripts/{name} must source the shared resolver"
+        )
         assert 'PYTHON_BIN="${PYTHON:-python3.12}"' not in text, (
             f"scripts/{name} reintroduced the hardcoded interpreter"
         )
@@ -214,7 +226,9 @@ def test_repo_guardian_only_invokes_scripts_that_exist() -> None:
     text = (REPO_ROOT / "scripts" / "repo_guardian.py").read_text()
     referenced = set(re.findall(r'"(scripts/[\w./-]+\.(?:sh|py))"', text))
     missing = sorted(ref for ref in referenced if not (REPO_ROOT / ref).is_file())
-    assert not missing, f"repo_guardian.py references scripts that do not exist: {missing}"
+    assert not missing, (
+        f"repo_guardian.py references scripts that do not exist: {missing}"
+    )
 
 
 def test_production_env_template_is_production_like() -> None:

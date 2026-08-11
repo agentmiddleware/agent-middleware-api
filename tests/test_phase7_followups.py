@@ -19,7 +19,7 @@ async def client():
 
 @pytest.mark.anyio
 async def test_agent_json_canonical_api_from_public_url(client, monkeypatch):
-    public = "https://api-service-production-433c.up.railway.app"
+    public = "https://api.thisisatest.tech"
     monkeypatch.setenv("PUBLIC_URL", public)
     get_settings.cache_clear()
     try:

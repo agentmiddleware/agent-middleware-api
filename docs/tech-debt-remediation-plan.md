@@ -12,8 +12,8 @@
 3. Prefer vertical slices + negative-path tests in security-critical areas (auth, permits, receipts, billing, deploy).
 4. Do **not** introduce new dependencies unless justified.
 5. After each phase: update this checklist (`[x]`), run targeted tests, report with AGENTS.md final-summary format.
-6. Live API: `https://api-service-production-433c.up.railway.app`  
-   Marketing: `https://agent-middleware-web.vercel.app`  
+6. Live API: `https://api.thisisatest.tech`;
+   marketing: `https://www.thisisatest.tech/`.
    Prefer `railway up` from this repo — **do not** “Redeploy from GitHub source” (can roll back to an old image).
 
 ### Global freeze (entire plan)

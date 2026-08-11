@@ -1,69 +1,38 @@
-# X Announcement Thread
+# Archived announcement draft
 
-## Copy-paste ready for @SmallFounder or project account
+> **Status: superseded — do not publish.**
+>
+> The former draft described Agent Middleware API as a broad, production-ready
+> agent platform and advertised integrations and package installs that were not
+> verified. It also predated the current design-partner direction. It is retained
+> only as a record of messaging that should not be reused.
 
----
+## Current public-message boundary
 
-**1/7**
-Just shipped **v1.1.0** of agent-middleware-api — the first open-source B2A platform with full Agentic Web Interface (AWI) support.
+Agent Middleware API is a governed MCP control layer for one narrow loop:
 
-We took the vision from arXiv:2506.10953 ("Build the web for agents, not agents for the web") and made it real.
+```text
+discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+```
 
-**Live at:** https://api-service-production-433c.up.railway.app
+Public messaging may say that the gateway provides scoped permits, retry-safe
+metering, signed receipts, and audit evidence for governed MCP tool calls.
+Public messaging must not claim customer traction, production readiness for
+arbitrary agent fleets, published SDK packages, settlement, compliance, or a
+complete agent platform.
 
----
+The next outbound message is not a launch thread. It is a personalized request
+to a qualified platform engineering, AI infrastructure, or security operator to
+bring one real internal MCP tool to a scoped design-partner pilot. Use the
+verified booking and monitored email contacts on
+`https://www.thisisatest.tech/`; do not publish until both flows work.
 
-**2/7**
-What's inside:
-- MCP Server Generator + dynamic proxy
-- Full AWI control plane (stateful sessions, 13 unified higher-level actions, progressive representations, task queues)
-- Bidirectional Playwright DOM bridge
-- WebAuthn/passkey protection for high-risk actions
-- Built-in RAG over AWI session memory
-- Behavioral + dry-run sandboxes
-- KYC, velocity monitoring, key rotation, billing, transfers
+Canonical links:
 
----
+- Marketing: `https://www.thisisatest.tech/`
+- API discovery: `https://api.thisisatest.tech/.well-known/agent.json`
+- MCP tools: `https://api.thisisatest.tech/mcp/tools.json`
+- Proof: `https://www.thisisatest.tech/proof/`
 
-**3/7**
-Everything is self-hostable, agent-first, and now fully discoverable:
-- https://api-service-production-433c.up.railway.app/.well-known/agent.json
-- https://api-service-production-433c.up.railway.app/v1/discover
-- https://api-service-production-433c.up.railway.app/mcp/tools.json
-- https://api-service-production-433c.up.railway.app/llm.txt
-
-Autonomous agents can find, evaluate, and use it with zero human help.
-
----
-
-**4/7**
-Plus official wrappers so it's dead simple to integrate:
-- langchain-agent-middleware
-- crewai-agent-middleware  
-- autogen-agent-middleware
-
-Just `pip install` and go.
-
----
-
-**5/7**
-We also added production hardening: structured logging, circuit breakers, graceful shutdown, health endpoints, and background cleanup.
-
----
-
-**6/7**
-The platform is now ready for real agent fleets.
-
-If you're building agents (or want your website to be agent-native), this is the open-source control plane you've been waiting for.
-
----
-
-**7/7**
-Repo: https://github.com/PetrefiedThunder/agent-middleware-api
-Try it: `curl https://api-service-production-433c.up.railway.app/mcp/tools.json`
-
-An official MCP Registry submission is prepared (`server.json`), gated until the spec-compliant endpoint ships — see docs/mcp-registry-submission.md.
-
-Feedback, stars, and PRs very welcome.
-
-#AI #AgenticAI #MCP #OpenSource #AgentMiddleware
+The proof must be labeled “self-issued live gateway proof, not customer
+traction.” Pricing remains private during fit qualification.

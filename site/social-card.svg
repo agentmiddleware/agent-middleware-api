@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Middleware API</title>
+  <desc id="desc">Authorize one agent action. Charge it once. Prove what happened.</desc>
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#151512" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="signalGlow" cx="0" cy="0" r="1" gradientTransform="translate(1035 72) rotate(132) scale(460 390)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E24B2A" stop-opacity="0.19"/>
+      <stop offset="1" stop-color="#E24B2A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#F2EFE6"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect width="1200" height="630" fill="url(#signalGlow)"/>
+
+  <rect x="64" y="62" width="40" height="10" fill="#E24B2A"/>
+  <text x="122" y="75" fill="#5F5A50" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19" font-weight="600" letter-spacing="2.1">AGENT MIDDLEWARE API</text>
+
+  <g fill="#151512" font-family="Arial, Helvetica, sans-serif" font-size="68" font-weight="800" letter-spacing="-3.2">
+    <text x="64" y="192">Authorize one agent action.</text>
+    <text x="64" y="274">Charge it once.</text>
+    <text x="64" y="356">Prove what happened.</text>
+  </g>
+
+  <line x1="64" y1="492" x2="1136" y2="492" stroke="#151512" stroke-opacity="0.22"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="600">
+    <text x="64" y="548" fill="#151512">SCOPED AUTHORITY</text>
+    <text x="391" y="548" fill="#151512">IDEMPOTENT METERING</text>
+    <text x="782" y="548" fill="#151512">SIGNED RECEIPTS</text>
+  </g>
+  <g fill="#E24B2A">
+    <circle cx="334" cy="542" r="5"/>
+    <circle cx="725" cy="542" r="5"/>
+  </g>
+  <text x="64" y="592" fill="#5F5A50" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">www.thisisatest.tech</text>
+  <text x="1136" y="592" text-anchor="end" fill="#5F5A50" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">ONE-TOOL DESIGN PARTNER PILOT</text>
+</svg>

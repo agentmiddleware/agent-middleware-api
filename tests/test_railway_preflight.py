@@ -161,16 +161,23 @@ def test_public_db_connection_failure_does_not_render_url(
 def test_deploy_workflow_drains_then_rescrubs_and_uses_public_db() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "railway-deploy.yml").read_text()
 
+    inject = workflow.index("- name: Inject build commit SHA")
+    deploy = workflow.index("- name: Deploy (railway up)")
     drain = workflow.index("- name: Wait for old workers to drain")
     rescrub = workflow.index("- name: Retire legacy credentials after drain")
     verify = workflow.index("- name: Verify deploy — migrations + posture")
-    assert drain < rescrub < verify
+    assert inject < deploy < drain < rescrub < verify
+    assert 'BUILD_COMMIT_SHA="$EXPECTED_SHA"' in workflow
+    assert "railway variable set" in workflow
+    assert "--skip-deploys" in workflow
     assert "python scripts/retire_owner_keys.py" in workflow
     assert "railway run --service Postgres --environment production" in workflow
     assert "--public-db" in workflow
     assert 'activeDeployments[0].status == "SUCCESS"' in workflow
     assert "activeDeployments | length) == 1" in workflow
     assert "python scripts/railway_preflight.py --live --strict" in workflow
+    assert '--expected-version "$EXPECTED_VERSION"' in workflow
+    assert '--expected-commit-sha "$EXPECTED_SHA"' in workflow
 
 
 class _Response:
@@ -184,11 +191,17 @@ class _Response:
         return self._payload
 
 
+EXPECTED_COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
 HEALTHY = {
     "status": "healthy",
-    "version": "1.2.0",
+    "production_like": True,
+    "version": "1.3.0",
+    "commit_sha": EXPECTED_COMMIT_SHA,
     "unhealthy": [],
     "enable_proof_surfaces": False,
+    "enable_dogfood_tool": False,
     "runtime_degradation": {"durable_state": {"fell_back_to_memory": False}},
 }
 
@@ -199,23 +212,177 @@ def _patch_get(monkeypatch, payload):
     monkeypatch.setattr(httpx, "get", lambda *a, **kw: _Response(payload))
 
 
+def _patch_endpoint_get(monkeypatch, dependencies_payload, liveness_payload):
+    import httpx
+
+    def get(url, **_kwargs):
+        payload = (
+            dependencies_payload
+            if url.endswith("/health/dependencies")
+            else liveness_payload
+        )
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+
 def test_live_passes_on_expected_posture(monkeypatch):
     _patch_get(monkeypatch, HEALTHY)
     assert preflight.check_live("https://api.example.com") is True
+
+
+def test_live_passes_on_exact_expected_release_identity(monkeypatch):
+    _patch_get(monkeypatch, HEALTHY)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_version="1.3.0",
+            expected_commit_sha=EXPECTED_COMMIT_SHA,
+        )
+        is True
+    )
 
 
 @pytest.mark.parametrize(
     "override",
     [
         {"status": "degraded"},
+        {"production_like": False},
         {"unhealthy": ["postgres"]},
         {"enable_proof_surfaces": True},
+        {"enable_dogfood_tool": True},
         {"runtime_degradation": {"durable_state": {"fell_back_to_memory": True}}},
     ],
 )
 def test_live_fails_on_bad_posture(monkeypatch, override):
     _patch_get(monkeypatch, {**HEALTHY, **override})
     assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_fails_when_dogfood_posture_is_missing(monkeypatch):
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    _patch_get(monkeypatch, payload)
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_fails_when_production_posture_is_missing(monkeypatch):
+    payload = {key: value for key, value in HEALTHY.items() if key != "production_like"}
+    _patch_get(monkeypatch, payload)
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_value"),
+    [
+        ("version", "1.3.0"),
+        ("commit_sha", EXPECTED_COMMIT_SHA),
+    ],
+)
+def test_live_fails_when_expected_release_identity_is_missing(
+    monkeypatch,
+    field,
+    expected_value,
+):
+    payload = {key: value for key, value in HEALTHY.items() if key != field}
+    _patch_get(monkeypatch, payload)
+    kwargs = {
+        "expected_version": expected_value if field == "version" else None,
+        "expected_commit_sha": expected_value if field == "commit_sha" else None,
+    }
+
+    assert preflight.check_live("https://api.example.com", **kwargs) is False
+
+
+@pytest.mark.parametrize(
+    ("field", "actual_value", "kwargs"),
+    [
+        ("version", "1.2.0", {"expected_version": "1.3.0"}),
+        (
+            "commit_sha",
+            "fedcba9876543210fedcba9876543210fedcba98",
+            {"expected_commit_sha": EXPECTED_COMMIT_SHA},
+        ),
+    ],
+)
+def test_live_fails_when_expected_release_identity_mismatches(
+    monkeypatch,
+    field,
+    actual_value,
+    kwargs,
+):
+    _patch_get(monkeypatch, {**HEALTHY, field: actual_value})
+
+    assert preflight.check_live("https://api.example.com", **kwargs) is False
+
+
+@pytest.mark.parametrize(
+    ("field", "actual_value", "kwargs"),
+    [
+        ("version", "1.2.0", {"expected_version": "1.3.0"}),
+        (
+            "commit_sha",
+            "fedcba9876543210fedcba9876543210fedcba98",
+            {"expected_commit_sha": EXPECTED_COMMIT_SHA},
+        ),
+    ],
+)
+def test_live_fails_when_liveness_release_identity_mismatches(
+    monkeypatch,
+    field,
+    actual_value,
+    kwargs,
+):
+    _patch_endpoint_get(
+        monkeypatch,
+        HEALTHY,
+        {**HEALTHY, field: actual_value},
+    )
+
+    assert preflight.check_live("https://api.example.com", **kwargs) is False
+
+
+def test_live_rejects_abbreviated_expected_commit_sha(monkeypatch):
+    _patch_get(monkeypatch, HEALTHY)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_commit_sha=EXPECTED_COMMIT_SHA[:12],
+        )
+        is False
+    )
+
+
+def test_cli_forwards_expected_release_identity(monkeypatch):
+    seen = []
+
+    def check_live(url, *, expected_version=None, expected_commit_sha=None):
+        seen.append((url, expected_version, expected_commit_sha))
+        return True
+
+    monkeypatch.setattr(preflight, "check_live", check_live)
+
+    assert (
+        preflight.main(
+            [
+                "--live",
+                "--strict",
+                "--url",
+                "https://api.example.com",
+                "--expected-version",
+                "1.3.0",
+                "--expected-commit-sha",
+                EXPECTED_COMMIT_SHA,
+            ]
+        )
+        == 0
+    )
+    assert seen == [("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA)]
 
 
 def test_live_fails_when_unreachable(monkeypatch):
