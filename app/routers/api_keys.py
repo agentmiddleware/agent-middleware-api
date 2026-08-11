@@ -35,6 +35,16 @@ router = APIRouter(
 )
 
 
+def _not_found(error: str, message: str) -> dict:
+    """Standardized 404 error payload."""
+    return {"error": error, "message": message}
+
+
+def _invalid_request(error: str, message: str) -> dict:
+    """Standardized 422 error payload."""
+    return {"error": error, "message": message}
+
+
 @router.post(
     "",
     response_model=APIKeyWithSecret,
@@ -75,7 +85,10 @@ async def create_api_key(
             expires_at=result["expires_at"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("wallet_not_found", str(e)),
+        )
 
 
 @router.get(
@@ -101,7 +114,10 @@ async def list_api_keys(
             total_revoked=result["total_revoked"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("wallet_not_found", str(e)),
+        )
 
 
 @router.post(
@@ -161,11 +177,20 @@ async def rotate_api_key(
             created_at=result["created_at"],
         )
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("wallet_not_found", str(e)),
+        )
     except KeyNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("key_not_found", str(e)),
+        )
     except InvalidRotationRequestError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(
+            status_code=422,
+            detail=_invalid_request("invalid_rotation_request", str(e)),
+        )
 
 
 @router.delete(
@@ -187,9 +212,15 @@ async def revoke_api_key(
     try:
         await service.revoke_key(wallet_id, key_id, reason)
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("wallet_not_found", str(e)),
+        )
     except KeyNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("key_not_found", str(e)),
+        )
 
 
 @router.post(
@@ -239,7 +270,10 @@ async def emergency_revoke(
             "created_at": result["created_at"].isoformat(),
         }
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("wallet_not_found", str(e)),
+        )
 
 
 @router.get(
@@ -261,4 +295,7 @@ async def get_rotation_logs(
         logs = await service.get_rotation_logs(wallet_id, limit)
         return [KeyRotationLogEntry(**log) for log in logs]
     except WalletNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(
+            status_code=404,
+            detail=_not_found("wallet_not_found", str(e)),
+        )
