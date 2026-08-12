@@ -436,13 +436,15 @@ verifier.
   is not implemented.
 - The public MCP surface is an HTTP/JSON-RPC tools subset at `/mcp/messages`,
   plus an opt-in standard endpoint at `POST /mcp`
-  (`ENABLE_STANDARD_MCP_ENDPOINT`, default off) serving the stateless
-  Streamable HTTP lifecycle (`initialize`, notifications, `ping`,
-  `tools/list`, `tools/call` with server-minted single-tool permits; JSON
-  responses only, no SSE stream or sessions). Upstream execution is
-  intentionally limited to one operator-configured Streamable HTTP server and
-  one exact tool; resources, prompts, OAuth, stdio, and multi-upstream registry
-  management are not implemented.
+  (`ENABLE_STANDARD_MCP_ENDPOINT`, default off) whose protocol surface —
+  `initialize` and version negotiation, notifications, `ping`, JSON-RPC
+  framing and errors — is served by the official MCP SDK's stateless
+  Streamable HTTP transport (JSON responses only, no SSE stream or sessions);
+  `tools/call` runs the governed pipeline with server-minted single-tool
+  permits. Upstream execution is intentionally limited to one
+  operator-configured Streamable HTTP server and one exact tool; resources,
+  prompts, OAuth, stdio, and multi-upstream registry management are not
+  implemented.
 - Permits are reusable budget envelopes, not one-shot delegation chains; parent
   delegation containment is not implemented.
 - Database service registrations remain metadata and are omitted from
