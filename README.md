@@ -53,7 +53,7 @@ project does not make yet.
 
 | Trust step | Implemented behavior | Primary surface |
 |---|---|---|
-| Discover | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt` (`/llm.txt` alias), `/openapi.json`, `/health/dependencies` |
+| Discover | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth, and public signing keys | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt` (`/llm.txt` alias), `/openapi.json`, `/health/dependencies`, `/.well-known/trust-keys.json` (standard JWK Set mirror at `/.well-known/jwks.json`) |
 | Authenticate | Bootstrap operator keys plus database-issued wallet keys; trust-core API keys are stored as hashes | `X-API-Key`, `/v1/api-keys` |
 | Authorize | Ed25519-signed permits bound to issuer wallet, subject wallet/key, tools, scopes, budget, nonce, and expiry | `/v1/permits` |
 | Request | An agent with no authority asks a human for a scoped, budgeted permit; the permit is minted from the reviewed terms after approval | `/v1/permit-requests` |
@@ -154,8 +154,26 @@ Recent work substantially tightened the trust and accounting boundary:
 - **Concurrent audit integrity.** Per-wallet chain heads serialize concurrent
   appenders, and verification detects payload tampering, broken links, and tail
   truncation.
+- **Adversarial coverage of the five claims, enforced gate-first.** The five
+  headline claims — charge-once under retry, budget over-spend containment,
+  interrupted-invocation accounting, signed offline-verifiable receipts, and
+  authority-before-money denial — have an in-process adversarial pass against
+  the real routers and services in
+  [`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py).
+  CI runs the full release gate as a single dedicated check
+  (`trust_release_gate`) so a claim cannot regress into `main` unproven; the
+  exact branch-protection settings are in
+  [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md).
+- **Standard JWKS discovery.** `/.well-known/jwks.json` serves the same
+  Ed25519 public keys as `/.well-known/trust-keys.json` as an RFC 7517 JWK Set
+  (OKP/Ed25519, `alg: EdDSA`) for verifiers using off-the-shelf JOSE tooling.
+  Neither endpoint ever serves an empty key set with 200 — "no usable key"
+  answers 503 so a verifier reads it as retry, not forgery. The
+  offline-verification anchor remains `/.well-known/trust-keys.json`, which
+  carries issuance/retirement metadata a bare JWK Set omits.
 
 The corresponding negative and concurrency coverage lives in
+[`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py),
 [`tests/test_trust_negative_security.py`](tests/test_trust_negative_security.py),
 [`tests/test_permit_postgres_concurrency.py`](tests/test_permit_postgres_concurrency.py),
 [`tests/test_refund_reconciliation.py`](tests/test_refund_reconciliation.py),
@@ -267,6 +285,17 @@ deployment refuses to boot with them set). Generate with
 `python scripts/generate_static_dev_keys.py` — see
 [docs/static-dev-api-keys.md](docs/static-dev-api-keys.md).
 
+An agent working against a local instance can also mint its own wallet-scoped
+dev key with no pre-shared secret. Opt in with
+`ENABLE_DEV_KEY_SELF_PROVISION=true`, then
+`POST /v1/dev-keys/self-provision` provisions a sponsor wallet, an agent
+wallet with bounded synthetic dev credits, and a wallet-scoped key shown once
+— the same credential class an operator bootstrap produces, never
+bootstrap-admin. The route answers 404 until the flag is set, and a
+production-like deployment refuses to boot with it enabled. Never enable it
+on a shared or hosted deployment; details are in the same
+[docs/static-dev-api-keys.md](docs/static-dev-api-keys.md).
+
 ### Optional: connect one upstream MCP tool
 
 Design-partner mode exposes one exact tool from one Streamable HTTP MCP server
@@ -354,7 +383,8 @@ put one real internal tool behind the governed path.
 | `GET /v1/me/audit/events` | Current wallet's audit view | Wallet key |
 | `POST /v1/receipts/verify` | Verify signed receipt material | Authenticated |
 | `GET /v1/receipts/{receipt_id}/portable` | Export a receipt as offline-verifiable evidence | Authorized wallet/admin |
-| `GET /.well-known/trust-keys.json` | Public signing keys for offline receipt verification | Public, unauthenticated |
+| `GET /.well-known/trust-keys.json` | Public signing keys for offline receipt verification, with issuance/retirement metadata | Public, unauthenticated |
+| `GET /.well-known/jwks.json` | The same signing keys as a standard JWK Set (RFC 7517) for JOSE tooling | Public, unauthenticated |
 | `GET /v1/evidence/{receipt_id}` | Permit, dispatch, ledger, receipt, and audit evidence bundle | Authorized wallet/admin |
 | `POST /v1/audit/verify-chain` | Verify a wallet audit chain | Authorized wallet/admin |
 | `GET /v1/receipts/reconciliation/refunds` | Inspect failed-refund work items | Bootstrap admin only |
@@ -496,7 +526,9 @@ make coverage
 # Focused trust modules; enforces at least 80% coverage
 make trust-coverage-gate
 
-# Trust tests + coverage + demo + discovery/OpenAPI/inventory drift
+# Trust tests (including the adversarial five-claims pass) + coverage +
+# demo + discovery/OpenAPI/inventory drift. CI runs this same script as the
+# required `trust_release_gate` check.
 make trust-release-gate
 
 # Two-process crash-consistency proof; needs a dedicated, empty PostgreSQL
@@ -512,10 +544,25 @@ already installed in the active Python environment.
 invariant it asserts — and, just as importantly, to what it does not prove. Two
 live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run
 the same class of invariants against a deployment you operate; both write test
-data, so point them at staging.
+data, so point them at staging. A local red-team pass
+(`make red-team-trust-plane-check`) attacks the trust loop against a throwaway
+SQLite database.
+
+The repository is intended to run **gate-first, execute-second**: CI exposes
+the release gate as one dedicated check named `trust_release_gate`, and
+[docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md)
+specifies the exact branch-protection settings that make it (and the other
+required checks) block `main`. The automated batteries prove the five claims
+from inside; the human milestone is the
+[stranger test](docs/stranger-test.md) — a person who has never seen the
+repository drives the whole governed loop and verifies the same claims from
+the published docs alone, asking zero questions.
 
 The CI workflows also run:
 
+- The full trust release gate as a single required check
+  (`trust_release_gate`), exactly as `make trust-release-gate` runs it
+  locally.
 - Python 3.11 and 3.12 suites.
 - Python SDK wheel/sdist builds, clean-install smoke tests, typed-client tests,
   Ruff, and mypy on Python 3.10 through 3.12.
@@ -570,6 +617,9 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling
 - [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
 - [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
+- [docs/stranger-test.md](docs/stranger-test.md) — the human milestone: a stranger drives the governed loop and checks the five claims from the public docs alone
+- [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) — gate-first branch protection: the exact required checks for `main`
+- [Hard Run Report.md](<Hard Run Report.md>) — adversarial black-box run against the live production trust plane, with reproduction commands
 - [docs/failure-semantics.md](docs/failure-semantics.md) — every terminal outcome of a metered call that dies mid-flight, and the test that proves each
 - [docs/agent-accountability.md](docs/agent-accountability.md) — why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
@@ -580,6 +630,7 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [docs/human-approval-gate.md](docs/human-approval-gate.md) — pausing a governed invoke on a human decision
 - [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) — replace the demo tool with one internal tool
 - [docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md) — operator-gated key provisioning
+- [docs/static-dev-api-keys.md](docs/static-dev-api-keys.md) — static local dev/training keys and self-serve dev key provisioning
 - [docs/PROOF_SURFACES.md](docs/PROOF_SURFACES.md) — frozen surface inventory
 - [docs/tech-debt-remediation-plan.md](docs/tech-debt-remediation-plan.md) — agent-executable hardening plan and status
 - [docs/deploy-railway.md](docs/deploy-railway.md) — supported deployment SOP
