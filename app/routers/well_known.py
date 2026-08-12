@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..core.config import get_settings, public_api_origin
 from ..core.public_contact import validated_public_contact
+from ..core.trust_mode import is_production_like_environment
 from ..schemas.awi import AWIDiscoveryManifest, AWIRepresentationType
 from ..services.awi_action_vocab import get_awi_vocabulary
 from ..services.signing_keys import (
@@ -178,8 +179,18 @@ def _provider_manifest(config: Any) -> dict[str, str]:
 
 
 def _authentication_manifest() -> dict[str, Any]:
-    """Honest auth discovery: no public self-serve key mint."""
-    return {
+    """Honest auth discovery.
+
+    The production-truthful answer is that there is no public self-serve key
+    mint. On a local instance that has *deliberately* opted in
+    (``ENABLE_DEV_KEY_SELF_PROVISION=true``, which production-like
+    environments refuse to boot with), we additionally advertise the
+    local-only dev-key endpoint so a bootstrapping agent discovers the
+    credential it can actually mint here instead of being told to find an
+    operator. The production surface is unchanged: the extra field appears
+    only when the endpoint is genuinely reachable.
+    """
+    manifest: dict[str, Any] = {
         "type": "api_key",
         "header": "X-API-Key",
         "public_self_serve": False,
@@ -190,6 +201,27 @@ def _authentication_manifest() -> dict[str, Any]:
             "Agents must use a wallet-scoped key — see bootstrap_docs."
         ),
     }
+
+    cfg = get_settings()
+    if cfg.ENABLE_DEV_KEY_SELF_PROVISION and not is_production_like_environment(
+        cfg.ENVIRONMENT
+    ):
+        manifest["dev_self_provision"] = {
+            "endpoint": "/v1/dev-keys/self-provision",
+            "method": "POST",
+            "scope": "local_only",
+            "requires_pre_shared_secret": False,
+            "docs": "/docs/static-dev-api-keys.md",
+            "note": (
+                "LOCAL DEV ONLY. This instance has "
+                "ENABLE_DEV_KEY_SELF_PROVISION=true, so an agent can mint its "
+                "own wallet-scoped dev key with no pre-shared secret by POSTing "
+                "here (empty body works). Never available in production-like "
+                "environments. Call from a CLI/SDK, not a browser."
+            ),
+        }
+
+    return manifest
 
 
 def _local_try_it_manifest() -> dict[str, Any]:
