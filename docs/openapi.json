@@ -6703,6 +6703,26 @@
         }
       }
     },
+    "/.well-known/jwks.json": {
+      "get": {
+        "tags": [
+          "Agent Discovery"
+        ],
+        "summary": "Trust-Plane JWKS (JSON Web Key Set)",
+        "description": "Standard JWK Set (RFC 7517) view of the same Ed25519 public keys published at /.well-known/trust-keys.json, for verifiers that auto-discover keys in JWKS form. Unauthenticated by design: a receipt is only portable evidence if a party holding no credential here can still check its signature. Each key is OKP/Ed25519 (`alg: EdDSA`); match a receipt's `kid` to the JWK `kid`. trust-keys.json carries the same keys with issuance/retirement metadata a bare JWK Set omits.",
+        "operationId": "get_jwks_json__well_known_jwks_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/.well-known/mcp/tools.json": {
       "get": {
         "tags": [

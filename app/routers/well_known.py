@@ -338,6 +338,7 @@ def _product_endpoints() -> dict[str, str]:
         # while and resolved to nothing, so discovery clients 404'd on it.
         "keys": "/v1/signing-keys",
         "trust_keys": "/.well-known/trust-keys.json",
+        "jwks": "/.well-known/jwks.json",
         "api_keys": "/v1/api-keys",
         "me": "/v1/me",
         "health": "/health",
@@ -638,6 +639,57 @@ async def get_trust_keys_json():
             },
         },
         media_type="application/json",
+    )
+
+
+@router.get(
+    "/.well-known/jwks.json",
+    summary="Trust-Plane JWKS (JSON Web Key Set)",
+    description=(
+        "Standard JWK Set (RFC 7517) view of the same Ed25519 public keys "
+        "published at /.well-known/trust-keys.json, for verifiers that "
+        "auto-discover keys in JWKS form. Unauthenticated by design: a receipt "
+        "is only portable evidence if a party holding no credential here can "
+        "still check its signature. Each key is OKP/Ed25519 (`alg: EdDSA`); "
+        "match a receipt's `kid` to the JWK `kid`. trust-keys.json carries the "
+        "same keys with issuance/retirement metadata a bare JWK Set omits."
+    ),
+)
+async def get_jwks_json():
+    """Serve the trust-plane public keys as a standard JWK Set.
+
+    Same key material and availability semantics as
+    ``/.well-known/trust-keys.json``; only the envelope differs. An empty set
+    is never served with 200 for the same reason trust-keys refuses to: a
+    verifier that looks up a receipt's ``kid`` and finds nothing can read the
+    receipt as a forgery, so "no usable key" answers 503 (retry) instead.
+    """
+    service = get_signing_key_service()
+    try:
+        # Materialize the active key so a freshly deployed plane publishes a
+        # usable key rather than an empty set.
+        await service.ensure_active_key()
+    except (SigningKeyError, RuntimeError):
+        logger.warning("jwks_active_key_unavailable", exc_info=True)
+
+    try:
+        keys = await service.list_public_keys()
+    except (SigningKeyError, RuntimeError):
+        logger.warning("jwks_unavailable", exc_info=True)
+        return _trust_keys_unavailable()
+
+    jwks = [
+        jwk
+        for jwk in (_published_key(key).get("jwk") for key in keys)
+        if jwk is not None
+    ]
+    if not jwks:
+        logger.warning("jwks_empty")
+        return _trust_keys_unavailable()
+
+    return JSONResponse(
+        content={"keys": jwks},
+        media_type="application/jwk-set+json",
     )
 
 
