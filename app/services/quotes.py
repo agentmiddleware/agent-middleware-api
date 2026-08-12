@@ -25,8 +25,9 @@ substituting a different one is the one outcome a price lock must never
 produce.
 
 The signature is over the same canonical payload shape permits and receipts
-use, so a quote is verifiable offline against the published JWKS: an agent can
-prove what it was promised without trusting the issuer's read endpoint.
+use, so a quote is verifiable offline against the published key document
+(``/.well-known/trust-keys.json``): an agent can prove what it was promised
+without trusting the issuer's read endpoint.
 """
 
 from __future__ import annotations
