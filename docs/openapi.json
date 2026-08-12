@@ -5570,6 +5570,48 @@
         }
       }
     },
+    "/v1/dev-keys/self-provision": {
+      "post": {
+        "tags": [
+          "Development"
+        ],
+        "summary": "Self-provision a wallet-scoped development API key (local only)",
+        "description": "Mint a dev sponsor wallet, agent wallet, and wallet-scoped API key with no pre-shared secret. Requires ENABLE_DEV_KEY_SELF_PROVISION and a local-compatible ENVIRONMENT; production-like deployments refuse to boot with this enabled. The key is shown once.",
+        "operationId": "self_provision_dev_key_v1_dev_keys_self_provision_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfProvisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfProvisionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/signing-keys/active": {
       "get": {
         "tags": [
@@ -11906,6 +11948,78 @@
           "scheduled"
         ],
         "title": "RotationType"
+      },
+      "SelfProvisionRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_.-]*$",
+            "title": "Agent Id",
+            "description": "Identifier for the dev agent wallet. Generated when omitted.",
+            "default": ""
+          },
+          "key_name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Key Name",
+            "default": "self-provisioned-dev"
+          },
+          "budget_credits": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Budget Credits",
+            "description": "Synthetic dev credits granted to the agent wallet.",
+            "default": 1000.0
+          }
+        },
+        "type": "object",
+        "title": "SelfProvisionRequest",
+        "description": "Everything is optional: a bare POST provisions a usable dev agent."
+      },
+      "SelfProvisionResponse": {
+        "properties": {
+          "sponsor_wallet_id": {
+            "type": "string",
+            "title": "Sponsor Wallet Id"
+          },
+          "wallet_id": {
+            "type": "string",
+            "title": "Wallet Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix"
+          },
+          "api_key": {
+            "type": "string",
+            "title": "Api Key"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sponsor_wallet_id",
+          "wallet_id",
+          "agent_id",
+          "key_id",
+          "key_prefix",
+          "api_key",
+          "note"
+        ],
+        "title": "SelfProvisionResponse"
       },
       "ServiceCapability": {
         "properties": {

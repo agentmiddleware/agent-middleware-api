@@ -84,6 +84,49 @@ if it did.
   `amw_dev_` strings in public history invite copy-paste confusion even
   though the keys hold no production power.
 
+## Self-serve provisioning for agents
+
+An agent talking to a running local instance can provision its own
+wallet-scoped dev key with **no pre-shared secret**, so nothing needs to be
+handed to it out of band. Opt in on the local server:
+
+```bash
+ENABLE_DEV_KEY_SELF_PROVISION=true
+```
+
+Then the agent calls:
+
+```bash
+curl -X POST http://localhost:8000/v1/dev-keys/self-provision \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "my-dev-agent"}'
+```
+
+The response contains a sponsor wallet, an agent wallet funded with bounded
+synthetic dev credits (`budget_credits`, default 1000, max 100000), and a
+wallet-scoped API key shown once — the same shape
+`scripts/partner_api_key_bootstrap.py` produces with a bootstrap admin, so
+self-served agents exercise the real credential class end to end
+(permits, metering, receipts, audit).
+
+Scope and safety:
+
+- The minted key is **wallet-scoped, never bootstrap-admin**: a credential
+  anyone can mint must not read the audit plane or touch other tenants.
+- The route answers **404 until the flag is set**, so the surface is never
+  available by accident (same pattern as `ENABLE_STANDARD_MCP_ENDPOINT`).
+- **Production-like environments refuse to boot** with the flag set, and
+  the handler independently fails closed with 403 there — the same two-layer
+  containment as `STATIC_DEV_API_KEYS`.
+- Self-provisioned keys are DB-backed (`b2a_` class). They are not part of
+  the rotation runbook either, but unlike static env keys they *can* be
+  rotated or revoked through `/v1/api-keys` if a local setup wants to
+  exercise those flows.
+
+Never enable this on a shared or hosted deployment: anyone who can reach
+the port can mint keys and synthetic credits. It exists for single-operator
+local instances and CI-style environments only.
+
 ## Relationship to the rotation runbook
 
 `docs/api-key-rotation.md` and its incident table apply **only** to

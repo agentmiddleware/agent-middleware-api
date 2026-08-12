@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     # the amw_dev_ prefix — a rotated amw_live_ key pasted here never
     # authenticates. See docs/static-dev-api-keys.md.
     STATIC_DEV_API_KEYS: str = ""
+    # Self-serve dev key provisioning (POST /v1/dev-keys/self-provision):
+    # lets an agent against a local instance mint its own wallet-scoped key
+    # with no pre-shared secret. Default off (route answers 404). Local-only:
+    # production-like environments refuse to boot when this is true, and the
+    # handler independently fails closed there. See docs/static-dev-api-keys.md.
+    ENABLE_DEV_KEY_SELF_PROVISION: bool = False
 
     # --- Proof surfaces ---
     # When false, only CORE_TRUST_ROUTERS (+ MCP) are mounted. Production-like
