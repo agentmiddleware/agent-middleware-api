@@ -48,10 +48,12 @@ rotating in the first place:
    STATIC_DEV_API_KEYS=amw_dev_...,amw_dev_...
    ```
 
-3. **Use** the key exactly like any other API key:
+3. **Use** the key exactly like any other API key (shown via an env var —
+   keeping the literal out of shell history and scanner reports):
 
    ```bash
-   curl -H "X-API-Key: amw_dev_..." http://localhost:8000/v1/audit/summary
+   export STATIC_DEV_KEY=amw_dev_...   # one of the generated values
+   curl -H "X-API-Key: $STATIC_DEV_KEY" http://localhost:8000/v1/audit/summary
    ```
 
 ## What a static dev key can do
