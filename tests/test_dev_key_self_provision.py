@@ -43,8 +43,21 @@ def self_provision_settings():
 
 @pytest.fixture()
 async def client():
+    """Client carrying the rate-limiter bypass header.
+
+    The endpoint itself takes no auth dependency and never reads this header;
+    it exists so these tests don't drain the shared "anonymous" rate-limit
+    bucket that the whole suite's unauthenticated requests count against
+    (RateLimitMiddleware exempts X-API-Key: test-key — see tests/conftest.py).
+    The no-credential property is proven by the one deliberately bare request
+    in test_self_provision_mints_wallet_scoped_key.
+    """
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"X-API-Key": "test-key"},
+    ) as c:
         yield c
 
 
@@ -65,12 +78,17 @@ async def test_refused_in_production_like_environment_even_when_enabled(
 
 
 async def test_self_provision_mints_wallet_scoped_key(
-    client, self_provision_settings, clean_database
+    self_provision_settings, clean_database
 ):
-    resp = await client.post(
-        "/v1/dev-keys/self-provision",
-        json={"agent_id": "test-dev-agent", "budget_credits": 500},
-    )
+    # Deliberately bare client — no headers at all — proving end to end that
+    # self-provisioning needs no pre-shared secret. Exactly one such request
+    # runs in the suite so the shared anonymous rate bucket is barely touched.
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as bare:
+        resp = await bare.post(
+            "/v1/dev-keys/self-provision",
+            json={"agent_id": "test-dev-agent", "budget_credits": 500},
+        )
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["agent_id"] == "test-dev-agent"
