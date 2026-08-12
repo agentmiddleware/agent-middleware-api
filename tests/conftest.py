@@ -106,6 +106,16 @@ os.environ.setdefault("VALID_API_KEYS", "test-key")
 # for examples that flip back to strict at the test boundary).
 os.environ.setdefault("TRUST_MODE_ENABLED", "false")
 os.environ.setdefault("ALLOW_LEGACY_UNPERMITTED_MCP", "true")
+# Stop the suite from self-throttling. RateLimitMiddleware exempts only the
+# literal "test-key"; unauthenticated requests all share the "anonymous"
+# bucket and provisioned agent keys each get their own, so a fast full-suite
+# run can cross the 120/min default and return 429 where a test expects
+# 401/403 (observed as a flaky `assert 429 == 401` in
+# test_tenant_isolation_hardening). Raising the limit for tests removes the
+# cross-test coupling without changing production behavior; the one test that
+# exercises limiting (test_runtime_degradation) builds its own middleware with
+# an explicit per-instance limit and is unaffected.
+os.environ.setdefault("RATE_LIMIT_PER_MINUTE", "1000000")
 
 
 @pytest.fixture(scope="session")
