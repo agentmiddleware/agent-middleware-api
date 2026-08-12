@@ -43,8 +43,10 @@ def require_scope(*required_scopes: str) -> Callable[[F], F]:
                     detail={"error": "unauthenticated", "message": "Authentication required."},
                 )
 
-            # API key callers have implicit full access
-            if auth.source in ("db", "env"):
+            # API key callers have implicit full access. "static-dev" is the
+            # local-only static development/training key path; it carries
+            # bootstrap-admin power in local-compatible environments only.
+            if auth.source in ("db", "env", "static-dev"):
                 return await func(*args, **kwargs)
 
             # JWT callers must have at least one required scope

@@ -5,6 +5,12 @@ the companion to `docs/key-management.md`, which covers the Ed25519
 trust-plane signing key; this document covers the env-based API keys that
 `app/core/auth.py` treats as bootstrap admins.
 
+**Out of scope:** the static `amw_dev_` development/training keys in
+`STATIC_DEV_API_KEYS` are deliberately never rotated. They authenticate
+only in local-compatible environments and a production-like deployment
+refuses to boot with them set, so the leak-means-compromise threat model
+below does not apply to them. See `docs/static-dev-api-keys.md`.
+
 ## Why these keys matter
 
 Any key listed in `VALID_API_KEYS` authenticates as a **bootstrap admin**:

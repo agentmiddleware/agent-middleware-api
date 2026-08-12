@@ -260,6 +260,13 @@ keys. There is no public self-serve key mint. An operator creates wallets and a
 wallet-scoped agent key, then transfers that key through a secure channel. See
 [docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md).
 
+For local testing and training material that needs a credential which never
+rotates, use `STATIC_DEV_API_KEYS` instead: static `amw_dev_` keys that
+authenticate only in local-compatible environments (a production-like
+deployment refuses to boot with them set). Generate with
+`python scripts/generate_static_dev_keys.py` — see
+[docs/static-dev-api-keys.md](docs/static-dev-api-keys.md).
+
 ### Optional: connect one upstream MCP tool
 
 Design-partner mode exposes one exact tool from one Streamable HTTP MCP server
