@@ -111,13 +111,26 @@ async def get_auth_context(
         return await _auth_from_jwt(token)
 
     if api_key is None:
+        detail = {
+            "error": "missing_credentials",
+            "message": "X-API-Key or Authorization: Bearer header is required.",
+            "docs": "/docs",
+        }
+        # On a local instance that opted into self-serve dev keys, point a
+        # bootstrapping agent at the credential it can actually mint here.
+        # Gated so no production surface ever advertises it (production-like
+        # environments refuse to boot with the flag set anyway).
+        if settings.ENABLE_DEV_KEY_SELF_PROVISION and not (
+            is_production_like_environment(settings.ENVIRONMENT)
+        ):
+            detail["self_provision"] = (
+                "This local instance allows self-serve dev keys: POST "
+                "/v1/dev-keys/self-provision (empty body) to mint a "
+                "wallet-scoped key, then send it as X-API-Key."
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": "missing_credentials",
-                "message": "X-API-Key or Authorization: Bearer header is required.",
-                "docs": "/docs",
-            },
+            detail=detail,
         )
 
     # RED TEAM FIX: Reject empty or whitespace-only keys.
