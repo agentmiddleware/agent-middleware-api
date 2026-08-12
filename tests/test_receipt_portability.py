@@ -192,6 +192,95 @@ async def test_unusable_key_set_is_refused_rather_than_served_empty(
 
 
 @pytest.mark.anyio
+async def test_jwks_endpoint_needs_no_credential(client, clean_database):
+    """The standard JWKS view must be fetchable by a party with no account.
+
+    Verifiers that auto-discover keys expect a bare RFC 7517 JWK Set at
+    /.well-known/jwks.json; the trust plane's docs and marketing site both
+    point there, so it must resolve rather than 404.
+    """
+    resp = await client.get("/.well-known/jwks.json")
+
+    assert resp.status_code == 200, resp.text
+    document = resp.json()
+    # RFC 7517 shape: a bare {"keys": [...]} set, no envelope metadata.
+    assert set(document) == {"keys"}
+    assert document["keys"], "no signing key published"
+
+    for jwk in document["keys"]:
+        assert jwk["kty"] == "OKP"
+        assert jwk["crv"] == "Ed25519"
+        assert jwk["alg"] == "EdDSA"
+        assert jwk["use"] == "sig"
+        # `x` is the raw 32-byte Ed25519 public key as unpadded base64url.
+        x = jwk["x"]
+        padded = x + "=" * (-len(x) % 4)
+        assert len(base64.urlsafe_b64decode(padded)) == 32
+
+
+@pytest.mark.anyio
+async def test_jwks_and_trust_keys_publish_the_same_key_material(
+    client, clean_database
+):
+    """jwks.json and trust-keys.json are two envelopes over one key set.
+
+    If they could drift, a verifier that trusted one would reach a different
+    conclusion than a verifier that trusted the other for the same receipt.
+    """
+    jwks_resp = await client.get("/.well-known/jwks.json")
+    trust_resp = await client.get("/.well-known/trust-keys.json")
+    assert jwks_resp.status_code == 200, jwks_resp.text
+    assert trust_resp.status_code == 200, trust_resp.text
+
+    jwks_by_kid = {k["kid"]: k for k in jwks_resp.json()["keys"]}
+    trust_by_kid = {
+        k["jwk"]["kid"]: k["jwk"] for k in trust_resp.json()["keys"] if "jwk" in k
+    }
+
+    assert trust_by_kid, "trust-keys published no JWK mirror"
+    assert set(jwks_by_kid) == set(trust_by_kid)
+    for kid, jwk in trust_by_kid.items():
+        assert jwks_by_kid[kid] == jwk
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "failure",
+    ["store_unreachable", "no_publishable_keys"],
+    ids=["unreachable_store", "empty_key_set"],
+)
+async def test_jwks_refuses_rather_than_serving_an_empty_set(
+    client, clean_database, monkeypatch, failure
+):
+    """An unusable JWKS answers 503, exactly like trust-keys.json.
+
+    A 200 with an empty `keys` list would let a verifier looking up a
+    receipt's kid conclude the receipt is a forgery, so "no usable key" must
+    stay in the retryable "cannot tell" bucket.
+    """
+    from app.services import signing_keys as signing_keys_module
+
+    service = signing_keys_module.get_signing_key_service()
+
+    async def unreachable():
+        raise RuntimeError("DATABASE_URL not configured")
+
+    async def empty():
+        return []
+
+    monkeypatch.setattr(
+        service,
+        "list_public_keys",
+        unreachable if failure == "store_unreachable" else empty,
+    )
+
+    resp = await client.get("/.well-known/jwks.json")
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["error"] == "trust_keys_unavailable"
+
+
+@pytest.mark.anyio
 async def test_tampering_with_a_signed_field_fails_verification(
     client, clean_database
 ):
