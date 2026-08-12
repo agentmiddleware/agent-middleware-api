@@ -6,7 +6,7 @@ provisions the same shape ``scripts/partner_api_key_bootstrap.py`` produces
 with a bootstrap admin — sponsor wallet → agent wallet → DB-backed key — so
 self-served agents exercise the real credential class, not a special one.
 
-Local-only by two independent layers, mirroring STATIC_DEV_API_KEYS:
+Local-only by three independent layers, mirroring STATIC_DEV_API_KEYS:
 
 - ``ENABLE_DEV_KEY_SELF_PROVISION`` defaults false and the route answers 404
   until an operator turns it on, so the surface is never advertised by
@@ -15,6 +15,13 @@ Local-only by two independent layers, mirroring STATIC_DEV_API_KEYS:
   (``validate_trust_mode_guardrails``), and the handler independently fails
   closed with 403 there, so the endpoint stays unreachable in production
   even if the boot gate were bypassed.
+- A cross-origin ``Origin`` header is rejected (403). The endpoint takes no
+  auth and returns a live secret in its body, so under the default wildcard
+  CORS a page the developer merely visits could otherwise ``fetch`` this
+  route against ``localhost`` and read the minted key cross-origin (a
+  browser confused-deputy). Real dev agents — CLIs, SDKs, curl — send no
+  ``Origin`` and pass through; only browser script from a foreign origin is
+  refused. Same DNS-rebinding hardening the standard MCP endpoint uses.
 
 The minted key is wallet-scoped, never bootstrap-admin: a credential anyone
 can mint must not read the audit plane or touch other tenants' wallets. The
@@ -25,9 +32,10 @@ loop cannot mint an absurd balance. See docs/static-dev-api-keys.md.
 from __future__ import annotations
 
 from decimal import Decimal
+from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from ..core.config import get_settings
@@ -91,6 +99,37 @@ def _refuse_production_like() -> None:
         )
 
 
+def _reject_cross_origin(request: Request) -> None:
+    """Reject cross-origin browser calls (DNS-rebinding hardening).
+
+    This endpoint is unauthenticated and returns a live secret in its body,
+    so under the default wildcard CORS an attacker page could ``fetch`` it
+    against the developer's localhost and read the minted key cross-origin.
+    A browser always sends ``Origin`` on such a request; non-browser dev
+    agents send none and pass through. Mirrors
+    ``app.routers.mcp_standard._validate_origin``.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return
+    origin_host = urlsplit(origin).hostname
+    allowed = {request.url.hostname}
+    public_url = get_settings().PUBLIC_URL
+    if public_url:
+        allowed.add(urlsplit(public_url).hostname)
+    if origin_host not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "origin_not_allowed",
+                "message": (
+                    "Cross-origin browser requests are not accepted on this "
+                    "endpoint. Call it from a CLI, SDK, or server-side client."
+                ),
+            },
+        )
+
+
 @router.post(
     "/self-provision",
     response_model=SelfProvisionResponse,
@@ -105,9 +144,11 @@ def _refuse_production_like() -> None:
 )
 async def self_provision_dev_key(
     request: SelfProvisionRequest,
+    http_request: Request,
 ) -> SelfProvisionResponse:
     _require_enabled()
     _refuse_production_like()
+    _reject_cross_origin(http_request)
 
     agent_id = request.agent_id or f"dev-agent-{uuid4().hex[:8]}"
     budget = Decimal(str(request.budget_credits))

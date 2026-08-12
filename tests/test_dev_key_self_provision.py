@@ -148,6 +148,81 @@ async def test_malformed_agent_id_rejected(client, self_provision_settings):
     assert resp.status_code == 422
 
 
+async def test_cross_origin_browser_request_rejected(client, self_provision_settings):
+    # A browser making a cross-origin fetch sends an Origin whose host is not
+    # the request host. Because this endpoint returns a live secret and runs
+    # under wildcard CORS, that request must be refused before anything is
+    # minted — otherwise attacker page JS reads the key cross-origin.
+    resp = await client.post(
+        "/v1/dev-keys/self-provision",
+        json={},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "origin_not_allowed"
+
+
+async def test_same_origin_browser_request_allowed(
+    client, self_provision_settings, clean_database
+):
+    # An Origin whose host matches the request host is a same-origin call and
+    # must pass — the guard targets foreign origins only.
+    resp = await client.post(
+        "/v1/dev-keys/self-provision",
+        json={},
+        headers={"Origin": "http://test"},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_no_origin_header_passes_through(
+    client, self_provision_settings, clean_database
+):
+    # Real dev agents (CLIs, SDKs, curl) send no Origin and must not be
+    # affected by the browser hardening.
+    resp = await client.post("/v1/dev-keys/self-provision", json={})
+    assert resp.status_code == 201, resp.text
+
+
+async def test_agent_manifest_advertises_self_provision_only_when_enabled(
+    self_provision_settings,
+):
+    from app.routers.well_known import _authentication_manifest
+
+    # Enabled locally: discovery surfaces the mint endpoint so a bootstrapping
+    # agent finds the credential it can actually get here.
+    enabled = _authentication_manifest()
+    assert "dev_self_provision" in enabled
+    assert enabled["dev_self_provision"]["endpoint"] == "/v1/dev-keys/self-provision"
+    assert enabled["dev_self_provision"]["requires_pre_shared_secret"] is False
+
+    # Flag off: production-honest manifest, no self-serve advertisement.
+    self_provision_settings.ENABLE_DEV_KEY_SELF_PROVISION = False
+    assert "dev_self_provision" not in _authentication_manifest()
+
+    # Flag on but production-like (a posture that can't actually boot, but the
+    # manifest must never advertise it regardless).
+    self_provision_settings.ENABLE_DEV_KEY_SELF_PROVISION = True
+    self_provision_settings.ENVIRONMENT = "production"
+    assert "dev_self_provision" not in _authentication_manifest()
+
+
+async def test_missing_credentials_401_hints_self_provision_when_enabled(
+    self_provision_settings,
+):
+    # The first "how do I tap in?" moment: an unauthenticated call should tell
+    # a local agent about the self-serve mint when it's enabled, and stay
+    # silent otherwise.
+    with pytest.raises(HTTPException) as exc:
+        await get_auth_context(api_key=None)
+    assert "self_provision" in exc.value.detail
+
+    self_provision_settings.ENABLE_DEV_KEY_SELF_PROVISION = False
+    with pytest.raises(HTTPException) as exc:
+        await get_auth_context(api_key=None)
+    assert "self_provision" not in exc.value.detail
+
+
 def test_guardrail_rejects_self_provision_in_production():
     with pytest.raises(TrustModeGuardrailError) as exc_info:
         validate_trust_mode_config(
