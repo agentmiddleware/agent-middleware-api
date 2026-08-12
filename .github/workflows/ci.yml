@@ -331,6 +331,31 @@ jobs:
           rm -f ./_gitleaks_canary.py
           echo "Canary correctly detected."
 
+  # Single named check for branch protection: the operator release gate, run
+  # exactly as `make trust-release-gate` runs it locally. Requiring this check
+  # is what makes the repo practice gate-first, execute-second — see
+  # docs/trust-release-gate-branch-protection.md.
+  trust_release_gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e ./b2a_sdk
+          pip install pytest pytest-asyncio pytest-cov anyio httpx
+
+      - name: Run the trust release gate
+        run: scripts/trust_release_gate.sh
+
   lint:
     runs-on: ubuntu-latest
     steps:

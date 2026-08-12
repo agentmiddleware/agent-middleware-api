@@ -17,6 +17,7 @@ TRUST_TESTS=(
   tests/test_receipts.py
   tests/test_audit_chain.py
   tests/test_idempotency.py
+  tests/test_adversarial_five_claims.py
 )
 
 echo "[trust-gate] focused trust-plane pytest suite"
