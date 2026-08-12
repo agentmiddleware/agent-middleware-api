@@ -1,9 +1,16 @@
-"""Standard MCP endpoint (POST /mcp): lifecycle, gating, and auto-minted permits."""
+"""Standard MCP endpoint (POST /mcp): SDK-owned lifecycle, gating, auto-permits.
+
+The protocol surface (initialize, version negotiation, notifications, ping,
+JSON-RPC framing and errors) is owned by the official MCP SDK; these tests
+pin the trust-plane contract layered on top of it — auth gating, origin
+validation, server-minted permits, exactly-once replay, and signed receipts.
+"""
 
 from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from mcp.types import LATEST_PROTOCOL_VERSION
 
 from app.core.config import get_settings
 from app.main import app
@@ -11,6 +18,13 @@ from app.schemas.billing import ServiceCategory
 from app.services.mcp_generator import McpGenerator
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
+
+# The SDK's streamable HTTP transport requires an explicit Accept header.
+MCP_HEADERS = {
+    "Accept": "application/json, text/event-stream",
+    "Content-Type": "application/json",
+}
+BOOTSTRAP_MCP_HEADERS = {**BOOTSTRAP_HEADERS, **MCP_HEADERS}
 
 
 @pytest.fixture
@@ -36,17 +50,28 @@ def _rpc(method: str, request_id: int | None = 1, params: dict | None = None) ->
     return body
 
 
+def _initialize(protocol_version: str = "2025-06-18") -> dict:
+    return _rpc(
+        "initialize",
+        params={
+            "protocolVersion": protocol_version,
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "0.0.0"},
+        },
+    )
+
+
 @pytest.mark.anyio
 async def test_endpoint_disabled_by_default(client):
     resp = await client.post(
-        "/mcp", json=_rpc("initialize"), headers=BOOTSTRAP_HEADERS
+        "/mcp", json=_initialize(), headers=BOOTSTRAP_MCP_HEADERS
     )
     assert resp.status_code == 404
 
 
 @pytest.mark.anyio
 async def test_endpoint_requires_credentials(client, standard_mcp_enabled):
-    resp = await client.post("/mcp", json=_rpc("initialize"))
+    resp = await client.post("/mcp", json=_initialize(), headers=MCP_HEADERS)
     assert resp.status_code == 401
 
 
@@ -54,8 +79,8 @@ async def test_endpoint_requires_credentials(client, standard_mcp_enabled):
 async def test_initialize_negotiates_requested_protocol(client, standard_mcp_enabled):
     resp = await client.post(
         "/mcp",
-        json=_rpc("initialize", params={"protocolVersion": "2025-03-26"}),
-        headers=BOOTSTRAP_HEADERS,
+        json=_initialize("2025-03-26"),
+        headers=BOOTSTRAP_MCP_HEADERS,
     )
     assert resp.status_code == 200
     result = resp.json()["result"]
@@ -70,10 +95,10 @@ async def test_initialize_unsupported_version_offers_latest(
 ):
     resp = await client.post(
         "/mcp",
-        json=_rpc("initialize", params={"protocolVersion": "1999-01-01"}),
-        headers=BOOTSTRAP_HEADERS,
+        json=_initialize("1999-01-01"),
+        headers=BOOTSTRAP_MCP_HEADERS,
     )
-    assert resp.json()["result"]["protocolVersion"] == "2025-06-18"
+    assert resp.json()["result"]["protocolVersion"] == LATEST_PROTOCOL_VERSION
 
 
 @pytest.mark.anyio
@@ -81,7 +106,7 @@ async def test_notifications_are_accepted_without_reply(client, standard_mcp_ena
     resp = await client.post(
         "/mcp",
         json=_rpc("notifications/initialized", request_id=None),
-        headers=BOOTSTRAP_HEADERS,
+        headers=BOOTSTRAP_MCP_HEADERS,
     )
     assert resp.status_code == 202
     assert resp.content == b""
@@ -89,14 +114,16 @@ async def test_notifications_are_accepted_without_reply(client, standard_mcp_ena
 
 @pytest.mark.anyio
 async def test_ping_returns_empty_result(client, standard_mcp_enabled):
-    resp = await client.post("/mcp", json=_rpc("ping"), headers=BOOTSTRAP_HEADERS)
+    resp = await client.post(
+        "/mcp", json=_rpc("ping"), headers=BOOTSTRAP_MCP_HEADERS
+    )
     assert resp.json()["result"] == {}
 
 
 @pytest.mark.anyio
 async def test_tools_list_returns_tools_array(client, standard_mcp_enabled):
     resp = await client.post(
-        "/mcp", json=_rpc("tools/list"), headers=BOOTSTRAP_HEADERS
+        "/mcp", json=_rpc("tools/list"), headers=BOOTSTRAP_MCP_HEADERS
     )
     assert resp.status_code == 200
     assert isinstance(resp.json()["result"]["tools"], list)
@@ -105,7 +132,7 @@ async def test_tools_list_returns_tools_array(client, standard_mcp_enabled):
 @pytest.mark.anyio
 async def test_unknown_method_is_method_not_found(client, standard_mcp_enabled):
     resp = await client.post(
-        "/mcp", json=_rpc("resources/list"), headers=BOOTSTRAP_HEADERS
+        "/mcp", json=_rpc("resources/list"), headers=BOOTSTRAP_MCP_HEADERS
     )
     assert resp.json()["error"]["code"] == -32601
 
@@ -113,17 +140,28 @@ async def test_unknown_method_is_method_not_found(client, standard_mcp_enabled):
 @pytest.mark.anyio
 async def test_batch_requests_are_rejected(client, standard_mcp_enabled):
     resp = await client.post(
-        "/mcp", json=[_rpc("ping")], headers=BOOTSTRAP_HEADERS
+        "/mcp", json=[_rpc("ping")], headers=BOOTSTRAP_MCP_HEADERS
     )
-    assert resp.json()["error"]["code"] == -32600
+    assert resp.status_code == 400
+    assert "error" in resp.json()
+
+
+@pytest.mark.anyio
+async def test_missing_accept_header_is_not_acceptable(client, standard_mcp_enabled):
+    resp = await client.post(
+        "/mcp",
+        json=_rpc("ping"),
+        headers={**BOOTSTRAP_HEADERS, "Accept": "text/plain"},
+    )
+    assert resp.status_code == 406
 
 
 @pytest.mark.anyio
 async def test_get_and_delete_are_method_not_allowed(client, standard_mcp_enabled):
-    resp = await client.get("/mcp", headers=BOOTSTRAP_HEADERS)
+    resp = await client.get("/mcp", headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 405
     assert resp.headers["allow"] == "POST"
-    resp = await client.request("DELETE", "/mcp", headers=BOOTSTRAP_HEADERS)
+    resp = await client.request("DELETE", "/mcp", headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 405
 
 
@@ -132,7 +170,7 @@ async def test_cross_origin_browser_calls_are_rejected(client, standard_mcp_enab
     resp = await client.post(
         "/mcp",
         json=_rpc("ping"),
-        headers={**BOOTSTRAP_HEADERS, "Origin": "https://evil.example"},
+        headers={**BOOTSTRAP_MCP_HEADERS, "Origin": "https://evil.example"},
     )
     assert resp.status_code == 403
 
@@ -142,7 +180,7 @@ async def test_tools_call_requires_wallet_scoped_key(client, standard_mcp_enable
     resp = await client.post(
         "/mcp",
         json=_rpc("tools/call", params={"name": "anything", "arguments": {}}),
-        headers=BOOTSTRAP_HEADERS,
+        headers=BOOTSTRAP_MCP_HEADERS,
     )
     error = resp.json()["error"]
     assert error["code"] == -32003
@@ -155,7 +193,7 @@ async def test_tools_call_unknown_tool(client, standard_mcp_enabled, clean_datab
     resp = await client.post(
         "/mcp",
         json=_rpc("tools/call", params={"name": "no-such-tool", "arguments": {}}),
-        headers=provisioned["agent_headers"],
+        headers={**provisioned["agent_headers"], **MCP_HEADERS},
     )
     assert resp.json()["error"]["code"] == -32001
 
@@ -183,6 +221,7 @@ async def test_tools_call_auto_mints_bounded_permit_and_charges_once(
         )
         headers = {
             **provisioned["agent_headers"],
+            **MCP_HEADERS,
             "Idempotency-Key": "standard-mcp-call-1",
         }
         resp = await client.post("/mcp", json=call, headers=headers)
@@ -191,6 +230,8 @@ async def test_tools_call_auto_mints_bounded_permit_and_charges_once(
         assert result["isError"] is False
         receipt = result["receipt"]
         assert receipt["wallet_id"] == wallet_id
+        # The receipt also rides the spec's extension point.
+        assert result["_meta"]["io.agentmiddleware/receipt"] == receipt
         permit_id = receipt["permit_id"]
 
         # The auto-minted permit is a real signed permit, bounded to this

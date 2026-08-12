@@ -11,6 +11,31 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔌 Standard `/mcp` endpoint now served by the official MCP SDK
+
+- **The opt-in `POST /mcp` endpoint no longer hand-rolls JSON-RPC.** The
+  official MCP python SDK's stateless Streamable HTTP transport (JSON-response
+  mode, one fresh transport per request) now owns the entire protocol
+  surface: `initialize` and protocol-version negotiation (through
+  `2025-11-25`), notifications, `ping`, JSON-RPC framing, parse errors,
+  Accept/Content-Type validation, and error envelopes.
+- The trust plane is unchanged and stays this codebase's only contribution to
+  the endpoint: API-key/JWT auth and origin validation at the HTTP layer, and
+  a `tools/call` handler that mints the bounded single-tool permit and runs
+  the same governed permit → meter → exactly-once dispatch → signed receipt
+  pipeline, preserving the JSON-RPC governance error codes (`-32001`,
+  `-32003`, `-32004`, `-32005`) and receipt-bearing error `data`.
+- Signed receipts now also ride the spec's extension point —
+  `result._meta["io.agentmiddleware/receipt"]` — alongside the existing
+  top-level `receipt` field, so standards-compliant clients that strip
+  unknown result fields still get the receipt.
+- Added an external end-to-end proof (`tests/test_minimal_path_e2e.py`): a
+  real uvicorn process in strict trust mode, driven over HTTP by the official
+  MCP SDK client, proving one governed tool call is authorized by a
+  server-minted permit, charged exactly once for an idempotency key, replay
+  answered with the original receipt, and the receipt verifiable via
+  `/v1/receipts/verify`.
+
 ### 🌐 Public product direction
 
 - Canonical public origins are `https://www.thisisatest.tech/` for the
