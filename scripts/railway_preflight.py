@@ -626,8 +626,13 @@ def main(argv: list[str] | None = None) -> int:
         except ManifestError as exc:
             print(f"{BAD} customer manifest: {exc}")
             return 1
-        except Exception:
-            print(f"{BAD} customer manifest: unable to resolve checkout provenance")
+        except Exception as exc:
+            # Keep the cause: a missing dependency (no ``alembic`` on the
+            # interpreter running this script) reads as a git problem otherwise.
+            print(
+                f"{BAD} customer manifest: unable to resolve checkout "
+                f"provenance: {type(exc).__name__}: {exc}"
+            )
             return 1
 
         if manifest.expected_alembic_revision != tree_head:
