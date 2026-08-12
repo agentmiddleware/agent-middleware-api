@@ -45,6 +45,7 @@ test.db
 data/dogfood_partner_notes.jsonl
 data/dogfood_trust_plane.db*
 data/demo_trust_plane.db*
+data/quickstart/
 
 # OS
 .DS_Store

@@ -6,6 +6,17 @@ provision money, issue a scoped key, let an agent act, and inspect the result.
 The flow uses a bootstrap/admin key only for provisioning. The agent uses a
 DB-created key scoped to its own wallet.
 
+> **First time here?** This page is the *operator* flow: bootstrap keys,
+> sponsor wallets, and policies. If you just want to drive the governed loop
+> yourself with no operator-issued key, start with
+> [docs/quickstart.md](quickstart.md) (`make quickstart`) instead.
+>
+> **About the tool name:** the examples below invoke `golden-path-echo`,
+> which exists only where an operator (or the test/battery harness) has
+> registered it. On a stock local server, set `ENABLE_DOGFOOD_TOOL=true`
+> and substitute `partner.notes.write` (2 credits/call) everywhere
+> `golden-path-echo` appears — the governance path is identical.
+
 ## Prerequisites
 
 Strict trust mode is on by default, so the API refuses to start without an

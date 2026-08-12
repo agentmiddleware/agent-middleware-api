@@ -47,15 +47,25 @@ offline with the repository SDK verifier.
 
 ## Try the complete loop locally
 
-No live credentials are required for the self-contained proof:
+No live credentials are required. Two local paths, both self-contained:
+
+Drive it yourself (a real server, you hold the keys):
 
 1. Clone https://github.com/PetrefiedThunder/agent-middleware-api
+2. Run `make quickstart` from the repository root.
+3. Follow docs/quickstart.md: mint your own wallet-scoped key, issue
+   yourself a permit, invoke one governed tool, replay it, overspend it,
+   and verify the signed receipt offline.
+
+Watch it prove itself (no server, one command):
+
+1. Clone the same repository.
 2. Run `make prove-trust-plane` from the repository root.
 
-The proof uses a throwaway local SQLite database and real FastAPI routes. It
-demonstrates permit -> invoke -> charge -> signed receipt -> replay without a
-second charge -> out-of-scope denial. It is a local proof, not a production
-settlement or compliance claim.
+Both use a throwaway local SQLite database and real FastAPI routes. They
+demonstrate permit -> invoke -> charge -> signed receipt -> replay without a
+second charge -> out-of-scope denial. These are local proofs, not production
+settlement or compliance claims.
 
 ## Humans and operators
 

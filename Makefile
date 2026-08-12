@@ -1,4 +1,17 @@
-.PHONY: test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+.PHONY: quickstart quickstart-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+
+# The 15-minute golden path: boot a real local trust plane on loopback with
+# self-serve key minting and one invokable governed tool, then follow
+# docs/quickstart.md from `git clone` to an offline-verified signed receipt.
+# State persists in data/quickstart/; `--reset` via QUICKSTART_ARGS wipes it.
+quickstart:
+	uv run --with-requirements requirements.txt python scripts/quickstart.py $(QUICKSTART_ARGS)
+
+# CI guard for the documented golden path: boots the quickstart server in a
+# throwaway state dir and drives every step of docs/quickstart.md over real
+# HTTP, including offline verification and the tamper check.
+quickstart-check:
+	uv run --with-requirements requirements.txt pytest tests/test_quickstart_path.py -v
 
 # Fast inner loop: trust-plane (product) tests only. Proof-surface workloads
 # are skipped here — run them with `make test-all` (what CI runs) or `make test-proof`.

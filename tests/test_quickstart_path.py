@@ -1,0 +1,286 @@
+"""CI guard for the documented 15-minute golden path (docs/quickstart.md).
+
+Boots the server through the real entry point (``scripts/quickstart.py``,
+the same command ``make quickstart`` runs) in a throwaway state directory,
+then drives every step of the quickstart page over HTTP: self-provision a
+key, self-issue a permit, invoke the governed tool, replay it, reuse the
+idempotency key with a changed payload, overspend the permit on the call
+the doc predicts, verify the receipt offline with the SDK CLI, forge it the
+way the doc forges it, and get denied by a permit that does not allow the
+tool.
+
+If docs/quickstart.md and the code disagree, this test is what breaks.
+Assertions deliberately pin the *documented* observables — error strings,
+credit amounts, exit codes — not internal implementation details.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import httpx
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+GOVERNED_TOOL = "partner.notes.write"
+TOOL_COST = "2.00000000"  # documented: 2 credits per call
+PERMIT_MAX_CREDITS = 7  # documented: 3 calls fit, the 4th must be denied
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest.fixture(scope="module")
+def quickstart_server(tmp_path_factory):
+    """The quickstart entry point itself, serving on a free loopback port."""
+    state_dir = tmp_path_factory.mktemp("quickstart-state")
+    port = _free_port()
+    log_path = state_dir / "quickstart-stdout.log"
+    with log_path.open("wb") as log_file:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "quickstart.py"),
+                "--port",
+                str(port),
+                "--state-dir",
+                str(state_dir),
+            ],
+            cwd=REPO_ROOT,
+            env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(
+                    "quickstart exited early:\n"
+                    + log_path.read_text(encoding="utf-8", errors="replace")
+                )
+            try:
+                if httpx.get(f"{base_url}/health", timeout=2).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                pass
+            time.sleep(0.5)
+        else:
+            raise RuntimeError("quickstart server never became healthy")
+        yield base_url
+    finally:
+        # SIGINT exercises the script's own graceful-shutdown path; the
+        # killpg fallback covers the uvicorn child if that path wedges.
+        process.send_signal(signal.SIGINT)
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
+
+
+def _verify_cli(bundle_path: Path, keys_path: Path) -> subprocess.CompletedProcess:
+    """Run the offline verifier exactly as the doc does: CLI, branchable exit."""
+    return subprocess.run(
+        [sys.executable, "-m", "b2a_sdk.verify_cli", "--bundle", str(bundle_path), "--keys", str(keys_path)],
+        env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "b2a_sdk" / "src")},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def _invoke_body(wallet_id: str, permit_id: str, idempotency_key: str, text: str, call_id: str) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": call_id,
+        "method": "tools/call",
+        "params": {
+            "name": GOVERNED_TOOL,
+            "arguments": {"text": text},
+            "mcpContext": {
+                "wallet_id": wallet_id,
+                "permit_id": permit_id,
+                "idempotency_key": idempotency_key,
+            },
+        },
+    }
+
+
+def test_documented_quickstart_path(quickstart_server, tmp_path):
+    client = httpx.Client(base_url=quickstart_server, timeout=30)
+
+    # Step 2 — discovery: exactly one invokable tool, no configuration.
+    assert client.get("/.well-known/agent.json").status_code == 200
+    manifest = client.get("/mcp/tools.json").json()
+    assert [tool["name"] for tool in manifest["tools"]] == [GOVERNED_TOOL]
+
+    # Step 3 — mint a key with no credential.
+    provision = client.post(
+        "/v1/dev-keys/self-provision", json={"agent_id": "quickstart-ci"}
+    )
+    assert provision.status_code in (200, 201), provision.text
+    minted = provision.json()
+    agent_key, wallet_id, key_id = minted["api_key"], minted["wallet_id"], minted["key_id"]
+    auth = {"X-API-Key": agent_key}
+
+    # Step 4 — self-issued permit: 7 credits at 2/call = 3 calls, 4th denied.
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    permit_resp = client.post(
+        "/v1/permits",
+        headers={**auth, "Idempotency-Key": "quickstart-ci-permit-1"},
+        json={
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": key_id,
+            "allowed_tools": [GOVERNED_TOOL],
+            "scopes": [f"tool:{GOVERNED_TOOL}:invoke", "billing:charge"],
+            "max_credits": PERMIT_MAX_CREDITS,
+            "expires_at": expires_at,
+        },
+    )
+    assert permit_resp.status_code == 201, permit_resp.text
+    permit_id = permit_resp.json()["permit_id"]
+
+    # Step 5 — governed invoke returns a signed success receipt.
+    first = client.post(
+        "/mcp/messages",
+        headers=auth,
+        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-1", "first note", "call-1"),
+    ).json()
+    receipt = first["result"]["receipt"]
+    assert receipt["outcome"] == "success"
+    assert receipt["credits_charged"] == TOOL_COST
+    assert receipt["ledger_entry_id"]
+    assert receipt["signature"]
+    receipt_id = receipt["receipt_id"]
+
+    # Step 6a — exact replay returns the same receipt, not a similar one.
+    replay = client.post(
+        "/mcp/messages",
+        headers=auth,
+        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-1", "first note", "call-1"),
+    ).json()
+    assert replay["result"]["receipt"]["receipt_id"] == receipt_id
+
+    # Step 6b — same key, changed payload fails closed.
+    conflict = client.post(
+        "/mcp/messages",
+        headers=auth,
+        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-1", "DIFFERENT text", "call-x"),
+    ).json()
+    assert conflict["error"]["message"] == "idempotency_key_reused"
+
+    # Step 7 — notes two and three fit the cap ...
+    for n in (2, 3):
+        ok = client.post(
+            "/mcp/messages",
+            headers=auth,
+            json=_invoke_body(wallet_id, permit_id, f"quickstart-ci-note-{n}", f"note {n}", f"call-{n}"),
+        ).json()
+        assert ok["result"]["receipt"]["credits_charged"] == TOOL_COST
+
+    # ... and the predicted fourth call is denied, uncharged, and signed.
+    overrun = client.post(
+        "/mcp/messages",
+        headers=auth,
+        json=_invoke_body(wallet_id, permit_id, "quickstart-ci-note-4", "note 4", "call-4"),
+    ).json()
+    assert overrun["error"]["message"] == "permit_budget_exceeded"
+    denial = overrun["error"]["data"]["receipt"]
+    assert denial["outcome"] == "denied"
+    assert denial["credits_charged"] == "0"
+    assert denial["ledger_entry_id"] is None
+    assert denial["signature"]
+    details = overrun["error"]["data"]["details"]
+    assert details["required_credits"] == "2.0"
+    assert details["remaining_credits"] == "1.00000000"
+
+    # The ledger agrees: exactly three debits for the tool.
+    ledger = client.get(f"/v1/billing/ledger/{wallet_id}", headers=auth).json()
+    debits = [e for e in ledger["entries"] if GOVERNED_TOOL in e["description"]]
+    assert len(debits) == 3
+
+    # Step 8 — offline verification, exactly as documented: fetch the
+    # portable bundle and the unauthenticated key set, run the SDK CLI.
+    bundle_path = tmp_path / "receipt-bundle.json"
+    keys_path = tmp_path / "trust-keys.json"
+    portable = client.get(f"/v1/receipts/{receipt_id}/portable", headers=auth)
+    assert portable.status_code == 200
+    bundle_path.write_text(portable.text, encoding="utf-8")
+    trust_keys = client.get("/.well-known/trust-keys.json")  # no credential
+    assert trust_keys.status_code == 200
+    keys_path.write_text(trust_keys.text, encoding="utf-8")
+
+    verified = _verify_cli(bundle_path, keys_path)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+    assert "VERIFIED" in verified.stdout
+
+    # Forge it the way the doc forges it: claim the call was free. The
+    # replace must actually bite — if canonicalization drifts and the doc's
+    # forgery becomes a no-op, that is doc rot and this test must fail.
+    # Note the canonical signing input stores "2", not the API's "2.00000000".
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    forged_input = bundle["signing_input"].replace(
+        '"credits_charged":"2"', '"credits_charged":"0"'
+    )
+    assert forged_input != bundle["signing_input"]
+    forged_path = tmp_path / "forged-receipt.json"
+    forged_path.write_text(
+        json.dumps({**bundle, "signing_input": forged_input}), encoding="utf-8"
+    )
+    forged = _verify_cli(forged_path, keys_path)
+    assert forged.returncode == 1, forged.stdout + forged.stderr
+    assert "INVALID" in forged.stderr  # the CLI reports failures on stderr
+
+    # Step 9 — a permit that allows a different tool denies this one, with a
+    # signed denial receipt that verifies offline like any other.
+    deny_permit = client.post(
+        "/v1/permits",
+        headers={**auth, "Idempotency-Key": "quickstart-ci-permit-2"},
+        json={
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": key_id,
+            "allowed_tools": ["some.other.tool"],
+            "scopes": ["tool:some.other.tool:invoke", "billing:charge"],
+            "max_credits": PERMIT_MAX_CREDITS,
+            "expires_at": expires_at,
+        },
+    ).json()
+    denied = client.post(
+        "/mcp/messages",
+        headers=auth,
+        json=_invoke_body(
+            wallet_id, deny_permit["permit_id"], "quickstart-ci-denied-1", "should be denied", "deny-1"
+        ),
+    ).json()
+    assert denied["error"]["message"] == "permit_tool_not_allowed"
+    denial_receipt_id = denied["error"]["data"]["receipt"]["receipt_id"]
+
+    denial_bundle_path = tmp_path / "denial-bundle.json"
+    denial_portable = client.get(
+        f"/v1/receipts/{denial_receipt_id}/portable", headers=auth
+    )
+    assert denial_portable.status_code == 200
+    denial_bundle_path.write_text(denial_portable.text, encoding="utf-8")
+    denial_verified = _verify_cli(denial_bundle_path, keys_path)
+    assert denial_verified.returncode == 0
+    assert "VERIFIED" in denial_verified.stdout
+
+    client.close()

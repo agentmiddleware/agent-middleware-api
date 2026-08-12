@@ -35,9 +35,12 @@ Either target works; pick one and stay on it.
   `GET /openapi.json`, then `GET /health/dependencies` before assuming real
   side effects. Live keys are operator-issued; the stranger uses a key they
   were handed, nothing self-minted.
-- **Local:** clone the repo and run `make prove-trust-plane`, then read the
-  receipt it emits. No credentials required. This is the path
-  `site/llm.txt` points a stranger to.
+- **Local:** clone the repo and run `make quickstart`, then follow
+  [docs/quickstart.md](quickstart.md) — it boots a real server with
+  self-serve key minting and one invokable governed tool, so every step
+  below is reachable with no operator-issued key. (`make prove-trust-plane`
+  remains the no-server option: it proves the same loop in-process, but you
+  watch it rather than drive it.)
 
 ## The run — each step maps to one claim
 
