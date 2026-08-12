@@ -26,7 +26,6 @@ def main():
                             max_credits=1000, idem="atk1-permit")
     permit_id = permit["json"]["permit_id"]
 
-    led0 = A.ledger(cred)["json"]
     notes0 = A.notes_count_for(MARKER)
 
     # 1a: N identical invocations, same idem key + same payload, fired simultaneously
@@ -55,7 +54,6 @@ def main():
 
     led1 = A.ledger(cred)["json"]
     notes1 = A.notes_count_for(MARKER)
-    debits_delta = led1["period_debits_exact"]
     debit_count = sum(1 for e in led1["entries"] if e["action"] == "debit")
 
     # 1b: same idem key, DIFFERENT payload

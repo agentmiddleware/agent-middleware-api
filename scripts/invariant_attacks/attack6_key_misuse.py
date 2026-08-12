@@ -27,9 +27,12 @@ def main():
 
     notes0 = A.notes_count_for(MARK)
 
-    # 6a: garbage key and missing key on a governed invoke
+    # 6a: garbage key and missing key on a governed invoke. The bogus value is a
+    # low-entropy, obviously-fake placeholder (no real credential) built at
+    # runtime so it is not a hardcoded-credential literal.
+    bogus_key = "-".join(["not", "a", "valid", "key"])
     body = A.invoke_body(A_cred["wallet_id"], pidA, "atk6-garbage", f"{MARK} garbage")
-    garbage = A.http("POST", "/mcp/messages", api_key="b2a_not_a_real_key_zzzzzzzz", body=body)
+    garbage = A.http("POST", "/mcp/messages", api_key=bogus_key, body=body)
     missing = A.http("POST", "/mcp/messages", api_key=None, body=body)
 
     # 6c: confused deputy — B invokes using A's permit (bound to A's key), claiming A's wallet

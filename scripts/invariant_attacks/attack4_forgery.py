@@ -13,7 +13,6 @@ Sub-tests:
   4d. Verify a genuine receipt against a MUTATED key set (wrong public key) ->
       UNDETERMINED (exit 2), NOT INVALID: an outage must never read as fraud.
 """
-import base64
 import json
 import subprocess
 import sys
