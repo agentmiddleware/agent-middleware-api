@@ -41,6 +41,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE_DIR = ROOT / "data" / "quickstart"
+# The dogfood tool writes here (fixed ROOT-relative path in
+# app/services/dogfood_tool.py); --reset clears it so the walkthrough's
+# note-count observations start from zero alongside the fresh database.
+DOGFOOD_NOTES_PATH = ROOT / "data" / "dogfood_partner_notes.jsonl"
 SIGNING_KEY_ID = "quickstart-local-ed25519"
 HEALTH_DEADLINE_SECONDS = 90.0
 
@@ -66,8 +70,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--reset",
         action="store_true",
         help=(
-            "Delete the state directory first: fresh database, fresh signing "
-            "seed, all previously minted keys and receipts gone."
+            "Start over: delete the state directory (fresh database, fresh "
+            "signing seed, all previously minted keys and receipts gone) and "
+            "the dogfood notes file the governed tool appends to."
         ),
     )
     return parser.parse_args(argv)
@@ -93,24 +98,36 @@ def load_or_create_seed(state_dir: Path) -> str:
 
 
 def build_server_env(state_dir: Path, seed: str) -> dict[str, str]:
-    """Quickstart posture, overriding any ambient or .env configuration."""
+    """Pin every setting that shapes the golden-path posture.
+
+    Environment variables take precedence over the repo-root ``.env`` file,
+    so pinning here shields the walkthrough from ambient or dotfile
+    configuration for the settings that matter: credentials, the tool list,
+    trust flags, and storage. Settings outside that posture (log levels,
+    rate limits, ...) still flow through normally.
+    """
     env = dict(os.environ)
     env.update(
         {
             "PYTHONPATH": str(ROOT),
             "ENVIRONMENT": "local",
+            "DEBUG": "false",
             "DATABASE_URL": f"sqlite+aiosqlite:///{state_dir / 'api.db'}",
             "STATE_BACKEND": "sqlite",
             "SQLITE_URL": str(state_dir / "state.db"),
-            # No VALID_API_KEYS: the only credential is the one you mint
-            # yourself through /v1/dev-keys/self-provision.
+            # No pre-shared credentials of any class: the only credential is
+            # the one you mint yourself through /v1/dev-keys/self-provision.
             "VALID_API_KEYS": "",
+            "STATIC_DEV_API_KEYS": "",
             "TRUST_MODE_ENABLED": "true",
             "ALLOW_LEGACY_UNPERMITTED_MCP": "false",
             "ENABLE_PROOF_SURFACES": "false",
             "ENABLE_DOGFOOD_TOOL": "true",
             "ENABLE_DEV_KEY_SELF_PROVISION": "true",
             "ENABLE_STANDARD_MCP_ENDPOINT": "true",
+            # Exactly one governed tool: a stray upstream config would add a
+            # second tool or fail boot on unreachable-upstream readiness.
+            "MCP_UPSTREAM_ENABLED": "false",
             "TRUST_SIGNING_KEY_ID": SIGNING_KEY_ID,
             "TRUST_SIGNING_PRIVATE_KEY_B64": seed,
         }
@@ -161,9 +178,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     state_dir: Path = args.state_dir
 
-    if args.reset and state_dir.exists():
-        shutil.rmtree(state_dir)
-        print(f"[quickstart] Reset: removed {state_dir}")
+    if args.reset:
+        if state_dir.exists():
+            shutil.rmtree(state_dir)
+            print(f"[quickstart] Reset: removed {state_dir}")
+        if DOGFOOD_NOTES_PATH.exists():
+            DOGFOOD_NOTES_PATH.unlink()
+            print(f"[quickstart] Reset: removed {DOGFOOD_NOTES_PATH}")
     state_dir.mkdir(parents=True, exist_ok=True)
 
     seed = load_or_create_seed(state_dir)

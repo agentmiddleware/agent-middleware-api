@@ -391,12 +391,17 @@ official Python SDK client.
 ## Starting over
 
 State persists across restarts (`make quickstart` resumes where you left
-off). For a clean slate — new database, new signing key, all minted keys and
-receipts gone:
+off). For a clean slate — new database, new signing key, all minted keys
+and receipts gone, and the notes file emptied:
 
 ```bash
 make quickstart QUICKSTART_ARGS="--reset"
 ```
+
+Reset before repeating the walkthrough: idempotency is forever, so
+re-running step 5 against old state replays the *original* receipt instead
+of executing again — correct behavior, but not the fresh run you wanted —
+and the note counts in steps 6 and 7 assume the notes file starts empty.
 
 ## What you just proved — and what you did not
 
