@@ -124,7 +124,14 @@ copy of the CI step.
 | Command | Enforces |
 |---|---|
 | `make trust-coverage-gate` | 20 focused trust test files at an **80% coverage floor** across 18 named trust-plane control modules |
-| `make trust-release-gate` | A 12-file trust suite, then the coverage gate, then the demo proof, then discovery-drift tests, then committed-OpenAPI parity, then simulation-inventory parity |
+| `make trust-release-gate` | A 13-file trust suite (including the in-process adversarial pass over the five claims, `tests/test_adversarial_five_claims.py`), then the coverage gate, then the demo proof, then discovery-drift tests, then committed-OpenAPI parity, then simulation-inventory parity |
+
+CI runs `scripts/trust_release_gate.sh` as a dedicated required check
+(`trust_release_gate`) so `main` cannot advance past an unproven claim; the
+exact branch-protection settings are in
+[`trust-release-gate-branch-protection.md`](trust-release-gate-branch-protection.md).
+The [stranger test](stranger-test.md) is the human milestone that checks the
+same five claims are reachable and checkable from the published docs alone.
 
 ## Live suites (against a deployment you operate)
 
