@@ -77,6 +77,7 @@ def validate_trust_mode_config(
     debug: bool = False,
     webauthn_allow_mock: bool = False,
     enable_proof_surfaces: bool = True,
+    static_dev_api_keys: str = "",
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -123,6 +124,13 @@ def validate_trust_mode_config(
                 "ENABLE_PROOF_SURFACES must be false in production-like "
                 "environments (mount only CORE_TRUST_ROUTERS + MCP)"
             )
+        if (static_dev_api_keys or "").strip():
+            violations.append(
+                "STATIC_DEV_API_KEYS must be empty in production-like "
+                "environments (static development/training keys are "
+                "local-only and are never rotated — see "
+                "docs/static-dev-api-keys.md)"
+            )
 
     if violations:
         raise TrustModeGuardrailError("; ".join(violations))
@@ -137,6 +145,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         debug=settings.DEBUG,
         webauthn_allow_mock=settings.WEBAUTHN_ALLOW_MOCK,
         enable_proof_surfaces=settings.ENABLE_PROOF_SURFACES,
+        static_dev_api_keys=settings.STATIC_DEV_API_KEYS,
     )
 
 

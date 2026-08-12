@@ -17,6 +17,12 @@ from .trust_mode import is_production_like_environment
 
 settings = get_settings()
 
+# Static development/training keys (STATIC_DEV_API_KEYS) must carry this
+# prefix. It keeps dev keys greppable/scannable and means a rotated
+# amw_live_ bootstrap key pasted into the wrong variable never
+# authenticates through the static-dev path.
+STATIC_DEV_KEY_PREFIX = "amw_dev_"
+
 api_key_header = APIKeyHeader(
     name=settings.API_KEY_HEADER,
     auto_error=False,
@@ -143,6 +149,25 @@ async def get_auth_context(
             is_bootstrap_admin=True,
         )
 
+    # Static development/training keys: bootstrap-admin power in
+    # local-compatible environments only. The environment gate is
+    # defense-in-depth — validate_trust_mode_guardrails already refuses to
+    # boot a production-like deployment with STATIC_DEV_API_KEYS set — so a
+    # leaked dev key is worthless against production even if the guardrail
+    # were bypassed. Exempt from rotation by design: see
+    # docs/static-dev-api-keys.md.
+    static_dev_keys = (
+        []
+        if is_production_like_environment(settings.ENVIRONMENT)
+        else _parse_static_dev_keys(settings.STATIC_DEV_API_KEYS)
+    )
+    if any(hmac.compare_digest(stripped, key) for key in static_dev_keys):
+        return AuthContext(
+            source="static-dev",
+            raw_key=stripped,
+            is_bootstrap_admin=True,
+        )
+
     try:
         from ..services.api_key_service import get_api_key_service
 
@@ -159,7 +184,10 @@ async def get_auth_context(
             is_bootstrap_admin=False,
         )
 
-    if valid_keys or not settings.DEBUG:
+    # Configured static dev keys close DEBUG open mode the same way
+    # VALID_API_KEYS does: once keys exist, an unknown key fails closed
+    # instead of authenticating as an anonymous bootstrap admin.
+    if valid_keys or settings.STATIC_DEV_API_KEYS.strip() or not settings.DEBUG:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -182,6 +210,19 @@ async def get_auth_context(
         raw_key=stripped,
         is_bootstrap_admin=True,
     )
+
+
+def _parse_static_dev_keys(configured: str) -> list[str]:
+    """Parse STATIC_DEV_API_KEYS, honoring only ``amw_dev_``-prefixed entries.
+
+    Non-prefixed entries are configuration mistakes (most dangerously, a live
+    bootstrap key in the wrong variable) and never authenticate.
+    """
+    return [
+        key
+        for key in (k.strip() for k in configured.split(","))
+        if key.startswith(STATIC_DEV_KEY_PREFIX)
+    ]
 
 
 def _parse_bearer_authorization(authorization: str) -> str:

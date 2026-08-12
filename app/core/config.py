@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     API_KEY_HEADER: str = "X-API-Key"
     # Comma-separated list of valid API keys (use a secrets manager in production)
     VALID_API_KEYS: str = ""
+    # Comma-separated static development/training keys for local testing.
+    # Deliberately exempt from the rotation runbook (docs/api-key-rotation.md)
+    # so recorded trainings, notebooks, and local fixtures keep working.
+    # Honored only in local-compatible environments; production-like
+    # environments refuse to boot when this is set (see
+    # app.core.trust_mode.validate_trust_mode_guardrails). Entries must carry
+    # the amw_dev_ prefix — a rotated amw_live_ key pasted here never
+    # authenticates. See docs/static-dev-api-keys.md.
+    STATIC_DEV_API_KEYS: str = ""
 
     # --- Proof surfaces ---
     # When false, only CORE_TRUST_ROUTERS (+ MCP) are mounted. Production-like
