@@ -125,6 +125,25 @@ A good change usually includes:
 
 Do not introduce new dependencies unless necessary and justified.
 
+## Local Credentials for Agents
+
+When you need an API key against a local instance, provision your own —
+do not ask for production secrets and never hardcode keys:
+
+- **Admin-shaped local testing**: run
+  `python scripts/generate_static_dev_keys.py`, put the printed value in
+  `.env` as `STATIC_DEV_API_KEYS=...`, and restart the server. Static
+  `amw_dev_` keys are bootstrap admins in local-compatible environments
+  only and are deliberately never rotated.
+- **Wallet-scoped keys with no restart** (server already running with
+  `ENABLE_DEV_KEY_SELF_PROVISION=true`): `POST /v1/dev-keys/self-provision`
+  mints a sponsor wallet, agent wallet, and wallet-scoped key with no
+  pre-shared secret. Use this to exercise the real permit → invoke →
+  receipt loop as a non-admin caller.
+
+Both surfaces are refused by production-like deployments at boot. Details:
+`docs/static-dev-api-keys.md`.
+
 ## Final Summary Format
 
 End every task with:

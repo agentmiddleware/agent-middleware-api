@@ -78,6 +78,7 @@ def validate_trust_mode_config(
     webauthn_allow_mock: bool = False,
     enable_proof_surfaces: bool = True,
     static_dev_api_keys: str = "",
+    enable_dev_key_self_provision: bool = False,
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -131,6 +132,12 @@ def validate_trust_mode_config(
                 "local-only and are never rotated — see "
                 "docs/static-dev-api-keys.md)"
             )
+        if enable_dev_key_self_provision:
+            violations.append(
+                "ENABLE_DEV_KEY_SELF_PROVISION must be false in "
+                "production-like environments (self-serve dev key minting "
+                "is local-only — see docs/static-dev-api-keys.md)"
+            )
 
     if violations:
         raise TrustModeGuardrailError("; ".join(violations))
@@ -146,6 +153,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         webauthn_allow_mock=settings.WEBAUTHN_ALLOW_MOCK,
         enable_proof_surfaces=settings.ENABLE_PROOF_SURFACES,
         static_dev_api_keys=settings.STATIC_DEV_API_KEYS,
+        enable_dev_key_self_provision=settings.ENABLE_DEV_KEY_SELF_PROVISION,
     )
 
 
