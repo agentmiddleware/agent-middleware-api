@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -7,7 +8,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select, update as sa_update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.time import to_naive_utc, utc_now
@@ -54,6 +56,23 @@ def _num(value: Decimal | None) -> str | None:
 def _stamp(value: datetime | None) -> str | None:
     """Render a naive-UTC column value as an explicit UTC timestamp."""
     return None if value is None else value.replace(microsecond=0).isoformat() + "Z"
+
+
+# Every ``spent_credits`` mutation is applied as a single guarded UPDATE rather
+# than a read-modify-write, so the permit cap is enforced atomically at the row
+# level. ``SELECT ... FOR UPDATE`` is a silent no-op on SQLite, so without this
+# two concurrent reservations both read the same ``spent_credits``, both pass the
+# cap check, and their increments clobber each other (a lost update) — the exact
+# over-spend this closes. Under genuine concurrency SQLite's WAL raises a
+# transient "database is locked"/"snapshot" conflict on the second writer; we
+# retry that with a small backoff. On PostgreSQL the row lock blocks instead of
+# raising, so the retry never triggers there.
+_PERMIT_WRITE_MAX_ATTEMPTS = 40
+
+
+def _is_retryable_write_conflict(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "locked" in message or "snapshot" in message
 
 
 def _loads_list(value: str) -> list[str]:
@@ -422,25 +441,105 @@ class PermitService:
         therefore cannot slip between a stale read and the budget mutation.
         """
         factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                model = await session.get(PermitModel, permit_id, with_for_update=True)
-                if not model:
-                    return PermitValidation(False, "permit_not_found", None)
-                validation = await self._validate_model_for_action(
-                    model=model,
-                    wallet_id=wallet_id,
-                    tool_name=tool_name,
-                    estimated_credits=estimated_credits,
-                    key_id=key_id,
-                    arguments=arguments,
-                )
-                if not validation.allowed:
-                    return validation
-                model.spent_credits += estimated_credits
-                model.updated_at = utc_now()
-                session.add(model)
-            return validation
+
+        async def _once() -> PermitValidation:
+            async with factory() as session:
+                async with session.begin():
+                    model = await session.get(
+                        PermitModel, permit_id, with_for_update=True
+                    )
+                    if not model:
+                        return PermitValidation(False, "permit_not_found", None)
+                    validation = await self._validate_model_for_action(
+                        model=model,
+                        wallet_id=wallet_id,
+                        tool_name=tool_name,
+                        estimated_credits=estimated_credits,
+                        key_id=key_id,
+                        arguments=arguments,
+                    )
+                    if not validation.allowed:
+                        return validation
+                    # Reserve atomically: a single guarded UPDATE enforces the
+                    # cap at the row level, so two concurrent reservations cannot
+                    # both pass even on SQLite, where the FOR UPDATE above is a
+                    # silent no-op. The read-validated numbers are advisory; this
+                    # write is the authority.
+                    now = utc_now()
+                    reserved = await session.execute(
+                        sa_update(PermitModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.permit_id == permit_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.status == "active",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits + estimated_credits
+                                <= PermitModel.max_credits,
+                            ),
+                        )
+                        .values(
+                            spent_credits=PermitModel.spent_credits
+                            + estimated_credits,
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, reserved).rowcount or 0) != 1:
+                        # A concurrent reservation consumed the remaining budget
+                        # (or a concurrent revocation flipped the status) between
+                        # the validation read and this guarded write. Re-read for
+                        # an accurate reason and deny — no budget moved.
+                        await session.refresh(model)
+                        if model.status != "active":
+                            return PermitValidation(
+                                False,
+                                f"permit_{model.status}",
+                                model,
+                                {
+                                    "status": model.status,
+                                    "revoked_at": _stamp(model.revoked_at),
+                                },
+                            )
+                        return PermitValidation(
+                            False,
+                            "permit_budget_exceeded",
+                            model,
+                            {
+                                "required_credits": _num(estimated_credits),
+                                "remaining_credits": _num(
+                                    model.max_credits - model.spent_credits
+                                ),
+                                "spent_credits": _num(model.spent_credits),
+                                "max_credits": _num(model.max_credits),
+                            },
+                        )
+                    # Reflect the committed reservation on the returned model.
+                    await session.refresh(model)
+                return validation
+
+        return await self._run_with_write_retry(_once)
+
+    async def _run_with_write_retry(self, operation):
+        """Run one full-transaction DB operation, retrying transient SQLite
+        write conflicts (WAL "database is locked"/"snapshot" errors a genuinely
+        concurrent writer raises). PostgreSQL blocks on the row lock instead of
+        raising, so this simply runs ``operation`` once there."""
+        last_exc: OperationalError | None = None
+        for attempt in range(_PERMIT_WRITE_MAX_ATTEMPTS):
+            try:
+                return await operation()
+            except OperationalError as exc:
+                last_exc = exc
+                if not _is_retryable_write_conflict(exc):
+                    raise
+                await asyncio.sleep(min(0.02, 0.002 * (attempt + 1)))
+        raise PermitError("permit_write_contended") from last_exc
 
     async def _validate_model_for_action(
         self,
@@ -609,60 +708,114 @@ class PermitService:
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
         factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                model = await session.get(PermitModel, permit_id, with_for_update=True)
-                if not model:
-                    raise PermitError("permit_not_found")
-                if model.spent_credits + amount > model.max_credits:
-                    raise PermitError("permit_budget_exceeded")
-                model.spent_credits += amount
-                model.updated_at = utc_now()
-                session.add(model)
 
-                # Budget percentage alerts
-                if model.max_credits > 0:
-                    pct = (model.spent_credits / model.max_credits) * 100
-                    thresholds = [
-                        (Decimal("100"), "critical", "permit_budget_exhausted"),
-                        (Decimal("90"), "warning", "permit_budget_90pct"),
-                        (Decimal("80"), "info", "permit_budget_80pct"),
-                    ]
-                    for threshold, severity, alert_type in thresholds:
-                        if pct >= threshold:
-                            # Only create alert if we just crossed this threshold
-                            prior_pct = (
-                                (model.spent_credits - amount) / model.max_credits
-                            ) * 100
-                            if prior_pct < threshold:
-                                alert = BillingAlertModel(
-                                    alert_id=f"alt-{uuid.uuid4().hex[:12]}",
-                                    wallet_id=model.subject_wallet_id,
-                                    alert_type=alert_type,
-                                    threshold_amount=threshold,
-                                    current_balance=model.max_credits
-                                    - model.spent_credits,
-                                    message=(
-                                        f"Permit {permit_id}: {pct:.0f}% of "
-                                        f"{model.max_credits} credits spent."
-                                    ),
-                                    severity=severity,
-                                )
-                                session.add(alert)
-                            break  # Only fire the highest crossed threshold
-            await session.commit()
+        async def _once() -> None:
+            async with factory() as session:
+                async with session.begin():
+                    now = utc_now()
+                    # Atomic guarded reserve (see authorize_and_reserve): the cap
+                    # is enforced by the WHERE clause, not a read-then-write.
+                    reserved = await session.execute(
+                        sa_update(PermitModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.permit_id == permit_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.status == "active",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits + amount
+                                <= PermitModel.max_credits,
+                            ),
+                        )
+                        .values(
+                            spent_credits=PermitModel.spent_credits + amount,
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, reserved).rowcount or 0) != 1:
+                        exists = await session.get(PermitModel, permit_id)
+                        if exists is None:
+                            raise PermitError("permit_not_found")
+                        raise PermitError("permit_budget_exceeded")
+
+                    # Budget percentage alerts, recomputed from the committed
+                    # ``spent_credits`` so a concurrent reservation cannot skew
+                    # the threshold arithmetic.
+                    model = await session.get(PermitModel, permit_id)
+                    if model is not None and model.max_credits > 0:
+                        pct = (model.spent_credits / model.max_credits) * 100
+                        thresholds = [
+                            (Decimal("100"), "critical", "permit_budget_exhausted"),
+                            (Decimal("90"), "warning", "permit_budget_90pct"),
+                            (Decimal("80"), "info", "permit_budget_80pct"),
+                        ]
+                        for threshold, severity, alert_type in thresholds:
+                            if pct >= threshold:
+                                # Only alert on the transition across a threshold.
+                                prior_pct = (
+                                    (model.spent_credits - amount) / model.max_credits
+                                ) * 100
+                                if prior_pct < threshold:
+                                    session.add(
+                                        BillingAlertModel(
+                                            alert_id=f"alt-{uuid.uuid4().hex[:12]}",
+                                            wallet_id=model.subject_wallet_id,
+                                            alert_type=alert_type,
+                                            threshold_amount=threshold,
+                                            current_balance=model.max_credits
+                                            - model.spent_credits,
+                                            message=(
+                                                f"Permit {permit_id}: {pct:.0f}% of "
+                                                f"{model.max_credits} credits spent."
+                                            ),
+                                            severity=severity,
+                                        )
+                                    )
+                                break  # Only fire the highest crossed threshold
+
+        await self._run_with_write_retry(_once)
 
     async def release_budget(self, permit_id: str, amount: Decimal) -> None:
         factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                model = await session.get(PermitModel, permit_id, with_for_update=True)
-                if not model:
-                    return
-                model.spent_credits = max(Decimal("0"), model.spent_credits - amount)
-                model.updated_at = utc_now()
-                session.add(model)
-            await session.commit()
+
+        async def _once() -> None:
+            async with factory() as session:
+                async with session.begin():
+                    # Atomic clamped decrement: a single UPDATE so a concurrent
+                    # reservation on the same permit cannot be lost to a
+                    # read-modify-write refund. A missing permit is a no-op.
+                    await session.execute(
+                        sa_update(PermitModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.permit_id == permit_id,
+                            )
+                        )
+                        .values(
+                            spent_credits=case(
+                                (
+                                    cast(
+                                        ColumnElement[bool],
+                                        PermitModel.spent_credits - amount
+                                        < Decimal("0"),
+                                    ),
+                                    Decimal("0"),
+                                ),
+                                else_=PermitModel.spent_credits - amount,
+                            ),
+                            updated_at=utc_now(),
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+
+        await self._run_with_write_retry(_once)
 
     async def release_dispatch_budget_once(self, attempt_id: str) -> bool:
         """Release one remote attempt's reservation exactly once.
@@ -673,37 +826,58 @@ class PermitService:
         Returns ``True`` only for the transaction that performed the release.
         """
         factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                attempt = await session.get(
-                    McpDispatchAttemptModel,
-                    attempt_id,
-                    with_for_update=True,
-                )
-                if attempt is None:
-                    raise PermitError("dispatch_attempt_not_found")
-                if attempt.state != "returned_error":
-                    raise PermitError("dispatch_budget_release_state_invalid")
-                if attempt.budget_released_at is not None:
-                    return False
-                model = await session.get(
-                    PermitModel,
-                    attempt.permit_id,
-                    with_for_update=True,
-                )
-                if model is None:
-                    raise PermitError("permit_not_found")
-                model.spent_credits = max(
-                    Decimal("0"),
-                    model.spent_credits - attempt.credits_authorized,
-                )
-                now = utc_now()
-                model.updated_at = now
-                attempt.budget_released_at = now
-                attempt.updated_at = now
-                session.add(model)
-                session.add(attempt)
-            return True
+
+        async def _once() -> bool:
+            async with factory() as session:
+                async with session.begin():
+                    attempt = await session.get(
+                        McpDispatchAttemptModel,
+                        attempt_id,
+                        with_for_update=True,
+                    )
+                    if attempt is None:
+                        raise PermitError("dispatch_attempt_not_found")
+                    if attempt.state != "returned_error":
+                        raise PermitError("dispatch_budget_release_state_invalid")
+                    if attempt.budget_released_at is not None:
+                        return False
+                    now = utc_now()
+                    # Atomic clamped decrement so a concurrent reservation on the
+                    # same permit is not clobbered by a read-modify-write here.
+                    released = await session.execute(
+                        sa_update(PermitModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.permit_id == attempt.permit_id,
+                            )
+                        )
+                        .values(
+                            spent_credits=case(
+                                (
+                                    cast(
+                                        ColumnElement[bool],
+                                        PermitModel.spent_credits
+                                        - attempt.credits_authorized
+                                        < Decimal("0"),
+                                    ),
+                                    Decimal("0"),
+                                ),
+                                else_=PermitModel.spent_credits
+                                - attempt.credits_authorized,
+                            ),
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, released).rowcount or 0) == 0:
+                        raise PermitError("permit_not_found")
+                    attempt.budget_released_at = now
+                    attempt.updated_at = now
+                    session.add(attempt)
+                return True
+
+        return await self._run_with_write_retry(_once)
 
     async def reconcile_budgets(self, *, idle_seconds: int = 900) -> int:
         """Repair budget reservations orphaned by a crash mid-invocation.
