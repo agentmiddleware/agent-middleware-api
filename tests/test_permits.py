@@ -515,6 +515,59 @@ async def test_authorize_and_reserve_rechecks_terminal_state_after_stale_prechec
 
 
 @pytest.mark.anyio
+async def test_concurrent_reservations_never_exceed_cap(client, clean_database):
+    """Parallel reservations against one permit can never over-spend its cap.
+
+    Regression for the SQLite over-spend: authorize_and_reserve guarded the
+    check-and-reserve with ``SELECT ... FOR UPDATE``, which SQLAlchemy silently
+    drops on SQLite. N concurrent reservations therefore all read the same
+    ``spent_credits``, all passed the cap check, and their increments clobbered
+    each other -- admitting far more than the cap allowed. The guarded
+    conditional UPDATE enforces the cap atomically on every engine, so only
+    ``floor(max_credits / cost)`` reservations may ever succeed and
+    ``spent_credits`` never crosses ``max_credits``.
+    """
+    import asyncio
+
+    provisioned = await provision_agent_wallet(client)
+    service = get_permit_service()
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="trust-echo",
+        max_credits=6,
+    )
+
+    cost = Decimal("2")
+    concurrency = 12
+
+    async def reserve_once():
+        return await service.authorize_and_reserve(
+            permit_id=permit["permit_id"],
+            wallet_id=provisioned["agent_wallet_id"],
+            tool_name="trust-echo",
+            estimated_credits=cost,
+            key_id=provisioned["key_id"],
+        )
+
+    results = await asyncio.gather(*(reserve_once() for _ in range(concurrency)))
+
+    allowed = [r for r in results if r.allowed]
+    denied = [r for r in results if not r.allowed]
+    assert len(allowed) == 3  # floor(6 / 2)
+    assert all(r.reason == "permit_budget_exceeded" for r in denied)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit["permit_id"])
+        assert model is not None
+        # Exactly the three admitted reservations, never past the cap.
+        assert model.spent_credits == Decimal("6")
+        assert model.spent_credits <= model.max_credits
+
+
+@pytest.mark.anyio
 async def test_permit_service_validation_denial_reasons(client, clean_database):
     provisioned = await provision_agent_wallet(client)
     other = await provision_agent_wallet(client)

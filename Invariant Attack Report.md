@@ -22,7 +22,7 @@ request and observed response, and gets a single verdict.
 | # | Invariant | Attack | Verdict |
 |---|-----------|--------|---------|
 | 1 | A retry never double-charges | 10 parallel identical invokes + same-key/different-payload replay | **HELD** |
-| 2 | A permit cap contains overspend | 10 parallel distinct-key invokes racing a 7-credit cap | **BROKE** on SQLite / **HELD** on Postgres |
+| 2 | A permit cap contains overspend | 10 parallel distinct-key invokes racing a 7-credit cap | **BROKE** on SQLite → **FIXED** (now HELD on both engines) |
 | 3 | A permit authorizes only its named tools | invoke a tool outside `allowed_tools` | **HELD** |
 | 4 | A receipt's signed facts cannot be forged | tamper each signed field; verify offline | **HELD** |
 | 5 | A crash leaves charge⇔receipt paired, never charged-without-proof, never double | `kill -9` mid-flight + boundary-kill proof | **HELD** |
@@ -41,7 +41,10 @@ on PostgreSQL** (3 successes, 7 signed budget denials), confirming this is a
 storage-engine gap in the quickstart posture, not a flaw in the invariant logic.
 `make quickstart` is also the walkthrough that sells "a permit cap contains
 overspend" to a first-time stranger — so the gap sits directly under a headline
-claim.
+claim. **This finding has since been fixed in this PR** (see
+[Resolution](#2b-resolution--fix-applied)): every `spent_credits` mutation is now
+a single atomic guarded UPDATE, and the same 10-way race that debited 20 credits
+now holds the cap exactly on SQLite (3 successes, 6 debited), matching Postgres.
 
 ---
 
@@ -217,17 +220,54 @@ The real `FOR UPDATE` row lock serializes the check-and-reserve; excess callers
 block, re-read the incremented `spent_credits`, and receive signed
 `permit_budget_exceeded` denials.
 
-**Recommendation.** The invariant logic is right; the storage engine defeats it.
-Either (a) make the quickstart/local posture concurrency-safe — e.g. a
-DB-agnostic conditional debit
-(`UPDATE permits SET spent_credits = spent_credits + :c WHERE permit_id = :p AND spent_credits + :c <= max_credits`,
-enforce via affected-rowcount) or a SQLite `BEGIN IMMEDIATE`/serialized-writer
-path — or (b) explicitly document that SQLite caps are sequential-only and gate
-the quickstart's "contains overspend" claim accordingly. Option (a) is
-preferred: the same code then holds on both engines.
-
 Reproduce: `python scripts/invariant_attacks/attack2_budget.py` and
 `attack2_mechanism_sqlite.py`; Postgres control via `attack2_budget_postgres.py`.
+
+### 2b Resolution — fix applied
+
+The invariant logic was right; the storage engine defeated it. The fix makes
+every permit `spent_credits` mutation atomic at the row level instead of a
+read-modify-write, so the cap is enforced by the database on both engines
+(`app/services/permits.py`):
+
+- `authorize_and_reserve` still takes the `FOR UPDATE` locked read and runs the
+  full validation (preserving the PostgreSQL row-lock contract that
+  `tests/test_permit_postgres_concurrency.py` asserts), but the reservation
+  itself is now a single **guarded conditional UPDATE** whose `WHERE` clause
+  re-checks the cap:
+
+  ```sql
+  UPDATE permits SET spent_credits = spent_credits + :c, updated_at = :now
+   WHERE permit_id = :p AND status = 'active'
+     AND spent_credits + :c <= max_credits
+  ```
+
+  `rowcount == 1` means the reservation was admitted; `rowcount == 0` means a
+  concurrent reservation consumed the budget first, and the call is denied
+  `permit_budget_exceeded` — no budget moves. Because the read-and-write happen
+  in one statement, there is no stale-read window to lose.
+- `reserve_budget`, `release_budget`, and the dispatch-release decrement were
+  converted to the same atomic form (a clamped `CASE` UPDATE for releases), so a
+  concurrent refund can no longer clobber a reservation.
+- Genuinely concurrent SQLite writers surface a transient "database is
+  locked"/WAL snapshot conflict on the loser; a small bounded retry
+  (`_run_with_write_retry`) re-runs that transaction. PostgreSQL blocks on the
+  row lock instead of raising, so the retry never triggers there.
+
+**Re-verified after the fix (same races, same instance):**
+
+| cap | N parallel | successes | credits debited | overspent |
+|-----|-----------|-----------|-----------------|-----------|
+| 7   | 10        | 3         | 6.0             | no        |
+| 2   | 5         | 1         | 2.0             | no        |
+| 4   | 8         | 2         | 4.0             | no        |
+
+Regression guard: `tests/test_permits.py::test_concurrent_reservations_never_exceed_cap`
+fires 12 concurrent reservations against a 6-credit cap and asserts exactly 3 are
+admitted and `spent_credits` never crosses `max_credits`. The full permit,
+governed-MCP, dispatch, AWI-governance, billing/refund, Postgres row-lock, and
+two-process crash-recovery suites were re-run green (~250 tests), and attacks 1
+and 5 were re-run to confirm no regression in the shared idempotency/ledger path.
 
 ---
 
@@ -427,13 +467,14 @@ Reproduce: `python scripts/invariant_attacks/attack6_key_misuse.py`.
 
 ## What this campaign proves — and what it does not
 
-**Proves:** five of the six core trust invariants survived an explicit hostile
-test with real concurrency, receipt tampering, crash recovery, and credential
-misuse — double-charge, scope escape, receipt forgery, crash accounting, and
-credential authority all HELD. The sixth, budget-cap containment, HELD
-sequentially and on PostgreSQL but **BROKE under concurrency on the shipped
-SQLite/quickstart posture**, with the root cause isolated to `FOR UPDATE` being a
-no-op on SQLite.
+**Proves:** all six core trust invariants now survive an explicit hostile test
+with real concurrency, receipt tampering, crash recovery, and credential misuse.
+Double-charge, scope escape, receipt forgery, crash accounting, and credential
+authority HELD as found. Budget-cap containment HELD sequentially and on
+PostgreSQL but **BROKE under concurrency on the shipped SQLite/quickstart
+posture** — root cause isolated to `FOR UPDATE` being a no-op on SQLite — and was
+**fixed in this PR** (atomic guarded UPDATEs) so the same 10-way race now holds
+the cap on SQLite too, guarded by a regression test.
 
 **Does not prove:** production security. Credits here are synthetic; the quickstart
 signing key is local; settlement is not exercised; and the concurrency findings
@@ -444,10 +485,14 @@ Postgres two-process proof; the SQLite live-kill is complementary, and a random
 
 ## Recommended next step
 
-Fix Attack 2 first — it is the one broken invariant and it sits under a headline
-quickstart claim. Make the permit reserve concurrency-safe on SQLite (DB-agnostic
-conditional debit, or a serialized-writer path), then re-run
-`attack2_budget.py` against the quickstart instance until the cap holds under a
-10-way race, exactly as it already does on PostgreSQL. Re-run the full battery
-after the fix to confirm no regression in attacks 1 and 5, which share the
-idempotency/ledger machinery.
+Attack 2 (the one broken invariant) is fixed in this PR and re-verified; the
+remaining follow-ups are smaller. Consider: (1) extending the same atomic-write
+discipline audit to any other per-row counter that still uses a read-modify-write
+under `FOR UPDATE` (the wallet velocity counters are already defended by the
+ledger `UNIQUE` constraint, but a sweep is cheap insurance); (2) wiring the
+SQLite-engine budget race into CI as a live check alongside the existing
+PostgreSQL `test_permit_postgres_concurrency.py`, so the quickstart posture is
+guarded end-to-end and not only at the service layer. Then move on to the
+attacks the brief deferred — notably attack #5's deterministic failure-boundary
+variants, which the two-process PostgreSQL proof already covers but the local
+SQLite instance does not exercise at exact commit points.
