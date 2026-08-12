@@ -231,6 +231,24 @@ python scripts/demo_trust_plane.py --assert
 The walkthrough and representative output are in [DEMO_SCRIPT.md](DEMO_SCRIPT.md)
 and [docs/demo-trust-plane-output.md](docs/demo-trust-plane-output.md).
 
+### Operate it yourself: the 15-minute golden path
+
+`make prove-trust-plane` proves the loop *to* you; the quickstart lets you
+*drive* it. One command boots a real local trust plane with self-serve key
+minting and one invokable governed tool:
+
+```bash
+make quickstart
+```
+
+Then follow [docs/quickstart.md](docs/quickstart.md): mint your own
+wallet-scoped key (no operator, no pre-shared secret), issue yourself a
+permit, invoke a real governed tool, deliberately try to double-charge and
+overspend, and finish holding a signed receipt you verified offline — plus
+a forged one the verifier rejected. Every step of that page runs in CI
+against a freshly booted server (`make quickstart-check`), so the
+documented path cannot silently rot.
+
 ## Run the API locally
 
 The following keeps strict trust mode enabled while using local SQLite files.
