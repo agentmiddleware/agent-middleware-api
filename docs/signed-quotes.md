@@ -59,8 +59,9 @@ the price it was promised.
 
 The signature covers `(quote_id, wallet_id, tool, quoted_credits, category,
 issued_at, expires_at)` using the same canonical payload and Ed25519 key as
-permits and receipts, so a quote verifies against the published JWKS
-(`/.well-known/jwks.json`) without trusting this API's read endpoint.
+permits and receipts, so a quote verifies offline against the published key
+document (`/.well-known/trust-keys.json`) without trusting this API's read
+endpoint.
 
 The signed `status` is pinned to `active`: the signature attests to the
 *commitment*, so spending a quote does not invalidate the proof of what was
