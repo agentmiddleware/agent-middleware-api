@@ -184,6 +184,39 @@ async def test_standard_mcp_rejects_same_host_different_origin(
 
 
 @pytest.mark.anyio
+async def test_standard_mcp_uses_public_url_not_proxy_observed_scheme(
+    client, standard_mcp_enabled, monkeypatch
+):
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+    get_settings.cache_clear()
+    try:
+        insecure = await client.post(
+            "/mcp",
+            json=_rpc("ping"),
+            headers={
+                **BOOTSTRAP_MCP_HEADERS,
+                "Host": "api.example.com",
+                "Origin": "http://api.example.com",
+            },
+        )
+        canonical = await client.post(
+            "/mcp",
+            json=_rpc("ping"),
+            headers={
+                **BOOTSTRAP_MCP_HEADERS,
+                "Host": "api.example.com",
+                "Origin": "https://api.example.com",
+            },
+        )
+    finally:
+        monkeypatch.setenv("PUBLIC_URL", "")
+        get_settings.cache_clear()
+
+    assert insecure.status_code == 403
+    assert canonical.status_code == 200
+
+
+@pytest.mark.anyio
 async def test_tools_call_requires_wallet_scoped_key(client, standard_mcp_enabled):
     resp = await client.post(
         "/mcp",
