@@ -63,9 +63,7 @@ def _initialize(protocol_version: str = "2025-06-18") -> dict:
 
 @pytest.mark.anyio
 async def test_endpoint_disabled_by_default(client):
-    resp = await client.post(
-        "/mcp", json=_initialize(), headers=BOOTSTRAP_MCP_HEADERS
-    )
+    resp = await client.post("/mcp", json=_initialize(), headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 404
 
 
@@ -114,9 +112,7 @@ async def test_notifications_are_accepted_without_reply(client, standard_mcp_ena
 
 @pytest.mark.anyio
 async def test_ping_returns_empty_result(client, standard_mcp_enabled):
-    resp = await client.post(
-        "/mcp", json=_rpc("ping"), headers=BOOTSTRAP_MCP_HEADERS
-    )
+    resp = await client.post("/mcp", json=_rpc("ping"), headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.json()["result"] == {}
 
 
@@ -139,9 +135,7 @@ async def test_unknown_method_is_method_not_found(client, standard_mcp_enabled):
 
 @pytest.mark.anyio
 async def test_batch_requests_are_rejected(client, standard_mcp_enabled):
-    resp = await client.post(
-        "/mcp", json=[_rpc("ping")], headers=BOOTSTRAP_MCP_HEADERS
-    )
+    resp = await client.post("/mcp", json=[_rpc("ping")], headers=BOOTSTRAP_MCP_HEADERS)
     assert resp.status_code == 400
     assert "error" in resp.json()
 
@@ -172,6 +166,20 @@ async def test_cross_origin_browser_calls_are_rejected(client, standard_mcp_enab
         json=_rpc("ping"),
         headers={**BOOTSTRAP_MCP_HEADERS, "Origin": "https://evil.example"},
     )
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("origin", ["https://test", "http://test:444"])
+async def test_standard_mcp_rejects_same_host_different_origin(
+    client, standard_mcp_enabled, origin
+):
+    resp = await client.post(
+        "/mcp",
+        json=_rpc("ping"),
+        headers={**BOOTSTRAP_MCP_HEADERS, "Origin": origin},
+    )
+
     assert resp.status_code == 403
 
 

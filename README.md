@@ -6,33 +6,35 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141%2B-009688)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-## Table of Contents
-
-- [What is implemented](#what-is-implemented)
-- [Product boundary](#product-boundary)
-- [Hardening now in the tree](#hardening-now-in-the-tree)
-- [Quick start: prove the trust loop](#quick-start-prove-the-trust-loop)
-- [Run the API locally](#run-the-api-locally)
-  - [Optional: connect one upstream MCP tool](#optional-connect-one-upstream-mcp-tool)
-- [Governed MCP call shape](#governed-mcp-call-shape)
-- [Core API surfaces](#core-api-surfaces)
-- [Security and accounting posture](#security-and-accounting-posture)
-  - [Strict production configuration](#strict-production-configuration)
-  - [Managed single-tenant pilot boundary](#managed-single-tenant-pilot-boundary)
-  - [Billing integrity](#billing-integrity)
-  - [Remaining limits](#remaining-limits)
-- [Tests and release gates](#tests-and-release-gates)
-- [Repository map](#repository-map)
-  - [Python SDK 0.4.0](#python-sdk-040)
-- [Documentation](#documentation)
-- [License](#license)
-
 > **Production beta, not production complete.** Agent Middleware API is a
-> self-hostable trust plane for governed MCP tool calls. It is
+> replay-safe transaction boundary for metered MCP tool calls. The supported
+> design-partner deployment is vendor-managed and single-tenant. It is
 > **not a full agent middleware platform**, payment network, IAM replacement, or
 > compliance platform.
 
-Authorize one agent action. Charge it once. Prove what happened.
+Your agent invokes a costly tool. The request times out. Was the call
+dispatched? Should the agent retry? Will the retry create another debit? Can
+you prove who authorized the action and what the gateway observed?
+
+Agent Middleware accepts a scoped permit and an idempotency key before one
+governed call. Replaying the same request with the same accepted key returns
+the original result and signed receipt without another gateway dispatch or
+debit. A changed request under that key fails closed.
+
+> **Authorize one agent action. Charge it once. Prove what happened.**
+
+Try the failure yourself:
+
+```bash
+git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
+cd agent-middleware-api
+make quickstart
+```
+
+Follow [the 15-minute walkthrough](docs/quickstart.md) to execute a real local
+side effect, deliberately retry it, confirm one debit and one receipt, exceed
+the permit budget, and verify the receipt offline. The walkthrough is exercised
+in CI.
 
 Agent Middleware API puts a control boundary between autonomous agents and
 registered local tools or one operator-configured upstream MCP tool. Agents
@@ -45,9 +47,11 @@ discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> 
 ```
 
 The initial product wedge is deliberately narrow: **replay-safe economic
-authorization for metered MCP calls**. See [WEDGE.md](WEDGE.md) for the product
-thesis and [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) for the claims the
-project does not make yet.
+authorization for metered MCP calls**. Gateway replay safety does not make a
+remote tool's side effect exactly once unless that tool also honors the
+forwarded idempotency key. See [WEDGE.md](WEDGE.md) for the product thesis and
+[SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) for the claims the project
+does not make yet.
 
 ## What is implemented
 
@@ -75,11 +79,12 @@ JSON-RPC `tools/list` method; `/mcp/tools.json` is a convenient public mirror.
 
 ## Product boundary
 
-The trust plane is the product. The broader agent features in this repository
-are retained as proof surfaces and are frozen unless a specific product
-decision brings one through the same permit, metering, receipt, and audit loop.
+The agent-action transaction boundary is the product. The broader agent
+features in this repository are retained as proof surfaces and are frozen
+unless a specific product decision brings one through the same permit,
+metering, receipt, and audit loop.
 
-| Core trust plane | Frozen proof surfaces |
+| Core transaction boundary | Frozen proof surfaces |
 |---|---|
 | Wallet-scoped API keys and tenant checks | AWI, browser, DOM, passkey, and RAG demos |
 | Signed permits and revocation | Content, media, IoT, oracle, and comms demos |
@@ -101,11 +106,13 @@ Recent work substantially tightened the trust and accounting boundary:
 - **Atomic permit admission.** Final permit checks and budget reservation occur
   while the permit row is locked. PostgreSQL concurrency tests cover competing
   reservations and revoke-versus-invoke races.
-- **Replay-safe governed execution.** A repeated idempotency key returns the
-  original result and receipt without a second gateway dispatch or wallet
-  debit, even across the governed MCP entrypoints; changed payloads conflict.
-  Remote side effects are not claimed as exactly once unless the upstream also
-  honors the forwarded key.
+- **Replay-safe governed execution.** After completion, an identical replay
+  returns the original result and receipt without a second gateway dispatch or
+  wallet debit, even across the governed MCP entrypoints; changed payloads
+  conflict. During the in-progress window, overlapping local-tool requests fail
+  closed as `idempotency_in_progress`; the upstream path waits boundedly for the
+  finished replay. Remote side effects are not claimed as exactly once unless
+  the upstream also honors the forwarded key.
 - **Durable remote dispatch truth.** For the configured upstream tool, one
   persisted chain links the idempotency record, permit reservation, ledger
   debit, dispatch attempt, signed receipt, and audit event. Recovery finalizes
@@ -571,10 +578,12 @@ the release gate as one dedicated check named `trust_release_gate`, and
 [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md)
 specifies the exact branch-protection settings that make it (and the other
 required checks) block `main`. The automated batteries prove the five claims
-from inside; the human milestone is the
+from inside; the human usability milestone is the
 [stranger test](docs/stranger-test.md) — a person who has never seen the
 repository drives the whole governed loop and verifies the same claims from
-the published docs alone, asking zero questions.
+the published docs alone, asking zero questions. That test does not prove
+customer demand. The active business milestone is the partner-owned pilot in
+[the 30-day customer-validation sprint](docs/30-day-customer-validation.md).
 
 The CI workflows also run:
 
@@ -631,6 +640,8 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 
 ## Documentation
 
+- [docs/30-day-customer-validation.md](docs/30-day-customer-validation.md) — active company milestone: customer interviews, partner-owned pilot, and
+  day-30 decision gate
 - [WEDGE.md](WEDGE.md) — narrow product thesis and first design-partner motion
 - [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling
 - [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities

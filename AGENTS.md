@@ -21,6 +21,33 @@ discover → authenticate → authorize → invoke → meter → receipt → aud
 
 Every major feature should support this loop. If a feature does not support this loop, question whether it should be frozen, deleted, or moved out of the main wedge.
 
+## Current Company Phase: Customer Validation
+
+The active company milestone is the 30-day customer-validation sprint in
+`docs/30-day-customer-validation.md`, not another core release.
+
+Apply this business invariant:
+
+> No new core capability without documented evidence from a named prospective
+> customer.
+
+Work may proceed without new customer evidence only when it is:
+
+- a security or correctness fix
+- a reliability fix in the existing one-tool loop
+- a documentation or integration fix required to complete an active pilot
+- maintenance required to keep existing release gates green
+
+Before unfreezing a capability, require one named active prospect, one concrete
+consequential tool, a documented current-workflow blocker, a committed owner and
+date, and the smallest vertical slice that clears the blocker. Demo enthusiasm,
+generic competitor parity, and speculative roadmap requests are not evidence.
+
+Judge external validation against the partner-owned milestone: one partner
+agent, one partner staging tool, one partner engineer, and one receipt that
+engineer verifies independently. Do not count local demos, self-issued public
+proof, or the stranger test as customer validation.
+
 ## Product Wedge Candidates
 
 When making product or architecture recommendations, evaluate these wedges:

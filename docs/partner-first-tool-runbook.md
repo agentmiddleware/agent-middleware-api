@@ -115,8 +115,15 @@ exactly-once side effects.
 
 ## Pass / fail
 
-**Pass:** partner accepts the loop for this one tool and schedules a follow-up
-to put a staging MCP endpoint behind the same path.
+**Technical pass:** the partner-owned agent and staging tool complete the loop,
+the partner engineer verifies the receipt in the partner environment, and the
+measured integration burden is recorded.
+
+**Commercial signal:** the partner says what unacceptable risk would return if
+the boundary were removed and commits an owner, next action, and decision date.
+A follow-up meeting or "cool demo" response alone is not validation. Apply the
+full gate in
+[`docs/30-day-customer-validation.md`](30-day-customer-validation.md).
 
 **Fail / stop:** partner asks for settlement, KMS, multi-framework policy, or
 broad migration before the single-tool loop is trusted. Point to

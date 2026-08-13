@@ -56,21 +56,27 @@ __all__ = [
 CANONICALIZATION = "awi-canonical-json/1"
 
 _ED25519_RAW_LEN = 32
+_ED25519_SIGNATURE_LEN = 64
 
 
 class VerificationStatus(str, Enum):
     """Why verification concluded what it did.
 
-    ``VERIFIED`` and ``INVALID`` are claims about the receipt. Everything else
-    is a claim about the *verifier's* situation — missing input, unknown key,
-    unreadable bundle — and must not be reported as evidence of tampering.
+    ``VERIFIED`` and ``INVALID`` are cryptographic claims. ``MISMATCH`` means
+    the envelope, signed payload, or caller expectation disagrees despite no
+    demonstrated signature failure. The remaining statuses describe missing
+    input/capability and must not be reported as evidence of tampering.
     """
 
     VERIFIED = "verified"
     INVALID = "invalid"
     MALFORMED = "malformed"
     UNKNOWN_KEY = "unknown_key"
+    # Kept for SDK compatibility. The current raw ``kid -> bytes`` key-set
+    # representation cannot carry lifecycle metadata, so disabled keys are
+    # filtered before verification and resolve as UNKNOWN_KEY instead.
     KEY_REVOKED = "key_revoked"
+    MISMATCH = "mismatch"
     UNSUPPORTED = "unsupported"
 
 
@@ -133,6 +139,24 @@ def _b64decode(value: str, *, urlsafe: bool = False) -> bytes | None:
         return None
 
 
+def _contains_invalid_unicode(value: Any) -> bool:
+    """Return True when decoded JSON contains a lone Unicode surrogate."""
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            try:
+                current.encode("utf-8")
+            except UnicodeEncodeError:
+                return True
+        elif isinstance(current, dict):
+            pending.extend(current.keys())
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    return False
+
+
 def key_set_from_document(document: Any) -> dict[str, bytes]:
     """Extract usable Ed25519 public keys from a ``trust-keys.json`` document.
 
@@ -187,6 +211,34 @@ def _load_verifier(raw_public_key: bytes):
     return Ed25519PublicKey.from_public_bytes(raw_public_key)
 
 
+def _verify_ed25519_signature(
+    raw_public_key: bytes,
+    signature: bytes,
+    signing_bytes: bytes,
+) -> bool:
+    """Return False only for cryptography's explicit bad-signature result."""
+    try:
+        from cryptography.exceptions import InvalidSignature
+    except ImportError as exc:  # pragma: no cover - depends on install extras
+        raise VerificationError(
+            "Ed25519 verification requires the 'cryptography' package. "
+            'Install it with: pip install "b2a-sdk[verify]"'
+        ) from exc
+
+    try:
+        _load_verifier(raw_public_key).verify(signature, signing_bytes)
+    except VerificationError:
+        raise
+    except InvalidSignature:
+        return False
+    except Exception as exc:
+        # A backend/programming failure is not a cryptographic negative. Let
+        # the caller report verifier failure rather than mislabel evidence as
+        # forged.
+        raise VerificationError("Ed25519 verifier failed unexpectedly") from exc
+    return True
+
+
 def _fail(
     status: VerificationStatus,
     reason: str,
@@ -227,7 +279,7 @@ def verify_bundle(
     if isinstance(bundle, str | bytes):
         try:
             bundle = json.loads(bundle)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError):
             return _fail(VerificationStatus.MALFORMED, "bundle is not valid JSON")
     if not isinstance(bundle, dict):
         return _fail(VerificationStatus.MALFORMED, "bundle must be a JSON object")
@@ -263,7 +315,7 @@ def verify_bundle(
 
     if expected_issuer is not None and bundle.get("issuer") != expected_issuer:
         return _fail(
-            VerificationStatus.INVALID,
+            VerificationStatus.MISMATCH,
             f"issuer mismatch: bundle claims {bundle.get('issuer')!r}",
             key_id=key_id,
         )
@@ -272,7 +324,7 @@ def verify_bundle(
     # payload is reported as malformed rather than as a forgery.
     try:
         payload = json.loads(signing_input)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError):
         return _fail(
             VerificationStatus.MALFORMED,
             "signing_input is not valid JSON",
@@ -284,12 +336,24 @@ def verify_bundle(
             "signing_input is not a JSON object",
             key_id=key_id,
         )
+    if _contains_invalid_unicode(payload):
+        return _fail(
+            VerificationStatus.MALFORMED,
+            "signing_input contains invalid Unicode text",
+            key_id=key_id,
+        )
 
     signature = _b64decode(signature_b64)
     if signature is None:
         return _fail(
             VerificationStatus.MALFORMED,
             "signature is not valid base64",
+            key_id=key_id,
+        )
+    if len(signature) != _ED25519_SIGNATURE_LEN:
+        return _fail(
+            VerificationStatus.MALFORMED,
+            "signature is not a 64-byte Ed25519 signature",
             key_id=key_id,
         )
 
@@ -309,16 +373,19 @@ def verify_bundle(
             key_id=key_id,
         )
 
+    try:
+        signing_bytes = signing_input.encode("utf-8")
+    except UnicodeEncodeError:
+        return _fail(
+            VerificationStatus.MALFORMED,
+            "signing_input is not valid UTF-8 text",
+            key_id=key_id,
+        )
+
     # The signature covers signing_input verbatim. Re-serializing the parsed
     # object here would silently "fix" a payload whose bytes were altered in a
     # way that survives a JSON round trip, so the original string is used.
-    try:
-        _load_verifier(raw_public_key).verify(signature, signing_input.encode("utf-8"))
-    except VerificationError:
-        raise
-    except Exception:
-        # cryptography raises InvalidSignature; anything else here is also a
-        # failure to verify, and must not escape as a crash.
+    if not _verify_ed25519_signature(raw_public_key, signature, signing_bytes):
         return _fail(
             VerificationStatus.INVALID,
             "signature does not verify over signing_input",
@@ -329,7 +396,7 @@ def verify_bundle(
     # signed payload itself.
     if payload.get("kid") != key_id:
         return _fail(
-            VerificationStatus.INVALID,
+            VerificationStatus.MISMATCH,
             "signed payload names a different kid than the bundle",
             key_id=key_id,
         )
@@ -337,10 +404,18 @@ def verify_bundle(
     stated_hash = payload.get("payload_hash")
     if isinstance(stated_hash, str):
         inner = {k: v for k, v in payload.items() if k != "payload_hash"}
-        computed = hashlib.sha256(canonical_json(inner).encode("utf-8")).hexdigest()
+        try:
+            canonical = canonical_json(inner)
+        except (RecursionError, ValueError):
+            return _fail(
+                VerificationStatus.MALFORMED,
+                "signed payload exceeds the supported JSON nesting depth",
+                key_id=key_id,
+            )
+        computed = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         if computed != stated_hash:
             return _fail(
-                VerificationStatus.INVALID,
+                VerificationStatus.MISMATCH,
                 "payload_hash does not match the signed payload",
                 key_id=key_id,
             )
@@ -360,7 +435,7 @@ def verify_bundle(
     envelope_receipt_id = bundle.get("receipt_id")
     if envelope_receipt_id is not None and envelope_receipt_id != receipt_id:
         return _fail(
-            VerificationStatus.INVALID,
+            VerificationStatus.MISMATCH,
             "bundle receipt_id does not match the signed receipt_id",
             receipt_id=receipt_id,
             key_id=key_id,

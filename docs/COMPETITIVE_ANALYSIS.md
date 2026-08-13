@@ -18,7 +18,7 @@
 > | §1 matrix, "Key Rotation" row: "Signing key rotation API" is a present capability | **Overclaim.** `/v1/signing-keys` exposes two read-only GETs; there is no rotation route and the rotation helper has no production caller |
 > | §2.6: audit chain uses a `FOR UPDATE` lock on the chain head | **Wrong mechanism.** It uses optimistic concurrency — a conditional `UPDATE ... WHERE last_seq = observed` — with a code comment explicitly disclaiming `SELECT ... FOR UPDATE` so behavior matches on SQLite and PostgreSQL |
 > | §2.4: "Missing: idempotency key scoping (currently global)" | **Already shipped.** Records are keyed by `(wallet_id, endpoint, idempotency_key)` |
-> | §2.5: "Missing: receipt verification endpoint" | **Exists.** `POST /v1/receipts/verify`. The real gap is narrower and more interesting: verification is a *server-side verdict*, and **offline** verification is impossible because signing-key metadata requires authentication |
+> | §2.5: "Missing: receipt verification endpoint" | **Exists and now includes offline verification.** `POST /v1/receipts/verify` provides the server verdict; `/v1/receipts/{id}/portable`, unauthenticated `/.well-known/trust-keys.json`, and the SDK CLI provide independently performable receipt-signature verification. Key distribution still trusts the issuing origin unless pinned out of band. |
 > | §5.3 / §6: "No rate limiting" listed as a gap and a P0 | **Already shipped.** `RateLimitMiddleware` is installed application-wide |
 > | §8: `app/routers/mcp.py` is "~300" lines; trust plane ~2,500 LOC | **Off by roughly 9×** for the governed path: that file is 2,718 lines. Any effort estimate derived from this table is unreliable |
 >

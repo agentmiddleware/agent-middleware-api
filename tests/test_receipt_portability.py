@@ -8,6 +8,7 @@ reach the same conclusion.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from decimal import Decimal
@@ -26,6 +27,17 @@ from b2a_sdk.receipt_verifier import (
     verify_bundle,
 )
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+_PUBLIC_VERIFIER_STATE_TABLES = (
+    "wallets",
+    "permits",
+    "ledger_entries",
+    "receipts",
+    "mcp_dispatch_attempts",
+    "signing_keys",
+    "control_plane_audit_events",
+)
 
 
 @pytest.fixture
@@ -98,6 +110,18 @@ async def _portable_bundle_and_keys(client, provisioned, receipt_id):
     return bundle_resp.json(), keys_resp.json()
 
 
+async def _public_verifier_state_counts() -> dict[str, int]:
+    factory = get_session_factory()
+    async with factory() as session:
+        return {
+            table: int(
+                (await session.execute(text(f"SELECT COUNT(*) FROM {table}"))).scalar()
+                or 0
+            )
+            for table in _PUBLIC_VERIFIER_STATE_TABLES
+        }
+
+
 @pytest.mark.anyio
 async def test_receipt_verifies_offline_without_credentials(client, clean_database):
     provisioned = await provision_agent_wallet(client)
@@ -135,6 +159,9 @@ async def test_receipt_verifies_offline_without_credentials(client, clean_databa
 @pytest.mark.anyio
 async def test_trust_keys_endpoint_needs_no_credential(client, clean_database):
     """A verifier with no account here must still be able to get the key."""
+    from app.services.signing_keys import get_signing_key_service
+
+    await get_signing_key_service().ensure_active_key()
     resp = await client.get("/.well-known/trust-keys.json")
 
     assert resp.status_code == 200
@@ -151,6 +178,59 @@ async def test_trust_keys_endpoint_needs_no_credential(client, clean_database):
     jwk_x = entry["jwk"]["x"]
     padded = jwk_x + "=" * (-len(jwk_x) % 4)
     assert base64.urlsafe_b64decode(padded) == raw
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "path",
+    ["/.well-known/trust-keys.json", "/.well-known/jwks.json"],
+)
+async def test_public_key_discovery_does_not_create_signing_authority(
+    client, clean_database, path
+):
+    """An anonymous verifier must never provision the plane's signing key."""
+    before = await _public_verifier_state_counts()
+
+    resp = await client.get(path)
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["error"] == "trust_keys_unavailable"
+    assert await _public_verifier_state_counts() == before
+
+
+@pytest.mark.anyio
+async def test_parallel_public_key_discovery_is_state_isolated(client, clean_database):
+    """Parallel anonymous reads must preserve all trust-critical state."""
+    before = await _public_verifier_state_counts()
+    paths = ["/.well-known/trust-keys.json", "/.well-known/jwks.json"] * 8
+
+    responses = await asyncio.gather(*(client.get(path) for path in paths))
+
+    assert all(response.status_code == 503 for response in responses)
+    assert await _public_verifier_state_counts() == before
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "path",
+    ["/.well-known/trust-keys.json", "/.well-known/jwks.json"],
+)
+async def test_public_key_discovery_does_not_reactivate_retired_key(
+    client, clean_database, path
+):
+    from app.services.signing_keys import get_signing_key_service
+
+    service = get_signing_key_service()
+    key = await service.ensure_active_key()
+    await service.retire_key_metadata(key.key_id)
+
+    resp = await client.get(path)
+
+    assert resp.status_code == 200, resp.text
+    persisted = await service.get_public_key(key.key_id)
+    assert persisted is not None
+    assert persisted.status == "retired"
+    assert persisted.retired_at is not None
 
 
 @pytest.mark.anyio
@@ -199,6 +279,9 @@ async def test_jwks_endpoint_needs_no_credential(client, clean_database):
     /.well-known/jwks.json; the trust plane's docs and marketing site both
     point there, so it must resolve rather than 404.
     """
+    from app.services.signing_keys import get_signing_key_service
+
+    await get_signing_key_service().ensure_active_key()
     resp = await client.get("/.well-known/jwks.json")
 
     assert resp.status_code == 200, resp.text
@@ -227,6 +310,9 @@ async def test_jwks_and_trust_keys_publish_the_same_key_material(
     If they could drift, a verifier that trusted one would reach a different
     conclusion than a verifier that trusted the other for the same receipt.
     """
+    from app.services.signing_keys import get_signing_key_service
+
+    await get_signing_key_service().ensure_active_key()
     jwks_resp = await client.get("/.well-known/jwks.json")
     trust_resp = await client.get("/.well-known/trust-keys.json")
     assert jwks_resp.status_code == 200, jwks_resp.text
@@ -281,9 +367,7 @@ async def test_jwks_refuses_rather_than_serving_an_empty_set(
 
 
 @pytest.mark.anyio
-async def test_tampering_with_a_signed_field_fails_verification(
-    client, clean_database
-):
+async def test_tampering_with_a_signed_field_fails_verification(client, clean_database):
     provisioned = await provision_agent_wallet(client)
     _, receipt = await _invoke_governed_tool(client, provisioned)
     bundle, key_document = await _portable_bundle_and_keys(
@@ -295,9 +379,7 @@ async def test_tampering_with_a_signed_field_fails_verification(
     assert payload["credits_charged"] != "0.01"
     payload["credits_charged"] = "0.01"
     forged = dict(bundle)
-    forged["signing_input"] = json.dumps(
-        payload, sort_keys=True, separators=(",", ":")
-    )
+    forged["signing_input"] = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
     result = verify_bundle(forged, key_set)
 
@@ -307,9 +389,7 @@ async def test_tampering_with_a_signed_field_fails_verification(
 
 
 @pytest.mark.anyio
-async def test_signature_from_another_receipt_does_not_transfer(
-    client, clean_database
-):
+async def test_signature_from_another_receipt_does_not_transfer(client, clean_database):
     """A valid signature must not validate a different receipt's bytes."""
     provisioned = await provision_agent_wallet(client)
     _, first = await _invoke_governed_tool(client, provisioned, "portable-echo")
@@ -332,9 +412,7 @@ async def test_signature_from_another_receipt_does_not_transfer(
 
 
 @pytest.mark.anyio
-async def test_envelope_cannot_misrepresent_the_signed_receipt(
-    client, clean_database
-):
+async def test_envelope_cannot_misrepresent_the_signed_receipt(client, clean_database):
     """Unauthenticated envelope fields must never override signed ones."""
     provisioned = await provision_agent_wallet(client)
     _, receipt = await _invoke_governed_tool(client, provisioned)
@@ -347,13 +425,13 @@ async def test_envelope_cannot_misrepresent_the_signed_receipt(
 
     result = verify_bundle(relabelled, key_set_from_document(key_document))
 
-    assert result.status is VerificationStatus.INVALID
+    assert result.status is VerificationStatus.MISMATCH
     assert "receipt_id" in (result.reason or "")
 
 
 @pytest.mark.anyio
 async def test_unknown_key_is_not_reported_as_tampering(client, clean_database):
-    """"I don't have the key" and "this is forged" must not look alike."""
+    """ "I don't have the key" and "this is forged" must not look alike."""
     provisioned = await provision_agent_wallet(client)
     _, receipt = await _invoke_governed_tool(client, provisioned)
     bundle, _ = await _portable_bundle_and_keys(
@@ -384,7 +462,7 @@ async def test_issuer_mismatch_is_rejected_when_expected_issuer_given(
         bundle, key_set, expected_issuer="https://not-this-plane.example"
     )
 
-    assert result.status is VerificationStatus.INVALID
+    assert result.status is VerificationStatus.MISMATCH
 
 
 @pytest.mark.anyio
@@ -435,9 +513,7 @@ def _local_signer():
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
     private_key = Ed25519PrivateKey.generate()
-    raw_public = private_key.public_key().public_bytes(
-        Encoding.Raw, PublicFormat.Raw
-    )
+    raw_public = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
 
     def sign(signing_input: str) -> str:
         return base64.b64encode(
@@ -482,7 +558,7 @@ def test_validly_signed_payload_with_a_wrong_payload_hash_is_rejected():
 
     result = verify_bundle(_signed_bundle(payload, kid=kid, sign=sign), key_set)
 
-    assert result.status is VerificationStatus.INVALID
+    assert result.status is VerificationStatus.MISMATCH
     assert "payload_hash" in (result.reason or "")
 
 
@@ -495,7 +571,7 @@ def test_signature_under_a_key_the_payload_does_not_name_is_rejected():
 
     result = verify_bundle(_signed_bundle(payload, kid=kid, sign=sign), key_set)
 
-    assert result.status is VerificationStatus.INVALID
+    assert result.status is VerificationStatus.MISMATCH
     assert "kid" in (result.reason or "")
 
 
@@ -519,6 +595,41 @@ def test_a_correctly_signed_payload_verifies():
 
     assert result.ok, result.reason
     assert result.claims["tool"] == "search"
+
+
+def test_retired_keys_verify_while_disabled_keys_are_unavailable():
+    kid, key_set, sign = _local_signer()
+    payload = _hashed_payload({"receipt_id": "rcpt-x", "kid": kid, "tool": "search"})
+    bundle = _signed_bundle(payload, kid=kid, sign=sign)
+    encoded_key = base64.b64encode(key_set[kid]).decode()
+
+    retired = key_set_from_document(
+        {
+            "keys": [
+                {
+                    "kid": kid,
+                    "alg": "Ed25519",
+                    "status": "retired",
+                    "public_key_b64": encoded_key,
+                }
+            ]
+        }
+    )
+    disabled = key_set_from_document(
+        {
+            "keys": [
+                {
+                    "kid": kid,
+                    "alg": "Ed25519",
+                    "status": "disabled",
+                    "public_key_b64": encoded_key,
+                }
+            ]
+        }
+    )
+
+    assert verify_bundle(bundle, retired).status is VerificationStatus.VERIFIED
+    assert verify_bundle(bundle, disabled).status is VerificationStatus.UNKNOWN_KEY
 
 
 # --- CLI ---------------------------------------------------------------------

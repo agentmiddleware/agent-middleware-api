@@ -13,42 +13,34 @@ not the documents.
 
 ## Ten seconds
 
-Agent Middleware API is a self-hostable trust plane that sits between your
-autonomous agents and the MCP tools they call. Every call needs a signed,
-scoped permit, gets metered against a wallet budget, and returns a signed
-receipt on a tamper-evident audit chain — and a retried call never charges or
-dispatches twice.
+Your agent invokes a costly tool and the request times out. Agent Middleware
+puts one scoped, budgeted boundary in front of the call: replaying the same
+request and accepted idempotency key cannot create another gateway dispatch or
+debit, and the terminal gateway outcome gets a signed receipt.
 
 ## Thirty seconds
 
-Your agents are already calling internal tools. Nobody can say which agent was
-allowed to make a given call, what it cost, or whether a retry ran it twice.
+When an agent's tool call times out, can your current stack prove whether it was
+authorized and dispatched, prevent the retry from creating another debit, and
+show the economic consequence afterward?
 
-Agent Middleware API puts one enforceable economic boundary in front of those
-tools. An agent authenticates with a wallet-scoped key, receives an
-Ed25519-signed permit bound to specific tools, scopes, budget, and expiry, and
-invokes through a governed MCP gateway. The call is debited against a real
-ledger, returns a signed receipt, and lands on a per-wallet hash chain you can
-verify after the fact. Replay the same idempotency key and you get the original
-receipt back — no second dispatch, no second debit. Ask for something outside
-the permit and you get a denial with a concrete reason, also receipted.
+Agent Middleware API is a transaction boundary for metered MCP calls. An agent
+uses a wallet-scoped key and an Ed25519-signed permit bound to tool, scope,
+budget, and expiry. The gateway records one accepted request key, returns the
+original result and signed receipt on an identical replay, and rejects changed
+input under that key. Out-of-scope and over-budget calls fail before a debit.
 
-An agent that holds no permit can ask a human for one — stating scope, budget,
-and why — and gets a signed permit carrying exactly the terms the human
-reviewed. An agent that needs to know a call's cost before committing can take
-a signed quote, and the charge honors it.
-
-It self-hosts, it's MIT-licensed, and you can prove the whole loop on your
-laptop in one command.
+Run the executable proof locally, then evaluate the supported vendor-managed,
+single-tenant pilot with one real internal tool.
 
 ## Two minutes (design-partner version)
 
-**The problem.** Teams running internal agents against MCP-style tools have an
-authorization story ("who can call what") and no economic story. There is no
-budget that binds, no artifact proving a specific call was authorized, and no
-guarantee that a retried or crashed call doesn't spend twice. Retry logic in
-agent frameworks makes this worse, not better: agents retry aggressively by
-design.
+**The problem to test.** Give me one tool you are afraid to let an autonomous
+agent invoke. If the call times out, can you tell whether the gateway dispatched
+it, whether a retry creates another debit, who authorized the economic exposure,
+and what evidence survives afterward? Existing IAM, gateway, or logging controls
+may already be sufficient; the first conversation must establish that they are
+not before this product is proposed.
 
 **The wedge.** Not a general MCP gateway, and not payments. The narrow,
 differentiating primitive is **exactly-once economic authorization at the
@@ -72,9 +64,9 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
   upstream-returned errors are refunded and receipted. Genuinely ambiguous
   post-dispatch outcomes are marked `delivery_uncertain` and routed to
   fail-closed manual review — never silently redispatched.
-- **Evidence you can hand an auditor.** Signed receipts for success, denial,
-  *and* failure, linked to permits, ledger entries, and a verifiable per-wallet
-  hash chain.
+- **Portable gateway evidence.** Signed receipts for success, denial, *and*
+  failure, linked to permits, ledger entries, and a verifiable per-wallet hash
+  chain. This is not a compliance-grade ledger or proof of physical work.
 
 **Why believe it.** The proof is executable, not asserted:
 
@@ -85,9 +77,10 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
 | `make prove-crash-recovery` | Crash consistency across two OS processes killed at commit boundaries |
 | `make red-team-trust-plane` | Adversarial attempts against the boundary |
 
-**The ask.** One real internal tool behind the proxy. Not a migration — one
-tool, one wallet, one permit, and a walk through the loop. If it doesn't earn
-trust in your stack, stop there.
+**The ask.** One partner-owned agent, one real staging tool, and one partner
+engineer behind the proxy. Intentionally retry the action, verify the receipt
+in the partner's environment, and ask whether removing the boundary would
+restore an unacceptable risk. If it does not earn a commercial next step, stop.
 
 ---
 
@@ -108,9 +101,10 @@ tool is invoked — and who can bring one real tool to the first conversation.
 ## Objections, answered honestly
 
 **"Isn't this just an API gateway?"** A gateway answers whether a call is
-allowed. This answers what it cost, proves it was authorized with a signed
-artifact, and guarantees a retry doesn't spend twice. The debit and the receipt
-are the product; the policy check is table stakes.
+allowed. This binds the authorization to an internal credit budget and signed
+receipt, and prevents an identical replay under the same accepted key from
+creating another gateway dispatch or debit. The debit and receipt are the
+product; the policy check is table stakes.
 
 **"We already have IAM."** Keep it. This is not an IAM replacement and does not
 try to be. IAM says an agent may call a tool; this bounds how much that agent
@@ -122,13 +116,15 @@ signed and chained, so tampering is *evident*. (Evident, not impossible — a
 database administrator who can alter both the data and its chain metadata is
 inside the trust boundary, and we say so.)
 
-**"Does exactly-once really hold across the network?"** At our boundary, yes:
-one dispatch, one debit, one receipt. A *remote* tool's own side effect is
-exactly-once only if that tool also honors the forwarded idempotency key.
-Anything else is a lie about distributed systems, and we won't tell it.
+**"Does exactly-once really hold across the network?"** For one accepted
+idempotency key at our boundary: one gateway dispatch, one debit, one receipt.
+A *remote* tool's own side effect is exactly once only if that tool also honors
+the forwarded key. Anything broader would overstate the distributed-systems
+guarantee.
 
-**"What's the maturity?"** Production beta, not production complete. Self-host
-it, run the proofs, and read `SECURITY_LIMITATIONS.md` before you decide.
+**"What's the maturity?"** Production beta, not production complete. Run the
+proofs locally; the supported design-partner posture is vendor-managed and
+single-tenant. Read `SECURITY_LIMITATIONS.md` before deciding.
 
 ## What this pitch must never claim
 

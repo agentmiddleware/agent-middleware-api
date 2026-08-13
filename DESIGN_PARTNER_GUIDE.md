@@ -4,6 +4,11 @@ Use this guide to qualify design partners for the concrete trust-plane proof:
 scoped signed permit, governed MCP invoke, wallet charge, signed receipt,
 ledger entry, audit chain, replay safety, and out-of-scope denial.
 
+This guide proves technical fit. It does not by itself prove customer demand.
+Use the interview funnel, commercial evidence gate, and partner-owned pilot
+acceptance test in
+[`docs/30-day-customer-validation.md`](docs/30-day-customer-validation.md).
+
 ## Best-Fit Partner
 
 An AI platform, infrastructure, or security engineering team that already has
@@ -110,13 +115,25 @@ Then walk the partner through the live flow:
     `permit_required` denial, proving the trust plane fails closed when
     `ALLOW_LEGACY_UNPERMITTED_MCP=false`.
 
-## What To Listen For
+## Problem Discovery Before The Demo
 
-- "Can this sit in front of one of our internal MCP tools?"
-- "Can we tune permit scopes, budgets, and expiry per agent or workflow?"
-- "Can our operators verify receipts without trusting application logs?"
-- "Can retries be safe when an agent or orchestrator repeats a request?"
-- "Can denial evidence be audited, not just returned to the caller?"
+Start with one question:
+
+> Give me one tool you are currently afraid to let an autonomous agent invoke.
+
+Then establish the consequence, current control, and buyer before showing the
+product:
+
+- What happens when that request times out and the agent retries?
+- Who authorizes the action and its economic exposure today?
+- How does the team prove what happened?
+- Which existing IAM, gateway, logging, or approval control is insufficient?
+- Would the team accept an inline availability, latency, and security
+  dependency?
+- Who owns the staging endpoint, engineering work, budget, and decision date?
+
+Do not ask, "Would you use this?" A real signal is a partner committing its own
+tool and engineer, not agreeing that the demo is interesting.
 
 ## Success Criteria
 
@@ -127,6 +144,12 @@ Then walk the partner through the live flow:
 - The partner can audit who authorized the action, what tool ran, and what it
   cost.
 - The partner can see an out-of-scope request denied with an explicit reason.
+- The partner's engineer can export and verify the receipt in the partner's own
+  environment.
+- The partner states what unacceptable risk would return if the boundary were
+  removed.
+- A commercial owner, next action, and decision date are recorded. Without
+  those, the result is a technical pass only.
 
 ## Positioning Language
 

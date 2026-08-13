@@ -52,11 +52,12 @@ needed adjustment.
 asserts that a replayed idempotency key returns the identical receipt with no
 second debit, *and* that a replayed denial returns the same denial receipt. It
 is proven again by the dogfood proof against a real on-disk side effect, again
-across two OS processes by the crash harness, and again under 15-way
-concurrency by the live conformance suite. Writing "expand the proof to cover
-replay" into a strategy document would have been a factual error that any
-reader of the repository would catch immediately. The real gap was that this
-was nowhere summarized.
+across two OS processes by the crash harness, and again under 15 identical
+concurrent requests by the live conformance suite, where contenders expose one
+receipt identity or fail closed as in progress and a completed replay returns
+the winner. Writing "expand the proof to cover replay" into a strategy document
+would have been a factual error that any reader of the repository would catch
+immediately. The real gap was that this was nowhere summarized.
 
 **Crash recovery was the genuine gap, and it was a packaging gap.** A
 two-process PostgreSQL crash harness already existed and ran green in CI, but
@@ -79,15 +80,17 @@ tamper-*evident* and that a database administrator who can alter both the data
 and its chain metadata is inside the trust boundary.
 
 The substantive idea underneath the BFT suggestion is real, though, and it
-survives in better form: **verification is currently first-party.** Receipts,
-evidence bundles, and chain verification are all served by the same operator
-that produced them. The honest ladder is single-operator tamper-evidence today
-→ independent verification next → external anchoring later. The highest-leverage
-next step is not consensus infrastructure but a small offline verifier that
-checks exported artifacts with no running server, converting
-*operator-verifiable* into *independently verifiable*.
+survives in better form. The repository has since shipped a portable receipt
+bundle, public signing-key metadata, and an offline verifier, converting receipt
+checking from a server-side verdict into independently performable signature
+verification. Evidence-bundle linkage and audit-chain verification remain
+operator-served, and key distribution still trusts the issuing origin unless a
+partner pins keys out of band. The honest ladder is single-operator
+tamper-evidence today → partner-run portable verification now → external
+anchoring only if customer evidence justifies it later.
 
-**Shipped:** `make prove-crash-recovery`; `make trust-conformance-live` and
+**Shipped:** portable receipt verification; `make prove-crash-recovery`;
+`make trust-conformance-live` and
 `make adversarial-battery-live` wrapping two live suites that were previously
 runbook-only; and [`PROOF_MATRIX.md`](PROOF_MATRIX.md) mapping every proof
 command to the invariant it asserts and — equally important — to what it does
@@ -336,20 +339,17 @@ spec's fields, delete the repo-defined annotations, keep the delegated-authority
 layer, and re-anchor positioning on evidence — "prove what happened," not
 "report what it costs."
 
-One caveat keeps this from being a cheap pivot today, and it is the most
-actionable finding in this document: **"enhanced verifiability" is not yet
-shipped as an externally checkable product.** Receipt verification is currently
-a *server-side verdict* — the caller asks the same server that issued the
-receipt whether it is valid. Third-party verification is not merely
-undocumented, it is impossible: both signing-key endpoints require
-authentication, so an outside party cannot fetch the public key needed to check
-a signature independently.
+That prerequisite has now shipped. An authorized wallet can export a portable
+receipt bundle, any third party can fetch public signing-key metadata without a
+credential, and the SDK verifier checks the bundle offline without calling the
+issuing application. The quickstart and stranger test also require a forged
+bundle to fail distinctly from an unknown key.
 
-So the contingency has a prerequisite. Pivoting to verifiability as a
-differentiator means first making verification something a third party can
-actually perform: publish public signing-key metadata unauthenticated, and ship
-the offline verifier. Until then the pivot would be a claim, not a capability —
-and this project does not make claims it cannot execute.
+The remaining trust limitation is key distribution, not signature checking:
+the verifier still learns the issuer's keys from the same TLS origin being
+audited unless the partner pins them out of band. The next milestone is
+therefore customer-run verification of a partner-owned action, not another
+first-party proof surface.
 
 If a native *evidence* primitive ships, the response is different and harder:
 compete on depth — chain verification, evidence bundles, reconciliation, and
@@ -370,13 +370,11 @@ presented:
    recommendations are gated on it, directly or indirectly.
 2. **Recruit a second maintainer.** The bus factor is the largest non-technical
    risk and the single highest-value contribution available.
-3. **Make verification independently performable.** Publish public signing-key
-   metadata without authentication, then ship the offline verifier. Small and
-   self-contained, it is simultaneously the real content of the discarded BFT
-   suggestion (recommendation 1) and the unmet prerequisite for the
-   verifiability pivot (recommendation 5). Two of the five recommendations
-   converge on this one item, which is what makes it the highest-leverage piece
-   of engineering on this list.
+3. **Have a design partner perform independent verification.** The portable
+   bundle, unauthenticated signing-key metadata, and offline verifier are
+   shipped. What remains unverified is whether a partner engineer can use them
+   on a partner-owned action and values the resulting receipt enough to keep the
+   gateway in the invocation path.
 4. **Keep the receipt layer transport-independent.** The cheap insurance that
    makes recommendation 5's contingency a rename rather than a rewrite.
 5. **Publish the discovery honesty profile in-repo.** Cheap, already enforced,

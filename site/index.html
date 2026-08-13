@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Middleware API | Govern one MCP tool action</title>
+    <title>Agent Middleware API | Replay-safe metered MCP calls</title>
     <meta
       name="description"
-      content="Scoped permissions, replay-safe charging, and signed receipts for governed MCP tool calls."
+      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#f2efe6" />
@@ -20,7 +20,7 @@
     />
     <meta
       property="og:description"
-      content="Scoped permissions, replay-safe charging, and signed receipts for governed MCP tool calls."
+      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
     />
     <meta property="og:url" content="https://www.thisisatest.tech/" />
     <meta
@@ -40,7 +40,7 @@
     />
     <meta
       name="twitter:description"
-      content="Scoped permissions, replay-safe charging, and signed receipts for governed MCP tool calls."
+      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
     />
     <meta
       name="twitter:image"
@@ -107,9 +107,14 @@
           </p>
           <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
           <p class="hero-body hero-body-lead">
-            Give AI agents scoped permissions and spending limits, prevent
-            duplicate charges on retries, and get a signed receipt for every
-            governed MCP tool call.
+            Your agent invokes a costly tool. The request times out. Was it
+            dispatched? Should the agent retry? Will the retry create another
+            debit?
+          </p>
+          <p class="hero-body">
+            Put one scoped, budgeted boundary in front of the call. The same
+            accepted idempotency key cannot create a second gateway dispatch or
+            debit, and the terminal gateway outcome gets a signed receipt.
           </p>
           <div class="cta-row">
             <a
@@ -151,7 +156,8 @@
           </div>
           <p class="agent-entry-copy">
             We map one governed action end to end: delegated authority before
-            execution, one debit through retries, and portable evidence after.
+            execution, one debit for identical same-key replays, and portable
+            evidence after.
           </p>
           <ol class="pilot-steps">
             <li><span>01</span><strong>Scope the action and budget</strong></li>
@@ -195,7 +201,7 @@
           <li>
             <span>During</span>
             <strong>Charge the call once</strong>
-            <p>Idempotent metering prevents a retry from becoming a new debit.</p>
+            <p>The same accepted request key cannot become a second debit.</p>
           </li>
           <li>
             <span>After</span>
