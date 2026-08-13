@@ -27,6 +27,7 @@ request and observed response, and gets a single verdict.
 | 4 | A receipt's signed facts cannot be forged | tamper each signed field; verify offline | **HELD** |
 | 5 | A crash leaves charge⇔receipt paired, never charged-without-proof, never double | `kill -9` mid-flight + boundary-kill proof | **HELD** |
 | 6 | A credential acts only within its authority | invalid/revoked keys, confused deputy, cross-tenant | **HELD** |
+| 7 | All of the above hold **simultaneously** under a mid-storm crash | six vectors contending at once + `kill -9` at a debit threshold | **HELD** |
 
 **Headline finding — Attack 2 (budget overspend), BROKE on the shipped local
 posture.** Ten concurrent invocations with distinct idempotency keys against a
@@ -531,8 +532,64 @@ and interpreter from the authoring host, so it could not run on a second machine
 It now derives the repo root from its own location and verifies with the running
 interpreter — a prerequisite for independent reproduction.
 
-**Still open (unchanged by this run):** the combined six-vector simultaneous
-attack, many-shot forgery, tightening attack 5's narrow charge→`mark_charged`
-sub-window (safe from double-charge, not auto-flagged for review), and wiring the
-SQLite budget race into CI. Production posture (real settlement, non-synthetic
-credits, production signing keys) remains explicitly out of scope for this harness.
+**Still open after this run:** many-shot forgery, tightening attack 5's narrow
+charge→`mark_charged` sub-window (safe from double-charge, not auto-flagged for
+review), and wiring the SQLite budget race into CI. Production posture (real
+settlement, non-synthetic credits, production signing keys) remains explicitly
+out of scope for this harness.
+
+---
+
+## Attack 7 — Six-vector simultaneous assault → **HELD**
+
+The attacks above each stress ONE invariant in isolation. Attack 7
+(`attack_combined.py`) runs all six at once against shared victim + attacker
+state, to prove they still hold under **cross-vector contention** — the class of
+failure serial tests cannot surface. A pool of workers drives an interleaved job
+queue so a budget race, a dedup race, a scope-escape, a confused-deputy/cross-
+tenant/revoked-key barrage, and legitimate load are all in flight simultaneously;
+a killer thread `SIGKILL`s the server the instant committed debits on the victim
+wallet cross a threshold. After restart, every load/budget key is replayed and
+the money invariants are reconciled against the ledger; a receipt **minted during
+the storm** is then tamper-checked offline.
+
+**Method.** Victim wallet V with three permits — `P_load` (cap 400, the volume +
+double-charge corpus), `P_budget` (cap 8, cost 2 → 4 calls allowed, the overspend
+target) and `P_scope` (allows only `some.other.tool`). Attacker wallet B and a
+pre-revoked wallet R drive the credential vectors against V. 214 storm jobs, 24
+concurrent workers, kill threshold = 12 committed debits. Engine: SQLite under a
+controllable boot (`boot_controlled_uv.sh`, killed by process group); the rate
+limiter is raised so the invariant — not the throttle — is what the storm
+exercises.
+
+**Observed (HELD on all four fresh-boot runs; 17/17 checks each).** The kill
+landed mid-storm at 12 committed debits, with load successes, budget denials,
+scope denials, credential denials and connection-resets all interleaved in the
+same window (a representative run executed ~58 of 214 enqueued jobs before the
+kill). After restart + replay of every load/budget key:
+
+| Invariant | Result |
+|-----------|--------|
+| No double charge | committed debits ≤ distinct keys attempted; **0** keys debited twice |
+| Budget contained | `P_budget.spent_credits` ≤ cap on every run; **never exceeded** |
+| Charge ⇔ receipt | **0** success receipts without a ledger debit |
+| No silent charged-without-proof | every debit is covered by a success receipt **or** a surviving idempotency record; **0** silent orphans |
+| No scope escape | **0** `P_scope` successes (all denied or connection-reset) |
+| No credential escape | **0** successes from garbage / missing / confused-deputy / revoked |
+| No cross-tenant permit | attacker's `subject_wallet_id`-swap issuance was denied (`subject_wallet_access_denied`); **0** permits created — asserted directly, since an issuance carries no receipt |
+| Forgery under load | a storm-minted receipt VERIFIED genuine; every tampered field INVALID; unknown key UNDETERMINED |
+
+The replay returns signed receipts for completed keys plus a batch of
+`idempotency_in_progress` — the latter are pre-crash attempts whose surviving
+idempotency record blocks re-execution, so no key is charged twice. The run also
+reproduces attack 5's honestly-scoped transient: some debits sit `charged,
+proof-pending` immediately after the crash until reconcile repairs or flags them
+— never a double charge, never a success receipt without a charge, and never a
+*silent* orphan (each pending debit still maps to a record the client sees as
+in-progress). The harness resets the dogfood side-effect store at start so the
+governed tool can write; when the tool is starved (notes file full) it returns
+`failed_refunded` and the money invariants still hold — charge then refund, no
+net loss — which several runs incidentally confirmed.
+
+Reproduce: see "Six-vector simultaneous attack" in
+[`scripts/invariant_attacks/README.md`](scripts/invariant_attacks/README.md).
