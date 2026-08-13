@@ -190,6 +190,11 @@ def test_release_workflow_validates_without_production_mutation() -> None:
 
 def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    private_release = sop[
+        sop.index("### Private operator release") : sop.index(
+            "### Customer operations manifest"
+        )
+    ]
 
     assert "uuid.uuid4().hex" in sop
     assert 'RELEASE_MARKER="manual-exact-sha-$DEPLOY_SHA-$RELEASE_NONCE"' in sop
@@ -206,6 +211,17 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     assert 'test "$sentinel_count" -eq 1' in sop
     assert 'test "$post_ready" = "true"' in sop
     assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 2
+    source_gate = private_release.index(
+        "python scripts/railway_preflight.py --manifest-only"
+    )
+    current_gate = private_release.index(
+        'python scripts/railway_preflight.py --live --strict --url "$API_URL"'
+    )
+    deploy = private_release.index('railway up --project "$PROJECT_ID"')
+    post_gate = private_release.rindex(
+        "python scripts/railway_preflight.py --live --strict"
+    )
+    assert source_gate < current_gate < deploy < post_gate
     assert "`railway run` executes locally" in sop
 
 
@@ -548,6 +564,65 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
             EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
         )
     ]
+
+
+def test_manifest_only_validates_new_candidate_without_probing_old_release(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    path = _write_manifest(tmp_path, _manifest_document())
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("old release must not be probed"),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_db",
+        lambda *_args, **_kwargs: pytest.fail("database must not be probed"),
+    )
+
+    assert (
+        preflight.main(
+            [
+                "--manifest-only",
+                "--manifest",
+                str(path),
+                "--url",
+                "https://api.example.com",
+            ]
+        )
+        == 0
+    )
+    assert "manifest matches clean release checkout" in capsys.readouterr().out
+
+
+def test_manifest_only_requires_manifest(capsys):
+    assert preflight.main(["--manifest-only"]) == 1
+    assert "requires --manifest" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "runtime_arguments",
+    [
+        ["--live"],
+        ["--db"],
+        ["--public-db"],
+        ["--expected-version", "1.3.0"],
+        ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
+    ],
+)
+def test_manifest_only_rejects_runtime_checks(
+    tmp_path,
+    runtime_arguments,
+    capsys,
+):
+    path = _write_manifest(tmp_path, _manifest_document())
+    arguments = ["--manifest-only", "--manifest", str(path), *runtime_arguments]
+
+    assert preflight.main(arguments) == 1
+    assert "manifest-only" in capsys.readouterr().out
 
 
 def test_live_passes_on_expected_posture(monkeypatch):

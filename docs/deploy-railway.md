@@ -259,10 +259,12 @@ ci_conclusion="$(gh api \
   --jq '[.workflow_runs[] | select(.event == "push" and .conclusion != null)][0].conclusion // "none"')"
 test "$ci_conclusion" = "success"
 
-# Bind the local source, control-plane target, and currently running service to
-# the same manifest before changing anything.
-python scripts/railway_preflight.py --live --strict \
+# Bind the candidate manifest to this clean source checkout, but do not compare
+# its new SHA to the still-running old release. Check current service posture
+# separately without a candidate identity expectation.
+python scripts/railway_preflight.py --manifest-only \
   --manifest "$MANIFEST" --url "$API_URL"
+python scripts/railway_preflight.py --live --strict --url "$API_URL"
 control_plane="$(railway status \
   --project "$PROJECT_ID" --environment "$ENVIRONMENT" --json)"
 test "$(jq -r '.id' <<<"$control_plane")" = "$PROJECT_ID"
