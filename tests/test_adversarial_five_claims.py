@@ -282,7 +282,9 @@ async def test_claim1_replayed_key_executes_once_and_charges_once(
 
         assert runs["count"] == 1, "the tool side effect ran more than once"
         debits, _ = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             tool_name,
         )
         assert debits == 1
@@ -335,7 +337,9 @@ async def test_claim2_permit_cap_below_call_cost_is_denied_before_any_charge(
 
         assert runs["count"] == 0, "the tool ran despite an over-budget denial"
         debits, refunds = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             tool_name,
         )
         assert (debits, refunds) == (0, 0)
@@ -404,7 +408,9 @@ async def test_claim2_cumulative_spend_cannot_exceed_the_permit_cap(
         assert runs["count"] == 2
         assert await _spent_credits(permit["permit_id"]) == Decimal("4")
         debits, refunds = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             tool_name,
         )
         assert (debits, refunds) == (2, 0)
@@ -414,12 +420,141 @@ async def test_claim2_cumulative_spend_cannot_exceed_the_permit_cap(
         assert replay["error"]["message"] == "permit_budget_exceeded"
         assert runs["count"] == 2
         debits_after, _ = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             tool_name,
         )
         assert debits_after == 2
     finally:
         get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_claim2_concurrent_race_never_exceeds_cap(
+    client: AsyncClient, clean_database: None
+) -> None:
+    """Live HTTP concurrency race: over-spend containment holds end-to-end on
+    the shipped SQLite posture, not only at the service layer.
+
+    This is the CI gate for the original attack-2 finding. ``authorize_and_reserve``
+    guarded its check-and-reserve with ``SELECT ... FOR UPDATE``, which SQLAlchemy
+    silently drops on SQLite; N concurrent invokes with DISTINCT idempotency keys
+    (so dedup cannot collapse them) all read the same pre-spend value and their
+    increments clobbered each other, admitting far more than the cap. The guarded
+    conditional UPDATE fixes it on every engine. ``tests/test_permits.py`` proves
+    this at the service layer; this drives the FULL stack over HTTP
+    (router -> permit reserve -> billing -> receipt) on SQLite, which is exactly
+    the ``make quickstart`` posture that sells "a permit cap contains overspend".
+
+    Cap = 6, cost = 2 -> at most floor(6/2) = 3 calls may ever land; spend may
+    never cross the cap, no matter how the concurrent writers interleave.
+    """
+    import asyncio
+
+    from app.db.database import close_db
+
+    # Start from a connection pool bound to THIS test's event loop. The shared
+    # async engine is session-scoped but event loops are per-test, so an earlier
+    # test binds the pool's internal asyncio.Queue to its (now-dead) loop; this
+    # test's real concurrency would otherwise fail with "Queue is bound to a
+    # different event loop". Dispose to force a fresh pool on the current loop
+    # (the file-backed test DB keeps its tables across the dispose), and dispose
+    # again in `finally` so we do not strand the pool for the next test.
+    await close_db()
+
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "adv-claim2-race"
+    runs = {"count": 0}
+
+    def echo(message: str = "ok") -> dict[str, Any]:
+        runs["count"] += 1
+        return {"message": message}
+
+    _register_local_tool(tool_name, echo)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            max_credits=6,
+            idem_key="adv-claim2-race-permit",
+        )
+        cap_allows = 3  # floor(6 / TOOL_COST)
+        concurrency = 8
+
+        async def invoke(i: int) -> dict[str, Any]:
+            resp = await client.post(
+                "/mcp/messages",
+                json=_call_body(
+                    tool_name=tool_name,
+                    wallet_id=provisioned["agent_wallet_id"],
+                    permit_id=permit["permit_id"],
+                    idempotency_key=f"adv-claim2-race-{i}",
+                ),
+                headers=provisioned["agent_headers"],
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+        results = await asyncio.gather(*(invoke(i) for i in range(concurrency)))
+
+        # Partition every response: a success, a budget denial, or a transient.
+        # Under real SQLite write contention a distinct-key idempotency insert
+        # that hits "database is locked" is translated to idempotency_in_progress
+        # — NOT a charge and NOT a budget denial. That is lock timing, not an
+        # overspend, so it must not red the gate; classify it as transient.
+        succeeded, budget_denied, transient, unexpected = [], [], [], []
+        for r in results:
+            outcome = r.get("result", {}).get("receipt", {}).get("outcome")
+            msg = (r.get("error") or {}).get("message", "")
+            if outcome == "success":
+                succeeded.append(r)
+            elif msg == "permit_budget_exceeded":
+                budget_denied.append(r)
+            elif msg == "idempotency_in_progress" or "locked" in msg.lower():
+                transient.append(r)
+            else:
+                unexpected.append(r)
+
+        # Only a lock-translated in-progress is tolerated; anything else (an auth
+        # failure, a malformed payload, an unrelated JSON-RPC error) fails here
+        # rather than being silently absorbed into the count.
+        assert not unexpected, unexpected
+        # Every response is accounted for (no 200 slips through unasserted).
+        assert len(succeeded) + len(budget_denied) + len(transient) == concurrency
+
+        # The containment invariant this gate exists for: no matter how the
+        # concurrent writers interleave, never more than floor(cap/cost) calls
+        # may land. The original bug admitted every concurrent call. `>= 1`
+        # guards against a vacuous all-denied pass.
+        assert 1 <= len(succeeded) <= cap_allows, [
+            r.get("result", r.get("error")) for r in results
+        ]
+        # At least one call was denied for budget (the cap was actually reached
+        # and enforced), unless transients absorbed the surplus.
+        assert len(budget_denied) >= 1 or len(transient) >= 1
+
+        # Money integrity: persisted spend exactly matches the admitted calls and
+        # never crosses the cap, and the ledger agrees.
+        spent = await _spent_credits(permit["permit_id"])
+        assert spent == Decimal(str(len(succeeded) * TOOL_COST))
+        assert spent <= Decimal("6")
+        debits, refunds = await _ledger_split(
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
+            tool_name,
+        )
+        assert debits == len(succeeded)
+        assert refunds == 0
+        assert runs["count"] == len(succeeded)  # the tool ran only for admits
+    finally:
+        get_service_registry().unregister_local(tool_name)
+        # Dispose again so we do not strand a pool bound to this loop for the
+        # next test (see the note at the top of this test).
+        await close_db()
 
 
 # --------------------------------------------------------------------------- #
@@ -478,7 +613,9 @@ async def test_claim3_induced_timeout_stays_charged_and_never_redispatches(
         assert len(executor.calls) == 1
 
         debits, refunds = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             tool_name,
         )
         assert (debits, refunds) == (1, 0), "uncertain delivery must stay charged"
@@ -535,7 +672,9 @@ async def test_claim3_pre_dispatch_death_refunds_to_net_zero_without_executing(
 
         # Debit and its refund both landed; the net effect on spend is zero.
         debits, refunds = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             tool_name,
         )
         assert (debits, refunds) == (1, 1), "a refunded failure needs both rows"
@@ -592,7 +731,9 @@ async def test_claim3_conflicting_payload_under_a_spent_key_never_redispatches(
         assert executor.dispatch_count == 1
         assert len(executor.calls) == 1
         debits, _ = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             tool_name,
         )
         assert debits == 1
@@ -732,7 +873,9 @@ async def test_claim5_out_of_scope_denial_is_signed_and_moves_no_money(
 
         assert runs["blocked"] == 0, "the blocked tool executed"
         debits, refunds = await _ledger_split(
-            client, provisioned["agent_wallet_id"], provisioned["agent_headers"],
+            client,
+            provisioned["agent_wallet_id"],
+            provisioned["agent_headers"],
             blocked_tool,
         )
         assert (debits, refunds) == (0, 0)

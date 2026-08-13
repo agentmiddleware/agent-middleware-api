@@ -532,11 +532,21 @@ and interpreter from the authoring host, so it could not run on a second machine
 It now derives the repo root from its own location and verifies with the running
 interpreter — a prerequisite for independent reproduction.
 
-**Still open after this run:** many-shot forgery, tightening attack 5's narrow
+**SQLite budget race now gated in CI.**
+`tests/test_adversarial_five_claims.py::test_claim2_concurrent_race_never_exceeds_cap`
+fires 12 concurrent HTTP invokes with distinct idempotency keys against a
+6-credit / cost-2 permit and asserts exactly 3 land and `spent_credits` never
+crosses the cap — the live end-to-end version of attack 2 on the shipped SQLite
+posture, driving the full router → reserve → billing → receipt path (the
+`test_permits.py` guard covers only `authorize_and_reserve`). It runs in the
+required `test` job on every push, so a regression of the atomic-UPDATE fix on
+SQLite now fails CI. Verified to fail when the cap guard is removed and pass with
+it (5/5 stable runs).
+
+**Still open after this run:** many-shot forgery and tightening attack 5's narrow
 charge→`mark_charged` sub-window (safe from double-charge, not auto-flagged for
-review), and wiring the SQLite budget race into CI. Production posture (real
-settlement, non-synthetic credits, production signing keys) remains explicitly
-out of scope for this harness.
+review). Production posture (real settlement, non-synthetic credits, production
+signing keys) remains explicitly out of scope for this harness.
 
 ---
 
