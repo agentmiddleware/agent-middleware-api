@@ -496,3 +496,43 @@ guarded end-to-end and not only at the service layer. Then move on to the
 attacks the brief deferred — notably attack #5's deterministic failure-boundary
 variants, which the two-process PostgreSQL proof already covers but the local
 SQLite instance does not exercise at exact commit points.
+
+---
+
+## Second-environment reproduction — 2026-08-13
+
+The original campaign (2026-08-12) ran on a single host. To check whether the
+results reproduce on a second, independent environment, the full harness was
+re-run from a clean checkout on a different machine (macOS, Python 3.12 via
+`uv`; PostgreSQL 16 in Docker). One additional environment is corroboration,
+not proof of environment-independence in general.
+**All six invariants reproduced their verdicts**, including attack 2 now holding
+on SQLite after the atomic-UPDATE fix.
+
+**SQLite quickstart (live HTTP, `make quickstart`):**
+
+| Attack | Verdict |
+|--------|---------|
+| 1 double-charge | HELD |
+| 2 budget overspend | **HELD** (cap 7 / 10 parallel → 3 successes, 6.0 debited, no overspend) |
+| 2 mechanism probe | `lost_update: false`, `overspent_vs_cap: false` |
+| 3 scope escape | HELD |
+| 4 forged receipts | HELD (genuine VERIFIED; all four tampered fields INVALID; unknown key → UNDETERMINED, not false-INVALID) |
+| 6 credential misuse | HELD |
+
+**PostgreSQL 16 (the authoritative concurrency/crash proofs):**
+
+- `tests/test_mcp_postgres_multiprocess.py` (attack 5, two-process boundary kill) — **3/3 passed**
+- `tests/test_permit_postgres_concurrency.py` (attack 2 row-lock + exactly-once receipts/refunds/dispatch) — **11/11 passed**
+- `attack2_budget_postgres.py` (live HTTP race): cap 7 / N 10 → 3 success / 7 budget-denied / 6.0 debited; cap 2 / N 5 → 1 success / 4 denied / 2.0 debited; cap 6 / N 8 → 3 success / 5 denied / 6.0 debited. **No overspend on any row**, matching the 2026-08-12 Postgres table exactly.
+
+**Harness portability fix.** `attack4_forgery.py` hardcoded an absolute repo path
+and interpreter from the authoring host, so it could not run on a second machine.
+It now derives the repo root from its own location and verifies with the running
+interpreter — a prerequisite for independent reproduction.
+
+**Still open (unchanged by this run):** the combined six-vector simultaneous
+attack, many-shot forgery, tightening attack 5's narrow charge→`mark_charged`
+sub-window (safe from double-charge, not auto-flagged for review), and wiring the
+SQLite budget race into CI. Production posture (real settlement, non-synthetic
+credits, production signing keys) remains explicitly out of scope for this harness.

@@ -13,23 +13,45 @@ Sub-tests:
   4d. Verify a genuine receipt against a MUTATED key set (wrong public key) ->
       UNDETERMINED (exit 2), NOT INVALID: an outage must never read as fraud.
 """
+
 import json
 import subprocess
 import sys
 import attacklib as A
 
-ROOT = "/home/user/agent-middleware-api"
-WORK = "/tmp/claude-0/-home-user-agent-middleware-api/1a00a88b-c580-5184-8529-17391abbddf2/scratchpad/atk4"
-subprocess.run(["mkdir", "-p", WORK], check=True)
+import os
+import tempfile
+
+# Derive the repo root from this file's location (scripts/invariant_attacks/…)
+# so the harness runs on any machine, not just the one it was authored on.
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+WORK = os.path.join(tempfile.gettempdir(), "atk4_forgery")
+os.makedirs(WORK, exist_ok=True)
 
 
 def verify(bundle_path, keys_path):
+    # Verify with the running interpreter; the SDK verifier imports no server
+    # code and only needs b2a_sdk/src on PYTHONPATH.
     p = subprocess.run(
-        [f"{ROOT}/.venv/bin/python", "-m", "b2a_sdk.verify_cli",
-         "--bundle", bundle_path, "--keys", keys_path],
-        cwd=ROOT, env={"PYTHONPATH": f"{ROOT}/b2a_sdk/src", "PATH": "/usr/bin:/bin"},
-        capture_output=True, text=True)
-    return {"exit": p.returncode, "stdout": p.stdout.strip(), "stderr": p.stderr.strip()}
+        [
+            sys.executable,
+            "-m",
+            "b2a_sdk.verify_cli",
+            "--bundle",
+            bundle_path,
+            "--keys",
+            keys_path,
+        ],
+        cwd=ROOT,
+        env={**os.environ, "PYTHONPATH": os.path.join(ROOT, "b2a_sdk", "src")},
+        capture_output=True,
+        text=True,
+    )
+    return {
+        "exit": p.returncode,
+        "stdout": p.stdout.strip(),
+        "stderr": p.stderr.strip(),
+    }
 
 
 def fetch_bundle(cred, receipt_id, name):
@@ -42,18 +64,38 @@ def fetch_bundle(cred, receipt_id, name):
 
 def main():
     cred = A.provision("atk4-forgery")
-    permit = A.issue_permit(cred, allowed_tools=["partner.notes.write"],
-                            scopes=["tool:partner.notes.write:invoke", "billing:charge"],
-                            max_credits=100, idem="atk4-permit")["json"]
+    permit = A.issue_permit(
+        cred,
+        allowed_tools=["partner.notes.write"],
+        scopes=["tool:partner.notes.write:invoke", "billing:charge"],
+        max_credits=100,
+        idem="atk4-permit",
+    )["json"]
     # success receipt
-    inv = A.invoke(cred["api_key"], cred["wallet_id"], permit["permit_id"], "atk4-ok", "atk4 good note")
+    inv = A.invoke(
+        cred["api_key"],
+        cred["wallet_id"],
+        permit["permit_id"],
+        "atk4-ok",
+        "atk4 good note",
+    )
     success_rid = A.receipt_of(inv)["receipt_id"]
     # denial receipt (scope escape)
-    deny_permit = A.issue_permit(cred, allowed_tools=["some.other.tool"],
-                                 scopes=["tool:some.other.tool:invoke", "billing:charge"],
-                                 max_credits=100, idem="atk4-denypermit")["json"]
-    deny = A.http("POST", "/mcp/messages", api_key=cred["api_key"],
-                  body=A.invoke_body(cred["wallet_id"], deny_permit["permit_id"], "atk4-deny", "denied note"))
+    deny_permit = A.issue_permit(
+        cred,
+        allowed_tools=["some.other.tool"],
+        scopes=["tool:some.other.tool:invoke", "billing:charge"],
+        max_credits=100,
+        idem="atk4-denypermit",
+    )["json"]
+    deny = A.http(
+        "POST",
+        "/mcp/messages",
+        api_key=cred["api_key"],
+        body=A.invoke_body(
+            cred["wallet_id"], deny_permit["permit_id"], "atk4-deny", "denied note"
+        ),
+    )
     denial_rid = A.receipt_of(deny)["receipt_id"]
 
     # keys
@@ -74,8 +116,11 @@ def main():
     tampers = {
         "credits_charged_2_to_0": ('"credits_charged":"2"', '"credits_charged":"0"'),
         "outcome_success_to_denied": ('"outcome":"success"', '"outcome":"denied"'),
-        "tool_rename": ('partner.notes.write', 'evil.tool.exfiltrate'),
-        "wallet_swap": (good_bundle.get("receipt", {}).get("wallet_id", cred["wallet_id"]), "agt-attacker0000"),
+        "tool_rename": ("partner.notes.write", "evil.tool.exfiltrate"),
+        "wallet_swap": (
+            good_bundle.get("receipt", {}).get("wallet_id", cred["wallet_id"]),
+            "agt-attacker0000",
+        ),
     }
     forge_results = {}
     for name, (old, new) in tampers.items():
@@ -111,17 +156,30 @@ def main():
     checks = {
         "success_verifies": results["4a_success_genuine"]["exit"] == 0,
         "denial_verifies": results["4b_denial_genuine"]["exit"] == 0,
-        "all_tampers_rejected": all(
-            v.get("exit") == 1 for v in forge_results.values() if "skipped" not in v),
-        "unknown_key_undetermined_not_invalid": results["4d_genuine_vs_unknown_key"]["exit"] == 2,
+        # Fail closed: every tamper case must have RUN and been rejected. A
+        # skipped case (pattern absent from signing_input) means that forgery
+        # variant was never exercised, so it must not count toward HELD — and an
+        # all-skipped set must not pass via all([]) == True.
+        "all_tampers_rejected": len(forge_results) == len(tampers)
+        and all(v.get("exit") == 1 for v in forge_results.values()),
+        "unknown_key_undetermined_not_invalid": results["4d_genuine_vs_unknown_key"][
+            "exit"
+        ]
+        == 2,
     }
     verdict = "HELD" if all(checks.values()) else "BROKE"
-    ev = {"attack": "4 - forged receipts", "verdict": verdict, "checks": checks,
-          "success_receipt_id": success_rid, "denial_receipt_id": denial_rid,
-          "results": results}
+    ev = {
+        "attack": "4 - forged receipts",
+        "verdict": verdict,
+        "checks": checks,
+        "success_receipt_id": success_rid,
+        "denial_receipt_id": denial_rid,
+        "results": results,
+    }
     print(json.dumps(ev, indent=2, default=str))
     with open("evidence_attack4.json", "w") as fh:
         json.dump(ev, fh, indent=2, default=str)
+
 
 if __name__ == "__main__":
     sys.exit(main())
