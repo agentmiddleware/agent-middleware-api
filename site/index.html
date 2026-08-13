@@ -66,6 +66,18 @@
     />
     <link rel="stylesheet" href="/styles.css?v=ledger-seal" />
     <script>
+      /* Apply saved accessibility preferences before first paint. */
+      try {
+        var amwPrefs = JSON.parse(window.localStorage.getItem("amw-a11y") || "{}");
+        var amwRoot = document.documentElement;
+        if (amwPrefs.scale) amwRoot.style.setProperty("--a11y-scale", amwPrefs.scale);
+        if (amwPrefs.contrast) amwRoot.setAttribute("data-a11y-contrast", "high");
+        if (amwPrefs.motion) amwRoot.setAttribute("data-a11y-motion", "reduce");
+        if (amwPrefs.spacing) amwRoot.setAttribute("data-a11y-spacing", "wide");
+        if (amwPrefs.underline) amwRoot.setAttribute("data-a11y-underline", "on");
+      } catch (amwError) {}
+    </script>
+    <script>
       window.va =
         window.va ||
         function () {
