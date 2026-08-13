@@ -52,7 +52,7 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.server.streamable_http_manager import RequestBodyLimitMiddleware
 from mcp.shared.exceptions import McpError
 from starlette.responses import JSONResponse, Response
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
@@ -99,6 +99,35 @@ _SERVER_INSTRUCTIONS = (
 
 def _mcp_error(code: int, message: str, data: dict[str, Any] | None = None) -> McpError:
     return McpError(mcp_types.ErrorData(code=code, message=message, data=data))
+
+
+# Far above any legitimate MCP message, far below where Python 3.11's JSON
+# parser starts raising RecursionError instead of returning a parse result.
+_MAX_JSON_NESTING_DEPTH = 100
+
+
+def _json_nesting_depth_exceeds(body: bytes, limit: int) -> bool:
+    """True when raw JSON bytes nest deeper than ``limit`` outside strings."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in body:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # backslash
+                escaped = True
+            elif byte == 0x22:  # double quote
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x7B, 0x5B):  # { or [
+            depth += 1
+            if depth > limit:
+                return True
+        elif byte in (0x7D, 0x5D):  # } or ]
+            depth = max(0, depth - 1)
+    return False
 
 
 def _permit_error(exc: PermitError) -> McpError:
@@ -427,24 +456,23 @@ class _SdkTransportResponse(Response):
         receive: Receive,
         send: Send,
     ) -> None:
-        # On Python 3.11 the stdlib JSON parser raises RecursionError for
-        # deeply nested bodies before pydantic can reject them as invalid
-        # params (3.12+ parses fine under the higher C-recursion limit and
-        # pydantic answers -32602). Normalize both to the 3.12 behavior
-        # instead of letting a 500 escape an anonymous surface.
-        response_started = False
+        # Refuse absurdly nested bodies before the SDK parses them. On
+        # Python 3.11 json.loads raises RecursionError at ~1000 frames and
+        # the SDK's broad handler turns that into a 500; on 3.12+ the parse
+        # succeeds and pydantic rejects the depth as invalid params. Scanning
+        # the raw bytes gives both versions the same -32602 answer.
+        messages: list[Message] = []
+        body = bytearray()
+        while True:
+            message = await receive()
+            messages.append(message)
+            if message["type"] != "http.request":
+                break
+            body.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
 
-        async def tracking_send(message: Any) -> None:
-            nonlocal response_started
-            if message.get("type") == "http.response.start":
-                response_started = True
-            await send(message)
-
-        try:
-            await self._dispatch_to_transport(scope, receive, tracking_send)
-        except RecursionError:
-            if response_started:
-                raise
+        if _json_nesting_depth_exceeds(bytes(body), _MAX_JSON_NESTING_DEPTH):
             error_response = JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -457,6 +485,16 @@ class _SdkTransportResponse(Response):
                 status_code=200,
             )
             await error_response(scope, receive, send)
+            return
+
+        replayed = iter(messages)
+
+        async def replay_receive() -> Message:
+            for message in replayed:
+                return message
+            return await receive()
+
+        await self._dispatch_to_transport(scope, replay_receive, send)
 
     async def _dispatch_to_transport(
         self,
