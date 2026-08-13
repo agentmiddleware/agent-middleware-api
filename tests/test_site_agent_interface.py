@@ -345,11 +345,14 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "window.va" in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
-    invalid_contacts = dict(VALID_TEST_CONTACTS)
-    invalid_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = "enable"
-    rejected = _render_site(tmp_path / "invalid", invalid_contacts)
-    assert rejected.returncode == 2
-    assert "PUBLIC_ENABLE_VERCEL_ANALYTICS" in rejected.stderr
+    # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
+    # "true", "false", or unset.
+    for invalid_value in ("enable", "1", "yes", "on"):
+        invalid_contacts = dict(VALID_TEST_CONTACTS)
+        invalid_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = invalid_value
+        rejected = _render_site(tmp_path / f"invalid-{invalid_value}", invalid_contacts)
+        assert rejected.returncode == 2, invalid_value
+        assert "PUBLIC_ENABLE_VERCEL_ANALYTICS" in rejected.stderr
 
 
 class _ExternalLinkCollector(HTMLParser):
@@ -361,10 +364,15 @@ class _ExternalLinkCollector(HTMLParser):
         if tag != "a":
             return
         attributes = dict(attrs)
-        href = attributes.get("href") or ""
-        if not href.startswith(("http://", "https://")):
+        href = (attributes.get("href") or "").strip()
+        parsed = urlparse(href)
+        # External means an http(s) or protocol-relative href (any scheme
+        # casing) pointing at another host; mailto/tel/internal paths are not.
+        if parsed.scheme.casefold() not in {"", "http", "https"}:
             return
-        if (urlparse(href).hostname or "") == "www.thisisatest.tech":
+        if not parsed.netloc:
+            return
+        if (parsed.hostname or "").casefold() == "www.thisisatest.tech":
             return
         rel_tokens = set((attributes.get("rel") or "").split())
         if not {"noopener", "noreferrer"} <= rel_tokens:

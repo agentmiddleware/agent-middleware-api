@@ -35,8 +35,8 @@ CONTACT_FIELDS = {
 }
 ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
 ANALYTICS_TOKEN = "@@VERCEL_ANALYTICS_SCRIPTS@@"
-ANALYTICS_FLAG_ENABLED = frozenset({"1", "true", "yes", "on"})
-ANALYTICS_FLAG_DISABLED = frozenset({"", "0", "false", "no", "off"})
+ANALYTICS_FLAG_ENABLED = frozenset({"true"})
+ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
 ANALYTICS_SCRIPTS = """<script>
       window.va =
         window.va ||
@@ -190,7 +190,7 @@ def vercel_analytics_enabled(environment: dict[str, str]) -> bool:
     if raw in ANALYTICS_FLAG_DISABLED:
         return False
     raise LaunchConfigurationError(
-        f"{ANALYTICS_FLAG} must be true/false (or 1/0, yes/no, on/off)"
+        f'{ANALYTICS_FLAG} must be "true", "false", or unset'
     )
 
 
@@ -256,10 +256,16 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
         if analytics_enabled:
             rendered = rendered.replace(ANALYTICS_TOKEN, ANALYTICS_SCRIPTS)
         else:
-            # Drop the token's whole line so no blank line is left behind; the
-            # unresolved-token check below still fails loudly if the source
-            # ever stops matching this shape.
-            rendered = rendered.replace(f"    {ANALYTICS_TOKEN}\n", "")
+            # Drop the token's whole line regardless of indentation so no
+            # blank line or stray whitespace is left behind; the
+            # unresolved-token check below still fails loudly if the token
+            # ever stops sitting on its own line.
+            rendered = re.sub(
+                rf"^[ \t]*{re.escape(ANALYTICS_TOKEN)}[ \t]*\n",
+                "",
+                rendered,
+                flags=re.MULTILINE,
+            )
         for token, replacement in replacements.items():
             rendered = rendered.replace(token, replacement)
         unresolved = sorted(set(re.findall(r"@@[A-Z0-9_]+@@", rendered)))
