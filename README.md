@@ -103,9 +103,13 @@ inventory and unfreeze rules are in
 
 Recent work substantially tightened the trust and accounting boundary:
 
-- **Atomic permit admission.** Final permit checks and budget reservation occur
-  while the permit row is locked. PostgreSQL concurrency tests cover competing
-  reservations and revoke-versus-invoke races.
+- **Atomic permit admission.** Final permit checks run under the locked permit
+  row, and the budget reservation itself is a single guarded `UPDATE` that
+  enforces the cap in its `WHERE` clause — so competing reservations cannot
+  over-spend a permit on any storage engine, including SQLite, where
+  `SELECT ... FOR UPDATE` is a silent no-op. PostgreSQL concurrency tests cover
+  competing reservations and revoke-versus-invoke races, and an engine-agnostic
+  test asserts the cap holds under a parallel reservation burst.
 - **Replay-safe governed execution.** After completion, an identical replay
   returns the original result and receipt without a second gateway dispatch or
   wallet debit, even across the governed MCP entrypoints; changed payloads
@@ -480,6 +484,12 @@ verifier.
   API compatibility also requires floats.
 - Charges, transfers, refunds, wallet provisioning, and Stripe settlement use
   database transactions and row locks where ordering matters.
+- Permit budget caps are reserved with a single atomic guarded `UPDATE` — the
+  cap is enforced in the statement's `WHERE` clause, not a read-modify-write — so
+  concurrent invocations against one permit cannot over-spend it on any storage
+  engine, including SQLite, where `SELECT ... FOR UPDATE` is a silent no-op.
+  Covered by `tests/test_permits.py::test_concurrent_reservations_never_exceed_cap`
+  and the PostgreSQL `postgres_permit_concurrency` CI job.
 - Direct top-up is deprecated and returns `410 Gone`; a client-supplied token is
   not treated as proof of payment.
 - Stripe webhooks are signature checked, settlement fields are validated, and
@@ -571,7 +581,12 @@ live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run
 the same class of invariants against a deployment you operate; both write test
 data, so point them at staging. A local red-team pass
 (`make red-team-trust-plane-check`) attacks the trust loop against a throwaway
-SQLite database.
+SQLite database. The stdlib-only [`scripts/invariant_attacks/`](scripts/invariant_attacks/)
+harness runs a hostile, concurrency-aware campaign against a live `make quickstart`
+instance — parallel double-charge, budget over-spend, scope escape, receipt
+forgery, crash consistency, and credential misuse — each with a
+HELD/BROKE/PARTIAL verdict backed by the exact request and observed response
+([Invariant Attack Report.md](<Invariant Attack Report.md>)).
 
 The repository is intended to run **gate-first, execute-second**: CI exposes
 the release gate as one dedicated check named `trust_release_gate`, and
@@ -649,6 +664,7 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
 - [docs/stranger-test.md](docs/stranger-test.md) — the human milestone: a stranger drives the governed loop and checks the five claims from the public docs alone
 - [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) — gate-first branch protection: the exact required checks for `main`
 - [Hard Run Report.md](<Hard Run Report.md>) — adversarial black-box run against the live production trust plane, with reproduction commands
+- [Invariant Attack Report.md](<Invariant Attack Report.md>) — hostile concurrency/tampering/crash/credential campaign against a local instance, the one invariant it broke (permit-cap over-spend on SQLite), and the fix that closed it
 - [docs/failure-semantics.md](docs/failure-semantics.md) — every terminal outcome of a metered call that dies mid-flight, and the test that proves each
 - [docs/agent-accountability.md](docs/agent-accountability.md) — why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path
