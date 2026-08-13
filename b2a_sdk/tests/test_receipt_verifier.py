@@ -209,6 +209,10 @@ def test_malformed_public_key_is_not_reported_as_tampering():
 
 
 def test_unexpected_crypto_backend_error_is_not_an_invalid_verdict(monkeypatch):
+    # Reaches the signature stage, so it needs the InvalidSignature import to
+    # succeed; on a bare install the install-hint VerificationError wins first.
+    pytest.importorskip("cryptography")
+
     class BrokenVerifier:
         def verify(self, _signature, _signing_bytes):
             raise RuntimeError("crypto backend failed")
