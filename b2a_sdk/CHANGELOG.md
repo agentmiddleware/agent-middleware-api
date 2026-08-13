@@ -16,6 +16,10 @@
   `cryptography` dependency. The base install is unchanged; importing
   `b2a_sdk` without the extra still works, and only signature checking
   requires it.
+- Require `cryptography>=50.0.0` in the `verify` and `dev` extras, matching
+  the application's own floor: every 42.x–49.x release carries at least one
+  published advisory, and a receipt *verifier* must not itself depend on a
+  known-vulnerable cryptography build.
 
 ## 0.4.0
 
