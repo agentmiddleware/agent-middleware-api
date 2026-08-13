@@ -54,5 +54,3 @@ Thumbs.db
 # Docker
 *.log
 .vercel/
-.vercel
-.env*
