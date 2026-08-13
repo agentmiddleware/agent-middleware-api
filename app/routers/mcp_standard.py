@@ -51,7 +51,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.server.streamable_http_manager import RequestBodyLimitMiddleware
 from mcp.shared.exceptions import McpError
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import Receive, Scope, Send
 
 from app.core.auth import AuthContext, get_auth_context
@@ -422,6 +422,43 @@ class _SdkTransportResponse(Response):
         await self._handle_request(scope, receive, send)
 
     async def _handle_request(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        # On Python 3.11 the stdlib JSON parser raises RecursionError for
+        # deeply nested bodies before pydantic can reject them as invalid
+        # params (3.12+ parses fine under the higher C-recursion limit and
+        # pydantic answers -32602). Normalize both to the 3.12 behavior
+        # instead of letting a 500 escape an anonymous surface.
+        response_started = False
+
+        async def tracking_send(message: Any) -> None:
+            nonlocal response_started
+            if message.get("type") == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self._dispatch_to_transport(scope, receive, tracking_send)
+        except RecursionError:
+            if response_started:
+                raise
+            error_response = JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32602,
+                        "message": "request JSON exceeds the supported nesting depth",
+                    },
+                },
+                status_code=200,
+            )
+            await error_response(scope, receive, send)
+
+    async def _dispatch_to_transport(
         self,
         scope: Scope,
         receive: Receive,

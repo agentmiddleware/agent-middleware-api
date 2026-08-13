@@ -4912,6 +4912,26 @@
         }
       }
     },
+    "/mcp/public": {
+      "post": {
+        "tags": [
+          "MCP Public Endpoint"
+        ],
+        "summary": "Public read-only MCP endpoint (official MCP SDK, stateless Streamable HTTP, JSON responses, no authentication)",
+        "description": "Hand one public MCP message to the official SDK's transport.\n\nDeliberately no auth dependency: every tool behind this surface is a\nread of public material. Origin validation still applies — the absence\nof credentials is not an invitation to be a cross-site oracle.",
+        "operationId": "Public_MCP_Streamable_HTTP_Endpoint_mcp_public_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/kyc/sessions": {
       "post": {
         "tags": [

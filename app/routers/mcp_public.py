@@ -27,6 +27,7 @@ on.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import logging
 import sys
@@ -62,7 +63,7 @@ def _import_receipt_verifier():
     instead of a drift-prone reimplementation.
     """
     try:
-        from b2a_sdk import receipt_verifier
+        receipt_verifier = importlib.import_module("b2a_sdk.receipt_verifier")
     except ImportError:
         module_path = (
             Path(__file__).resolve().parents[2]
