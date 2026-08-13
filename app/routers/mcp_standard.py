@@ -409,9 +409,11 @@ def _validate_origin(request: Request) -> None:
     origin = request.headers.get("origin")
     if not origin:
         return
-    allowed = {request_origin}
-    if public_url:
-        allowed.add(public_url)
+    # A reverse proxy may expose its internal HTTP scheme through the ASGI
+    # request even though the canonical browser origin is HTTPS. Once an
+    # operator configures PUBLIC_URL, it is the only origin authority;
+    # request-derived origin is a local/unconfigured fallback only.
+    allowed = {public_url} if public_url else {request_origin}
     if origin.rstrip("/") not in allowed:
         raise HTTPException(status_code=403, detail={"error": "origin_not_allowed"})
 

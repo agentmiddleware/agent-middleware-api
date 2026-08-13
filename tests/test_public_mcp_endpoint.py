@@ -337,6 +337,39 @@ async def test_public_url_rejects_rebound_host(client, public_mcp_enabled, monke
 
 
 @pytest.mark.anyio
+async def test_public_url_rejects_proxy_observed_http_origin(
+    client, public_mcp_enabled, monkeypatch
+):
+    monkeypatch.setenv("PUBLIC_URL", "https://api.example.com")
+    get_settings.cache_clear()
+    try:
+        insecure = await client.post(
+            PUBLIC_PATH,
+            json=_initialize(),
+            headers={
+                **MCP_HEADERS,
+                "Host": "api.example.com",
+                "Origin": "http://api.example.com",
+            },
+        )
+        canonical = await client.post(
+            PUBLIC_PATH,
+            json=_initialize(),
+            headers={
+                **MCP_HEADERS,
+                "Host": "api.example.com",
+                "Origin": "https://api.example.com",
+            },
+        )
+    finally:
+        monkeypatch.setenv("PUBLIC_URL", "")
+        get_settings.cache_clear()
+
+    assert insecure.status_code == 403
+    assert canonical.status_code == 200
+
+
+@pytest.mark.anyio
 async def test_tools_list_is_exactly_the_read_only_surface(client, public_mcp_enabled):
     resp = await client.post(PUBLIC_PATH, json=_rpc("tools/list"), headers=MCP_HEADERS)
     tools = resp.json()["result"]["tools"]
