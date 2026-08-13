@@ -234,3 +234,101 @@ def test_command_failure_never_renders_public_database_url(
     assert "public database scrub or verification failed" in captured.err
     assert public_url not in captured.err
     assert "public-secret" not in captured.err
+
+
+def test_private_command_requires_private_url_without_public_fallback(
+    monkeypatch,
+    capsys,
+):
+    public_url = "postgresql://user:public-secret@switchback.proxy.rlwy.net:5432/db"
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DATABASE_PUBLIC_URL", public_url)
+
+    assert retire_owner_keys.main(["--private-db"]) == 1
+
+    captured = capsys.readouterr()
+    assert "DATABASE_URL is required" in captured.err
+    assert public_url not in captured.err
+    assert "public-secret" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql://user:secret@switchback.proxy.rlwy.net:5432/db",
+        "postgresql://user:secret@127.0.0.1:5432/db",
+        (
+            "postgresql://user:secret@postgres.railway.internal/db"
+            "?host=switchback.proxy.rlwy.net&port=6543"
+        ),
+        "postgresql://user:secret@postgres.railway.internal/db?port=6543",
+        "postgresql://user:secret@postgres.railway.internal/db#override",
+        "sqlite+aiosqlite:///local.db",
+    ],
+)
+def test_private_command_rejects_public_or_non_railway_urls(
+    monkeypatch,
+    capsys,
+    url,
+):
+    monkeypatch.setenv("DATABASE_URL", url)
+
+    assert retire_owner_keys.main(["--private-db"]) == 1
+
+    captured = capsys.readouterr()
+    assert "private Railway PostgreSQL URL" in captured.err
+    assert url not in captured.err
+    assert "secret" not in captured.err
+
+
+def test_private_command_uses_only_private_database_url_without_rendering_it(
+    monkeypatch,
+    capsys,
+):
+    private_url = (
+        "postgresql://user:private-secret@postgres.railway.internal:5432/database"
+    )
+    public_url = "postgresql://user:public-secret@switchback.proxy.rlwy.net:5432/db"
+    seen = []
+    monkeypatch.setenv("DATABASE_URL", private_url)
+    monkeypatch.setenv("DATABASE_PUBLIC_URL", public_url)
+
+    async def succeed(url):
+        seen.append(url)
+        return {
+            "wallets": 0,
+            "service_registry": 0,
+            "unbound_refresh_tokens": 0,
+        }
+
+    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", succeed)
+
+    assert retire_owner_keys.main(["--private-db"]) == 0
+    assert seen == [private_url]
+
+    captured = capsys.readouterr()
+    assert private_url not in captured.out
+    assert public_url not in captured.out
+    assert "private-secret" not in captured.out
+    assert "public-secret" not in captured.out
+
+
+def test_private_command_failure_never_renders_private_database_url(
+    monkeypatch,
+    capsys,
+):
+    private_url = (
+        "postgresql://user:private-secret@postgres.railway.internal:5432/database"
+    )
+    monkeypatch.setenv("DATABASE_URL", private_url)
+
+    async def fail(_url):
+        raise RuntimeError(f"failed against {private_url}")
+
+    monkeypatch.setattr(retire_owner_keys, "retire_owner_keys", fail)
+
+    assert retire_owner_keys.main(["--private-db"]) == 1
+    captured = capsys.readouterr()
+    assert "private database scrub or verification failed" in captured.err
+    assert private_url not in captured.err
+    assert "private-secret" not in captured.err
