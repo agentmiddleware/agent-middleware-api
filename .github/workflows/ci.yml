@@ -14,8 +14,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # 3.13 is a non-required, experimental leg. Keep fail-fast off so a 3.13
+      # breakage cannot cancel the still-running, branch-protection-required
+      # 3.11/3.12 legs and thereby block merges.
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v7
@@ -92,8 +96,11 @@ jobs:
   python_sdk:
     runs-on: ubuntu-latest
     strategy:
+      # See note on the `test` job: keep the non-required 3.13 leg from
+      # cancelling the required 3.10/3.11/3.12 legs and blocking merges.
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
 
