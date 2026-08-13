@@ -8,13 +8,15 @@ post-deploy pass closes that race and verifies that no non-empty value remains.
 It also revokes refresh-token rows that old workers can still write without the
 API-key binding introduced by the published refresh-token migration.
 
-The command intentionally accepts only ``DATABASE_PUBLIC_URL`` because it runs
-off-platform in GitHub Actions. It never falls back to the application's
-private ``DATABASE_URL`` and never renders either URL or a stored value.
+The default command intentionally accepts only ``DATABASE_PUBLIC_URL`` for
+legacy off-platform use. ``--private-db`` instead requires the API container's
+Railway-private ``DATABASE_URL``. Neither mode falls back to the other URL or
+renders a URL or stored value.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import ipaddress
 import os
@@ -81,6 +83,41 @@ def load_public_database_url(
     if address is not None and not address.is_global:
         raise OwnerKeyRetirementError(
             "DATABASE_PUBLIC_URL must not use a private or local address"
+        )
+    return url
+
+
+def load_private_database_url(
+    environment: Mapping[str, str] | None = None,
+) -> str:
+    """Return the Railway-private PostgreSQL URL without a public fallback."""
+    values = os.environ if environment is None else environment
+    url = values.get("DATABASE_URL", "").strip()
+    if not url:
+        raise OwnerKeyRetirementError("DATABASE_URL is required")
+
+    try:
+        parsed = urlsplit(url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise OwnerKeyRetirementError(
+            "DATABASE_URL must be a private Railway PostgreSQL URL"
+        ) from exc
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if parsed.scheme not in {
+        "postgres",
+        "postgresql",
+        "postgresql+asyncpg",
+    } or not hostname.endswith(".railway.internal"):
+        raise OwnerKeyRetirementError(
+            "DATABASE_URL must be a private Railway PostgreSQL URL"
+        )
+    # asyncpg accepts query-string connection overrides such as
+    # ``?host=public-proxy&port=...``. Reject every query/fragment so the
+    # validated authority is necessarily the authority used to connect.
+    if parsed.query or parsed.fragment:
+        raise OwnerKeyRetirementError(
+            "DATABASE_URL must be a private Railway PostgreSQL URL"
         )
     return url
 
@@ -178,16 +215,31 @@ async def retire_owner_keys(database_url: str) -> dict[str, int]:
         await engine.dispose()
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument(
+        "--private-db",
+        action="store_true",
+        help=(
+            "require Railway-private $DATABASE_URL for an in-container run; "
+            "never fall back to $DATABASE_PUBLIC_URL"
+        ),
+    )
+    args = parser.parse_args([] if argv is None else argv)
+    connection_kind = "private" if args.private_db else "public"
     try:
-        database_url = load_public_database_url()
+        database_url = (
+            load_private_database_url()
+            if args.private_db
+            else load_public_database_url()
+        )
         scrubbed = asyncio.run(retire_owner_keys(database_url))
     except OwnerKeyRetirementError as exc:
         print(f"{BAD} {exc}", file=sys.stderr)
         return 1
     except Exception:
         print(
-            f"{BAD} public database scrub or verification failed",
+            f"{BAD} {connection_kind} database scrub or verification failed",
             file=sys.stderr,
         )
         return 1
@@ -202,4 +254,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

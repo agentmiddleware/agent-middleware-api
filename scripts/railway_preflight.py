@@ -33,6 +33,11 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
     checkout, and the live service must publish the configured signing key.
     Existing invocations without a manifest keep their current behavior.
 
+``--manifest-only`` (requires ``--manifest``)
+    Validate the candidate manifest against this clean checkout without probing
+    the currently deployed release. Use this before an upgrade, because the
+    running service still reports the previous commit until deployment.
+
 Exit code is non-zero if any *executed* check fails, so this works as a
 release gate. Skipped checks never fail the run; ``--strict`` turns a skip
 into a failure for CI, where both inputs are expected.
@@ -56,6 +61,10 @@ Usage::
 
     # Managed single-tenant gate (URL and commit come from the manifest):
     python scripts/railway_preflight.py --live --strict \
+      --manifest /path/to/customer.production.json
+
+    # Candidate source/manifest binding before deployment (no network checks):
+    python scripts/railway_preflight.py --manifest-only \
       --manifest /path/to/customer.production.json
 
 See docs/deploy-railway.md.
@@ -602,15 +611,39 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--manifest-only",
+        action="store_true",
+        help=(
+            "validate --manifest against this clean release checkout without "
+            "running database or live-service checks"
+        ),
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="treat a skipped check as a failure (for CI)",
     )
     args = parser.parse_args(argv)
 
+    if args.manifest_only and not args.manifest:
+        print(f"{BAD} --manifest-only requires --manifest")
+        return 1
+    if args.manifest_only and (
+        args.db
+        or args.live
+        or args.public_db
+        or args.expected_version
+        or args.expected_commit_sha
+    ):
+        print(
+            f"{BAD} --manifest-only cannot be combined with --db, --live, "
+            "--public-db, or live release expectations"
+        )
+        return 1
+
     # Neither flag given: run whatever the environment supports.
-    run_db = args.db or not (args.db or args.live)
-    run_live = args.live or not (args.db or args.live)
+    run_db = not args.manifest_only and (args.db or not (args.db or args.live))
+    run_live = not args.manifest_only and (args.live or not (args.db or args.live))
 
     results: list[bool] = []
     manifest: CustomerManifest | None = None
@@ -661,6 +694,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{BAD} expected commit SHA does not match the customer manifest")
             return 1
         effective_commit_sha = manifest.expected_commit_sha
+
+    if args.manifest_only:
+        print(f"{OK} customer manifest matches clean release checkout")
+        return 0
 
     if run_db:
         database_url_load_failed = False

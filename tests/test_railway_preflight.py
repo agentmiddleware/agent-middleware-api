@@ -166,36 +166,73 @@ def test_public_db_connection_failure_does_not_render_url(
     assert "public-secret" not in output
 
 
-def test_deploy_workflow_drains_then_rescrubs_and_uses_public_db() -> None:
+def test_release_workflow_validates_without_production_mutation() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "railway-deploy.yml").read_text()
 
-    inject = workflow.index("- name: Inject build commit SHA")
-    deploy = workflow.index("- name: Deploy (railway up)")
-    drain = workflow.index("- name: Wait for old workers to drain")
-    rescrub = workflow.index("- name: Retire legacy credentials after drain")
-    verify = workflow.index("- name: Verify deploy — migrations + posture")
-    assert inject < deploy < drain < rescrub < verify
-    assert 'BUILD_COMMIT_SHA="$EXPECTED_SHA"' in workflow
-    assert "railway variable set" in workflow
-    assert "--skip-deploys" in workflow
-    assert "python scripts/retire_owner_keys.py" in workflow
-    assert "railway run --service Postgres --environment production" in workflow
-    assert "--public-db" in workflow
-    assert 'activeDeployments[0].status == "SUCCESS"' in workflow
-    assert "activeDeployments | length) == 1" in workflow
-    assert "python scripts/railway_preflight.py --live --strict" in workflow
-    assert '--expected-version "$EXPECTED_VERSION"' in workflow
-    assert '--expected-commit-sha "$EXPECTED_SHA"' in workflow
+    resolve = workflow.index("- name: Resolve release identity")
+    ci_gate = workflow.index("- name: Require green CI for exact commit")
+    posture = workflow.index("- name: Preflight — current production posture")
+    clean = workflow.index("- name: Confirm source checkout is clean")
+    summary = workflow.index("- name: Manual private release required")
+    assert resolve < ci_gate < posture < clean < summary
+    assert "deployment performed: **no**" in workflow
+    assert 'git merge-base --is-ancestor "$sha" origin/main' in workflow
+    assert 'select(.event == "push"' in workflow
+    assert "scripts/railway_preflight.py --live --strict" in workflow
+    assert "railway up" not in workflow
+    assert "railway variable set" not in workflow
+    assert "railway run --service Postgres --environment production" not in workflow
+    assert "--public-db" not in workflow
+    assert "DATABASE_PUBLIC_URL" not in workflow
+    assert "RAILWAY_TOKEN" not in workflow
+    assert "skip_ci_gate" not in workflow
 
 
 def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    private_release = sop[
+        sop.index("### Private operator release") : sop.index(
+            "### Customer operations manifest"
+        )
+    ]
 
-    assert (
-        "railway ssh --service api-service --environment production -- \\\n"
-        "  python scripts/railway_preflight.py --db --strict"
-    ) in sop
+    assert "uuid.uuid4().hex" in sop
+    assert 'RELEASE_MARKER="manual-exact-sha-$DEPLOY_SHA-$RELEASE_NONCE"' in sop
+    assert "select(.meta.cliMessage == $marker)" in sop
+    assert 'PROJECT_ID="$(jq -er \'.railway_project_id\' "$MANIFEST")"' in sop
+    assert 'ENVIRONMENT="$(jq -er \'.environment\' "$MANIFEST")"' in sop
+    assert 'API_URL="$(jq -er \'.public_url\' "$MANIFEST")"' in sop
+    assert "select(.name == $environment)" in sop
+    assert sop.count('--project "$PROJECT_ID"') >= 7
+    assert '--deployment-instance "$INSTANCE_ID"' in sop
+    assert "python scripts/retire_owner_keys.py --private-db" in sop
+    assert "python scripts/railway_preflight.py --db --strict" in sop
+    assert "PRIVATE_RELEASE_CHECKS_OK" in sop
+    assert 'test "$sentinel_count" -eq 1' in sop
+    assert 'test "$post_ready" = "true"' in sop
+    assert sop.count('--manifest "$MANIFEST" --url "$API_URL"') == 2
+    source_gate = private_release.index(
+        "python scripts/railway_preflight.py --manifest-only"
+    )
+    current_gate = private_release.index(
+        'python scripts/railway_preflight.py --live --strict --url "$API_URL"'
+    )
+    deploy = private_release.index('railway up --project "$PROJECT_ID"')
+    post_gate = private_release.rindex(
+        "python scripts/railway_preflight.py --live --strict"
+    )
+    assert source_gate < current_gate < deploy < post_gate
     assert "`railway run` executes locally" in sop
+
+
+def test_customer_restore_sop_does_not_misstate_volume_restore_semantics() -> None:
+    sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    normalized = " ".join(sop.split())
+
+    assert "Prefer a Railway PITR restore" in normalized
+    assert "ordinary Railway volume-backup restore instead swaps" in normalized
+    assert "removes backups newer than the selected point" in normalized
+    assert "restored disposable target" not in sop
 
 
 class _Response:
@@ -527,6 +564,65 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
             EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
         )
     ]
+
+
+def test_manifest_only_validates_new_candidate_without_probing_old_release(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    path = _write_manifest(tmp_path, _manifest_document())
+    monkeypatch.setattr(
+        preflight,
+        "check_live",
+        lambda *_args, **_kwargs: pytest.fail("old release must not be probed"),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "check_db",
+        lambda *_args, **_kwargs: pytest.fail("database must not be probed"),
+    )
+
+    assert (
+        preflight.main(
+            [
+                "--manifest-only",
+                "--manifest",
+                str(path),
+                "--url",
+                "https://api.example.com",
+            ]
+        )
+        == 0
+    )
+    assert "manifest matches clean release checkout" in capsys.readouterr().out
+
+
+def test_manifest_only_requires_manifest(capsys):
+    assert preflight.main(["--manifest-only"]) == 1
+    assert "requires --manifest" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "runtime_arguments",
+    [
+        ["--live"],
+        ["--db"],
+        ["--public-db"],
+        ["--expected-version", "1.3.0"],
+        ["--expected-commit-sha", EXPECTED_COMMIT_SHA],
+    ],
+)
+def test_manifest_only_rejects_runtime_checks(
+    tmp_path,
+    runtime_arguments,
+    capsys,
+):
+    path = _write_manifest(tmp_path, _manifest_document())
+    arguments = ["--manifest-only", "--manifest", str(path), *runtime_arguments]
+
+    assert preflight.main(arguments) == 1
+    assert "manifest-only" in capsys.readouterr().out
 
 
 def test_live_passes_on_expected_posture(monkeypatch):

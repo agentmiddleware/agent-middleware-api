@@ -42,14 +42,20 @@ and audit records remain in that customer's PostgreSQL service. Do not export
 them to a shared customer data store for this pilot.
 
 Before onboarding a customer, enable provider backups and complete one
-successful restore drill for that customer's PostgreSQL service. Record the
-date, source backup, restored target, verification result, and operator without
-putting data or credentials in the record. Make no SLA, RTO, or RPO claim until
-the corresponding behavior has been measured and contractually approved.
+successful restore drill for that customer's PostgreSQL service. Prefer a
+Railway PITR restore, which creates a sibling PostgreSQL service and leaves the
+source online. An ordinary Railway volume-backup restore instead swaps the
+source service to the restored volume and removes backups newer than the
+selected point; use that mode only on a non-customer qualification stack or in
+an approved maintenance window. Record the date, source backup, restore mode,
+verification result, and operator without putting data or credentials in the
+record. Make no SLA, RTO, or RPO claim until the corresponding behavior has
+been measured and contractually approved.
 
 ## Canonical deploy path
 
-**Build and ship from this repo with the in-repo Dockerfile.**
+**Build and ship from this repo with the in-repo Dockerfile. Production
+releases are operator-run from a clean exact-SHA checkout.**
 
 ```bash
 # From repository root, linked to the Railway service:
@@ -58,6 +64,12 @@ railway variable set BUILD_COMMIT_SHA="$DEPLOY_SHA" \
   --service api-service --environment production --skip-deploys
 railway up --service api-service --environment production
 ```
+
+That abbreviated command is appropriate only after the pre-deploy gates below.
+For a stack that may hold customer data, follow the complete
+[private operator release](#private-operator-release-required-for-customer-data)
+checklist. GitHub Actions validates the candidate release but deliberately does
+not deploy it or hold a Railway SSH key.
 
 `BUILD_COMMIT_SHA` is a persistent Railway variable. Refresh it from the exact
 checked-out commit before **every** manual `railway up`, even when the variable
@@ -175,7 +187,8 @@ railway run python scripts/railway_preflight.py
 # Schema parity only:
 DATABASE_URL=postgresql://… python scripts/railway_preflight.py --db
 
-# Schema parity from GitHub Actions or another off-platform runner:
+# Legacy off-platform parity diagnostic. This requires a temporary public
+# database proxy and is not acceptable evidence for customer-data qualification:
 railway run --service Postgres --environment production -- \
   python scripts/railway_preflight.py --db --public-db --strict
 
@@ -209,6 +222,155 @@ manifest-bound live check as separate post-deploy gates; both must pass.
 A check whose input is absent is **skipped**, not failed; pass `--strict` to
 turn a skip into a failure (what CI and the deploy workflow use). Shorthands:
 `make railway-preflight` and `make railway-preflight-live`.
+
+### Private operator release (required for customer data)
+
+Do not give GitHub Actions a Railway workspace SSH key. A project-scoped token
+cannot manage Railway SSH keys, while a workspace key reaches every service in
+the workspace. Keep the release operator-local and register one controlled key
+only for the maintenance window.
+
+Use Railway CLI 5.35.0 or newer. Earlier versions have known remote-command
+argument/execution bugs. The sentinel below is mandatory even on a newer CLI:
+an SSH command that returns zero without actually running must not approve a
+release.
+
+From a clean detached checkout of the exact commit:
+
+```bash
+set -euo pipefail
+
+MANIFEST="${MANIFEST:?set MANIFEST to the controlled customer manifest path}"
+SERVICE="api-service"
+DEPLOY_SHA="$(git rev-parse HEAD)"
+EXPECTED_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+PROJECT_ID="$(jq -er '.railway_project_id' "$MANIFEST")"
+ENVIRONMENT="$(jq -er '.environment' "$MANIFEST")"
+API_URL="$(jq -er '.public_url' "$MANIFEST")"
+
+test -z "$(git status --porcelain)"
+test "${#DEPLOY_SHA}" -eq 40
+git fetch origin main --no-tags
+git merge-base --is-ancestor "$DEPLOY_SHA" origin/main
+
+# Exact-SHA CI is a hard gate. Do not substitute a green PR-head run.
+ci_conclusion="$(gh api \
+  "repos/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&status=completed" \
+  --jq '[.workflow_runs[] | select(.event == "push" and .conclusion != null)][0].conclusion // "none"')"
+test "$ci_conclusion" = "success"
+
+# Bind the candidate manifest to this clean source checkout, but do not compare
+# its new SHA to the still-running old release. Check current service posture
+# separately without a candidate identity expectation.
+python scripts/railway_preflight.py --manifest-only \
+  --manifest "$MANIFEST" --url "$API_URL"
+python scripts/railway_preflight.py --live --strict --url "$API_URL"
+control_plane="$(railway status \
+  --project "$PROJECT_ID" --environment "$ENVIRONMENT" --json)"
+test "$(jq -r '.id' <<<"$control_plane")" = "$PROJECT_ID"
+test "$(jq -r --arg environment "$ENVIRONMENT" \
+  '[.environments.edges[].node | select(.name == $environment)] | length' \
+  <<<"$control_plane")" -eq 1
+
+# Refresh provenance, then deploy only this clean checkout. A unique marker
+# lets the operator identify this deployment even if another release starts.
+RELEASE_NONCE="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+RELEASE_MARKER="manual-exact-sha-$DEPLOY_SHA-$RELEASE_NONCE"
+railway variable set BUILD_COMMIT_SHA="$DEPLOY_SHA" \
+  --project "$PROJECT_ID" --service "$SERVICE" \
+  --environment "$ENVIRONMENT" --skip-deploys
+railway up --project "$PROJECT_ID" --service "$SERVICE" \
+  --environment "$ENVIRONMENT" --ci \
+  --message "$RELEASE_MARKER"
+
+# Resolve and wait for the uniquely marked deployment just started above.
+DEPLOYMENT_ID="$(railway deployment list \
+  --project "$PROJECT_ID" --service "$SERVICE" \
+  --environment "$ENVIRONMENT" --limit 20 --json \
+  | jq -er --arg marker "$RELEASE_MARKER" \
+      '[.[] | select(.meta.cliMessage == $marker)][0].id')"
+
+for attempt in $(seq 1 60); do
+  snapshot="$(railway status --project "$PROJECT_ID" \
+    --environment "$ENVIRONMENT" --json)"
+  ready="$(jq -r \
+    --arg environment "$ENVIRONMENT" --arg service "$SERVICE" \
+    --arg deployment "$DEPLOYMENT_ID" '
+      ([.environments.edges[].node
+        | select(.name == $environment)
+        | .serviceInstances.edges[].node
+        | select(.serviceName == $service)][0] // null) as $instance
+      | $instance != null
+        and ($instance.activeDeployments | length) == 1
+        and $instance.activeDeployments[0].id == $deployment
+        and $instance.activeDeployments[0].status == "SUCCESS"
+        and ($instance.activeDeployments[0].instances | length) == 1
+        and $instance.activeDeployments[0].instances[0].status == "RUNNING"
+    ' <<<"$snapshot")"
+  [ "$ready" = "true" ] && break
+  [ "$attempt" -lt 60 ] || { echo "deployment did not become uniquely ready" >&2; exit 1; }
+  sleep 5
+done
+
+INSTANCE_ID="$(jq -er \
+  --arg environment "$ENVIRONMENT" --arg service "$SERVICE" \
+  --arg deployment "$DEPLOYMENT_ID" '
+    [.environments.edges[].node
+      | select(.name == $environment)
+      | .serviceInstances.edges[].node
+      | select(.serviceName == $service)
+      | .activeDeployments[]
+      | select(.id == $deployment)
+      | .instances[0].id][0]
+  ' <<<"$snapshot")"
+
+# Pin both private checks to that exact running instance. The post-drain scrub
+# runs first; schema parity and the sentinel must then succeed in the same SSH
+# invocation. Neither command prints DATABASE_URL or stored credentials.
+remote_output="$(railway ssh \
+  --project "$PROJECT_ID" --service "$SERVICE" \
+  --environment "$ENVIRONMENT" \
+  --deployment-instance "$INSTANCE_ID" -- \
+  sh -c 'python scripts/retire_owner_keys.py --private-db && python scripts/railway_preflight.py --db --strict && printf "PRIVATE_RELEASE_CHECKS_OK\\n"')"
+printf '%s\n' "$remote_output"
+sentinel_count="$(printf '%s\n' "$remote_output" | grep -c '^PRIVATE_RELEASE_CHECKS_OK$' || true)"
+test "$sentinel_count" -eq 1
+
+# Refuse to bless the release if the selected instance stopped being the only
+# active worker while the private checks ran.
+post_snapshot="$(railway status --project "$PROJECT_ID" \
+  --environment "$ENVIRONMENT" --json)"
+post_ready="$(jq -r \
+  --arg environment "$ENVIRONMENT" --arg service "$SERVICE" \
+  --arg deployment "$DEPLOYMENT_ID" \
+  --arg instance "$INSTANCE_ID" '
+    ([.environments.edges[].node
+      | select(.name == $environment)
+      | .serviceInstances.edges[].node
+      | select(.serviceName == $service)][0] // null) as $service_instance
+    | $service_instance != null
+      and ($service_instance.activeDeployments | length) == 1
+      and $service_instance.activeDeployments[0].id == $deployment
+      and $service_instance.activeDeployments[0].status == "SUCCESS"
+      and ($service_instance.activeDeployments[0].instances | length) == 1
+      and $service_instance.activeDeployments[0].instances[0].id == $instance
+      and $service_instance.activeDeployments[0].instances[0].status == "RUNNING"
+  ' <<<"$post_snapshot")"
+test "$post_ready" = "true"
+
+# The public service must attest the manifest's origin, signing key, source SHA,
+# and this checkout's version.
+python scripts/railway_preflight.py --live --strict \
+  --manifest "$MANIFEST" --url "$API_URL" \
+  --expected-version "$EXPECTED_VERSION"
+```
+
+Afterward, inspect application and HTTP logs for tracebacks, dependency
+degradation, or unexpected 5xx responses. A failed private sentinel, schema
+check, exact-SHA check, health check, or critical user flow is a rollback
+trigger. Roll back by deploying the previously green exact SHA through this
+same sequence; never reverse database migrations. Migrations used for a
+rolling release must remain compatible with that rollback release.
 
 ### Customer operations manifest
 
@@ -244,10 +406,11 @@ The preflight first binds the manifest's commit and revision to the local
 release checkout and refuses a dirty worktree, then can remotely attest the
 public URL, application commit, schema revision (when `--db` runs), and
 active signing-key publication and fingerprint. It records the Railway
-project id, environment, and region but cannot remotely
-attest those three values without Railway control-plane API access; the
-operator must compare them with the linked Railway project before
-qualification. A `railway up` source build does not currently expose a stable runtime image
+project id, environment, and region but cannot remotely attest those three
+values without Railway control-plane API access. The private operator release
+checklist therefore derives the project and environment selectors from this
+manifest and validates them through Railway before deployment. A `railway up`
+source build does not currently expose a stable runtime image
 digest to this application, so `BUILD_COMMIT_SHA` is the attested release
 identity and image digest is explicitly **not verified** for this pilot. Do not
 invent or record a guessed digest.
@@ -271,48 +434,41 @@ Therefore a deploy is incomplete until Railway reports that the new deployment
 is the only active worker set and the idempotent post-deploy retirement passes:
 
 ```bash
-# Run only after the old deployment has fully drained. This loads the Postgres
-# service's explicit DATABASE_PUBLIC_URL and never prints it.
-railway run --service Postgres --environment production -- \
-  python scripts/retire_owner_keys.py
+# Run only after the old deployment has fully drained. Pin the command to the
+# new API instance, whose DATABASE_URL reaches Postgres privately.
+railway ssh --project "$PROJECT_ID" \
+  --service api-service --environment production \
+  --deployment-instance "$INSTANCE_ID" -- \
+  python scripts/retire_owner_keys.py --private-db
 ```
 
 The command locks all three affected tables for its transaction, replaces any
 late non-empty owner-key value with the empty compatibility marker, revokes any
 NULL-bound refresh token, and verifies both invariants. It fails if
-`DATABASE_PUBLIC_URL` or any required retirement column is missing. A later
-contract migration may drop the owner-key columns only after this release can
-no longer be running.
+the selected private `DATABASE_URL` is absent or not a Railway-private
+PostgreSQL URL, or if any required retirement column is missing. It never falls
+back to `DATABASE_PUBLIC_URL`. A later contract migration may drop the
+owner-key columns only after this release can no longer be running.
 
-## Deploying from CI (optional)
+## Validating a release in CI
 
-`.github/workflows/railway-deploy.yml` is a **manual** (`workflow_dispatch`)
-deploy that runs the same canonical `railway up` from a checkout of the ref you
-pick. It is not a push trigger, and it does not use Railway's *Redeploy from
-GitHub source* — both remain forbidden above. Before deploying it requires the
-CI workflow to have concluded `success` for that exact commit (override with
-`skip_ci_gate` for emergencies), then runs the live posture preflight against
-the currently deployed release without requiring the new version or SHA. It
-injects the resolved full commit as `BUILD_COMMIT_SHA` with `--skip-deploys`
-before `railway up`. After deploying, it waits until the new deployment is the
-only active worker set, re-scrubs the retained owner-key columns, and loads the
-Postgres service environment so the off-platform runner can perform strict
-schema parity through `DATABASE_PUBLIC_URL`. The final live check requires the
-exact `pyproject.toml` version and resolved full commit SHA. This catches both a
-shipped-but-unmigrated schema and a healthy response still served by the wrong
-build without trying to resolve Railway's private database hostname from
-GitHub Actions.
+`.github/workflows/railway-deploy.yml` is a manual, **validation-only**
+`workflow_dispatch`. It checks out the selected ref, requires successful CI for
+that exact commit, verifies the current production posture, and records the
+candidate SHA and version. It never holds a Railway token or SSH key, changes a
+variable, runs `railway up`, or connects through `DATABASE_PUBLIC_URL`.
 
-The workflow is inert until an operator adds:
+The workflow requires:
 
 | Setting | Kind | Value |
 |---------|------|-------|
-| `RAILWAY_TOKEN` | repo/environment **secret** | Railway project token for the target project |
 | `PUBLIC_URL` | repo **variable** | Public API origin, used by the pre-deploy posture check |
 
-Manual `railway up` from a verified working tree remains fully supported and is
-still the fastest path; the workflow exists so a deploy has an auditable record
-and cannot skip the migration check.
+The workflow's green result means “candidate prepared,” not “deployed.” The
+operator must then use the private release checklist above. This separation
+keeps workspace-wide SSH authority out of GitHub while preserving exact-SHA,
+post-drain credential retirement, private schema parity, and live posture
+gates.
 
 ## After deploy — verify
 
@@ -355,9 +511,11 @@ Qualify every customer stack with synthetic or redacted data before onboarding:
    each trust-key document must omit the other customer's key id, and the
    database/signing-key identifiers must differ. Never print or copy the key
    values into the qualification record.
-5. Complete and record the provider-backup restore drill. Re-run the trust loop
-   against the restored disposable target, then remove that target through the
-   approved Railway operator process.
+5. Complete and record the provider-backup restore drill. Prefer a PITR-created
+   sibling and re-run the trust loop there before removing it through the
+   approved Railway operator process. Do not treat an ordinary volume-backup
+   restore as disposable: it replaces the source service's mounted volume and
+   removes backups newer than the selected point.
 
 Roll out first to an internal dedicated stack, then to one low-sensitivity
 design partner. Stop promotion if deployment provenance, schema parity,
