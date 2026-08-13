@@ -150,11 +150,57 @@ def test_settings_wrapper_uses_environment_field():
         TRUST_SIGNING_PRIVATE_KEY_B64=VALID_SIGNING_PRIVATE_KEY_B64,
         ALLOW_LEGACY_UNPERMITTED_MCP=False,
         ENABLE_PROOF_SURFACES=False,
+        ENABLE_DEV_KEY_SELF_PROVISION=False,
         DEBUG=False,
         WEBAUTHN_ALLOW_MOCK=False,
     )
 
     validate_trust_mode_guardrails(settings)
+
+
+def test_public_mcp_requires_shared_rate_limiter_in_production():
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment="production",
+            trust_mode_enabled=True,
+            signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+            allow_legacy_unpermitted_mcp=False,
+            enable_proof_surfaces=False,
+            enable_public_mcp_endpoint=True,
+            redis_url="",
+            public_url="https://api.example.com",
+        )
+
+    assert "REDIS_URL" in str(exc_info.value)
+
+
+def test_public_mcp_accepts_shared_rate_limiter_in_production():
+    validate_trust_mode_config(
+        environment="production",
+        trust_mode_enabled=True,
+        signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+        allow_legacy_unpermitted_mcp=False,
+        enable_proof_surfaces=False,
+        enable_public_mcp_endpoint=True,
+        redis_url="redis://redis.internal:6379/0",
+        public_url="https://api.example.com",
+    )
+
+
+def test_public_mcp_requires_public_origin_in_production():
+    with pytest.raises(TrustModeGuardrailError) as exc_info:
+        validate_trust_mode_config(
+            environment="production",
+            trust_mode_enabled=True,
+            signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+            allow_legacy_unpermitted_mcp=False,
+            enable_proof_surfaces=False,
+            enable_public_mcp_endpoint=True,
+            redis_url="redis://redis.internal:6379/0",
+            public_url="",
+        )
+
+    assert "PUBLIC_URL" in str(exc_info.value)
 
 
 def test_describe_permissive_returns_none_when_strict():

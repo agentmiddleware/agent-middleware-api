@@ -49,6 +49,7 @@ from anyio.abc import TaskStatus
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http import StreamableHTTPServerTransport
+from mcp.server.streamable_http_manager import RequestBodyLimitMiddleware
 from mcp.shared.exceptions import McpError
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
@@ -96,9 +97,7 @@ _SERVER_INSTRUCTIONS = (
 )
 
 
-def _mcp_error(
-    code: int, message: str, data: dict[str, Any] | None = None
-) -> McpError:
+def _mcp_error(code: int, message: str, data: dict[str, Any] | None = None) -> McpError:
     return McpError(mcp_types.ErrorData(code=code, message=message, data=data))
 
 
@@ -136,7 +135,10 @@ def _meta_idempotency_key(params: mcp_types.CallToolRequestParams) -> str | None
 
 
 async def _mint_auto_permit(
-    *, auth: AuthContext, tool_name: str, record: dict[str, Any],
+    *,
+    auth: AuthContext,
+    tool_name: str,
+    record: dict[str, Any],
     client_key: str | None,
 ) -> str:
     """Mint the bounded single-tool permit backing this call.
@@ -351,9 +353,7 @@ def _build_standard_mcp_server() -> Server:
             meta = dict(payload.get("_meta") or {})
             meta[_RECEIPT_META_KEY] = receipt
             payload["_meta"] = meta
-        return mcp_types.ServerResult(
-            mcp_types.CallToolResult.model_validate(payload)
-        )
+        return mcp_types.ServerResult(mcp_types.CallToolResult.model_validate(payload))
 
     server.request_handlers[mcp_types.CallToolRequest] = handle_call_tool
     return server
@@ -368,19 +368,22 @@ def _require_enabled() -> None:
 
 
 def _validate_origin(request: Request) -> None:
-    """Reject cross-origin browser calls (DNS-rebinding hardening).
+    """Validate browser Origin exactly and bind production Host to PUBLIC_URL.
 
     Non-browser MCP clients send no Origin header and pass through.
     """
+    public_url = get_settings().PUBLIC_URL.rstrip("/")
+    request_origin = f"{request.url.scheme}://{request.url.netloc}"
+    if public_url and request.url.netloc != urlsplit(public_url).netloc:
+        raise HTTPException(status_code=421, detail={"error": "host_not_allowed"})
+
     origin = request.headers.get("origin")
     if not origin:
         return
-    origin_host = urlsplit(origin).hostname
-    allowed = {request.url.hostname}
-    public_url = get_settings().PUBLIC_URL
+    allowed = {request_origin}
     if public_url:
-        allowed.add(urlsplit(public_url).hostname)
-    if origin_host not in allowed:
+        allowed.add(public_url)
+    if origin.rstrip("/") not in allowed:
         raise HTTPException(status_code=403, detail={"error": "origin_not_allowed"})
 
 
@@ -393,9 +396,37 @@ class _SdkTransportResponse(Response):
     owns everything after authentication: JSON-RPC parsing and parse errors,
     Accept/Content-Type validation, lifecycle and protocol-version
     negotiation, notifications, and error envelopes.
+
+    Takes the :class:`Server` to run so every stateless surface (standard,
+    public) shares one transport composition instead of drifting copies.
     """
 
+    def __init__(
+        self,
+        server: Server,
+        *,
+        max_request_body_size: int | None = None,
+    ) -> None:
+        super().__init__()
+        self._server = server
+        self._max_request_body_size = max_request_body_size
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self._max_request_body_size is not None:
+            limited = RequestBodyLimitMiddleware(
+                self._handle_request,
+                self._max_request_body_size,
+            )
+            await limited(scope, receive, send)
+            return
+        await self._handle_request(scope, receive, send)
+
+    async def _handle_request(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
         transport = StreamableHTTPServerTransport(
             mcp_session_id=None,
             is_json_response_enabled=True,
@@ -409,14 +440,14 @@ class _SdkTransportResponse(Response):
                 async with transport.connect() as (read_stream, write_stream):
                     task_status.started()
                     try:
-                        await _standard_mcp_server.run(
+                        await self._server.run(
                             read_stream,
                             write_stream,
-                            _standard_mcp_server.create_initialization_options(),
+                            self._server.create_initialization_options(),
                             stateless=True,
                         )
                     except Exception:  # pragma: no cover - response already sent
-                        logger.exception("Standard MCP stateless session crashed")
+                        logger.exception("MCP stateless session crashed")
 
             await tg.start(run_server)
             await transport.handle_request(scope, receive, send)
@@ -444,7 +475,7 @@ async def handle_standard_mcp(
     _require_enabled()
     _validate_origin(request)
     request.scope.setdefault("state", {})["auth_context"] = auth
-    return _SdkTransportResponse()
+    return _SdkTransportResponse(_standard_mcp_server)
 
 
 @router.api_route("", methods=["GET", "DELETE"], include_in_schema=False)

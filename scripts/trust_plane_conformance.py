@@ -9,8 +9,9 @@ What it verifies
 ----------------
   * Golden path: discover -> wallet hierarchy -> scoped permit -> governed
     invoke -> signed receipt -> receipt verifies -> audit chain verifies.
-  * Exactly-once: a replayed Idempotency-Key returns the *same* receipt and
-    does not charge twice, both sequentially and under concurrency.
+  * Exactly-once: a completed replay returns the *same* receipt; concurrent
+    identical requests expose only that receipt identity or an explicit
+    in-progress response; and the operation is charged once.
   * Budget: a permit denies the invocation that would exceed max_credits.
   * Permit lifecycle: expired and forged permits are rejected.
   * Tenant isolation (the strongest check here): a scoped API key bound to
@@ -164,7 +165,9 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
         json={"wallet_id": wallet_b, "key_name": f"{TAG}-b"},
     )
     if not s.check(
-        "setup: mint scoped key for wallet B", r.status_code == 201, r.text[:120]
+        "setup: mint scoped key for wallet B",
+        r.status_code == 201,
+        f"HTTP {r.status_code}",
     ):
         return
     key_b = r.json()["api_key"]
@@ -246,18 +249,21 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
     r = await make_permit(c, admin, spn, wallet_a, "concurrent")
     pid_c = r.json()["permit_id"]
     key = f"{TAG}-concurrent-once"
+    concurrent_body = invoke_body(
+        wallet_a, pid_c, f"concurrent identical {RUN}", req_id=15
+    )
 
-    async def fire(i):
+    async def fire():
         return await c.post(
             "/mcp/messages",
             headers=admin_headers({"Idempotency-Key": key}),
-            json=invoke_body(wallet_a, pid_c, f"concurrent {i}", req_id=i),
+            json=concurrent_body,
         )
 
     responses = await asyncio.gather(
-        *[fire(i) for i in range(15)], return_exceptions=True
+        *[fire() for _ in range(15)], return_exceptions=True
     )
-    rids, errors = set(), 0
+    rids, receipt_responses, in_progress, errors = set(), 0, 0, 0
     for resp in responses:
         if isinstance(resp, Exception):
             errors += 1
@@ -265,11 +271,33 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
         j = resp.json()
         got = j.get("result", {}).get("receipt", {}).get("receipt_id")
         if got:
+            receipt_responses += 1
             rids.add(got)
+        elif j.get("error", {}).get("message") == "idempotency_in_progress":
+            in_progress += 1
+        else:
+            errors += 1
     s.check(
-        "15 concurrent same-key invokes collapse to one receipt",
-        len(rids) == 1 and errors == 0,
-        f"distinct_receipts={len(rids)} errors={errors}",
+        "15 concurrent identical invokes expose one receipt identity or in-progress",
+        len(rids) == 1
+        and receipt_responses + in_progress == len(responses)
+        and errors == 0,
+        (
+            f"receipt_responses={receipt_responses} in_progress={in_progress} "
+            f"distinct_receipts={len(rids)} errors={errors}"
+        ),
+    )
+
+    r = await c.post(
+        "/mcp/messages",
+        headers=admin_headers({"Idempotency-Key": key}),
+        json=concurrent_body,
+    )
+    completed_rid = r.json().get("result", {}).get("receipt", {}).get("receipt_id")
+    s.check(
+        "post-completion replay returns the concurrent winner's receipt",
+        bool(completed_rid) and completed_rid in rids,
+        f"winner={next(iter(rids), None)} replay={completed_rid}",
     )
 
     r = await c.get(f"/v1/permits/{pid_c}", headers=admin)

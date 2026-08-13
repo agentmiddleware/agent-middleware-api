@@ -79,6 +79,9 @@ def validate_trust_mode_config(
     enable_proof_surfaces: bool = True,
     static_dev_api_keys: str = "",
     enable_dev_key_self_provision: bool = False,
+    enable_public_mcp_endpoint: bool = False,
+    redis_url: str = "",
+    public_url: str = "",
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -138,6 +141,18 @@ def validate_trust_mode_config(
                 "production-like environments (self-serve dev key minting "
                 "is local-only — see docs/static-dev-api-keys.md)"
             )
+        if enable_public_mcp_endpoint and not (redis_url or "").strip():
+            violations.append(
+                "REDIS_URL is required when ENABLE_PUBLIC_MCP_ENDPOINT is true "
+                "in production-like environments (anonymous verification must "
+                "use shared rate-limit state)"
+            )
+        if enable_public_mcp_endpoint and not (public_url or "").strip():
+            violations.append(
+                "PUBLIC_URL is required when ENABLE_PUBLIC_MCP_ENDPOINT is true "
+                "in production-like environments (browser origin and Host "
+                "validation must use the operator-configured public origin)"
+            )
 
     if violations:
         raise TrustModeGuardrailError("; ".join(violations))
@@ -154,6 +169,9 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         enable_proof_surfaces=settings.ENABLE_PROOF_SURFACES,
         static_dev_api_keys=settings.STATIC_DEV_API_KEYS,
         enable_dev_key_self_provision=settings.ENABLE_DEV_KEY_SELF_PROVISION,
+        enable_public_mcp_endpoint=settings.ENABLE_PUBLIC_MCP_ENDPOINT,
+        redis_url=settings.REDIS_URL,
+        public_url=settings.PUBLIC_URL,
     )
 
 

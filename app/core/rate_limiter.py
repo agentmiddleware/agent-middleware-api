@@ -5,14 +5,17 @@ Enforces per-API-key request limits using a sliding window counter.
 Returns standard rate limit headers on every response.
 """
 
-import time
 import asyncio
+import ipaddress
 import logging
+import os
+import time
 from collections import defaultdict
+
+import redis.asyncio as redis
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-import redis.asyncio as redis
 
 from .config import get_settings
 from .runtime_degradation import mark_rate_limiter_memory_fallback
@@ -20,6 +23,36 @@ from .trust_mode import is_production_like_environment
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+_PUBLIC_MCP_PATH = "/mcp/public"
+_PUBLIC_MCP_BUCKET_PREFIX = "route:mcp-public"
+_PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER = 10
+
+
+def _public_mcp_client_id(request: Request) -> str:
+    """Return a non-spoofable client identifier for the supported ingress.
+
+    Railway documents ``X-Real-IP`` as an ingress-populated client address.
+    Trust it only when Railway's injected environment marker is present, and
+    only when exactly one canonical IP value was supplied. Other deployments
+    retain the ASGI peer address and ignore all caller-provided forwarding
+    headers.
+    """
+
+    peer_host = request.client.host if request.client else "unknown"
+    if not os.environ.get("RAILWAY_ENVIRONMENT_ID", "").strip():
+        return peer_host
+
+    values = request.headers.getlist("x-real-ip")
+    if len(values) != 1:
+        return peer_host
+    raw = values[0].strip()
+    if not raw or "," in raw or "%" in raw:
+        return peer_host
+    try:
+        return ipaddress.ip_address(raw).compressed
+    except ValueError:
+        return peer_host
 
 
 class RateLimiterUnavailable(RuntimeError):
@@ -89,63 +122,102 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def _check_limit_with_redis(
         self,
-        api_key: str,
+        bucket_key: str,
         now: float,
+        *,
+        limit: int | None = None,
     ) -> tuple[bool, int, int]:
         """
         Returns (limited, remaining, reset_in_seconds).
         """
+        effective_limit = self.limit if limit is None else limit
         client = await self._get_redis()
         if client is None:
             if self._fail_closed_on_redis_outage():
                 raise RateLimiterUnavailable("redis_rate_limiter_unavailable")
             if self._redis_url:
                 mark_rate_limiter_memory_fallback()
-            return await self._check_limit_in_memory(api_key, now)
+            return await self._check_limit_in_memory(
+                bucket_key,
+                now,
+                limit=effective_limit,
+            )
 
         window_size = int(self.window)
         bucket_start = int(now // window_size) * window_size
         reset_in = max(1, (bucket_start + window_size) - int(now))
-        key = f"rate_limit:{api_key}:{bucket_start}"
+        key = f"rate_limit:{bucket_key}:{bucket_start}"
 
         count = await client.incr(key)
         if count == 1:
             await client.expire(key, window_size + 2)
 
-        remaining = max(0, self.limit - int(count))
-        limited = int(count) > self.limit
+        remaining = max(0, effective_limit - int(count))
+        limited = int(count) > effective_limit
         return limited, remaining, reset_in
 
     async def _check_limit_in_memory(
         self,
-        api_key: str,
+        bucket_key: str,
         now: float,
+        *,
+        limit: int | None = None,
     ) -> tuple[bool, int, int]:
         """
         Returns (limited, remaining, reset_in_seconds).
         """
+        effective_limit = self.limit if limit is None else limit
         window_start = now - self.window
 
         async with self._lock:
-            self._requests[api_key] = [
-                ts for ts in self._requests[api_key] if ts > window_start
+            self._requests[bucket_key] = [
+                ts for ts in self._requests[bucket_key] if ts > window_start
             ]
 
-            current_count = len(self._requests[api_key])
-            if current_count >= self.limit:
-                oldest = self._requests[api_key][0] if self._requests[api_key] else now
+            current_count = len(self._requests[bucket_key])
+            if current_count >= effective_limit:
+                oldest = (
+                    self._requests[bucket_key][0] if self._requests[bucket_key] else now
+                )
                 reset_in = max(1, int(oldest + self.window - now) + 1)
                 return True, 0, reset_in
 
-            self._requests[api_key].append(now)
-            remaining = max(0, self.limit - len(self._requests[api_key]))
-            oldest = self._requests[api_key][0]
+            self._requests[bucket_key].append(now)
+            remaining = max(
+                0,
+                effective_limit - len(self._requests[bucket_key]),
+            )
+            oldest = self._requests[bucket_key][0]
             reset_in = max(1, int(oldest + self.window - now) + 1)
             return False, remaining, reset_in
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # Extract API key for per-key limiting
-        api_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
+        # Public MCP is intentionally unauthenticated. Ignore caller-supplied
+        # API-key headers there so rotating bogus values cannot mint fresh
+        # rate-limit buckets (and the local test-key bypass cannot be reached
+        # from the Internet).
+        public_mcp_request = request.url.path.rstrip("/") == _PUBLIC_MCP_PATH
+        if public_mcp_request:
+            client_id = _public_mcp_client_id(request)
+            namespace = (
+                f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
+            )
+            bucket_limits = [
+                (
+                    f"{namespace}:{_PUBLIC_MCP_BUCKET_PREFIX}:client:{client_id}",
+                    self.limit,
+                ),
+                (
+                    f"{namespace}:{_PUBLIC_MCP_BUCKET_PREFIX}:global",
+                    max(
+                        self.limit,
+                        self.limit * _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER,
+                    ),
+                ),
+            ]
+        else:
+            bucket_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
+            bucket_limits = [(bucket_key, self.limit)]
 
         # Skip rate limiting for docs, health, and test clients
         skip_paths = (
@@ -169,7 +241,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # In test / CI environments, the special "test-key" bypasses rate limits
         # so that large test suites don't self-throttle.
-        if api_key == "test-key":
+        if (
+            not public_mcp_request
+            and bucket_key == "test-key"
+            and not is_production_like_environment(settings.ENVIRONMENT)
+        ):
             response = await call_next(request)
             response.headers["X-RateLimit-Limit"] = str(self.limit)
             response.headers["X-RateLimit-Remaining"] = str(self.limit)
@@ -177,10 +253,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return response  # type: ignore[no-any-return]
 
         now = time.time()
+        applied_limit = self.limit
+        header_remaining = self.limit
+        header_reset = int(self.window)
         try:
-            limited, remaining, reset_in = await self._check_limit_with_redis(
-                api_key, now
-            )
+            for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
+                limited, remaining, reset_in = await self._check_limit_with_redis(
+                    bucket_key,
+                    now,
+                    limit=applied_limit,
+                )
+                if index == 0:
+                    header_remaining = remaining
+                    header_reset = reset_in
+                if limited:
+                    break
         except RateLimiterUnavailable:
             return JSONResponse(
                 status_code=503,
@@ -225,9 +312,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "Redis rate limiter failed; using in-memory rate limiter "
                 "for this request."
             )
-            limited, remaining, reset_in = await self._check_limit_in_memory(
-                api_key, now
-            )
+            for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
+                limited, remaining, reset_in = await self._check_limit_in_memory(
+                    bucket_key,
+                    now,
+                    limit=applied_limit,
+                )
+                if index == 0:
+                    header_remaining = remaining
+                    header_reset = reset_in
+                if limited:
+                    break
 
         if limited:
             return JSONResponse(
@@ -236,14 +331,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "detail": {
                         "error": "rate_limited",
                         "message": (
-                            f"Rate limit exceeded. {self.limit} requests "
+                            f"Rate limit exceeded. {applied_limit} requests "
                             "per minute allowed."
                         ),
                         "retry_after_seconds": reset_in,
                     }
                 },
                 headers={
-                    "X-RateLimit-Limit": str(self.limit),
+                    "X-RateLimit-Limit": str(applied_limit),
                     "X-RateLimit-Remaining": "0",
                     "X-RateLimit-Reset": str(reset_in),
                     "Retry-After": str(reset_in),
@@ -254,7 +349,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         response.headers["X-RateLimit-Limit"] = str(self.limit)
-        response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(reset_in)
+        response.headers["X-RateLimit-Remaining"] = str(header_remaining)
+        response.headers["X-RateLimit-Reset"] = str(header_reset)
 
         return response  # type: ignore[no-any-return]

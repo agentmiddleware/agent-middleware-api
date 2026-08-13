@@ -98,7 +98,8 @@ trust-release-gate:
 # so point them at staging unless you intend to write test data to production.
 #
 # trust-conformance-live asserts the invariants the product sells against a
-# running instance: golden path, sequential and 15-way concurrent replay,
+# running instance: golden path, sequential replay, 15-way identical concurrent
+# admission with safe in-progress responses, post-completion replay,
 # idempotency-key conflict on a changed payload, budget denial, expired and
 # forged permits, receipt and audit-chain verification, and tenant isolation.
 # Requires AGENT_MIDDLEWARE_API_KEY (a bootstrap/admin key). Set

@@ -7,11 +7,12 @@ main repository suite, where cryptography is always present.
 
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
 
-from b2a_sdk import verify_cli
+from b2a_sdk import receipt_verifier, verify_cli
 from b2a_sdk.receipt_verifier import (
     CANONICALIZATION,
     VerificationError,
@@ -30,7 +31,7 @@ def _bundle(**overrides):
         "alg": "Ed25519",
         "canonicalization": CANONICALIZATION,
         "signing_input": json.dumps({"receipt_id": "rcpt-1", "kid": "key-1"}),
-        "signature": "AA==",
+        "signature": base64.b64encode(b"\x00" * 64).decode(),
         "issuer": "https://api.example.com",
     }
     bundle.update(overrides)
@@ -86,6 +87,10 @@ def test_key_set_drops_disabled_keys():
     }
 
     assert set(key_set_from_document(document)) == {"live"}
+
+
+def test_key_revoked_status_is_reserved_for_sdk_compatibility():
+    assert VerificationStatus.KEY_REVOKED.value == "key_revoked"
 
 
 def test_key_set_skips_unusable_entries_without_failing_the_whole_document():
@@ -144,14 +149,55 @@ def test_non_json_string_bundle_is_malformed():
     assert verify_bundle("{oops", {}).status is VerificationStatus.MALFORMED
 
 
+def test_extreme_signing_input_nesting_is_malformed_not_a_crash():
+    nested = "[" * 1_100 + "0" + "]" * 1_100
+
+    result = verify_bundle(_bundle(signing_input=nested), {"key-1": b"\x00" * 32})
+
+    assert result.status is VerificationStatus.MALFORMED
+    assert not result.is_tampered
+
+
+@pytest.mark.parametrize(
+    "signing_input",
+    [
+        '{"value":' + "9" * 5_000 + "}",
+        '{"value":"\\ud800"}',
+    ],
+    ids=["huge_integer", "lone_surrogate"],
+)
+def test_pathological_json_values_are_malformed_not_internal_errors(signing_input):
+    result = verify_bundle(
+        _bundle(signing_input=signing_input),
+        {"key-1": b"\x00" * 32},
+    )
+
+    assert result.status is VerificationStatus.MALFORMED
+    assert not result.is_tampered
+
+
 def test_non_object_bundle_is_malformed():
     assert verify_bundle([1, 2, 3], {}).status is VerificationStatus.MALFORMED
+
+
+@pytest.mark.parametrize(
+    "signature",
+    ["!!!!", "AA==", base64.b64encode(b"\x00" * 65).decode()],
+)
+def test_invalid_base64_or_signature_length_is_malformed(signature):
+    result = verify_bundle(
+        _bundle(signature=signature),
+        {"key-1": b"\x00" * 32},
+    )
+
+    assert result.status is VerificationStatus.MALFORMED
+    assert not result.is_tampered
 
 
 def test_issuer_mismatch_is_checked_before_any_key_lookup():
     result = verify_bundle(_bundle(), {}, expected_issuer="https://other.example.com")
 
-    assert result.status is VerificationStatus.INVALID
+    assert result.status is VerificationStatus.MISMATCH
     assert "issuer" in (result.reason or "")
 
 
@@ -160,6 +206,25 @@ def test_malformed_public_key_is_not_reported_as_tampering():
 
     assert result.status is VerificationStatus.MALFORMED
     assert not result.is_tampered
+
+
+def test_unexpected_crypto_backend_error_is_not_an_invalid_verdict(monkeypatch):
+    # Reaches the signature stage, so it needs the InvalidSignature import to
+    # succeed; on a bare install the install-hint VerificationError wins first.
+    pytest.importorskip("cryptography")
+
+    class BrokenVerifier:
+        def verify(self, _signature, _signing_bytes):
+            raise RuntimeError("crypto backend failed")
+
+    monkeypatch.setattr(
+        receipt_verifier,
+        "_load_verifier",
+        lambda _raw_public_key: BrokenVerifier(),
+    )
+
+    with pytest.raises(VerificationError, match="failed unexpectedly"):
+        verify_bundle(_bundle(), {"key-1": b"\x00" * 32})
 
 
 def _run_human_readable_cli(monkeypatch, capsys, claims):

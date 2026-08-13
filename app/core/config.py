@@ -133,6 +133,15 @@ class Settings(BaseSettings):
     ENABLE_STANDARD_MCP_ENDPOINT: bool = False
     STANDARD_MCP_PERMIT_TTL_SECONDS: int = 120
 
+    # --- Public MCP endpoint (POST /mcp/public) ---
+    # Unauthenticated, read-only Streamable HTTP surface for MCP clients
+    # that cannot hold an API key (public plugin runtimes such as ChatGPT
+    # apps). Serves only verification and discovery tools; nothing behind
+    # it can create signing authority, mint permits, debit wallets, change
+    # governed tool registration, or reach the governed invoke path. Off by
+    # default like every other transport surface.
+    ENABLE_PUBLIC_MCP_ENDPOINT: bool = False
+
     # --- Stripe Payment Processing ---
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
@@ -205,6 +214,8 @@ class Settings(BaseSettings):
     CAPTION_LANGUAGE: str = "en"
 
     # --- Rate Limiting ---
+    # Authenticated routes use the API key. The unauthenticated public MCP
+    # route uses a canonical client IP plus a deployment-wide backstop.
     RATE_LIMIT_PER_MINUTE: int = 120
 
     # --- LLM / AI Agent Intelligence ---

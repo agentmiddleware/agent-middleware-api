@@ -93,7 +93,7 @@ def test_modified_or_unexpected_issuer_is_rejected() -> None:
         expected_issuer=EXPECTED_ISSUER,
     )
 
-    assert result.status is VerificationStatus.INVALID
+    assert result.status is VerificationStatus.MISMATCH
 
 
 def test_modified_public_key_is_rejected() -> None:

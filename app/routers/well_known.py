@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..core.config import get_settings, public_api_origin
 from ..core.public_contact import validated_public_contact
@@ -631,25 +632,17 @@ async def get_trust_keys_json():
     """Serve the public verification keys for offline receipt checking."""
     service = get_signing_key_service()
     try:
-        # Materialize the active key so a freshly deployed plane publishes a
-        # usable key rather than an empty list.
-        await service.ensure_active_key()
-    except (SigningKeyError, RuntimeError):
-        # Misconfigured or absent signing material must not take down public
-        # verification of receipts already signed under earlier keys.
-        logger.warning("trust_keys_active_key_unavailable", exc_info=True)
-
-    try:
         keys = await service.list_public_keys()
-    except (SigningKeyError, RuntimeError):
+    except (SigningKeyError, SQLAlchemyError, RuntimeError):
         logger.warning("trust_keys_unavailable", exc_info=True)
         return _trust_keys_unavailable()
 
     if not keys:
-        # Reachable store, nothing publishable — e.g. signing material is
-        # misconfigured so ensure_active_key() failed above, or every stored
-        # key has been disabled. Same situation for a verifier as an
-        # unreachable store, so it gets the same answer.
+        # Reachable store, nothing publishable — e.g. startup/operator key
+        # provisioning has not completed, or every stored key has been
+        # disabled. Same situation for a verifier as an unreachable store, so
+        # it gets the same answer. This public read must never create signing
+        # authority on the verifier's behalf.
         logger.warning("trust_keys_empty")
         return _trust_keys_unavailable()
 
@@ -698,15 +691,8 @@ async def get_jwks_json():
     """
     service = get_signing_key_service()
     try:
-        # Materialize the active key so a freshly deployed plane publishes a
-        # usable key rather than an empty set.
-        await service.ensure_active_key()
-    except (SigningKeyError, RuntimeError):
-        logger.warning("jwks_active_key_unavailable", exc_info=True)
-
-    try:
         keys = await service.list_public_keys()
-    except (SigningKeyError, RuntimeError):
+    except (SigningKeyError, SQLAlchemyError, RuntimeError):
         logger.warning("jwks_unavailable", exc_info=True)
         return _trust_keys_unavailable()
 

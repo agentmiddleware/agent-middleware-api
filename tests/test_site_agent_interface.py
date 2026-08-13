@@ -133,13 +133,19 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     page = (output / "index.html").read_text(encoding="utf-8")
     text = _page_text(page)
     headline = "Authorize one agent action. Charge it once. Prove what happened."
-    body = (
-        "Give AI agents scoped permissions and spending limits, prevent duplicate "
-        "charges on retries, and get a signed receipt for every governed MCP tool call."
+    failure = (
+        "Your agent invokes a costly tool. The request times out. Was it dispatched? "
+        "Should the agent retry? Will the retry create another debit?"
+    )
+    boundary = (
+        "Put one scoped, budgeted boundary in front of the call. The same accepted "
+        "idempotency key cannot create a second gateway dispatch or debit, and the "
+        "terminal gateway outcome gets a signed receipt."
     )
 
     assert headline in text
-    assert body in text
+    assert failure in text
+    assert boundary in text
     assert "Book a one-tool pilot" in text
     assert "Verify a real receipt" in text
     assert "platform engineering, AI infrastructure, and security teams" in text

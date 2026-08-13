@@ -14,6 +14,11 @@ stranger proves the claims are *reachable and checkable from the documentation
 alone*. If the stranger gets stuck, the gap is real product surface — usually a
 doc, an error message, or a discovery field — not a test.
 
+This is a usability and independent-verification test, not customer validation.
+A local tool, self-issued public proof, or friendly evaluator cannot satisfy the
+partner-owned pilot gate in
+[`docs/30-day-customer-validation.md`](30-day-customer-validation.md).
+
 ## Ground rules
 
 - **Public docs only.** The stranger may read the published discovery contract

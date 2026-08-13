@@ -65,7 +65,10 @@ detection of both a tampered receipt and a tampered audit event.
 Replay is therefore already a proven invariant, not a gap — it is asserted here
 on both the success and denial paths, again in the dogfood proof against a real
 side effect, again across two OS processes by the crash proof, and again under
-15-way concurrency by the live conformance suite.
+15 identical concurrent requests by the live conformance suite. During the
+in-progress window, overlapping local-tool requests may receive the explicit
+`idempotency_in_progress` response; after completion, replay returns the one
+receipt.
 
 ### The ten attacks in `make red-team-trust-plane`
 
@@ -139,7 +142,7 @@ Both write real rows to the target. Point them at staging.
 
 | Command | Proves | Requires |
 |---|---|---|
-| `make trust-conformance-live` | Golden path; sequential **and 15-way concurrent** replay collapsing to one receipt and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | `AGENT_MIDDLEWARE_API_KEY`; set `AGENT_MIDDLEWARE_API_URL` or it defaults to production |
+| `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | `AGENT_MIDDLEWARE_API_KEY`; set `AGENT_MIDDLEWARE_API_URL` or it defaults to production |
 | `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency; always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
 
 The battery reports SKIP — never a false PASS — for MCP-invocation checks when
