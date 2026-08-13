@@ -11,6 +11,7 @@ import sys
 import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlparse
 import runpy
 
 import pytest
@@ -54,7 +55,7 @@ def _page_text(markup: str) -> str:
 
 def _render_site(output: Path, contacts: dict[str, str] | None = None):
     environment = dict(os.environ)
-    for name in VALID_TEST_CONTACTS:
+    for name in (*VALID_TEST_CONTACTS, "PUBLIC_ENABLE_VERCEL_ANALYTICS"):
         environment.pop(name, None)
     if contacts:
         environment.update(contacts)
@@ -308,7 +309,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert 'name="twitter:card" content="summary_large_image"' in page
     assert "https://www.thisisatest.tech/social-card.png" in page
     assert '<link rel="icon" href="/favicon.svg"' in page
-    assert "/_vercel/insights/script.js" in page
+    assert "/_vercel/insights/script.js" not in page
     assert "Sitemap: https://www.thisisatest.tech/sitemap.xml" in robots
     assert "https://www.thisisatest.tech/proof/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
@@ -318,6 +319,113 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
         assert f'data-analytics-event="{event_name}"' in page
     assert "dataset.href" not in analytics
     assert "textContent" not in analytics
+
+
+def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
+    """The insights script 404s unless the Vercel project enables analytics."""
+
+    default_output = tmp_path / "default"
+    result = _render_site(default_output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+    for relative_path in ("index.html", "proof/index.html"):
+        page = (default_output / relative_path).read_text(encoding="utf-8")
+        assert "/_vercel/insights/script.js" not in page
+        assert "window.va" not in page
+        assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
+        assert '<script defer src="/analytics.js"></script>' in page
+
+    enabled_output = tmp_path / "enabled"
+    enabled_contacts = dict(VALID_TEST_CONTACTS)
+    enabled_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = "true"
+    result = _render_site(enabled_output, enabled_contacts)
+    assert result.returncode == 0, result.stderr
+    for relative_path in ("index.html", "proof/index.html"):
+        page = (enabled_output / relative_path).read_text(encoding="utf-8")
+        assert '<script defer src="/_vercel/insights/script.js"></script>' in page
+        assert "window.va" in page
+        assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
+
+    invalid_contacts = dict(VALID_TEST_CONTACTS)
+    invalid_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = "enable"
+    rejected = _render_site(tmp_path / "invalid", invalid_contacts)
+    assert rejected.returncode == 2
+    assert "PUBLIC_ENABLE_VERCEL_ANALYTICS" in rejected.stderr
+
+
+class _ExternalLinkCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.missing_rel: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag != "a":
+            return
+        attributes = dict(attrs)
+        href = attributes.get("href") or ""
+        if not href.startswith(("http://", "https://")):
+            return
+        if (urlparse(href).hostname or "") == "www.thisisatest.tech":
+            return
+        rel_tokens = set((attributes.get("rel") or "").split())
+        if not {"noopener", "noreferrer"} <= rel_tokens:
+            self.missing_rel.append(href)
+
+
+def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    for relative_path in ("index.html", "proof/index.html"):
+        collector = _ExternalLinkCollector()
+        collector.feed((output / relative_path).read_text(encoding="utf-8"))
+        collector.close()
+        assert not collector.missing_rel, (
+            f"{relative_path} external links missing rel=noopener noreferrer: "
+            f"{collector.missing_rel}"
+        )
+
+
+class _JsonLdCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_json_ld = False
+        self.payloads: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        self._in_json_ld = tag == "script" and dict(attrs).get("type") == (
+            "application/ld+json"
+        )
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._in_json_ld = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_json_ld and data.strip():
+            self.payloads.append(data)
+
+
+def test_pages_publish_valid_json_ld(tmp_path) -> None:
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    expected = {
+        "index.html": ("WebSite", "https://www.thisisatest.tech/"),
+        "proof/index.html": ("WebPage", "https://www.thisisatest.tech/proof/"),
+    }
+    for relative_path, (schema_type, url) in expected.items():
+        collector = _JsonLdCollector()
+        collector.feed((output / relative_path).read_text(encoding="utf-8"))
+        collector.close()
+        assert len(collector.payloads) == 1, f"{relative_path} JSON-LD missing"
+        document = json.loads(collector.payloads[0])
+        assert document["@context"] == "https://schema.org"
+        assert document["@type"] == schema_type
+        assert document["url"] == url
+        assert document["name"]
+        assert document["description"]
 
 
 def test_local_site_assets_exist() -> None:

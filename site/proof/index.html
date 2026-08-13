@@ -40,6 +40,20 @@
       name="twitter:image"
       content="https://www.thisisatest.tech/social-card.png"
     />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "Verify a real agent-action receipt",
+        "url": "https://www.thisisatest.tech/proof/",
+        "description": "Download a portable Agent Middleware API receipt and verify its Ed25519 signature offline.",
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "Agent Middleware API",
+          "url": "https://www.thisisatest.tech/"
+        }
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -59,14 +73,7 @@
         if (amwPrefs.underline) amwRoot.setAttribute("data-a11y-underline", "on");
       } catch (amwError) {}
     </script>
-    <script>
-      window.va =
-        window.va ||
-        function () {
-          (window.vaq = window.vaq || []).push(arguments);
-        };
-    </script>
-    <script defer src="/_vercel/insights/script.js"></script>
+    @@VERCEL_ANALYTICS_SCRIPTS@@
     <script defer src="/analytics.js"></script>
     <script defer src="/proof/proof.js"></script>
     <script defer src="/a11y.js"></script>
@@ -82,6 +89,7 @@
         <a
           class="nav-agent"
           href="@@PUBLIC_BOOKING_URL@@"
+          rel="noopener noreferrer"
           data-analytics-event="booking_click"
           >Book a pilot <span aria-hidden="true">↗</span></a
         >
@@ -192,6 +200,7 @@ b2a-verify-receipt \
             <a
               class="button button-primary"
               href="@@PUBLIC_BOOKING_URL@@"
+              rel="noopener noreferrer"
               data-analytics-event="booking_click"
               >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
@@ -214,6 +223,7 @@ b2a-verify-receipt \
         <p>Contact</p>
         <a
           href="@@PUBLIC_BOOKING_URL@@"
+          rel="noopener noreferrer"
           data-analytics-event="booking_click"
           >Book a one-tool pilot</a
         >

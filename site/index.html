@@ -46,6 +46,15 @@
       name="twitter:image"
       content="https://www.thisisatest.tech/social-card.png"
     />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Agent Middleware API",
+        "url": "https://www.thisisatest.tech/",
+        "description": "Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+      }
+    </script>
     <link
       rel="alternate"
       type="application/json"
@@ -77,14 +86,7 @@
         if (amwPrefs.underline) amwRoot.setAttribute("data-a11y-underline", "on");
       } catch (amwError) {}
     </script>
-    <script>
-      window.va =
-        window.va ||
-        function () {
-          (window.vaq = window.vaq || []).push(arguments);
-        };
-    </script>
-    <script defer src="/_vercel/insights/script.js"></script>
+    @@VERCEL_ANALYTICS_SCRIPTS@@
     <script defer src="/analytics.js"></script>
     <script defer src="/proof/proof.js"></script>
     <script defer src="/a11y.js"></script>
@@ -103,6 +105,7 @@
         <a
           class="nav-agent"
           href="@@PUBLIC_BOOKING_URL@@"
+          rel="noopener noreferrer"
           data-analytics-event="booking_click"
           >Book a pilot <span aria-hidden="true">↗</span></a
         >
@@ -133,6 +136,7 @@
             <a
               class="button button-primary"
               href="@@PUBLIC_BOOKING_URL@@"
+              rel="noopener noreferrer"
               data-analytics-event="booking_click"
               >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
@@ -181,6 +185,7 @@
             <span>Built for operators of internal MCP tools</span>
             <a
               href="@@PUBLIC_BOOKING_URL@@"
+              rel="noopener noreferrer"
               data-analytics-event="booking_click"
               >Discuss fit <span aria-hidden="true">↗</span></a
             >
@@ -312,6 +317,7 @@
             <a
               class="button button-primary"
               href="@@PUBLIC_BOOKING_URL@@"
+              rel="noopener noreferrer"
               data-analytics-event="booking_click"
               >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
@@ -338,16 +344,16 @@
           </p>
         </div>
         <div class="machine-links">
-          <a href="https://api.thisisatest.tech/.well-known/agent.json">
+          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/.well-known/agent.json">
             <span>Agent manifest</span><code>/.well-known/agent.json</code>
           </a>
-          <a href="https://api.thisisatest.tech/llms.txt">
+          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/llms.txt">
             <span>Agent instructions</span><code>/llms.txt</code>
           </a>
-          <a href="https://api.thisisatest.tech/mcp/tools.json">
+          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/mcp/tools.json">
             <span>MCP discovery</span><code>/mcp/tools.json</code>
           </a>
-          <a href="https://api.thisisatest.tech/health/dependencies">
+          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/health/dependencies">
             <span>Runtime truth</span><code>/health/dependencies</code>
           </a>
         </div>
@@ -379,6 +385,7 @@
         <p>Human contact</p>
         <a
           href="@@PUBLIC_BOOKING_URL@@"
+          rel="noopener noreferrer"
           data-analytics-event="booking_click"
           >Book a one-tool pilot</a
         >
@@ -392,9 +399,9 @@
       <div class="footer-directory">
         <p>Evidence and discovery</p>
         <a href="/proof/" data-analytics-event="proof_click">Receipt proof</a>
-        <a href="https://api.thisisatest.tech/.well-known/agent.json">Agent manifest</a>
-        <a href="https://api.thisisatest.tech/openapi.json">OpenAPI</a>
-        <a href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
+        <a rel="noopener noreferrer" href="https://api.thisisatest.tech/.well-known/agent.json">Agent manifest</a>
+        <a rel="noopener noreferrer" href="https://api.thisisatest.tech/openapi.json">OpenAPI</a>
+        <a rel="noopener noreferrer" href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
       </div>
       <p class="footer-note">
         Marketing: <code>www.thisisatest.tech</code> · API:

@@ -4,6 +4,12 @@
 The source HTML deliberately contains non-deployable tokens. Vercel runs this
 script and serves only ``dist/``; a missing or obviously provisional contact
 therefore fails the build instead of leaking a fake funnel into production.
+
+The Vercel Web Analytics loader is emitted only when
+``PUBLIC_ENABLE_VERCEL_ANALYTICS=true``. Deploying the ``/_vercel/insights``
+script tag against a project whose Web Analytics is not enabled makes every
+page load log a 404 plus a MIME-type refusal in the browser console, so the
+default build omits the tag entirely.
 """
 
 from __future__ import annotations
@@ -27,6 +33,18 @@ CONTACT_FIELDS = {
     "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
     "@@PUBLIC_BOOKING_URL@@": "PUBLIC_BOOKING_URL",
 }
+ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
+ANALYTICS_TOKEN = "@@VERCEL_ANALYTICS_SCRIPTS@@"
+ANALYTICS_FLAG_ENABLED = frozenset({"1", "true", "yes", "on"})
+ANALYTICS_FLAG_DISABLED = frozenset({"", "0", "false", "no", "off"})
+ANALYTICS_SCRIPTS = """<script>
+      window.va =
+        window.va ||
+        function () {
+          (window.vaq = window.vaq || []).push(arguments);
+        };
+    </script>
+    <script defer src="/_vercel/insights/script.js"></script>"""
 TEXT_ASSETS = (
     "index.html",
     "proof/index.html",
@@ -159,6 +177,23 @@ def validated_contacts(environment: dict[str, str]) -> dict[str, str]:
     }
 
 
+def vercel_analytics_enabled(environment: dict[str, str]) -> bool:
+    """Return whether the build should emit the Vercel Web Analytics loader.
+
+    A misspelled value fails the build instead of silently disabling analytics
+    the operator meant to turn on.
+    """
+
+    raw = environment.get(ANALYTICS_FLAG, "").strip().casefold()
+    if raw in ANALYTICS_FLAG_ENABLED:
+        return True
+    if raw in ANALYTICS_FLAG_DISABLED:
+        return False
+    raise LaunchConfigurationError(
+        f"{ANALYTICS_FLAG} must be true/false (or 1/0, yes/no, on/off)"
+    )
+
+
 def _copy_asset(relative_path: str, output: Path) -> None:
     source = SITE_ROOT / relative_path
     destination = output / relative_path
@@ -198,6 +233,7 @@ def _validated_output_path(output: Path) -> Path:
 
 def render_site(output: Path, environment: dict[str, str]) -> None:
     replacements = validated_contacts(environment)
+    analytics_enabled = vercel_analytics_enabled(environment)
     missing_assets = [
         relative_path
         for relative_path in REQUIRED_PUBLIC_ASSETS
@@ -217,6 +253,13 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
     for relative_path in TEXT_ASSETS:
         source = SITE_ROOT / relative_path
         rendered = source.read_text(encoding="utf-8")
+        if analytics_enabled:
+            rendered = rendered.replace(ANALYTICS_TOKEN, ANALYTICS_SCRIPTS)
+        else:
+            # Drop the token's whole line so no blank line is left behind; the
+            # unresolved-token check below still fails loudly if the source
+            # ever stops matching this shape.
+            rendered = rendered.replace(f"    {ANALYTICS_TOKEN}\n", "")
         for token, replacement in replacements.items():
             rendered = rendered.replace(token, replacement)
         unresolved = sorted(set(re.findall(r"@@[A-Z0-9_]+@@", rendered)))

@@ -49,8 +49,14 @@ the offline verifier.
 
 Vercel Web Analytics records page views and three non-PII event names:
 `booking_click`, `email_click`, and `proof_click`. Event payloads never include
-the email address, booking URL, receipt fields, or link destination. Analytics
-must be enabled for the Vercel project before deploying the script.
+the email address, booking URL, receipt fields, or link destination.
+
+The `/_vercel/insights/script.js` loader is emitted only when
+`PUBLIC_ENABLE_VERCEL_ANALYTICS=true` is set at build time; the default build
+omits it. Vercel serves that script only for projects whose Web Analytics is
+enabled in the dashboard — deploying the tag without that produces a 404 plus
+a MIME-type refusal in the browser console on every page load. Enable Web
+Analytics for the Vercel project first, then set the environment variable.
 
 ## Deployment
 
