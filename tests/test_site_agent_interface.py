@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -302,6 +303,25 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     robots = (output / "robots.txt").read_text(encoding="utf-8")
     sitemap = (output / "sitemap.xml").read_text(encoding="utf-8")
     analytics = (output / "analytics.js").read_text(encoding="utf-8")
+
+    json_ld_match = re.search(
+        r'<script type="application/ld\+json">\s*(.*?)\s*</script>',
+        page,
+        flags=re.DOTALL,
+    )
+    assert json_ld_match is not None
+    website = json.loads(json_ld_match.group(1))
+    assert website == {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": "https://www.thisisatest.tech/#website",
+        "name": "Agent Middleware API",
+        "url": "https://www.thisisatest.tech/",
+        "description": (
+            "A control layer for scoped, replay-safe, metered MCP tool calls "
+            "with signed receipts."
+        ),
+    }
 
     assert '<link rel="canonical" href="https://www.thisisatest.tech/"' in page
     assert 'property="og:url" content="https://www.thisisatest.tech/"' in page
