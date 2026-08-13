@@ -9,7 +9,7 @@
       content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
     />
     <meta name="robots" content="index, follow" />
-    <meta name="theme-color" content="#f2efe6" />
+    <meta name="theme-color" content="#0b1120" />
     <link rel="canonical" href="https://www.thisisatest.tech/" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
@@ -61,10 +61,22 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Syne:wght@500;600;700;800&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Libre+Franklin:wght@700;800&amp;family=Public+Sans:wght@400;500;600&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css?v=design-partner" />
+    <link rel="stylesheet" href="/styles.css?v=ledger-seal" />
+    <script>
+      /* Apply saved accessibility preferences before first paint. */
+      try {
+        var amwPrefs = JSON.parse(window.localStorage.getItem("amw-a11y") || "{}");
+        var amwRoot = document.documentElement;
+        if (amwPrefs.scale) amwRoot.style.setProperty("--a11y-scale", amwPrefs.scale);
+        if (amwPrefs.contrast) amwRoot.setAttribute("data-a11y-contrast", "high");
+        if (amwPrefs.motion) amwRoot.setAttribute("data-a11y-motion", "reduce");
+        if (amwPrefs.spacing) amwRoot.setAttribute("data-a11y-spacing", "wide");
+        if (amwPrefs.underline) amwRoot.setAttribute("data-a11y-underline", "on");
+      } catch (amwError) {}
+    </script>
     <script>
       window.va =
         window.va ||
@@ -75,6 +87,7 @@
     <script defer src="/_vercel/insights/script.js"></script>
     <script defer src="/analytics.js"></script>
     <script defer src="/proof/proof.js"></script>
+    <script defer src="/a11y.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -248,6 +261,7 @@
 
         <div class="proof-grid artifact-grid" aria-live="polite">
           <article class="proof-col">
+            <span class="receipt-seal" aria-hidden="true">Ed25519 · self-issued</span>
             <div class="proof-label">
               <span>Published signed claims</span>
               <span class="badge" data-proof-status>loading artifact</span>

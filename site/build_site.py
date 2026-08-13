@@ -33,6 +33,7 @@ TEXT_ASSETS = (
 )
 COPY_ASSETS = (
     ".well-known",
+    "a11y.js",
     "analytics.js",
     "favicon.svg",
     "llm.txt",
