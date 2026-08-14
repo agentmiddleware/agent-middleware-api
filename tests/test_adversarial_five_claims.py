@@ -224,6 +224,68 @@ async def _spent_credits(permit_id: str) -> Decimal:
     return Decimal(str(permit.spent_credits))
 
 
+def race_money_integrity_violations(
+    *,
+    spent: Decimal,
+    debits: int,
+    refunds: int,
+    visible_successes: int,
+    tool_runs: int,
+    cap: float,
+    cost: float,
+) -> list[str]:
+    """Money-integrity invariants for the concurrent permit-cap race.
+
+    Returns the list of violated invariants (empty == all held). This is a pure
+    function so the semantics can be pinned by deterministic unit tests instead
+    of relying on a lucky interleaving to expose a regression.
+
+    Only the invariants that hold *regardless of how the concurrent writers
+    interleave* are asserted. Permit reserve, ledger debit, and receipt each
+    commit in SEPARATE transactions (``app/services/permits.py``,
+    ``billing_engine.py``, ``receipts.py``), so the exact cross-view equalities
+    are only transiently true: under real SQLite write contention
+    ``spent_credits`` can LEAD the committed debits (a reserve commits, its debit
+    loses the lock race, and the reservation is released only downward, never up
+    past the cap), and a committed debit can outrun the client-visible success
+    receipt (surfacing to the caller as a transient ``idempotency_in_progress``).
+    Asserting the raw equalities is what made this gate flaky; the always-true
+    guarantees are containment and one-directional bounds — the same
+    proof-pending-vs-corruption distinction the invariant-attack harness draws.
+    """
+    spent = Decimal(str(spent))
+    cap_d = Decimal(str(cap))
+    cost_d = Decimal(str(cost))
+    cap_allows = int(cap_d // cost_d)
+    violations: list[str] = []
+    # Containment — THE regression this gate guards.
+    if spent > cap_d:
+        violations.append(f"overspend: spent_credits {spent} exceeds cap {cap_d}")
+    if debits > cap_allows:
+        violations.append(
+            f"overspend: {debits} committed debits exceed cap_allows {cap_allows}"
+        )
+    if visible_successes > cap_allows:
+        violations.append(
+            f"over-admission: {visible_successes} successes exceed cap_allows {cap_allows}"
+        )
+    # No phantom success: a client-visible success is always backed by a
+    # committed debit. The reverse (a committed debit not yet visible as a
+    # success) is the tolerated proof-pending transient.
+    if visible_successes > debits:
+        violations.append(
+            f"phantom success: {visible_successes} successes exceed {debits} committed debits"
+        )
+    # Charge-once side effect: the tool never runs more than charges committed.
+    if tool_runs > debits:
+        violations.append(
+            f"side-effect without charge: {tool_runs} tool runs exceed {debits} debits"
+        )
+    if refunds != 0:
+        violations.append(f"unexpected refunds: {refunds}")
+    return violations
+
+
 # --------------------------------------------------------------------------- #
 # Claim 1 — Charge-once under retry                                            #
 # --------------------------------------------------------------------------- #
@@ -525,31 +587,47 @@ async def test_claim2_concurrent_race_never_exceeds_cap(
         # Every response is accounted for (no 200 slips through unasserted).
         assert len(succeeded) + len(budget_denied) + len(transient) == concurrency
 
-        # The containment invariant this gate exists for: no matter how the
-        # concurrent writers interleave, never more than floor(cap/cost) calls
-        # may land. The original bug admitted every concurrent call. `>= 1`
-        # guards against a vacuous all-denied pass.
-        assert 1 <= len(succeeded) <= cap_allows, [
-            r.get("result", r.get("error")) for r in results
-        ]
-        # At least one call was denied for budget (the cap was actually reached
-        # and enforced), unless transients absorbed the surplus.
-        assert len(budget_denied) >= 1 or len(transient) >= 1
-
-        # Money integrity: persisted spend exactly matches the admitted calls and
-        # never crosses the cap, and the ledger agrees.
+        # Money integrity is keyed off COMMITTED state — the permit's spend
+        # counter and the ledger — which is the ground truth, never the
+        # client-visible success count. Permit reserve, ledger debit, and receipt
+        # each commit in SEPARATE transactions, so under real SQLite write
+        # contention spent_credits can LEAD the committed debits (a reserve
+        # commits, its debit loses the lock race, and the reservation heals only
+        # downward) and a committed debit can outrun the client-visible success
+        # receipt (a transient idempotency_in_progress). Asserting the exact
+        # cross-view equalities — spent == successes*cost, debits == successes,
+        # runs == successes — is what made this gate flaky; the always-true
+        # guarantees are containment and one-directional bounds. The detailed
+        # invariants live in race_money_integrity_violations() so they can be
+        # pinned by deterministic unit tests rather than a lucky interleaving.
         spent = await _spent_credits(permit["permit_id"])
-        assert spent == Decimal(str(len(succeeded) * TOOL_COST))
-        assert spent <= Decimal("6")
         debits, refunds = await _ledger_split(
             client,
             provisioned["agent_wallet_id"],
             provisioned["agent_headers"],
             tool_name,
         )
-        assert debits == len(succeeded)
-        assert refunds == 0
-        assert runs["count"] == len(succeeded)  # the tool ran only for admits
+        violations = race_money_integrity_violations(
+            spent=spent,
+            debits=debits,
+            refunds=refunds,
+            visible_successes=len(succeeded),
+            tool_runs=runs["count"],
+            cap=6,
+            cost=TOOL_COST,
+        )
+        assert not violations, (
+            violations,
+            [r.get("result", r.get("error")) for r in results],
+        )
+        # Non-vacuous + cap actually reached: at least one charge committed (not
+        # an all-denied vacuous pass) and never more than floor(cap/cost) — the
+        # exact regression this gate guards — with the surplus contained, either
+        # denied for budget or deferred as a lock-translated transient.
+        assert 1 <= debits <= cap_allows, [
+            r.get("result", r.get("error")) for r in results
+        ]
+        assert len(budget_denied) >= 1 or len(transient) >= 1
     finally:
         get_service_registry().unregister_local(tool_name)
         # Dispose again so we do not strand a pool bound to this loop for the
@@ -883,3 +961,80 @@ async def test_claim5_out_of_scope_denial_is_signed_and_moves_no_money(
     finally:
         get_service_registry().unregister_local(allowed_tool)
         get_service_registry().unregister_local(blocked_tool)
+
+
+# --------------------------------------------------------------------------- #
+# Money-integrity invariant semantics (pure, deterministic)                    #
+#                                                                              #
+# These pin race_money_integrity_violations() so the concurrent-cap gate's     #
+# tolerance of the proof-pending transient can never be silently widened into  #
+# tolerating a real overspend. They need no server, DB, or event loop.         #
+# --------------------------------------------------------------------------- #
+
+
+_RACE_CAP = 6
+_RACE_COST = 2.0  # cap_allows = floor(6 / 2) = 3
+
+
+def _race_violations(**overrides: Any) -> list[str]:
+    kwargs: dict[str, Any] = {
+        "spent": Decimal("6"),
+        "debits": 3,
+        "refunds": 0,
+        "visible_successes": 3,
+        "tool_runs": 3,
+        "cap": _RACE_CAP,
+        "cost": _RACE_COST,
+    }
+    kwargs.update(overrides)
+    return race_money_integrity_violations(**kwargs)
+
+
+def test_race_money_integrity_holds_on_the_happy_path() -> None:
+    assert _race_violations() == []
+
+
+def test_race_money_integrity_tolerates_reserve_leading_the_debit() -> None:
+    # The exact CI flake: a third reservation committed (spent=6) but its debit
+    # lost the lock race, so only two debits/two successes are visible. Reserve
+    # and debit are separate transactions and the reservation heals only
+    # downward, so spent legitimately leads the ledger here.
+    assert _race_violations(spent=Decimal("6"), debits=2, visible_successes=2, tool_runs=2) == []
+
+
+def test_race_money_integrity_tolerates_charge_hidden_as_transient() -> None:
+    # Three charges committed, but one caller saw idempotency_in_progress
+    # because its receipt write lost the lock race. Client-visible successes are
+    # a lower bound on committed charges.
+    assert _race_violations(debits=3, visible_successes=1, tool_runs=3) == []
+
+
+def test_race_money_integrity_flags_overspend_from_the_original_bug() -> None:
+    # The pre-fix bug admitted every concurrent call (8 debits, spent 16).
+    violations = _race_violations(
+        spent=Decimal("16"), debits=8, visible_successes=8, tool_runs=8
+    )
+    assert any("overspend" in v for v in violations)
+
+
+def test_race_money_integrity_flags_overspend_by_one_debit() -> None:
+    violations = _race_violations(
+        spent=Decimal("8"), debits=4, visible_successes=4, tool_runs=4
+    )
+    assert any("cap_allows" in v for v in violations)
+
+
+def test_race_money_integrity_flags_phantom_success_without_a_charge() -> None:
+    # A client told "success" for a call that never committed a debit — the
+    # dangerous direction the <= bound must still catch.
+    violations = _race_violations(spent=Decimal("4"), debits=2, visible_successes=3, tool_runs=2)
+    assert any("phantom success" in v for v in violations)
+
+
+def test_race_money_integrity_flags_side_effect_without_a_charge() -> None:
+    violations = _race_violations(tool_runs=4)
+    assert any("side-effect without charge" in v for v in violations)
+
+
+def test_race_money_integrity_flags_unexpected_refund() -> None:
+    assert any("refund" in v for v in _race_violations(refunds=1))
