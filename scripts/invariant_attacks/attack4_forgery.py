@@ -8,9 +8,9 @@ imports no server code.
 Sub-tests:
   4a. Genuine SUCCESS receipt bundle verifies (exit 0 VERIFIED).
   4b. Genuine DENIAL receipt bundle verifies (denials are real signed evidence).
-  4c. Tamper each signed fact (credits_charged, outcome, tool, wallet_id,
-      ledger_entry_id) -> INVALID (exit 1) for every one.
-  4d. Verify a genuine receipt against a MUTATED key set (wrong public key) ->
+  4c. Tamper representative high-value signed facts (credits_charged, outcome,
+      tool, wallet_id, ledger_entry_id) -> INVALID (exit 1) for every one.
+  4d. Verify a genuine receipt against a key set with an unknown kid ->
       UNDETERMINED (exit 2), NOT INVALID: an outage must never read as fraud.
 """
 
@@ -112,16 +112,13 @@ def main():
     results["4b_denial_genuine"] = verify(denial_path, keys_path)
 
     signing_input = good_bundle["signing_input"]
-    # 4c: tamper each signed fact in signing_input (string surgery, re-sign nothing)
-    tampers = {
-        "credits_charged_2_to_0": ('"credits_charged":"2"', '"credits_charged":"0"'),
-        "outcome_success_to_denied": ('"outcome":"success"', '"outcome":"denied"'),
-        "tool_rename": ("partner.notes.write", "evil.tool.exfiltrate"),
-        "wallet_swap": (
-            good_bundle.get("receipt", {}).get("wallet_id", cred["wallet_id"]),
-            "agt-attacker0000",
-        ),
-    }
+    # 4c: mutate representative high-value signed facts in signing_input
+    # (string surgery, re-sign nothing). The shared helper deliberately includes
+    # ledger_entry_id so the harness covers the receipt-to-ledger binding it
+    # claims to protect.
+    tampers = A.signed_receipt_tamper_cases(
+        good_bundle, fallback_wallet_id=cred["wallet_id"]
+    )
     forge_results = {}
     for name, (old, new) in tampers.items():
         if old not in signing_input:

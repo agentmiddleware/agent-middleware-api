@@ -24,13 +24,14 @@ request and observed response, and gets a single verdict.
 | 1 | A retry never double-charges | 10 parallel identical invokes + same-key/different-payload replay | **HELD** |
 | 2 | A permit cap contains overspend | 10 parallel distinct-key invokes racing a 7-credit cap | **BROKE** on SQLite → **FIXED** (now HELD on both engines) |
 | 3 | A permit authorizes only its named tools | invoke a tool outside `allowed_tools` | **HELD** |
-| 4 | A receipt's signed facts cannot be forged | tamper each signed field; verify offline | **HELD** |
-| 5 | A crash leaves charge⇔receipt paired, never charged-without-proof, never double | `kill -9` mid-flight + boundary-kill proof | **HELD** |
+| 4 | A receipt's signed facts cannot be forged | tamper representative high-value signed fields; verify offline | **HELD** |
+| 5 | A crash leaves charge⇔receipt paired, never charged-without-proof, never double | `kill -9` mid-flight + boundary-kill proof | **HELD** at deterministic Postgres boundaries; live SQLite run is **PARTIAL** while proof remains pending |
 | 6 | A credential acts only within its authority | invalid/revoked keys, confused deputy, cross-tenant | **HELD** |
-| 7 | All of the above hold **simultaneously** under a mid-storm crash | six vectors contending at once + `kill -9` at a debit threshold | **HELD** |
+| 7 | Shared safety properties remain contained in one combined campaign | five live attack families share a crash storm; forgery is checked offline after restart | **HELD** under the hardened live rerun |
 
-**Headline finding — Attack 2 (budget overspend), BROKE on the shipped local
-posture.** Ten concurrent invocations with distinct idempotency keys against a
+**Historical headline finding — Attack 2 (budget overspend) broke on the shipped
+local posture and is now fixed.** Ten concurrent invocations with distinct
+idempotency keys against a
 **7-credit** permit (tool costs 2/call, so 3 calls should be the ceiling) **all
 succeeded and debited 20 credits** — a ~3× overspend, reproducible. Sequential
 enforcement is correct (the 4th sequential call is denied). The root cause is
@@ -42,7 +43,7 @@ on PostgreSQL** (3 successes, 7 signed budget denials), confirming this is a
 storage-engine gap in the quickstart posture, not a flaw in the invariant logic.
 `make quickstart` is also the walkthrough that sells "a permit cap contains
 overspend" to a first-time stranger — so the gap sits directly under a headline
-claim. **This finding has since been fixed in this PR** (see
+claim. **This finding was fixed in the earlier budget-race change** (see
 [Resolution](#2b-resolution--fix-applied)): every `spent_credits` mutation is now
 a single atomic guarded UPDATE, and the same 10-way race that debited 20 credits
 now holds the cap exactly on SQLite (3 successes, 6 debited), matching Postgres.
@@ -129,7 +130,7 @@ Reproduce: `python scripts/invariant_attacks/attack1_double_charge.py`.
 
 ---
 
-## Attack 2 — Budget / permit overspend → **BROKE** (SQLite) / **HELD** (Postgres)
+## Attack 2 — Budget / permit overspend → historical **BROKE**, now **HELD** on SQLite and Postgres
 
 **Invariant.** Cumulative spend under a permit can never exceed its `max_credits`
 cap — even under concurrent invocations racing the spend check.
@@ -152,7 +153,7 @@ wallet debited total: 6.00
 The denial is signed evidence carrying no charge (`outcome:"denied"`,
 `reason_code:"permit_budget_exceeded"`), returned in `error.data.receipt`.
 
-### 2b Concurrency race — BROKEN on SQLite
+### 2b Historical concurrency race — BROKEN on SQLite
 
 **Exact request (each of the 10, distinct `idempotency_key` and `id`):**
 
@@ -186,8 +187,8 @@ permit.spent_credits (db): 6.0     <- the permit "thinks" 6 was spent
 wallet actually debited:   16.0    <- the wallet really lost 16
 ```
 
-The guard `authorize_and_reserve` locks the permit row and increments
-`spent_credits` under that lock (`app/services/permits.py:427-440`):
+The historical `authorize_and_reserve` implementation locked the permit row and
+incremented `spent_credits` under that lock:
 
 ```python
 model = await session.get(PermitModel, permit_id, with_for_update=True)  # row lock
@@ -221,8 +222,11 @@ The real `FOR UPDATE` row lock serializes the check-and-reserve; excess callers
 block, re-read the incremented `spent_credits`, and receive signed
 `permit_budget_exceeded` denials.
 
-Reproduce: `python scripts/invariant_attacks/attack2_budget.py` and
-`attack2_mechanism_sqlite.py`; Postgres control via `attack2_budget_postgres.py`.
+Reproduce the **current fixed behavior** with
+`python scripts/invariant_attacks/attack2_budget.py` and
+`attack2_mechanism_sqlite.py`; use `attack2_budget_postgres.py` for the Postgres
+control. The broken numbers above are retained as historical finding evidence,
+not a claim about current HEAD.
 
 ### 2b Resolution — fix applied
 
@@ -320,7 +324,8 @@ verify" (unknown key) — an outage must never read as fraud.
 
 **Method.** Fetch a genuine receipt bundle and the public key set (the key set
 needs no credential), verify offline with the shipped `b2a_sdk` verifier (imports
-no server code), then tamper each signed fact and re-verify.
+no server code), then tamper representative high-value signed facts and
+re-verify.
 
 ```bash
 curl -s "$API_URL/v1/receipts/<rid>/portable" -H "X-API-Key: b2a_****" -o bundle.json
@@ -337,6 +342,7 @@ tamper credits_charged 2 -> 0    -> INVALID   signature does not verify over sig
 tamper outcome success -> denied -> INVALID   signature does not verify over signing_input  (1)
 tamper tool -> evil.tool         -> INVALID   signature does not verify over signing_input  (1)
 tamper wallet_id -> agt-attacker -> INVALID   signature does not verify over signing_input  (1)
+tamper ledger_entry_id           -> INVALID   signature does not verify over signing_input  (1)
 genuine receipt, unknown kid     -> UNKNOWN_KEY  no published key for kid 'quickstart-local-ed25519'  (2)
 ```
 
@@ -352,7 +358,7 @@ Reproduce: `python scripts/invariant_attacks/attack4_forgery.py`.
 
 ---
 
-## Attack 5 — Crash consistency → **HELD**
+## Attack 5 — Crash consistency → **HELD** at deterministic boundaries / **PARTIAL** on the live SQLite rerun
 
 **Invariant.** After an uncontrolled crash + restart: for every operation either
 the charge **and** the receipt exist or neither does; never "charged but no
@@ -370,9 +376,9 @@ complementary methods.
 
 ### 5a Authoritative boundary-kill proof (PostgreSQL) — PASS
 
-The repo ships a two-process proof that injects faults at **named commit
-boundaries** and kills a worker there. All three pass (`make prove-crash-recovery`,
-26.5s):
+The repo ships a two-process proof with two fault-injected worker deaths at
+**named commit boundaries**, plus one overlapping two-process serialization
+test. All three pass (`make prove-crash-recovery`, 26.5s):
 
 ```
 test_two_processes_serialize_one_governed_side_effect        PASSED  (debit_count==1, receipts==1)
@@ -419,7 +425,8 @@ deleted — it always survives to block re-execution. A ledger-wide query confir
 **0 committed debits were orphaned** (every debit still maps to a surviving
 record).
 
-**Verdict: HELD**, with one honestly-scoped caveat that matches the repo's
+**Deterministic Postgres verdict: HELD. Live SQLite classification: PARTIAL while
+proof remains pending**, matching the repo's
 documented `delivery_uncertain` / manual-review semantics
 ([`docs/failure-semantics.md`](docs/failure-semantics.md)): immediately after a
 crash there is a transient "charged, proof-pending" window during which the
@@ -429,6 +436,12 @@ The narrow charge→`mark_charged` sub-window leaves an uncheckpointed-but-charg
 local record that is safe from double charge (the record survives and blocks
 replay) but is not auto-flagged for review — worth tightening, not a money
 invariant break.
+
+**Fresh fail-closed rerun (2026-08-13): PARTIAL.** The threshold crash happened;
+there were no double charges, no receipt without its debit, and no silent orphan.
+Five debits still had surviving proof-pending records after replay, so
+`no_unresolved_proof_pending` was the only failed check. The hardened script
+returns nonzero for this state instead of promoting transient safety to `HELD`.
 
 Reproduce: `make prove-crash-recovery`;
 `python scripts/invariant_attacks/attack5_crash_sqlite.py`; `reconcile_probe.py`.
@@ -464,18 +477,26 @@ which `validate_key` filters out (`app/services/api_key_service.py`).
 
 Reproduce: `python scripts/invariant_attacks/attack6_key_misuse.py`.
 
+Fresh hardened rerun (2026-08-13): **HELD**. All exact status/reason contracts,
+both self-scoped audit views, successful revocation, post-revocation denial, and
+the no-side-effect check passed.
+
 ---
 
 ## What this campaign proves — and what it does not
 
-**Proves:** all six core trust invariants now survive an explicit hostile test
-with real concurrency, receipt tampering, crash recovery, and credential misuse.
-Double-charge, scope escape, receipt forgery, crash accounting, and credential
-authority HELD as found. Budget-cap containment HELD sequentially and on
-PostgreSQL but **BROKE under concurrency on the shipped SQLite/quickstart
-posture** — root cause isolated to `FOR UPDATE` being a no-op on SQLite — and was
-**fixed in this PR** (atomic guarded UPDATEs) so the same 10-way race now holds
-the cap on SQLite too, guarded by a regression test.
+**Verified:** the isolated attacks exercise all six core trust invariants. The
+applicable budget, deduplication, scope, and crash attacks use real concurrency;
+Attack 4's receipt-forgery mutations and Attack 6's credential-authority checks
+are serial probes. The campaign also covers deterministic crash boundaries and
+exact credential-denial contracts. Double-charge, scope escape, receipt forgery,
+and credential authority hold. Budget-cap containment historically broke on
+SQLite but now holds on SQLite and PostgreSQL after the guarded atomic-UPDATE
+fix. Crash integrity holds at the deterministic Postgres boundaries; the live
+SQLite test is classified `PARTIAL` whenever proof delivery remains pending
+rather than being misreported as fully held. The combined campaign must
+independently satisfy its new non-vacuity checks before receiving a hardened
+`HELD` verdict.
 
 **Does not prove:** production security. Credits here are synthetic; the quickstart
 signing key is local; settlement is not exercised; and the concurrency findings
@@ -486,17 +507,12 @@ Postgres two-process proof; the SQLite live-kill is complementary, and a random
 
 ## Recommended next step
 
-Attack 2 (the one broken invariant) is fixed in this PR and re-verified; the
-remaining follow-ups are smaller. Consider: (1) extending the same atomic-write
-discipline audit to any other per-row counter that still uses a read-modify-write
-under `FOR UPDATE` (the wallet velocity counters are already defended by the
-ledger `UNIQUE` constraint, but a sweep is cheap insurance); (2) wiring the
-SQLite-engine budget race into CI as a live check alongside the existing
-PostgreSQL `test_permit_postgres_concurrency.py`, so the quickstart posture is
-guarded end-to-end and not only at the service layer. Then move on to the
-attacks the brief deferred — notably attack #5's deterministic failure-boundary
-variants, which the two-process PostgreSQL proof already covers but the local
-SQLite instance does not exercise at exact commit points.
+Attack 2 is fixed and already guarded by the live SQLite CI test. Merge the
+fail-closed verdict hardening and confirm the combined CI job publishes its
+redacted artifact; keep the deterministic Postgres boundary proof authoritative
+for crash integrity. Then return to the customer-validation milestone rather
+than expanding the core product without a named prospect and concrete pilot
+blocker.
 
 ---
 
@@ -507,8 +523,10 @@ results reproduce on a second, independent environment, the full harness was
 re-run from a clean checkout on a different machine (macOS, Python 3.12 via
 `uv`; PostgreSQL 16 in Docker). One additional environment is corroboration,
 not proof of environment-independence in general.
-**All six invariants reproduced their verdicts**, including attack 2 now holding
-on SQLite after the atomic-UPDATE fix.
+The historical scripts reproduced their then-current verdicts, including attack
+2 holding on SQLite after the atomic-UPDATE fix. The fail-closed semantics added
+later supersede any historical label that did not require every claimed vector
+to run or that counted proof-pending as fully held.
 
 **SQLite quickstart (live HTTP, `make quickstart`):**
 
@@ -518,7 +536,7 @@ on SQLite after the atomic-UPDATE fix.
 | 2 budget overspend | **HELD** (cap 7 / 10 parallel → 3 successes, 6.0 debited, no overspend) |
 | 2 mechanism probe | `lost_update: false`, `overspent_vs_cap: false` |
 | 3 scope escape | HELD |
-| 4 forged receipts | HELD (genuine VERIFIED; all four tampered fields INVALID; unknown key → UNDETERMINED, not false-INVALID) |
+| 4 forged receipts | **HELD** under the current five-field harness, including `ledger_entry_id` (genuine VERIFIED; all tampering INVALID; unknown key → UNDETERMINED, not false-INVALID) |
 | 6 credential misuse | HELD |
 
 **PostgreSQL 16 (the authoritative concurrency/crash proofs):**
@@ -550,56 +568,57 @@ signing keys) remains explicitly out of scope for this harness.
 
 ---
 
-## Attack 7 — Six-vector simultaneous assault → **HELD**
+## Attack 7 — Shared crash storm plus offline forgery
 
-The attacks above each stress ONE invariant in isolation. Attack 7
-(`attack_combined.py`) runs all six at once against shared victim + attacker
-state, to prove they still hold under **cross-vector contention** — the class of
-failure serial tests cannot surface. A pool of workers drives an interleaved job
-queue so a budget race, a dedup race, a scope-escape, a confused-deputy/cross-
-tenant/revoked-key barrage, and legitimate load are all in flight simultaneously;
-a killer thread `SIGKILL`s the server the instant committed debits on the victim
-wallet cross a threshold. After restart, every load/budget key is replayed and
-the money invariants are reconciled against the ledger; a receipt **minted during
-the storm** is then tamper-checked offline.
+The attacks above each stress one invariant in isolation. Attack 7
+(`attack_combined.py`) schedules **five live attack families** against shared
+victim + attacker state: double-charge/dedup, budget overspend, scope escape,
+credential misuse, and crash consistency. Receipt anti-forgery is the sixth
+invariant in the campaign, but it is checked offline **after restart**; it is not
+simultaneously in flight with the HTTP storm.
 
-**Method.** Victim wallet V with three permits — `P_load` (cap 400, the volume +
+**Method.** Victim wallet V has three permits — `P_load` (cap 400, the volume +
 double-charge corpus), `P_budget` (cap 8, cost 2 → 4 calls allowed, the overspend
-target) and `P_scope` (allows only `some.other.tool`). Attacker wallet B and a
-pre-revoked wallet R drive the credential vectors against V. 214 storm jobs, 24
-concurrent workers, kill threshold = 12 committed debits. Engine: SQLite under a
-controllable boot (`boot_controlled_uv.sh`, killed by process group); the rate
-limiter is raised so the invariant — not the throttle — is what the storm
-exercises.
+target), and `P_scope` (allows only `some.other.tool`). Attacker wallet B and a
+pre-revoked wallet R drive the credential variants against V. The interleaved
+queue has 214 jobs across nine required live variants and 24 workers; a killer
+thread sends `SIGKILL` when committed debits cross 12. After restart, all
+load/budget keys are replayed and ledger-reconciled. The forgery phase prefers a
+storm-minted success receipt but records and may use a pre-storm control receipt
+when crash timing leaves no completed storm receipt.
 
-**Observed (HELD on all four fresh-boot runs; 17/17 checks each).** The kill
-landed mid-storm at 12 committed debits, with load successes, budget denials,
-scope denials, credential denials and connection-resets all interleaved in the
-same window (a representative run executed ~58 of 214 enqueued jobs before the
-kill). After restart + replay of every load/budget key:
+The original four fresh-boot runs were useful supporting evidence, but their
+counter tracked queue claims rather than completed work and the report overstated
+exact temporal overlap. Those historical `HELD` labels are therefore not used as
+the hardened verdict. Current code can report `HELD` only when:
 
-| Invariant | Result |
-|-----------|--------|
-| No double charge | committed debits ≤ distinct keys attempted; **0** keys debited twice |
-| Budget contained | `P_budget.spent_credits` ≤ cap on every run; **never exceeded** |
-| Charge ⇔ receipt | **0** success receipts without a ledger debit |
-| No silent charged-without-proof | every debit is covered by a success receipt **or** a surviving idempotency record; **0** silent orphans |
-| No scope escape | **0** `P_scope` successes (all denied or connection-reset) |
-| No credential escape | **0** successes from garbage / missing / confused-deputy / revoked |
-| No cross-tenant permit | attacker's `subject_wallet_id`-swap issuance was denied (`subject_wallet_access_denied`); **0** permits created — asserted directly, since an issuance carries no receipt |
-| Forgery under load | a storm-minted receipt VERIFIED genuine; every tampered field INVALID; unknown key UNDETERMINED |
+| Proof condition | Fail-closed requirement |
+|-----------------|-------------------------|
+| Storm non-vacuity | every required live variant has a recorded start |
+| Harness integrity | every broad result bucket is observed and no worker exception escapes |
+| Crash integrity | the threshold kill actually happens; no double charge, receipt-without-debit, or silent orphan appears |
+| Budget integrity | the budget row exists and both spend and success count remain within cap |
+| Authorization | no scope, credential, intruder-key, or cross-tenant success exists in responses or persisted state |
+| Forgery | genuine receipt verifies; wallet, ledger link, amount, outcome, and tool tampering are all INVALID; unknown kid is UNDETERMINED |
 
-The replay returns signed receipts for completed keys plus a batch of
-`idempotency_in_progress` — the latter are pre-crash attempts whose surviving
-idempotency record blocks re-execution, so no key is charged twice. The run also
-reproduces attack 5's honestly-scoped transient: some debits sit `charged,
-proof-pending` immediately after the crash until reconcile repairs or flags them
-— never a double charge, never a success receipt without a charge, and never a
-*silent* orphan (each pending debit still maps to a record the client sees as
-in-progress). The harness resets the dogfood side-effect store at start so the
-governed tool can write; when the tool is starved (notes file full) it returns
-`failed_refunded` and the money invariants still hold — charge then refund, no
-net loss — which several runs incidentally confirmed.
+**Fresh hardened rerun (2026-08-13): HELD.** All required live variants started:
+load 11, budget 11, dedup 10, scope 10, and six each for garbage, missing,
+confused-deputy, revoked, and cross-tenant credential variants. The kill landed
+at 12 committed debits. Reconciliation found 122 debits across 137 possible
+idempotency keys, zero double-charged keys, zero receipt-without-debit records,
+zero silent orphans, and spend contained at the 8-credit budget cap. The selected
+receipt was storm-produced; all five tamper cases—including `ledger_entry_id`—
+were INVALID, and the unknown kid remained UNDETERMINED. No worker error or
+failed check was recorded. Six debits remained visibly proof-pending behind
+surviving idempotency records; that transient is why the deterministic Postgres
+boundary proof, not this random live kill, remains authoritative for complete
+crash-delivery semantics.
 
-Reproduce: see "Six-vector simultaneous attack" in
+This proves non-vacuous cross-vector contention, not that all nine variants were
+simultaneously in flight at the exact microsecond of the kill. The redacted CI
+artifact records per-variant start counts, worker errors, receipt source, all
+checks, and ledger reconciliation so reviewers can evaluate the verdict without
+trusting console prose.
+
+Reproduce: see "Shared crash-storm attack" in
 [`scripts/invariant_attacks/README.md`](scripts/invariant_attacks/README.md).

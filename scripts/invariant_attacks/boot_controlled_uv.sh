@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Controllable boot for attack_combined.py (the six-vector simultaneous attack).
+# Controllable boot for attack_combined.py (shared crash-storm attack).
 #
 # Same trust-plane posture as boot_controlled.sh, but launched via `uv` so it
 # runs on a fresh clone without a pre-activated venv. Because `uv run` keeps
@@ -11,6 +11,8 @@
 #
 #   TP_STATE_DIR           (required)  database + signing seed dir
 #   TP_PORT                (default: 8000)
+#   TP_PYTHON              (optional)  use an already-provisioned interpreter
+#                          instead of resolving dependencies through uv.
 #   RATE_LIMIT_PER_MINUTE  (optional)  inherited from the environment; raise it
 #                          so the limiter does not throttle the invariant the
 #                          storm is actually testing.
@@ -39,6 +41,10 @@ export ENABLE_PROOF_SURFACES=false ENABLE_DOGFOOD_TOOL=true
 export ENABLE_DEV_KEY_SELF_PROVISION=true ENABLE_STANDARD_MCP_ENDPOINT=true
 export MCP_UPSTREAM_ENABLED=false
 export TRUST_SIGNING_KEY_ID=quickstart-local-ed25519
-export TRUST_SIGNING_PRIVATE_KEY_B64="$(cat "$SEED_FILE")"
+TRUST_SIGNING_PRIVATE_KEY_B64="$(cat "$SEED_FILE")"
+export TRUST_SIGNING_PRIVATE_KEY_B64
+if [ -n "${TP_PYTHON:-}" ]; then
+  exec "$TP_PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT"
+fi
 exec uv run --with-requirements requirements.txt python -m uvicorn app.main:app \
   --host 127.0.0.1 --port "$PORT"

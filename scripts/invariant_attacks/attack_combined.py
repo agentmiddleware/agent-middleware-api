@@ -1,14 +1,16 @@
-"""ATTACK 7 — Six-vector simultaneous assault.
+"""ATTACK 7 — Shared five-vector crash storm plus offline forgery check.
 
 The per-vector scripts (attacks 1-6) each attack ONE invariant in isolation.
-This runs all six at once, against shared victim + attacker state, so
-cross-vector contention is actually exercised: a budget race, a dedup race, a
-scope-escape, a confused-deputy and a mid-flight crash all hammer the SAME
-victim wallet simultaneously. Serial tests cannot surface an interaction that
-only appears when the invariants are attacked together.
+This schedules five operational attack families against shared victim + attacker
+state, so cross-vector contention is exercised: a budget race, a dedup race, a
+scope escape, credential misuse, and a mid-flight crash all hammer the SAME
+victim wallet. After restart, a sixth invariant—receipt anti-forgery—is checked
+offline. Serial tests cannot surface an interaction that only appears when the
+live invariants are attacked together.
 
-A pool of workers drives an interleaved job queue so every vector is in flight
-at once (sustained contention), against victim wallet V:
+A pool of workers drives an interleaved job queue against victim wallet V. The
+harness proves that every required live variant started before it can report
+HELD; it does not claim every variant overlapped at the exact kill instant:
 
   1 double-charge : K threads fire the SAME idempotency key + payload on a
                     high-cap "load" permit (P_load).
@@ -22,8 +24,9 @@ at once (sustained contention), against victim wallet V:
   5 crash         : a killer SIGKILLs the server the instant committed debits on
                     V cross THRESHOLD — mid-storm. After restart every P_load and
                     P_budget key is replayed with its identical payload.
-  4 forgery       : a SUCCESS receipt MINTED DURING THE STORM is tamper-checked
-                    offline with the shipped b2a_sdk verifier.
+  4 forgery       : after restart, a SUCCESS receipt is tamper-checked offline
+                    with the shipped b2a_sdk verifier. A storm-minted receipt is
+                    preferred; a pre-storm control receipt is the fallback.
 
 Invariants asserted after restart + replay (ledger-centric; engine = sqlite):
 
@@ -40,12 +43,12 @@ Invariants asserted after restart + replay (ledger-centric; engine = sqlite):
                        not. Verified by: (a) no live response carried a success
                        receipt, and (b) every success receipt on V belongs to
                        P_load or P_budget.
-  - forgery held     : a storm-minted receipt verifies genuine, every tampered
-                       signed field is INVALID, and an unknown key is UNDETERMINED
-                       (never a false INVALID).
+  - forgery held     : the selected genuine receipt verifies, every tested
+                       high-value signed field is INVALID after tampering, and an
+                       unknown key is UNDETERMINED (never a false INVALID).
 
 Needs a controllable server (so it can kill -9 + restart). See the README
-"Six-vector simultaneous attack" recipe. Env: TP_PIDFILE, TP_BOOT, TP_SERVER_LOG,
+"Shared crash-storm attack" recipe. Env: TP_PIDFILE, TP_BOOT, TP_SERVER_LOG,
 TP_DB_PATH (the controlled instance's api.db), API_URL.
 """
 
@@ -75,9 +78,26 @@ BUDGET_KEYS = 12  # distinct P_budget keys racing the cap
 DEDUP_KEYS = 4  # keys fired K-parallel each (double-charge)
 DEDUP_FANOUT = 8  # identical parallel requests per dedup key
 THRESHOLD = 12  # committed debits on V that trigger the mid-storm kill
+REQUIRED_STORM_VECTOR_TAGS = (
+    "load",
+    "budget",
+    "dedup",
+    "scope",
+    "credential_garbage",
+    "credential_missing",
+    "credential_deputy",
+    "credential_revoked",
+    "cross_tenant",
+)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WORK = os.path.join(tempfile.gettempdir(), "atk7_combined")
 os.makedirs(WORK, exist_ok=True)
+
+
+def all_required_storm_vectors_started(started_by_vector):
+    """Fail closed unless every required live attack variant actually started."""
+
+    return all(started_by_vector.get(tag, 0) > 0 for tag in REQUIRED_STORM_VECTOR_TAGS)
 
 
 # ---- server control ---------------------------------------------------------
@@ -87,7 +107,24 @@ def current_pid():
     return int(open(PIDFILE).read().strip())
 
 
+def proc_stat_state(stat_text):
+    """Return the Linux /proc process state without trusting the comm field."""
+    _, separator, fields = stat_text.rpartition(")")
+    if not separator:
+        return None
+    state_fields = fields.strip().split()
+    return state_fields[0] if state_fields else None
+
+
 def alive(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as proc_stat:
+            if proc_stat_state(proc_stat.read()) == "Z":
+                return False
+    except (FileNotFoundError, OSError):
+        # /proc is unavailable on macOS, and a disappearing PID is handled by
+        # the portable signal probe below.
+        pass
     try:
         os.kill(pid, 0)
         return True
@@ -411,7 +448,7 @@ def main():
     for i in range(6):
         jobs.append(
             (
-                "cred",
+                "credential_garbage",
                 lambda i=i: record(
                     "cred",
                     A.http(
@@ -427,7 +464,7 @@ def main():
         )
         jobs.append(
             (
-                "cred",
+                "credential_missing",
                 lambda i=i: record(
                     "cred",
                     A.http(
@@ -442,7 +479,7 @@ def main():
         # confused deputy: attacker key B drives victim's permit
         jobs.append(
             (
-                "cred",
+                "credential_deputy",
                 lambda i=i: record(
                     "cred",
                     A.http(
@@ -459,7 +496,7 @@ def main():
         # revoked key drives victim's permit
         jobs.append(
             (
-                "cred",
+                "credential_revoked",
                 lambda i=i: record(
                     "cred",
                     A.http(
@@ -478,7 +515,7 @@ def main():
         # an issue_permit response carries no receipt for the cred check to see.
         jobs.append(
             (
-                "xtenant",
+                "cross_tenant",
                 lambda i=i: record_xtenant(
                     A.issue_permit(
                         attacker,
@@ -492,10 +529,10 @@ def main():
             )
         )
 
-    # Interleave the vectors so the queue alternates load/budget/scope/cred/dedup
-    # — a pool of workers pulling from it keeps ALL vector types in flight at once
-    # (sustained contention), and sustains enough load for the mid-storm kill to
-    # land amid real charges. (A single Barrier deadlocks once jobs > pool size.)
+    # Interleave the variants so a pool of workers creates sustained cross-vector
+    # contention and enough load for the mid-storm kill to land amid real charges.
+    # A single Barrier deadlocks once jobs > pool size, so the harness records
+    # starts explicitly instead of claiming exact overlap at the kill instant.
     buckets = {}
     for tag, fn in jobs:
         buckets.setdefault(tag, []).append((tag, fn))
@@ -510,18 +547,26 @@ def main():
     stop = threading.Event()
     q_idx = {"i": 0}
     q_lock = threading.Lock()
+    started_by_vector = Counter()
+    worker_errors = Counter()
 
     def worker():
         while not stop.is_set():
             with q_lock:
                 i = q_idx["i"]
+                if i >= n:
+                    return
                 q_idx["i"] += 1
-            if i >= n:
-                return
+                tag = jobs[i][0]
+                started_by_vector[tag] += 1
             try:
                 jobs[i][1]()
             except Exception:
-                pass
+                # attacklib turns expected connection resets into status=None.
+                # Any exception escaping a job is therefore a harness failure,
+                # not evidence that an authorization invariant held.
+                with q_lock:
+                    worker_errors[tag] += 1
 
     WORKERS = 24
     pid_before = current_pid()
@@ -531,18 +576,20 @@ def main():
         # uv run spawns uvicorn as a child, so kill the whole process group.
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
+            return True
         except OSError:
             try:
                 os.kill(pid, signal.SIGKILL)
+                return True
             except OSError:
-                pass
+                return False
 
     def killer():
         while not stop.is_set():
             d = committed_debits(wallet)
             if d >= THRESHOLD:
-                hard_kill(pid_before)
-                killed["at_debits"] = d
+                if hard_kill(pid_before):
+                    killed["at_debits"] = d
                 stop.set()
                 return
             time.sleep(0.002)
@@ -558,12 +605,13 @@ def main():
                 pass
     stop.set()
     kt.join()
-    storm_jobs_executed = min(q_idx["i"], n)
+    storm_jobs_started = sum(started_by_vector.values())
 
     # wait for the old process to actually die, then restart
     t0 = time.time()
     while alive(pid_before) and time.time() - t0 < 15:
         time.sleep(0.1)
+    old_process_stopped = not alive(pid_before)
     crashed_debits = committed_debits(wallet)
     restart_server()
     time.sleep(0.6)
@@ -634,11 +682,9 @@ def main():
             json.dump(keys["json"], fh)
         good = verify(good_path, keys_path)
         signing_input = bundle["json"].get("signing_input", "")
-        tampers = {
-            "credits_charged": ('"credits_charged":"2"', '"credits_charged":"0"'),
-            "outcome": ('"outcome":"success"', '"outcome":"denied"'),
-            "tool": ("partner.notes.write", "evil.tool.exfiltrate"),
-        }
+        tampers = A.signed_receipt_tamper_cases(
+            bundle["json"], fallback_wallet_id=wallet
+        )
         tamper_results = {}
         for name, (old, new) in tampers.items():
             if old not in signing_input:
@@ -692,9 +738,16 @@ def main():
     budget_spent = float((budget_row or {}).get("spent_credits", 0))
     budget_max = float((budget_row or {}).get("max_credits", BUDGET_CAP))
     xtenant_created = [r for r in live["xtenant"] if r["permit_created"]]
+    all_storm_buckets_observed = all(live[bucket] for bucket in live)
 
     checks = {
         "crash_happened": killed["at_debits"] is not None,
+        "old_process_stopped": old_process_stopped,
+        "all_required_storm_vectors_started": all_required_storm_vectors_started(
+            started_by_vector
+        ),
+        "all_storm_buckets_observed": all_storm_buckets_observed,
+        "no_worker_errors": not worker_errors,
         "revocation_succeeded": revocation_succeeded,
         "no_double_charge_total": rec["num_debits"] <= rec["distinct_attempted_keys"],
         "no_double_charge_per_key": not rec["double_charged_keys"],
@@ -722,7 +775,7 @@ def main():
     verdict = "HELD" if all(checks.values()) else "BROKE"
 
     ev = {
-        "attack": "7 - six-vector simultaneous assault",
+        "attack": "7 - shared five-vector crash storm plus offline forgery",
         "verdict": verdict,
         "engine": "sqlite (controlled boot)",
         "params": {
@@ -734,7 +787,9 @@ def main():
             "dedup_fanout": DEDUP_FANOUT,
             "kill_threshold_debits": THRESHOLD,
             "storm_jobs_enqueued": n,
-            "storm_jobs_executed": storm_jobs_executed,
+            "storm_jobs_started": storm_jobs_started,
+            "storm_jobs_started_by_vector": dict(started_by_vector),
+            "worker_errors_by_vector": dict(worker_errors),
         },
         "crash": {
             "killed_at_committed_debits": killed["at_debits"],

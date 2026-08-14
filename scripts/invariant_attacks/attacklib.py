@@ -8,6 +8,7 @@ pairs, and reconciles committed state by reading the SQLite database directly
 Never prints full API keys; keys are redacted to a short prefix in any
 captured evidence.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,14 +27,55 @@ import os
 # from this file), so the scripts work regardless of the current directory.
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 API = os.environ.get("API_URL", "http://127.0.0.1:8000")
-DB_PATH = os.environ.get("TP_DB_PATH", os.path.join(_REPO_ROOT, "data/quickstart/api.db"))
-NOTES_PATH = os.environ.get("TP_NOTES_PATH", os.path.join(_REPO_ROOT, "data/dogfood_partner_notes.jsonl"))
+DB_PATH = os.environ.get(
+    "TP_DB_PATH", os.path.join(_REPO_ROOT, "data/quickstart/api.db")
+)
+NOTES_PATH = os.environ.get(
+    "TP_NOTES_PATH", os.path.join(_REPO_ROOT, "data/dogfood_partner_notes.jsonl")
+)
 
 
 def redact(key: str | None) -> str:
     if not key:
         return "<none>"
     return key[:8] + "..." if len(key) > 8 else key
+
+
+def signed_receipt_tamper_cases(
+    bundle: dict, *, fallback_wallet_id: str | None = None
+) -> dict[str, tuple[str, str]]:
+    """Return representative high-value signed-field mutations.
+
+    Missing dynamic fields deliberately produce a pattern that cannot occur in a
+    valid signing input. The attack scripts then record the case as skipped and
+    fail closed instead of silently reducing their forgery coverage.
+    """
+
+    receipt = bundle.get("receipt") if isinstance(bundle.get("receipt"), dict) else {}
+    try:
+        signed = json.loads(bundle.get("signing_input") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        signed = {}
+    if not isinstance(signed, dict):
+        signed = {}
+    wallet_id = (
+        signed.get("wallet_id")
+        or receipt.get("wallet_id")
+        or fallback_wallet_id
+        or "<missing-wallet-id>"
+    )
+    ledger_entry_id = (
+        signed.get("ledger_entry_id")
+        or receipt.get("ledger_entry_id")
+        or "<missing-ledger-entry-id>"
+    )
+    return {
+        "credits_charged": ('"credits_charged":"2"', '"credits_charged":"0"'),
+        "outcome": ('"outcome":"success"', '"outcome":"denied"'),
+        "tool": ("partner.notes.write", "evil.tool.exfiltrate"),
+        "wallet_id": (wallet_id, "agt-forged-wallet"),
+        "ledger_entry_id": (ledger_entry_id, "ledger-forged-entry"),
+    }
 
 
 def _headers(api_key: str | None, idem: str | None = None) -> dict:
@@ -45,9 +87,15 @@ def _headers(api_key: str | None, idem: str | None = None) -> dict:
     return h
 
 
-def http(method: str, path: str, *, api_key: str | None = None,
-         body: dict | None = None, idem: str | None = None,
-         extra_headers: dict | None = None) -> dict:
+def http(
+    method: str,
+    path: str,
+    *,
+    api_key: str | None = None,
+    body: dict | None = None,
+    idem: str | None = None,
+    extra_headers: dict | None = None,
+) -> dict:
     """Perform one HTTP call. Returns {status, json|text, error}."""
     url = API + path
     data = json.dumps(body).encode() if body is not None else None
@@ -64,7 +112,11 @@ def http(method: str, path: str, *, api_key: str | None = None,
         raw = e.read().decode()
         status = e.code
     except Exception as e:  # connection reset etc. (crash test)
-        return {"status": None, "error": repr(e), "latency_ms": round((time.time() - t0) * 1000, 1)}
+        return {
+            "status": None,
+            "error": repr(e),
+            "latency_ms": round((time.time() - t0) * 1000, 1),
+        }
     out = {"status": status, "latency_ms": round((time.time() - t0) * 1000, 1)}
     try:
         out["json"] = json.loads(raw)
@@ -74,6 +126,7 @@ def http(method: str, path: str, *, api_key: str | None = None,
 
 
 # ---- trust-plane convenience wrappers --------------------------------------
+
 
 def provision(agent_id: str) -> dict:
     r = http("POST", "/v1/dev-keys/self-provision", body={"agent_id": agent_id})
@@ -88,11 +141,23 @@ def provision(agent_id: str) -> dict:
 
 
 def expires_in(minutes: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
 
-def issue_permit(cred: dict, *, allowed_tools, scopes, max_credits, idem, expires=None,
-                 subject_wallet_id=None, subject_key_id=None, issuer_wallet_id=None) -> dict:
+def issue_permit(
+    cred: dict,
+    *,
+    allowed_tools,
+    scopes,
+    max_credits,
+    idem,
+    expires=None,
+    subject_wallet_id=None,
+    subject_key_id=None,
+    issuer_wallet_id=None,
+) -> dict:
     body = {
         "issuer_wallet_id": issuer_wallet_id or cred["wallet_id"],
         "subject_wallet_id": subject_wallet_id or cred["wallet_id"],
@@ -107,22 +172,34 @@ def issue_permit(cred: dict, *, allowed_tools, scopes, max_credits, idem, expire
 
 def invoke_body(wallet_id, permit_id, idem_key, text, rpc_id="call"):
     return {
-        "jsonrpc": "2.0", "id": rpc_id, "method": "tools/call",
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "method": "tools/call",
         "params": {
             "name": "partner.notes.write",
             "arguments": {"text": text},
-            "mcpContext": {"wallet_id": wallet_id, "permit_id": permit_id, "idempotency_key": idem_key},
+            "mcpContext": {
+                "wallet_id": wallet_id,
+                "permit_id": permit_id,
+                "idempotency_key": idem_key,
+            },
         },
     }
 
 
 def invoke(api_key, wallet_id, permit_id, idem_key, text, rpc_id="call") -> dict:
-    return http("POST", "/mcp/messages", api_key=api_key,
-                body=invoke_body(wallet_id, permit_id, idem_key, text, rpc_id))
+    return http(
+        "POST",
+        "/mcp/messages",
+        api_key=api_key,
+        body=invoke_body(wallet_id, permit_id, idem_key, text, rpc_id),
+    )
 
 
 def ledger(cred: dict) -> dict:
-    return http("GET", f"/v1/billing/ledger/{cred['wallet_id']}", api_key=cred["api_key"])
+    return http(
+        "GET", f"/v1/billing/ledger/{cred['wallet_id']}", api_key=cred["api_key"]
+    )
 
 
 def receipt_of(resp: dict):
@@ -165,6 +242,7 @@ def reason_of(resp: dict):
 
 # ---- concurrency ------------------------------------------------------------
 
+
 def fire_parallel(n: int, fn):
     """Run fn(i) on n OS threads that all release from a barrier simultaneously.
 
@@ -187,6 +265,7 @@ def fire_parallel(n: int, fn):
 
 # ---- non-mutating DB reconciliation (crash test) ---------------------------
 
+
 def db_rows(query: str, params: tuple = ()):  # read committed state directly
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     con.row_factory = sqlite3.Row
@@ -202,13 +281,18 @@ def reconcile_wallet(wallet_id: str, endpoint: str = "/mcp/messages"):
     idem = db_rows(
         "SELECT record_id, idempotency_key, request_hash, status_code, ledger_entry_id, response_reference "
         "FROM idempotency_records WHERE wallet_id=? AND endpoint=? ORDER BY created_at",
-        (wallet_id, endpoint))
+        (wallet_id, endpoint),
+    )
     rcpts = db_rows(
         "SELECT receipt_id, idempotency_record_id, ledger_entry_id, credits_charged, outcome, reason_code "
-        "FROM receipts WHERE wallet_id=? ORDER BY created_at", (wallet_id,))
+        "FROM receipts WHERE wallet_id=? ORDER BY created_at",
+        (wallet_id,),
+    )
     debits = db_rows(
         "SELECT entry_id, amount, operation_key, description FROM ledger_entries "
-        "WHERE wallet_id=? AND action='debit' ORDER BY timestamp", (wallet_id,))
+        "WHERE wallet_id=? AND action='debit' ORDER BY timestamp",
+        (wallet_id,),
+    )
     return {"idempotency_records": idem, "receipts": rcpts, "debits": debits}
 
 

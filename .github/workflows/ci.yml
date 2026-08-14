@@ -93,6 +93,120 @@ jobs:
         if: matrix.python-version == '3.12'
         run: pytest tests/test_migrations.py -v --tb=short
 
+  invariant_attack_proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install controlled-harness dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e ./b2a_sdk
+
+      - name: Configure isolated attack state
+        run: |
+          mkdir -p "$RUNNER_TEMP/invariant-attack-state"
+          {
+            echo "API_URL=http://127.0.0.1:8000"
+            echo "TP_PORT=8000"
+            echo "TP_WORKDIR=$RUNNER_TEMP/invariant-attack-state"
+            echo "TP_STATE_DIR=$RUNNER_TEMP/invariant-attack-state"
+            echo "TP_PIDFILE=$RUNNER_TEMP/invariant-attack-state/server.pid"
+            echo "TP_SERVER_LOG=$RUNNER_TEMP/invariant-attack-state/server.log"
+            echo "TP_DB_PATH=$RUNNER_TEMP/invariant-attack-state/api.db"
+            echo "TP_BOOT=$GITHUB_WORKSPACE/scripts/invariant_attacks/boot_controlled_uv.sh"
+            echo "TP_NOTES_PATH=$GITHUB_WORKSPACE/data/dogfood_partner_notes.jsonl"
+            echo "TP_PYTHON=$(command -v python)"
+            echo "RATE_LIMIT_PER_MINUTE=1000000"
+          } >> "$GITHUB_ENV"
+
+      - name: Boot controlled trust plane
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import subprocess
+
+          log = open(os.environ["TP_SERVER_LOG"], "ab")
+          proc = subprocess.Popen(
+              ["bash", os.environ["TP_BOOT"]],
+              stdout=log,
+              stderr=subprocess.STDOUT,
+              start_new_session=True,
+              env=os.environ.copy(),
+          )
+          pathlib.Path(os.environ["TP_PIDFILE"]).write_text(
+              str(proc.pid), encoding="utf-8"
+          )
+          PY
+          python - <<'PY'
+          import time
+          import urllib.request
+
+          for _ in range(180):
+              try:
+                  with urllib.request.urlopen(
+                      "http://127.0.0.1:8000/health", timeout=1
+                  ) as response:
+                      if response.status == 200:
+                          break
+              except Exception:
+                  time.sleep(0.5)
+          else:
+              raise SystemExit("controlled trust plane did not become healthy")
+          PY
+
+      - name: Run shared crash-storm proof
+        working-directory: scripts/invariant_attacks
+        run: python attack_combined.py
+
+      - name: Redact and validate proof evidence
+        if: always()
+        working-directory: scripts/invariant_attacks
+        run: python redact_evidence.py evidence_attack_combined.json evidence_attack_combined.redacted.json
+
+      - name: Upload redacted invariant evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: invariant-attack-proof
+          path: scripts/invariant_attacks/evidence_attack_combined.redacted.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Stop controlled trust plane
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import signal
+
+          pidfile_value = os.environ.get("TP_PIDFILE")
+          if not pidfile_value:
+              raise SystemExit(0)
+          pidfile = pathlib.Path(pidfile_value)
+          if pidfile.exists():
+              pid = int(pidfile.read_text(encoding="utf-8").strip())
+              try:
+                  pgid = os.getpgid(pid)
+              except ProcessLookupError:
+                  raise SystemExit(0)
+              if pid > 1 and pgid == pid:
+                  os.killpg(pgid, signal.SIGKILL)
+          PY
+
   python_sdk:
     runs-on: ubuntu-latest
     strategy:
