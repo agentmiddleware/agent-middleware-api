@@ -224,6 +224,23 @@ Confirm the ledger agrees — one funding entry, one debit:
 curl -s "$API_URL/v1/billing/ledger/$WALLET_ID" -H "X-API-Key: $AGENT_API_KEY" | python3 -m json.tool
 ```
 
+Then verify the tamper-evident audit chain behind those entries. Every
+governed tool invocation — the successful call you just made, and the
+denials you are about to trigger — appends a hash-linked audit event, and
+your own key is enough to verify your wallet's chain (tamper evidence you
+cannot use yourself protects no one):
+
+```bash
+curl -s -X POST "$API_URL/v1/audit/verify-chain" \
+  -H "X-API-Key: $AGENT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}' | python3 -m json.tool
+```
+
+`"valid": true` with a non-zero `checked_events` means the recorded history
+hash-links end to end; an edited or deleted event would surface as
+`"valid": false` with the broken link named in `broken_event_id`.
+
 ## 7. Overspend on purpose (~2 minutes)
 
 Spend the rest of the permit — notes two and three succeed:

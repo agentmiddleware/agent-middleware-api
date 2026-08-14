@@ -255,10 +255,38 @@ make quickstart
 Then follow [docs/quickstart.md](docs/quickstart.md): mint your own
 wallet-scoped key (no operator, no pre-shared secret), issue yourself a
 permit, invoke a real governed tool, deliberately try to double-charge and
-overspend, and finish holding a signed receipt you verified offline — plus
+overspend, verify your wallet's tamper-evident audit chain with your own
+key, and finish holding a signed receipt you verified offline — plus
 a forged one the verifier rejected. Every step of that page runs in CI
 against a freshly booted server (`make quickstart-check`), so the
 documented path cannot silently rot.
+
+### One command, whole loop, partner handoff bundle
+
+To drive the entire loop end-to-end against a running quickstart server —
+and produce artifacts you can hand to someone else to verify — run:
+
+```bash
+make quickstart        # terminal 1: boots the server
+make live-loop-proof   # terminal 2: drives the loop, writes the bundle
+```
+
+`live-loop-proof` walks the full core loop as a self-provisioned non-admin
+caller — `discover → authenticate → authorize → invoke → meter → receipt →
+replay → audit → govern` — and asserts each invariant rather than only
+printing it: the call charges the known price once, the replay returns the
+same receipt with no second debit, the audit chain verifies, and the
+out-of-scope call is denied with a signed, zero-charge receipt. It exits
+non-zero the moment any stage's invariant breaks.
+
+On success it writes a handoff bundle to `data/live-loop-proof/`: the
+portable success and denial receipts, the issuer's public key set, a
+machine-readable transcript, and a `VERIFY.md` a partner engineer can
+follow to verify both receipts offline — no account, no credential, and no
+network access to the issuing server. Handing that directory to a partner
+who verifies a receipt themselves is the independent-verification step the
+customer-validation milestone asks for. The command runs end to end in CI
+(`tests/test_quickstart_path.py`).
 
 ## Run the API locally
 
@@ -652,6 +680,15 @@ python -m pip install -e './b2a_sdk[dev]'
 
 `B2AClient` remains as deprecated compatibility during the 0.4.x transition.
 No TypeScript package is published. Do not advertise PyPI or npm installation.
+
+Offline receipt verification is deliberately dependency-minimal: the
+`b2a-verify-receipt` CLI (and `verify_bundle`) verify a signed receipt
+against a published key set with only `cryptography` installed — no
+networking library and no account. Importing the package no longer pulls in
+the HTTP client, so `pip install "./b2a_sdk[verify]"` (or just
+`cryptography` with `PYTHONPATH=b2a_sdk/src`) is enough to check a receipt.
+The networked `--issuer` fetch is the only path that additionally needs
+`httpx`.
 
 ## Documentation
 
