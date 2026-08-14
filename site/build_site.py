@@ -21,6 +21,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -37,21 +38,27 @@ ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
 ANALYTICS_TOKEN = "@@VERCEL_ANALYTICS_SCRIPTS@@"
 ANALYTICS_FLAG_ENABLED = frozenset({"true"})
 ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
-ANALYTICS_SCRIPTS = """<script>
-      window.va =
-        window.va ||
-        function () {
-          (window.vaq = window.vaq || []).push(arguments);
-        };
-    </script>
+# The queue shim lives in /va-init.js rather than an inline <script> so the
+# deployed Content-Security-Policy can stay script-src 'self' with no
+# 'unsafe-inline'. It must load before the insights script reads window.vaq.
+ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-2"></script>
     <script defer src="/_vercel/insights/script.js"></script>"""
+BUILD_DATE_TOKEN = "@@BUILD_DATE@@"
+SECURITY_TXT_EXPIRES_TOKEN = "@@SECURITY_TXT_EXPIRES@@"
+# security.txt must carry a future Expires (RFC 9116 §2.5.5). Regenerating it
+# one year out on every build means a deployed site never serves a lapsed file.
+SECURITY_TXT_LIFETIME_DAYS = 365
 TEXT_ASSETS = (
     "index.html",
     "proof/index.html",
+    "404.html",
+    "sitemap.xml",
+    ".well-known/security.txt",
 )
 COPY_ASSETS = (
     ".well-known",
     "a11y.js",
+    "a11y-preload.js",
     "analytics.js",
     "favicon.svg",
     "llm.txt",
@@ -61,6 +68,7 @@ COPY_ASSETS = (
     "robots.txt",
     "sitemap.xml",
     "styles.css",
+    "va-init.js",
 )
 REQUIRED_PUBLIC_ASSETS = (
     *TEXT_ASSETS,
@@ -102,8 +110,15 @@ def _is_reserved_hostname(hostname: str) -> bool:
     return normalized in RESERVED_HOSTS or normalized.endswith(RESERVED_HOST_SUFFIXES)
 
 
-def validated_contacts(environment: dict[str, str]) -> dict[str, str]:
-    """Return escaped contact values or refuse to build the public site."""
+def validated_contacts(
+    environment: dict[str, str], *, escape_markup: bool = True
+) -> dict[str, str]:
+    """Return contact values or refuse to build the public site.
+
+    ``escape_markup`` is on for HTML and XML targets. Plain-text targets such as
+    ``.well-known/security.txt`` take the raw value, because an entity-escaped
+    address there would be served verbatim to whoever reads the file.
+    """
 
     missing = [
         name
@@ -170,6 +185,12 @@ def validated_contacts(environment: dict[str, str]) -> dict[str, str]:
             "PUBLIC_BOOKING_URL must point to a booking service"
         )
 
+    if not escape_markup:
+        return {
+            "@@PUBLIC_DISPLAY_NAME@@": display_name,
+            "@@PUBLIC_CONTACT_EMAIL@@": email,
+            "@@PUBLIC_BOOKING_URL@@": booking_url,
+        }
     return {
         "@@PUBLIC_DISPLAY_NAME@@": html.escape(display_name),
         "@@PUBLIC_CONTACT_EMAIL@@": html.escape(email, quote=True),
@@ -231,8 +252,23 @@ def _validated_output_path(output: Path) -> Path:
     )
 
 
+def _build_timestamps() -> dict[str, str]:
+    """Return the date tokens shared by the sitemap and security.txt."""
+
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=SECURITY_TXT_LIFETIME_DAYS)
+    return {
+        BUILD_DATE_TOKEN: now.date().isoformat(),
+        SECURITY_TXT_EXPIRES_TOKEN: expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
 def render_site(output: Path, environment: dict[str, str]) -> None:
-    replacements = validated_contacts(environment)
+    markup_replacements = validated_contacts(environment)
+    text_replacements = validated_contacts(environment, escape_markup=False)
+    timestamps = _build_timestamps()
+    markup_replacements.update(timestamps)
+    text_replacements.update(timestamps)
     analytics_enabled = vercel_analytics_enabled(environment)
     missing_assets = [
         relative_path
@@ -266,6 +302,11 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
                 rendered,
                 flags=re.MULTILINE,
             )
+        replacements = (
+            markup_replacements
+            if relative_path.endswith((".html", ".xml"))
+            else text_replacements
+        )
         for token, replacement in replacements.items():
             rendered = rendered.replace(token, replacement)
         unresolved = sorted(set(re.findall(r"@@[A-Z0-9_]+@@", rendered)))

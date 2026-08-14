@@ -1,0 +1,20 @@
+# Rendered by site/build_site.py. The contact address comes from
+# PUBLIC_CONTACT_EMAIL and Expires is set one year past each build, so a
+# deployed site never serves a lapsed file.
+
+Contact: mailto:@@PUBLIC_CONTACT_EMAIL@@
+Expires: @@SECURITY_TXT_EXPIRES@@
+Preferred-Languages: en
+Canonical: https://www.thisisatest.tech/.well-known/security.txt
+Policy: https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY.md
+
+# Scope
+#   www.thisisatest.tech  — this static marketing and proof site
+#   api.thisisatest.tech  — the governed gateway
+#
+# Known and already-published limitations are listed in
+# https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md
+# Please read that first; anything it already covers is not a new finding.
+#
+# This site is operated by a single accountable person, not a staffed security
+# team. Expect a human acknowledgement rather than an automated triage SLA.

@@ -35,9 +35,41 @@ Open `http://127.0.0.1:8765/`.
 
 - `/` — human design-partner funnel
 - `/proof/` — portable receipt, matching key snapshot, and offline command
+- `/404.html` — branded not-found page with links back into the site
 - `/.well-known/agent.json` — marketing-origin pointer to API discovery
+- `/.well-known/security.txt` — vulnerability-report contact (RFC 9116)
 - `/llm.txt` and `/llms.txt` — machine bootstrap prose
 - `/robots.txt` and `/sitemap.xml` — search discovery
+
+`sitemap.xml` and `.well-known/security.txt` are rendered, not copied:
+`@@BUILD_DATE@@` becomes the build date's `<lastmod>`, and
+`@@SECURITY_TXT_EXPIRES@@` becomes one year past the build, so a deployed
+`security.txt` never serves a lapsed `Expires`. Plain-text targets take the raw
+contact value; HTML and XML targets take the entity-escaped one.
+
+## Response headers and caching
+
+`vercel.json` sends a `Content-Security-Policy` with `script-src 'self'` and no
+`'unsafe-inline'`. Two files exist only to make that possible:
+
+- `a11y-preload.js` — applies saved accessibility preferences before first
+  paint. It is loaded **synchronously** in `<head>`; do not add `defer`.
+- `va-init.js` — the Vercel Web Analytics queue shim, emitted only when
+  `PUBLIC_ENABLE_VERCEL_ANALYTICS=true`.
+
+If you ever add an executable inline `<script>` to a page, the CSP will block
+it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
+same-origin file instead.
+
+CSS and JS are served with `max-age=604800`, so cache busting is a **manual
+query token**: every reference looks like `/styles.css?v=gateway-2`. When you
+change any of those files, bump the token in `index.html`, `proof/index.html`,
+`404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or returning visitors
+keep the old bytes for up to a week. HTML itself carries no long-lived
+`Cache-Control` rule and revalidates on every request.
+
+`trailingSlash: true` makes `/proof` redirect to `/proof/`, matching the
+page's `rel="canonical"`.
 
 The proof page reads fields from `/proof/receipt.json`; it does not hard-code a
 receipt ID, amount, or verification verdict. If either proof file is absent or

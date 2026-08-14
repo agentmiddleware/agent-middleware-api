@@ -5,6 +5,12 @@ execute protected tools. Platform engineering, AI infrastructure, and security
 teams operating internal MCP tools are the buyers; autonomous clients consume
 the discovery contract below.
 
+The product is one thing with one name: a gateway between an agent and one
+paid MCP (Model Context Protocol) tool. "Boundary", "control point", and
+"trust plane" describe what the gateway does; they are not separate products.
+The SDK ships as `b2a_sdk` and its verifier as `b2a-verify-receipt`, where
+`b2a` is short for business-to-agent.
+
 ## Governed loop
 
 discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
@@ -71,3 +77,7 @@ settlement or compliance claims.
 
 https://www.thisisatest.tech/
 https://github.com/PetrefiedThunder/agent-middleware-api
+
+## Security contact
+
+https://www.thisisatest.tech/.well-known/security.txt

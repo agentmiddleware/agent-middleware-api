@@ -73,23 +73,15 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=Libre+Franklin:wght@700;800&amp;family=Public+Sans:wght@400;500;600&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css?v=ledger-seal" />
-    <script>
-      /* Apply saved accessibility preferences before first paint. */
-      try {
-        var amwPrefs = JSON.parse(window.localStorage.getItem("amw-a11y") || "{}");
-        var amwRoot = document.documentElement;
-        if (amwPrefs.scale) amwRoot.style.setProperty("--a11y-scale", amwPrefs.scale);
-        if (amwPrefs.contrast) amwRoot.setAttribute("data-a11y-contrast", "high");
-        if (amwPrefs.motion) amwRoot.setAttribute("data-a11y-motion", "reduce");
-        if (amwPrefs.spacing) amwRoot.setAttribute("data-a11y-spacing", "wide");
-        if (amwPrefs.underline) amwRoot.setAttribute("data-a11y-underline", "on");
-      } catch (amwError) {}
-    </script>
+    <link rel="stylesheet" href="/styles.css?v=gateway-2" />
+    <!-- Blocking on purpose: saved accessibility preferences must apply before
+         first paint. Kept in a file rather than inline so the Content-Security-
+         Policy can be script-src 'self' with no 'unsafe-inline'. -->
+    <script src="/a11y-preload.js?v=gateway-2"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/analytics.js"></script>
-    <script defer src="/proof/proof.js"></script>
-    <script defer src="/a11y.js"></script>
+    <script defer src="/analytics.js?v=gateway-2"></script>
+    <script defer src="/proof/proof.js?v=gateway-2"></script>
+    <script defer src="/a11y.js?v=gateway-2"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -105,10 +97,11 @@
         <a
           class="nav-agent"
           href="@@PUBLIC_BOOKING_URL@@"
+          target="_blank"
           rel="noopener noreferrer"
           data-analytics-event="booking_click"
-          aria-label="Book a pilot — 30-minute call (opens Calendly)"
-          >Book a pilot <span aria-hidden="true">↗</span></a
+          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
+          >Book a one-tool pilot <span aria-hidden="true">↗</span></a
         >
       </div>
     </nav>
@@ -119,7 +112,8 @@
           <p class="eyebrow">
             <span class="eyebrow-mark" aria-hidden="true"></span>
             <span class="eyebrow-text"
-              >For platform engineering, AI infrastructure, and security teams</span
+              >For platform engineering, AI infrastructure, and security teams
+              running MCP tools</span
             >
           </p>
           <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
@@ -129,25 +123,28 @@
             debit?
           </p>
           <p class="hero-body">
-            Put one scoped, budgeted boundary in front of the call. The same
-            accepted idempotency key cannot create a second gateway dispatch or
-            debit, and the terminal gateway outcome gets a signed receipt.
+            Agent Middleware API is a gateway between your agents and your paid
+            MCP (Model Context Protocol) tools. The first call executes and is
+            charged once; a retry carrying the same idempotency key cannot
+            dispatch again or debit again. Every completed call returns a signed
+            receipt you can verify offline.
           </p>
           <div class="cta-row">
             <a
               class="button button-primary"
               href="@@PUBLIC_BOOKING_URL@@"
+              target="_blank"
               rel="noopener noreferrer"
               data-analytics-event="booking_click"
-              aria-label="Book a one-tool pilot — 30-minute call (opens Calendly)"
+              aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
               >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
             <a
               class="button button-secondary"
               href="/proof/"
               data-analytics-event="proof_click"
-              aria-label="Verify a real receipt — go to verification page"
-              >Verify a real receipt</a
+              aria-label="Verify our receipt yourself — offline. Opens the verification page."
+              >Verify our receipt yourself — offline</a
             >
           </div>
           <p class="email-fallback">
@@ -167,31 +164,35 @@
         <aside class="agent-entry pilot-card" aria-labelledby="pilot-card-title">
           <div class="agent-entry-head">
             <div>
-              <p class="panel-kicker">The one-tool offer</p>
+              <p class="panel-kicker">The design-partner offer</p>
               <h2 id="pilot-card-title">Bring one real MCP tool.</h2>
             </div>
-            <span class="public-badge"
-              ><span aria-hidden="true"></span> design partner</span
-            >
           </div>
           <p class="agent-entry-copy">
             We map one governed action end to end: delegated authority before
-            execution, one debit for identical same-key replays, and portable
-            evidence after.
+            execution, one debit no matter how many times the same request is
+            replayed, and portable evidence after.
           </p>
           <ol class="pilot-steps">
             <li><span>01</span><strong>Scope the action and budget</strong></li>
             <li><span>02</span><strong>Invoke through the gateway</strong></li>
-            <li><span>03</span><strong>Replay, deny, and verify offline</strong></li>
+            <li>
+              <span>03</span
+              ><strong
+                >Replay it safely, watch an out-of-scope call get denied, and
+                verify the receipt offline</strong
+              >
+            </li>
           </ol>
           <div class="agent-entry-foot">
             <span>Built for operators of internal MCP tools</span>
             <a
               href="@@PUBLIC_BOOKING_URL@@"
+              target="_blank"
               rel="noopener noreferrer"
               data-analytics-event="booking_click"
-              aria-label="Discuss fit — book a pilot call"
-              >Discuss fit <span aria-hidden="true">↗</span></a
+              aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
+              >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
           </div>
         </aside>
@@ -205,8 +206,8 @@
             <p>
               An agent can be correct and still exceed its mandate, retry an
               expensive call, or leave an operator unable to prove what ran.
-              The middleware puts a narrow control point between the agent and
-              one tool.
+              The gateway sits between the agent and one tool, and it is the
+              only path to that tool.
             </p>
             <p>
               The result is inspectable before, during, and after execution
@@ -243,14 +244,38 @@
           </p>
         </div>
         <ol class="loop-track" aria-label="Governed agent-to-tool action loop">
-          <li><span>01</span><strong>Discover</strong></li>
-          <li><span>02</span><strong>Authenticate</strong></li>
-          <li><span>03</span><strong>Authorize</strong></li>
-          <li><span>04</span><strong>Invoke</strong></li>
-          <li><span>05</span><strong>Meter</strong></li>
-          <li><span>06</span><strong>Receipt</strong></li>
-          <li><span>07</span><strong>Audit</strong></li>
-          <li><span>08</span><strong>Govern</strong></li>
+          <li>
+            <span>01</span><strong>Discover</strong>
+            <p>The agent reads the manifest: which tools exist and what each call costs.</p>
+          </li>
+          <li>
+            <span>02</span><strong>Authenticate</strong>
+            <p>The caller presents an operator-issued API key. There is no self-serve mint.</p>
+          </li>
+          <li>
+            <span>03</span><strong>Authorize</strong>
+            <p>A scoped permit binds the call to one tool, one wallet, a budget, and an expiry.</p>
+          </li>
+          <li>
+            <span>04</span><strong>Invoke</strong>
+            <p>The gateway is the only path to the tool, so an out-of-scope call is denied here.</p>
+          </li>
+          <li>
+            <span>05</span><strong>Meter</strong>
+            <p>The call is debited from the scoped wallet, once. The same key never debits twice.</p>
+          </li>
+          <li>
+            <span>06</span><strong>Receipt</strong>
+            <p>The terminal outcome is signed with Ed25519 and returned to the caller.</p>
+          </li>
+          <li>
+            <span>07</span><strong>Audit</strong>
+            <p>Wallet events are chained, so a later edit to the record is detectable.</p>
+          </li>
+          <li>
+            <span>08</span><strong>Govern</strong>
+            <p>Operators change scope, budget, and expiry from the control plane, not the agent.</p>
+          </li>
         </ol>
       </section>
 
@@ -299,7 +324,7 @@
               class="text-link"
               href="/proof/"
               data-analytics-event="proof_click"
-              >Open proof and verification command <span aria-hidden="true">↗</span></a
+              >See the proof and run the verifier</a
             >
           </article>
         </div>
@@ -314,15 +339,22 @@
           <p>
             Bring one internal MCP tool with a real operator, permission
             boundary, and retry or audit concern. We qualify fit, define the
-            one action, and walk permit → invoke → charge → receipt → replay →
-            deny before discussing any broader rollout.
+            one action, and walk you through permit → invoke → charge → receipt
+            → replay → deny before discussing any broader rollout.
+          </p>
+          <p class="constraint-line">
+            One tool · one operator · one action. You can run the whole loop
+            locally before the call: clone the repository and run
+            <code>make prove-trust-plane</code>. No credentials, no signup.
           </p>
           <div class="pilot-links">
             <a
               class="button button-primary"
               href="@@PUBLIC_BOOKING_URL@@"
+              target="_blank"
               rel="noopener noreferrer"
               data-analytics-event="booking_click"
+              aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
               >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
             <a
@@ -343,24 +375,54 @@
           <p class="section-kicker">04 / Machine discovery</p>
           <h2 id="machine-title">Public pointers for agents and operators.</h2>
           <p>
-            Discovery is public. Protected actions still require an
-            operator-issued API key and an applicable scoped permit.
+            Machine-readable discovery — what an agent fetches before it ever
+            calls a tool. Discovery is public. Protected actions still require
+            an operator-issued API key and an applicable scoped permit.
           </p>
         </div>
         <div class="machine-links">
-          <a href="https://api.thisisatest.tech/.well-known/agent.json" rel="noopener noreferrer">
-            <span>Agent manifest</span><code>/.well-known/agent.json</code>
+          <a
+            href="https://api.thisisatest.tech/.well-known/agent.json"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span
+              >Agent manifest <span class="ext" aria-hidden="true">↗</span></span
+            ><code>/.well-known/agent.json</code>
           </a>
-          <a href="https://api.thisisatest.tech/llms.txt" rel="noopener noreferrer">
-            <span>Agent instructions</span><code>/llms.txt</code>
+          <a
+            href="https://api.thisisatest.tech/llms.txt"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span
+              >Agent instructions
+              <span class="ext" aria-hidden="true">↗</span></span
+            ><code>/llms.txt</code>
           </a>
-          <a href="https://api.thisisatest.tech/mcp/tools.json" rel="noopener noreferrer">
-            <span>MCP discovery</span><code>/mcp/tools.json</code>
+          <a
+            href="https://api.thisisatest.tech/mcp/tools.json"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span
+              >MCP discovery <span class="ext" aria-hidden="true">↗</span></span
+            ><code>/mcp/tools.json</code>
           </a>
-          <a href="https://api.thisisatest.tech/health/dependencies" rel="noopener noreferrer">
-            <span>Runtime truth</span><code>/health/dependencies</code>
+          <a
+            href="https://api.thisisatest.tech/health/dependencies"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span
+              >Live dependency status
+              <span class="ext" aria-hidden="true">↗</span></span
+            ><code>/health/dependencies</code>
           </a>
         </div>
+        <p class="machine-note">
+          These four links open raw JSON on the API origin in a new tab.
+        </p>
       </section>
 
       <section class="boundary-section" aria-labelledby="boundary-title">
@@ -378,21 +440,88 @@
           </ul>
         </div>
       </section>
+
+      <section
+        class="provenance-section"
+        id="provenance"
+        aria-labelledby="provenance-title"
+      >
+        <div class="section provenance-layout">
+          <div class="provenance-copy">
+            <p class="section-kicker">06 / Who is behind this</p>
+            <h2 id="provenance-title">Built in the open by one accountable operator.</h2>
+            <p>
+              Agent Middleware API is built and run by
+              @@PUBLIC_DISPLAY_NAME@@. The gateway, the SDK, and the offline
+              receipt verifier are public source — you can read exactly what
+              the eight steps above do before you talk to anyone.
+            </p>
+            <p>
+              <a
+                href="https://github.com/PetrefiedThunder/agent-middleware-api"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Source code on GitHub</a
+              >
+              ·
+              <a
+                href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/quickstart.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Quickstart</a
+              >
+              ·
+              <a
+                href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Security limitations</a
+              >
+            </p>
+          </div>
+          <div class="closing-cta">
+            <h2>Bring one tool. Keep the evidence.</h2>
+            <p>
+              A 30-minute call: we scope one governed action on a tool you
+              already run, and you leave with a receipt you can verify without
+              us.
+            </p>
+            <div class="pilot-links">
+              <a
+                class="button button-primary"
+                href="@@PUBLIC_BOOKING_URL@@"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-analytics-event="booking_click"
+                aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
+                >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+              >
+              <a
+                class="button button-secondary"
+                href="/proof/"
+                data-analytics-event="proof_click"
+                >Verify our receipt yourself — offline</a
+              >
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
       <div class="footer-branding">
         <div class="footer-brand">Agent Middleware API</div>
-        <p>Authorize the action. Meter it once. Keep the evidence.</p>
+        <p>Authorize one agent action. Charge it once. Prove what happened.</p>
       </div>
       <div class="footer-directory">
         <p>Human contact</p>
         <a
           class="button button-primary"
           href="@@PUBLIC_BOOKING_URL@@"
+          target="_blank"
           rel="noopener noreferrer"
           data-analytics-event="booking_click"
-          aria-label="Book a one-tool pilot — 30-minute call"
+          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
           >Book a one-tool pilot</a
         >
         <a
@@ -406,9 +535,31 @@
       <div class="footer-directory">
         <p>Evidence and discovery</p>
         <a href="/proof/" data-analytics-event="proof_click">Receipt proof</a>
-        <a href="https://api.thisisatest.tech/.well-known/agent.json" rel="noopener noreferrer">Agent manifest</a>
-        <a href="https://api.thisisatest.tech/openapi.json" rel="noopener noreferrer">OpenAPI</a>
-        <a href="https://api.thisisatest.tech/health/dependencies" rel="noopener noreferrer">Runtime truth</a>
+        <a href="https://api.thisisatest.tech/.well-known/agent.json" target="_blank" rel="noopener noreferrer">Agent manifest</a>
+        <a href="https://api.thisisatest.tech/openapi.json" target="_blank" rel="noopener noreferrer">OpenAPI</a>
+        <a href="https://api.thisisatest.tech/health/dependencies" target="_blank" rel="noopener noreferrer">Live dependency status</a>
+      </div>
+      <div class="footer-directory">
+        <p>Source and policy</p>
+        <a
+          href="https://github.com/PetrefiedThunder/agent-middleware-api"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Source code (GitHub)</a
+        >
+        <a
+          href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/quickstart.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Quickstart docs</a
+        >
+        <a
+          href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Security limitations</a
+        >
+        <a href="/.well-known/security.txt">Report a vulnerability</a>
       </div>
       <p class="footer-note">
         Marketing: <code>www.thisisatest.tech</code> · API:
