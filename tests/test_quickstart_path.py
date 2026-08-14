@@ -292,6 +292,36 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     client.close()
 
 
+def _run_proof_script(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "live_loop_proof.py"), *args],
+        cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_live_loop_proof_refuses_unsafe_remote_targets():
+    """The guard must fail closed before minting or sending any credential.
+
+    Both rejections happen before any network call, so no server is needed.
+    """
+    # Non-loopback without opting in.
+    without_optin = _run_proof_script("--api-url", "https://example.com")
+    assert without_optin.returncode == 2
+    assert "without --allow-remote" in without_optin.stderr
+
+    # Non-loopback over cleartext, even with --allow-remote: the minted key
+    # would cross the network unencrypted, so it must be refused.
+    cleartext = _run_proof_script(
+        "--api-url", "http://example.com", "--allow-remote"
+    )
+    assert cleartext.returncode == 2
+    assert "cleartext" in cleartext.stderr
+
+
 def test_live_loop_proof_script(quickstart_server, tmp_path):
     """The one-command live proof drives every stage and writes the bundle.
 

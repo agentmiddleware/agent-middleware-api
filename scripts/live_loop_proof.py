@@ -27,9 +27,12 @@ Run::
     make quickstart          # terminal 1: boots the server
     make live-loop-proof     # terminal 2: drives the loop, writes the bundle
 
-Self-provision only exists on local dev postures — production-like
-deployments refuse it at boot — so this script is loopback-only unless
-``--allow-remote`` is passed for a staging host you control.
+Self-provision only exists on dev-like postures — production-like
+deployments (staging, preprod, preview, ...) refuse it — so this script is
+loopback-only unless ``--allow-remote`` is passed, and then only against a
+remote instance that has self-provision enabled. Non-loopback targets must
+use ``https://``: the run mints an API key and sends it on every request,
+which must never cross the network in the clear.
 """
 
 from __future__ import annotations
@@ -173,9 +176,17 @@ class ProofRun:
             "/v1/dev-keys/self-provision",
             json={"agent_id": f"live-loop-proof-{self.run_id}"},
         )
+        hint = (
+            " -- a production-like target (staging/preprod/preview) refuses "
+            "self-provision by design; point --allow-remote at a remote "
+            "instance with ENABLE_DEV_KEY_SELF_PROVISION=true"
+            if minted.status_code == 403
+            else ""
+        )
         require(
             minted.status_code in (200, 201),
-            f"self-provision refused ({minted.status_code}): {minted.text}",
+            f"self-provision refused ({minted.status_code}): "
+            f"{minted.text}{hint}",
         )
         body = minted.json()
         identity = {
@@ -521,20 +532,35 @@ def main(argv: list[str] | None = None) -> int:
         "--allow-remote",
         action="store_true",
         help=(
-            "Permit a non-loopback --api-url. Only for a staging host you "
-            "control; the run self-provisions keys and writes test data."
+            "Permit a non-loopback --api-url (which must then use https://). "
+            "Only for a remote instance with self-provision enabled -- "
+            "production-like hosts (staging, preprod, preview, ...) refuse "
+            "self-provision by design, so this mode cannot authenticate there."
         ),
     )
     args = parser.parse_args(argv)
 
-    host = urlparse(args.api_url).hostname or ""
-    if host not in LOOPBACK_HOSTS and not args.allow_remote:
-        print(
-            f"refusing non-loopback target {args.api_url!r} without "
-            "--allow-remote",
-            file=sys.stderr,
-        )
-        return 2
+    parsed = urlparse(args.api_url)
+    host = parsed.hostname or ""
+    if host not in LOOPBACK_HOSTS:
+        if not args.allow_remote:
+            print(
+                f"refusing non-loopback target {args.api_url!r} without "
+                "--allow-remote",
+                file=sys.stderr,
+            )
+            return 2
+        # The run mints an API key and sends it in X-API-Key on every request;
+        # a non-loopback hop must be encrypted or that credential (and every
+        # governed call) crosses the network in the clear.
+        if parsed.scheme != "https":
+            print(
+                f"refusing cleartext {parsed.scheme or 'http'}:// for "
+                f"non-loopback target {args.api_url!r}; use https:// so the "
+                "minted key is not sent over the wire unencrypted",
+                file=sys.stderr,
+            )
+            return 2
 
     try:
         run(args.api_url.rstrip("/"), args.output_dir)
