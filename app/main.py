@@ -33,6 +33,7 @@ from .core.durable_state import (
 from .core.health import gather_dependency_report
 from .core.public_contact import validated_public_contact as _public_contact_metadata
 from .core.rate_limiter import RateLimitMiddleware
+from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
     validate_trust_mode_guardrails,
@@ -521,6 +522,12 @@ def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:
 # CORS origins are configurable via the CORS_ORIGINS env var (comma-separated).
 cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 add_cors_middleware(app, cors_origins)
+
+# Baseline response hardening (nosniff, framing, referrer, HSTS over TLS).
+# Registered last so it wraps outermost: Starlette builds the stack in reverse
+# registration order, and stamping rate-limit 429s and CORS preflights too is
+# the point.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # --- Mount service routers ---
 

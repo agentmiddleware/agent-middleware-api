@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -139,16 +140,22 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "Should the agent retry? Will the retry create another debit?"
     )
     boundary = (
-        "Put one scoped, budgeted boundary in front of the call. The same accepted "
-        "idempotency key cannot create a second gateway dispatch or debit, and the "
-        "terminal gateway outcome gets a signed receipt."
+        "Agent Middleware API is a gateway between your agents and your paid MCP "
+        "(Model Context Protocol) tools. The first call executes and is charged "
+        "once; a retry carrying the same idempotency key cannot dispatch again or "
+        "debit again. Every completed call returns a signed receipt you can verify "
+        "offline."
     )
 
     assert headline in text
     assert failure in text
     assert boundary in text
     assert "Book a one-tool pilot" in text
-    assert "Verify a real receipt" in text
+    assert "Verify our receipt yourself — offline" in text
+    # One label for the booking CTA everywhere; the shorter "Book a pilot" and
+    # "Discuss fit" variants drifted away from the differentiator.
+    assert "Book a pilot" not in text
+    assert "Discuss fit" not in text
     assert "platform engineering, AI infrastructure, and security teams" in text
     assert f'href="{VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]}"' in page
     assert f'href="mailto:{VALID_TEST_CONTACTS["PUBLIC_CONTACT_EMAIL"]}"' in page
@@ -183,7 +190,8 @@ def test_rendered_site_has_truthful_proof_and_no_browser_secret_storage(
     ).read_bytes()
 
     assert "self-issued live gateway proof, not customer traction" in landing
-    assert "Self-issued live gateway proof, not customer traction" in proof
+    assert "This receipt is self-issued from a non-sensitive" in proof
+    assert "it is not customer evidence" in proof
     assert "partner.echo" in landing
     assert "/proof/receipt.json" in proof
     assert "/proof/trust-keys.json" in proof
@@ -330,9 +338,9 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html"):
         page = (default_output / relative_path).read_text(encoding="utf-8")
         assert "/_vercel/insights/script.js" not in page
-        assert "window.va" not in page
+        assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-2"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -342,7 +350,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert "window.va" in page
+        assert '<script src="/va-init.js?v=gateway-2"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -518,6 +526,189 @@ def test_pages_publish_valid_json_ld(tmp_path) -> None:
         assert document["description"]
 
 
+class _InlineScriptCollector(HTMLParser):
+    """Collect the body of every executable inline ``<script>``.
+
+    ``application/ld+json`` blocks are data, not script: browsers never execute
+    them and CSP's ``script-src`` does not block them.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._executable = False
+        self.inline_scripts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag != "script":
+            return
+        attributes = dict(attrs)
+        script_type = (attributes.get("type") or "text/javascript").strip()
+        self._executable = "src" not in attributes and script_type in {
+            "text/javascript",
+            "application/javascript",
+            "module",
+        }
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._executable = False
+
+    def handle_data(self, data: str) -> None:
+        if self._executable and data.strip():
+            self.inline_scripts.append(" ".join(data.split())[:80])
+
+
+def test_site_sends_a_content_security_policy_and_hsts() -> None:
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+
+    global_headers = next(
+        entry for entry in config["headers"] if entry["source"] == "/(.*)"
+    )
+    values = {header["key"]: header["value"] for header in global_headers["headers"]}
+
+    assert "includeSubDomains" in values["Strict-Transport-Security"]
+    policy = {
+        directive.split(" ")[0]: directive
+        for directive in values["Content-Security-Policy"].split("; ")
+    }
+    assert policy["default-src"] == "default-src 'self'"
+    assert policy["object-src"] == "object-src 'none'"
+    assert policy["base-uri"] == "base-uri 'none'"
+    # The accessibility preload and the analytics shim live in same-origin files
+    # precisely so no inline-script escape hatch is needed.
+    assert policy["script-src"] == "script-src 'self'"
+    assert "'unsafe-inline'" not in values["Content-Security-Policy"]
+    assert "https://fonts.googleapis.com" in policy["style-src"]
+    assert "https://fonts.gstatic.com" in policy["font-src"]
+
+
+def test_pages_carry_no_inline_scripts(tmp_path) -> None:
+    """Every executable script must be a same-origin file, for the CSP above."""
+
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    enabled_output = tmp_path / "analytics-on"
+    enabled_contacts = dict(VALID_TEST_CONTACTS)
+    enabled_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = "true"
+    assert _render_site(enabled_output, enabled_contacts).returncode == 0
+
+    for root in (output, enabled_output):
+        for relative_path in ("index.html", "proof/index.html", "404.html"):
+            collector = _InlineScriptCollector()
+            collector.feed((root / relative_path).read_text(encoding="utf-8"))
+            collector.close()
+            assert not collector.inline_scripts, (
+                f"{relative_path} has an inline <script> the CSP would block: "
+                f"{collector.inline_scripts}"
+            )
+
+
+def test_static_assets_are_cached_and_html_is_not() -> None:
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+
+    cached_sources = {
+        entry["source"]
+        for entry in config["headers"]
+        for header in entry["headers"]
+        if header["key"] == "Cache-Control" and "max-age=604800" in header["value"]
+    }
+    assert any("styles.css" in source for source in cached_sources)
+    assert "/proof/proof.js" in cached_sources
+
+    # Fingerprinting is a query token, so every reference must carry it or the
+    # week-long cache would pin visitors to a stale stylesheet.
+    for relative_path in ("index.html", "proof/index.html", "404.html"):
+        page = (SITE / relative_path).read_text(encoding="utf-8")
+        for asset in ("/styles.css", "/a11y.js", "/a11y-preload.js"):
+            assert f'{asset}?v=' in page, f"{relative_path} references {asset} unversioned"
+
+    # HTML gets no long-lived Cache-Control rule of its own.
+    html_rules = [
+        entry
+        for entry in config["headers"]
+        if entry["source"].endswith((".html", "/"))
+    ]
+    assert not html_rules
+
+
+def test_trailing_slash_is_canonical_for_the_proof_page() -> None:
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    proof = (SITE / "proof" / "index.html").read_text(encoding="utf-8")
+
+    assert config["trailingSlash"] is True
+    assert 'rel="canonical" href="https://www.thisisatest.tech/proof/"' in proof
+
+
+def test_robots_states_an_explicit_ai_crawler_policy(tmp_path) -> None:
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    robots = (output / "robots.txt").read_text(encoding="utf-8")
+    for agent in ("GPTBot", "ClaudeBot", "Google-Extended", "PerplexityBot", "CCBot"):
+        assert f"User-agent: {agent}" in robots
+
+
+def test_sitemap_publishes_lastmod(tmp_path) -> None:
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    sitemap = (output / "sitemap.xml").read_text(encoding="utf-8")
+    assert sitemap.count("<lastmod>") == sitemap.count("<loc>")
+    assert "@@BUILD_DATE@@" not in sitemap
+
+
+def test_security_txt_is_routable_and_unexpired(tmp_path) -> None:
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    security_txt = (output / ".well-known" / "security.txt").read_text(
+        encoding="utf-8"
+    )
+    contact = VALID_TEST_CONTACTS["PUBLIC_CONTACT_EMAIL"]
+    assert f"Contact: mailto:{contact}" in security_txt
+    # A plain-text file must carry the raw address, never an HTML entity.
+    assert "&#x27;" not in security_txt and "&amp;" not in security_txt
+
+    expires = next(
+        line.split(": ", 1)[1].strip()
+        for line in security_txt.splitlines()
+        if line.startswith("Expires:")
+    )
+    parsed = datetime.strptime(expires, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc
+    )
+    assert parsed > datetime.now(timezone.utc)
+
+
+def test_branded_404_offers_a_way_back(tmp_path) -> None:
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    page = (output / "404.html").read_text(encoding="utf-8")
+    assert 'name="robots" content="noindex' in page
+    assert 'href="/proof/"' in page
+    assert 'href="/#machine-discovery"' in page
+    assert "@@" not in page
+
+
+def test_navigation_is_identical_across_pages(tmp_path) -> None:
+    """A visitor on /proof/ must reach the same places as one on /."""
+
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    landing = (output / "index.html").read_text(encoding="utf-8")
+    proof = (output / "proof" / "index.html").read_text(encoding="utf-8")
+
+    for label in ("Pilot", "Proof", "Machine discovery"):
+        assert f">{label}</a>" in landing
+        assert f">{label}</a>" in proof
+    for anchor in ("/#pilot", "/#proof", "/#machine-discovery"):
+        assert f'href="{anchor}"' in proof
+
+
 def test_local_site_assets_exist() -> None:
     for path in (
         SITE / "styles.css",
@@ -531,6 +722,10 @@ def test_local_site_assets_exist() -> None:
         SITE / ".well-known" / "agent.json",
         SITE / "proof" / "index.html",
         SITE / "proof" / "proof.js",
+        SITE / "404.html",
+        SITE / "a11y-preload.js",
+        SITE / "va-init.js",
+        SITE / ".well-known" / "security.txt",
     ):
         assert path.is_file(), f"missing landing-page asset: {path}"
 

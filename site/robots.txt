@@ -1,4 +1,41 @@
 User-agent: *
 Allow: /
 
+# AI crawlers are welcome on this origin. Everything here is public marketing
+# and public evidence: there is no gated content, and no protected action can
+# be taken from this host. Protected routes live on api.thisisatest.tech and
+# require an operator-issued API key plus a scoped permit regardless of crawler.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: meta-externalagent
+Allow: /
+
 Sitemap: https://www.thisisatest.tech/sitemap.xml
