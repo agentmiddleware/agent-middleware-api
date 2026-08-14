@@ -36,13 +36,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -53,7 +55,26 @@ DEFAULT_OUTPUT_DIR = ROOT / "data" / "live-loop-proof"
 GOVERNED_TOOL = "partner.notes.write"
 UNGRANTED_TOOL = "some.other.tool"
 PERMIT_MAX_CREDITS = 10
+# The quickstart dogfood tool bills a fixed 2 credits/call
+# (DOGFOOD_CREDITS_PER_UNIT in app/services/dogfood_tool.py). Pinning it here
+# lets the meter stage prove the charge is not just present but *correct* — a
+# server that regressed metering to 0 (revenue leak) must fail, not pass.
+EXPECTED_CREDITS_PER_CALL = Decimal("2")
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _sanitize_url_for_record(url: str) -> str:
+    """Drop any embedded credential (userinfo) and query/fragment from a URL.
+
+    The transcript ships inside the partner handoff bundle, so a secret carried
+    in ``--api-url`` (basic-auth userinfo or a token query param) must never be
+    persisted there. Keep only scheme, host, port, and path.
+    """
+    parts = urlparse(url)
+    netloc = parts.hostname or ""
+    if parts.port is not None:
+        netloc = f"{netloc}:{parts.port}"
+    return urlunparse((parts.scheme, netloc, parts.path, "", "", ""))
 
 VERIFY_MD = """\
 # Independent verification of this receipt bundle
@@ -232,10 +253,21 @@ class ProofRun:
             receipt["ledger_entry_id"] is not None,
             "success receipt has no ledger entry",
         )
+        # A metered call must actually charge the known price. Without this a
+        # server that regressed to charging 0 (revenue leak) or a wrong amount
+        # would still green the loop -- defeating the billing-integrity claim
+        # the meter stage exists to prove.
+        charged = Decimal(str(receipt["credits_charged"]))
+        require(
+            charged == EXPECTED_CREDITS_PER_CALL,
+            f"success charged {charged} credits, expected "
+            f"{EXPECTED_CREDITS_PER_CALL}",
+        )
         self.record(
             "invoke",
             receipt_id=receipt["receipt_id"],
             outcome=receipt["outcome"],
+            credits_charged=str(charged),
         )
         return receipt
 
@@ -250,6 +282,20 @@ class ProofRun:
             len(matching) == 1,
             "receipt's ledger_entry_id not found in the wallet ledger",
         )
+        # The ledger debit must agree with the receipt's charge, in the right
+        # direction and magnitude -- the receipt and the money must tell the
+        # same story, or metering integrity is broken.
+        debit_amount = Decimal(str(matching[0]["amount"]))
+        require(
+            debit_amount == -EXPECTED_CREDITS_PER_CALL,
+            f"ledger debit {debit_amount} != expected "
+            f"{-EXPECTED_CREDITS_PER_CALL}",
+        )
+        require(
+            -debit_amount == Decimal(str(receipt["credits_charged"])),
+            "ledger debit magnitude disagrees with the receipt's "
+            "credits_charged",
+        )
         debits = [e for e in entries if GOVERNED_TOOL in e["description"]]
         self.record(
             "meter",
@@ -259,7 +305,9 @@ class ProofRun:
         )
         return len(debits)
 
-    def receipt_bundle(self, receipt_id: str, filename: str) -> Path:
+    def receipt_bundle(self, receipt_id: str, filename: str, *,
+                       expected_outcome: str,
+                       expected_credits: Decimal) -> Path:
         portable = self.client.get(f"/v1/receipts/{receipt_id}/portable")
         require(
             portable.status_code == 200,
@@ -267,6 +315,21 @@ class ProofRun:
         )
         path = self.output_dir / filename
         path.write_text(portable.text, encoding="utf-8")
+        # Verify the *exported* bundle says what this stage claims. Offline
+        # signature verification proves the bytes are authentic, not that they
+        # carry the right outcome; a validly-signed denial exported as a
+        # success would otherwise ship in the handoff bundle unnoticed.
+        signed = json.loads(json.loads(path.read_text(encoding="utf-8"))["signing_input"])
+        require(
+            signed.get("outcome") == expected_outcome,
+            f"{filename}: exported outcome {signed.get('outcome')!r} != "
+            f"{expected_outcome!r}",
+        )
+        require(
+            Decimal(str(signed.get("credits_charged"))) == expected_credits,
+            f"{filename}: exported credits_charged "
+            f"{signed.get('credits_charged')!r} != {expected_credits}",
+        )
         return path
 
     def trust_keys(self) -> Path:
@@ -366,7 +429,9 @@ class ProofRun:
                 "--keys",
                 str(keys_path),
             ],
-            env={"PYTHONPATH": str(SDK_SRC)},
+            # Merge, don't replace, the environment: a bare env={...} would
+            # drop the interpreter's own paths and can break the subprocess.
+            env={**os.environ, "PYTHONPATH": str(SDK_SRC)},
             capture_output=True,
             text=True,
             timeout=60,
@@ -395,7 +460,9 @@ def run(api_url: str, output_dir: Path) -> None:
         debits = proof.meter(identity["wallet_id"], receipt)
 
         receipt_path = proof.receipt_bundle(
-            receipt["receipt_id"], "receipt-bundle.json"
+            receipt["receipt_id"], "receipt-bundle.json",
+            expected_outcome="success",
+            expected_credits=EXPECTED_CREDITS_PER_CALL,
         )
         keys_path = proof.trust_keys()
         proof.record(
@@ -408,7 +475,9 @@ def run(api_url: str, output_dir: Path) -> None:
         proof.audit()
         denial = proof.govern(identity)
         denial_path = proof.receipt_bundle(
-            denial["receipt_id"], "denial-bundle.json"
+            denial["receipt_id"], "denial-bundle.json",
+            expected_outcome="denied",
+            expected_credits=Decimal("0"),
         )
 
         success_out = proof.verify_offline(receipt_path, keys_path, "success")
@@ -419,7 +488,7 @@ def run(api_url: str, output_dir: Path) -> None:
             json.dumps(
                 {
                     "run_id": proof.run_id,
-                    "api_url": api_url,
+                    "api_url": _sanitize_url_for_record(api_url),
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                     "stages": proof.stages,
                 },

@@ -347,3 +347,23 @@ def test_live_loop_proof_script(quickstart_server, tmp_path):
     for bundle in ("receipt-bundle.json", "denial-bundle.json"):
         verified = _verify_cli(output_dir / bundle, output_dir / "trust-keys.json")
         assert verified.returncode == 0, verified.stdout + verified.stderr
+
+    # Signature validity alone does not prove a bundle carries the right
+    # outcome. Assert the *semantics* of each exported bundle so a validly
+    # signed but wrong-outcome receipt (e.g. a denial exported as a success)
+    # cannot ship in the handoff unnoticed.
+    def _signed(bundle_name: str) -> dict:
+        outer = json.loads((output_dir / bundle_name).read_text(encoding="utf-8"))
+        return json.loads(outer["signing_input"])
+
+    success_signed = _signed("receipt-bundle.json")
+    assert success_signed["outcome"] == "success"
+    assert success_signed["credits_charged"] == "2"
+
+    denial_signed = _signed("denial-bundle.json")
+    assert denial_signed["outcome"] == "denied"
+    assert denial_signed["credits_charged"] == "0"
+
+    # The transcript must not carry a credential embedded in --api-url.
+    transcript_api_url = transcript["api_url"]
+    assert "@" not in transcript_api_url
