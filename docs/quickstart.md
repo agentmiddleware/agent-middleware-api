@@ -225,9 +225,10 @@ curl -s "$API_URL/v1/billing/ledger/$WALLET_ID" -H "X-API-Key: $AGENT_API_KEY" |
 ```
 
 Then verify the tamper-evident audit chain behind those entries. Every
-governed action appends a hash-linked audit event, and your own key is
-enough to verify your wallet's chain — tamper evidence you cannot use
-yourself protects no one:
+governed tool invocation — the successful call you just made, and the
+denials you are about to trigger — appends a hash-linked audit event, and
+your own key is enough to verify your wallet's chain (tamper evidence you
+cannot use yourself protects no one):
 
 ```bash
 curl -s -X POST "$API_URL/v1/audit/verify-chain" \

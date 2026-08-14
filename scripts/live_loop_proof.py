@@ -76,13 +76,15 @@ to the issuing server.
 
 ## Verify offline (no network)
 
-From a clone of the repository:
+The only dependency is `cryptography` for the Ed25519 check — no networking
+library, no account. From a clone of the repository:
 
+    pip install cryptography
     PYTHONPATH=b2a_sdk/src python -m b2a_sdk.verify_cli \\
         --bundle receipt-bundle.json --keys trust-keys.json
 
-Or with the SDK installed (`pip install ./b2a_sdk` from the repo, which
-provides the `b2a-verify-receipt` entry point):
+Or with the SDK installed (`pip install "./b2a_sdk[verify]"` from the repo,
+which provides the `b2a-verify-receipt` entry point and the verifier extra):
 
     b2a-verify-receipt --bundle receipt-bundle.json --keys trust-keys.json
 
@@ -101,7 +103,8 @@ verifier. It must exit 1.
 ## Verify against the live issuer instead
 
 If you can reach the issuing server, you can fetch its key set yourself
-rather than trusting the copy in this directory:
+rather than trusting the copy in this directory (this path fetches over the
+network, so it also needs `httpx`: `pip install "./b2a_sdk[verify]" httpx`):
 
     b2a-verify-receipt --bundle receipt-bundle.json --issuer <server origin>
 """

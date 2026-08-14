@@ -54,7 +54,7 @@ def _read_json(path: str) -> Any:
 def _fetch_key_document(issuer: str, timeout: float) -> Any:
     try:
         import httpx
-    except ImportError as exc:  # pragma: no cover - httpx is a base dependency
+    except ImportError as exc:  # httpx is only needed for the --issuer fetch
         raise VerificationError(
             "Fetching a key set requires httpx; pass --keys to verify offline."
         ) from exc
