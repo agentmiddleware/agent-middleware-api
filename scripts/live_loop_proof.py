@@ -64,6 +64,28 @@ PERMIT_MAX_CREDITS = 10
 # server that regressed metering to 0 (revenue leak) must fail, not pass.
 EXPECTED_CREDITS_PER_CALL = Decimal("2")
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# Every file the run writes into the handoff directory.
+ARTIFACTS = (
+    "receipt-bundle.json",
+    "denial-bundle.json",
+    "trust-keys.json",
+    "transcript.json",
+    "VERIFY.md",
+)
+
+
+def _child_env(prepend: Path) -> dict[str, str]:
+    """Inherit the environment, prepending ``prepend`` to PYTHONPATH.
+
+    Prepending rather than replacing keeps an inherited PYTHONPATH (CI, tox, a
+    developer shell) intact while ensuring the intended source wins on import.
+    """
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{prepend}{os.pathsep}{existing}" if existing else str(prepend)
+    )
+    return env
 
 
 def _sanitize_url_for_record(url: str) -> str:
@@ -101,16 +123,21 @@ to the issuing server.
 ## Verify offline (no network)
 
 The only dependency is `cryptography` for the Ed25519 check — no networking
-library, no account. From a clone of the repository:
+library, no account. Run the commands below **from this directory** (the one
+holding `receipt-bundle.json`); the bundle and key paths are relative to it.
 
-    pip install cryptography
-    PYTHONPATH=b2a_sdk/src python -m b2a_sdk.verify_cli \\
-        --bundle receipt-bundle.json --keys trust-keys.json
-
-Or with the SDK installed (`pip install "./b2a_sdk[verify]"` from the repo,
-which provides the `b2a-verify-receipt` entry point and the verifier extra):
+With the SDK installed from a clone — `pip install "/path/to/agent-middleware-api/b2a_sdk[verify]"`,
+which pulls in `cryptography` and provides the `b2a-verify-receipt` command:
 
     b2a-verify-receipt --bundle receipt-bundle.json --keys trust-keys.json
+
+Or straight from a clone's source, pointing `PYTHONPATH` at its `b2a_sdk/src`
+by **absolute** path so it resolves no matter your working directory:
+
+    pip install cryptography
+    PYTHONPATH=/path/to/agent-middleware-api/b2a_sdk/src \\
+        python -m b2a_sdk.verify_cli \\
+        --bundle receipt-bundle.json --keys trust-keys.json
 
 Expected: `VERIFIED`, exit code 0. Repeat with `denial-bundle.json`.
 
@@ -198,7 +225,7 @@ class ProofRun:
         return identity
 
     def authorize(self, identity: dict[str, str], *, allowed_tool: str,
-                  label: str) -> str:
+                  label: str, record: bool = True) -> str:
         expires_at = (
             datetime.now(timezone.utc) + timedelta(minutes=30)
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -220,7 +247,7 @@ class ProofRun:
             f"permit creation failed ({permit.status_code}): {permit.text}",
         )
         permit_id = permit.json()["permit_id"]
-        if label == "grant":
+        if record:
             self.record(
                 "authorize",
                 permit_id=permit_id,
@@ -346,9 +373,11 @@ class ProofRun:
     def trust_keys(self) -> Path:
         # Deliberately unauthenticated: the key set must be fetchable by a
         # verifier who holds no credential at all.
-        keys = httpx.get(
-            f"{self.client.base_url}/.well-known/trust-keys.json", timeout=30
-        )
+        # base_url.join avoids a double slash: some httpx versions store
+        # base_url with a trailing slash, and Starlette does not collapse
+        # "//.well-known/..." to the single-slash route.
+        keys_url = self.client.base_url.join(".well-known/trust-keys.json")
+        keys = httpx.get(str(keys_url), timeout=30)
         require(keys.status_code == 200, "trust-keys.json not served")
         path = self.output_dir / "trust-keys.json"
         path.write_text(keys.text, encoding="utf-8")
@@ -396,8 +425,10 @@ class ProofRun:
         self.record("audit", valid=True, checked_events=chain["checked_events"])
 
     def govern(self, identity: dict[str, str]) -> dict[str, Any]:
+        # record=False: the denial's own "govern" stage is what the transcript
+        # records, not this setup permit.
         narrow_permit = self.authorize(
-            identity, allowed_tool=UNGRANTED_TOOL, label="deny"
+            identity, allowed_tool=UNGRANTED_TOOL, label="deny", record=False
         )
         denied = self.client.post(
             "/mcp/messages",
@@ -418,7 +449,13 @@ class ProofRun:
         )
         denial = denied["error"]["data"]["receipt"]
         require(denial["outcome"] == "denied", "denial receipt outcome != denied")
-        require(denial["credits_charged"] == "0", "denial was charged")
+        # Compare as Decimal, like the success charge, so a formatting change
+        # ("0.00000000") cannot make this assertion silently pass or fail.
+        denial_charged = Decimal(str(denial["credits_charged"]))
+        require(
+            denial_charged == Decimal("0"),
+            f"denial was charged {denial_charged} credits",
+        )
         require(bool(denial["signature"]), "denial receipt is unsigned")
         self.record(
             "govern",
@@ -440,9 +477,7 @@ class ProofRun:
                 "--keys",
                 str(keys_path),
             ],
-            # Merge, don't replace, the environment: a bare env={...} would
-            # drop the interpreter's own paths and can break the subprocess.
-            env={**os.environ, "PYTHONPATH": str(SDK_SRC)},
+            env=_child_env(SDK_SRC),
             capture_output=True,
             text=True,
             timeout=60,
@@ -458,6 +493,12 @@ class ProofRun:
 
 def run(api_url: str, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Clear a prior run's artifacts first: a partial failure must not leave a
+    # transcript describing one run beside receipts from another, since the
+    # default output directory is reused and the directory is handed to a
+    # partner as a single coherent bundle.
+    for name in ARTIFACTS:
+        (output_dir / name).unlink(missing_ok=True)
     with httpx.Client(base_url=api_url, timeout=30) as client:
         proof = ProofRun(client, output_dir)
         print(f"live loop proof {proof.run_id} against {api_url}\n")

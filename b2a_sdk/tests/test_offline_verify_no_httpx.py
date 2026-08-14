@@ -36,11 +36,16 @@ _BLOCK_HTTPX = "import sys; sys.modules['httpx'] = None\n"
 
 
 def _run(code: str, *, block_httpx: bool) -> subprocess.CompletedProcess:
-    # Merge, don't replace, the environment: a bare ``env={...}`` would drop the
-    # interpreter's own paths and break site-packages resolution.
+    # Prepend to (not replace) PYTHONPATH: keep any inherited PYTHONPATH intact
+    # while ensuring the SDK source wins on import.
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{SDK_SRC}{os.pathsep}{existing}" if existing else str(SDK_SRC)
+    )
     return subprocess.run(
         [sys.executable, "-c", (_BLOCK_HTTPX if block_httpx else "") + code],
-        env={**os.environ, "PYTHONPATH": str(SDK_SRC)},
+        env=env,
         capture_output=True,
         text=True,
         timeout=60,
@@ -122,6 +127,49 @@ def test_verify_cli_keys_path_runs_without_httpx(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "VERIFIED" in result.stdout
+
+
+def test_tampered_bundle_rejected_without_httpx(tmp_path):
+    """The dependency-minimal path must still REJECT a forged bundle.
+
+    VERIFY.md tells partners to branch on exit code 1; prove that contract
+    holds in the same httpx-free configuration, not just the accept path.
+    """
+    pytest.importorskip("cryptography")
+    bundle_path, keys_path = _write_signed_bundle(tmp_path)
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    bundle["signing_input"] = bundle["signing_input"].replace(
+        '"outcome":"success"', '"outcome":"denied"'
+    )
+    assert '"outcome":"denied"' in bundle["signing_input"]  # the edit must bite
+    forged = tmp_path / "forged-bundle.json"
+    forged.write_text(json.dumps(bundle), encoding="utf-8")
+    result = _run(
+        "from b2a_sdk.verify_cli import main\n"
+        f"raise SystemExit(main(['--bundle', {str(forged)!r}, "
+        f"'--keys', {str(keys_path)!r}]))\n",
+        block_httpx=True,
+    )
+    # 1 = well-formed but does not verify; must not be 0 and must not crash (2).
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "INVALID" in result.stderr
+
+
+def test_unknown_attribute_raises_attribute_error():
+    """The lazy __getattr__ must raise AttributeError for unknown names, not
+    ImportError -- wrong type breaks hasattr/getattr-default/pickle probing."""
+    result = _run(
+        "import b2a_sdk\n"
+        "try:\n"
+        "    b2a_sdk.NotAThing\n"
+        "except AttributeError:\n"
+        "    print('attribute-error-ok')\n"
+        "else:\n"
+        "    raise SystemExit('expected AttributeError')\n",
+        block_httpx=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "attribute-error-ok" in result.stdout
 
 
 def test_lazy_http_client_still_importable_when_httpx_present():

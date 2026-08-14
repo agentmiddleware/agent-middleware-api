@@ -263,7 +263,7 @@ documented path cannot silently rot.
 
 ### One command, whole loop, partner handoff bundle
 
-To drive the entire loop end to end against a running quickstart server —
+To drive the entire loop end-to-end against a running quickstart server —
 and produce artifacts you can hand to someone else to verify — run:
 
 ```bash
