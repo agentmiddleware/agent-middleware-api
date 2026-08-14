@@ -91,6 +91,7 @@
           href="@@PUBLIC_BOOKING_URL@@"
           rel="noopener noreferrer"
           data-analytics-event="booking_click"
+          aria-label="Book a pilot — 30-minute call (opens Calendly)"
           >Book a pilot <span aria-hidden="true">↗</span></a
         >
       </div>
@@ -149,6 +150,7 @@
               href="/proof/receipt.json"
               download
               data-analytics-event="proof_click"
+              aria-label="Download receipt.json — sample Ed25519 receipt"
               >Download receipt.json</a
             >
             <a
@@ -156,6 +158,7 @@
               href="/proof/trust-keys.json"
               download
               data-analytics-event="proof_click"
+              aria-label="Download trust-keys.json — Ed25519 public keys"
               >Download trust-keys.json</a
             >
           </article>
@@ -202,11 +205,13 @@ b2a-verify-receipt \
               href="@@PUBLIC_BOOKING_URL@@"
               rel="noopener noreferrer"
               data-analytics-event="booking_click"
+              aria-label="Book a one-tool pilot — 30-minute call (opens Calendly)"
               >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
             <a
               href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
               data-analytics-event="email_click"
+              aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
               >Email @@PUBLIC_CONTACT_EMAIL@@</a
             >
           </div>
@@ -222,14 +227,17 @@ b2a-verify-receipt \
       <div class="footer-directory">
         <p>Contact</p>
         <a
+          class="button button-primary"
           href="@@PUBLIC_BOOKING_URL@@"
           rel="noopener noreferrer"
           data-analytics-event="booking_click"
+          aria-label="Book a one-tool pilot — 30-minute call"
           >Book a one-tool pilot</a
         >
         <a
           href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
           data-analytics-event="email_click"
+          aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
           >@@PUBLIC_CONTACT_EMAIL@@</a
         >
         <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>

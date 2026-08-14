@@ -394,6 +394,88 @@ def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
         )
 
 
+class _LabeledLinkCollector(HTMLParser):
+    """Collect (visible_text, aria_label, href) for every ``<a>`` that carries an
+    ``aria-label``. Text inside ``aria-hidden`` descendants (e.g. the decorative
+    ``↗`` glyph) is excluded, matching how a screen reader computes the visible
+    accessible name.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_a = False
+        self._href = ""
+        self._label: str | None = None
+        self._text_parts: list[str] = []
+        self._hidden_stack: list[bool] = []
+        self.labeled_links: list[tuple[str, str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attributes = dict(attrs)
+        if tag == "a":
+            self._in_a = True
+            self._href = (attributes.get("href") or "").strip()
+            self._label = attributes.get("aria-label")
+            self._text_parts = []
+            self._hidden_stack = []
+        elif self._in_a:
+            hidden = str(attributes.get("aria-hidden", "")).strip().lower() == "true"
+            self._hidden_stack.append(hidden)
+
+    def handle_data(self, data: str) -> None:
+        if self._in_a and not any(self._hidden_stack):
+            cleaned = " ".join(data.split())
+            if cleaned:
+                self._text_parts.append(cleaned)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self._in_a:
+            if self._label is not None:
+                self.labeled_links.append(
+                    (" ".join(self._text_parts), self._label, self._href)
+                )
+            self._in_a = False
+            self._hidden_stack = []
+        elif self._in_a and self._hidden_stack:
+            self._hidden_stack.pop()
+
+
+def test_cta_aria_labels_preserve_visible_text_and_booking_url(tmp_path) -> None:
+    """WCAG 2.1 Label-in-Name for the rendered CTAs.
+
+    Every ``aria-label`` must contain the link's visible text as a contiguous
+    phrase, so voice-control users can still activate a control by speaking its
+    visible wording. This is the regression guard for the footer booking CTA,
+    whose label once read "Book a 30-minute one-tool pilot call" — which does
+    NOT contain the visible phrase "Book a one-tool pilot" — and for every other
+    labelled CTA. Booking CTAs must also resolve to the build-time booking URL.
+    """
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    booking_url = VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]
+    for relative_path in ("index.html", "proof/index.html"):
+        collector = _LabeledLinkCollector()
+        collector.feed((output / relative_path).read_text(encoding="utf-8"))
+        collector.close()
+        assert collector.labeled_links, f"{relative_path} exposes no aria-labelled links"
+        for visible, label, href in collector.labeled_links:
+            assert visible, f"{relative_path}: aria-label {label!r} on a link with no visible text"
+            assert visible in label, (
+                f"{relative_path}: aria-label {label!r} does not contain the "
+                f"visible link text {visible!r} (WCAG 2.1 Label-in-Name)"
+            )
+            if visible.startswith("Book a"):
+                assert href == booking_url, (
+                    f"{relative_path}: booking CTA {visible!r} resolves to {href!r}, "
+                    f"not the build-time booking URL {booking_url!r}"
+                )
+        assert any(
+            href == booking_url for _visible, _label, href in collector.labeled_links
+        ), f"{relative_path}: no CTA resolved to the build-time booking URL"
+
+
 class _JsonLdCollector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()

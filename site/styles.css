@@ -1033,6 +1033,11 @@ p a {
   color: var(--brass-bright);
 }
 
+.footer-directory .button-primary,
+.footer-directory .button-primary:hover {
+  color: var(--ink);
+}
+
 .footer-directory span {
   color: var(--text-dim);
   font-size: 0.88rem;

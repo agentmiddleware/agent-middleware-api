@@ -107,6 +107,7 @@
           href="@@PUBLIC_BOOKING_URL@@"
           rel="noopener noreferrer"
           data-analytics-event="booking_click"
+          aria-label="Book a pilot — 30-minute call (opens Calendly)"
           >Book a pilot <span aria-hidden="true">↗</span></a
         >
       </div>
@@ -138,12 +139,14 @@
               href="@@PUBLIC_BOOKING_URL@@"
               rel="noopener noreferrer"
               data-analytics-event="booking_click"
+              aria-label="Book a one-tool pilot — 30-minute call (opens Calendly)"
               >Book a one-tool pilot <span aria-hidden="true">↗</span></a
             >
             <a
               class="button button-secondary"
               href="/proof/"
               data-analytics-event="proof_click"
+              aria-label="Verify a real receipt — go to verification page"
               >Verify a real receipt</a
             >
           </div>
@@ -187,6 +190,7 @@
               href="@@PUBLIC_BOOKING_URL@@"
               rel="noopener noreferrer"
               data-analytics-event="booking_click"
+              aria-label="Discuss fit — book a pilot call"
               >Discuss fit <span aria-hidden="true">↗</span></a
             >
           </div>
@@ -344,16 +348,16 @@
           </p>
         </div>
         <div class="machine-links">
-          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/.well-known/agent.json">
+          <a href="https://api.thisisatest.tech/.well-known/agent.json" rel="noopener noreferrer">
             <span>Agent manifest</span><code>/.well-known/agent.json</code>
           </a>
-          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/llms.txt">
+          <a href="https://api.thisisatest.tech/llms.txt" rel="noopener noreferrer">
             <span>Agent instructions</span><code>/llms.txt</code>
           </a>
-          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/mcp/tools.json">
+          <a href="https://api.thisisatest.tech/mcp/tools.json" rel="noopener noreferrer">
             <span>MCP discovery</span><code>/mcp/tools.json</code>
           </a>
-          <a rel="noopener noreferrer" href="https://api.thisisatest.tech/health/dependencies">
+          <a href="https://api.thisisatest.tech/health/dependencies" rel="noopener noreferrer">
             <span>Runtime truth</span><code>/health/dependencies</code>
           </a>
         </div>
@@ -384,14 +388,17 @@
       <div class="footer-directory">
         <p>Human contact</p>
         <a
+          class="button button-primary"
           href="@@PUBLIC_BOOKING_URL@@"
           rel="noopener noreferrer"
           data-analytics-event="booking_click"
+          aria-label="Book a one-tool pilot — 30-minute call"
           >Book a one-tool pilot</a
         >
         <a
           href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
           data-analytics-event="email_click"
+          aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
           >@@PUBLIC_CONTACT_EMAIL@@</a
         >
         <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
@@ -399,9 +406,9 @@
       <div class="footer-directory">
         <p>Evidence and discovery</p>
         <a href="/proof/" data-analytics-event="proof_click">Receipt proof</a>
-        <a rel="noopener noreferrer" href="https://api.thisisatest.tech/.well-known/agent.json">Agent manifest</a>
-        <a rel="noopener noreferrer" href="https://api.thisisatest.tech/openapi.json">OpenAPI</a>
-        <a rel="noopener noreferrer" href="https://api.thisisatest.tech/health/dependencies">Runtime truth</a>
+        <a href="https://api.thisisatest.tech/.well-known/agent.json" rel="noopener noreferrer">Agent manifest</a>
+        <a href="https://api.thisisatest.tech/openapi.json" rel="noopener noreferrer">OpenAPI</a>
+        <a href="https://api.thisisatest.tech/health/dependencies" rel="noopener noreferrer">Runtime truth</a>
       </div>
       <p class="footer-note">
         Marketing: <code>www.thisisatest.tech</code> · API:
