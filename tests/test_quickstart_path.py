@@ -5,9 +5,9 @@ the same command ``make quickstart`` runs) in a throwaway state directory,
 then drives every step of the quickstart page over HTTP: self-provision a
 key, self-issue a permit, invoke the governed tool, replay it, reuse the
 idempotency key with a changed payload, overspend the permit on the call
-the doc predicts, verify the receipt offline with the SDK CLI, forge it the
-way the doc forges it, and get denied by a permit that does not allow the
-tool.
+the doc predicts, verify the wallet's audit chain with its own key, verify
+the receipt offline with the SDK CLI, forge it the way the doc forges it,
+and get denied by a permit that does not allow the tool.
 
 If docs/quickstart.md and the code disagree, this test is what breaks.
 Assertions deliberately pin the *documented* observables — error strings,
@@ -216,6 +216,12 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     debits = [e for e in ledger["entries"] if GOVERNED_TOOL in e["description"]]
     assert len(debits) == 3
 
+    # ... and the tamper-evident audit chain behind those entries verifies
+    # with the wallet's own key — no operator credential required.
+    chain = client.post("/v1/audit/verify-chain", headers=auth, json={}).json()
+    assert chain["valid"] is True
+    assert chain["checked_events"] > 0
+
     # Step 8 — offline verification, exactly as documented: fetch the
     # portable bundle and the unauthenticated key set, run the SDK CLI.
     bundle_path = tmp_path / "receipt-bundle.json"
@@ -284,3 +290,60 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     assert "VERIFIED" in denial_verified.stdout
 
     client.close()
+
+
+def test_live_loop_proof_script(quickstart_server, tmp_path):
+    """The one-command live proof drives every stage and writes the bundle.
+
+    scripts/live_loop_proof.py is the scripted form of the walkthrough above;
+    this keeps the two from drifting apart.
+    """
+    output_dir = tmp_path / "handoff"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "live_loop_proof.py"),
+            "--api-url",
+            quickstart_server,
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    for artifact in (
+        "receipt-bundle.json",
+        "denial-bundle.json",
+        "trust-keys.json",
+        "transcript.json",
+        "VERIFY.md",
+    ):
+        assert (output_dir / artifact).exists(), f"missing {artifact}"
+
+    transcript = json.loads(
+        (output_dir / "transcript.json").read_text(encoding="utf-8")
+    )
+    assert [stage["stage"] for stage in transcript["stages"]] == [
+        "discover",
+        "authenticate",
+        "authorize",
+        "invoke",
+        "meter",
+        "receipt",
+        "replay",
+        "audit",
+        "govern",
+        "verify:success",
+        "verify:denial",
+    ]
+
+    # The bundle must be independently verifiable exactly as VERIFY.md
+    # instructs a partner engineer to do it.
+    for bundle in ("receipt-bundle.json", "denial-bundle.json"):
+        verified = _verify_cli(output_dir / bundle, output_dir / "trust-keys.json")
+        assert verified.returncode == 0, verified.stdout + verified.stderr

@@ -79,6 +79,22 @@ For machine-readable verification of the same war-room flow:
 make agent-ops-war-room-check
 ```
 
+For the full loop over **real HTTP** as a self-provisioned non-admin caller
+— discover → authenticate → authorize → invoke → meter → receipt → replay →
+audit-chain verification → out-of-scope denial, with both receipts verified
+offline — plus a partner handoff bundle (portable receipts, public key set,
+and independent verification instructions) written to
+`data/live-loop-proof/`:
+
+```bash
+make quickstart        # terminal 1: boots the server
+make live-loop-proof   # terminal 2: drives the loop, writes the bundle
+```
+
+Handing that bundle's directory to a partner engineer, and having them run
+the verifier themselves, is the partner-owned verification step the
+customer-validation milestone asks for.
+
 The proof artifact shape is captured in
 [`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md). Use the
 live demo flow below when walking a partner through the product story.
