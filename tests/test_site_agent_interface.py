@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -558,6 +560,32 @@ class _InlineScriptCollector(HTMLParser):
             self.inline_scripts.append(" ".join(data.split())[:80])
 
 
+def _csp_policy(header_value: str) -> dict[str, str]:
+    """Parse a CSP into {directive-name: full-directive}.
+
+    Asserts each directive appears once: a dict keyed on the name silently
+    keeps the last, so "style-src *; style-src \'self\'" would pass a test while
+    browsers still enforce the permissive first one.
+    """
+
+    directives = header_value.split("; ")
+    names = [directive.partition(" ")[0] for directive in directives]
+    assert len(names) == len(set(names)), f"duplicate CSP directives: {names}"
+    return {name: directive for name, directive in zip(names, directives)}
+
+
+def test_csp_parser_rejects_a_shadowed_directive() -> None:
+    """The guard in _csp_policy is what makes every other CSP assertion mean
+    something, so it needs a case that actually trips it."""
+
+    with pytest.raises(AssertionError, match="duplicate CSP directives"):
+        _csp_policy("style-src *; style-src 'self'")
+
+    # The permissive directive alone must still parse, or the guard would be
+    # passing for the wrong reason.
+    assert _csp_policy("style-src *")["style-src"] == "style-src *"
+
+
 def test_site_sends_a_content_security_policy_and_hsts() -> None:
     config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
 
@@ -567,10 +595,7 @@ def test_site_sends_a_content_security_policy_and_hsts() -> None:
     values = {header["key"]: header["value"] for header in global_headers["headers"]}
 
     assert "includeSubDomains" in values["Strict-Transport-Security"]
-    policy = {
-        directive.split(" ")[0]: directive
-        for directive in values["Content-Security-Policy"].split("; ")
-    }
+    policy = _csp_policy(values["Content-Security-Policy"])
     assert policy["default-src"] == "default-src 'self'"
     assert policy["object-src"] == "object-src 'none'"
     assert policy["base-uri"] == "base-uri 'none'"
@@ -578,8 +603,11 @@ def test_site_sends_a_content_security_policy_and_hsts() -> None:
     # precisely so no inline-script escape hatch is needed.
     assert policy["script-src"] == "script-src 'self'"
     assert "'unsafe-inline'" not in values["Content-Security-Policy"]
-    assert "https://fonts.googleapis.com" in policy["style-src"]
-    assert "https://fonts.gstatic.com" in policy["font-src"]
+    # Typography is self-hosted from /fonts, so neither font CDN is permitted.
+    assert policy["style-src"] == "style-src 'self'"
+    assert policy["font-src"] == "font-src 'self'"
+    assert "fonts.googleapis.com" not in values["Content-Security-Policy"]
+    assert "fonts.gstatic.com" not in values["Content-Security-Policy"]
 
 
 def test_pages_carry_no_inline_scripts(tmp_path) -> None:
@@ -780,11 +808,246 @@ def test_local_site_assets_exist() -> None:
         SITE / "a11y-preload.js",
         SITE / "va-init.js",
         SITE / ".well-known" / "security.txt",
+        SITE / "fonts.css",
+        SITE / "vendor_fonts.py",
     ):
         assert path.is_file(), f"missing landing-page asset: {path}"
+
+
+def test_typography_is_self_hosted_with_no_third_party_request(tmp_path) -> None:
+    """No page may reach a font CDN, and the CSP must not permit one.
+
+    Google Fonts cost two cross-origin handshakes on the critical path
+    (googleapis.com for the CSS, then gstatic.com for the files) and put a
+    third party between a visitor and a page whose entire pitch is that you can
+    verify things yourself.
+    """
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    rendered = [output / "index.html", output / "proof" / "index.html", output / "404.html"]
+    for page in rendered:
+        markup = page.read_text(encoding="utf-8")
+        for host in ("fonts.googleapis.com", "fonts.gstatic.com"):
+            assert host not in markup, f"{page.name} still requests {host}"
+        assert '<link rel="stylesheet" href="/fonts.css' in markup
+
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    global_headers = next(
+        entry for entry in config["headers"] if entry["source"] == "/(.*)"
+    )
+    values = {header["key"]: header["value"] for header in global_headers["headers"]}
+    policy = _csp_policy(values["Content-Security-Policy"])
+    assert policy["style-src"] == "style-src 'self'"
+    assert policy["font-src"] == "font-src 'self'"
+
+    # The build must actually ship the files the stylesheet points at.
+    assert (output / "fonts.css").is_file()
+    for face in re.findall(r'url\("(/fonts/[^"]+)"\)', (output / "fonts.css").read_text()):
+        assert (output / face.lstrip("/")).is_file(), f"{face} not published"
+
+
+def test_font_stylesheet_and_files_agree() -> None:
+    """fonts.css and fonts/ are generated together; neither may drift alone.
+
+    This is the half of the vendoring contract that needs no network. Refreshing
+    against upstream is `python3 vendor_fonts.py --check`.
+    """
+    stylesheet = (SITE / "fonts.css").read_text(encoding="utf-8")
+    referenced = {
+        Path(src).name for src in re.findall(r'url\("(/fonts/[^"]+)"\)', stylesheet)
+    }
+    committed = {path.name for path in (SITE / "fonts").glob("*.woff2")}
+
+    assert referenced, "fonts.css declares no @font-face src"
+    assert referenced == committed, (
+        f"fonts.css and fonts/ disagree; only in css: {sorted(referenced - committed)}, "
+        f"only on disk: {sorted(committed - referenced)} — re-run vendor_fonts.py"
+    )
+    for name in committed:
+        assert (SITE / "fonts" / name).read_bytes()[:4] == b"wOF2", f"{name} is not woff2"
+
+    # Every family/weight the design system asks for must have a face, or the
+    # browser silently synthesises one.
+    for family, weight in (
+        ("IBM Plex Mono", 400), ("IBM Plex Mono", 500), ("IBM Plex Mono", 600),
+        ("Libre Franklin", 700), ("Libre Franklin", 800),
+        ("Public Sans", 400), ("Public Sans", 500), ("Public Sans", 600),
+    ):
+        block = re.search(
+            rf'font-family: "{re.escape(family)}";\s*font-style: normal;\s*'
+            rf"font-weight: {weight};",
+            stylesheet,
+        )
+        assert block, f"fonts.css has no face for {family} {weight}"
+
+
+def test_preloaded_fonts_exist_and_are_actually_used(tmp_path) -> None:
+    """A preload for a file the page never uses is pure wasted bandwidth."""
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    stylesheet = (output / "fonts.css").read_text(encoding="utf-8")
+
+    # The 404 page deliberately preloads nothing: it is noindex and is served
+    # overwhelmingly to scanners and stale links, so ~70KB of high-priority
+    # font fetches per bad URL buys nothing.
+    assert 'rel="preload"' not in (output / "404.html").read_text(encoding="utf-8")
+
+    for relative_path in ("index.html", "proof/index.html"):
+        markup = (output / relative_path).read_text(encoding="utf-8")
+        preloads = re.findall(r'<link rel="preload" href="(/fonts/[^"]+)"', markup)
+        assert preloads, f"{relative_path} preloads no fonts"
+        for href in preloads:
+            assert (output / href.lstrip("/")).is_file(), f"{href} missing"
+            assert f'url("{href}")' in stylesheet, f"{href} is preloaded but unused"
+            # Fonts are CORS-fetched even same-origin; without crossorigin the
+            # preload is discarded and the file is fetched twice.
+            assert re.search(
+                rf'<link rel="preload" href="{re.escape(href)}"[^>]*crossorigin',
+                markup,
+                re.S,
+            ), f"{href} preload is missing crossorigin"
+
+        # The mono family is static: each first-viewport weight is its own file,
+        # so preloading only one still leaves the nav links and section kickers
+        # swapping in late.
+        manifest = json.loads(
+            (SITE / "fonts.manifest.json").read_text(encoding="utf-8")
+        )
+        for weight in (400, 500, 600):
+            assert any(
+                name.startswith(f"ibm-plex-mono-{weight}-latin.")
+                for name in manifest["preload"]
+            ), f"IBM Plex Mono {weight} renders in the fold but is not preloaded"
+
+
+def test_stylesheet_cache_key_tracks_the_generated_css(tmp_path) -> None:
+    """A fixed key would strand visitors on a fonts.css naming deleted files.
+
+    vendor_fonts.py removes the hashed woff2 files it replaces. A client holding
+    a week-old stylesheet under an unchanged URL would request those deleted
+    files and get 404s, so the stylesheet key has to move with its bytes.
+    """
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    digest = hashlib.sha256((SITE / "fonts.css").read_bytes()).hexdigest()[:8]
+    for relative_path in ("index.html", "proof/index.html", "404.html"):
+        markup = (output / relative_path).read_text(encoding="utf-8")
+        assert f'href="/fonts.css?v={digest}"' in markup, relative_path
+        assert "@@FONTS_CSS_VERSION@@" not in markup
+        # The hand-maintained token must not creep back onto this asset.
+        assert 'href="/fonts.css?v=gateway' not in markup
+
+
+def test_font_filenames_are_content_hashed_so_immutable_is_safe() -> None:
+    """Unhashed names plus a long max-age would serve a refreshed font stale.
+
+    The manual `?v=` token the rest of the site uses cannot reach these URLs:
+    they live inside fonts.css and the generated preloads, not in hand-written
+    markup.
+    """
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    rule = next(
+        entry for entry in config["headers"] if entry["source"].startswith("/fonts/")
+    )
+    cache = next(h["value"] for h in rule["headers"] if h["key"] == "Cache-Control")
+    assert "immutable" in cache
+
+    for path in (SITE / "fonts").glob("*.woff2"):
+        stem, _, extension = path.name.rpartition(".")
+        digest = stem.rsplit(".", 1)[1]
+        assert re.fullmatch(r"[0-9a-f]{8}", digest), f"{path.name} is not hashed"
+        assert hashlib.sha256(path.read_bytes()).hexdigest().startswith(digest), (
+            f"{path.name} does not match its own content hash"
+        )
 
 
 def teardown_module() -> None:
     """Keep local focused runs from retaining an interrupted generated build."""
 
     shutil.rmtree(SITE / "dist", ignore_errors=True)
+
+
+def test_build_refuses_a_malformed_or_stale_font_manifest(tmp_path) -> None:
+    """json.loads accepts a list or a string; manifest.get would then raise
+    AttributeError and the build would die with a traceback instead of the
+    launch error it documents. A stale entry names a content-hashed file that no
+    longer exists, which would ship a <link rel="preload"> that 404s."""
+
+    build_module = runpy.run_path(str(SITE / "build_site.py"))
+    launch_error = build_module["LaunchConfigurationError"]
+    font_preload_tags = build_module["font_preload_tags"]
+    manifest_path = SITE / "fonts.manifest.json"
+    original = manifest_path.read_text(encoding="utf-8")
+
+    cases = {
+        "top-level list": "[]",
+        "top-level string": '"preload"',
+        "preload not a list": '{"preload": "one-file.woff2"}',
+        "preload not strings": '{"preload": [1, 2]}',
+        "preload empty": '{"preload": []}',
+        "preload names a missing file": '{"preload": ["not-vendored.woff2"]}',
+        "not json at all": "{",
+    }
+    try:
+        for label, payload in cases.items():
+            manifest_path.write_text(payload, encoding="utf-8")
+            with pytest.raises(launch_error):
+                font_preload_tags()
+        manifest_path.write_text(original, encoding="utf-8")
+        # The real manifest still renders, so the guards are not over-tight.
+        assert 'rel="preload"' in font_preload_tags()
+    finally:
+        manifest_path.write_text(original, encoding="utf-8")
+
+
+def test_vendored_font_license_is_published(tmp_path) -> None:
+    """OFL 1.1 condition 2 asks that the notice and the license itself travel
+    with the redistributed fonts.
+
+    The operator README is deliberately withheld from dist/, so the attribution
+    lives in a plain-text file that ships beside the woff2 files it covers.
+    """
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    license_text = (output / "fonts" / "OFL.txt").read_text(encoding="utf-8")
+
+    # Each family's own notice, verbatim from its upstream OFL.txt. Asserting
+    # the family names alone is not enough: all three were present and all
+    # three notices were still wrong — two attributed to a foundry that no
+    # longer holds them, and Plex missing its name reservation entirely, which
+    # understates the terms the bytes travel under.
+    for family, notice in (
+        ("IBM Plex Mono", 'Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"'),
+        ("Libre Franklin", "Copyright 2020 The Libre Franklin Project Authors"),
+        ("Public Sans", "Copyright 2015 The Public Sans Project Authors"),
+    ):
+        assert family in license_text, f"{family}: not named in the license file"
+        assert notice in license_text, f"{family}: upstream notice missing or altered"
+
+    # These fonts are served as standalone files, not embedded in a document or
+    # bundled in a program, so OFL 1.1 condition 2 wants the license itself and
+    # not a link to it. Assert the operative sections, not just the title: a
+    # file that has been quietly reduced back to a URL still says "Open Font
+    # License" at the top.
+    for clause in (
+        "SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007",
+        "PREAMBLE",
+        "DEFINITIONS",
+        "PERMISSION & CONDITIONS",
+        "TERMINATION",
+        "DISCLAIMER",
+        "may be sold by itself",
+        "contains the above copyright notice and this license",
+        'THE FONT SOFTWARE IS PROVIDED "AS IS"',
+    ):
+        assert clause in license_text, f"OFL text is missing: {clause}"
+    assert len(license_text.splitlines()) > 100
+
+    # The operator note stays internal; the exclusion must not be broader.
+    assert not (output / "fonts" / "README.md").exists()
+    assert (output / ".well-known" / "security.txt").is_file()
+    assert (output / "proof" / "receipt.json").is_file()
