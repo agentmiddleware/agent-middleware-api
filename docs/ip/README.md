@@ -35,10 +35,13 @@ generic "AI agent authorization" pitch would lead with:
 3. **Signature-stable receipt evolution** — additive fields are signed only when
    present, so schema growth does not invalidate historical signatures, with a
    fail-closed legacy fallback (`app/services/receipts.py:312`, `:558`).
-4. **Offline verification with a status taxonomy** — every reported field is
-   read from the signed bytes rather than the envelope, and an unreachable key
-   set is reported differently from a bad signature, so an outage is never read
-   as fraud (`b2a_sdk/src/b2a_sdk/receipt_verifier.py`).
+4. **Offline verification with a status taxonomy** — every reported claim value
+   is read from the signed bytes rather than the envelope, and a key the
+   verifier does not hold resolves to `UNKNOWN_KEY` rather than to a tampering
+   verdict, so a key-distribution problem is never read as fraud
+   (`b2a_sdk/src/b2a_sdk/receipt_verifier.py`). Note the verifier performs no
+   key retrieval and so cannot itself observe a fetch outage; see §4.6 of the
+   disclosure for the precise boundary.
 
 The authorization half of the system — scoped, expiring, signed permits for
 agent tool calls — is where the closest prior art lives, and is the weakest

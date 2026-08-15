@@ -72,9 +72,9 @@ A gateway mediates agent-to-tool invocations and, for each invocation:
    the signed receipt's actual outcome; charged records with no recoverable
    evidence are flagged rather than guessed at.
 4. **Issues a signed receipt** whose signature covers a canonical serialization
-   including a self-referential payload hash, and which signs additive fields
-   only when present so that schema growth does not invalidate historical
-   signatures.
+   that embeds a digest of the payload's other fields, and which signs additive
+   fields only when present so that schema growth does not invalidate
+   historical signatures.
 5. **Publishes verification keys** at a well-known location so any third party
    can verify a receipt **offline**, with a status taxonomy that never reports
    an unreachable or unknown key as evidence of tampering.
@@ -129,16 +129,41 @@ UPDATE permits
 ```
 
 4. If the affected row count is not exactly 1, the reservation lost a race —
-   refresh the row and deny with an accurate reason (`permit_revoked` /
-   `permit_expired` if the status changed, otherwise `permit_budget_exceeded`
-   with remaining, spent, and maximum credits attached). **No budget moved.**
+   refresh the row and deny with an accurate reason (`permit_<status>` if the
+   status changed, otherwise `permit_budget_exceeded` with remaining, spent,
+   and maximum credits attached). **No budget moved.**
 
 The essential property: *the numbers read during validation are advisory; the
 guarded write is the sole authority.* The cap predicate is evaluated by the
 database as part of the same statement that performs the increment, so two
 concurrent reservations cannot both satisfy it, **regardless of whether the row
-lock in step 1 actually engaged**. Correctness no longer depends on the engine's
-locking semantics.
+lock in step 1 actually engaged**.
+
+**Scope this claim precisely.** The guarded predicate covers exactly two
+things — `status = 'active'` and the budget cap. Those two are enforced
+independently of the lock. Everything else validated in step 2 — signature,
+key match, expiry, scopes, per-tool counts, aggregate value cap, forbidden
+fields — is protected by the row lock alone, and therefore *does* depend on the
+engine's locking semantics.
+
+Expiry is the sharpest instance, because an expired permit deliberately keeps
+`status = "active"` in storage (expiry is enforced dynamically at invoke time;
+see the comment at `app/routers/me.py:102`). Two consequences follow, and the
+disclosure must not paper over either:
+
+- On an engine where the lock is a no-op, a permit can pass the step-2 expiry
+  check, cross `expires_at`, and still satisfy the guarded update — dispatching
+  an invocation under a just-expired permit. The window is narrow and requires
+  expiry to fall inside it, but it is real.
+- The step-4 re-read classifies only by stored `status`, so it cannot return
+  `permit_expired`; an expired permit still reads as `active` and the denial
+  falls through to `permit_budget_exceeded`.
+
+Adding `expires_at > :now` to the guarded update predicate, and consulting
+`expires_at` in the re-read classification, would extend the lock-independent
+guarantee to expiry. **[not implemented]** — see §7. Counsel should keep the
+independent claim anchored on the budget cap, which is what the code actually
+enforces without the lock.
 
 The same guarded-update discipline is used for standalone reservation
 (`reserve_budget()`, `:709`, which also emits threshold notifications at 80%,
@@ -218,9 +243,19 @@ linkage to both the idempotency record and the dispatch attempt.
 Signing (`app/services/signing_keys.py:324`):
 
 1. Set `alg = "Ed25519"` and `kid = <key id>`.
-2. Compute `payload_hash = SHA-256(canonical_json(payload))` and insert it into
-   the payload — the signed bytes commit to a digest of themselves.
-3. Sign `canonical_json(payload)` with Ed25519.
+2. Compute `payload_hash = SHA-256(canonical_json(payload))` over the payload
+   **as it stands before the digest field is added**, then insert the digest
+   into the payload (`app/services/signing_keys.py:338`).
+3. Sign `canonical_json(payload)` — now including `payload_hash` — with Ed25519.
+
+The digest therefore covers **the other signed fields, not itself**; a
+self-referential digest is not computable. The verifier mirrors this by
+stripping `payload_hash` before recomputing
+(`b2a_sdk/src/b2a_sdk/receipt_verifier.py:406`) and reporting `MISMATCH` on
+disagreement. Its function is a redundant integrity check *inside* the
+signature: it detects a payload whose fields were altered in some way that
+preserved the signature bytes, and it gives a verifier a cheap consistency
+check it can perform before doing curve arithmetic.
 
 Canonicalization (`canonical_json`, `:66`) is a named, versioned contract —
 `awi-canonical-json/1` — so an independent verifier can state which rules it
@@ -268,9 +303,20 @@ no database, and no credential; its only dependency beyond the standard library
 is `cryptography`, and the offline path is tested to work with HTTP libraries
 entirely absent. Two properties define it:
 
-**Every reported field is read from the signed bytes.** The enclosing bundle is
-unauthenticated envelope data and is never a source of truth. A bundle claiming
-`receipt_id: X` around a payload signed for `Y` is rejected as `MISMATCH`.
+**Every reported claim value is read from the signed bytes.** The enclosing
+bundle is unauthenticated envelope data and is never a source of truth for
+reported values. A bundle claiming `receipt_id: X` around a payload signed for
+`Y` is rejected as `MISMATCH`.
+
+One exception, stated precisely because it bounds the property above: the
+`kid` used to **select** the verification key is read from the envelope
+(`receipt_verifier.py:289`); the signed payload's `kid` is compared against it
+only *after* the signature verifies (`:397`). The consequence is that an
+envelope relabelled with a different *published* `kid` resolves to `INVALID`
+rather than `MISMATCH`, because the wrong key is selected and the signature
+fails before the cross-check runs — even though the signed payload was never
+touched. Selecting the key from the parsed signed payload instead would close
+that gap and make the taxonomy exact. **[not implemented]** — see §7.
 
 **Failure is never silently "false".** The status taxonomy:
 
@@ -284,9 +330,24 @@ unauthenticated envelope data and is never a source of truth. A bundle claiming
 | `UNSUPPORTED` | Declared algorithm or canonicalization the verifier does not implement |
 
 The distinction is the point. A verifier that collapses these into a boolean
-reports a key-server outage identically to a forged receipt, and a caller acting
-on that boolean will eventually escalate an availability incident as fraud. Only
-`INVALID` asserts tampering; the rest describe missing input or capability.
+reports "I do not hold that key" identically to a forged receipt, and a caller
+acting on that boolean will eventually escalate a key-distribution problem as
+fraud. `INVALID` is the only status that asserts a signature failure; the rest
+describe missing input or capability.
+
+Two precisions counsel should not let drift:
+
+- **The verifier never observes an outage itself.** It accepts a
+  caller-supplied `key_set` and performs no retrieval, so a key-server fetch
+  failure happens *before* `verify_bundle()` is ever called and is reported by
+  whatever fetched the keys — the CLI (`verify_cli.py`) or the online wrapper.
+  What the verifier contributes is that a key it does not hold resolves to
+  `UNKNOWN_KEY` rather than to a tampering verdict. That is the claimable
+  property; "detects outages" is not.
+- **`INVALID` is not exclusively a payload-modification signal**, because of
+  the envelope-`kid` selection path described above. It means "the signature
+  did not verify under the selected key," which a relabelled envelope can also
+  produce.
 
 ### 4.7 Supporting: audit chain
 
@@ -342,7 +403,19 @@ and inequitable-conduct exposure, and this repository already documents them
 - **The charged-with-no-receipt case is unrecoverable by design.** It is counted
   for manual review, not repaired.
 - **Key distribution and issuer identity remain the verifier's trust decision.**
-  Offline verification proves a signature, not that the issuer is honest.
+  Offline verification proves a signature, not that the issuer is honest. The
+  verifier retrieves nothing and therefore cannot distinguish a key-server
+  outage from any other reason its key set lacks a `kid`.
+- **Key selection reads the envelope, not the signed payload**
+  (`receipt_verifier.py:289`). A bundle relabelled with a different published
+  `kid` yields `INVALID`, not `MISMATCH`, so `INVALID` cannot be read as
+  "the payload was modified" without qualification. Closing this is a small
+  code change and would strengthen claim 15 — do it **before** filing if the
+  stronger claim is wanted.
+- **The lock-independent budget guarantee does not extend to expiry.** The
+  guarded update predicates only on `status` and the cap; expired permits keep
+  `status = "active"`. See §4.2 for the resulting race and the missing
+  `permit_expired` denial reason.
 - **Private-key rotation is out of band.** `rotate_active_key_metadata()`
   rotates metadata only.
 - Settlement, compliance-grade ledger storage, and production readiness for

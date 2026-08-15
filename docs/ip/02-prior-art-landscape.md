@@ -134,10 +134,13 @@ Ranked by how defensible each looks against the art above:
 2. **Crash-recovery classification of a charged-but-unfinalized operation**
    (`app/services/idempotency.py:408`). Specific problem, specific asymmetric
    solution, no clean analogue found in the searched art.
-3. **Offline verification with a status taxonomy that separates cryptographic
-   failure from resource unavailability** (`b2a_sdk/.../receipt_verifier.py`).
-   The "never report an outage as tampering" property is a genuine and
-   articulable technical contribution. Verifying a signature offline is not.
+3. **Offline verification with a status taxonomy that separates a signature
+   failure from a key the verifier does not hold**
+   (`b2a_sdk/.../receipt_verifier.py`). The "a missing key is never reported as
+   tampering" property is a genuine and articulable technical contribution.
+   Verifying a signature offline is not. State it in those terms rather than as
+   outage detection — the verifier fetches nothing and cannot observe an
+   outage (§4.6 of the disclosure).
 4. **Signature-stable schema evolution** (`app/services/receipts.py:312`).
    Signing additive fields only when present, so old signatures keep verifying
    as the schema grows, with a fail-closed constrained fallback for the one

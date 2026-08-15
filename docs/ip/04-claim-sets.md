@@ -166,11 +166,22 @@ records of invocations still in progress are not subjected to the repair action.
 
 ## Set C — Offline verification with a diagnostic status taxonomy (CRM)
 
-> Drafting note: two limitations carry this claim — reading every reported field
-> **from the signed bytes** rather than the envelope, and returning a status
-> that **distinguishes a cryptographic failure from an unavailable or unknown
-> key**. Verifying an Ed25519 signature offline is not novel; refusing to let an
-> outage present as tampering is the contribution.
+> Drafting note: two limitations carry this claim — reading every reported
+> **claim value** from the signed bytes rather than the envelope, and returning
+> a status that **distinguishes a signature failure from a key the verifier
+> does not hold**. Verifying an Ed25519 signature offline is not novel;
+> refusing to let a missing key present as tampering is the contribution.
+>
+> Limitation (c) recites selection by the identifier **carried in the bundle**,
+> because that is what the code does (`receipt_verifier.py:289`), with the
+> signed payload's `kid` cross-checked after verification (`:397`). Selecting
+> the key from the parsed signed payload would be strictly stronger — it would
+> make a relabelled envelope resolve to `MISMATCH` instead of `INVALID` — but
+> it is **not implemented**, and a claim reciting it would cover subject matter
+> this repository has not reduced to practice. If that change is made in code
+> before filing, tell counsel: the claim should then be amended to recite
+> selection from the signed payload, and limitation (f) can be tightened to
+> "only status (i) indicates modification of the payload."
 
 **15.** A non-transitory computer-readable medium storing instructions that,
 when executed by one or more processors, cause the processors to verify a
@@ -182,20 +193,22 @@ transaction receipt without network access, by:
 - (b) responsive to the declared canonicalization identifier not matching a
   canonicalization contract implemented by the instructions, returning a status
   of unsupported without evaluating the signature;
-- (c) serializing the signed payload according to said canonicalization
-  contract, and verifying the signature over the resulting bytes using a public
-  key selected from the key set by a key identifier **read from the signed
-  payload**;
-- (d) responsive to the verification succeeding, returning a verified status
-  together with one or more claim values, **each such claim value being read
-  from the signed payload and not from the envelope**;
-- (e) responsive to a value in the envelope conflicting with a corresponding
-  value in the signed payload, returning a mismatch status; and
+- (c) selecting a public key from the key set by a key identifier carried in
+  the bundle, and verifying the signature over the signed payload's bytes
+  **as received, without re-serializing them**, using the selected key;
+- (d) responsive to the verification succeeding, comparing a key identifier
+  **read from the signed payload** against the key identifier used in (c), and
+  returning a mismatch status when they differ;
+- (e) responsive to the verification succeeding and (d) agreeing, returning a
+  verified status together with one or more claim values, **each such claim
+  value being read from the signed payload and not from the envelope**, and
+  returning a mismatch status when any envelope value conflicts with its
+  counterpart in the signed payload; and
 - (f) returning a status selected from a plurality of statuses that
-  distinguishes at least (i) a failure of the signature to verify, from (ii) an
-  absence of the identified key from the key set, from (iii) a structural
-  malformation of the bundle, wherein only status (i) indicates modification of
-  the payload.
+  distinguishes at least (i) a failure of the signature to verify under the
+  selected key, from (ii) an absence of the identified key from the key set,
+  from (iii) a structural malformation of the bundle, wherein status (ii) is
+  not reported as evidence of modification.
 
 **16.** The medium of claim 15, wherein the instructions execute without a
 network connection, without a database connection, and without a credential of
@@ -207,8 +220,11 @@ values in a normalized fixed-point form, and rendering timestamps in a
 coordinated-universal-time representation.
 
 **18.** The medium of claim 15, wherein the signed payload comprises a digest
-computed over the signed payload itself, such that the signature commits to a
-self-referential digest of the payload.
+field whose value is computed over the signed payload **excluding that digest
+field**, and wherein the verifying comprises removing said digest field,
+recomputing the digest over the remaining fields according to the
+canonicalization contract, and returning a mismatch status when the recomputed
+digest differs from the stored value.
 
 **19.** The medium of claim 15, wherein the signed payload omits each of a
 plurality of optional fields that are absent, and wherein the verifying

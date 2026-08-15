@@ -132,13 +132,24 @@ visually distinguishable — this figure exists to show they are not one boolean
 2. **520** Parse → fail → **525** `MALFORMED`
 3. **530** Declared canonicalization matches implemented contract? → No →
    **535** `UNSUPPORTED`
-4. **540** Read `kid` **from signed payload**; present in key set (excluding
-   disabled)? → No → **545** `UNKNOWN_KEY`
-5. **550** Canonicalize signed payload; verify Ed25519 signature → fail →
-   **555** `INVALID` — *annotate: "the only status asserting tampering"*
-6. **560** Envelope values agree with signed payload values? → No → **565**
+4. **540** Read `kid` **from the bundle envelope**; present in key set
+   (excluding disabled)? → No → **545** `UNKNOWN_KEY`
+5. **550** Verify Ed25519 signature over the signed bytes **as received** →
+   fail → **555** `INVALID` — *annotate: "signature did not verify under the
+   selected key"*
+6. **560** `kid` in signed payload == `kid` used in step 4? → No → **565**
    `MISMATCH`
-7. **570** `VERIFIED` — return claims **read from signed payload**
+7. **570** Recompute `payload_hash` over the signed payload **excluding that
+   field**; disagrees? → **565** `MISMATCH`
+8. **575** Envelope values agree with signed payload values? → No → **565**
+   `MISMATCH`
+9. **580** `VERIFIED` — return claims **read from signed payload**
 
 Shade **555** distinctly from **525**, **535**, **545**, **565** and add a
 legend: "cryptographic claim" vs. "missing input or capability."
+
+*Draftsperson note:* steps 4 and 6 are deliberately ordered that way — key
+selection uses the envelope's `kid`, and the signed payload's `kid` is checked
+only after the signature verifies. Do not "correct" the figure to read the
+`kid` from the signed payload; that would depict something the code does not
+do. See §4.6 of the disclosure.
