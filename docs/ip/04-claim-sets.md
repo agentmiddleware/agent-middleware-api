@@ -86,15 +86,13 @@ dispatch-attempt record in a prepared state are performed within the same
 database transaction, such that no reservation of the consumed-credit value
 exists without a corresponding dispatch-attempt record.
 
-> Drafting note: **support for this dependent is currently split.** The
-> transactional-atomicity limitation is supported by
-> `authorize_reserve_and_prepare()`, but that method reserves via an ORM
-> read-modify-write rather than the conditional update statement of claim 1(d)
-> (`app/services/mcp_dispatch_attempts.py:463`). As written the claim depends
-> on claim 1 and so imports 1(d), which that path does not perform. Either
-> change the code so both paths share the guarded update — the better fix, and
-> it makes this claim cleanly supported — or redraft this dependent to recite
-> transactional atomicity without importing 1(d). See §4.3 of the disclosure.
+> Drafting note: **this dependent is now cleanly supported.** An earlier draft
+> flagged it as split-support, because `authorize_reserve_and_prepare()`
+> reserved via an ORM read-modify-write rather than the conditional update of
+> claim 1(d). The code was changed so both reservation paths share the guarded
+> update and affected-row check, with a regression test that fails against the
+> pre-fix code. The claim imports 1(d) from claim 1 and both paths now perform
+> it. See §4.3 of the disclosure.
 
 **7.** The system of claim 1, wherein the instructions further cause the system
 to emit a notification responsive to the consumed-credit value crossing each of

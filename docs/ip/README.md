@@ -27,7 +27,8 @@ generic "AI agent authorization" pitch would lead with:
 1. **Atomic budget reservation** — a single guarded conditional `UPDATE` that
    enforces a permit's spend cap at the row level, remaining correct on engines
    where advisory row locks are a silent no-op
-   (`app/services/permits.py:426`).
+   (`app/services/permits.py:426`, and the upstream dispatch path at
+   `app/services/mcp_dispatch_attempts.py:463`).
 2. **Exactly-once debit across a crash** — a charge checkpoint written before
    finalization, plus a reconciler that can tell "never charged" from "charged,
    then finalization crashed" and repair each differently

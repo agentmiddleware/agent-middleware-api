@@ -1054,3 +1054,153 @@ async def test_dispatch_reconciliation_queries_active_and_unfinalized_terminal(
 
     unfinalized = await service.list_unfinalized_terminal_contexts(idle_seconds=300)
     assert [item.attempt.attempt_id for item in unfinalized] == [prepared.attempt_id]
+
+
+@pytest.mark.anyio
+async def test_remote_prepare_cap_holds_under_concurrency(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch,
+) -> None:
+    """Two concurrent upstream reservations cannot jointly exceed the cap.
+
+    The upstream dispatch path reserved with an ORM read-modify-write until
+    this was fixed. On SQLite the ``with_for_update()`` on the permit row is a
+    silent no-op, so both callers read the same ``spent_credits``, both passed
+    the read-time budget check, and one increment clobbered the other -- the
+    permit overspent with nothing in the record showing it.
+
+    The interleaving is forced rather than hoped for. Both callers are held at
+    a barrier immediately after validation -- which is after they have read the
+    permit and before either reserves -- and released together. Without the
+    barrier this test could pass against the broken implementation whenever one
+    task happened to finish before the other read, which would make it useless
+    as a regression guard. With it, both validations necessarily approve the
+    same pre-reservation balance, so the guarded UPDATE is the only thing that
+    can keep the cap.
+    """
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-tool-cap-race"
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="permit-cap-race",
+    )
+
+    # Each reservation fits on its own; together they exceed max_credits.
+    credits = Decimal("6")
+    concurrency = 2
+
+    import anyio
+
+    from app.services.permits import PermitService
+
+    original_validate = PermitService._validate_model_for_action
+    arrived = 0
+    both_validated = anyio.Event()
+
+    async def _barriered_validate(self, **kwargs):
+        # Run the real validation first, so each caller reads and approves the
+        # permit exactly as it would in production...
+        result = await original_validate(self, **kwargs)
+        nonlocal arrived
+        arrived += 1
+        if arrived >= concurrency:
+            both_validated.set()
+        # ...then hold every caller until all of them have done so. Releasing
+        # earlier would let one reservation commit before the other reads,
+        # which is precisely the schedule under which the pre-fix code looks
+        # correct. fail_after keeps a lost caller from hanging the suite.
+        with anyio.fail_after(30):
+            await both_validated.wait()
+        return result
+
+    monkeypatch.setattr(
+        PermitService,
+        "_validate_model_for_action",
+        _barriered_validate,
+    )
+
+    async def _reserve(index: int):
+        payload = {"tool": tool_name, "arguments": {"value": index}}
+        begun = await get_idempotency_service().begin_with_record(
+            wallet_id=provisioned["agent_wallet_id"],
+            endpoint="/mcp/messages",
+            idempotency_key=f"invoke-cap-race-{index}",
+            request_payload=payload,
+        )
+        return await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+            idempotency_record_id=begun.record_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            key_id=provisioned["key_id"],
+            public_tool_id=tool_name,
+            upstream_tool_name="remote_tool",
+            upstream_origin="https://partner.example",
+            request_hash=begun.request_hash,
+            credits_authorized=credits,
+        )
+
+    results: dict[int, tuple] = {}
+
+    async def _run(index: int) -> None:
+        try:
+            results[index] = await _reserve(index)
+        except Exception as exc:  # surfaced below as a failure, not swallowed
+            results[index] = (exc, None)
+
+    # The barrier's own fail_after only starts once a caller reaches the
+    # patched validation. A caller that stalls before that point would hang the
+    # suite with no diagnostic, so bound the whole group as well.
+    with anyio.fail_after(90):
+        async with anyio.create_task_group() as tg:
+            for index in range(concurrency):
+                tg.start_soon(_run, index)
+
+    assert arrived == concurrency, "both callers must reach the barrier"
+
+    outcomes = list(results.values())
+    assert len(outcomes) == concurrency
+    for validation, _attempt in outcomes:
+        assert not isinstance(validation, Exception), validation
+
+    allowed = [v for v, _ in outcomes if v.allowed]
+    denied = [v for v, _ in outcomes if not v.allowed]
+    assert len(allowed) == 1, "exactly one reservation may win the cap"
+    assert len(denied) == 1
+    assert denied[0].reason == "permit_budget_exceeded"
+    # The denial carries what an agent needs to retry smaller -- and the
+    # numbers have to be right, not merely present. A stale balance here would
+    # send a retrying agent straight back into the same denial. Compared as
+    # Decimals because these are rendered with the storage column's scale
+    # ("4.00000000"), which is a formatting detail the assertion should not
+    # depend on; the values are what matter.
+    assert denied[0].details is not None
+    assert Decimal(denied[0].details["required_credits"]) == credits
+    assert Decimal(denied[0].details["remaining_credits"]) == Decimal("10") - credits
+    assert Decimal(denied[0].details["spent_credits"]) == credits
+    assert Decimal(denied[0].details["max_credits"]) == Decimal("10")
+
+    # The winner holds a prepared attempt; the loser left nothing to compensate.
+    prepared = [a for v, a in outcomes if v.allowed]
+    assert prepared and prepared[0] is not None
+    assert prepared[0].state == "prepared"
+    assert [a for v, a in outcomes if not v.allowed] == [None]
+
+    # The invariant that matters: spend never exceeds the cap.
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == credits
+    assert stored_permit.spent_credits <= stored_permit.max_credits
+
+    factory = get_session_factory()
+    async with factory() as session:
+        attempts = (
+            await session.execute(
+                select(func.count()).select_from(McpDispatchAttemptModel)
+            )
+        ).scalar_one()
+    assert attempts == 1, "a denied reservation must not leave a prepared attempt"

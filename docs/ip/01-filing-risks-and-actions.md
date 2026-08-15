@@ -45,6 +45,67 @@ and the AgentMarket listing draft (`docs/agentmarket-listing.md`), which the
 repo marks as frozen copy. **Confirm each with counsel rather than assuming
 either way.**
 
+### Dated evidence from the repository history
+
+The full git history was recovered (the working clone had been shallow) and
+gives concrete earliest-possible dates. **These are conservative earliest
+bounds, not established disclosure dates.** Commit dates bound publication from
+below — content cannot have been published before it was written, and the site
+deploys from these commits, so actual publication is at or after each date. They
+are not a substitute for the three records that would settle it: Vercel
+deployment history, repository access and visibility history, and third-party
+archive captures. Treat every §102(b)(1) date below as "no earlier than", and
+have counsel confirm each against those sources.
+
+Note also that dates here are given in the commit's local offset unless marked
+UTC; the two differ across a day boundary for the earliest entry, which is
+exactly the kind of ambiguity a filing date should not inherit.
+
+| Event | Earliest date | Evidence |
+| --- | --- | --- |
+| First repository commit | 2026-02-22 local (`-08:00`) = **2026-02-23 UTC** | `fb327e4`, authored 2026-02-22T21:33:18-08:00 |
+| Repository created on GitHub (private) | 2026-02-23T05:33:55Z | GitHub `created_at` — a distinct event, ~37s after the commit timestamp |
+| Marketing site content first committed | **2026-07-29** | `site/index.html` first appears in `1df5999` |
+| `thisisatest.tech` first referenced | **2026-08-11** | `5f2233d` |
+| Proof artifacts (`site/proof/`) first committed | **2026-08-11** | `5f2233d` |
+| Ed25519 / offline verification first described on the site | **2026-08-11** | `5f2233d`, refined in `9e10971` |
+| **SDK release published with wheel + sdist** | **2026-08-07** | GitHub release `python-sdk-v0.4.0`, `draft: false`, published 2026-08-07T19:19:14Z |
+
+**Read this as good news, and act on it quickly.** The mechanisms this package
+claims were not described on the public site until **2026-08-11** — days, not
+months, before this was written. Two consequences:
+
+- The **US** §102(b)(1) clock on that subject matter runs from roughly
+  2026-08-11 (or 2026-07-29 for the earlier, more generic marketing copy), so
+  the outer US deadline is roughly August 2027.
+- **Foreign rights may still be recoverable.** Absolute novelty bars what was
+  *publicly disclosed* before the priority date. Only a marketing-level
+  description has been public, and only briefly. Whether that description is
+  *enabling* for any claimed mechanism is the whole question — and none of the
+  four mechanisms is described at an enabling level anywhere public. Filing
+  promptly is what preserves the argument; delay is what forecloses it.
+
+### The SDK release is the sharpest item
+
+`python-sdk-v0.4.0` is a **real, non-draft GitHub release** published
+2026-08-07T19:19:14Z with two attached artifacts —
+`b2a_sdk-0.4.0-py3-none-any.whl` and `b2a_sdk-0.4.0.tar.gz` — each showing
+**`download_count: 2`**. The sdist contains the offline verifier source, i.e.
+mechanism 4 at a fully enabling level.
+
+Each asset reports `download_count: 2`, so **four downloads in total** across
+the two artifacts. The repository is private, so the release and its assets
+should be private too, and those downloads are most likely CI or the owner.
+**That is the expected answer, not a verified one.** Counsel should confirm:
+
+1. Was the repository private for the entire period since 2026-08-07? A repo
+   that was ever public, even briefly, published these assets.
+2. Who performed those four downloads, and were any by a third party?
+3. Was any release asset URL shared outside the repository's collaborators?
+
+If all three come back clean this is a non-event. If any does not, an enabling
+disclosure of mechanism 4 dates from 2026-08-07 and the analysis above changes.
+
 ### Why this matters
 
 - **United States** — 35 U.S.C. §102(b)(1) gives a **12-month grace period**

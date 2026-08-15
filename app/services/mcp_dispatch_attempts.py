@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -460,9 +460,77 @@ class McpDispatchAttemptService:
                     if not validation.allowed:
                         return validation, None
 
-                    permit.spent_credits += credits_authorized
-                    permit.updated_at = utc_now()
-                    session.add(permit)
+                    # Reserve with the same guarded UPDATE that
+                    # PermitService.authorize_and_reserve() uses. The cap
+                    # predicate is evaluated by the database as part of the
+                    # statement that performs the increment, so two concurrent
+                    # reservations cannot both pass even on SQLite, where the
+                    # FOR UPDATE above is a silent no-op. A read-modify-write
+                    # here would lose an increment on that engine and overspend
+                    # the permit -- the bug fixed for the local path in 25897fd,
+                    # which this upstream path did not inherit. The
+                    # read-validated numbers are advisory; this write is the
+                    # authority.
+                    reserved = await session.execute(
+                        sa_update(PermitModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.permit_id == permit_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.status == "active",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits + credits_authorized
+                                <= PermitModel.max_credits,
+                            ),
+                        )
+                        .values(
+                            spent_credits=PermitModel.spent_credits
+                            + credits_authorized,
+                            updated_at=utc_now(),
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, reserved).rowcount or 0) != 1:
+                        # A concurrent reservation consumed the remaining budget,
+                        # or a concurrent revocation flipped the status, between
+                        # the validation read and this guarded write. Deny with
+                        # an accurate reason and create no prepared attempt --
+                        # no budget moved, so there is nothing to compensate.
+                        await session.refresh(permit)
+                        if permit.status != "active":
+                            return (
+                                PermitValidation(
+                                    False,
+                                    f"permit_{permit.status}",
+                                    permit,
+                                    {"status": permit.status},
+                                ),
+                                None,
+                            )
+                        return (
+                            PermitValidation(
+                                False,
+                                "permit_budget_exceeded",
+                                permit,
+                                {
+                                    "required_credits": format(credits_authorized, "f"),
+                                    "remaining_credits": format(
+                                        permit.max_credits - permit.spent_credits,
+                                        "f",
+                                    ),
+                                    "spent_credits": format(permit.spent_credits, "f"),
+                                    "max_credits": format(permit.max_credits, "f"),
+                                },
+                            ),
+                            None,
+                        )
+                    # Reflect the committed reservation on the returned model.
+                    await session.refresh(permit)
                     attempt = McpDispatchAttemptModel(
                         attempt_id=f"dsp-{uuid.uuid4().hex[:16]}",
                         idempotency_record_id=idempotency_record_id,

@@ -64,11 +64,9 @@ A gateway mediates agent-to-tool invocations and, for each invocation:
 1. **Atomically authorizes and reserves** budget against a signed delegated
    permit, using a single guarded conditional update that enforces the cap at
    the row level and therefore remains correct where advisory row locks do not
-   fire. **This applies to the path through
-   `PermitService.authorize_and_reserve()`. It does *not* currently apply to the
-   upstream MCP dispatch path**, which reserves by ORM read-modify-write — see
-   §4.3. Counsel must not read item 1 as covering every invocation until both
-   paths share the guarded update.
+   fire. **Both reservation paths now share this mechanism** — the local path
+   through `PermitService.authorize_and_reserve()` and the upstream MCP dispatch
+   path through `authorize_reserve_and_prepare()`. See §4.3 for the history.
 2. **Checkpoints the debit** on the idempotency record before finalization
    begins, so a later crash leaves a record that classifies itself.
 3. **Reconciles** crashed records asymmetrically: never-charged records are
@@ -192,32 +190,31 @@ without the attempt record that governs its release. Re-entry adopts only an
 invariant-equivalent prepared row (`_assert_prepared_match`), and the attempt is
 bound to the approval identity that authorized it (`_assert_approval_binding`).
 
-> **Important limitation — do not let this slide into the claims.**
-> This method does **not** use the guarded conditional update of §4.2. It
-> reserves with an ORM read-modify-write —
-> `permit.spent_credits += credits_authorized`
-> (`app/services/mcp_dispatch_attempts.py:463`) — inside the transaction,
-> relying on the row lock rather than on a database-evaluated predicate. The
-> upstream MCP path reaches this method from `app/routers/mcp.py:1064`.
+> **This path used to be the exception — it no longer is.**
+> Until recently this method reserved with an ORM read-modify-write
+> (`permit.spent_credits += credits_authorized`), relying on the row lock rather
+> than a database-evaluated predicate. On an engine where the lock is a no-op,
+> two concurrent upstream invocations against the same permit both read the same
+> `spent_credits`, both passed the read-time check, and one increment clobbered
+> the other — the same overspend that was fixed for the local path in `25897fd`
+> but never inherited here. The upstream MCP path reaches this method from
+> `app/routers/mcp.py:1064`, so the gap was reachable in production.
 >
-> Consequence: **the lock-independent guarantee described in §4.2 does not
-> extend to the upstream dispatch path.** On an engine where the row lock is a
-> no-op, two concurrent upstream invocations against the same permit can
-> both read the same `spent_credits` and lose one increment — the original
-> overspend bug, still present on this path.
+> It now performs the identical guarded `sa_update` of §4.2 with the same
+> affected-row check, and denies with `permit_budget_exceeded` (or
+> `permit_<status>`) creating **no prepared attempt**, so a lost race leaves
+> nothing to compensate.
 >
-> Two ways to resolve this, and counsel needs to know which was taken:
-> - **Fix the code** — replace the read-modify-write with the same guarded
->   `sa_update` plus affected-row check, so both paths share one enforcement
->   mechanism. This is the better answer and it makes claim 6 straightforwardly
->   supported. **[not implemented]**
-> - **Or qualify the claims** — claim 6 (reservation and prepared-attempt
->   creation in one transaction) must then be read as reciting transactional
->   atomicity only, not the lock-independent predicate of claim 1(d)–(e).
+> **Regression coverage:**
+> `tests/test_governed_persistence.py::test_remote_prepare_cap_holds_under_concurrency`
+> runs two concurrent reservations that each fit alone but jointly exceed the
+> cap, and asserts exactly one wins, spend never exceeds the cap, and exactly
+> one attempt row exists. The test was confirmed to **fail against the
+> pre-fix code** with `assert 2 == 1` — both reservations allowed — so it
+> pins the behavior rather than merely passing.
 >
-> Until the code is changed, claim 1's lock-independence limitation is
-> supported by `PermitService.authorize_and_reserve()` and by the local-tool
-> path that calls it — not by the upstream dispatch path.
+> Consequence for the claims: claim 1's lock-independence limitation is now
+> supported on both paths, and claim 6 is straightforwardly supported.
 
 `delivery_uncertain` is a first-class terminal state, surfaced as HTTP 504. The
 system declines to assert that a remote side effect did or did not occur when it
@@ -451,7 +448,8 @@ and inequitable-conduct exposure, and this repository already documents them
 - **The lock-independent budget guarantee does not extend to expiry.** The
   guarded update predicates only on `status` and the cap; expired permits keep
   `status = "active"`. See §4.2 for the resulting race and the missing
-  `permit_expired` denial reason.
+  `permit_expired` denial reason. This is now the *only* remaining gap in the
+  reservation mechanism — the upstream-path gap was closed (§4.3).
 - **Private-key rotation is out of band.** `rotate_active_key_metadata()`
   rotates metadata only.
 - Settlement, compliance-grade ledger storage, and production readiness for
