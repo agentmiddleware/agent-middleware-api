@@ -1,18 +1,26 @@
 """Two-process PostgreSQL fault-injection app for governed MCP acceptance tests.
 
 This module is loaded only by the opt-in multiprocess stress harness.  It
-registers one durable test tool and installs process-local gates around the
-production commit boundaries.  No test-only hooks are imported by the normal
-application.
+registers two durable test tools -- one local, one upstream-MCP-backed -- and
+installs process-local gates around the production commit boundaries.  No
+test-only hooks are imported by the normal application.
+
+The upstream tool exists so the remote governed dispatch state machine
+(``prepared -> dispatched -> delivery_uncertain``) is exercised by a real
+process kill rather than by seeding its durable states in-process.  Its
+side-effect table is deliberately duplicate-tolerant: a redispatch after
+ambiguity must be observable as a second row, never hidden by a constraint.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +32,13 @@ from app.routers import mcp as mcp_router
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import AgentMoney
 from app.services.idempotency import IdempotencyService, get_idempotency_service
+from app.services.mcp_dispatch_reconciliation import (
+    get_mcp_dispatch_reconciliation_service,
+)
 from app.services.permits import PermitService, get_permit_service
 from app.services.receipts import ReceiptService
 from app.services.service_registry import get_service_registry
+from app.services.upstream_mcp import UpstreamMcpResult
 
 
 _FAULT_POINT = os.environ.get("MCP_STRESS_FAULT_POINT", "")
@@ -211,7 +223,142 @@ async def _stress_tool(
     }
 
 
+async def _record_upstream_effect(call_token: str) -> int:
+    """Persist the simulated remote side effect and return its row id.
+
+    Duplicates are permitted on purpose. If the trust plane ever redispatched
+    an ambiguous invocation, this table is where the second effect would show
+    up, so the invariant is measured rather than assumed.
+    """
+
+    from app.db.database import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        row = await session.execute(
+            text(
+                """
+                INSERT INTO mcp_stress_upstream_effects
+                    (call_token, worker_pid)
+                VALUES (:call_token, :worker_pid)
+                RETURNING effect_id
+                """
+            ),
+            {"call_token": call_token, "worker_pid": os.getpid()},
+        )
+        effect_id = int(row.scalar_one())
+        await session.commit()
+    return effect_id
+
+
+class _StressUpstreamExecutor:
+    """Stand-in for the upstream MCP adapter with gates at the dispatch boundary.
+
+    ``before_dispatch`` is the production checkpoint that moves the durable
+    attempt to ``dispatched``; the gates around it are what let the harness
+    kill a worker on either side of the point where an external effect
+    becomes possible.
+    """
+
+    async def call_tool(
+        self,
+        arguments: dict[str, Any],
+        *,
+        invocation_id: str,
+        idempotency_key: str,
+        before_dispatch: Callable[[], Awaitable[None]],
+    ) -> UpstreamMcpResult:
+        call_token = str(arguments.get("call_token", ""))
+
+        # Durable pre-dispatch checkpoint: prepared -> dispatched.
+        await before_dispatch()
+        _fault(
+            "after_mark_dispatched",
+            call_token=call_token,
+            invocation_id=invocation_id,
+        )
+
+        effect_id = await _record_upstream_effect(call_token)
+        _fault(
+            "after_upstream_effect",
+            call_token=call_token,
+            invocation_id=invocation_id,
+            effect_id=effect_id,
+        )
+
+        payload: dict[str, Any] = {
+            "content": [{"type": "text", "text": f"upstream effect {effect_id}"}],
+            "structuredContent": {
+                "call_token": call_token,
+                "effect_id": effect_id,
+                "forwarded_invocation_id": invocation_id,
+                "forwarded_idempotency_key": idempotency_key,
+            },
+            "isError": False,
+        }
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        encoded = canonical.encode()
+        return UpstreamMcpResult(
+            payload=payload,
+            canonical_json=canonical,
+            response_hash=hashlib.sha256(encoded).hexdigest(),
+            size_bytes=len(encoded),
+            is_error=False,
+        )
+
+
+_STRESS_UPSTREAM_TOOL = "stress-upstream-tool"
+_STRESS_UPSTREAM_EXECUTOR = _StressUpstreamExecutor()
+
+
+def _ensure_stress_upstream_registered() -> None:
+    """(Re-)register the stress upstream tool if startup cleared it.
+
+    ``register_configured_upstream_mcp`` unregisters every ``upstream_mcp``
+    backend during app startup, which runs after this module is imported. The
+    router calls ``_ensure_local_mcp_tools_registered`` on each invocation, so
+    hooking it is what keeps the tool resolvable without weakening that
+    production cleanup.
+    """
+    registry = get_service_registry()
+    if registry.get_executor(_STRESS_UPSTREAM_TOOL) is not None:
+        return
+    registry.register_upstream(
+        service_id=_STRESS_UPSTREAM_TOOL,
+        name="Stress Upstream Tool",
+        description="Remote-backed side-effect tool used only by the opt-in PG harness",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=_STRESS_UPSTREAM_EXECUTOR,
+        input_schema={
+            "type": "object",
+            "properties": {"call_token": {"type": "string"}},
+            "required": ["call_token"],
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        credits_per_unit=2.0,
+        upstream_tool_name="partner.stress_effect",
+        upstream_origin="https://stress-partner.example",
+    )
+
+
+def _install_upstream_registration_hook() -> None:
+    original_ensure = mcp_router._ensure_local_mcp_tools_registered
+
+    def ensure_local_mcp_tools_registered() -> None:
+        original_ensure()
+        _ensure_stress_upstream_registered()
+
+    mcp_router._ensure_local_mcp_tools_registered = ensure_local_mcp_tools_registered
+
+
 _install_fault_wrappers()
+_install_upstream_registration_hook()
 get_service_registry().register_local(
     service_id="stress-governed-tool",
     name="Stress Governed Tool",
@@ -222,6 +369,7 @@ get_service_registry().register_local(
     unit_name="call",
     require_permit=True,
 )
+_ensure_stress_upstream_registered()
 
 
 def _authorize_control_request(provided_token: str | None) -> None:
@@ -264,6 +412,12 @@ async def stress_reconcile(
     ),
 ) -> dict[str, Any]:
     _authorize_control_request(control_token)
+    # Governed remote dispatch is reconciled first: it terminalizes its own
+    # crash-orphaned attempts and repairs their idempotency records, so the
+    # generic sweep below must not see those records as unexplained.
+    dispatch = await get_mcp_dispatch_reconciliation_service().reconcile(
+        idle_seconds=idle_seconds
+    )
     repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
         idle_seconds=idle_seconds
     )
@@ -274,4 +428,9 @@ async def stress_reconcile(
         "idempotency_repaired": repaired,
         "idempotency_needs_review": needs_review,
         "permit_budgets_corrected": permits_corrected,
+        "dispatch_prepared_finalized": dispatch.prepared_finalized,
+        "dispatch_dispatched_uncertain": dispatch.dispatched_uncertain,
+        "dispatch_terminal_recovered": dispatch.terminal_recovered,
+        "dispatch_idempotency_recovered": dispatch.idempotency_recovered,
+        "dispatch_failed_attempts": len(dispatch.failed_attempt_ids),
     }

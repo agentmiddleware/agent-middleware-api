@@ -45,7 +45,7 @@ are absorbing: any attempt to re-transition raises
 | `denied` | Permit, wallet-policy, recipient-domain, or human-approval denial — all evaluated **before money moves** | Never debited; reservation released | No | 403 / `-32003` | `test_frozen_wallet_denial_returns_receipt_and_replays_without_charge`, `test_out_of_scope_governed_mcp_denial_returns_receipt`, `test_rejected_approval_is_terminal_and_replays`, `test_upstream_permit_denials_never_charge_or_dispatch` |
 | `insufficient_funds` | The charge itself was refused (balance, child-wallet cap, daily limit) | Never debited; reservation released | No | 402 / `-32004` | `test_insufficient_funds_returns_receipt_and_replays_without_charge` |
 | `failed_refunded` | A **confirmed** failure: local tool raised; upstream returned `isError: true`; DNS/TLS/`initialize` failed before the dispatch checkpoint; charge refused on the upstream path; or a crash before dispatch, finalized by the reconciler | Debit refunded (or never taken). The receipt signs `credits_charged = 0`; the ledger separately proves the correlated refund | Upstream `isError` → yes; everything else → no | 500 or 502 / `-32006` (402/403 for refused charges) | `test_governed_tool_failure_returns_refunded_receipt`, `test_confirmed_upstream_failures_refund_and_replay_without_redispatch`, `test_charge_failure_is_immediately_signed_and_releases_remote_budget`, `test_crash_between_debit_and_dispatch_reconciles_refund` |
-| `delivery_uncertain` | The dispatch checkpoint was passed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | `test_ambiguous_or_rejected_upstream_response_stays_charged_and_replays`, `test_kill_between_dispatch_and_response_becomes_delivery_uncertain`, `test_stale_dispatched_becomes_charged_delivery_uncertain_without_retry` |
+| `delivery_uncertain` | The dispatch checkpoint was passed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | `test_ambiguous_or_rejected_upstream_response_stays_charged_and_replays`, `test_kill_between_dispatch_and_response_becomes_delivery_uncertain`, `test_stale_dispatched_becomes_charged_delivery_uncertain_without_retry`, `test_kill_after_remote_effect_never_redispatches_the_effect` |
 | `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape, reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence) | **Stays charged** | Yes — confirmed executed | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable` |
 | `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
 
@@ -88,7 +88,9 @@ injected at each durable boundary in the tests named below.
 | Window — process dies… | Detected by | Resolution | Money |
 |---|---|---|---|
 | **A. after debit, before dispatch** (attempt `prepared`) | Stale-active sweep; the debit is found by its `operation_key` even if the crash preceded `attach_charge` | `failed_refunded` (`reconciled_stale_prepared`), signed receipt + audit, replay returns 502 | **Refunded**, budget released |
+| **A′. A, proved by an actual process kill** (worker killed the instant the debit commits, before `attach_charge`) | Stale-active sweep, after a real `SIGKILL` across two OS processes | `failed_refunded`; the orphaned debit is adopted by operation identity and the upstream is never contacted | **Refunded** exactly once, budget released |
 | **B. after dispatch, before response** (attempt `dispatched`) | Stale-active sweep | `delivery_uncertain`, signed receipt + audit, replay returns 504 | **Stays charged** |
+| **B′. B, proved by an actual process kill** (worker killed past the checkpoint, with and without a landed remote effect) | Stale-active sweep, after a real `SIGKILL` across two OS processes | `delivery_uncertain`; the upstream effect count never grows and the recovered evidence bundle verifies | **Stays charged**, reservation retained |
 | **C. after the response, before the receipt commit** (attempt terminal, no receipt) | Terminal-without-receipt sweep; the stored canonical result is **re-hashed byte-exact** before reuse (`dispatch_stored_result_hash_mismatch` on any tamper) | The recorded terminal state is adopted and signed; a recorded `returned_error` completes its refund | Per the recorded state |
 | **D1. lost COMMIT ack on reserve+prepare** | Recovery re-read adopts only an invariant-identical `prepared` row | Same attempt id returned; no second reservation | Unchanged (`test_lost_commit_ack_recovery_no_double_charge`) |
 | **D2. lost ack on the final completion** (receipt exists, idempotency record empty) | Receipt-present / response-`NULL` sweep, which runs **before** the generic sweep | The replay record is rebuilt from the signed receipt; an existing `failed_refunded` receipt **blocks** a second budget release | Unchanged |
@@ -100,7 +102,12 @@ test — `test_crash_between_debit_and_dispatch_reconciles_refund`,
 `test_terminal_success_is_reconstructed_from_bounded_result`,
 `test_existing_receipt_missing_idempotency_completion_replays_full_result`,
 `test_effect_free_stale_mcp_identity_is_released_for_safe_retry`) and by the
-multi-process kill tests in `tests/test_mcp_postgres_multiprocess.py`.
+multi-process kill tests in `tests/test_mcp_postgres_multiprocess.py` — of
+which `test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain` and
+`test_kill_after_remote_effect_never_redispatches_the_effect` cover window B by
+killing a real worker on either side of the remote effect, and
+`test_kill_between_debit_and_dispatch_refunds_without_dispatching` covers
+window A the same way, rather than by seeding the durable state in process.
 
 Reconciliation itself is idempotent by construction: audit event ids are
 derived deterministically from the attempt id, refunds are keyed
