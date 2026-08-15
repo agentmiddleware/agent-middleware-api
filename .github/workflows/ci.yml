@@ -500,6 +500,9 @@ jobs:
       - name: Run mypy
         run: mypy app/
 
+      - name: Check doc references resolve
+        run: python scripts/check_doc_references.py
+
   # --- Autonomous PR Pipeline ---
   # This job runs on a schedule and creates PRs automatically
   # based on telemetry data. Uncomment when AUTO_PR_ENABLED=true.

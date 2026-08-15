@@ -103,8 +103,9 @@ async def record_audit_event(
     )
     from app.services.audit_chain import append_chained_audit_event
 
-    # Sign + persist under a per-wallet chain-head lock so concurrent writers
-    # cannot fork the hash chain.
+    # Sign + persist against the per-wallet chain head, which is advanced by an
+    # optimistic conditional UPDATE (with retry) rather than a lock, so
+    # concurrent writers cannot fork the hash chain.
     persisted = await append_chained_audit_event(model)
     return _to_event(persisted)
 

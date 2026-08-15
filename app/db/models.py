@@ -692,9 +692,15 @@ class ControlPlaneAuditEventModel(SQLModel, table=True):
 class AuditChainHeadModel(SQLModel, table=True):
     """Per-wallet head pointer for the audit hash chain.
 
-    A single row per wallet, locked FOR UPDATE during an append, serializes
-    concurrent writers so they cannot read the same predecessor and fork the
-    chain. ``wallet_key`` is the wallet id, or "" for wallet-less events.
+    A single row per wallet serializes concurrent writers so they cannot read
+    the same predecessor and fork the chain. Serialization is optimistic, not
+    lock-based: an append reads ``last_seq``/``last_chain_hash``, then advances
+    the head with a conditional ``UPDATE ... WHERE last_seq = <observed>``. A
+    writer whose update matches no rows lost the race and retries against the
+    new head. This avoids ``SELECT ... FOR UPDATE`` so the behaviour is
+    identical on SQLite and Postgres; see ``append_chained_audit_event`` in
+    ``app/services/audit_chain.py``. ``wallet_key`` is the wallet id, or "" for
+    wallet-less events.
     """
 
     __tablename__ = "audit_chain_heads"

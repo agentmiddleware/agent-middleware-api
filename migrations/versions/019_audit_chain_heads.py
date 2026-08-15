@@ -1,8 +1,11 @@
 """Per-wallet audit chain head pointer.
 
-Adds the `audit_chain_heads` table. Each row is locked FOR UPDATE during an
-audit append so concurrent same-wallet writers serialize and cannot fork the
-hash chain.
+Adds the `audit_chain_heads` table. One row per wallet serializes concurrent
+same-wallet writers so they cannot read the same predecessor and fork the hash
+chain. Serialization is optimistic, not lock-based: an append reads `last_seq`
+and advances the head with a conditional `UPDATE ... WHERE last_seq =
+<observed>`, retrying when the update matches no rows. See
+`append_chained_audit_event` in `app/services/audit_chain.py`.
 
 Revision ID: 019_audit_chain_heads
 Revises: 018_permit_updated_at

@@ -1,4 +1,4 @@
-.PHONY: quickstart quickstart-check live-loop-proof test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+.PHONY: quickstart quickstart-check live-loop-proof test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
 
 # The 15-minute golden path: boot a real local trust plane on loopback with
 # self-serve key minting and one invokable governed tool, then follow
@@ -96,6 +96,10 @@ agent-ops-war-room:
 
 agent-ops-war-room-check:
 	uv run --with-requirements requirements.txt python scripts/agent_ops_war_room_demo.py --assert --json
+
+# Fail if a comment or docstring names a symbol the tree no longer defines.
+check-doc-references:
+	python scripts/check_doc_references.py
 
 trust-coverage-gate:
 	scripts/trust_coverage_gate.sh

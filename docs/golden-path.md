@@ -136,7 +136,7 @@ export PERMIT_JSON=$(
       \"allowed_tools\": [\"golden-path-echo\"],
       \"scopes\": [\"tool:golden-path-echo:invoke\", \"billing:charge\"],
       \"max_credits\": 50,
-      \"expires_at\": \"$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\"
+      \"expires_at\": \"$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\"
     }"
 )
 

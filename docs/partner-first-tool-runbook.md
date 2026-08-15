@@ -48,11 +48,17 @@ Do not mount AWI/media/oracle for this session.
 
 ## Rolling deployment safety
 
-Apply Alembic through the current head (`028_revoke_unbound_refresh`)
-before current workers take traffic. Revision `027_governed_mcp_identity` adds
-a rolling-compatible unique index that serializes pre-026 physical MCP endpoint
-keys with the current `/mcp/invoke` identity. Revision 028 revokes historical
-refresh tokens that cannot be safely bound to their originating API key.
+Apply Alembic through the current head (`032_receipt_reason_code`)
+before current workers take traffic. Confirm with `alembic heads` rather than
+trusting this line — a stale head here under-migrates the deployment.
+
+Revision `027_governed_mcp_identity` adds a rolling-compatible unique index
+that serializes pre-026 physical MCP endpoint keys with the current
+`/mcp/invoke` identity. Revision 028 revokes historical refresh tokens that
+cannot be safely bound to their originating API key. Revisions 029-032 add
+permit v2 constraints, permit requests, signed quotes, and the machine-readable
+receipt reason code; a worker running current code against a database stopped
+at 028 fails on those columns.
 
 Revision 027 stops with only an aggregate conflict count if historical rows
 already reuse one wallet/key across MCP endpoint generations. Do not pick or
@@ -104,7 +110,9 @@ exactly-once side effects.
    - `scopes: ["tool:YOUR_TOOL_ID:invoke", "billing:charge"]`
    - `max_credits: MAX_CREDITS`
    - `Idempotency-Key` on permit create
-4. Governed invoke via `POST /mcp/messages` with `mcpContext.wallet_id`, `permit_id`, `idempotency_key`.
+4. Governed invoke via `POST /mcp/messages`. `mcpContext` carrying `wallet_id`,
+   `permit_id`, and `idempotency_key` goes directly in `params` — not in
+   `_meta`. A misplaced context returns `Missing wallet_id in mcpContext`.
 5. Show ledger debit + `GET /v1/receipts/verify`.
 6. Replay same idempotency key → same `receipt_id`, no second gateway dispatch
    or debit.
@@ -112,6 +120,30 @@ exactly-once side effects.
 8. Call `YOUR_TOOL_ID` with no permit → deny (`permit_required`).
 9. Force a post-dispatch timeout → signed `delivery_uncertain`, charge retained,
    and no automatic retry.
+10. **Partner verifies the receipt offline, in their own environment.** Export
+    the portable bundle and the public key set, then verify with no gateway
+    access and no credentials:
+
+    ```bash
+    curl -s "$API_URL/v1/receipts/$RECEIPT_ID/portable" \
+      -H "X-API-Key: $AGENT_API_KEY" > receipt-bundle.json
+    curl -s "$API_URL/.well-known/trust-keys.json" > trust-keys.json
+
+    # The verifier is not on PyPI. Install the wheel attached to the Python
+    # SDK GitHub release, or run it from a copy of b2a_sdk/:
+    pip install ./b2a_sdk            # or: pip install b2a_sdk-<version>-py3-none-any.whl
+    python -m b2a_sdk.verify_cli --bundle receipt-bundle.json --keys trust-keys.json
+    ```
+
+    Expect `VERIFIED` with the permit, tool, outcome, and credits. Exit code 0
+    verified, 1 invalid, 2 undetermined. Tampering with any field in
+    `signing_input` must produce `INVALID`. This step must run on the partner's
+    machine, by the partner's engineer — it is the one that demonstrates the
+    evidence does not depend on trusting the issuer at read time.
+
+Request bodies for steps 1-8 are in
+[`docs/golden-path.md`](golden-path.md); the offline verification path is also
+covered in [`docs/quickstart.md`](quickstart.md).
 
 ## Pass / fail
 
@@ -148,5 +180,7 @@ make agent-ops-war-room         # narrated operator timeline
 make red-team-trust-plane       # adversarial deny battery
 ```
 
-See also: [`DESIGN_PARTNER_GUIDE.md`](../DESIGN_PARTNER_GUIDE.md),
+See also: [`docs/golden-path.md`](golden-path.md) (copy-pasteable requests for
+every step above), [`docs/quickstart.md`](quickstart.md) (offline receipt
+verification), [`DESIGN_PARTNER_GUIDE.md`](../DESIGN_PARTNER_GUIDE.md),
 [`DEMO_SCRIPT.md`](../DEMO_SCRIPT.md), [`WEDGE.md`](../WEDGE.md).

@@ -11,6 +11,10 @@ themselves prove production readiness, compliance, settlement safety, or
 enterprise suitability. Repo claims still need code, tests, docs, or executable
 demo evidence.
 
+For the inward-facing counterpart — repo mechanisms verified against their own
+source, with evidence-confidence markers — see
+[`docs/invention-inventory.md`](invention-inventory.md).
+
 ## Product Boundary
 
 Verified from repo:
