@@ -424,6 +424,13 @@ the debit, not with the signature — see [`../WEDGE.md`](../WEDGE.md).
 1. **Receipt formats may standardize elsewhere.** protect-mcp carries an IETF
    Internet-Draft for its receipt format and is integrated with Microsoft
    Autogen. If that draft lands, receipts become table stakes.
+   *(Update 2026-08-15: the draft was read directly. It is an individual
+   submission with no IETF standing — earlier-stage than "IETF draft"
+   connotes — but revision -02 added a `spending_authority` receipt type, so
+   the format is now expanding into economic evidence. It still defines
+   nothing binding a debit to an idempotency record, and its namespaced types
+   plus commitment mode make emitting our receipts in its envelope
+   structurally cheap. Detail: `market-research-2026-08.md` §8.1.)*
 2. **A large vendor is in the category.** `agent-governance-toolkit` has an open
    proposal for independently verifiable compliance receipts.
 3. **The build-vs-buy default is a free library.** latch is MIT and

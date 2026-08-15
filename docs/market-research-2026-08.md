@@ -56,14 +56,21 @@ roughly six months. That one needs no market model and is the one to lean on.
 
 The failure this repo exists to prevent — an agent framework retrying a
 timed-out tool call and producing a second charge — is reported and reproduced
-by parties with no stake in this product. Note the evidence level carefully: an
-issue report with a reproduction is not the same as a confirmed production
-incident, and this document does not have the latter for anyone.
+by parties with no stake in this product. Note the evidence level carefully.
+When first compiled, this section had no confirmed production incident for
+anyone; the 2026-08-15 second pass (§8) found two first-hand ones — a
+LangGraph Cloud re-execution incident with 2–3x duplicated work and cost, and
+a practitioner report of quadruplicated side effects — though still **no
+confirmed production incident of a duplicated payment charge specifically**.
+Keep that last distinction; it is the one a skeptical buyer will probe.
 
 | Evidence | What it establishes | Verification |
 |---|---|---|
 | [stripe/ai#402](https://github.com/stripe/ai/issues/402), "Agent-level retry creates duplicate charges — no idempotency guard above the tool layer" (open, 2026-05-03) | The strongest single piece of external evidence — though it is an issue report with a reproduction, not a confirmed production incident. The reporter documents that the Stripe SDK's idempotency keys cover *network-level* retries within a session, while agent frameworks retry as a **new invocation with a freshly generated key**, producing duplicate charges. They explicitly conclude the fix belongs "above the tool layer." | **Verified** — issue read directly |
 | [OpenBB-finance/OpenBB#7455](https://github.com/OpenBB-finance/OpenBB/issues/7455), "Signed audit receipts for MCP server tool calls (regulatory compliance)" | A production MCP operator asking for signed per-call evidence, and being pointed at a third-party gateway rather than anything native. | **Verified** — issue located |
+| [langchain-ai/langgraph#7417](https://github.com/langchain-ai/langgraph/issues/7417), "Long tool calls (~180s+) silently re-executed from checkpoint on LangGraph Cloud" (open, 2026-04-05) | **A confirmed production incident of the mechanism.** On LangGraph Cloud (Plus tier, EU), tool calls exceeding ~180s are silently re-dispatched from checkpoint while the original still runs — "both the original and the duplicate complete successfully, resulting in 2–3x redundant work and cost." Consistent across langgraph 1.1.3–1.1.6. No visible maintainer fix. This is duplicated *execution and cost*, not a confirmed duplicated payment charge. | **Verified** — issue read directly, 2026-08-15 |
+| [crewAIInc/crewAI#5802](https://github.com/crewAIInc/crewAI/issues/5802), "Tool re-execution on task retry has no idempotency guard — duplicate payments, emails, trades possible" (open, 2026-05-14) | A second major framework with the same gap, with reproduction steps: any `@tool` function re-runs on task retry with no mechanism to detect prior completion; the worked example is `stripe.charge()` firing twice. Cites #7417 as production confirmation that "in-memory dedup doesn't survive worker re-dispatch." | **Verified** — issue read directly, 2026-08-15 |
+| [CrewAI community thread](https://community.crewai.com/t/at-least-once-tool-calls-retries-can-double-fire-your-side-effecting-tools-in-a-crew/7697) (2026-07-31) | A first-hand practitioner incident: "this one cost us real duplicate side effects before we caught it" — one request fired a send-email step four times through layered coordinator/worker retries, producing "two tickets, two emails, two rows, **and nothing in the transcript says so**." Side effects, not charges — but that closing phrase is the evidence gap this product's receipts exist to close, stated unprompted by a stranger. | **Verified** — thread read directly, 2026-08-15 |
 | Practitioner writing on idempotency in agentic tool calling | Frames this as a distributed-systems problem the agent layer imported without the corresponding patterns. | Unverified — the specific essay cited in the brief was not located |
 | Vendor commentary on retry-driven cost amplification | Agents retrying on data-layer timeouts multiply per-step cost. | Unverified |
 
@@ -215,17 +222,102 @@ built from §3 and §4.
 
 1. Does the 44.56% governance sub-segment CAGR exist in the SNS Insider report,
    or was it interpolated? Do not repeat it until someone reads the report.
-2. What is in protect-mcp's IETF Internet-Draft, and does the receipt format
-   have room for a ledger reference? If so, interoperating beats competing.
+2. ~~What is in protect-mcp's IETF Internet-Draft, and does the receipt format
+   have room for a ledger reference?~~ **Answered 2026-08-15 — yes on both
+   counts, and the draft has moved into spending evidence. See §8.**
 3. Does `jamjet` bind its budget enforcement to its replay records, or are they
    independent subsystems? This determines whether the bolded row in §4 stays
    true.
 4. Do design-partner conversations actually surface duplicate-charge incidents,
-   or is stripe/ai#402 an articulate outlier? One partner interview settles it.
+   or is stripe/ai#402 an articulate outlier? **Partially advanced 2026-08-15:**
+   stripe/ai#402 is not an outlier — §2 now has a confirmed production
+   re-execution incident (langgraph#7417), a second framework with the same gap
+   (crewai#5802), and a first-hand quadruplicated-side-effect report. Still
+   open: whether any of it converts to willingness to pay. Only a partner
+   conversation settles that.
 5. Would a buyer with an EU AI Act mandate reject a vendor with no compliance
    mapping outright, or accept receipts as one input among several?
 
 ---
 
-*Compiled 2026-08-15. Sources verified as marked; unverified rows are labeled
-and must not be promoted into customer-facing copy without a check.*
+## 8. Second-Pass Findings (2026-08-15)
+
+A follow-up research pass on the two §7 questions that could be answered from
+primary sources. Everything below is **Verified** — read directly.
+
+### 8.1 The protect-mcp receipt draft, read
+
+The draft is
+[draft-farley-acta-signed-receipts](https://datatracker.ietf.org/doc/draft-farley-acta-signed-receipts/)
+("Signed Decision Receipts for Machine-to-Machine Access Control"), author Tom
+Farley of ScopeBlind. Three findings, in descending order of strategic weight:
+
+1. **The draft has moved into economic evidence.** Revision -02 adds a
+   `scopeblind:spending_authority` receipt type with required `amount` and
+   `currency` (ISO 4217) fields, plus optional `category` and a coarse
+   `utilization_band` (`low`/`medium`/`high`/`exceeded`) chosen deliberately to
+   evidence budget compliance without disclosing budget ceilings. The closest
+   competitor is no longer only signing access decisions — it is standardizing
+   *spend* evidence. What it still does **not** define is anything binding a
+   debit to an idempotency record: `spending_authority` evidences that spend
+   was authorized within a band, not that a specific charge settled exactly
+   once. The §4 differentiating row stands, but its neighbourhood is being
+   built on, and faster than §6 risk 1 assumed.
+
+2. **There is room for a ledger reference — two mechanisms.** Receipt types are
+   namespaced strings (`protectmcp:*`, `scopeblind:*`, `blindllm:*`), so a
+   custom namespace (e.g. `agentmiddleware:governed_invoke`) carrying
+   ledger-entry and idempotency-record identifiers is structurally possible
+   today without touching the draft. -02 also adds a Merkle-tree "Commitment
+   Mode" for selective disclosure, and algorithm agility (EdDSA — the same
+   Ed25519 this repo already uses — plus ML-DSA-65 and ES256). A future
+   receipt-type registry is mentioned as a MAY; none exists yet. So the §7
+   hypothesis holds: **interoperating is structurally cheap** — emitting our
+   receipts as a namespaced type under this format would cost a serializer,
+   not a redesign.
+
+3. **"IETF Internet-Draft" needs a qualifier wherever we cite it.** It is an
+   individual submission, explicitly "not endorsed by the IETF," with no
+   working-group adoption. That cuts both ways: the standardization threat in
+   §6 risk 1 is real but earlier-stage than "IETF draft" connotes, and any
+   interop bet is a bet on one vendor's draft, not on a standards process.
+
+### 8.2 The problem in production
+
+Section 2's table now carries the detail; the shape of the upgrade:
+
+| Before this pass | After |
+|---|---|
+| One issue report with a reproduction (stripe/ai#402) | That, **plus** a confirmed production incident of silent retry re-execution with 2–3x cost (langgraph#7417, LangGraph Cloud, open since April with no visible fix), a second major framework with the same documented gap and a `stripe.charge()`-fires-twice reproduction (crewai#5802), and a first-hand practitioner report of one request producing four sends |
+| Mechanism plausible | Mechanism confirmed at platform level: managed infrastructure re-dispatches work the caller believes is still running — exactly the ambiguous-outcome case `delivery_uncertain` exists for |
+
+Two disciplines to keep. First: still **no confirmed production incident of a
+duplicated payment charge**. Redundant compute cost and quadruplicated emails
+are production facts; a double-charged customer remains, on public evidence, a
+reproduction. Second: none of this is demand evidence. It is now very hard to
+argue the problem is theoretical; it remains unproven that anyone pays a
+vendor to solve it rather than patching their own tool layer — the community
+thread's author fixed it with idempotency keys and moved on.
+
+### 8.3 What this changes
+
+- **The pitch gains a platform-level citation.** "Your framework's own cloud
+  may re-dispatch a call you think is still running" (langgraph#7417) is
+  stronger in a design-partner conversation than a hypothetical retry — and it
+  lands on `delivery_uncertain`, the part of the wedge no surveyed competitor
+  documents.
+- **The practitioner quote is the receipt argument verbatim**: "nothing in the
+  transcript says so." Candidate for `/compare/` or the pitch, cited.
+- **Interop vs. compete is now a live, cheap experiment**: one serializer
+  emitting `agentmiddleware:*` receipts in the draft's envelope, offline
+  verification included. Whether to run it is a product call; the cost side is
+  no longer unknown.
+- **§6 risk 1 escalates**: the receipt-format neighbour added spend evidence
+  within two draft revisions. If a registry lands, economic receipt types
+  become table stakes the way signatures did.
+
+---
+
+*Compiled 2026-08-15; second pass appended the same day. Sources verified as
+marked; unverified rows are labeled and must not be promoted into
+customer-facing copy without a check.*

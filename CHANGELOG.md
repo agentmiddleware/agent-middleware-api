@@ -61,6 +61,23 @@ full release gate; do not backfill a final `v1.2.0` tag.
 
 ### 🔬 Competitive research, and the positioning correction it forced
 
+- **Second research pass (2026-08-15) answered two of the open questions.**
+  The protect-mcp receipt draft
+  (`draft-farley-acta-signed-receipts`) was read directly: it is an individual
+  submission with no IETF standing, its -02 revision adds a
+  `spending_authority` receipt type (the closest competitor is standardizing
+  *spend* evidence, though still nothing binding a debit to an idempotency
+  record), and its namespaced types plus Merkle commitment mode make emitting
+  our receipts in its envelope structurally cheap — interop is now a costed
+  option rather than an unknown. Problem evidence was upgraded from one
+  reproduction to a **confirmed production incident** of silent retry
+  re-execution (`langchain-ai/langgraph#7417`, LangGraph Cloud, "2–3x
+  redundant work and cost"), a second framework with the same documented gap
+  (`crewAIInc/crewAI#5802`), and a first-hand practitioner report of one
+  request producing four sends — while still recording that no duplicated
+  *payment charge* in production is publicly confirmed, and that none of this
+  is willingness-to-pay evidence. See `docs/market-research-2026-08.md` §8.
+
 - Added `docs/market-research-2026-08.md`: MCP-native competitive set, market
   sizing, and problem evidence, each row carrying an explicit verification
   level. `stripe/ai#402` — a third-party issue report, with a reproduction, of
