@@ -3,7 +3,6 @@
   "buildCommand": "python3 build_site.py",
   "outputDirectory": "dist",
   "cleanUrls": true,
-  "trailingSlash": true,
   "headers": [
     {
       "source": "/(.*)",
@@ -68,6 +67,13 @@
       ]
     },
     {
+      "source": "/llms-full.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
       "source": "/robots.txt",
       "headers": [
         { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
@@ -113,6 +119,11 @@
       "source": "/:path*",
       "has": [{ "type": "host", "value": "site-tawny-seven-33.vercel.app" }],
       "destination": "https://www.thisisatest.tech/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/proof",
+      "destination": "/proof/",
       "permanent": true
     },
     {
