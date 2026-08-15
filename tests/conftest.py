@@ -88,6 +88,13 @@ def iter_routes(routes):
 
 # Set up SQLite for testing before any imports
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+# Durable state stays in memory for the suite. State this explicitly: the tests
+# always ran on memory state, but only as an accident of auto-resolution
+# choosing postgres and asyncpg then failing on the SQLite DSN above. Once a
+# SQLite DATABASE_URL resolves to the SQLite backend, "auto" opens a real
+# aiosqlite connection whose worker thread is not a daemon, and an unclosed one
+# blocks interpreter shutdown. See the teardown in setup_database.
+os.environ.setdefault("STATE_BACKEND", "memory")
 # Ephemeral SQLite create_all even when a job sets ENVIRONMENT=production
 # (production_trust CI). Never applies to Postgres — see allows_metadata_create_all.
 os.environ.setdefault("ALLOW_METADATA_CREATE_ALL", "true")
@@ -152,6 +159,7 @@ def enable_proof_surfaces_for_marked_tests(request):
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_database():
     """Set up database tables before any tests run."""
+    from app.core.durable_state import close_durable_state
     from app.db.database import init_db, close_db
 
     # Close any existing connection
@@ -171,6 +179,13 @@ async def setup_database():
 
     # Cleanup
     await close_db()
+    # Release any durable-state backend a test opted into. aiosqlite runs each
+    # connection on a non-daemon worker thread, so an unclosed one keeps the
+    # interpreter alive after the run finishes — the suite passes and pytest
+    # never exits. STATE_BACKEND=memory above means this is normally a no-op;
+    # it exists so a test that deliberately selects a real backend cannot wedge
+    # the process.
+    await close_durable_state()
 
 
 @pytest_asyncio.fixture(scope="function")

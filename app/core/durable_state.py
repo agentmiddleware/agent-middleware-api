@@ -28,7 +28,7 @@ import asyncpg
 import redis.asyncio as redis
 
 from .config import get_settings
-from .db_urls import as_asyncpg_url
+from .db_urls import as_asyncpg_url, is_postgres_url, sqlite_path_from_url
 from .runtime_degradation import mark_durable_state_fell_back
 from .trust_mode import is_production_like_environment
 
@@ -65,6 +65,12 @@ class DurableStateStore:
         self._redis_url = settings.REDIS_URL.strip()
         self._database_url = settings.DATABASE_URL.strip()
         self._sqlite_url = settings.SQLITE_URL.strip()
+        # A SQLAlchemy SQLite ``DATABASE_URL`` is the standard local-development
+        # setting. Without this, auto-resolution below would see a non-empty
+        # DATABASE_URL, choose the postgres backend, hand a sqlite DSN to
+        # asyncpg, and silently degrade to in-memory state after the failure.
+        if not self._sqlite_url:
+            self._sqlite_url = sqlite_path_from_url(self._database_url)
         self._production_like = is_production_like_environment(settings.ENVIRONMENT)
 
         self._init_lock = asyncio.Lock()
@@ -104,7 +110,7 @@ class DurableStateStore:
             return "memory"
 
         # auto/default
-        if self._database_url:
+        if self._database_url and is_postgres_url(self._database_url):
             return "postgres"
         if self._redis_url:
             return "redis"
