@@ -85,6 +85,15 @@ Flowchart:
    and the classification — **[not implemented]**.
 8. **280** Yes → commit → **290** dispatch invocation
 
+**Draw the path split.** This figure depicts
+`PermitService.authorize_and_reserve()`. The upstream MCP dispatch path
+(`authorize_reserve_and_prepare()`) reserves by ORM read-modify-write inside the
+transaction instead, and therefore does **not** carry the lock-independent
+guarantee. Show it as a branch off **210** labelled "upstream MCP dispatch —
+ORM read-modify-write, lock-dependent, **[not implemented]** for the guarantee
+in **250**". A figure showing only the guarded path would overstate how much of
+the system it covers.
+
 ### FIG. 3 — Debit checkpoint and asymmetric reconciliation
 
 *Supports claims 9–14; §4.4. The most important figure — draw it in two panels.*
@@ -104,7 +113,12 @@ response, idle > threshold:
 - **380** Dispatch attempt exists? → Yes → **382** skip (remote reconciler owns
   it, preserves delivery-uncertain state)
 - **384** Checkpoint present? → No → **386** attempt or receipt exists? → No →
-  **388** delete record; key safe to retry
+  **387** endpoint effect-free (canonical MCP identity, `operation_kind ==
+  "upstream_mcp"`)? → Yes → **388** delete record; key safe to retry.
+  *The effect-free test is a precondition, not a formality:* deletion is
+  confined to the narrow upstream-MCP identity that crashed before any budget,
+  debit, attempt, or receipt existed. Records outside that scope are never
+  deleted, because their side-effect ordering differs.
 - Checkpoint present → **390** receipt exists? →
   - Yes → **392** reconstruct response from `receipt.outcome`; select status
     code (success→200, insufficient_funds→402, denied→403,
@@ -134,8 +148,12 @@ new field. Nothing is ever re-signed.
   under original bytes; T2 receipt verifies under extended bytes — *annotate:
   "no re-signing migration"*.
 - **490** Constrained legacy fallback, shown as a dashed side branch with its
-  gate conditions (exactly one referencing idempotency record; wallet and
-  request hash agree) and a **fail-closed** terminal.
+  gate conditions — exactly one referencing idempotency record; wallet and
+  request hash agree; **and the receipt carries no dispatch link** — and a
+  **fail-closed** terminal. All three gates are required:
+  `_has_unambiguous_historical_idempotency_link()` returns false outright when
+  `dispatch_attempt_id` is set, so a dispatch-linked receipt never reaches the
+  legacy branch.
 
 ### FIG. 5 — Offline verification status taxonomy
 
@@ -161,8 +179,19 @@ visually distinguishable — this figure exists to show they are not one boolean
    `MISMATCH`
 9. **580** `VERIFIED` — return claims **read from signed payload**
 
-Shade **555** distinctly from **525**, **535**, **545**, **565** and add a
-legend: "cryptographic claim" vs. "missing input or capability."
+**Group the terminals into two families, not one-against-the-rest.** Shade
+**555** (`INVALID`) and **565** (`MISMATCH`) together as **integrity failures**
+— both are reached only after the verifier has enough input to make a judgment
+about the evidence itself, and both mean something about the bundle is wrong.
+Shade **525** (`MALFORMED`), **535** (`UNSUPPORTED`) and **545**
+(`UNKNOWN_KEY`) together as **missing input or capability** — the verifier is
+saying "I cannot judge this," not "this is bad."
+
+An earlier draft contrasted `INVALID` alone against everything else, which put
+`MISMATCH` on the wrong side of the line: `MISMATCH` is raised *after* the
+signature verifies, when the payload's `kid`, its `payload_hash`, or an envelope
+value disagrees with the signed content. That is an integrity finding, not an
+availability one.
 
 *Draftsperson note:* steps 4 and 6 are deliberately ordered that way — key
 selection uses the envelope's `kid`, and the signed payload's `kid` is checked

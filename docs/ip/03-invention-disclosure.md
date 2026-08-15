@@ -64,7 +64,11 @@ A gateway mediates agent-to-tool invocations and, for each invocation:
 1. **Atomically authorizes and reserves** budget against a signed delegated
    permit, using a single guarded conditional update that enforces the cap at
    the row level and therefore remains correct where advisory row locks do not
-   fire.
+   fire. **This applies to the path through
+   `PermitService.authorize_and_reserve()`. It does *not* currently apply to the
+   upstream MCP dispatch path**, which reserves by ORM read-modify-write — see
+   §4.3. Counsel must not read item 1 as covering every invocation until both
+   paths share the guarded update.
 2. **Checkpoints the debit** on the idempotency record before finalization
    begins, so a later crash leaves a record that classifies itself.
 3. **Reconciles** crashed records asymmetrically: never-charged records are

@@ -12,6 +12,17 @@ publication and those under secrecy order do not either. Not searchable today
 is not the same as not prior art later: an application invisible now can still
 have prior-art effect once published or issued.
 
+**Search scope actually performed** — state it so counsel can judge the weight
+of everything below: public web search for issued US patents and vendor
+announcements in agent authorization and governance; review of the standards and
+literature already cited in `docs/related-work.md`; and reading of this
+repository's implementation. **Not performed:** classification-based searching
+(CPC/IPC), USPTO Patent Public Search or EPO/WIPO full-text databases, any
+non-English art, any published-application search, and any reading of issued
+claim text beyond the abstracts and summaries linked below. The rankings in §5
+are engineering judgment about where the mechanisms differ from known art — they
+are a starting hypothesis for counsel to test, not a patentability opinion.
+
 ---
 
 ## 1. Daon's agentic-AI portfolio — the closest art
@@ -117,7 +128,11 @@ The pattern itself is unclaimable. Two details in this repo go past it:
   present, receipt exists" (rebuild the replay response *from the receipt's
   actual outcome*) differently again from "checkpoint present, no receipt"
   (do not guess — flag for manual review)
-  (`app/services/idempotency.py:408`).
+  (`app/services/idempotency.py:408`). Note the scoping: this generic reconciler
+  **skips any record carrying a dispatch attempt**, because remote MCP attempts
+  are owned by `McpDispatchReconciliation`, which retains the bounded upstream
+  result and can rebuild the exact replay contract. A generic receipt-only
+  repair would discard that result and erase delivery uncertainty.
 
 The standard pattern answers "did I already do this?" The mechanism here answers
 "the process died — did money move, and can I reconstruct what the caller should

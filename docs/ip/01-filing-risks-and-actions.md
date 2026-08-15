@@ -84,7 +84,12 @@ site at any enabling level. That is the argument to preserve.
 - [ ] **File a provisional application now**, before further publication —
       but understand precisely what it does and does not buy:
       - It **establishes a US filing date** and, filed inside the §102(b)(1)
-        grace period, preserves US rights against your own earlier disclosure.
+        grace period, preserves US rights against your own earlier disclosure —
+        **but only if a nonprovisional or US-designating PCT application is
+        filed within 12 months and expressly claims the provisional's benefit.**
+        A provisional is never examined and never matures into a patent on its
+        own; it goes abandoned at 12 months. Miss that window and the filing
+        date is gone.
       - It can serve as the basis for a **Paris Convention priority claim** for
         foreign or PCT applications filed within 12 months.
       - It does **not** cure an earlier public disclosure, and it does **not**
@@ -98,10 +103,17 @@ site at any enabling level. That is the argument to preserve.
       Specifically: do not publish the SDK to PyPI, do not complete the MCP
       Registry submission, and do not publish a design-partner-facing writeup
       of the reconciliation or canonicalization mechanisms.
-- [ ] **Confirm no SDK package was ever published.** `docs/x-announcement-thread.md`
-      says published SDK packages must not be claimed, which suggests none were —
-      verify, because a PyPI release of `b2a_sdk` would put the offline verifier
-      source (mechanism 4) into publicly available prior art.
+- [ ] **Establish exactly how and where the SDK has been distributed** — do not
+      assume it was never released. `b2a_sdk/README.md` states the package is
+      **not** on PyPI but that the `python-sdk-v0.4.0` tag **attaches built
+      wheels and sdists to a GitHub release**
+      (`.github/workflows/python-sdk-release.yml` builds and publishes them on
+      any `python-sdk-v*` tag). That is a real distribution channel carrying the
+      offline verifier source — mechanism 4.
+      Check all of them: the PyPI index, the git tags, every GitHub release and
+      its attached artifacts, and whether any release was ever public. Releases
+      on a private repository are not public, so this may well be clean — but it
+      is a question to answer with evidence, not an assumption.
 
 ---
 
