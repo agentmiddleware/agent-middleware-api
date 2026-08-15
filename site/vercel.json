@@ -137,6 +137,11 @@
       "permanent": true
     },
     {
+      "source": "/compare",
+      "destination": "/compare/",
+      "permanent": true
+    },
+    {
       "source": "/mcp/tools.json",
       "destination": "https://api.thisisatest.tech/mcp/tools.json",
       "permanent": false

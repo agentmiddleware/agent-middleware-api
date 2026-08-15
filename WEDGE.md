@@ -47,9 +47,36 @@ platform teams—not a general MCP gateway and not merchant settlement.
 | MCP “trust” gateways (e.g. signed receipts + replay) | Policy / evidence | Wallet debit + economic idempotency |
 | MCP monetization / pay-per-tool | Payments rails | Internal budgets; no settlement claim |
 | Enterprise authz for MCP | Who may call | Meter + receipt + charge-once |
+| Agent reliability libraries (in-process decorators) | Retry safety inside the caller | A boundary the agent cannot route around; evidence a third party can check |
 
 Do not pitch as production payments, compliance-grade ledger, or IAM
 replacement (see [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
+
+### Signed receipts are table stakes now (2026-08)
+
+The 2026 competitive sweep in
+[`docs/market-research-2026-08.md`](docs/market-research-2026-08.md) verified
+that **signed, offline-verifiable receipts are no longer differentiating**.
+At least one MCP policy proxy emits Ed25519 receipts verifiable without calling
+its issuer, and it carries an IETF Internet-Draft for the format; other projects
+ship hash-chained signed receipts alongside policy and HITL.
+
+This does not change the wedge — it sharpens which half of it to lead with.
+The row no surveyed project is *documented* as occupying is the **economic**
+one:
+
+> One accepted idempotency key produces exactly one gateway dispatch, one
+> ledger debit, and one receipt, linked by a single persisted chain — and a
+> genuinely ambiguous post-dispatch outcome becomes a distinct receipted state
+> rather than a silent redispatch.
+
+State that as scope, not as exclusivity: several projects enforce budgets and
+several dedupe replays, and whether any of them *binds* the two is an open
+verification question (`docs/market-research-2026-08.md` §7). Say "no project we
+surveyed documents this," never "nobody does."
+
+Lead with the debit. Cite the signature as supporting evidence, never as the
+differentiator, and never as a superlative — see **What Not To Claim Yet**.
 
 ## Core User
 
@@ -155,6 +182,14 @@ Agent-executable remediation of known spine/discovery/deploy debt:
 - Quotes as a pricing or settlement product. A quote fixes what this gateway
   will debit from an internal wallet for one call; it is not a market price, a
   vendor commitment, or an invoice.
+- Uniqueness superlatives — “the only gateway that…”, “no competitor offers…”.
+  Signed receipts, offline verification, per-tool policy, and budget caps all
+  exist elsewhere; a superlative that a reader can falsify in one search costs
+  more credibility than the claim buys.
+- Compliance mapping to the EU AI Act, Colorado AI Act, ISO 42001, or SOC 2.
+  Receipts may be *one input* an operator's auditor accepts; that is the
+  operator's determination, not ours. No mappings, no certifications, no
+  “compliance-ready.”
 - Permit requests as an approval-workflow product. The decision is delegated to
   Sentinel and the surface is one ask and one poll — it is not a replacement
   for an access-request or change-management system.

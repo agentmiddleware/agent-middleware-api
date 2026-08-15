@@ -257,6 +257,7 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
     public_paths = (
         output / "index.html",
         output / "proof" / "index.html",
+        output / "compare" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / ".well-known" / "agent.json",
@@ -322,6 +323,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert "/_vercel/insights/script.js" not in page
     assert "Sitemap: https://www.thisisatest.tech/sitemap.xml" in robots
     assert "https://www.thisisatest.tech/proof/" in sitemap
+    assert "https://www.thisisatest.tech/compare/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
 
     for event_name in ("booking_click", "email_click", "proof_click"):
@@ -337,22 +339,22 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     default_output = tmp_path / "default"
     result = _render_site(default_output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
-    for relative_path in ("index.html", "proof/index.html"):
+    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (default_output / relative_path).read_text(encoding="utf-8")
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-2"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-3"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
     enabled_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = "true"
     result = _render_site(enabled_output, enabled_contacts)
     assert result.returncode == 0, result.stderr
-    for relative_path in ("index.html", "proof/index.html"):
+    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-2"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-3"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -394,7 +396,7 @@ def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
-    for relative_path in ("index.html", "proof/index.html"):
+    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         collector = _ExternalLinkCollector()
         collector.feed((output / relative_path).read_text(encoding="utf-8"))
         collector.close()
@@ -465,7 +467,7 @@ def test_cta_aria_labels_preserve_visible_text_and_booking_url(tmp_path) -> None
     assert result.returncode == 0, result.stderr
 
     booking_url = VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]
-    for relative_path in ("index.html", "proof/index.html"):
+    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         collector = _LabeledLinkCollector()
         collector.feed((output / relative_path).read_text(encoding="utf-8"))
         collector.close()
@@ -514,6 +516,7 @@ def test_pages_publish_valid_json_ld(tmp_path) -> None:
     expected = {
         "index.html": ("WebSite", "https://www.thisisatest.tech/"),
         "proof/index.html": ("WebPage", "https://www.thisisatest.tech/proof/"),
+        "compare/index.html": ("WebPage", "https://www.thisisatest.tech/compare/"),
     }
     for relative_path, (schema_type, url) in expected.items():
         collector = _JsonLdCollector()
@@ -623,7 +626,12 @@ def test_pages_carry_no_inline_scripts(tmp_path) -> None:
     assert _render_site(enabled_output, enabled_contacts).returncode == 0
 
     for root in (output, enabled_output):
-        for relative_path in ("index.html", "proof/index.html", "404.html"):
+        for relative_path in (
+            "index.html",
+            "proof/index.html",
+            "compare/index.html",
+            "404.html",
+        ):
             collector = _InlineScriptCollector()
             collector.feed((root / relative_path).read_text(encoding="utf-8"))
             collector.close()
@@ -646,11 +654,27 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
     assert "/proof/proof.js" in cached_sources
 
     # Fingerprinting is a query token, so every reference must carry it or the
-    # week-long cache would pin visitors to a stale stylesheet.
-    for relative_path in ("index.html", "proof/index.html", "404.html"):
+    # week-long cache would pin visitors to a stale asset. Discover the
+    # references rather than listing them: a hand-maintained list silently
+    # stops covering each newly added asset, which is exactly the reference
+    # that would go stale unnoticed.
+    local_asset_reference = re.compile(
+        r'(?:src|href)="(/[^"?]+\.(?:css|js))(\?[^"]*)?"'
+    )
+    for relative_path in (
+            "index.html",
+            "proof/index.html",
+            "compare/index.html",
+            "404.html",
+        ):
         page = (SITE / relative_path).read_text(encoding="utf-8")
-        for asset in ("/styles.css", "/a11y.js", "/a11y-preload.js"):
-            assert f'{asset}?v=' in page, f"{relative_path} references {asset} unversioned"
+        references = local_asset_reference.findall(page)
+        assert references, f"{relative_path} references no local CSS or JS"
+        for asset, query in references:
+            assert query.startswith("?v="), (
+                f"{relative_path} references {asset} without a ?v= cache token; "
+                "returning visitors would keep the old bytes for up to a week"
+            )
 
     # HTML gets no long-lived Cache-Control rule of its own.
     html_rules = [
@@ -661,9 +685,9 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
     assert not html_rules
 
 
-def test_trailing_slash_is_canonical_for_the_proof_page() -> None:
-    """One canonical URL for the proof page, via a redirect rather than the
-    global ``trailingSlash`` setting.
+def test_trailing_slash_is_canonical_for_subpages() -> None:
+    """One canonical URL per subpage, via a redirect rather than the global
+    ``trailingSlash`` setting.
 
     ``trailingSlash: true`` is the obvious way to write this and it is wrong on
     Vercel: it makes every ``/.well-known/*`` entry in ``headers`` stop matching,
@@ -674,17 +698,23 @@ def test_trailing_slash_is_canonical_for_the_proof_page() -> None:
     where only the dot-prefixed directory lost its headers.
     """
     config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
-    proof = (SITE / "proof" / "index.html").read_text(encoding="utf-8")
 
     assert "trailingSlash" not in config
-    redirect = next(
-        entry
-        for entry in config["redirects"]
-        if "has" not in entry and entry["source"] == "/proof"
-    )
-    assert redirect["destination"] == "/proof/"
-    assert redirect["permanent"] is True
-    assert 'rel="canonical" href="https://www.thisisatest.tech/proof/"' in proof
+    # Because the global setting is off, every directory page needs its own
+    # redirect or the un-slashed URL 404s.
+    for directory in ("proof", "compare"):
+        page = (SITE / directory / "index.html").read_text(encoding="utf-8")
+        redirect = next(
+            entry
+            for entry in config["redirects"]
+            if "has" not in entry and entry["source"] == f"/{directory}"
+        )
+        assert redirect["destination"] == f"/{directory}/"
+        assert redirect["permanent"] is True
+        assert (
+            f'rel="canonical" href="https://www.thisisatest.tech/{directory}/"'
+            in page
+        )
 
     # Every dot-prefixed path the headers block configures must actually be
     # served with those headers; a rule that silently stops matching is the
@@ -775,19 +805,144 @@ def test_branded_404_offers_a_way_back(tmp_path) -> None:
 
 
 def test_navigation_is_identical_across_pages(tmp_path) -> None:
-    """A visitor on /proof/ must reach the same places as one on /."""
+    """A visitor on any subpage must reach the same places as one on /."""
 
     output = tmp_path / "site"
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
 
     landing = (output / "index.html").read_text(encoding="utf-8")
     proof = (output / "proof" / "index.html").read_text(encoding="utf-8")
+    compare = (output / "compare" / "index.html").read_text(encoding="utf-8")
 
-    for label in ("Pilot", "Proof", "Machine discovery"):
-        assert f">{label}</a>" in landing
-        assert f">{label}</a>" in proof
-    for anchor in ("/#pilot", "/#proof", "/#machine-discovery"):
-        assert f'href="{anchor}"' in proof
+    for label in ("Pilot", "Proof", "Compare", "Machine discovery"):
+        for page in (landing, proof, compare):
+            assert f">{label}</a>" in page
+    for anchor in ("/#pilot", "/#proof", "/compare/", "/#machine-discovery"):
+        for page in (proof, compare):
+            assert f'href="{anchor}"' in page
+
+    # 404 carries the same nav minus the booking CTA, so a visitor who lands on
+    # a dead URL can still reach every real page.
+    not_found = (output / "404.html").read_text(encoding="utf-8")
+    for anchor in ("/#pilot", "/#proof", "/compare/", "/#machine-discovery"):
+        assert f'href="{anchor}"' in not_found, f"404.html cannot reach {anchor}"
+
+
+def _anchor_texts_and_hrefs(markup: str) -> list[tuple[str, str]]:
+    """Return ``(visible_text, href)`` for every ``<a>`` in the page."""
+
+    class _Anchors(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pairs: list[tuple[str, str]] = []
+            self._href: str | None = None
+            self._parts: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs) -> None:
+            if tag == "a":
+                self._href = (dict(attrs).get("href") or "").strip()
+                self._parts = []
+
+        def handle_data(self, data: str) -> None:
+            if self._href is not None and data.strip():
+                self._parts.append(" ".join(data.split()))
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag == "a" and self._href is not None:
+                self.pairs.append((" ".join(self._parts), self._href))
+                self._href = None
+
+    parser = _Anchors()
+    parser.feed(markup)
+    parser.close()
+    return parser.pairs
+
+
+def test_comparison_page_names_alternatives_and_refuses_superlatives(
+    tmp_path,
+) -> None:
+    """The comparison page exists to be trusted by a reader who can check it.
+
+    That imposes three contracts. It must name real alternatives with working
+    links, so the reader can go and look. It must concede at least one row —
+    a comparison where the author never loses is an advertisement. And it must
+    not smuggle in the two claims ``ELEVATOR_PITCH.md`` forbids: an
+    unverifiable "only product that…" superlative, or a compliance guarantee.
+    """
+
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    page = (output / "compare" / "index.html").read_text(encoding="utf-8")
+    text = " ".join(_page_text(page).split()).casefold()
+
+    # Naming an alternative in prose is not enough — "independently checkable"
+    # means the reader can click through to the project and judge for
+    # themselves, so each name must carry an off-site link.
+    anchors = _anchor_texts_and_hrefs(page)
+    for alternative in ("protect-mcp", "jamjet", "traceagent", "latch"):
+        linked = [
+            href
+            for visible, href in anchors
+            if alternative in visible.casefold() and href.startswith("https://")
+        ]
+        assert linked, (
+            f"comparison page names {alternative} without an off-site link the "
+            "reader can check"
+        )
+
+    # Concedes ground rather than winning every row.
+    assert "use something else" in text
+    assert "a poor fit" in text
+
+    # Refuses uniqueness superlatives and compliance guarantees in any phrasing,
+    # not just the exact wordings that existed when this test was written.
+    # WEDGE.md's never-claim list is the contract; these are its normalized form.
+    prohibited = (
+        r"\b(?:the )?only (?:mcp|gateway|product|tool|one)\b",
+        r"\bno competitor\b",
+        r"\bnobody else\b",
+        r"\bno one else\b",
+        r"\bfirst and only\b",
+        r"\bcompliance[- ]ready\b",
+        r"\b(?:soc ?2|eu ai act|iso ?42001)[- ]compliant\b",
+        r"\bguarantees? compliance\b",
+        r"\bfully compliant\b",
+    )
+    for pattern in prohibited:
+        assert not re.search(pattern, text), (
+            f"comparison page matches prohibited claim pattern {pattern!r} — see "
+            "WEDGE.md 'What Not To Claim Yet'"
+        )
+
+    # Negative path: the patterns must actually reject offending copy. Without
+    # this, a pattern that silently stops matching would leave the page
+    # unguarded while the test still passed.
+    offending = (
+        "we are the only gateway that meters by the call",
+        "only product that prevents double charges",
+        "nobody else binds the debit",
+        "no one else binds the debit",
+        "no competitor offers this",
+        "we are the first and only gateway for this",
+        "we are soc2-compliant and compliance-ready",
+        "the service is fully compliant",
+        "this guarantees compliance with the eu ai act",
+    )
+    for sample in offending:
+        assert any(re.search(pattern, sample) for pattern in prohibited), (
+            f"prohibited-claim patterns fail to reject {sample!r}"
+        )
+    # …and every pattern must earn its place. Without this, deleting a pattern
+    # that has no sample of its own would leave the suite green.
+    for pattern in prohibited:
+        assert any(re.search(pattern, sample) for sample in offending), (
+            f"prohibited-claim pattern {pattern!r} has no negative-path sample"
+        )
+
+    # States the compliance boundary rather than dodging the question.
+    assert "not on their own" in text
+    assert "hold no" in text and "certification" in text
 
 
 def test_local_site_assets_exist() -> None:
@@ -804,6 +959,7 @@ def test_local_site_assets_exist() -> None:
         SITE / ".well-known" / "agent.json",
         SITE / "proof" / "index.html",
         SITE / "proof" / "proof.js",
+        SITE / "compare" / "index.html",
         SITE / "404.html",
         SITE / "a11y-preload.js",
         SITE / "va-init.js",
@@ -825,7 +981,12 @@ def test_typography_is_self_hosted_with_no_third_party_request(tmp_path) -> None
     output = tmp_path / "site"
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
 
-    rendered = [output / "index.html", output / "proof" / "index.html", output / "404.html"]
+    rendered = [
+        output / "index.html",
+        output / "proof" / "index.html",
+        output / "compare" / "index.html",
+        output / "404.html",
+    ]
     for page in rendered:
         markup = page.read_text(encoding="utf-8")
         for host in ("fonts.googleapis.com", "fonts.gstatic.com"):
@@ -845,6 +1006,39 @@ def test_typography_is_self_hosted_with_no_third_party_request(tmp_path) -> None
     assert (output / "fonts.css").is_file()
     for face in re.findall(r'url\("(/fonts/[^"]+)"\)', (output / "fonts.css").read_text()):
         assert (output / face.lstrip("/")).is_file(), f"{face} not published"
+
+
+def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
+    """Saved accessibility preferences must apply on every page, including 404.
+
+    This is a merge-regression guard. ``a11y-preload.js`` is what stops a
+    visitor who has set larger text or higher contrast from getting a flash of
+    the default theme, and ``a11y.js`` is what renders the controls at all. A
+    page that keeps the shared stylesheet but loses these two scripts looks
+    fine in review and silently drops the feature — which is exactly what a
+    conflict resolution did to ``404.html`` once.
+    """
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "404.html",
+    ):
+        markup = (output / relative_path).read_text(encoding="utf-8")
+        # Blocking, in <head>, before first paint — a deferred preload would
+        # not prevent the flash it exists to prevent.
+        assert re.search(
+            r'<script src="/a11y-preload\.js\?v=[^"]+"></script>', markup
+        ), f"{relative_path} does not apply saved accessibility preferences"
+        assert "defer" not in re.search(
+            r"<script[^>]*a11y-preload[^>]*>", markup
+        ).group(0), f"{relative_path} defers a11y-preload.js; it must block"
+        assert re.search(
+            r'<script defer src="/a11y\.js\?v=[^"]+"></script>', markup
+        ), f"{relative_path} does not load the accessibility controls"
 
 
 def test_font_stylesheet_and_files_agree() -> None:
@@ -894,7 +1088,7 @@ def test_preloaded_fonts_exist_and_are_actually_used(tmp_path) -> None:
     # font fetches per bad URL buys nothing.
     assert 'rel="preload"' not in (output / "404.html").read_text(encoding="utf-8")
 
-    for relative_path in ("index.html", "proof/index.html"):
+    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         markup = (output / relative_path).read_text(encoding="utf-8")
         preloads = re.findall(r'<link rel="preload" href="(/fonts/[^"]+)"', markup)
         assert preloads, f"{relative_path} preloads no fonts"

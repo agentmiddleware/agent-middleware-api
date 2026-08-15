@@ -35,6 +35,7 @@ Open `http://127.0.0.1:8765/`.
 
 - `/` — human design-partner funnel
 - `/proof/` — portable receipt, matching key snapshot, and offline command
+- `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
 - `/404.html` — branded not-found page with links back into the site
 - `/.well-known/agent.json` — marketing-origin pointer to API discovery
 - `/.well-known/security.txt` — vulnerability-report contact (RFC 9116)
@@ -64,14 +65,15 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-2`. When you
+query token**: every reference looks like `/styles.css?v=gateway-3`. When you
 change any of those files, bump the token in `index.html`, `proof/index.html`,
-`404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or returning visitors
+`compare/index.html`, `404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or
+returning visitors
 keep the old bytes for up to a week. HTML itself carries no long-lived
 `Cache-Control` rule and revalidates on every request.
 
-An explicit `/proof` → `/proof/` redirect matches the page's
-`rel="canonical"`. Do **not** replace it with the global `trailingSlash: true`
+Explicit `/proof` → `/proof/` and `/compare` → `/compare/` redirects match
+those pages' `rel="canonical"`. Every directory page needs its own entry. Do **not** replace it with the global `trailingSlash: true`
 setting: on Vercel that makes every `/.well-known/*` entry in `headers` stop
 matching, so `agent.json` and `security.txt` silently fall back to
 `max-age=0, must-revalidate` while every other configured path keeps its

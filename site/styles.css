@@ -1187,6 +1187,106 @@ p a {
   padding: 0;
 }
 
+/* Comparison page ------------------------------------------------------------------------- */
+
+/* The matrix is wider than a phone. It scrolls inside its own region rather
+   than making the whole page scroll sideways; the region is focusable so the
+   scroll is reachable by keyboard. */
+.compare-scroll {
+  overflow-x: auto;
+  margin-top: 2rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.compare-scroll:focus-visible {
+  outline: var(--focus-ring);
+}
+
+.compare-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 46rem;
+  font-size: 0.92rem;
+}
+
+.compare-table caption {
+  caption-side: bottom;
+  padding: 1rem 1.25rem;
+  text-align: left;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.compare-table th,
+.compare-table td {
+  border-bottom: 1px solid var(--rule-soft);
+  padding: 0.85rem 1.25rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.compare-table thead th {
+  border-bottom: 1px solid var(--rule);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.compare-table tbody th {
+  color: var(--text);
+  font-weight: 600;
+  width: 30%;
+}
+
+.compare-table tbody td {
+  color: var(--text-dim);
+}
+
+.compare-table tbody tr:last-child th,
+.compare-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.compare-table strong {
+  color: var(--text);
+}
+
+.fit-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.fit-list li {
+  color: var(--text-dim);
+  line-height: 1.65;
+}
+
+.faq-list {
+  margin-top: 2rem;
+  display: grid;
+  gap: 1.75rem;
+}
+
+.faq-list dt {
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.faq-list dd {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.75;
+  max-width: 62ch;
+}
+
 /* Hero entrance (motion is opt-out via media query + a11y panel) --------------------------- */
 
 @keyframes rise {

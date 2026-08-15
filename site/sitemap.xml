@@ -8,4 +8,8 @@
     <loc>https://www.thisisatest.tech/proof/</loc>
     <lastmod>@@BUILD_DATE@@</lastmod>
   </url>
+  <url>
+    <loc>https://www.thisisatest.tech/compare/</loc>
+    <lastmod>@@BUILD_DATE@@</lastmod>
+  </url>
 </urlset>

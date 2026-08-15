@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How this compares | Agent Middleware API</title>
+    <meta
+      name="description"
+      content="An honest comparison of Agent Middleware API against MCP governance gateways, audit tools, and reliability libraries — including where they do the same job."
+    />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0b1120" />
+    <link rel="canonical" href="https://www.thisisatest.tech/compare/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Agent Middleware API" />
+    <meta property="og:title" content="How this compares to other MCP governance tools" />
+    <meta
+      property="og:description"
+      content="Several projects sign receipts. The difference here is that one accepted idempotency key produces exactly one debit."
+    />
+    <meta property="og:url" content="https://www.thisisatest.tech/compare/" />
+    <meta
+      property="og:image"
+      content="https://www.thisisatest.tech/social-card.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Agent Middleware API compared with MCP governance tools"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="How this compares to other MCP governance tools" />
+    <meta
+      name="twitter:description"
+      content="Several projects sign receipts. The difference here is that one accepted idempotency key produces exactly one debit."
+    />
+    <meta
+      name="twitter:image"
+      content="https://www.thisisatest.tech/social-card.png"
+    />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "How this compares to other MCP governance tools",
+        "url": "https://www.thisisatest.tech/compare/",
+        "description": "An honest comparison of Agent Middleware API against MCP governance gateways, audit tools, and reliability libraries.",
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "Agent Middleware API",
+          "url": "https://www.thisisatest.tech/"
+        }
+      }
+    </script>
+    @@FONT_PRELOADS@@
+    <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-3" />
+    <!-- Blocking on purpose: saved accessibility preferences must apply before
+         first paint. Kept in a file rather than inline so the Content-Security-
+         Policy can be script-src 'self' with no 'unsafe-inline'. -->
+    <script src="/a11y-preload.js?v=gateway-3"></script>
+    @@VERCEL_ANALYTICS_SCRIPTS@@
+    <script defer src="/analytics.js?v=gateway-3"></script>
+    <script defer src="/a11y.js?v=gateway-3"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <nav class="site-nav" aria-label="Primary">
+      <a class="nav-brand" href="/" aria-label="Agent Middleware API home">
+        <span>Agent Middleware API</span>
+      </a>
+      <div class="nav-links">
+        <a href="/#pilot">Pilot</a>
+        <a href="/#proof">Proof</a>
+        <a href="/compare/">Compare</a>
+        <a href="/#machine-discovery">Machine discovery</a>
+        <a
+          class="nav-agent"
+          href="@@PUBLIC_BOOKING_URL@@"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-analytics-event="booking_click"
+          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
+          >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+        >
+      </div>
+    </nav>
+
+    <main id="main">
+      <header class="section proof-page-header">
+        <p class="section-kicker">Comparison / Build vs buy</p>
+        <h1>Several tools sign receipts. One debit is the difference.</h1>
+        <p class="proof-page-lead">
+          This page names competitors and says plainly where they do the same
+          job we do. If one of them fits your problem better, use it — a
+          governed boundary you do not need is operational cost with no return.
+        </p>
+      </header>
+
+      <section class="section" aria-labelledby="honest-title">
+        <p class="section-kicker">01 / What is not unique</p>
+        <h2 id="honest-title">Signed, offline-verifiable receipts are no longer rare in this field.</h2>
+        <div class="thesis-copy">
+          <p>
+            When this project started, per-call cryptographic evidence for MCP
+            tool calls was unusual. It is not unusual now. Policy gateways and
+            safety frameworks emit signed receipts, and at least one verifies
+            offline without calling its issuer — the same property our
+            <a href="/proof/" data-analytics-event="proof_click">proof page</a>
+            demonstrates. Audit layers publish hash-chained receipts; whether
+            those also carry an issuer signature you can check without the
+            vendor, we have not confirmed either way.
+          </p>
+          <p>
+            So the receipt is not the argument. The argument is what the receipt
+            is bound to: a ledger debit that cannot happen twice under the same
+            accepted idempotency key.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="matrix-title">
+        <p class="section-kicker">02 / Where each tool sits</p>
+        <h2 id="matrix-title">The comparison, including the rows we lose.</h2>
+        <div class="compare-scroll" tabindex="0" role="region" aria-labelledby="matrix-title">
+          <table class="compare-table">
+            <caption>
+              Assessed August 2026 from each project's public source and
+              documentation. &ldquo;Not documented&rdquo; means we did not find
+              the capability described &mdash; not that we proved it absent.
+              Capabilities change; verify before deciding. Retry protection is
+              scoped to this gateway: for an authorized request, one accepted
+              idempotency key permits <em>at most one</em> dispatch from here —
+              a call denied or failed before dispatch produces a terminal
+              receipt and no debit at all. Whether your upstream tool then runs
+              its own side effect exactly once depends on that tool honouring
+              the forwarded key.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                <th scope="col">Agent Middleware API</th>
+                <th scope="col">Policy gateways</th>
+                <th scope="col">Audit layers</th>
+                <th scope="col">Reliability libraries</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Enforces at a boundary the agent cannot bypass</th>
+                <td>Yes</td>
+                <td>Yes</td>
+                <td>Not documented</td>
+                <td>No — in-process</td>
+              </tr>
+              <tr>
+                <th scope="row">Per-tool scope and policy</th>
+                <td>Signed permits</td>
+                <td>Yes</td>
+                <td>No</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Signed receipts, verifiable without the vendor</th>
+                <td>Yes</td>
+                <td>Yes</td>
+                <td>Chained, signature unverified</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Tamper-evident chained audit</th>
+                <td>Per-wallet hash chain</td>
+                <td>Varies</td>
+                <td>Yes</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Budget enforced before execution</th>
+                <td>Wallet ledger</td>
+                <td>Varies</td>
+                <td>No</td>
+                <td>Call and cost caps</td>
+              </tr>
+              <tr>
+                <th scope="row">Duplicate gateway dispatch prevented on retry</th>
+                <td>Yes</td>
+                <td>Varies</td>
+                <td>No</td>
+                <td>N/A — dedupes in-process, and only at call sites that use the wrapper</td>
+              </tr>
+              <tr>
+                <th scope="row">Debit bound to the idempotency record</th>
+                <td>Yes</td>
+                <td>Not documented</td>
+                <td>Not documented</td>
+                <td>Not documented</td>
+              </tr>
+              <tr>
+                <th scope="row">Ambiguous outcome is a distinct receipted state</th>
+                <td>Yes</td>
+                <td>Not documented</td>
+                <td>Not documented</td>
+                <td>Not documented</td>
+              </tr>
+              <tr>
+                <th scope="row">Human approval before an action</th>
+                <td>Permit requests</td>
+                <td>Varies</td>
+                <td>Authority trails</td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Compliance framework mapping</th>
+                <td><strong>No</strong></td>
+                <td>No</td>
+                <td><strong>Yes</strong></td>
+                <td>No</td>
+              </tr>
+              <tr>
+                <th scope="row">Free and self-serve</th>
+                <td><strong>No</strong></td>
+                <td>Often</td>
+                <td>Varies</td>
+                <td><strong>Yes</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="machine-note">
+          Representative projects in each column:
+          <a
+            href="https://github.com/tomjwxf/scopeblind-gateway"
+            target="_blank"
+            rel="noopener noreferrer"
+            >protect-mcp</a
+          >
+          and
+          <a
+            href="https://github.com/jamjet-labs/jamjet"
+            target="_blank"
+            rel="noopener noreferrer"
+            >jamjet</a
+          >
+          (policy gateways),
+          <a
+            href="https://www.traceagent.dev/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >TraceAgent</a
+          >
+          (audit layers), and
+          <a
+            href="https://github.com/sangaraju1988/latch"
+            target="_blank"
+            rel="noopener noreferrer"
+            >latch</a
+          >
+          (reliability libraries).
+        </p>
+      </section>
+
+      <section class="section" aria-labelledby="latch-title">
+        <p class="section-kicker">03 / Build vs buy</p>
+        <h2 id="latch-title">Versus a decorator library you can install today.</h2>
+        <div class="thesis-copy">
+          <p>
+            The most common alternative is not a competing gateway. It is an
+            afternoon with an open-source Python library — idempotency, circuit
+            breaker, timeout, and budget guardrail as decorators on your tool
+            functions. It is MIT-licensed, free, and adds no infrastructure.
+            For a lot of teams that is the correct answer, and we would rather
+            say so than sell past it.
+          </p>
+        </div>
+        <ol class="thesis-signals">
+          <li>
+            <span>Choose the library</span>
+            <strong>Your problem is reliability</strong>
+            <p>
+              You control every call site, you trust your own agents, and you
+              need retries to stop costing money. Nobody outside your team has
+              to believe the result.
+            </p>
+          </li>
+          <li>
+            <span>Choose a boundary</span>
+            <strong>Your problem is evidence</strong>
+            <p>
+              Someone who is not you — a finance owner, an auditor, the tool's
+              operator — has to be able to check what ran and what it cost,
+              without trusting the process that ran it.
+            </p>
+          </li>
+          <li>
+            <span>Choose a boundary</span>
+            <strong>The agent must not be able to opt out</strong>
+            <p>
+              A decorator protects the call sites that import it. An agent that
+              constructs a call another way is simply not covered. A gateway is
+              the only path to the tool.
+            </p>
+          </li>
+        </ol>
+        <div class="thesis-copy">
+          <p>
+            The honest summary: an in-process cache is not evidence, and a
+            library the agent can route around is not a boundary. If neither of
+            those distinctions matters for your tool, install the library and
+            keep your afternoon.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="who-title">
+        <p class="section-kicker">04 / Fit</p>
+        <h2 id="who-title">Who this is actually for.</h2>
+        <div class="proof-grid artifact-grid">
+          <article class="proof-col">
+            <div class="proof-label">
+              <span>A good fit</span>
+              <span class="badge">worth a call</span>
+            </div>
+            <ul class="fit-list">
+              <li>You run one internal MCP tool where a duplicate call costs real money or causes a real side effect.</li>
+              <li>An agent retried something expensive and you could not prove afterwards what actually ran.</li>
+              <li>Someone outside the engineering team needs to check the record.</li>
+              <li>You can bring one real tool and one engineer to a pilot.</li>
+            </ul>
+          </article>
+          <article class="proof-col replay">
+            <div class="proof-label">
+              <span>A poor fit</span>
+              <span class="badge">use something else</span>
+            </div>
+            <ul class="fit-list">
+              <li>You want governance across every tool and framework at once. That is a platform; this is one boundary.</li>
+              <li>Your tool calls are cheap and idempotent already. Nothing here pays for itself.</li>
+              <li>You need a certified compliance product with regulatory mappings. See the audit layers above.</li>
+              <li>You need identity and SSO for agents. Keep your IAM; this sits downstream of it.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="faq-title">
+        <p class="section-kicker">05 / Questions we get asked</p>
+        <h2 id="faq-title">Compliance, pricing, and other honest answers.</h2>
+        <dl class="faq-list">
+          <dt>Can these receipts satisfy a SOC 2 or EU AI Act audit?</dt>
+          <dd>
+            Not on their own, and we will not claim otherwise. A signed receipt
+            records the <em>authorization decision</em> and the call's
+            <em>terminal outcome</em>, and shows the record has not been altered
+            since. Only a success receipt evidences that the call executed and
+            was charged; a denial receipt evidences that the call was refused
+            and never ran, and a refunded-failure or unconfirmed-outcome receipt
+            evidences exactly that. Ledger linkage appears where there is a
+            ledger record to link — a debit, or the compensating entry that
+            reversed it — so a pre-dispatch denial has no debit to point at. It
+            is deliberately not a success certificate: refusals and failures get
+            signed too, which is what makes the evidence worth anything when
+            something goes wrong. Whether
+            that evidence satisfies a given control is a question for your
+            auditor, not for us. We publish no regulatory mappings and hold no
+            certifications. If a mapped compliance report is the deliverable you
+            need, an audit-layer product is a better purchase.
+          </dd>
+          <dt>Why is there no pricing page or free tier?</dt>
+          <dd>
+            Because we qualify fit before we deploy. This is a design-partner
+            stage product, and most of the value of the first deployments is in
+            being wrong quickly with someone who will tell us. A self-serve
+            signup would get us installations we cannot support and cannot
+            learn from. You can still run the entire loop yourself, locally,
+            with no credentials and no contact with us.
+          </dd>
+          <dt>Is this production-ready?</dt>
+          <dd>
+            Production beta, not production complete. There is one server, one
+            database, and one operator-held signing key — no replicas and no
+            consensus. The supported posture is vendor-managed and
+            single-tenant. Read the security limitations before deciding.
+          </dd>
+          <dt>Does exactly-once hold all the way to my tool?</dt>
+          <dd>
+            At our boundary, yes: one accepted idempotency key produces one
+            dispatch, one debit, one receipt. Whether your <em>upstream</em>
+            tool's own side effect happens exactly once depends on whether that
+            tool honors the forwarded key. When the outcome after dispatch is
+            genuinely unknowable, we mark it uncertain and route it to manual
+            review rather than guessing.
+          </dd>
+        </dl>
+        <p class="machine-note">
+          Full detail:
+          <a
+            href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            >security limitations</a
+          >
+          and
+          <a
+            href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/market-research-2026-08.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            >the research this page is built from</a
+          >.
+        </p>
+      </section>
+
+      <section class="provenance-section" aria-labelledby="compare-cta-title">
+        <div class="section provenance-layout">
+          <div class="provenance-copy">
+            <p class="section-kicker">06 / Check it yourself</p>
+            <h2 id="compare-cta-title">Do not take the table on faith.</h2>
+            <p>
+              The core trust-plane claims in the left-hand column are
+              executable — the rest, like the absence of compliance mapping or a
+              self-serve tier, are product facts you can only take us at our
+              word on. Clone the repository and run
+              <code>make prove-trust-plane</code> to walk
+              permit → invoke → charge → receipt → replay → deny with no
+              credentials and no signup. Then verify a published receipt
+              offline, without us.
+            </p>
+            <p>
+              <a
+                href="https://github.com/PetrefiedThunder/agent-middleware-api"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Source code on GitHub</a
+              >
+              ·
+              <a
+                href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/quickstart.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Quickstart</a
+              >
+            </p>
+          </div>
+          <div class="closing-cta">
+            <h2>Still think it fits?</h2>
+            <p>
+              A 30-minute call: we scope one governed action on a tool you
+              already run, and you leave with a receipt you can verify without
+              us.
+            </p>
+            <div class="pilot-links">
+              <a
+                class="button button-primary"
+                href="@@PUBLIC_BOOKING_URL@@"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-analytics-event="booking_click"
+                aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
+                >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+              >
+              <a
+                class="button button-secondary"
+                href="/proof/"
+                data-analytics-event="proof_click"
+                >Verify our receipt yourself — offline</a
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-branding">
+        <div class="footer-brand">Agent Middleware API</div>
+        <p>Authorize one agent action. Charge it once. Prove what happened.</p>
+      </div>
+      <div class="footer-directory">
+        <p>Human contact</p>
+        <a
+          class="button button-primary"
+          href="@@PUBLIC_BOOKING_URL@@"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-analytics-event="booking_click"
+          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
+          >Book a one-tool pilot</a
+        >
+        <a
+          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          data-analytics-event="email_click"
+          aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
+          >@@PUBLIC_CONTACT_EMAIL@@</a
+        >
+        <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
+      </div>
+      <div class="footer-directory">
+        <p>Evidence and discovery</p>
+        <a href="/proof/" data-analytics-event="proof_click">Receipt proof</a>
+        <a href="/compare/">How this compares</a>
+        <a href="/#machine-discovery">Machine discovery</a>
+      </div>
+      <p class="footer-note">
+        Marketing: <code>www.thisisatest.tech</code> · API:
+        <code>api.thisisatest.tech</code>
+      </p>
+    </footer>
+  </body>
+</html>

@@ -59,6 +59,33 @@ full release gate; do not backfill a final `v1.2.0` tag.
   and administrator set per low-sensitivity design partner. Shared SaaS,
   customer-VPC/BYOC, and regulated production data remain out of scope.
 
+### 🔬 Competitive research, and the positioning correction it forced
+
+- Added `docs/market-research-2026-08.md`: MCP-native competitive set, market
+  sizing, and problem evidence, each row carrying an explicit verification
+  level. `stripe/ai#402` — a third-party issue report, with a reproduction, of
+  agent-level retries creating duplicate charges — was read directly and is now
+  the strongest external evidence for the wedge. It is a reported reproduction,
+  not a confirmed production incident, and is labeled as such.
+- **Signed, offline-verifiable receipts are no longer differentiating**, and the
+  docs now say so. At least one MCP policy proxy ships Ed25519 receipts
+  verifiable without calling its issuer, with an IETF Internet-Draft for the
+  format. `WEDGE.md` and `ELEVATOR_PITCH.md` now lead with the economic claim
+  instead: one accepted idempotency key, one dispatch, one ledger debit, one
+  receipt, in a single persisted chain.
+- `COMPETITIVE_ANALYSIS.md` gained a scope note and §9. Its "no competitor
+  offers this" statements were true against Stripe/AWS/Okta and are false
+  against the MCP-native set; both facts are now recorded rather than edited
+  away.
+- Added two prohibitions to `WEDGE.md`'s never-claim list: uniqueness
+  superlatives, and compliance mapping to any named framework.
+- Added `/compare/` to the marketing site — a named comparison including the
+  rows this product loses, a build-vs-buy section against in-process
+  reliability libraries, explicit fit/poor-fit criteria, and FAQ answers on
+  compliance and the absence of pricing. A test asserts the page keeps naming
+  alternatives, keeps conceding ground, and never acquires a superlative or a
+  compliance guarantee. Static asset cache token bumped to `v=gateway-3`.
+
 ### 🧾 Denials an agent can act on, and trust reads a wallet can do itself
 
 - **Permit denials now carry `details`** — the evaluated constraint and its

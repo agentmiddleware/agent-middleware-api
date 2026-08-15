@@ -25,6 +25,19 @@
 > See [`PRODUCT_STRATEGY.md`](PRODUCT_STRATEGY.md) for the strategy assessment
 > that these corrections fed into.
 
+> ## 📌 Scope note (2026-08-15)
+>
+> Sections 1–8 below compare this system against **general-purpose incumbents**
+> — Stripe, AWS IAM, Okta/Auth0, Vault, and bare MCP. That comparison is still
+> the right one for architecture and threat modelling, and it is unchanged.
+>
+> It is no longer the competitive reality. Between roughly 2026-02 and 2026-08
+> a set of **MCP-native** governance projects appeared, several of which
+> already ship signed receipts at a network boundary. §9 records that set.
+> Statements below of the form "no competitor offers this" (§2.5, §5.1) were
+> true against the incumbent set and are **false against the MCP-native set** —
+> read §9 before quoting any of them.
+
 ---
 
 ## 1. Architectural Comparison Matrix
@@ -172,11 +185,17 @@ permit = {
 
 **No comparable system** offers per-invocation signed receipts with request/response hashes.
 
+> **Superseded (2026-08-15).** True against the incumbents compared above;
+> **false** against the MCP-native set — protect-mcp and jamjet both ship signed
+> per-call evidence. Left in place per this document's record-don't-rewrite
+> convention. Do not quote this sentence; see [§9](#9-mcp-native-competitive-set-added-2026-08-15).
+
 **Gap Analysis:**
 - Missing: receipt verification endpoint (consumer can verify signature offline)
 - Missing: receipt batching (one receipt per N calls for high-volume)
 - Missing: receipt export format (PDF, JSON-LD with schema.org)
-- Strength: Unique in the ecosystem — no competitor has this
+- Strength: strong, but **not unique as of 2026-08** — see §9. (Original text:
+  "Unique in the ecosystem — no competitor has this.")
 
 ### 2.6 Audit Chain
 
@@ -290,7 +309,9 @@ permit = {
 
 ### 5.1 Technical Moats
 
-1. **Signed receipts with request/response hashes** — No competitor offers this
+1. **Signed receipts with request/response hashes** — ~~No competitor offers
+   this~~ **superseded 2026-08-15**: protect-mcp and jamjet do. The surviving
+   moat is the debit bound to the idempotency record; see §9.2
 2. **Hash-chain audit with per-wallet monotonic sequence** — Stronger than CloudTrail
 3. **Permit-scoped budget metering** — Stripe doesn't have tool-level budgets
 4. **Permanent idempotency with payload binding** — 24h TTL is industry standard
@@ -354,6 +375,65 @@ permit = {
 | `app/core/auth.py` | ~200 | Medium |
 | `app/routers/mcp.py` | ~300 | High |
 | **Total trust plane** | **~2,500** | **Medium** |
+
+---
+
+## 9. MCP-Native Competitive Set (added 2026-08-15)
+
+Full analysis, with per-claim verification levels and market sizing:
+[`market-research-2026-08.md`](market-research-2026-08.md).
+
+### 9.1 The near neighbours
+
+| Project | Shape | Receipts | Budget | Idempotency | Verification |
+|---|---|---|---|---|---|
+| [protect-mcp / ScopeBlind](https://github.com/tomjwxf/scopeblind-gateway) | stdio proxy, Cedar policy per tool | Ed25519, verifiable without calling the issuer | ❌ | ❌ | Verified |
+| [jamjet](https://github.com/jamjet-labs/jamjet) | Portable `policy.yaml` across adapters | Signed, hash-chained | ✅ caps | ✅ replay | Verified |
+| [latch](https://github.com/sangaraju1988/latch) | In-process Python library | ❌ none | ✅ guardrail | ✅ | Verified |
+| [TraceAgent](https://www.traceagent.dev/) | Audit layer for MCP calls | SHA-256 chained, compliance exports | ❌ | ❌ | Verified (vendor site) |
+| [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit) | Policy, identity, sandboxing | Proposed verifiable compliance receipts | — | — | Verified |
+
+### 9.2 What this does to §2.5 and §5.1
+
+§2.5 concluded "**No comparable system** offers per-invocation signed receipts
+with request/response hashes," and §5.1 listed signed receipts as moat #1.
+Against Stripe, AWS, and Okta that remains accurate. Against protect-mcp,
+and jamjet it is **not** — both ship signed per-call evidence, and
+protect-mcp's is offline-verifiable by design. TraceAgent is **not** a
+counterexample to the signed-receipt claim: its evidence is verified only as far
+as SHA-256 hash chaining, and a hash chain is neither an issuer signature nor a
+way to verify one without the vendor. It refutes only the weaker claim that
+nothing else produces per-call cryptographic evidence.
+
+The moat that survives verification is narrower and sits one layer down:
+
+> One accepted idempotency key produces exactly one gateway dispatch, one
+> ledger debit, and one receipt, linked by a single persisted chain — and a
+> genuinely ambiguous post-dispatch outcome becomes a distinct receipted state
+> rather than a silent redispatch.
+
+No project in §9.1 is *documented* as binding a debit to an idempotency record
+— jamjet's budgets and replay are described as independent features and the
+binding question is open (see §7 of the research doc). State this as the scope
+of the survey, not as proven exclusivity. Receipts are being commoditized; the
+economic semantics, so far as this survey found, are not. Positioning copy should lead with
+the debit, not with the signature — see [`../WEDGE.md`](../WEDGE.md).
+
+### 9.3 Strategic risks this set introduces
+
+1. **Receipt formats may standardize elsewhere.** protect-mcp carries an IETF
+   Internet-Draft for its receipt format and is integrated with Microsoft
+   Autogen. If that draft lands, receipts become table stakes.
+2. **A large vendor is in the category.** `agent-governance-toolkit` has an open
+   proposal for independently verifiable compliance receipts.
+3. **The build-vs-buy default is a free library.** latch is MIT and
+   `pip install`-shaped. The counter-argument — an in-process decorator is not
+   a boundary the agent cannot bypass, and a cache is not evidence — has to be
+   made explicitly rather than assumed.
+4. **Compliance mapping is a live gap.** TraceAgent maps to EU AI Act, Colorado
+   AI Act, and ISO 42001. `WEDGE.md` forbids compliance-grade claims and that
+   should stand; the available move is a bounded FAQ answer, not a compliance
+   page.
 
 ---
 

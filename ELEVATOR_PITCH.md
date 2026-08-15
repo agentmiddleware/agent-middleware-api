@@ -11,6 +11,17 @@ not the documents.
 
 > **Authorize one agent action. Charge it once. Prove what happened.**
 
+## Subhead
+
+> One agent action, one debit — no matter how many times the agent retries.
+> Verify the receipt without us.
+
+The debit leads. Offline-verifiable signed receipts are real here and worth
+saying, but as of the 2026-08 sweep
+([`docs/market-research-2026-08.md`](docs/market-research-2026-08.md)) they are
+no longer rare, so they cannot carry the pitch and must never carry a
+superlative.
+
 ## Ten seconds
 
 Your agent invokes a costly tool and the request times out. Agent Middleware
@@ -64,9 +75,12 @@ scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
   upstream-returned errors are refunded and receipted. Genuinely ambiguous
   post-dispatch outcomes are marked `delivery_uncertain` and routed to
   fail-closed manual review — never silently redispatched.
-- **Portable gateway evidence.** Signed receipts for success, denial, *and*
-  failure, linked to permits, ledger entries, and a verifiable per-wallet hash
-  chain. This is not a compliance-grade ledger or proof of physical work.
+- **Portable gateway evidence.** Signed receipts for success, denial, failure,
+  *and* `delivery_uncertain`, linked to permits, a verifiable per-wallet hash
+  chain, and — where a
+  ledger record exists for that outcome — the ledger entry. A pre-dispatch
+  denial has no debit to link. This is not a compliance-grade ledger or proof of
+  physical work.
 
 **Why believe it.** The proof is executable, not asserted:
 
@@ -91,12 +105,33 @@ restore an unacceptable risk. If it does not earn a commercial next step, stop.
 | MCP trust gateways | Policy and evidence | Wallet debit plus economic idempotency |
 | MCP monetization / pay-per-tool | Payment rails | Internal budgets, no settlement claim |
 | Enterprise authz for MCP | Who may call | Meter, receipt, and charge exactly once |
+| Agent reliability libraries | Retry safety inside the caller | A boundary the agent cannot route around, and evidence a third party can check |
+| Agent audit / compliance layers | Regulatory mapping and exports | The economic consequence, not just the record of the call |
+
+Named projects, verification levels, and the rows we lose:
+[`docs/market-research-2026-08.md`](docs/market-research-2026-08.md).
 
 ## Who it's for
 
 Platform engineering, AI infrastructure, or security teams that already run
 internal agents against MCP-style tools and need a control point *before* the
 tool is invoked — and who can bring one real tool to the first conversation.
+
+Concretely, the qualifying shape is **one tool where a duplicate call costs real
+money or causes a real side effect**, and where someone outside the engineering
+team may have to check what ran. If tool calls are cheap and already idempotent,
+this does not pay for itself, and the first conversation should end there.
+
+## Who it isn't for
+
+- Teams wanting governance across every tool and framework at once. That is a
+  platform; this is one boundary.
+- Teams whose deliverable is a certified compliance report with regulatory
+  mappings. Audit-layer products do that; this does not.
+- Teams shopping for agent identity or SSO. That is IAM, upstream of this.
+- Teams who need retry safety inside code they fully control and whose results
+  nobody outside the team has to believe. An in-process library is cheaper and
+  is the right answer.
 
 ## Objections, answered honestly
 
@@ -122,6 +157,47 @@ A *remote* tool's own side effect is exactly once only if that tool also honors
 the forwarded key. Anything broader would overstate the distributed-systems
 guarantee.
 
+**"Why not just use an open-source library?"** If your problem is reliability,
+do. A decorator library gives you idempotency, timeouts, and budget caps for
+free, with no infrastructure. Two things it cannot give you: it protects only
+the call sites that import it, so an agent that constructs a call another way is
+simply not covered; and an in-process result cache is not evidence anyone
+outside your team can check. Buy a boundary when you need those two properties.
+Otherwise the library is the correct answer and we will say so.
+
+**"Don't other MCP gateways already sign receipts?"** Yes — several, and at
+least one verifies offline without calling its issuer. We do not claim to be
+alone here. What no project we surveyed *documents* is binding the debit to the
+idempotency record:
+one accepted key, one dispatch, one ledger debit, one receipt, in a single
+persisted chain. (One *debit* — a refunded failure correctly writes a second,
+compensating ledger entry against that debit.) Several of them enforce budgets
+and several dedupe replays; whether any binds the two is unresolved, and we say
+so rather than claiming the cell outright. The signature proves what happened;
+the ledger link is what makes a duplicate charge impossible rather than merely
+detectable.
+
+**"Can these receipts satisfy SOC 2 or the EU AI Act?"** Not on their own, and
+we will not say otherwise. A receipt evidences the signed *authorization
+decision* and the call's *terminal outcome*, linked to the permit and audit
+chain — and shows the record has not been altered since. Only a success receipt
+evidences that the call executed and was charged; denial, refunded-failure, and
+`delivery_uncertain` receipts evidence exactly those outcomes instead, which is
+the point of signing them. A denial is a refusal, not an authorization. Ledger
+linkage is present only where a ledger record exists — a debit, or the
+compensating entry that reversed it — so `_finalize_governed_denial` takes
+`ledger_entry_id` as optional and a pre-dispatch denial carries none. Whether
+that satisfies a given control is a determination for the operator's auditor.
+We publish no regulatory mappings and hold no certifications. If a mapped
+compliance report is the deliverable, an audit-layer product is the better
+purchase and we would rather lose the deal than imply coverage we do not have.
+
+**"Why is there no pricing page?"** Because fit is qualified before deployment.
+Most of the value of the early deployments is being wrong quickly with a partner
+who will say so, and self-serve signup produces installations that cannot be
+supported or learned from. The whole loop is runnable locally with no
+credentials and no contact with us.
+
 **"What's the maturity?"** Production beta, not production complete. Run the
 proofs locally; the supported design-partner posture is vendor-managed and
 single-tenant. Read `SECURITY_LIMITATIONS.md` before deciding.
@@ -138,6 +214,10 @@ Do not say, imply, or let a slide suggest:
 - A replacement for enterprise IAM, secrets management, or sandbox isolation.
 - Byzantine fault tolerance. There is one server, one database, and one
   operator-held signing key — there are no replicas and no consensus.
+- That we are the only product doing any of this. Signed receipts, offline
+  verification, per-tool policy, and budget caps all exist elsewhere. A
+  superlative a prospect can falsify in one search costs more than it buys.
+- Compliance coverage, mapping, or readiness for any named framework.
 
 Refusing to overclaim is the product's defining discipline. The pitch inherits
 it.

@@ -43,7 +43,7 @@ ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
 # The queue shim lives in /va-init.js rather than an inline <script> so the
 # deployed Content-Security-Policy can stay script-src 'self' with no
 # 'unsafe-inline'. It must load before the insights script reads window.vaq.
-ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-2"></script>
+ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-3"></script>
     <script defer src="/_vercel/insights/script.js"></script>"""
 BUILD_DATE_TOKEN = "@@BUILD_DATE@@"
 SECURITY_TXT_EXPIRES_TOKEN = "@@SECURITY_TXT_EXPIRES@@"
@@ -53,6 +53,7 @@ SECURITY_TXT_LIFETIME_DAYS = 365
 TEXT_ASSETS = (
     "index.html",
     "proof/index.html",
+    "compare/index.html",
     "404.html",
     "sitemap.xml",
     ".well-known/security.txt",
@@ -64,6 +65,7 @@ COPY_ASSETS = (
     "fonts",
     "fonts.css",
     "analytics.js",
+    "compare",
     "favicon.svg",
     "llm.txt",
     "llms.txt",

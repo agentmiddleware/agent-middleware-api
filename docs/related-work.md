@@ -46,6 +46,8 @@ Verified from repo:
 | Threat model | [From Prompt Injections to Protocol Exploits](https://arxiv.org/abs/2506.23260) | Threat taxonomy for LLM-agent ecosystems, including protocol-level vulnerabilities. | Verified external source. |
 | Threat model | [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837) | Design-pattern context for prompt-injection resistance when agents use tools. | Verified external source. |
 | Governance | [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework) | Governance vocabulary for enterprise and public-sector risk conversations. | Verified external source; compliance is not claimed. |
+| Problem evidence | [stripe/ai#402 — agent-level retry creates duplicate charges](https://github.com/stripe/ai/issues/402) | Third-party issue report, with a reproduction, of the exact failure this wedge exists to prevent: agent frameworks retry as a new invocation with a fresh idempotency key, so SDK-level keys do not cover it. Concludes the guard belongs above the tool layer. | Verified external source; read directly 2026-08-15. It is a reported reproduction, **not** evidence that a duplicate charge reached production, and it establishes the problem rather than demand for this product. |
+| Competitive set | [`market-research-2026-08.md`](market-research-2026-08.md) | MCP-native competitors, market sizing, and the verification level of each claim. Records that signed offline-verifiable receipts are no longer differentiating. | Repo document; per-claim verification levels stated inline. |
 
 ## Claim Evidence Matrix
 
