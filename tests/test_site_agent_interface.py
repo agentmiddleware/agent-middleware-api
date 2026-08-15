@@ -634,11 +634,64 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
 
 
 def test_trailing_slash_is_canonical_for_the_proof_page() -> None:
+    """One canonical URL for the proof page, via a redirect rather than the
+    global ``trailingSlash`` setting.
+
+    ``trailingSlash: true`` is the obvious way to write this and it is wrong on
+    Vercel: it makes every ``/.well-known/*`` entry in ``headers`` stop matching,
+    so ``agent.json`` and ``security.txt`` fall back to
+    ``max-age=0, must-revalidate`` while every other configured path keeps its
+    headers. Confirmed on the deployed site — measured at ``max-age=300`` before
+    the setting shipped and ``max-age=0`` after — and on a preview deployment,
+    where only the dot-prefixed directory lost its headers.
+    """
     config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
     proof = (SITE / "proof" / "index.html").read_text(encoding="utf-8")
 
-    assert config["trailingSlash"] is True
+    assert "trailingSlash" not in config
+    redirect = next(
+        entry
+        for entry in config["redirects"]
+        if "has" not in entry and entry["source"] == "/proof"
+    )
+    assert redirect["destination"] == "/proof/"
+    assert redirect["permanent"] is True
     assert 'rel="canonical" href="https://www.thisisatest.tech/proof/"' in proof
+
+    # Every dot-prefixed path the headers block configures must actually be
+    # served with those headers; a rule that silently stops matching is the
+    # failure this test exists to catch.
+    configured = {entry["source"] for entry in config["headers"]}
+    assert {"/.well-known/agent.json", "/.well-known/security.txt"} <= configured
+
+
+def test_llms_full_extends_the_short_pointer_without_contradicting_it(
+    tmp_path,
+) -> None:
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    short = (output / "llms.txt").read_text(encoding="utf-8")
+    full = (output / "llms-full.txt").read_text(encoding="utf-8")
+
+    # The short file has to point at the long one, or nothing will find it.
+    assert "https://www.thisisatest.tech/llms-full.txt" in short
+    assert len(full) > len(short)
+    assert CANONICAL_API in full
+    assert CANONICAL_MARKETING_SITE in full
+    assert "business-to-agent" in full
+    # The long brief must carry the same refusals as the human page, so an agent
+    # reading only this file cannot infer past them.
+    for limitation in (
+        "No customer traction",
+        "No production settlement",
+        "compliance-grade ledger storage",
+        "exactly-once upstream side effects",
+        "no public self-serve mint",
+    ):
+        assert limitation in full
+    for suffix in PROVIDER_HOST_SUFFIXES:
+        assert suffix not in full
 
 
 def test_robots_states_an_explicit_ai_crawler_policy(tmp_path) -> None:
@@ -719,6 +772,7 @@ def test_local_site_assets_exist() -> None:
         SITE / "sitemap.xml",
         SITE / "llm.txt",
         SITE / "llms.txt",
+        SITE / "llms-full.txt",
         SITE / ".well-known" / "agent.json",
         SITE / "proof" / "index.html",
         SITE / "proof" / "proof.js",

@@ -78,6 +78,12 @@ settlement or compliance claims.
 https://www.thisisatest.tech/
 https://github.com/PetrefiedThunder/agent-middleware-api
 
+## Longer machine brief
+
+The product boundary, the vocabulary, and the claims deliberately NOT made:
+
+https://www.thisisatest.tech/llms-full.txt
+
 ## Security contact
 
 https://www.thisisatest.tech/.well-known/security.txt

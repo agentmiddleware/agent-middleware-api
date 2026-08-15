@@ -63,6 +63,7 @@ COPY_ASSETS = (
     "favicon.svg",
     "llm.txt",
     "llms.txt",
+    "llms-full.txt",
     "social-card.png",
     "proof",
     "robots.txt",
