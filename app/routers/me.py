@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.time import utc_now
 from app.schemas.audit import AuditEventListResponse, AuditEventResponse
 from app.schemas.billing import AlertListResponse
 from app.schemas.trust import (
+    AuthoritySummaryResponse,
     PermitListResponse,
     PermitRequestListResponse,
     QuoteListResponse,
@@ -22,6 +25,7 @@ from app.trust import (
     get_quote_service,
     get_receipt_service,
     list_audit_events,
+    list_policy_bundles,
     request_to_response,
 )
 
@@ -57,6 +61,75 @@ async def list_my_alerts(
         alerts=paginated,
         total=total,
         unacknowledged=unacknowledged,
+    )
+
+
+@router.get(
+    "/authority",
+    response_model=AuthoritySummaryResponse,
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Key is not wallet-scoped (wallet_key_required)"},
+        404: {"description": "Key's wallet no longer exists (wallet_not_found)"},
+    },
+)
+async def get_my_authority(
+    auth: AuthContext = Depends(get_auth_context),
+) -> AuthoritySummaryResponse:
+    """What authority does this key currently hold?
+
+    One read answering the questions a planning agent asks before acting:
+    what may I do (policies, active permits), what will pause for a human
+    (human_approval_required), what have I already asked for (pending permit
+    requests), and what can I spend (balance, daily spend). Read-only and
+    scoped to the caller's own wallet; listing never advances a decision or
+    pages a human.
+    """
+    wallet_id, key_id = _require_wallet_key(auth)
+    money = get_agent_money()
+    wallet = await money.get_wallet(wallet_id)
+    if wallet is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "wallet_not_found"},
+        )
+    balance = (
+        Decimal(wallet.balance_exact)
+        if wallet.balance_exact
+        else Decimal(str(wallet.balance))
+    )
+    policies = [p for p in await list_policy_bundles(wallet_id) if p.is_active]
+    # A permit past expires_at keeps status="active" in storage (expiry is
+    # enforced dynamically at invoke time), so bound the read to unexpired
+    # rows — this summary must never present authority every invoke rejects.
+    permits, permits_total = await get_permit_service().list_permits(
+        wallet_id=wallet_id,
+        status="active",
+        subject_key_id=key_id,
+        expires_after=utc_now(),
+        limit=50,
+        offset=0,
+    )
+    pending_requests, requests_total = (
+        await get_permit_request_service().list_requests(
+            subject_wallet_id=wallet_id,
+            status="pending",
+            limit=50,
+            offset=0,
+        )
+    )
+    return AuthoritySummaryResponse(
+        wallet_id=wallet_id,
+        balance=balance,
+        daily_spend_used=await money.get_daily_spend(wallet_id),
+        human_approval_required=any(p.human_approval_required for p in policies),
+        policies=policies,
+        active_permits=permits,
+        active_permits_total=permits_total,
+        pending_permit_requests=[
+            await request_to_response(model) for model in pending_requests
+        ],
+        pending_permit_requests_total=requests_total,
     )
 
 

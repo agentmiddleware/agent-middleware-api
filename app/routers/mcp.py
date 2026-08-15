@@ -910,6 +910,13 @@ async def _execute_registered_tool(
         estimated_cost=registered_cost,
         daily_spend_used=await money.get_daily_spend(wallet_id),
         simulation=simulation,
+        # A permit that routes every invoke through the human-approval gate
+        # below satisfies a policy's human_approval_required demand; the
+        # policy's other constraints are still enforced.
+        approval_gate_active=bool(
+            governed_call and permit_model is not None
+            and permit_model.requires_human_approval
+        ),
     )
     policy_metadata = {
         "policy_id": policy.policy_id,
@@ -949,10 +956,22 @@ async def _execute_registered_tool(
                 outcome="denied",
                 status_code=403,
             )
+            # A policy denial's actionable constraint is the policy, not the
+            # (valid) permit — permit_validation.details is None here. The
+            # evaluated constraints describe the caller's own wallet policy,
+            # which the wallet holder can already read.
             raise ToolPermissionDenied(
                 reason,
                 receipt=receipt_payload,
-                details=permit_validation.details,
+                details=(
+                    {
+                        "policy_id": policy.policy_id,
+                        "reason_code": reason,
+                        "evaluated_constraints": policy.evaluated_constraints,
+                    }
+                    if policy.policy_id
+                    else None
+                ),
             )
         raise PermissionError(policy.reason)
 
