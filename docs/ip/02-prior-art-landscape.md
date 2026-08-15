@@ -30,7 +30,7 @@ short-lived token cryptographically bound to action type, resource scope, time
 window, **rate limits**, and execution context.
 
 Read that against this repo's permit
-(`app/schemas/trust.py:10`, `app/services/permits.py:247`): a short-lived,
+(`app/schemas/trust.py:12`, `app/services/permits.py:247`): a short-lived,
 signed credential binding subject wallet, subject key, scopes, allowed tools,
 budget cap, expiry, nonce, per-tool call limits, and recipient domain.
 

@@ -85,7 +85,7 @@ A gateway mediates agent-to-tool invocations and, for each invocation:
 
 ### 4.1 The permit
 
-A permit (`app/schemas/trust.py:10`, `app/services/permits.py:247`) is an
+A permit (`app/schemas/trust.py:12`, `app/services/permits.py:247`) is an
 Ed25519-signed record binding:
 
 | Field | Constraint expressed |
@@ -239,7 +239,7 @@ without a re-signing migration and without silently invalidating history.
 
 One historical migration backfilled an idempotency link onto receipts signed
 before linkage existed. Rather than loosening verification generally, a
-constrained fallback (`_has_unambiguous_historical_idempotency_link`, `:114`)
+constrained fallback (`_has_unambiguous_historical_idempotency_link`, `:115`)
 retries the legacy payload shape **only** when exactly one idempotency record
 points at the receipt and its wallet and request hash both agree. Ambiguous,
 absent, mismatched, or dispatch-linked cases fail closed.
