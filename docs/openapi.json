@@ -5828,6 +5828,70 @@
         }
       }
     },
+    "/v1/me/authority": {
+      "get": {
+        "tags": [
+          "Agent Self Inspection"
+        ],
+        "summary": "Get My Authority",
+        "description": "What authority does this key currently hold?\n\nOne read answering the questions a planning agent asks before acting:\nwhat may I do (policies, active permits), what will pause for a human\n(human_approval_required), what have I already asked for (pending permit\nrequests), and what can I spend (balance, daily spend). Read-only and\nscoped to the caller's own wallet; listing never advances a decision or\npages a human.",
+        "operationId": "get_my_authority_v1_me_authority_get",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthoritySummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "403": {
+            "description": "Key is not wallet-scoped (wallet_key_required)"
+          },
+          "404": {
+            "description": "Key's wallet no longer exists (wallet_not_found)"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/me/permits": {
       "get": {
         "tags": [
@@ -8088,6 +8152,71 @@
           "by_policy_reason"
         ],
         "title": "AuditSummaryResponse"
+      },
+      "AuthoritySummaryResponse": {
+        "properties": {
+          "wallet_id": {
+            "type": "string",
+            "title": "Wallet Id"
+          },
+          "balance": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Balance"
+          },
+          "daily_spend_used": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Daily Spend Used"
+          },
+          "human_approval_required": {
+            "type": "boolean",
+            "title": "Human Approval Required"
+          },
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyBundleResponse"
+            },
+            "type": "array",
+            "title": "Policies"
+          },
+          "active_permits": {
+            "items": {
+              "$ref": "#/components/schemas/PermitResponse"
+            },
+            "type": "array",
+            "title": "Active Permits"
+          },
+          "active_permits_total": {
+            "type": "integer",
+            "title": "Active Permits Total"
+          },
+          "pending_permit_requests": {
+            "items": {
+              "$ref": "#/components/schemas/PermitRequestResponse"
+            },
+            "type": "array",
+            "title": "Pending Permit Requests"
+          },
+          "pending_permit_requests_total": {
+            "type": "integer",
+            "title": "Pending Permit Requests Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_id",
+          "balance",
+          "daily_spend_used",
+          "human_approval_required",
+          "policies",
+          "active_permits",
+          "active_permits_total",
+          "pending_permit_requests",
+          "pending_permit_requests_total"
+        ],
+        "title": "AuthoritySummaryResponse",
+        "description": "Answer to \"what authority do I currently have?\" for one wallet key.\n\nComposes reads the caller can already make one at a time — balance,\nactive policy constraints, active permits, pending permit requests — into\na single view, so a planning agent sees what it may do, what will pause\nfor a human, and what it has already asked for, without stitching four\nlists together. Everything here describes the caller's own wallet."
       },
       "BillingAlert": {
         "properties": {

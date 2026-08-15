@@ -109,7 +109,7 @@ All monetary comparisons are done in `Decimal` end-to-end (thresholds stored as
 
 | Check | Reason code |
 |-------|-------------|
-| Bundle requires human approval | `human_approval_required` |
+| Bundle requires human approval | `human_approval_required` — satisfied instead of denied when the invoke's permit carries `requires_human_approval` (the Layer D gate provides the demanded decision; every other check below still runs) |
 | Tool not in the bundle allow-list | `tool_not_allowed` |
 | Service category not in the bundle allow-list | `service_category_not_allowed` |
 | `estimated > max_cost_per_action` | `max_cost_per_action_exceeded` |

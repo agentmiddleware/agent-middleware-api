@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.policies import PolicyBundleResponse
+
 
 class PermitCreateRequest(BaseModel):
     issuer_wallet_id: str
@@ -138,6 +140,37 @@ class PermitListResponse(BaseModel):
     offset: int
     has_more: bool
     next_offset: int | None = None
+
+
+class AuthoritySummaryResponse(BaseModel):
+    """Answer to "what authority do I currently have?" for one wallet key.
+
+    Composes reads the caller can already make one at a time — balance,
+    active policy constraints, active permits, pending permit requests — into
+    a single view, so a planning agent sees what it may do, what will pause
+    for a human, and what it has already asked for, without stitching four
+    lists together. Everything here describes the caller's own wallet.
+    """
+
+    wallet_id: str
+    balance: Decimal
+    daily_spend_used: Decimal
+    # True when any active policy bundle demands a human decision. Governed
+    # calls then pause on the approval gate (pending_human_approval) instead
+    # of failing terminally.
+    human_approval_required: bool
+    # Declarative constraints operators set for this wallet.
+    policies: list[PolicyBundleResponse]
+    # Explicit signed authority currently held: status=active, this key, and
+    # not yet expired. Capped at 50 rows; the total says whether the list is
+    # complete — page /v1/me/permits for the remainder.
+    active_permits: list[PermitResponse]
+    active_permits_total: int
+    # Authority already asked for and still awaiting a human decision. Capped
+    # at 50 rows; the total says whether the list is complete — page
+    # /v1/me/permit-requests for the remainder.
+    pending_permit_requests: list[PermitRequestResponse]
+    pending_permit_requests_total: int
 
 
 class PermitVerifyRequest(BaseModel):

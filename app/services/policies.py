@@ -138,6 +138,28 @@ async def patch_policy_bundle(
     return _to_response(row)
 
 
+async def wallet_human_approval_required(wallet_id: str) -> bool:
+    """True when any active policy bundle for this wallet demands a human decision.
+
+    Used by surfaces that mint permits on the caller's behalf (the standard
+    MCP endpoint) to materialize the policy as a ``requires_human_approval``
+    permit, so the demand is satisfied by the invoke-time approval gate
+    instead of surfacing as an unsatisfiable denial.
+    """
+    stmt = (
+        select(PolicyBundleModel.policy_id)  # type: ignore[call-overload]
+        .where(
+            PolicyBundleModel.wallet_id == wallet_id,  # type: ignore[arg-type]
+            PolicyBundleModel.is_active == True,  # type: ignore[arg-type]  # noqa: E712
+            PolicyBundleModel.human_approval_required == True,  # type: ignore[arg-type]  # noqa: E712
+        )
+        .limit(1)
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        return (await session.execute(stmt)).first() is not None
+
+
 def _as_decimal(value: float | int | Decimal | None) -> Decimal | None:
     if value is None:
         return None
@@ -155,7 +177,17 @@ async def evaluate_wallet_policy(
     daily_spend_used: float | Decimal | None = None,
     simulation: bool | None = None,
     risk_tier: str | None = None,
+    approval_gate_active: bool = False,
 ) -> PolicyEvaluation:
+    """Evaluate a wallet's active policy bundles against one intended action.
+
+    ``approval_gate_active`` declares that the invoke being evaluated already
+    runs through the permit-level human-approval gate. A policy's
+    ``human_approval_required`` constraint is then satisfied by that gate
+    (recorded in ``evaluated_constraints``) instead of denying — every OTHER
+    constraint in the bundle is still enforced. Callers with no approval gate
+    keep the fail-closed denial.
+    """
     stmt = (
         select(PolicyBundleModel)
         .where(
@@ -199,7 +231,9 @@ async def evaluate_wallet_policy(
         }
         evaluated.append(constraints)
         if policy.human_approval_required:
-            return PolicyEvaluation(False, "human_approval_required", policy.policy_id, {"evaluated": evaluated})
+            if not approval_gate_active:
+                return PolicyEvaluation(False, "human_approval_required", policy.policy_id, {"evaluated": evaluated})
+            constraints["human_approval_satisfied_by_gate"] = True
         if allowed_tools is not None and tool_name not in allowed_tools:
             return PolicyEvaluation(False, "tool_not_allowed", policy.policy_id, {"evaluated": evaluated})
         if allowed_categories is not None and service_category not in allowed_categories:

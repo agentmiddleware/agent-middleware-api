@@ -12,8 +12,9 @@ Supports two modes:
 MCP Protocol Reference: https://modelcontextprotocol.io/
 """
 
-import logging
 import asyncio
+import logging
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -156,12 +157,51 @@ class McpGenerator:
         cat = service.get("category", "unknown") or "unknown"
         truth = truth_for_category(cat)
 
+        raw_cost = service.get("credits_per_unit_exact")
+        if raw_cost is None:
+            raw_cost = service.get("credits_per_unit", 1.0)
+        try:
+            per_call_cost = float(raw_cost)
+        except (TypeError, ValueError):
+            per_call_cost = 1.0
+        if not math.isfinite(per_call_cost):
+            # A malformed price (unparseable, NaN, infinite) must not
+            # advertise a free tool.
+            per_call_cost = 1.0
+
+        # The governance contract behind tools/call: authorized by a
+        # wallet-bounded permit, metered, and answered with a signed receipt,
+        # with approvalMayBeRequired signaling that wallet policy or the
+        # backing permit can pause any call on a human decision (a retryable
+        # pending_human_approval, not a failure). Advertised only when the
+        # invocation path actually enforces it on every call: a permissive
+        # deployment (ALLOW_LEGACY_UNPERMITTED_MCP, local/demo only — refused
+        # at boot in production-like environments) accepts ungoverned
+        # permit-less calls, and this manifest must not promise guarantees
+        # that path does not provide. A require_permit tool is the exception:
+        # the router forces the governed path for it even in permissive mode.
+        from ..core.config import get_settings
+
+        settings = get_settings()
+        governed = bool(
+            (
+                settings.TRUST_MODE_ENABLED
+                and not settings.ALLOW_LEGACY_UNPERMITTED_MCP
+            )
+            or service.get("require_permit")
+        )
+
         annotations = {
             "creditsPerCall": service.get("credits_per_unit", 1.0),
             "unitName": service.get("unit_name", "call"),
             "category": cat,
             "simulation": truth["simulation"],
             "integrationStatus": truth["integration_status"],
+            "governed": governed,
+            "receiptProvided": governed,
+            "supportsIdempotency": governed,
+            "economicAction": per_call_cost > 0,
+            "approvalMayBeRequired": governed,
         }
         if service.get("credits_per_unit_exact") is not None:
             annotations["creditsPerCallExact"] = service["credits_per_unit_exact"]

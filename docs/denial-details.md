@@ -81,7 +81,7 @@ adjacent `details.field` value identifies the rejected field.
 | `wallet_frozen` | The wallet is frozen and cannot be debited. | Resolve the freeze with an administrator; retry with a new idempotency key only after the wallet is spendable. |
 | `wallet_expired` | The child wallet's spending lifetime has ended. | Use a non-expired wallet and a permit bound to it. |
 | `insufficient_funds` | Balance or a wallet spending cap cannot cover the action. | Top up the wallet, reduce the action cost, or change the applicable cap, then use a new idempotency key. |
-| `human_approval_required` | An active wallet policy blocks automatic execution. | Have an administrator revise the blocking wallet policy before retrying; this is separate from the permit approval gate below. |
+| `human_approval_required` | An active wallet policy demands a human decision and the invoke's permit has no approval gate to provide one. | Invoke under a permit minted with `requires_human_approval` (the standard `/mcp` surface mints one automatically when policy demands it), or have an administrator revise the policy. A gated permit satisfies only this constraint — the policy's other limits still apply. |
 | `tool_not_allowed` | A wallet policy excludes the requested tool. | Use a policy-allowed tool or update the policy allowlist. |
 | `service_category_not_allowed` | A wallet policy excludes the tool's service category. | Use an allowed category or update the category allowlist. |
 | `max_cost_per_action_exceeded` | The quoted action cost exceeds the wallet policy's per-action limit. | Lower the action cost or raise the policy limit. |

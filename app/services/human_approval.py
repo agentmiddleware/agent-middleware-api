@@ -159,6 +159,19 @@ def sentinel_idempotency_key(
     return f"mw-{digest[:48]}"
 
 
+def approval_window_seconds() -> int:
+    """Locally-enforced lifetime of a pending approval, in seconds.
+
+    Sentinel never expires a pending approval, so this window (clamped to
+    Sentinel's accepted bounds) is the whole decision budget a human has.
+    Anything whose validity must outlive a pending decision — such as the
+    permit an approval-gated invoke retries under — should size itself
+    against this window.
+    """
+    raw = get_settings().SENTINEL_APPROVAL_TIMEOUT_SECONDS
+    return max(_SENTINEL_TIMEOUT_MIN, min(int(raw), _SENTINEL_TIMEOUT_MAX))
+
+
 def human_approval_configured() -> bool:
     """Whether real-mode Sentinel calls are possible with current settings."""
     settings = get_settings()
@@ -286,8 +299,7 @@ class HumanApprovalService:
 
     @staticmethod
     def _timeout_seconds() -> int:
-        raw = get_settings().SENTINEL_APPROVAL_TIMEOUT_SECONDS
-        return max(_SENTINEL_TIMEOUT_MIN, min(int(raw), _SENTINEL_TIMEOUT_MAX))
+        return approval_window_seconds()
 
     @staticmethod
     def _approvers() -> list[str]:

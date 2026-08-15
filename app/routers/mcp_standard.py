@@ -16,6 +16,21 @@ permit -> meter -> receipt -> audit loop applies unchanged; only the minting
 step moves server-side. Bootstrap/admin keys have no wallet and are refused:
 there is no wallet to encumber, and this endpoint must never bypass metering.
 
+Wallet policy decides the shape of the auto-minted permit. When an active
+policy bundle for the caller's wallet sets ``human_approval_required``, the
+permit is minted with ``requires_human_approval=true``, so the invoke pauses
+on the existing human-approval gate instead of failing: the agent calls the
+tool normally, and the middleware materializes the approval workflow. Such
+calls require a client ``Idempotency-Key`` so the retry that polls the
+decision resolves to the same permit and the same approval instead of paging
+a human again.
+
+Denials on this surface are machine-actionable: they carry the same
+``details`` the governed endpoints emit (which limit was hit, by how much)
+plus, where a next step exists, a ``remediation`` block naming it
+(fund the wallet, ask a human via ``POST /v1/permit-requests``, retry the
+same call once an approval is decided).
+
 Replay safety: a client-supplied ``Idempotency-Key`` header (or the
 ``io.agentmiddleware/idempotency_key`` entry in ``params._meta``) is honored
 exactly like the governed endpoints. Without one, each call gets a fresh
@@ -75,6 +90,7 @@ from app.services.idempotency import (
 from app.services.mcp_generator import MCP_SERVER_VERSION, McpGenerator
 from app.services.permits import PermitError, get_permit_service
 from app.services.service_registry import get_service_registry
+from app.trust import approval_window_seconds, wallet_human_approval_required
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +146,35 @@ def _json_nesting_depth_exceeds(body: bytes, limit: int) -> bool:
     return False
 
 
-def _permit_error(exc: PermitError) -> McpError:
-    code = -32004 if exc.reason == "permit_budget_exceeds_wallet_balance" else -32003
-    return _mcp_error(code, exc.reason)
+def _permit_error(
+    exc: PermitError,
+    *,
+    tool_name: str | None = None,
+    record: dict[str, Any] | None = None,
+) -> McpError:
+    """Map an auto-mint failure to a structured, machine-actionable error.
+
+    The budget case names the concrete gap and the two ways out. The caller's
+    own tool cost is disclosed (it is public in discovery); the wallet balance
+    is not restated because the caller can read it via ``/v1/me``.
+    """
+    if exc.reason == "permit_budget_exceeds_wallet_balance":
+        data: dict[str, Any] = {
+            "error": "authority_required",
+            "reason_code": exc.reason,
+            "remediation": {
+                "type": "fund_wallet_or_request_authority",
+                "check_authority": "GET /v1/me/authority",
+                "request_authority": "POST /v1/permit-requests",
+            },
+        }
+        if tool_name is not None:
+            requested: dict[str, Any] = {"tool": tool_name}
+            if record is not None:
+                requested["estimated_credits"] = str(_tool_call_budget(record))
+            data["requested"] = requested
+        return _mcp_error(-32004, exc.reason, data)
+    return _mcp_error(-32003, exc.reason)
 
 
 def _tool_call_budget(record: dict[str, Any]) -> Decimal:
@@ -169,6 +211,7 @@ async def _mint_auto_permit(
     tool_name: str,
     record: dict[str, Any],
     client_key: str | None,
+    requires_human_approval: bool = False,
 ) -> str:
     """Mint the bounded single-tool permit backing this call.
 
@@ -181,14 +224,21 @@ async def _mint_auto_permit(
     if not wallet_id:  # narrowed by the caller; fail closed regardless
         raise _mcp_error(-32003, "wallet_scoped_key_required")
     settings = get_settings()
+    # An approval-gated permit must stay valid for the whole decision window
+    # plus the normal TTL as execution margin: permit expiry is validated
+    # before the approval is polled, so a shorter-lived permit would strand a
+    # decision made late in the window as a terminal permit_expired denial.
+    ttl_seconds = settings.STANDARD_MCP_PERMIT_TTL_SECONDS
+    if requires_human_approval:
+        ttl_seconds += approval_window_seconds()
     permit_request = PermitCreateRequest(
         issuer_wallet_id=wallet_id,
         subject_wallet_id=wallet_id,
         subject_key_id=auth.key_id,
         allowed_tools=[tool_name],
         max_credits=_tool_call_budget(record),
-        expires_at=utc_now()
-        + timedelta(seconds=settings.STANDARD_MCP_PERMIT_TTL_SECONDS),
+        expires_at=utc_now() + timedelta(seconds=ttl_seconds),
+        requires_human_approval=requires_human_approval,
     )
 
     if not client_key:
@@ -197,17 +247,22 @@ async def _mint_auto_permit(
                 permit_request, subject_key_id=auth.key_id
             )
         except PermitError as exc:
-            raise _permit_error(exc) from exc
+            raise _permit_error(exc, tool_name=tool_name, record=record) from exc
         return permit.permit_id
 
     idem = get_idempotency_service()
     mint_key = "smcp-" + hashlib.sha256(client_key.encode("utf-8")).hexdigest()[:48]
-    mint_payload = {
+    mint_payload: dict[str, Any] = {
         "kind": "standard-mcp-auto-permit",
         "tool": tool_name,
         "wallet_id": wallet_id,
         "subject_key_id": auth.key_id,
     }
+    # Included only when set so pre-existing mint records (created before the
+    # approval bit existed) still replay. A policy flip between attempts
+    # changes the payload and conflicts — fail closed, use a fresh key.
+    if requires_human_approval:
+        mint_payload["requires_human_approval"] = True
     try:
         mint_replay = await idem.begin(
             wallet_id=wallet_id,
@@ -232,7 +287,7 @@ async def _mint_auto_permit(
             endpoint=_AUTO_PERMIT_ENDPOINT,
             idempotency_key=mint_key,
         )
-        raise _permit_error(exc) from exc
+        raise _permit_error(exc, tool_name=tool_name, record=record) from exc
     await idem.complete(
         wallet_id=wallet_id,
         endpoint=_AUTO_PERMIT_ENDPOINT,
@@ -267,12 +322,39 @@ async def _governed_tools_call(
     if record is None:
         raise _mcp_error(-32001, f"Tool not found: {tool_name}")
 
+    # Wallet policy shapes the permit this surface mints. A policy demanding a
+    # human decision is materialized as an approval-gated permit rather than
+    # surfacing as an unsatisfiable denial: the agent calls the tool normally
+    # and the middleware runs the approval workflow.
+    requires_human_approval = await wallet_human_approval_required(auth.wallet_id)
+    if requires_human_approval and not client_idempotency_key:
+        # Without a client key every retry would mint a fresh permit and page
+        # a human again instead of polling the pending decision.
+        raise _mcp_error(
+            -32003,
+            "idempotency_key_required_for_human_approval",
+            {
+                "error": "authority_required",
+                "reason_code": "idempotency_key_required_for_human_approval",
+                "remediation": {
+                    "type": "retry_with_idempotency_key",
+                    "detail": (
+                        "This wallet's policy requires human approval. Send an "
+                        "Idempotency-Key header (or params._meta"
+                        '["io.agentmiddleware/idempotency_key"]) and retry the '
+                        "same call with the same key to poll the decision."
+                    ),
+                },
+            },
+        )
+
     idempotency_key = client_idempotency_key or f"mcp-auto-{uuid.uuid4().hex}"
     permit_id = await _mint_auto_permit(
         auth=auth,
         tool_name=tool_name,
         record=record,
         client_key=client_idempotency_key,
+        requires_human_approval=requires_human_approval,
     )
 
     call_params = {
@@ -302,10 +384,30 @@ async def _governed_tools_call(
             request_payload=request_payload,
         )
     except HumanApprovalPendingSignal as e:
-        raise _mcp_error(e.jsonrpc_code, str(e), e.data or None) from e
+        reason = str(e)
+        pending_data = dict(e.data)
+        if reason == "human_approval_pending":
+            pending_data.setdefault("error", "authority_required")
+            pending_data.setdefault("status", "pending_human_approval")
+            pending_data.setdefault(
+                "remediation",
+                {
+                    "type": "await_human_decision",
+                    "detail": (
+                        "Nothing was charged. Retry the identical tools/call "
+                        "with the same Idempotency-Key once the approval is "
+                        "decided; the same permit and approval are reused."
+                    ),
+                },
+            )
+        raise _mcp_error(e.jsonrpc_code, reason, pending_data or None) from e
     except ToolPermissionDenied as e:
-        data = {"receipt": e.receipt} if e.receipt else None
-        raise _mcp_error(-32003, str(e), data) from e
+        denial_data: dict[str, Any] = {}
+        if e.receipt:
+            denial_data["receipt"] = e.receipt
+        if e.details:
+            denial_data["details"] = e.details
+        raise _mcp_error(-32003, str(e), denial_data or None) from e
     except GovernedToolError as e:
         data = dict(e.extra_data)
         if e.receipt:

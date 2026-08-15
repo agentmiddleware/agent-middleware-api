@@ -17,6 +17,8 @@ from app.services.governance import record_governed_action
 from app.services.policies import (
     PolicyEvaluation,
     evaluate_wallet_policy,
+    list_policy_bundles,
+    wallet_human_approval_required,
 )
 
 __all__ = [
@@ -25,5 +27,7 @@ __all__ = [
     "evaluate_tool_invocation",
     "evaluate_governed_action",
     "evaluate_wallet_policy",
+    "list_policy_bundles",
     "record_governed_action",
+    "wallet_human_approval_required",
 ]
