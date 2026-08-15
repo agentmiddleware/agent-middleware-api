@@ -188,6 +188,33 @@ without the attempt record that governs its release. Re-entry adopts only an
 invariant-equivalent prepared row (`_assert_prepared_match`), and the attempt is
 bound to the approval identity that authorized it (`_assert_approval_binding`).
 
+> **Important limitation — do not let this slide into the claims.**
+> This method does **not** use the guarded conditional update of §4.2. It
+> reserves with an ORM read-modify-write —
+> `permit.spent_credits += credits_authorized`
+> (`app/services/mcp_dispatch_attempts.py:463`) — inside the transaction,
+> relying on the row lock rather than on a database-evaluated predicate. The
+> upstream MCP path reaches this method from `app/routers/mcp.py:1064`.
+>
+> Consequence: **the lock-independent guarantee described in §4.2 does not
+> extend to the upstream dispatch path.** On an engine where the row lock is a
+> no-op, two concurrent upstream invocations against the same permit can
+> both read the same `spent_credits` and lose one increment — the original
+> overspend bug, still present on this path.
+>
+> Two ways to resolve this, and counsel needs to know which was taken:
+> - **Fix the code** — replace the read-modify-write with the same guarded
+>   `sa_update` plus affected-row check, so both paths share one enforcement
+>   mechanism. This is the better answer and it makes claim 6 straightforwardly
+>   supported. **[not implemented]**
+> - **Or qualify the claims** — claim 6 (reservation and prepared-attempt
+>   creation in one transaction) must then be read as reciting transactional
+>   atomicity only, not the lock-independent predicate of claim 1(d)–(e).
+>
+> Until the code is changed, claim 1's lock-independence limitation is
+> supported by `PermitService.authorize_and_reserve()` and by the local-tool
+> path that calls it — not by the upstream dispatch path.
+
 `delivery_uncertain` is a first-class terminal state, surfaced as HTTP 504. The
 system declines to assert that a remote side effect did or did not occur when it
 cannot know. Remote side effects are exactly-once only when the upstream honors
@@ -300,8 +327,13 @@ rather than raised — one corrupt row must not mask tampering behind a 500.
 
 The verifier (`b2a_sdk/src/b2a_sdk/receipt_verifier.py`) requires no network,
 no database, and no credential; its only dependency beyond the standard library
-is `cryptography`, and the offline path is tested to work with HTTP libraries
-entirely absent. Two properties define it:
+is `cryptography`. The no-HTTP-library property is covered by
+`b2a_sdk/tests/test_offline_verify_no_httpx.py` (including
+`test_verify_cli_keys_path_runs_without_httpx` and
+`test_tampered_bundle_rejected_without_httpx`), which runs the offline path in a
+subprocess with `httpx` forced unavailable — reproduce with
+`pytest -q b2a_sdk/tests/test_offline_verify_no_httpx.py`. Two properties define
+it:
 
 **Every reported claim value is read from the signed bytes.** The enclosing
 bundle is unauthenticated envelope data and is never a source of truth for

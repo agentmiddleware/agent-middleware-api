@@ -7,7 +7,7 @@
 > "authorizing AI agents" invites the §101 framing discussed in
 > [`01-filing-risks-and-actions.md`](01-filing-risks-and-actions.md).
 
-**Draft (138 words):**
+**Draft (146 words — recount with `wc -w` after any edit):**
 
 A gateway mediates tool invocations by autonomous software agents while
 enforcing a delegated spending limit, charging exactly once, and producing
@@ -49,11 +49,17 @@ Block diagram, left to right:
 - **160** Remote tool server (MCP)
 - **170** Well-known key endpoints (`/.well-known/trust-keys.json`,
   `/.well-known/jwks.json`)
-- **180** Third-party verifier — **shown with no connection to 120 or 140**,
-  connected only to **170** and holding a receipt bundle **182**
+- **180** Third-party verifier — **shown with no live connection to 120, 140,
+  or 170** — holding a receipt bundle **182** and a **previously retrieved key
+  set 184** (a local cache or file obtained at some earlier time)
 
-The absent connection from **180** to the gateway is the point of the figure:
-the verifier needs no account, credential, or network path to the issuer.
+The absent connections are the point of the figure: the verifier needs no
+account, no credential, and no network path to anything at verification time.
+Draw the key-set arrow from **170** to **184** as a **dashed line labelled
+"earlier, out of band"** — key retrieval happens before verification and is not
+part of it. A solid live link from **180** to **170** would contradict the word
+"offline" and misdescribe `receipt_verifier.py`, which fetches nothing and
+accepts only a caller-supplied key set.
 
 ### FIG. 2 — Atomic authorization and reservation
 
@@ -70,9 +76,13 @@ Flowchart:
 5. **250** Execute guarded conditional `UPDATE`, showing the predicate inline:
    `SET spent = spent + est WHERE status='active' AND spent + est <= max`
 6. **260** Decision: affected row count == 1?
-7. **265** No → refresh row → **270** status changed? → deny `permit_revoked` /
-   `permit_expired`; else deny `permit_budget_exceeded` with remaining, spent,
-   max — *annotate: "no budget moved"*
+7. **265** No → refresh row → **270** status changed? → deny `permit_revoked`;
+   otherwise deny `permit_budget_exceeded` with remaining, spent, max —
+   *annotate: "no budget moved"*.
+   Do **not** draw a `permit_expired` terminal here: expired permits keep
+   `status = "active"`, so this re-read cannot produce that reason (§4.2).
+   It becomes reachable only if `expires_at` is added to the guarded predicate
+   and the classification — **[not implemented]**.
 8. **280** Yes → commit → **290** dispatch invocation
 
 ### FIG. 3 — Debit checkpoint and asymmetric reconciliation
@@ -105,12 +115,18 @@ response, idle > threshold:
 
 *Supports claims 18–19; §4.5.*
 
-Two parallel columns showing the same receipt signed at time T1 and at time T2,
-after an optional field was added to the schema.
+Two parallel columns showing **two different receipts** — one issued at time T1
+and one at time T2, after an optional field was added to the schema. They are
+distinct instances, **not the same receipt signed twice**: the T1 receipt keeps
+its original signed bytes untouched forever, and only the T2 receipt carries the
+new field. Nothing is ever re-signed.
 
 - **410** Receipt fields (T1) → **420** add `alg`, `kid` → **430** compute
-  `payload_hash = SHA-256(canonical_json(payload))` → **440** insert
-  `payload_hash` into payload → **450** `canonical_json` → **460** Ed25519 sign
+  `payload_hash = SHA-256(canonical_json(payload))` **over the payload as it
+  stands at this point, before the digest field exists** → **440** insert
+  `payload_hash` into the payload → **450** `canonical_json` of the payload
+  **now including** `payload_hash` → **460** Ed25519 sign.
+  *Annotate 430/440 explicitly: the digest covers the other fields, not itself.*
 - Right column repeats with **415** an additional optional field
   (`dispatch_attempt_id`) present.
 - **470** Verification block below both, branching: reconstruct payload

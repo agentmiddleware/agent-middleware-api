@@ -16,9 +16,13 @@ go on the IDS.
 
 | Patent | Title / subject | Issued |
 | --- | --- | --- |
-| **US 12,688,261** | Methods and Systems for Authorizing Invocation of a Tool by an Autonomous Artificial Intelligence Agent — action-level delegated authorization | 2026-07-21 |
-| **US 12,563,045** | Agent Behavioral Integrity — runtime execution monitoring, policy at discovery / invocation / runtime checkpoints | 2026 |
-| **US 12,452,035** | Person-Agent Fidelity — human-to-agent bonding, Baseline Persona Model, drift detection | 2026 |
+| **US 12,688,261** | Methods and systems for authorizing invocation of a tool by an autonomous artificial intelligence agent — action-level delegated authorization | **2026-07-21** |
+| **US 12,563,045 B1** | Methods and systems for maintaining behavioral integrity of autonomous artificial intelligence agents | **2026-02-24** |
+| **US 12,452,035** | Person-agent fidelity — human-to-agent bonding, Baseline Persona Model, drift detection | **2025-10-21** |
+
+Assignee: Daon Technology. Named inventor on '045: Raphael A. Rodriguez.
+Counsel should pull the primary records (Google Patents / Patent Public Search)
+and the full claim text for all three before relying on any positioning below.
 
 ### Why '261 is a serious problem
 
@@ -34,15 +38,39 @@ Read that against this repo's permit
 signed credential binding subject wallet, subject key, scopes, allowed tools,
 budget cap, expiry, nonce, per-tool call limits, and recipient domain.
 
-**These are the same idea.** A claim whose point of novelty is "a signed,
-scoped, expiring authorization artifact for an agent tool invocation" is, on
-the face of the public description, anticipated or at best obvious over '261.
-`max_calls_per_tool` is a rate limit. `expires_at` is a time window.
-`allowed_tools` and `scopes` are action type and resource scope.
+**The overlap is real but narrower than it first appears — and this correction
+is in your favour.** An earlier draft of this document called them "the same
+idea" and pronounced permit issuance anticipated or obvious over '261. That was
+a categorical legal conclusion drawn from press summaries, which is not a sound
+way to reach one. Reported claim 1 of '261 recites elements the permit here does
+**not** have.
 
-Get the actual claims of '261 and read them — the press description is not the
-claim scope, and the granted claims may be considerably narrower. But plan for
-the worst case: **do not anchor an independent claim in permit issuance.**
+Preliminary element mapping — **counsel must replace this with a real claim
+chart against the issued text**:
+
+| Reported '261 claim 1 element | This repo's permit |
+| --- | --- |
+| Receive an AI agent's tool-invocation request | Yes — governed invoke |
+| Evaluate a **fidelity signal** (agent behaviourally bound to a person) | **Absent.** No person-binding or behavioural model exists |
+| Evaluate an **integrity signal** (execution behaviour within expected range) | **Absent.** No runtime behavioural attestation |
+| Apply policy rules to the request context | Partly — scopes, tools, caps, expiry, forbidden fields |
+| Generate a machine-verifiable delegation artifact with least-privilege constraints | Yes — the signed permit |
+| Authorize the invocation | Yes |
+
+So the fair statement is: the **delegation-artifact element** of '261 reads
+closely onto the permit, while the fidelity and integrity elements — which
+appear to be what makes Daon's combination distinctive — have no counterpart
+here. That does not make permit issuance safe to claim, since an examiner could
+still combine '261 with a capability-token reference. But it is a materially
+weaker anticipation position than "the same idea."
+
+Two instructions for counsel, in order:
+
+1. **Get the issued claim text of '261** (not the press description, not the
+   summary above) and build the chart properly.
+2. **Still do not anchor an independent claim in permit issuance.** The
+   settlement-side mechanisms are better territory regardless of how the '261
+   chart comes out, and they do not depend on winning this argument.
 
 ### What '261 does not appear to reach
 
@@ -54,6 +82,10 @@ loop:
 - recovering a consistent state after a crash between debit and finalization
 - issuing signed, **offline-verifiable evidence of the completed action**, as
   distinct from authorization granted before it
+
+Stated carefully: these are **not identified in the reviewed materials**, which
+is not the same as proven absent. Only a reading of the issued claims and
+specification can establish that.
 
 Daon's artifact is a permission slip issued *before* the act. The receipt in
 this repo is evidence issued *after* it, verifiable by a third party who trusts
@@ -168,5 +200,7 @@ problem the art does not address** — not on the assembly. That is what
 - [Daon expands AI agent governance patent portfolio — Biometric Update](https://www.biometricupdate.com/202607/daon-expands-ai-agent-governance-patent-portfolio)
 - [Daon wins third patent for agentic AI governance — FinTech Global](https://fintech.global/2026/08/07/daon-wins-third-patent-for-agentic-ai-governance/)
 - [Daon wins patent for real-time AI agent authorisation — SecurityBrief UK](https://securitybrief.co.uk/story/daon-wins-patent-for-real-time-ai-agent-authorisation)
+- [Stripe API — Idempotent requests (`Idempotency-Key`)](https://docs.stripe.com/api/idempotent_requests)
 - [Avoiding double payments in a distributed payments system — Airbnb Engineering](https://medium.com/airbnb-engineering/avoiding-double-payments-in-a-distributed-payments-system-2981f6b070bb)
+- [Google Patents — US 12,563,045 B1](https://patents.google.com/patent/US12563045B1/en)
 - [Macaroons: Cookies with Contextual Caveats — Google Research](https://research.google/pubs/macaroons-cookies-with-contextual-caveats-for-decentralized-authorization-in-the-cloud/)

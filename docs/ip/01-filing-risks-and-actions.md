@@ -23,10 +23,27 @@ But the product has a live public site at `https://www.thisisatest.tech`
 - `/.well-known/trust-keys.json` key distribution
 - canonical-JSON signing
 
-Additional public surfaces referenced in-repo: a published live-proof artifact
-(`scripts/publish_live_proof.py`), an MCP Registry submission path
-(`docs/mcp-registry-submission.md`, `server.json`), and an AgentMarket listing
-draft (`docs/agentmarket-listing.md`).
+Additional public surfaces, distinguishing what is actually live from what is
+only prepared — the distinction matters, because only a *published* artifact
+starts a clock:
+
+**Live and public** (treat as disclosures; get first-live dates and archived
+copies for each):
+
+- `https://www.thisisatest.tech/proof/`
+- `https://www.thisisatest.tech/proof/receipt.json`
+- `https://www.thisisatest.tech/proof/trust-keys.json`
+
+Note that `scripts/publish_live_proof.py` is the **generator**, not the
+artifact. The disclosure is the published output above, not the script.
+
+**Prepared but not confirmed published** (candidate surfaces, not yet
+disclosures): the MCP Registry submission path
+(`docs/mcp-registry-submission.md`, `server.json`) — no matching registry entry
+appears to exist, and the repo gates publishing behind a disabled endpoint —
+and the AgentMarket listing draft (`docs/agentmarket-listing.md`), which the
+repo marks as frozen copy. **Confirm each with counsel rather than assuming
+either way.**
 
 ### Why this matters
 
@@ -54,9 +71,19 @@ site at any enabling level. That is the argument to preserve.
       history for `thisisatest.tech`, the first public proof publication, and
       any registry or marketplace listing that went live. Give counsel exact
       dates and archived copies (Wayback, screenshots).
-- [ ] **File a provisional application now**, before further publication. A
-      provisional is cheap, and it stops the bleeding on both the US grace
-      period and any foreign rights not yet lost.
+- [ ] **File a provisional application now**, before further publication —
+      but understand precisely what it does and does not buy:
+      - It **establishes a US filing date** and, filed inside the §102(b)(1)
+        grace period, preserves US rights against your own earlier disclosure.
+      - It can serve as the basis for a **Paris Convention priority claim** for
+        foreign or PCT applications filed within 12 months.
+      - It does **not** cure an earlier public disclosure, and it does **not**
+        revive foreign rights already lost to absolute novelty. If the site
+        disclosed the subject matter before the provisional's filing date, a
+        later provisional cannot repair that in absolute-novelty jurisdictions.
+      - It only supports what it actually describes. The provisional must
+        adequately disclose **each mechanism** later claimed, or the
+        non-provisional cannot claim its benefit for that mechanism.
 - [ ] **Freeze new public technical detail** until the provisional is on file.
       Specifically: do not publish the SDK to PyPI, do not complete the MCP
       Registry submission, and do not publish a design-partner-facing writeup
@@ -64,7 +91,7 @@ site at any enabling level. That is the argument to preserve.
 - [ ] **Confirm no SDK package was ever published.** `docs/x-announcement-thread.md`
       says published SDK packages must not be claimed, which suggests none were —
       verify, because a PyPI release of `b2a_sdk` would put the offline verifier
-      source (mechanism 4) into the public domain of prior art.
+      source (mechanism 4) into publicly available prior art.
 
 ---
 
@@ -75,23 +102,35 @@ site at any enabling level. That is the argument to preserve.
 A substantial share of the commits sit on branches named `claude/*` and
 `codex/*` — this work was AI-assisted, extensively and visibly.
 
-The law here is settled on the extremes and unsettled in the middle:
+The governing guidance changed recently, and the change is favorable:
 
 - **Only natural persons can be named inventors.** *Thaler v. Vidal*, 43 F.4th
-  1207 (Fed. Cir. 2022) — an AI system cannot be an inventor, full stop.
-- **AI-assisted inventions remain patentable**, provided a natural person made a
-  *significant contribution* to the conception of each claimed invention.
-  USPTO Inventorship Guidance for AI-Assisted Inventions, 89 Fed. Reg. 10043
-  (Feb. 13, 2024).
-- Under that guidance, "significant contribution" is assessed per claim using
-  the *Pannu* factors. Merely recognizing a problem, or merely appreciating a
-  useful result from an AI system's output, is **not** enough. Constructing the
-  prompt, selecting among alternatives, and directing the design in a way that
-  amounts to conception generally **is**.
+  1207 (Fed. Cir. 2022) — an AI system cannot be an inventor, full stop. This
+  is unchanged.
+- **The February 2024 guidance has been rescinded.** The USPTO announced
+  revised inventorship guidance for AI-assisted inventions on **November 26,
+  2025**, published at 90 Fed. Reg. (Nov. 28, 2025), which withdrew the
+  February 2024 guidance (89 Fed. Reg. 10043) **in its entirety**.
+- **There is no longer a separate standard for AI-assisted inventions.** The
+  revised guidance applies ordinary inventorship law — human conception —
+  regardless of whether an AI tool was used. AI systems are treated as tools,
+  analogous to instruments or research software.
+- **The *Pannu* factors no longer apply to the human/AI question.** The USPTO
+  concluded that *Pannu*, a joint-inventorship test for multiple natural
+  persons, is inapposite where one human uses an AI tool. *Pannu* still governs
+  joint inventorship **among human co-inventors**.
 
-An incorrectly named inventor is not a formality. It is a defect that can render
-a patent unenforceable, and misstatements to the USPTO implicate the duty of
-candor.
+**What this means here:** the earlier draft of this document applied the 2024
+"significant contribution" and per-claim *Pannu* framing. That framing is
+withdrawn. The question is the ordinary one — **who conceived the invention** —
+and the fact that the work was AI-assisted does not by itself create a special
+burden. That is a materially better position than the 2024 guidance implied.
+
+It does **not** make the conception record unnecessary. Inventorship still has
+to be right, an incorrectly named inventor remains a defect that can render a
+patent unenforceable, and misstatements to the USPTO still implicate the duty
+of candor. But the record you are building is the ordinary one any inventor
+builds, not a special AI showing.
 
 ### Actions
 
@@ -168,10 +207,19 @@ by its terms license your patents to recipients. But two exposures remain:
 ### Actions
 
 - [ ] **Enumerate everyone who received the code**, under what terms, and when.
-- [ ] **Decide the licensing posture before filing.** If patent protection is
-      the goal and the code is going public later, Apache 2.0 with its express
-      grant and defensive-termination clause is the more coherent pairing than
-      MIT. Changing the license does not retroactively affect copies already
+- [ ] **Decide the licensing posture before filing — with counsel, not by
+      default.** An earlier draft of this document suggested Apache 2.0 as the
+      more coherent pairing with a patent strategy. That was too glib and is
+      arguably backwards: Apache 2.0 §3 grants every recipient a royalty-free
+      license to the contributor's patent claims necessarily infringed by the
+      contribution, which is precisely the right you would be trying to
+      preserve. Its defensive-termination clause only revokes that grant from
+      someone who sues over the work; it does not reserve your rights against
+      everyone else.
+      The real choice is among keeping the code closed, dual licensing, or
+      making an intentional and scoped patent grant — and it depends on whether
+      the goal is adoption or enforcement. Take it to counsel.
+      Changing the license does not retroactively affect copies already
       distributed under MIT.
 - [ ] Have counsel review whether any design-partner agreement already grants
       rights that would undercut an assertion.

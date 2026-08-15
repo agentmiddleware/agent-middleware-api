@@ -81,10 +81,20 @@ permit record does not exceed a per-tool invocation limit stored in the permit
 record, and that no argument of the request has a key within a set of forbidden
 argument keys stored in the permit record.
 
-**6.** The system of claim 1, wherein the conditional update statement of (d)
-and a creation of a dispatch-attempt record in a prepared state are performed
-within the same database transaction, such that no reservation of the
-consumed-credit value exists without a corresponding dispatch-attempt record.
+**6.** The system of claim 1, wherein the reserving of (d) and a creation of a
+dispatch-attempt record in a prepared state are performed within the same
+database transaction, such that no reservation of the consumed-credit value
+exists without a corresponding dispatch-attempt record.
+
+> Drafting note: **support for this dependent is currently split.** The
+> transactional-atomicity limitation is supported by
+> `authorize_reserve_and_prepare()`, but that method reserves via an ORM
+> read-modify-write rather than the conditional update statement of claim 1(d)
+> (`app/services/mcp_dispatch_attempts.py:463`). As written the claim depends
+> on claim 1 and so imports 1(d), which that path does not perform. Either
+> change the code so both paths share the guarded update — the better fix, and
+> it makes this claim cleanly supported — or redraft this dependent to recite
+> transactional atomicity without importing 1(d). See §4.3 of the disclosure.
 
 **7.** The system of claim 1, wherein the instructions further cause the system
 to emit a notification responsive to the consumed-credit value crossing each of
@@ -250,10 +260,17 @@ A combination of individually known elements is the standard predicate for a
 > idempotency record to a wallet debit by the checkpoint of claim 9(d); and a
 > receipt service that issues signed evidence verifiable per claim 15 by a party
 > possessing no credential of the gateway — wherein a single tool invocation by
-> an autonomous agent produces exactly one debit and exactly one item of
-> independently verifiable evidence, notwithstanding concurrent invocations,
-> client retries, or failure of the gateway process between the debit and the
-> recording of the outcome.
+> an autonomous agent incurs **at most one** debit, and, **when the receipt
+> finalization commits**, produces one item of independently verifiable
+> evidence, notwithstanding concurrent invocations, client retries, or failure
+> of the gateway process between the debit and the recording of the outcome.
+
+> Drafting note: the "at most one debit" / "when finalization commits" phrasing
+> is deliberate and must not be tightened back to "exactly one debit and
+> exactly one receipt." §7 of the disclosure records that a failure between the
+> debit and the receipt write can leave a charge with no reconstructable
+> receipt — counted for manual review, not recovered. A claim guaranteeing a
+> receipt in every case would be contradicted by the specification itself.
 
 ---
 
