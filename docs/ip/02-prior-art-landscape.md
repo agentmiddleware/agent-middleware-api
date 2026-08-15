@@ -2,9 +2,15 @@
 
 Searched 2026-08-15. This is a positioning search, **not** a professional
 patentability search. Commission a formal search from counsel or a search firm
-before filing a non-provisional — in particular, published US and PCT
-applications in the 18-month blackout window will not appear here, and that is
-exactly where competing agent-governance filings from 2025–2026 are sitting.
+before filing a non-provisional. Note what a search like this structurally
+cannot see: US and PCT applications generally do not publish until 18 months
+from their earliest effective filing or priority date, so pending applications
+filed in 2025–2026 — exactly where competing agent-governance filings would be —
+may not be searchable yet. Provisionals and US applications under an eligible
+nonpublication request never publish as such; applications abandoned before
+publication and those under secrecy order do not either. Not searchable today
+is not the same as not prior art later: an application invisible now can still
+have prior-art effect once published or issued.
 
 ---
 
@@ -16,9 +22,9 @@ go on the IDS.
 
 | Patent | Title / subject | Issued |
 | --- | --- | --- |
-| **US 12,688,261** | Methods and systems for authorizing invocation of a tool by an autonomous artificial intelligence agent — action-level delegated authorization | **2026-07-21** |
-| **US 12,563,045 B1** | Methods and systems for maintaining behavioral integrity of autonomous artificial intelligence agents | **2026-02-24** |
-| **US 12,452,035** | Person-agent fidelity — human-to-agent bonding, Baseline Persona Model, drift detection | **2025-10-21** |
+| **US 12,688,261** ([Justia](https://patents.justia.com/patent/12688261)) | Methods and systems for authorizing invocation of a tool by an autonomous artificial intelligence agent — action-level delegated authorization | **2026-07-21** |
+| **US 12,563,045 B1** ([Google Patents](https://patents.google.com/patent/US12563045B1/en), [OG](https://patentsgazette.uspto.gov/week08/OG/html/1543-4/US12563045-20260224.html)) | Methods and systems for maintaining behavioral integrity of autonomous artificial intelligence agents | **2026-02-24** |
+| **US 12,452,035** ([OG](https://patentsgazette.uspto.gov/week42/OG/html/1539-3/US12452035-20251021.html)) | Person-agent fidelity — human-to-agent bonding, Baseline Persona Model, drift detection | **2025-10-21** |
 
 Assignee: Daon Technology. Named inventor on '045: Raphael A. Rodriguez.
 Counsel should pull the primary records (Google Patents / Patent Public Search)

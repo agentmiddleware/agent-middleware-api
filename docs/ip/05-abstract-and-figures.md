@@ -7,21 +7,21 @@
 > "authorizing AI agents" invites the §101 framing discussed in
 > [`01-filing-risks-and-actions.md`](01-filing-risks-and-actions.md).
 
-**Draft (146 words — recount with `wc -w` after any edit):**
+**Draft (146 words — recount with `wc -w` after any edit; 37 CFR 1.72(b) caps it at 150):**
 
 A gateway mediates tool invocations by autonomous software agents while
-enforcing a delegated spending limit, charging exactly once, and producing
-independently verifiable evidence. Budget is reserved by a single conditional
-update statement whose limit predicate the database evaluates as part of the
-same statement that performs the increment, so concurrent invocations cannot
-jointly exceed the limit irrespective of whether a requested row lock was
+enforcing a delegated spending limit, deduplicating retries that carry an
+idempotency key, and producing verifiable evidence. Budget is reserved by a
+single conditional update whose limit predicate the database evaluates as part
+of the same statement that performs the increment, so concurrent invocations
+cannot jointly exceed the limit irrespective of whether a requested row lock was
 granted; an affected-row count other than one yields a denial identifying
 whether budget or permit status caused it. An identifier of the ledger entry is
-written to an idempotency record after the debit and before finalization, so a
+written to the idempotency record after the debit and before finalization, so a
 record left unfinished by a process failure is classified as never charged, as
 charged and reconstructable from a signed receipt, or as requiring review. The
-receipt is verifiable offline against a published key, returning a status that
-distinguishes signature failure from an unavailable key.
+receipt verifies offline against a published key, returning a status
+distinguishing signature failure from an unavailable key.
 
 ---
 

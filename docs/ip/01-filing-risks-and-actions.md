@@ -51,11 +51,21 @@ either way.**
   running from the inventor's own first public disclosure. If the site went
   live in, say, March 2026, a US filing must land before the corresponding date
   in March 2027. The clock started at first disclosure, not at your convenience.
-- **Europe, China, Japan, Korea, and most of the rest of the world** — absolute
-  novelty. A public disclosure **before** the priority date is a bar with no
-  grace period. If the site has been live and describing signed receipts and
+- **Europe, China, Japan, Korea, and most of the rest of the world** — broadly
+  absolute novelty. A public disclosure **before** the priority date is
+  generally a bar. If the site has been live and describing signed receipts and
   offline verification since before any filing, foreign rights to *that
   disclosed subject matter* may already be gone.
+
+  **Do not treat that as settled without checking each target country.** Grace
+  periods and non-prejudicial-disclosure exceptions vary. The EPC has narrow
+  exceptions under Article 55 — evident abuse in relation to the applicant, and
+  display at an officially recognised international exhibition — each with a
+  six-month window and strict conditions. Japan and Korea have their own grace
+  provisions with their own requirements and deadlines. None of these is a
+  general-purpose grace period of the US kind, and none should be relied on
+  without counsel confirming it applies to *these* disclosures in *that*
+  jurisdiction.
 
 Whether the site's marketing-level description is **enabling** (detailed enough
 to teach a skilled person to build it) is a legal judgment and is genuinely
@@ -109,8 +119,9 @@ The governing guidance changed recently, and the change is favorable:
   is unchanged.
 - **The February 2024 guidance has been rescinded.** The USPTO announced
   revised inventorship guidance for AI-assisted inventions on **November 26,
-  2025**, published at 90 Fed. Reg. (Nov. 28, 2025), which withdrew the
-  February 2024 guidance (89 Fed. Reg. 10043) **in its entirety**.
+  2025**, published at **90 Fed. Reg. 54637 (Nov. 28, 2025)**, Federal Register
+  Document No. **2025-21457**, which withdrew the February 2024 guidance
+  (89 Fed. Reg. 10043) **in its entirety**.
 - **There is no longer a separate standard for AI-assisted inventions.** The
   revised guidance applies ordinary inventorship law — human conception —
   regardless of whether an AI tool was used. AI systems are treated as tools,
@@ -124,7 +135,9 @@ The governing guidance changed recently, and the change is favorable:
 "significant contribution" and per-claim *Pannu* framing. That framing is
 withdrawn. The question is the ordinary one — **who conceived the invention** —
 and the fact that the work was AI-assisted does not by itself create a special
-burden. That is a materially better position than the 2024 guidance implied.
+burden. On its face that reads as a better position than the 2024 guidance
+implied — but treat that as a preliminary reading for counsel to confirm, not a
+conclusion you can rely on.
 
 It does **not** make the conception record unnecessary. Inventorship still has
 to be right, an incorrectly named inventor remains a defect that can render a
@@ -195,10 +208,16 @@ concrete technical solution — not a business practice with a computer bolted o
 MIT contains **no express patent grant** — unlike Apache 2.0 §3 — so it does not
 by its terms license your patents to recipients. But two exposures remain:
 
-- Courts have found **implied patent licenses** where a licensor distributes
-  code under a permissive license and later asserts patents covering that same
-  code against recipients. The scope is unsettled, but the risk is real for
-  anyone who actually received the code.
+- There is a **theoretical implied-license or estoppel risk** if you distribute
+  code under a permissive licence and later assert patents covering that same
+  code against a recipient. State this accurately: an earlier draft of this
+  document said "courts have found implied patent licenses" in this situation.
+  **That overstated the authority.** No US case squarely holds that
+  distribution under MIT or a similar permissive licence, standing alone,
+  creates an implied patent licence. Doctrines like legal estoppel and implied
+  licence by conduct exist and are fact-dependent, and a defendant who received
+  the code would very likely raise them — but this is an unverified,
+  fact-dependent risk to have counsel evaluate, not a settled rule.
 - Because the repo is private, that recipient set should be small. It is not
   necessarily empty: design partners, the "stranger test" participants
   (`docs/stranger-test.md`), and anyone given a handoff bundle may have received

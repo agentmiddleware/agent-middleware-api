@@ -77,7 +77,7 @@ A gateway mediates agent-to-tool invocations and, for each invocation:
    historical signatures.
 5. **Publishes verification keys** at a well-known location so any third party
    can verify a receipt **offline**, with a status taxonomy that never reports
-   an unreachable or unknown key as evidence of tampering.
+   a key the verifier does not hold as evidence of tampering.
 
 ---
 
@@ -355,7 +355,7 @@ that gap and make the taxonomy exact. **[not implemented]** — see §7.
 | Status | Meaning |
 | --- | --- |
 | `VERIFIED` | Signature holds — cryptographic claim |
-| `INVALID` | Signature does not hold — cryptographic claim, i.e. tampering |
+| `INVALID` | The signature did not verify under the selected key — a cryptographic claim. Payload modification is one possible cause; a relabelled envelope is another (see below) |
 | `MISMATCH` | Envelope, payload, or caller expectation disagree, no demonstrated signature failure |
 | `UNKNOWN_KEY` | Signing key not in the supplied key set |
 | `MALFORMED` | Structurally unparseable input |

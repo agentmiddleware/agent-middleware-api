@@ -33,9 +33,9 @@ unenforceability for inequitable conduct.
 
 **Action for counsel:** obtain and read the **granted claims** of all three, not
 the press summaries. Then order a professional patentability search — the three
-Daon patents are what a lay search surfaced, and published applications in the
-18-month blackout window are precisely where competing 2025–2026 agent-governance
-filings will be sitting.
+Daon patents are what a lay search surfaced, and applications that have not yet
+published — generally those under 18 months from their earliest priority date —
+are precisely where competing 2025–2026 agent-governance filings will be sitting.
 
 ---
 
@@ -77,7 +77,7 @@ novelty jurisdictions. Counsel needs the complete list with dates to assess both
 | 16 | Public product site, `https://www.thisisatest.tech` | First-live date; archived captures. Describes Ed25519-signed receipts, offline verification, `/.well-known/trust-keys.json`. |
 | 17 | Published live-proof artifacts: `https://www.thisisatest.tech/proof/`, `/proof/receipt.json`, `/proof/trust-keys.json` | First-live dates, archived captures, and the published content. Note `scripts/publish_live_proof.py` is the generator, not the disclosure. |
 | 18 | MCP Registry / marketplace materials (`server.json`, `docs/mcp-registry-submission.md`, `docs/agentmarket-listing.md`) | **Candidate surfaces, not confirmed disclosures.** No matching MCP Registry entry appears to exist and the repo marks the AgentMarket copy as frozen. Confirm whether either was ever actually submitted or published, and when. |
-| 19 | Any design-partner or "stranger test" distribution (`docs/stranger-test.md`, `DESIGN_PARTNER_GUIDE.md`) | Recipients, dates, and whether under NDA. Distribution under NDA is not a public disclosure; distribution without one may be. |
+| 19 | Every design-partner or "stranger test" distribution (`docs/stranger-test.md`, `DESIGN_PARTNER_GUIDE.md`) | Record **every** copy distributed: recipient, date, confidentiality terms, and whether any use, sale, or offer for sale accompanied it. Distribution under NDA **may** not be a public disclosure — but NDA status is not dispositive. Under *Helsinn Healthcare v. Teva* (2019) a sale or offer for sale can trigger the on-sale bar of §102(a)(1) **even when confidential**. Counsel assesses the patent-law consequences; do not treat an NDA as a safe harbour. |
 | 20 | Any published SDK package (`b2a_sdk`) | **Verify whether one was ever published.** A public release would place the offline verifier source — the Set C mechanism — into publicly available prior art. |
 
 See [`01-filing-risks-and-actions.md`](01-filing-risks-and-actions.md) §1 for
