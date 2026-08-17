@@ -25,7 +25,7 @@ python-dotenv>=1.2.2    # .env file loading
 cryptography>=50.0.0       # Ed25519 trust-plane signatures (>=50.0.0 fixes GHSA-g6cj-pr64-35w5)
 redis>=8.1.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
-greenlet>=3.5.4         # SQLAlchemy async engine support
+greenlet>=3.5.5         # SQLAlchemy async engine support
 stripe>=15.4.0           # Stripe payment processing
 mcp>=1.29.0,<2         # MCP SDK; >=1.29.0 provides the pre-parse request-body guard used by public/partner transports; <2 guards v1 internals
 
