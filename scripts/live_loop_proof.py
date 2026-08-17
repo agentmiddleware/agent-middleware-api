@@ -375,7 +375,9 @@ class ProofRun:
         # base_url with a trailing slash, and Starlette does not collapse
         # "//.well-known/..." to the single-slash route.
         keys_url = self.client.base_url.join(".well-known/trust-keys.json")
-        keys = httpx.get(str(keys_url), timeout=30)
+        # trust_env=False for the same reason as the main client: keep every
+        # request on the loopback host, never through an ambient proxy.
+        keys = httpx.get(str(keys_url), timeout=30, trust_env=False)
         require(keys.status_code == 200, "trust-keys.json not served")
         path = self.output_dir / "trust-keys.json"
         path.write_text(keys.text, encoding="utf-8")
@@ -497,7 +499,12 @@ def run(api_url: str, output_dir: Path) -> None:
     # partner as a single coherent bundle.
     for name in ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
-    with httpx.Client(base_url=api_url, timeout=30) as client:
+    # trust_env=False: the run mints an API key and sends it in X-API-Key on
+    # every request. httpx honors ambient HTTP_PROXY/HTTPS_PROXY/ALL_PROXY by
+    # default, which could route that credential off the loopback host through
+    # a proxy. Disabling env trust keeps the whole loopback-only guarantee
+    # airtight regardless of the caller's proxy environment.
+    with httpx.Client(base_url=api_url, timeout=30, trust_env=False) as client:
         proof = ProofRun(client, output_dir)
         print(f"live loop proof {proof.run_id} against {api_url}\n")
 
