@@ -28,6 +28,23 @@ MCP_TOOLS_JSON_VERSION = "1.0"
 MCP_SERVER_VERSION = "1.0"
 
 
+def _finite_price(value: Any) -> float | None:
+    """Coerce a registry price to a finite float, or ``None`` if unusable.
+
+    ``float()`` raises ``OverflowError`` for an int too large to represent and
+    ``TypeError``/``ValueError`` for junk, and it happily returns a not-a-number
+    or infinite value for the strings "nan" and "inf" — none of which can be
+    published in a JSON manifest.
+    """
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
 class McpGenerator:
     """
     Generates project tool manifests and standalone MCP servers.
@@ -157,16 +174,25 @@ class McpGenerator:
         cat = service.get("category", "unknown") or "unknown"
         truth = truth_for_category(cat)
 
-        raw_cost = service.get("credits_per_unit_exact")
-        if raw_cost is None:
-            raw_cost = service.get("credits_per_unit", 1.0)
-        try:
-            per_call_cost = float(raw_cost)
-        except (TypeError, ValueError):
+        # A malformed price must neither crash generation nor poison the
+        # manifest: NaN/Infinity serialize as bare `NaN`/`Infinity` literals,
+        # which are not valid JSON (RFC 8259), so one bad row would make the
+        # WHOLE manifest unparseable for a strict client. Prices are therefore
+        # normalized to finite values here, and the conservative 1.0 fallback
+        # ensures an unreadable price never advertises a free tool.
+        raw_exact = service.get("credits_per_unit_exact")
+        exact_price = _finite_price(raw_exact)
+        declared_price = _finite_price(service.get("credits_per_unit"))
+        if raw_exact is not None and exact_price is None:
+            # Present but unreadable: the authoritative price is corrupt, so
+            # this tool's real cost is unknown. Do not let a possibly-stale
+            # declared value (0.0 included) advertise it as free.
             per_call_cost = 1.0
-        if not math.isfinite(per_call_cost):
-            # A malformed price (unparseable, NaN, infinite) must not
-            # advertise a free tool.
+        elif exact_price is not None:
+            per_call_cost = exact_price
+        elif declared_price is not None:
+            per_call_cost = declared_price
+        else:
             per_call_cost = 1.0
 
         # The governance contract behind tools/call: authorized by a
@@ -192,7 +218,9 @@ class McpGenerator:
         )
 
         annotations = {
-            "creditsPerCall": service.get("credits_per_unit", 1.0),
+            # The normalized price, so the advertised number is always finite
+            # and always agrees with economicAction below.
+            "creditsPerCall": per_call_cost,
             "unitName": service.get("unit_name", "call"),
             "category": cat,
             "simulation": truth["simulation"],
@@ -203,7 +231,10 @@ class McpGenerator:
             "economicAction": per_call_cost > 0,
             "approvalMayBeRequired": governed,
         }
-        if service.get("credits_per_unit_exact") is not None:
+        # Advertised only when it is a usable finite price: an "exact" price a
+        # client cannot parse is worse than an absent one, and the raw value is
+        # kept verbatim so a valid decimal keeps its precision and formatting.
+        if exact_price is not None:
             annotations["creditsPerCallExact"] = service["credits_per_unit_exact"]
 
         if truth.get("runtime_service"):

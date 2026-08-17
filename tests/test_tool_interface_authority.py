@@ -22,6 +22,7 @@ These tests pin the recomposition that makes that true on the standard
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -37,6 +38,7 @@ from app.routers.mcp import ToolPermissionDenied
 from app.schemas.billing import ServiceCategory
 from app.schemas.policies import PolicyBundleCreate
 from app.services.human_approval import HumanApprovalService
+from app.services.mcp_generator import McpGenerator
 from app.services.policies import (
     create_policy_bundle,
     evaluate_wallet_policy,
@@ -683,19 +685,148 @@ async def test_annotations_are_honest_in_permissive_trust_mode(
         registry.unregister_local("authority-permit-forced")
 
 
-def test_non_finite_cost_is_not_advertised_as_free():
+def _priced_tool(**price_fields):
     from app.services.mcp_generator import McpGenerator
 
-    tool = McpGenerator()._service_to_mcp_tool(
+    return McpGenerator()._service_to_mcp_tool(
         {
-            "service_id": "authority-nan-priced",
-            "description": "Tool with a malformed exact price",
+            "service_id": "authority-priced",
+            "description": "Tool under price normalization",
             "category": ServiceCategory.AGENT_COMMS.value,
-            "credits_per_unit": 2.0,
-            "credits_per_unit_exact": "nan",
+            **price_fields,
         }
     )
-    assert tool["annotations"]["economicAction"] is True
+
+
+@pytest.mark.parametrize(
+    "price_fields",
+    [
+        # Exact field malformed in every way float() can fail or lie.
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "nan"},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "inf"},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "-inf"},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "not-a-number"},
+        # A non-numeric type raises TypeError rather than ValueError.
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": []},
+        # An int too large for a float raises OverflowError, not ValueError.
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": 10**400},
+        # No exact field: the same guards apply to credits_per_unit.
+        {"credits_per_unit": float("nan")},
+        {"credits_per_unit": "garbage"},
+        {"credits_per_unit": 10**400},
+    ],
+)
+def test_malformed_price_is_never_advertised_as_free(price_fields):
+    """A price the plane cannot make sense of must fail conservative —
+    advertising economicAction=false would tell an agent a consequential
+    tool is free."""
+    assert _priced_tool(**price_fields)["annotations"]["economicAction"] is True
+
+
+def test_valid_zero_price_is_still_not_an_economic_action():
+    """The conservative fallback must not swallow a legitimately free tool."""
+    assert (
+        _priced_tool(credits_per_unit=0.0, credits_per_unit_exact="0")["annotations"][
+            "economicAction"
+        ]
+        is False
+    )
+    assert (
+        _priced_tool(credits_per_unit=0.0)["annotations"]["economicAction"] is False
+    )
+
+
+def _strict_json(payload) -> str:
+    """Serialize rejecting NaN/Infinity — i.e. as a strict RFC 8259 client would.
+
+    ``json.dumps`` emits bare ``NaN``/``Infinity`` literals by default, which
+    Go's ``encoding/json`` and Rust's ``serde`` refuse; ``allow_nan=False``
+    surfaces that here instead of shipping an unparseable manifest.
+    """
+    import json
+
+    return json.dumps(payload, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    "price_fields",
+    [
+        {"credits_per_unit": float("nan")},
+        {"credits_per_unit": float("inf")},
+        {"credits_per_unit": float("-inf")},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "nan"},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": 10**400},
+        {"credits_per_unit": 0.0, "credits_per_unit_exact": "nan"},
+    ],
+)
+def test_public_manifest_stays_strict_json_for_malformed_prices(price_fields):
+    """One bad price must not make the WHOLE manifest unparseable.
+
+    NaN/Infinity are not valid JSON, so a strict client rejects the entire
+    document — every other tool's discovery breaks with it. Exercised through
+    the public generator, not the private converter.
+    """
+    registry = get_service_registry()
+    registry.register_local(
+        service_id="authority-malformed-price",
+        name="Malformed Price Tool",
+        description="Registry row carrying an unusable price",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ok": True},
+        unit_name="call",
+        **{k: v for k, v in price_fields.items() if k == "credits_per_unit"},
+    )
+    try:
+        record = registry.get_local("authority-malformed-price")
+        if "credits_per_unit_exact" in price_fields:
+            record["credits_per_unit_exact"] = price_fields["credits_per_unit_exact"]
+
+        manifest = McpGenerator().generate_tools_json()
+        # The whole manifest must serialize for a strict RFC 8259 client.
+        _strict_json(manifest)
+
+        ann = {t["name"]: t for t in manifest["tools"]}[
+            "authority-malformed-price"
+        ]["annotations"]
+        # The advertised price is the conservative fallback specifically —
+        # not merely "some finite number". Pinning the value catches a
+        # regression that reuses a declared 2.0 alongside a corrupt exact
+        # price, which a finiteness-only assertion would wave through.
+        assert isinstance(ann["creditsPerCall"], float)
+        assert math.isfinite(ann["creditsPerCall"])
+        assert ann["creditsPerCall"] == 1.0
+        # An unusable exact price is omitted rather than published as garbage.
+        assert "creditsPerCallExact" not in ann
+        # Conservative: an unreadable price never reads as free.
+        assert ann["economicAction"] is True
+    finally:
+        registry.unregister_local("authority-malformed-price")
+
+
+def test_public_manifest_preserves_a_valid_exact_price():
+    """Normalization must not disturb a well-formed exact decimal."""
+    registry = get_service_registry()
+    registry.register_local(
+        service_id="authority-exact-price",
+        name="Exact Price Tool",
+        description="Registry row with a valid exact decimal price",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ok": True},
+        credits_per_unit=2.5,
+        unit_name="call",
+    )
+    try:
+        registry.get_local("authority-exact-price")["credits_per_unit_exact"] = "2.50"
+        manifest = McpGenerator().generate_tools_json()
+        _strict_json(manifest)
+        ann = {t["name"]: t for t in manifest["tools"]}["authority-exact-price"][
+            "annotations"
+        ]
+        assert ann["creditsPerCall"] == 2.5
+        assert ann["creditsPerCallExact"] == "2.50"
+        assert ann["economicAction"] is True
+    finally:
+        registry.unregister_local("authority-exact-price")
 
 
 def test_approval_window_is_clamped_to_sentinel_bounds(monkeypatch):
