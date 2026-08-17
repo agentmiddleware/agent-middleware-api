@@ -55,3 +55,8 @@ Thumbs.db
 # Docker
 *.log
 .vercel/
+
+# Agent tooling scratch: throwaway git worktrees used to run checks in
+# isolation. Full repo copies (including .env.production and coverage
+# artifacts) — never commit these.
+.claude/worktrees/
