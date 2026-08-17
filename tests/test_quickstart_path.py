@@ -300,37 +300,30 @@ def test_documented_quickstart_path(quickstart_server, tmp_path):
     client.close()
 
 
-def _run_proof_script(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
+def _run_proof_script(
+    *args: str, timeout: int = 30, extra_env: dict | None = None
+) -> subprocess.CompletedProcess:
+    env = _prepend_pythonpath(REPO_ROOT)
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "live_loop_proof.py"), *args],
         cwd=REPO_ROOT,
-        env=_prepend_pythonpath(REPO_ROOT),
+        env=env,
         capture_output=True,
         text=True,
         timeout=timeout,
     )
 
 
-def test_live_loop_proof_refuses_unsafe_remote_targets(tmp_path):
-    """The guard must fail closed before minting or sending any credential.
-
-    Both rejections happen before any network call, so no server is needed.
-    """
+def test_live_loop_proof_refuses_non_loopback_target(tmp_path):
+    """The proof is loopback-only: any non-loopback host is refused before a
+    credential is minted, over http or https alike. No server is needed."""
     out = tmp_path / "out"
-    # Non-loopback without opting in.
-    without_optin = _run_proof_script(
-        "--api-url", "https://example.com", "--output-dir", str(out)
-    )
-    assert without_optin.returncode == 2
-    assert "without --allow-remote" in without_optin.stderr
-
-    # Non-loopback over cleartext, even with --allow-remote: the minted key
-    # would cross the network unencrypted, so it must be refused.
-    cleartext = _run_proof_script(
-        "--api-url", "http://example.com", "--allow-remote", "--output-dir", str(out)
-    )
-    assert cleartext.returncode == 2
-    assert "cleartext" in cleartext.stderr
+    for url in ("https://example.com", "http://example.com"):
+        result = _run_proof_script("--api-url", url, "--output-dir", str(out))
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "loopback-only" in result.stderr
 
     # Fail closed means no handoff directory, not a half-written bundle.
     assert not out.exists()
@@ -346,6 +339,37 @@ def test_live_loop_proof_reports_unreachable_server(tmp_path):
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert "make quickstart" in result.stderr
+
+
+def test_live_loop_proof_ignores_ambient_proxy(quickstart_server, tmp_path):
+    """The minted key must stay on loopback even under a proxy environment.
+
+    With HTTP(S)_PROXY pointed at a dead port and NO_PROXY cleared, the run
+    can only succeed if it does NOT honor those proxy vars — i.e. the client
+    is built with trust_env=False. If proxy inheritance were left on, httpx
+    would route the X-API-Key requests through the dead proxy and the run
+    would fail. This is the regression guard for that credential-hygiene
+    property.
+    """
+    dead_proxy = f"http://127.0.0.1:{_free_port()}"
+    proxy_env = {
+        var: dead_proxy
+        for var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                    "http_proxy", "https_proxy", "all_proxy")
+    }
+    # Clear any ambient loopback exclusion so the proxy vars would otherwise bite.
+    proxy_env["NO_PROXY"] = ""
+    proxy_env["no_proxy"] = ""
+
+    output_dir = tmp_path / "handoff"
+    result = _run_proof_script(
+        "--api-url", quickstart_server,
+        "--output-dir", str(output_dir),
+        timeout=180,
+        extra_env=proxy_env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (output_dir / "receipt-bundle.json").exists()
 
 
 def test_sanitize_url_for_record_strips_credentials():

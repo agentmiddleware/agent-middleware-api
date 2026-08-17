@@ -29,10 +29,9 @@ Run::
 
 Self-provision only exists on dev-like postures — production-like
 deployments (staging, preprod, preview, ...) refuse it — so this script is
-loopback-only unless ``--allow-remote`` is passed, and then only against a
-remote instance that has self-provision enabled. Non-loopback targets must
-use ``https://``: the run mints an API key and sends it on every request,
-which must never cross the network in the clear.
+loopback-only by design. The run mints an API key and sends it on every
+request; refusing any non-loopback target keeps that credential on the local
+host and off the network entirely.
 """
 
 from __future__ import annotations
@@ -204,9 +203,8 @@ class ProofRun:
             json={"agent_id": f"live-loop-proof-{self.run_id}"},
         )
         hint = (
-            " -- a production-like target (staging/preprod/preview) refuses "
-            "self-provision by design; point --allow-remote at a remote "
-            "instance with ENABLE_DEV_KEY_SELF_PROVISION=true"
+            " -- self-provision is refused on production-like targets by "
+            "design; run this against a local `make quickstart` server"
             if minted.status_code == 403
             else ""
         )
@@ -377,7 +375,9 @@ class ProofRun:
         # base_url with a trailing slash, and Starlette does not collapse
         # "//.well-known/..." to the single-slash route.
         keys_url = self.client.base_url.join(".well-known/trust-keys.json")
-        keys = httpx.get(str(keys_url), timeout=30)
+        # trust_env=False for the same reason as the main client: keep every
+        # request on the loopback host, never through an ambient proxy.
+        keys = httpx.get(str(keys_url), timeout=30, trust_env=False)
         require(keys.status_code == 200, "trust-keys.json not served")
         path = self.output_dir / "trust-keys.json"
         path.write_text(keys.text, encoding="utf-8")
@@ -499,7 +499,12 @@ def run(api_url: str, output_dir: Path) -> None:
     # partner as a single coherent bundle.
     for name in ARTIFACTS:
         (output_dir / name).unlink(missing_ok=True)
-    with httpx.Client(base_url=api_url, timeout=30) as client:
+    # trust_env=False: the run mints an API key and sends it in X-API-Key on
+    # every request. httpx honors ambient HTTP_PROXY/HTTPS_PROXY/ALL_PROXY by
+    # default, which could route that credential off the loopback host through
+    # a proxy. Disabling env trust keeps the whole loopback-only guarantee
+    # airtight regardless of the caller's proxy environment.
+    with httpx.Client(base_url=api_url, timeout=30, trust_env=False) as client:
         proof = ProofRun(client, output_dir)
         print(f"live loop proof {proof.run_id} against {api_url}\n")
 
@@ -569,39 +574,21 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_OUTPUT_DIR,
         help=f"Where to write the handoff bundle (default: {DEFAULT_OUTPUT_DIR}).",
     )
-    parser.add_argument(
-        "--allow-remote",
-        action="store_true",
-        help=(
-            "Permit a non-loopback --api-url (which must then use https://). "
-            "Only for a remote instance with self-provision enabled -- "
-            "production-like hosts (staging, preprod, preview, ...) refuse "
-            "self-provision by design, so this mode cannot authenticate there."
-        ),
-    )
     args = parser.parse_args(argv)
 
-    parsed = urlparse(args.api_url)
-    host = parsed.hostname or ""
+    # Loopback only, by design: the run self-provisions a key and sends it on
+    # every request, and self-provision exists only on dev-like postures. There
+    # is no supported remote target, so any non-loopback host is refused before
+    # a credential is minted.
+    host = urlparse(args.api_url).hostname or ""
     if host not in LOOPBACK_HOSTS:
-        if not args.allow_remote:
-            print(
-                f"refusing non-loopback target {args.api_url!r} without "
-                "--allow-remote",
-                file=sys.stderr,
-            )
-            return 2
-        # The run mints an API key and sends it in X-API-Key on every request;
-        # a non-loopback hop must be encrypted or that credential (and every
-        # governed call) crosses the network in the clear.
-        if parsed.scheme != "https":
-            print(
-                f"refusing cleartext {parsed.scheme or 'http'}:// for "
-                f"non-loopback target {args.api_url!r}; use https:// so the "
-                "minted key is not sent over the wire unencrypted",
-                file=sys.stderr,
-            )
-            return 2
+        print(
+            f"refusing non-loopback target {args.api_url!r}: the live-loop "
+            "proof is loopback-only; run it against a local `make quickstart` "
+            "server",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         run(args.api_url.rstrip("/"), args.output_dir)
