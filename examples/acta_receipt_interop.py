@@ -129,6 +129,12 @@ def verify_portable_bundle(
     for field in ("signing_input", "signature", "kid", "issuer"):
         if not isinstance(bundle.get(field), str) or not bundle[field]:
             raise TranscodeError(f"portable bundle is missing {field!r}")
+    declared_alg = bundle.get("alg")
+    if declared_alg is not None and declared_alg != "Ed25519":
+        raise TranscodeError(
+            f"bundle declares alg {declared_alg!r}; this verifier only "
+            "performs Ed25519 and will not report a misleading result"
+        )
     if expected_issuer is not None and bundle["issuer"] != expected_issuer:
         raise TranscodeError(
             "bundle issuer does not match the issuer bound to the trusted "

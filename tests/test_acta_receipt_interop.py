@@ -192,13 +192,39 @@ def test_issuer_id_must_match_signing_kid() -> None:
         )
 
 
-def test_missing_signer_identity_is_refused() -> None:
-    """Absent issuer_id and absent kid must not slip past as None == None."""
+def test_inner_bundle_declared_alg_mismatch_is_refused() -> None:
+    """A bundle declaring a non-Ed25519 alg must not verify as Ed25519."""
+    key = Ed25519PrivateKey.generate()
+    bundle = _make_bundle(key, "kid-a")
+    bundle["alg"] = "ES256"
+    with pytest.raises(interop.TranscodeError, match="alg"):
+        interop.verify_portable_bundle(bundle, _public_b64(key))
+
+
+@pytest.mark.parametrize(
+    ("issuer_id", "kid", "match"),
+    [
+        (None, None, "issuer_id"),  # both absent: None == None must not pass
+        (None, "test-kid", "issuer_id"),
+        ("", "test-kid", "issuer_id"),
+        ("test-kid", None, "kid"),
+        ("test-kid", "", "kid"),
+    ],
+)
+def test_missing_signer_identity_is_refused(
+    issuer_id: str | None, kid: str | None, match: str
+) -> None:
+    """Each signer-identity field must independently refuse absent/empty."""
     key = Ed25519PrivateKey.generate()
     body = {"type": interop.ACTA_TYPE, "receipt_id": "rcpt-test"}
+    if issuer_id is not None:
+        body["issuer_id"] = issuer_id
     signature = key.sign(interop.jcs_canonicalize(body))
-    signed = {**body, "signature": {"alg": "Ed25519", "sig": signature.hex()}}
-    with pytest.raises(interop.TranscodeError, match="issuer_id|kid"):
+    signature_block = {"alg": "Ed25519", "sig": signature.hex()}
+    if kid is not None:
+        signature_block["kid"] = kid
+    signed = {**body, "signature": signature_block}
+    with pytest.raises(interop.TranscodeError, match=match):
         interop.verify_acta_receipt(signed, key.public_key())
 
 
