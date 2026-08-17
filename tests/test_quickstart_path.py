@@ -311,26 +311,14 @@ def _run_proof_script(*args: str, timeout: int = 30) -> subprocess.CompletedProc
     )
 
 
-def test_live_loop_proof_refuses_unsafe_remote_targets(tmp_path):
-    """The guard must fail closed before minting or sending any credential.
-
-    Both rejections happen before any network call, so no server is needed.
-    """
+def test_live_loop_proof_refuses_non_loopback_target(tmp_path):
+    """The proof is loopback-only: any non-loopback host is refused before a
+    credential is minted, over http or https alike. No server is needed."""
     out = tmp_path / "out"
-    # Non-loopback without opting in.
-    without_optin = _run_proof_script(
-        "--api-url", "https://example.com", "--output-dir", str(out)
-    )
-    assert without_optin.returncode == 2
-    assert "without --allow-remote" in without_optin.stderr
-
-    # Non-loopback over cleartext, even with --allow-remote: the minted key
-    # would cross the network unencrypted, so it must be refused.
-    cleartext = _run_proof_script(
-        "--api-url", "http://example.com", "--allow-remote", "--output-dir", str(out)
-    )
-    assert cleartext.returncode == 2
-    assert "cleartext" in cleartext.stderr
+    for url in ("https://example.com", "http://example.com"):
+        result = _run_proof_script("--api-url", url, "--output-dir", str(out))
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "loopback-only" in result.stderr
 
     # Fail closed means no handoff directory, not a half-written bundle.
     assert not out.exists()
