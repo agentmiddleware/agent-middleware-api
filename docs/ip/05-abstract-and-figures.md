@@ -74,15 +74,20 @@ Flowchart:
    scopes, per-tool count, aggregate cap, forbidden fields
 4. **240** Decision: valid? → No → **245** Deny with reason
 5. **250** Execute guarded conditional `UPDATE`, showing the predicate inline:
-   `SET spent = spent + est WHERE status='active' AND spent + est <= max`
+   `SET spent = spent + est WHERE status='active' AND expires_at > now
+   AND spent + est <= max`
 6. **260** Decision: affected row count == 1?
 7. **265** No → refresh row → **270** status changed? → deny `permit_revoked`;
-   otherwise deny `permit_budget_exceeded` with remaining, spent, max —
-   *annotate: "no budget moved"*.
-   Do **not** draw a `permit_expired` terminal here: expired permits keep
-   `status = "active"`, so this re-read cannot produce that reason (§4.2).
-   It becomes reachable only if `expires_at` is added to the guarded predicate
-   and the classification — **[not implemented]**.
+   → **272** expired (`expires_at <= now`)? → deny `permit_expired` with
+   expired-at and checked-at; otherwise deny `permit_budget_exceeded` with
+   remaining, spent, max — *annotate: "no budget moved"*.
+   **Draw all three terminals.** An earlier draft told the draftsperson to omit
+   `permit_expired` on the ground that expired permits keep `status = "active"`
+   and the re-read could never produce it. That was true of the code at the
+   time and is no longer: `expires_at` is now a term of the guarded predicate,
+   and the classification consults it *before* budget, so a permit that expired
+   mid-flight reports as expired rather than as out of money.
+   Order the branches status → expiry → budget, matching the code.
 8. **280** Yes → commit → **290** dispatch invocation
 
 **Both reservation paths use this flow.** The figure depicts

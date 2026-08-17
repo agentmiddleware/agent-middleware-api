@@ -465,6 +465,15 @@ class PermitService:
                     # both pass even on SQLite, where the FOR UPDATE above is a
                     # silent no-op. The read-validated numbers are advisory; this
                     # write is the authority.
+                    #
+                    # Expiry is in the predicate for the same reason the cap is.
+                    # An expired permit keeps status="active" in storage (expiry
+                    # is a dynamic check, not a stored state), so without this
+                    # term a permit could pass the read-time expiry check, cross
+                    # expires_at, and still be reserved against -- dispatching
+                    # under a just-expired permit wherever the row lock above did
+                    # not engage. Naive-UTC comparison matches the column type;
+                    # see reconcile_expired_permits for the same pattern.
                     now = utc_now()
                     reserved = await session.execute(
                         sa_update(PermitModel)
@@ -476,6 +485,10 @@ class PermitService:
                             cast(
                                 ColumnElement[bool],
                                 PermitModel.status == "active",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.expires_at > now,
                             ),
                             cast(
                                 ColumnElement[bool],
@@ -504,6 +517,20 @@ class PermitService:
                                 {
                                     "status": model.status,
                                     "revoked_at": _stamp(model.revoked_at),
+                                },
+                            )
+                        # Reachable now that expiry is in the predicate above.
+                        # Classified before budget so a permit that expired
+                        # mid-flight is not misreported as out of money.
+                        expired_at = to_naive_utc(model.expires_at)
+                        if expired_at <= now:
+                            return PermitValidation(
+                                False,
+                                "permit_expired",
+                                model,
+                                {
+                                    "expired_at": _stamp(expired_at),
+                                    "checked_at": _stamp(now),
                                 },
                             )
                         return PermitValidation(

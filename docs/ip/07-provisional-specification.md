@@ -183,15 +183,17 @@ Flowchart:
    scopes, per-tool count, aggregate cap, forbidden fields
 4. **240** Decision: valid? → No → **245** Deny with reason
 5. **250** Execute guarded conditional `UPDATE`, showing the predicate inline:
-   `SET spent = spent + est WHERE status='active' AND spent + est <= max`
+   `SET spent = spent + est WHERE status='active' AND expires_at > now
+   AND spent + est <= max`
 6. **260** Decision: affected row count == 1?
 7. **265** No → refresh row → **270** status changed? → deny `permit_revoked`;
-   otherwise deny `permit_budget_exceeded` with remaining, spent, max —
-   *annotate: "no budget moved"*.
-   Do **not** draw a `permit_expired` terminal here: expired permits keep
-   `status = "active"`, so this re-read cannot produce that reason (§V.B).
-   It becomes reachable only if `expires_at` is added to the guarded predicate
-   and the classification — **[not implemented]**.
+   → **272** expired (`expires_at <= now`)? → deny `permit_expired` with
+   expired-at and checked-at; otherwise deny `permit_budget_exceeded` with
+   remaining, spent, max — *annotate: "no budget moved"*.
+   **Draw all three terminals**, ordered status → expiry → budget, matching the
+   code. `expires_at` is a term of the guarded predicate, and the classification
+   consults it *before* budget, so a permit that expired mid-flight reports as
+   expired rather than as out of money (§V.B).
 8. **280** Yes → commit → **290** dispatch invocation
 
 **Both reservation paths use this flow.** The upstream dispatch path performs
@@ -345,13 +347,15 @@ UPDATE permits
        updated_at    = :now
  WHERE permit_id     = :permit_id
    AND status        = 'active'
+   AND expires_at    > :now
    AND spent_credits + :estimated <= max_credits
 ```
 
 4. If the affected row count is not exactly 1, the reservation lost a race —
-   refresh the row and deny with an accurate reason (`permit_<status>` if the
-   status changed, otherwise `permit_budget_exceeded` with remaining, spent,
-   and maximum credits attached). **No budget moved.**
+   refresh the row and deny with an accurate reason: `permit_<status>` if the
+   status changed, `permit_expired` if it crossed `expires_at`, otherwise
+   `permit_budget_exceeded` with remaining, spent, and maximum credits
+   attached. **No budget moved.**
 
 The essential property: *the numbers read during validation are advisory; the
 guarded write is the sole authority.* The cap predicate is evaluated by the
@@ -360,27 +364,21 @@ concurrent reservations cannot both satisfy it, **regardless of whether the row
 lock in step 1 actually engaged**.
 
 **The scope of that guarantee is precise, and the specification should say so.**
-The guarded predicate covers exactly two things — `status = 'active'` and the
-budget cap. Those two are enforced independently of the lock. Everything else
-validated in step 2 — signature, key match, expiry, scopes, per-tool counts,
-aggregate value cap, forbidden fields — is protected by the row lock alone, and
-therefore *does* depend on the engine's locking semantics.
+The guarded predicate covers exactly three things — `status = 'active'`,
+`expires_at > :now`, and the budget cap. Those three are enforced independently
+of the lock. Everything else validated in step 2 — signature, key match, scopes,
+per-tool counts, aggregate value cap, forbidden fields — is protected by the row
+lock alone, and therefore *does* depend on the engine's locking semantics.
 
-Expiry is the sharpest instance, because an expired permit deliberately keeps
-`status = "active"` in storage (expiry is enforced dynamically at invocation
-time) [[`app/routers/me.py:102`]]. Two consequences follow:
-
-- On an engine where the lock is a no-op, a permit can pass the step-2 expiry
-  check, cross `expires_at`, and still satisfy the guarded update — dispatching
-  an invocation under a just-expired permit. The window is narrow and requires
-  expiry to fall inside it, but it is real.
-- The step-4 re-read classifies only by stored `status`, so it cannot return
-  `permit_expired`; an expired permit still reads as `active` and the denial
-  falls through to `permit_budget_exceeded`.
-
-Adding `expires_at > :now` to the guarded update predicate, and consulting
-`expires_at` in the re-read classification, would extend the lock-independent
-guarantee to expiry. **[not implemented]** — see §VIII.
+Expiry is in the predicate for a specific reason worth reciting: an expired
+permit deliberately keeps `status = "active"` in storage, because expiry is a
+dynamic check rather than a stored state [[`app/routers/me.py:102`]]. A
+predicate testing only `status` therefore does not test validity. With
+`expires_at` in the predicate, a permit that crosses its expiry between the
+read-time check and the guarded write fails the write instead of being reserved
+against, and the re-read classifies expiry before budget so the denial reports
+`permit_expired` rather than misreporting a permit with budget left as out of
+money.
 
 The same guarded-update discipline is used for standalone reservation
 [[`reserve_budget()`, `permits.py:709`]], which also emits threshold
@@ -643,10 +641,10 @@ inequitable-conduct exposure, and this repository already documents these
   so `INVALID` cannot be read as "the payload was modified" without
   qualification. Closing this is a small code change — **do it before filing**
   if the stronger claim is wanted.
-- **The lock-independent budget guarantee does not extend to expiry.** The
-  guarded update predicates only on `status` and the cap; expired permits keep
-  `status = "active"`. See §V.B. This is the only remaining gap in the
-  reservation mechanism.
+- ~~**The lock-independent budget guarantee does not extend to expiry.**~~
+  **Closed.** `expires_at > :now` is a term of the guarded update on both
+  reservation paths, and the re-read classifies expiry before budget. See §V.B.
+  No known gap remains in the reservation mechanism.
 - **Private-key rotation is out of band.** The rotation routine rotates metadata
   only.
 - Settlement, compliance-grade ledger storage, and production readiness for
