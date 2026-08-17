@@ -917,9 +917,13 @@ async def test_receipt_commit_survives_worker_death_and_reconciles(
         blocked = await _invoke(steady_worker, seeded)
         _assert_in_progress(blocked)
 
-        reconciliation = await _reconcile(stress_harness, steady_worker)
-        assert reconciliation["idempotency_repaired"] == 1
-        assert reconciliation["idempotency_needs_review"] == 0
+        # Asserted against this record rather than the sweep's counters: those
+        # are cumulative over every record the shared database still holds, so
+        # reading them would couple this scenario to the order the module
+        # happens to run in.
+        assert (await _local_crash_state(seeded))["completed"] is False
+        await _reconcile(stress_harness, steady_worker)
+        assert (await _local_crash_state(seeded))["completed"] is True
 
         replay = await _invoke(steady_worker, seeded)
         assert replay.status_code == 200
@@ -966,9 +970,10 @@ async def test_post_side_effect_crash_requires_review_without_redispatch(
         assert before.debit_count == 1
         assert before.receipt_ids == ()
 
-        reconciliation = await _reconcile(stress_harness, steady_worker)
-        assert reconciliation["idempotency_repaired"] == 0
-        assert reconciliation["idempotency_needs_review"] == 1
+        # Per record, not the cumulative sweep counters: this scenario's proof
+        # is that its own record is left untouched, which is order-independent.
+        await _reconcile(stress_harness, steady_worker)
+        assert (await _local_crash_state(seeded))["completed"] is False
 
         replay = await _invoke(steady_worker, seeded)
         _assert_in_progress(replay)
@@ -1225,13 +1230,13 @@ class CrashExpectation:
 # because a local tool's side effects are not observable to the reconciler the
 # way a dispatch attempt's are.
 #
-# Ordering note: three of these rows leave a record in the sweep's
-# needs-review set, and that set is cumulative across the shared database.
-# The narrative scenarios above assert exact sweep counters, so they must run
-# first. That holds today because pytest runs a module in definition order and
-# no shuffling plugin is installed. If one is ever added, those exact-count
-# assertions are what will break -- convert them to per-record assertions like
-# the ones below rather than reordering around the problem.
+# Every assertion here is against the seeded call's own record. The sweep's
+# counters are cumulative over the shared database -- `stress_harness` is
+# module-scoped and this module deliberately does not truncate between tests,
+# because a kill-and-recover scenario needs its own prior state intact -- so
+# reading them would make each scenario depend on the order the module runs
+# in. The narrative scenarios above were converted to the same per-record
+# form for that reason.
 LOCAL_CRASH_CONTRACT = (
     CrashExpectation(
         fault_point="before_permit_reserve",
