@@ -18,6 +18,7 @@ should be filed as-is.
 | [`04-claim-sets.md`](04-claim-sets.md) | Three independent claims plus dependents | Counsel |
 | [`05-abstract-and-figures.md`](05-abstract-and-figures.md) | Abstract and figure descriptions | Counsel / draftsperson |
 | [`06-ids-candidates.md`](06-ids-candidates.md) | References to disclose under 37 CFR 1.97 | Counsel |
+| [`07-provisional-specification.md`](07-provisional-specification.md) | `03-` and `05-` assembled into one continuous §112(a) written description, in filing order. A draft to edit, **not** a filing — see its header for the four things counsel must do before it can be filed. | Counsel |
 
 ## The short version
 
@@ -48,3 +49,30 @@ The authorization half of the system — scoped, expiring, signed permits for
 agent tool calls — is where the closest prior art lives, and is the weakest
 place to anchor a claim. See
 [`02-prior-art-landscape.md`](02-prior-art-landscape.md).
+
+## What changed after the 2026-08 research pass
+
+The list above is ordered as originally drafted. **It is no longer the order of
+strength.** PRs #285 and #288 added verified, primary-source research to the
+repository — `docs/market-research-2026-08.md` and new rows in
+`docs/related-work.md` — and changed no file in `docs/ip/`. Folding it in
+(§§5–7 of `02-`) moved things:
+
+- **The settlement mechanisms held.** Exactly-once debit across a crash (2) is
+  now the strongest: nothing in the new art classifies a crashed record the way
+  the reconciler does.
+- **The evidence mechanisms weakened.** Offline-verifiable Ed25519 receipts at a
+  network boundary are occupied — protect-mcp emits receipts verifiable without
+  calling the issuer, and its author has an Internet-Draft,
+  `draft-farley-acta-signed-receipts`, whose `-02` adds a `spending_authority`
+  receipt type. What survives of (4) is the **status taxonomy** specifically:
+  that a key the verifier does not hold resolves to `UNKNOWN_KEY` rather than to
+  a tampering verdict.
+- **Mechanism 1 has a named general technique**: optimistic concurrency control
+  (Kung & Robinson, 1981). Draft it around the classification of the zero-row
+  outcome, not around the conditional `UPDATE`.
+
+Read [`02-prior-art-landscape.md`](02-prior-art-landscape.md) §§5–7 before
+relying on the ordering above, and
+[`06-ids-candidates.md`](06-ids-candidates.md) §§C.1–C.2 for what that research
+added to the disclosure list.

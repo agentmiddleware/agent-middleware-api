@@ -1204,3 +1204,168 @@ async def test_remote_prepare_cap_holds_under_concurrency(
             )
         ).scalar_one()
     assert attempts == 1, "a denied reservation must not leave a prepared attempt"
+
+
+async def _expire_permit_row(permit_id: str) -> None:
+    """Push a permit's ``expires_at`` into the past, in its own transaction.
+
+    Used to simulate the permit crossing its expiry *after* validation read it
+    as live. Doing it through a separate session is what makes the race
+    deterministic instead of timing-dependent.
+    """
+    from app.db.models import PermitModel
+
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            model = await session.get(PermitModel, permit_id)
+            assert model is not None
+            model.expires_at = utc_now() - timedelta(seconds=1)
+            session.add(model)
+
+
+@pytest.mark.anyio
+async def test_reserve_refuses_permit_that_expired_after_validation(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch,
+) -> None:
+    """A permit crossing expires_at mid-reservation is denied, not reserved.
+
+    Expiry is a dynamic check: an expired permit keeps ``status="active"`` in
+    storage. So before ``expires_at`` was added to the guarded UPDATE predicate,
+    a permit could pass the read-time expiry check in validation, cross its
+    expiry, and still satisfy the guarded write -- reserving budget, and
+    dispatching, under a permit that was no longer valid. The row lock does not
+    close that window on engines where it is a silent no-op.
+
+    The window is forced open here rather than waited for: validation runs for
+    real, then the row is expired out-of-band before the guarded UPDATE runs.
+    """
+    from app.services.permits import PermitService
+
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-tool-expiry-race"
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="permit-expiry-race",
+    )
+
+    original_validate = PermitService._validate_model_for_action
+
+    async def _expire_after_validate(self, **kwargs):
+        # Validate exactly as production does -- the permit is still live here,
+        # so this returns allowed...
+        result = await original_validate(self, **kwargs)
+        # ...and only then does the permit expire, before the guarded write.
+        await _expire_permit_row(permit["permit_id"])
+        return result
+
+    monkeypatch.setattr(
+        PermitService,
+        "_validate_model_for_action",
+        _expire_after_validate,
+    )
+
+    validation = await get_permit_service().authorize_and_reserve(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        tool_name=tool_name,
+        estimated_credits=Decimal("4"),
+        key_id=provisioned["key_id"],
+    )
+
+    assert validation.allowed is False
+    # Reported as expired, not as out of money -- the permit had budget left.
+    assert validation.reason == "permit_expired"
+    assert validation.details is not None
+    assert validation.details["expired_at"] is not None
+    assert validation.details["checked_at"] is not None
+
+    # The invariant that matters: no budget moved.
+    stored = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored is not None
+    assert stored.spent_credits == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_remote_prepare_refuses_permit_that_expired_after_validation(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch,
+) -> None:
+    """The upstream dispatch path enforces expiry in the same guarded write.
+
+    Same race as the local path, on the path reached from
+    ``app/routers/mcp.py``. A denial here must also leave no prepared attempt,
+    because a prepared attempt with no reservation behind it is exactly the
+    inconsistency the state machine exists to prevent.
+    """
+    from app.services.permits import PermitService
+
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-tool-expiry-race-remote"
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="permit-expiry-race-remote",
+    )
+
+    original_validate = PermitService._validate_model_for_action
+
+    async def _expire_after_validate(self, **kwargs):
+        result = await original_validate(self, **kwargs)
+        await _expire_permit_row(permit["permit_id"])
+        return result
+
+    monkeypatch.setattr(
+        PermitService,
+        "_validate_model_for_action",
+        _expire_after_validate,
+    )
+
+    payload = {"tool": tool_name, "arguments": {"value": 1}}
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint="/mcp/messages",
+        idempotency_key="invoke-expiry-race",
+        request_payload=payload,
+    )
+    (
+        validation,
+        attempt,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="remote_tool",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("4"),
+    )
+
+    assert validation.allowed is False
+    assert validation.reason == "permit_expired"
+    assert attempt is None
+
+    stored = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored is not None
+    assert stored.spent_credits == Decimal("0")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        attempts = (
+            await session.execute(
+                select(func.count()).select_from(McpDispatchAttemptModel)
+            )
+        ).scalar_one()
+    assert attempts == 0, "an expiry denial must not leave a prepared attempt"

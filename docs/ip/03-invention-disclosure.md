@@ -127,13 +127,15 @@ UPDATE permits
        updated_at    = :now
  WHERE permit_id     = :permit_id
    AND status        = 'active'
+   AND expires_at    > :now
    AND spent_credits + :estimated <= max_credits
 ```
 
 4. If the affected row count is not exactly 1, the reservation lost a race —
-   refresh the row and deny with an accurate reason (`permit_<status>` if the
-   status changed, otherwise `permit_budget_exceeded` with remaining, spent,
-   and maximum credits attached). **No budget moved.**
+   refresh the row and deny with an accurate reason: `permit_<status>` if the
+   status changed, `permit_expired` if it crossed `expires_at`, otherwise
+   `permit_budget_exceeded` with remaining, spent, and maximum credits
+   attached. **No budget moved.**
 
 The essential property: *the numbers read during validation are advisory; the
 guarded write is the sole authority.* The cap predicate is evaluated by the
@@ -141,31 +143,42 @@ database as part of the same statement that performs the increment, so two
 concurrent reservations cannot both satisfy it, **regardless of whether the row
 lock in step 1 actually engaged**.
 
-**Scope this claim precisely.** The guarded predicate covers exactly two
-things — `status = 'active'` and the budget cap. Those two are enforced
-independently of the lock. Everything else validated in step 2 — signature,
-key match, expiry, scopes, per-tool counts, aggregate value cap, forbidden
-fields — is protected by the row lock alone, and therefore *does* depend on the
-engine's locking semantics.
+**Scope this claim precisely.** The guarded predicate covers exactly three
+things — `status = 'active'`, `expires_at > :now`, and the budget cap. Those
+three are enforced independently of the lock. Everything else validated in
+step 2 — signature, key match, scopes, per-tool counts, aggregate value cap,
+forbidden fields — is protected by the row lock alone, and therefore *does*
+depend on the engine's locking semantics.
 
-Expiry is the sharpest instance, because an expired permit deliberately keeps
-`status = "active"` in storage (expiry is enforced dynamically at invoke time;
-see the comment at `app/routers/me.py:102`). Two consequences follow, and the
-disclosure must not paper over either:
-
-- On an engine where the lock is a no-op, a permit can pass the step-2 expiry
-  check, cross `expires_at`, and still satisfy the guarded update — dispatching
-  an invocation under a just-expired permit. The window is narrow and requires
-  expiry to fall inside it, but it is real.
-- The step-4 re-read classifies only by stored `status`, so it cannot return
-  `permit_expired`; an expired permit still reads as `active` and the denial
-  falls through to `permit_budget_exceeded`.
-
-Adding `expires_at > :now` to the guarded update predicate, and consulting
-`expires_at` in the re-read classification, would extend the lock-independent
-guarantee to expiry. **[not implemented]** — see §7. Counsel should keep the
-independent claim anchored on the budget cap, which is what the code actually
-enforces without the lock.
+> **Expiry moved into the predicate; this section used to describe a gap.**
+> An expired permit keeps `status = "active"` in storage — expiry is a dynamic
+> check, not a stored state (see the comment at `app/routers/me.py:102`). While
+> the guarded predicate covered only `status` and the cap, two things followed:
+> a permit could pass the step-2 expiry check, cross `expires_at`, and still
+> satisfy the guarded update — dispatching under a just-expired permit wherever
+> the row lock was a no-op; and the step-4 re-read, classifying only by stored
+> `status`, could never return `permit_expired`, so such a denial fell through
+> to `permit_budget_exceeded`.
+>
+> Both are now closed. `expires_at > :now` is a term of the guarded update on
+> **both** reservation paths, and the re-read classifies expiry before budget so
+> a permit that expired mid-flight is not misreported as out of money.
+>
+> **Regression coverage:**
+> `tests/test_governed_persistence.py::test_reserve_refuses_permit_that_expired_after_validation`
+> and `::test_remote_prepare_refuses_permit_that_expired_after_validation`
+> force the window open — validation runs for real against a live permit, the
+> row is then expired out of band, and only then does the guarded write run.
+> Both were confirmed to **fail against the pre-fix code** with
+> `assert True is False`: the reservation was allowed under an expired permit,
+> on both paths. The upstream test additionally asserts that the denial leaves
+> **no prepared attempt**.
+>
+> Consequence for the claims: the lock-independent guarantee now covers expiry
+> as well as the cap, and `permit_expired` is a reachable denial reason from the
+> re-read. Counsel may now recite expiry in the guarded-update limitation —
+> though the budget cap remains the cleaner anchor, since it is the one that
+> carries an accounting consequence.
 
 The same guarded-update discipline is used for standalone reservation
 (`reserve_budget()`, `:709`, which also emits threshold notifications at 80%,
@@ -445,11 +458,13 @@ and inequitable-conduct exposure, and this repository already documents them
   "the payload was modified" without qualification. Closing this is a small
   code change and would strengthen claim 15 — do it **before** filing if the
   stronger claim is wanted.
-- **The lock-independent budget guarantee does not extend to expiry.** The
-  guarded update predicates only on `status` and the cap; expired permits keep
-  `status = "active"`. See §4.2 for the resulting race and the missing
-  `permit_expired` denial reason. This is now the *only* remaining gap in the
-  reservation mechanism — the upstream-path gap was closed (§4.3).
+- ~~**The lock-independent budget guarantee does not extend to expiry.**~~
+  **Closed.** `expires_at > :now` is now a term of the guarded update on both
+  reservation paths, and the re-read classifies expiry before budget, so
+  `permit_expired` is reachable. See §4.2 for the mechanism and the regression
+  tests that fail against the pre-fix code. **No known gap remains in the
+  reservation mechanism** — the upstream-path gap closed earlier (§4.3), this
+  one after it.
 - **Private-key rotation is out of band.** `rotate_active_key_metadata()`
   rotates metadata only.
 - Settlement, compliance-grade ledger storage, and production readiness for

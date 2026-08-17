@@ -26,6 +26,18 @@ US 12,688,261 sits (see [`02-prior-art-landscape.md`](02-prior-art-landscape.md)
 > — is the limitation that distinguishes this from ordinary row locking, and it
 > is supported by the SQLite embodiment in §5 of the disclosure. Do not let it
 > be amended away.
+>
+> **Added after the 2026-08 research pass:** the general technique here is
+> **optimistic concurrency control** (Kung & Robinson, ACM TODS 6(2), June 1981, pp. 213–226), and
+> `jamjet` and `latch` both enforce budgets in agent tooling — see
+> [`02-prior-art-landscape.md`](02-prior-art-landscape.md) §5 and §6.2. A
+> conditional `UPDATE` predicated on an observed value is textbook, so lean the
+> claim on what OCC does not supply: the predicate is a **domain cap** rather
+> than a version equality test, the zero-row outcome is **classified into an
+> actionable reason** (budget versus status) rather than retried, and there is
+> **no retry loop** — a loser is denied, not re-run. Note also that
+> `app/services/audit_chain.py` uses the same technique for a different purpose
+> in this repository, which an examiner may find.
 
 **1.** A system for enforcing a delegated spending limit on tool invocations by
 an autonomous software agent, the system comprising:
@@ -190,6 +202,19 @@ records of invocations still in progress are not subjected to the repair action.
 > before filing, tell counsel: the claim should then be amended to recite
 > selection from the signed payload, and limitation (f) can be tightened to
 > "only status (i) indicates modification of the payload."
+>
+> **Added after the 2026-08 research pass — this set got weaker, not stronger.**
+> Offline-verifiable Ed25519 receipts at a network boundary are **occupied**:
+> protect-mcp emits decision receipts verifiable without calling the issuer, and
+> its author has an Internet-Draft (`draft-farley-acta-signed-receipts`) whose
+> `-02` adds a `spending_authority` receipt type. See
+> [`02-prior-art-landscape.md`](02-prior-art-landscape.md) §6. The narrow
+> framing in the note above is therefore not merely good practice — it is now
+> the **only** framing available. Do not let this set drift back toward "signed
+> receipts at a gateway" or "offline verification," both of which are table
+> stakes. The taxonomy is the claim. Counsel should also check what each
+> competitor's verifier returns when the key is missing; on the reviewed
+> materials none of them says, which is where the distinction lives.
 
 **15.** A non-transitory computer-readable medium storing instructions that,
 when executed by one or more processors, cause the processors to verify a

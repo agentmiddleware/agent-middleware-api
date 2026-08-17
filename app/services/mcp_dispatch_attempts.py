@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.time import utc_now
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     HumanApprovalModel,
@@ -471,6 +471,14 @@ class McpDispatchAttemptService:
                     # which this upstream path did not inherit. The
                     # read-validated numbers are advisory; this write is the
                     # authority.
+                    #
+                    # Expiry is in the predicate for the same reason the cap is.
+                    # An expired permit keeps status="active" in storage, so
+                    # without this term a permit could pass the read-time expiry
+                    # check, cross expires_at, and still be reserved against.
+                    # One `now` is used for both the predicate and the denial
+                    # classification below, so the two cannot disagree.
+                    now = utc_now()
                     reserved = await session.execute(
                         sa_update(PermitModel)
                         .where(
@@ -484,6 +492,10 @@ class McpDispatchAttemptService:
                             ),
                             cast(
                                 ColumnElement[bool],
+                                PermitModel.expires_at > now,
+                            ),
+                            cast(
+                                ColumnElement[bool],
                                 PermitModel.spent_credits + credits_authorized
                                 <= PermitModel.max_credits,
                             ),
@@ -491,7 +503,7 @@ class McpDispatchAttemptService:
                         .values(
                             spent_credits=PermitModel.spent_credits
                             + credits_authorized,
-                            updated_at=utc_now(),
+                            updated_at=now,
                         )
                         .execution_options(synchronize_session=False)
                     )
@@ -509,6 +521,24 @@ class McpDispatchAttemptService:
                                     f"permit_{permit.status}",
                                     permit,
                                     {"status": permit.status},
+                                ),
+                                None,
+                            )
+                        # Reachable now that expiry is in the predicate above.
+                        # Classified before budget so a permit that expired
+                        # mid-flight is not misreported as out of money.
+                        if to_naive_utc(permit.expires_at) <= now:
+                            return (
+                                PermitValidation(
+                                    False,
+                                    "permit_expired",
+                                    permit,
+                                    {
+                                        "expired_at": to_naive_utc(
+                                            permit.expires_at
+                                        ).isoformat(),
+                                        "checked_at": now.isoformat(),
+                                    },
                                 ),
                                 None,
                             )
