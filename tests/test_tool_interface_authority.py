@@ -683,19 +683,55 @@ async def test_annotations_are_honest_in_permissive_trust_mode(
         registry.unregister_local("authority-permit-forced")
 
 
-def test_non_finite_cost_is_not_advertised_as_free():
+def _priced_tool(**price_fields):
     from app.services.mcp_generator import McpGenerator
 
-    tool = McpGenerator()._service_to_mcp_tool(
+    return McpGenerator()._service_to_mcp_tool(
         {
-            "service_id": "authority-nan-priced",
-            "description": "Tool with a malformed exact price",
+            "service_id": "authority-priced",
+            "description": "Tool under price normalization",
             "category": ServiceCategory.AGENT_COMMS.value,
-            "credits_per_unit": 2.0,
-            "credits_per_unit_exact": "nan",
+            **price_fields,
         }
     )
-    assert tool["annotations"]["economicAction"] is True
+
+
+@pytest.mark.parametrize(
+    "price_fields",
+    [
+        # Exact field malformed in every way float() can fail or lie.
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "nan"},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "inf"},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "-inf"},
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": "not-a-number"},
+        # A non-numeric type raises TypeError rather than ValueError.
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": []},
+        # An int too large for a float raises OverflowError, not ValueError.
+        {"credits_per_unit": 2.0, "credits_per_unit_exact": 10**400},
+        # No exact field: the same guards apply to credits_per_unit.
+        {"credits_per_unit": float("nan")},
+        {"credits_per_unit": "garbage"},
+        {"credits_per_unit": 10**400},
+    ],
+)
+def test_malformed_price_is_never_advertised_as_free(price_fields):
+    """A price the plane cannot make sense of must fail conservative —
+    advertising economicAction=false would tell an agent a consequential
+    tool is free."""
+    assert _priced_tool(**price_fields)["annotations"]["economicAction"] is True
+
+
+def test_valid_zero_price_is_still_not_an_economic_action():
+    """The conservative fallback must not swallow a legitimately free tool."""
+    assert (
+        _priced_tool(credits_per_unit=0.0, credits_per_unit_exact="0")["annotations"][
+            "economicAction"
+        ]
+        is False
+    )
+    assert (
+        _priced_tool(credits_per_unit=0.0)["annotations"]["economicAction"] is False
+    )
 
 
 def test_approval_window_is_clamped_to_sentinel_bounds(monkeypatch):
