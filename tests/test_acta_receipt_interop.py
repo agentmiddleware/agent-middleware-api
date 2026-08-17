@@ -83,7 +83,9 @@ def test_checked_in_proof_bundle_transcodes_and_roundtrips() -> None:
         if entry["kid"] == bundle["kid"]
     )
 
-    verified = interop.verify_portable_bundle(bundle, key_b64)
+    verified = interop.verify_portable_bundle(
+        bundle, key_b64, expected_issuer=keys["issuer"]
+    )
     transcoder = Ed25519PrivateKey.generate()
     signed = interop.sign_acta_receipt(
         interop.to_acta_receipt(verified, issuer_id="test-kid"),
@@ -132,6 +134,33 @@ def test_missing_economic_linkage_is_refused() -> None:
     bundle = _make_bundle(key, "kid-a", claims={"ledger_entry_id": ""})
     with pytest.raises(interop.TranscodeError, match="ledger_entry_id"):
         interop.verify_portable_bundle(bundle, _public_b64(key))
+
+
+def test_issuer_mutated_after_signing_is_refused() -> None:
+    """The wrapper issuer is unsigned; the key-record binding must catch it."""
+    key = Ed25519PrivateKey.generate()
+    bundle = _make_bundle(key, "kid-a")
+    bundle["issuer"] = "https://attacker.invalid"
+    with pytest.raises(interop.TranscodeError, match="issuer"):
+        interop.verify_portable_bundle(
+            bundle, _public_b64(key), expected_issuer="https://example.invalid"
+        )
+
+
+def test_signature_alg_tamper_is_refused() -> None:
+    """Changing only signature.alg must fail even though the sig bytes hold."""
+    key = Ed25519PrivateKey.generate()
+    bundle = _make_bundle(key, "kid-a")
+    verified = interop.verify_portable_bundle(bundle, _public_b64(key))
+    transcoder = Ed25519PrivateKey.generate()
+    signed = interop.sign_acta_receipt(
+        interop.to_acta_receipt(verified, issuer_id="test-kid"),
+        transcoder,
+        kid="test-kid",
+    )
+    signed["signature"] = {**signed["signature"], "alg": "ES256"}
+    with pytest.raises(interop.TranscodeError, match="alg"):
+        interop.verify_acta_receipt(signed, transcoder.public_key())
 
 
 def test_outer_envelope_tamper_is_detected() -> None:

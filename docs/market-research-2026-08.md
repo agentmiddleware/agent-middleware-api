@@ -316,7 +316,10 @@ thread's author fixed it with idempotency keys and moved on.
   has been run.** `examples/acta_receipt_interop.py` transcodes the published
   proof receipt into an `agentmiddleware:governed_invoke` receipt in the
   draft's envelope (JCS canonicalization, Ed25519, `issuer_id`=`kid`), with
-  the original signed bundle embedded and independently verifiable, and the
+  the original signed bundle embedded and independently verifiable — the
+  signature covers the exact `signing_input` bytes, and the wrapper's
+  `issuer` label is checked against the issuer bound to the key material in
+  the trust-keys snapshot rather than trusted on its own — and the
   ledger/idempotency linkage carried as first-class fields. Cost measured:
   ~200 lines plus tests, no trust-plane changes. Whether to *ship* it stays a
   product call; the cost side is now a fact, not an estimate.

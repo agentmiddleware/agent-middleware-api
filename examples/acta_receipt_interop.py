@@ -111,17 +111,29 @@ class VerifiedBundle:
 
 
 def verify_portable_bundle(
-    bundle: dict[str, Any], public_key_b64: str
+    bundle: dict[str, Any], public_key_b64: str, expected_issuer: str | None = None
 ) -> VerifiedBundle:
     """Verify the inner receipt exactly as the offline SDK verifier does.
 
     The signature is checked over the raw ``signing_input`` bytes — never
     over a re-serialization — so this function cannot be tricked by a bundle
     whose pretty ``claims`` disagree with what was actually signed.
+
+    The bundle's ``issuer`` field is wrapper metadata *outside* the signed
+    bytes. Pass ``expected_issuer`` — the issuer bound to the key material in
+    the trust-keys snapshot the public key came from — to refuse a bundle
+    whose wrapper claims a different issuer. Without it, the issuer is
+    carried through as unverified routing metadata; trust is anchored in the
+    key, not the label.
     """
     for field in ("signing_input", "signature", "kid", "issuer"):
         if not isinstance(bundle.get(field), str) or not bundle[field]:
             raise TranscodeError(f"portable bundle is missing {field!r}")
+    if expected_issuer is not None and bundle["issuer"] != expected_issuer:
+        raise TranscodeError(
+            "bundle issuer does not match the issuer bound to the trusted "
+            f"key record: {bundle['issuer']!r} != {expected_issuer!r}"
+        )
 
     public_key = Ed25519PublicKey.from_public_bytes(
         base64.b64decode(public_key_b64, validate=True)
@@ -163,7 +175,10 @@ def to_acta_receipt(verified: VerifiedBundle, issuer_id: str) -> dict[str, Any]:
     (``type``, ``issued_at``, ``issuer_id``, ``tool_name``) and carry the
     economic linkage — the part no surveyed receipt format defines — as
     plainly named custom fields. The untouched original bundle is embedded
-    so cryptographic trust never depends on the transcoder.
+    so cryptographic trust never depends on the transcoder. Its ``issuer``
+    field is wrapper metadata, trustworthy only when the caller verified it
+    against the key record (``expected_issuer``); the signature covers
+    ``signing_input`` alone.
     """
     claims = verified.claims
     return {
@@ -209,6 +224,13 @@ def verify_acta_receipt(
     signature_block = signed.get("signature")
     if not isinstance(signature_block, dict):
         raise TranscodeError("ACTA receipt has no signature block")
+    if signature_block.get("alg") != "Ed25519":
+        raise TranscodeError(
+            "ACTA signature alg must be Ed25519; refusing "
+            f"{signature_block.get('alg')!r}"
+        )
+    if not isinstance(signature_block.get("sig"), str):
+        raise TranscodeError("ACTA signature sig must be a hex string")
     body = {key: value for key, value in signed.items() if key != "signature"}
     if body.get("issuer_id") != signature_block.get("kid"):
         raise TranscodeError("issuer_id does not match the signature kid")
@@ -234,7 +256,9 @@ def _demo(bundle_path: str) -> int:
         if entry["kid"] == bundle["kid"]
     )
 
-    verified = verify_portable_bundle(bundle, key_b64)
+    verified = verify_portable_bundle(
+        bundle, key_b64, expected_issuer=keys["issuer"]
+    )
     print(f"inner signature: VERIFIED (kid={verified.kid})")
 
     transcoder_key = Ed25519PrivateKey.generate()
