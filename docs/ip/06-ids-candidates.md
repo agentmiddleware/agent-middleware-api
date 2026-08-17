@@ -49,6 +49,7 @@ are precisely where competing 2025–2026 agent-governance filings will be sitti
 | 7 | RFC 8785 — JSON Canonicalization Scheme (JCS) | Closest standardized analogue to the `awi-canonical-json/1` contract. Counsel should note where the implementation **differs** from JCS — decimal normalization and datetime coercion in particular — since those differences are what the canonicalization-version check protects. |
 | 8 | RFC 6962 — Certificate Transparency | Hash-linked tamper-evident log structure; relevant to the audit chain (§4.7), which is described as supporting detail, not novelty. |
 | 9 | RFC 8693 — OAuth 2.0 Token Exchange; RFC 9396 — Rich Authorization Requests | Scoped, delegated, fine-grained authorization credentials. |
+| 9a | **`draft-farley-acta-signed-receipts`** ([IETF Datatracker](https://datatracker.ietf.org/doc/draft-farley-acta-signed-receipts/)) | **The most material reference added since the first draft of this package.** Ed25519 over JCS-canonicalized JSON, namespaced receipt types, and from `-02` a **`spending_authority`** receipt type plus a Merkle commitment mode — reaching mechanisms 1, 3 and 4 simultaneously. Two qualifications: it is an **individual submission with no IETF standing**, so cite it as one vendor's draft rather than a standards-track document; and pull the **dated revision history**, since which revision first recited `spending_authority` matters more under §102(a)(1) than the draft's existence. Authored by the party behind protect-mcp (item 20a). |
 
 ---
 
@@ -62,6 +63,37 @@ are precisely where competing 2025–2026 agent-governance filings will be sitti
 | 13 | *Constant-Size Cryptographic Evidence Structures for Regulated AI Workflows*, arXiv:2511.17118 | Hash-and-sign evidence structures composing with hash chains. Cited in `docs/related-work.md`. |
 | 14 | *Creating Characteristically Auditable Agentic AI Systems*, ACM DOI 10.1145/3759355.3759356 | Agent auditability as a system property. Cited in `docs/related-work.md`. |
 | 15 | *From Prompt Injections to Protocol Exploits*, arXiv:2506.23260 | Threat taxonomy for LLM-agent ecosystems including protocol-level attacks. Background for the confused-deputy and permit-misuse framing. |
+| 15a | **Kung, H.T. & Robinson, J.T., *On Optimistic Methods for Concurrency Control*, ACM TODS 6(2), June 1981, pp. 213–226** (DOI [10.1145/319566.319567](https://dl.acm.org/doi/10.1145/319566.319567)) | The general technique mechanism 1 instantiates: commit conditionally on an observed value and detect the lost race by affected-row count instead of holding a lock. Productized in Hibernate `@Version` and SQLAlchemy `version_id_col`. Disclose it and draft around the **classification of the zero-row outcome** — see §5 of `02-prior-art-landscape.md`. Note this repository contains a second instance of the technique in `app/services/audit_chain.py`, which an examiner may find. |
+
+### C.1 MCP-native governance products
+
+Propagated from [`../market-research-2026-08.md`](../market-research-2026-08.md)
+(added by #285), whose rows carry per-claim verification levels. **Not
+independently re-verified for this package** — counsel must read the primaries.
+All are publicly available and describe systems overlapping the claimed
+mechanisms, so all are IDS candidates.
+
+| # | Reference | Relevance |
+| --- | --- | --- |
+| 20a | [protect-mcp / ScopeBlind gateway](https://github.com/tomjwxf/scopeblind-gateway) | Recorded as **the closest competitor**: a proxy intercepting `tools/call` with per-tool Cedar policy and optional **Ed25519-signed decision receipts verifiable without calling the issuer**. Occupies network-boundary-plus-offline-receipts. No wallet, budget, or charge-once semantics. Author of item 9a. **Establish its public-availability date** — it bears on §102(a)(1) for mechanisms 3 and 4. |
+| 20b | [jamjet-labs/jamjet](https://github.com/jamjet-labs/jamjet) | **Enforces budgets** and emits signed receipts with a hash-chained `previousReceiptHash` plus pre/post-execution signatures. Reaches mechanism 1 (budget enforcement in an agent gateway) and mechanisms 3–4. |
+| 20c | [sangaraju1988/latch](https://github.com/sangaraju1988/latch) | Python library pairing **idempotency with a budget guardrail**, plus circuit breaker and saga/compensation, with a Redis backend for cross-process idempotency. Closest to Set B; note compensation is a different answer from crash-state classification. No signed receipts. |
+| 20d | [TraceAgent](https://www.traceagent.dev/) | Append-only SHA-256 hash-chained receipts. **Verified only that receipts are hash-chained**; issuer signature and offline verifiability are *unverified*. Do not characterize it as offline-verifiable without a primary source. |
+| 20e | [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit) | Active proposal for independently verifiable compliance receipts. Disclose as a large-vendor entrant in the same space. |
+
+### C.2 Third-party problem reports
+
+These are double-edged and counsel should treat them as such: they evidence a
+**long-felt need** (a *Graham v. John Deere* secondary consideration against
+obviousness) while also being **printed publications establishing that a person
+of ordinary skill was motivated to solve the problem**. Disclose them.
+
+| # | Reference | Relevance |
+| --- | --- | --- |
+| 21a | [stripe/ai#402](https://github.com/stripe/ai/issues/402) | Agent-level retry creates duplicate charges; SDK-level idempotency keys do not cover it because the framework retries as a new invocation with a fresh key. Concludes the guard belongs above the tool layer. A reproduction, **not** a confirmed production charge. |
+| 21b | [langchain-ai/langgraph#7417](https://github.com/langchain-ai/langgraph/issues/7417) | **Confirmed production incident**: managed infrastructure re-dispatches a tool call the caller believes is still running. Duplicated execution and cost — the platform-level instance of the ambiguous-outcome case `delivery_uncertain` models. |
+| 21c | [crewAIInc/crewAI#5802](https://github.com/crewAIInc/crewAI/issues/5802) | A second framework documenting the same gap, with a `stripe.charge()`-fires-twice worked example. |
+| 21d | [OpenBB-finance/OpenBB#7455](https://github.com/OpenBB-finance/OpenBB/issues/7455) | A production MCP operator requesting signed per-call evidence for regulatory compliance. |
 
 ---
 
