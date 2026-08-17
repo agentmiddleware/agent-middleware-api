@@ -192,6 +192,16 @@ def test_issuer_id_must_match_signing_kid() -> None:
         )
 
 
+def test_missing_signer_identity_is_refused() -> None:
+    """Absent issuer_id and absent kid must not slip past as None == None."""
+    key = Ed25519PrivateKey.generate()
+    body = {"type": interop.ACTA_TYPE, "receipt_id": "rcpt-test"}
+    signature = key.sign(interop.jcs_canonicalize(body))
+    signed = {**body, "signature": {"alg": "Ed25519", "sig": signature.hex()}}
+    with pytest.raises(interop.TranscodeError, match="issuer_id|kid"):
+        interop.verify_acta_receipt(signed, key.public_key())
+
+
 def test_floats_fail_closed_in_canonicalization() -> None:
     with pytest.raises(interop.TranscodeError, match="float"):
         interop.jcs_canonicalize({"amount": 1.5})

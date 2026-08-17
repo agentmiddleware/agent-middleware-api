@@ -232,7 +232,13 @@ def verify_acta_receipt(
     if not isinstance(signature_block.get("sig"), str):
         raise TranscodeError("ACTA signature sig must be a hex string")
     body = {key: value for key, value in signed.items() if key != "signature"}
-    if body.get("issuer_id") != signature_block.get("kid"):
+    issuer_id = body.get("issuer_id")
+    kid = signature_block.get("kid")
+    if not isinstance(issuer_id, str) or not issuer_id:
+        raise TranscodeError("ACTA receipt issuer_id must be a non-empty string")
+    if not isinstance(kid, str) or not kid:
+        raise TranscodeError("ACTA signature kid must be a non-empty string")
+    if issuer_id != kid:
         raise TranscodeError("issuer_id does not match the signature kid")
     try:
         public_key.verify(

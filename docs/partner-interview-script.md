@@ -98,7 +98,9 @@ Whatever they built, take it seriously — it is the real competitor. Refer to
 it in *their* words from §1 (rule 5 still applies here — if they called it
 "the dedup thing," so do you):
 
-- "That safeguard you built at the tool layer — how long did that take?
+- "What, if anything, did you change after the incident?"
+  *(A real answer may be "nothing" — record `none` for the mitigation field
+  and move on.)* If they describe a safeguard: "How long did that take?
   Who maintains it? Does it survive a worker restart / a second process?"
 - "Have you had to prove to anyone *outside* the team what an agent did and
   what it cost? Who asked? What did you show them? Did they accept it?"
@@ -152,9 +154,18 @@ Then stop talking. The reactions worth recording:
   > calendar before we hang up?"
 
   A pass requires all three: a **named engineer**, a **named staging
-  environment**, and a **scheduled date** (or a concrete scheduling step
-  taken on the call). "Sounds cool, keep me posted" — or a yes with no name
-  and no date — is a no; write it down as a no.
+  environment**, and a **scheduled date or a concrete scheduling step taken
+  on the call** (an invite sent, a named owner asked to propose a slot).
+  "Sounds cool, keep me posted" — or a yes with no name and no date — is a
+  no; write it down as a no.
+
+  This gate is **pre-qualification only**. Pilot readiness is a separate,
+  stricter contract — the Pilot Acceptance Test in
+  [`30-day-customer-validation.md`](30-day-customer-validation.md) requires
+  a partner-owned agent, a partner-owned staging MCP tool, a partner
+  engineer operating the workflow, and independent partner-side receipt
+  verification. Passing this interview gate advances someone to that
+  conversation, not past it.
 
 ### 5. Close (1 min)
 
@@ -177,7 +188,7 @@ Then stop talking. The reactions worth recording:
 | Their words for the problem (verbatim) | |
 | Commitment test: engineer named | |
 | Commitment test: staging env named | |
-| Commitment test: date scheduled | |
+| Commitment test: date scheduled, or concrete scheduling step taken | |
 | Disqualified at screening? Why? | |
 
 An interview counts toward the denominator only if it passed screening and
@@ -191,8 +202,13 @@ All counts are over **qualified_n = 5** completed, qualified interviews —
 keep interviewing until there are five; do not decide on fewer.
 
 - **3+ of 5** surface a past-tense incident **and** **2+ of 5** pass the
-  full commitment test (engineer + staging + date) → proceed to a paid-pilot
-  conversation with the strongest one. A paid-pilot *conversation* — the
+  full commitment test (engineer + staging + date or concrete scheduling
+  step) → proceed to a paid-pilot conversation. Selection is deterministic:
+  take the passer with the **earliest scheduled staging date** first (a
+  concrete-step-only pass sorts after any dated pass); tie-break on the most
+  complete buyer-evidence row (approver, budget, procurement — three fields
+  beat two), then on the earlier interview. The rest queue in the same
+  order — one design partner at a time. A paid-pilot *conversation* — the
   commitment test proves an engineer's afternoon, not a budget; the pilot
   conversation is where the §3 buyer evidence (approver, budget, procurement)
   gets tested for real.
