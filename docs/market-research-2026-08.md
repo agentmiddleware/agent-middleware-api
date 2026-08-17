@@ -237,6 +237,10 @@ built from §3 and §4.
    conversation settles that.
 5. Would a buyer with an EU AI Act mandate reject a vendor with no compliance
    mapping outright, or accept receipts as one input among several?
+6. Does the demand exist? The instrument for answering is now written:
+   [`partner-interview-script.md`](partner-interview-script.md), with a
+   pre-committed decision rule so five interviews produce a verdict rather
+   than an argument.
 
 ---
 
@@ -308,10 +312,14 @@ thread's author fixed it with idempotency keys and moved on.
   documents.
 - **The practitioner quote is the receipt argument verbatim**: "nothing in the
   transcript says so." Candidate for `/compare/` or the pitch, cited.
-- **Interop vs. compete is now a live, cheap experiment**: one serializer
-  emitting `agentmiddleware:*` receipts in the draft's envelope, offline
-  verification included. Whether to run it is a product call; the cost side is
-  no longer unknown.
+- **Interop vs. compete is now a live, cheap experiment — and the experiment
+  has been run.** `examples/acta_receipt_interop.py` transcodes the published
+  proof receipt into an `agentmiddleware:governed_invoke` receipt in the
+  draft's envelope (JCS canonicalization, Ed25519, `issuer_id`=`kid`), with
+  the original signed bundle embedded and independently verifiable, and the
+  ledger/idempotency linkage carried as first-class fields. Cost measured:
+  ~200 lines plus tests, no trust-plane changes. Whether to *ship* it stays a
+  product call; the cost side is now a fact, not an estimate.
 - **§6 risk 1 escalates**: the receipt-format neighbour added spend evidence
   within two draft revisions. If a registry lands, economic receipt types
   become table stakes the way signatures did.

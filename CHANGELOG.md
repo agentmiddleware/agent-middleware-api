@@ -61,6 +61,20 @@ full release gate; do not backfill a final `v1.2.0` tag.
 
 ### 🔬 Competitive research, and the positioning correction it forced
 
+- **The interop question now has running code.**
+  `examples/acta_receipt_interop.py` (plus `tests/test_acta_receipt_interop.py`,
+  8 tests) transcodes a signed portable receipt into the ScopeBlind ACTA
+  receipt envelope as a custom `agentmiddleware:governed_invoke` type — inner
+  production signature verified over the exact `signing_input` bytes, outer
+  Ed25519-over-JCS envelope, economic linkage as first-class fields, floats
+  and unverified or linkage-less bundles refused. Deliberately an experiment
+  in `examples/`, not a product surface; shipping it remains a product call.
+- **The demand question now has an instrument.**
+  `docs/partner-interview-script.md`: a past-tense-only discovery script with
+  an incident-first structure, a commitment test priced in engineer-afternoons
+  rather than opinions, a per-call scoring table, and a decision rule
+  committed before the interviews so five calls produce a verdict.
+
 - **Second research pass (2026-08-15) answered two of the open questions.**
   The protect-mcp receipt draft
   (`draft-farley-acta-signed-receipts`) was read directly: it is an individual
