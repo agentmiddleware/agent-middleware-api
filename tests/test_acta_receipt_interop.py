@@ -32,6 +32,7 @@ _spec.loader.exec_module(interop)
 
 
 def _make_bundle(private_key: Ed25519PrivateKey, kid: str, **overrides):
+    """Build a synthetic signed portable bundle, with override hooks."""
     claims = {
         "alg": "Ed25519",
         "created_at": "2026-08-15T00:00:00+00:00",
@@ -63,6 +64,7 @@ def _make_bundle(private_key: Ed25519PrivateKey, kid: str, **overrides):
 
 
 def _public_b64(private_key: Ed25519PrivateKey) -> str:
+    """Return the raw public key of *private_key*, base64-encoded."""
     from cryptography.hazmat.primitives.serialization import (
         Encoding,
         PublicFormat,
@@ -105,6 +107,7 @@ def test_checked_in_proof_bundle_transcodes_and_roundtrips() -> None:
 
 
 def test_unverified_inner_signature_is_refused() -> None:
+    """A bundle signed by a different key must not transcode."""
     key = Ed25519PrivateKey.generate()
     bundle = _make_bundle(key, "kid-a")
     wrong_key = Ed25519PrivateKey.generate()
@@ -113,6 +116,7 @@ def test_unverified_inner_signature_is_refused() -> None:
 
 
 def test_tampered_signing_input_is_refused() -> None:
+    """Altering signing_input after signing must break verification."""
     key = Ed25519PrivateKey.generate()
     bundle = _make_bundle(key, "kid-a")
     bundle["signing_input"] = bundle["signing_input"].replace('"1"', '"2"', 1)
@@ -121,6 +125,7 @@ def test_tampered_signing_input_is_refused() -> None:
 
 
 def test_kid_mismatch_between_bundle_and_signed_claim_is_refused() -> None:
+    """The wrapper kid must match the kid inside the signed claims."""
     key = Ed25519PrivateKey.generate()
     bundle = _make_bundle(key, "kid-a")
     bundle["kid"] = "kid-b"
@@ -164,6 +169,7 @@ def test_signature_alg_tamper_is_refused() -> None:
 
 
 def test_outer_envelope_tamper_is_detected() -> None:
+    """Changing any envelope field after signing must fail verification."""
     key = Ed25519PrivateKey.generate()
     bundle = _make_bundle(key, "kid-a")
     verified = interop.verify_portable_bundle(bundle, _public_b64(key))
@@ -229,5 +235,6 @@ def test_missing_signer_identity_is_refused(
 
 
 def test_floats_fail_closed_in_canonicalization() -> None:
+    """Floats are outside the JCS subset and must be refused outright."""
     with pytest.raises(interop.TranscodeError, match="float"):
         interop.jcs_canonicalize({"amount": 1.5})

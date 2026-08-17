@@ -79,6 +79,7 @@ def jcs_canonicalize(value: Any) -> bytes:
     """
 
     def check(node: Any) -> None:
+        """Recursively reject value shapes outside the supported JCS subset."""
         if isinstance(node, float):
             raise TranscodeError(
                 "float values are not supported by this JCS subset; "
@@ -256,6 +257,7 @@ def verify_acta_receipt(
 
 
 def _demo(bundle_path: str) -> int:
+    """Verify a portable bundle end-to-end and print the ACTA envelope."""
     with open(bundle_path, "r", encoding="utf-8") as handle:
         bundle = json.load(handle)
 
