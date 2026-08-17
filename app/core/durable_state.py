@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import aiosqlite
 import asyncio
+import atexit
 import json
 import logging
+import os
+import threading
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -55,6 +58,85 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
+# --- SQLite worker-thread shutdown backstop --------------------------------
+# ``aiosqlite.Connection`` composes its worker ``Thread`` without
+# ``daemon=True``, and CPython joins non-daemon threads during interpreter
+# shutdown. A connection nobody closes therefore wedges the process at exit
+# with no traceback and no output — the failure mode that cancelled CI at
+# GitHub's six-hour limit before ``close_durable_state`` was wired into the
+# test teardown. ``close()`` is still the real cleanup path; this only catches
+# consumers that never reach it (a script, a REPL, a worker entrypoint).
+#
+# Registration goes through ``threading._register_atexit``, NOT ``atexit``.
+# Plain ``atexit`` handlers run *after* the non-daemon join, so they can never
+# break this particular hang — verified by observation, and the reason the
+# obvious implementation does not work. ``threading._register_atexit`` runs
+# inside ``threading._shutdown`` before the join; the stdlib's own
+# ``concurrent.futures.thread`` relies on it for the same purpose.
+_TRACKED_SQLITE_CONNECTIONS: dict[int, tuple[aiosqlite.Connection, int]] = {}
+_SQLITE_SHUTDOWN_HOOK_REGISTERED = False
+
+
+def _release_tracked_sqlite_connections() -> None:
+    """Release worker threads for connections nobody closed."""
+    current_pid = os.getpid()
+    for key, (conn, owner_pid) in list(_TRACKED_SQLITE_CONNECTIONS.items()):
+        # Shutdown hooks are inherited across fork(). A child must never close
+        # a connection owned by its parent, and must leave the entry in place
+        # rather than dropping something it was not entitled to handle.
+        if owner_pid != current_pid:
+            continue
+        logger.warning(
+            "Durable-state SQLite connection was not closed; releasing its "
+            "worker thread at shutdown. Call close_durable_state() on exit."
+        )
+        try:
+            # ``stop`` rather than ``close``: it is synchronous and tolerates a
+            # missing event loop by design, enqueueing its close-and-stop work
+            # with a ``None`` future. No loop has to survive until shutdown.
+            conn.stop()
+        except Exception:
+            # Warning, not debug: reaching here means the worker thread is still
+            # alive and interpreter exit is about to block on it.
+            logger.warning(
+                "Failed to stop SQLite worker at shutdown; interpreter exit "
+                "may block on it.",
+                exc_info=True,
+            )
+        _TRACKED_SQLITE_CONNECTIONS.pop(key, None)
+
+
+def _ensure_sqlite_shutdown_hook() -> None:
+    """Register the shutdown hook once per process."""
+    global _SQLITE_SHUTDOWN_HOOK_REGISTERED
+    if _SQLITE_SHUTDOWN_HOOK_REGISTERED:
+        return
+    register_early = getattr(threading, "_register_atexit", None)
+    if register_early is not None:
+        register_early(_release_tracked_sqlite_connections)
+    else:
+        # No known CPython lacks it (3.9+), but degrade rather than crash on
+        # import if a future runtime drops the private hook. Say so loudly:
+        # plain ``atexit`` runs *after* the non-daemon join, so this fallback
+        # cannot actually prevent the hang — it only makes the leak visible.
+        logger.warning(
+            "threading._register_atexit is unavailable; falling back to atexit, "
+            "which runs too late to release a leaked SQLite worker thread. "
+            "Call close_durable_state() on shutdown to avoid a hang at exit."
+        )
+        atexit.register(_release_tracked_sqlite_connections)
+    _SQLITE_SHUTDOWN_HOOK_REGISTERED = True
+
+
+def _track_sqlite_connection(conn: aiosqlite.Connection, owner_pid: int) -> None:
+    _ensure_sqlite_shutdown_hook()
+    _TRACKED_SQLITE_CONNECTIONS[id(conn)] = (conn, owner_pid)
+
+
+def _untrack_sqlite_connection(conn: aiosqlite.Connection) -> None:
+    _TRACKED_SQLITE_CONNECTIONS.pop(id(conn), None)
+
+
 class DurableStateStore:
     """Simple key/value JSON state store backed by PostgreSQL or Redis."""
 
@@ -79,6 +161,7 @@ class DurableStateStore:
         self._redis: redis.Redis | None = None
         self._pg_pool: asyncpg.Pool | None = None
         self._sqlite_conn: aiosqlite.Connection | None = None
+        self._sqlite_owner_pid: int | None = None
 
     @property
     def backend(self) -> str:
@@ -131,6 +214,20 @@ class DurableStateStore:
         mark_durable_state_fell_back(intended)
         return "memory"
 
+    def _register_sqlite_shutdown_backstop(self) -> None:
+        """Track this connection so interpreter shutdown cannot hang on it."""
+        conn = self._sqlite_conn
+        if conn is None:
+            return
+        self._sqlite_owner_pid = os.getpid()
+        _track_sqlite_connection(conn, self._sqlite_owner_pid)
+
+    def _unregister_sqlite_shutdown_backstop(self) -> None:
+        """Stop tracking once the connection is closed through the normal path."""
+        if self._sqlite_conn is not None:
+            _untrack_sqlite_connection(self._sqlite_conn)
+        self._sqlite_owner_pid = None
+
     async def _ensure_ready(self) -> None:
         if self._initialized:
             return
@@ -171,6 +268,7 @@ class DurableStateStore:
                     await self._redis.ping()
                 elif self._backend == "sqlite":
                     self._sqlite_conn = await aiosqlite.connect(self._sqlite_url)
+                    self._register_sqlite_shutdown_backstop()
                     self._sqlite_conn.row_factory = aiosqlite.Row
                     await self._sqlite_conn.execute(
                         """
@@ -427,11 +525,52 @@ class DurableStateStore:
                 logger.debug("Failed to close Postgres pool cleanly", exc_info=True)
             self._pg_pool = None
 
-        if self._sqlite_conn is not None:
+        if self._sqlite_conn is not None and self._sqlite_owner_pid not in (
+            None,
+            os.getpid(),
+        ):
+            # Inherited across fork(). The connection object came with us but its
+            # worker thread did not -- fork duplicates only the calling thread --
+            # so ``await conn.close()`` would block forever on a future nothing
+            # can resolve. The parent still owns the real connection, so the
+            # child must not touch it: drop the local references and stop.
+            # The registry entry is left alone; the shutdown hook already skips
+            # connections owned by another process.
+            logger.debug(
+                "Discarding a SQLite connection inherited from pid %s; "
+                "the owning process is responsible for closing it.",
+                self._sqlite_owner_pid,
+            )
+            self._sqlite_conn = None
+            self._sqlite_owner_pid = None
+        elif self._sqlite_conn is not None:
+            conn = self._sqlite_conn
+            released = True
             try:
-                await self._sqlite_conn.close()
+                await conn.close()
             except Exception:
                 logger.debug("Failed to close SQLite connection cleanly", exc_info=True)
+                # ``Connection.close`` stops the worker from a finally-block, so
+                # today it is released even on this path. Do not depend on that:
+                # it is an aiosqlite internal, and a leaked non-daemon worker
+                # blocks interpreter exit with no traceback. ``stop`` is
+                # idempotent enough to call after a close that already ran it.
+                try:
+                    conn.stop()
+                except Exception:
+                    logger.warning(
+                        "SQLite worker thread could not be stopped after a "
+                        "failed close; leaving it tracked so the shutdown hook "
+                        "can try again before interpreter exit.",
+                        exc_info=True,
+                    )
+                    released = False
+            if released:
+                # Untrack only once the worker is actually released. Keeping a
+                # dead entry would make the shutdown hook warn about a leak that
+                # did not happen; dropping a live one would remove the backstop
+                # from the single case that still needs it.
+                self._unregister_sqlite_shutdown_backstop()
             self._sqlite_conn = None
 
         self._initialized = False
