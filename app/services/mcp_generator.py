@@ -162,7 +162,9 @@ class McpGenerator:
             raw_cost = service.get("credits_per_unit", 1.0)
         try:
             per_call_cost = float(raw_cost)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: an int too large for a float (a registry write
+            # could carry one even though prices are normally float/Decimal).
             per_call_cost = 1.0
         if not math.isfinite(per_call_cost):
             # A malformed price (unparseable, NaN, infinite) must not
