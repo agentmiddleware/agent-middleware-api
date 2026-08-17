@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+from pathlib import Path
+
 import pytest
 
 from app.core.db_urls import (
@@ -11,6 +15,8 @@ from app.core.db_urls import (
     sqlite_path_from_url,
 )
 from app.core.durable_state import (
+    _TRACKED_SQLITE_CONNECTIONS,
+    _release_tracked_sqlite_connections,
     DurableStateConfigError,
     DurableStateStore,
     reset_durable_state_for_tests,
@@ -295,3 +301,137 @@ def test_auto_without_urls_refuses_production_like(monkeypatch):
     get_settings.cache_clear()
     reset_durable_state_for_tests()
     reset_runtime_degradation()
+
+
+# --- shutdown backstop for the aiosqlite worker thread ---------------------
+# aiosqlite.Connection composes a worker Thread with no daemon=True, and
+# interpreter shutdown joins non-daemon threads. A connection nobody closes
+# therefore hangs the process at exit with no traceback. close() is the real
+# cleanup path; these cover the backstop for consumers that never reach it.
+
+# Opens the SQLite backend and exits WITHOUT calling close_durable_state().
+# Without the backstop this process never terminates.
+_LEAK_SCRIPT = """
+import asyncio, os, sys
+sys.path.insert(0, {repo!r})
+os.environ["STATE_BACKEND"] = "sqlite"
+os.environ["SQLITE_URL"] = {db!r}
+os.environ["ENVIRONMENT"] = "development"
+
+from app.core.durable_state import get_durable_state
+
+async def main():
+    store = get_durable_state()
+    await store.save_json("k", {{"v": 1}})
+    assert store.backend == "sqlite", store.backend
+
+asyncio.run(main())
+print("WORK_DONE", flush=True)
+# Deliberately no close_durable_state() -- that is the whole point.
+"""
+
+
+def _run_leak_script(tmp_path, extra_env=None):
+    """Run the leaking script in a subprocess under a hard timeout.
+
+    Returns (returncode, stdout). A timeout is reported as returncode 124 to
+    match the shell convention used elsewhere in this repo's verification.
+    """
+    import subprocess
+    import sys as _sys
+
+    script = _LEAK_SCRIPT.format(
+        repo=str(Path(__file__).resolve().parent.parent),
+        db=str(tmp_path / "atexit_probe.db"),
+    )
+    env = {**os.environ, **(extra_env or {})}
+    env.pop("DATABASE_URL", None)
+    try:
+        proc = subprocess.run(
+            [_sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return 124, (exc.stdout or b"").decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+    return proc.returncode, proc.stdout
+
+
+def test_process_exits_when_sqlite_state_is_never_closed(tmp_path):
+    """The acceptance gate: a leaked connection must not wedge interpreter exit.
+
+    Asserting on the exit code rather than on output is deliberate. A passing
+    log line reads identically whether the process exited or hung -- that
+    ambiguity is exactly what let the original six-hour CI hang through.
+    """
+    returncode, stdout = _run_leak_script(tmp_path)
+
+    assert "WORK_DONE" in stdout, f"script did not complete its work: {stdout!r}"
+    assert returncode != 124, (
+        "process hung at exit: the aiosqlite worker thread was never released"
+    )
+    assert returncode == 0, f"unexpected exit code {returncode}"
+
+
+def test_clean_close_untracks_and_releases_the_worker_thread(tmp_path):
+    """The normal path stays authoritative: close() releases and deregisters."""
+    import threading
+
+    reset_durable_state_for_tests()
+    store = DurableStateStore()
+    store._state_backend = "sqlite"
+    store._sqlite_url = str(tmp_path / "clean_close.db")
+
+    async def exercise():
+        await store.save_json("k", {"v": 1})
+        assert store.backend == "sqlite"
+        conn = store._sqlite_conn
+        assert conn is not None
+        assert _TRACKED_SQLITE_CONNECTIONS, "backstop did not track the connection"
+        await store.close()
+        return conn
+
+    conn = asyncio.run(exercise())
+
+    assert id(conn) not in _TRACKED_SQLITE_CONNECTIONS, (
+        "connection still tracked after a clean close"
+    )
+    assert store._sqlite_owner_pid is None
+    conn._thread.join(timeout=10)
+    assert not conn._thread.is_alive(), "worker thread outlived close()"
+    assert conn._thread not in threading.enumerate()
+    reset_durable_state_for_tests()
+
+
+def test_shutdown_backstop_is_inert_in_a_forked_child(tmp_path, monkeypatch):
+    """A forked child must never close a connection its parent owns."""
+    reset_durable_state_for_tests()
+    store = DurableStateStore()
+    store._state_backend = "sqlite"
+    store._sqlite_url = str(tmp_path / "fork_guard.db")
+
+    async def setup():
+        await store.save_json("k", {"v": 1})
+
+    asyncio.run(setup())
+    conn = store._sqlite_conn
+    assert conn is not None
+    assert id(conn) in _TRACKED_SQLITE_CONNECTIONS
+
+    # Pretend we are a child that inherited the registry across fork().
+    monkeypatch.setattr(os, "getpid", lambda: store._sqlite_owner_pid + 1)
+    _release_tracked_sqlite_connections()
+    assert conn._thread.is_alive(), "child closed a connection it does not own"
+
+    # The real owner still releases it.
+    monkeypatch.undo()
+    _TRACKED_SQLITE_CONNECTIONS[id(conn)] = (conn, store._sqlite_owner_pid)
+    _release_tracked_sqlite_connections()
+    conn._thread.join(timeout=10)
+    assert not conn._thread.is_alive()
+
+    store._sqlite_conn = None
+    store._unregister_sqlite_shutdown_backstop()
+    reset_durable_state_for_tests()

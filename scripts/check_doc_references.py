@@ -49,6 +49,11 @@ KNOWN_EXTERNAL = frozenset(
         "pythonpath",
         # MCP SDK class referenced when describing what the SDK transport does.
         "StreamableHTTPSessionManager",
+        # Stdlib internals named when explaining interpreter-shutdown ordering.
+        # Listed as full dotted names on purpose: allowlisting the bare tails
+        # instead would exempt those common words everywhere in the tree.
+        "threading._shutdown",
+        "concurrent.futures.thread",
     }
 )
 
