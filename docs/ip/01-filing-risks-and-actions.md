@@ -126,15 +126,22 @@ file by hand, or any authenticated client, would also register. It does mean the
 count is unexplained rather than explained, and it should be treated as an open
 question rather than a formality.
 
-**Repository visibility could not be determined from the working environment.**
-An unauthenticated probe returned 403 for the API and 404 for the asset, but
-both requests traverse this environment's egress proxy, and an unauthenticated
-request to a private repository returns 404 regardless — neither result is
-evidence either way. Do not read those codes as a finding.
+**Repository visibility: private *now*, history unknown.** The authenticated
+GitHub API reports `"private": true` for this repository as of 2026-08-17. That
+settles the present state and nothing else — the API exposes only current
+visibility, so it cannot tell you whether the repository was public at any point
+between 2026-08-07 and now, which is the question that actually matters.
+
+Note also what is *not* evidence: an unauthenticated probe from a sandboxed
+environment returned 403 for the API and 404 for the asset, but both requests
+traverse an egress proxy, and an unauthenticated request to a private repository
+returns 404 regardless. Do not read those codes as a finding in either
+direction.
 
 ### What still needs a human
 
-1. **Was the repository private for the entire period since 2026-08-07?** A repo
+1. **Was the repository private for the entire period since 2026-08-07?** It is
+   private *today* (API, 2026-08-17), but that says nothing about the interval. A repo
    that was public at any point, even briefly, published these assets. This is
    answerable definitively from the organization or account **audit log**
    (`repo.access` events record every visibility change, with timestamps); the
