@@ -94,14 +94,61 @@ months, before this was written. Two consequences:
 mechanism 4 at a fully enabling level.
 
 Each asset reports `download_count: 2`, so **four downloads in total** across
-the two artifacts. The repository is private, so the release and its assets
-should be private too, and those downloads are most likely CI or the owner.
-**That is the expected answer, not a verified one.** Counsel should confirm:
+the two artifacts.
 
-1. Was the repository private for the entire period since 2026-08-07? A repo
-   that was ever public, even briefly, published these assets.
-2. Who performed those four downloads, and were any by a third party?
-3. Was any release asset URL shared outside the repository's collaborators?
+### What the API establishes, and what it does not
+
+Queried against the authenticated GitHub API on 2026-08-15. These are facts, not
+inferences, and they narrow the questions below:
+
+| Field | Value | Why it matters |
+| --- | --- | --- |
+| Release author | `github-actions[bot]` | The release was produced by CI (`.github/workflows/python-sdk-release.yml`), not hand-cut |
+| Both asset uploaders | `github-actions[bot]` | Same — the artifacts were built and attached by the workflow |
+| `created_at` / `published_at` | 2026-08-07T19:18:40Z / 19:19:14Z | 34 seconds apart; publication was immediate, not staged |
+| `updated_at` | 2026-08-07T19:19:14Z | **Identical to `published_at`** — the release has not been edited since it was published |
+| `draft` / `prerelease` | `false` / `false` | Not a draft and not marked pre-release |
+| `b2a_sdk-0.4.0.tar.gz` | 21,778 bytes, `sha256:46094226f7af6e5e60fc1068535b39db79be7d62bdbeef99753d3d5428e2efd3` | Pins exactly which bytes were published |
+| `b2a_sdk-0.4.0-py3-none-any.whl` | 21,168 bytes, `sha256:8263b63aaa06ff395f6d367ca7dba2a1ada5b3f98bca5d24ae3c9b08c5df6e6c` | Same |
+
+Record those two digests. If the enabling-disclosure question is ever litigated
+or examined, they are what lets anyone establish *what was in the artifact* on
+that date, independently of the current tree.
+
+**One comfortable assumption did not survive.** The earlier draft reasoned that
+the four downloads were "most likely CI or the owner." No workflow or script in
+this repository downloads its own release assets — the only
+`releases/download` reference anywhere in `.github/` or `scripts/` fetches
+gitleaks from an external repository. So the mechanical explanation that would
+have made the download counts self-evidently benign **is not present in the
+tree**. That does not make the downloads third-party; a maintainer pulling the
+file by hand, or any authenticated client, would also register. It does mean the
+count is unexplained rather than explained, and it should be treated as an open
+question rather than a formality.
+
+**Repository visibility could not be determined from the working environment.**
+An unauthenticated probe returned 403 for the API and 404 for the asset, but
+both requests traverse this environment's egress proxy, and an unauthenticated
+request to a private repository returns 404 regardless — neither result is
+evidence either way. Do not read those codes as a finding.
+
+### What still needs a human
+
+1. **Was the repository private for the entire period since 2026-08-07?** A repo
+   that was public at any point, even briefly, published these assets. This is
+   answerable definitively from the organization or account **audit log**
+   (`repo.access` events record every visibility change, with timestamps); the
+   API's current `visibility` field cannot answer it retrospectively.
+2. **Who performed those four downloads?** GitHub does not expose per-download
+   identity for release assets through any public API, so this is not
+   machine-answerable. If the account is on an Enterprise plan, the audit log
+   retains more; otherwise the honest answer may be that it is unknowable, and
+   counsel should plan for that rather than assume a benign answer.
+3. **Was any release asset URL shared outside the collaborator set?** Human
+   knowledge only — check design-partner correspondence, Slack/email, and any
+   place `python-sdk-v0.4.0` was linked. Note that a private-repo asset URL
+   requires authentication to fetch, so sharing the URL alone is weaker evidence
+   of disclosure than sharing the file.
 
 If all three come back clean this is a non-event. If any does not, an enabling
 disclosure of mechanism 4 dates from 2026-08-07 and the analysis above changes.
@@ -291,10 +338,12 @@ by its terms license your patents to recipients. But two exposures remain:
   licence by conduct exist and are fact-dependent, and a defendant who received
   the code would very likely raise them — but this is an unverified,
   fact-dependent risk to have counsel evaluate, not a settled rule.
-- Because the repo is private, that recipient set should be small. It is not
-  necessarily empty: design partners, the "stranger test" participants
-  (`docs/stranger-test.md`), and anyone given a handoff bundle may have received
-  licensed copies.
+- If the repo has been private throughout, that recipient set should be small —
+  but note that premise is **assumed, not verified** (see "What still needs a
+  human" above; repository visibility history is an audit-log question). The set
+  is not necessarily empty either way: design partners, the "stranger test"
+  participants (`docs/stranger-test.md`), and anyone given a handoff bundle may
+  have received licensed copies.
 
 ### Actions
 

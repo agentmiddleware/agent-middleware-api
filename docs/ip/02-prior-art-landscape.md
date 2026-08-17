@@ -19,9 +19,14 @@ literature already cited in `docs/related-work.md`; and reading of this
 repository's implementation. **Not performed:** classification-based searching
 (CPC/IPC), USPTO Patent Public Search or EPO/WIPO full-text databases, any
 non-English art, any published-application search, and any reading of issued
-claim text beyond the abstracts and summaries linked below. The rankings in §5
+claim text beyond the abstracts and summaries linked below. The rankings in §7
 are engineering judgment about where the mechanisms differ from known art — they
 are a starting hypothesis for counsel to test, not a patentability opinion.
+
+**§5 and §6 were added after the first draft**, and §6 in particular is
+propagated from repository research (`docs/market-research-2026-08.md`,
+`docs/related-work.md`) rather than from a search performed for this document.
+The §7 ranking was revised as a result.
 
 ---
 
@@ -173,31 +178,179 @@ pattern — treat it as supporting detail in the spec, not as a point of novelty
 
 ---
 
-## 5. Where the room actually is
+## 5. Optimistic concurrency control — the closest general technique to mechanism 1
 
-Ranked by how defensible each looks against the art above:
+This section exists because an earlier draft of this document ranked atomic
+guarded reservation first without naming the textbook technique it is an
+instance of. Leaving that unstated does not make it go away; it just means an
+examiner raises it first.
 
-1. **Atomic guarded reservation under weak isolation** (`app/services/permits.py:426`).
-   The single conditional `UPDATE ... WHERE spent + amount <= cap` with a
-   `rowcount != 1` denial is a real solution to a real bug — the repo history
-   records the overspend being found under concurrency and then fixed. Crucially,
-   it stays correct on engines where `SELECT ... FOR UPDATE` is silently a no-op,
-   which is a claim limitation grounded in database behavior, not bookkeeping.
-   Strongest §101 posture of the four.
-2. **Crash-recovery classification of a charged-but-unfinalized operation**
+The general technique is **optimistic concurrency control**: read a value, then
+commit conditionally on that value being unchanged, and detect the lost race by
+the affected-row count rather than by holding a lock. H.T. Kung and John T. Robinson set out
+the model in *On Optimistic Methods for Concurrency Control* (ACM TODS 6(2),
+June 1981, pp. 213–226). Every mainstream ORM ships a productized form of it — Hibernate's
+`@Version`, SQLAlchemy's `version_id_col` — and conditional `UPDATE ... WHERE`
+against an observed value is its ordinary SQL expression.
+
+**This repository contains a second, independent instance of the same
+technique**, which counsel should know about before an examiner finds it.
+`append_chained_audit_event()` advances a per-wallet audit chain head with
+`UPDATE ... WHERE last_seq = <observed>`, checks the affected-row count, and
+retries on a lost race — with the implementation explicitly noting it avoids
+`SELECT ... FOR UPDATE` so behaviour is identical on SQLite and Postgres
+(`app/services/audit_chain.py`, and the `AuditChainHeadModel` docstring at
+`app/db/models.py:692`). Two uses of a technique in one codebase say nothing
+about the prior art directly — prior art is what §102 and §103 turn on, not the
+authors' habits. What it does show is that the technique is a general-purpose
+tool reached for wherever a row needs contended advancement, and an examiner
+who notices the second instance will read the first as an application of a
+known method.
+
+So state the distinction narrowly, because the narrow version is the one that
+holds. What OCC as such does not supply:
+
+- the predicate is a **domain cap** (`spent + requested <= max`), not an
+  equality test on an observed version or sequence value, so the same statement
+  both authorizes and accounts;
+- the affected-row count of zero is **classified** into a reason the caller can
+  act on — `permit_budget_exceeded` carrying remaining/spent/max so an agent can
+  retry smaller, versus `permit_<status>` for a revoked permit — rather than
+  being retried blindly as a lost race;
+- there is **no retry loop at all** on the reservation path. A classical OCC
+  writer retries until it wins; a caller here is denied and told why, because
+  spending someone else's budget on a second attempt is not the desired
+  behaviour.
+
+Whether that combination clears §103 over Kung/Robinson plus a budgeting
+reference is exactly the question for counsel. **Put OCC on the IDS** and draft
+around the classification step, not around the conditional `UPDATE`.
+
+---
+
+## 6. MCP-native governance products, and a receipt-format Internet-Draft
+
+**This section is propagated from research this repository performed after the
+first draft of this package, and not independently re-verified here.** The
+sources and per-claim verification levels live in
+[`../market-research-2026-08.md`](../market-research-2026-08.md) and
+[`../related-work.md`](../related-work.md), whose rows below are marked
+*Verified* by that work — meaning the primary source was read on 2026-08-15.
+Counsel must read the primaries before relying on any of it. The reason it
+matters here is blunt: **PRs #285 and #288 added this material to the repository
+and changed no file in `docs/ip/`**, so the package was ranking mechanisms
+against an art landscape that the project had already superseded.
+
+### 6.1 The receipt-format draft
+
+**`draft-farley-acta-signed-receipts`**
+([IETF Datatracker](https://datatracker.ietf.org/doc/draft-farley-acta-signed-receipts/))
+specifies Ed25519 signatures over JCS-canonicalized JSON with namespaced receipt
+types, and from `-02` adds a **`spending_authority` receipt type** and a Merkle
+commitment mode.
+
+Read that against this package. Ed25519 over a canonical JSON contract is the
+shared substrate of mechanisms 3 and 4; mechanism 3 is additive fields signed
+only when present, which is exactly what a namespaced, versioned receipt type is
+designed to accommodate; and `spending_authority` is a budget-bearing artifact,
+which is mechanism 1's territory. This is the single most material reference
+found in the new research and it is **not currently on the IDS**.
+
+Two qualifications, both from `related-work.md` and both important:
+
+1. It is an **individual submission with no IETF standing** — cite it as one
+   vendor's draft, not as a standards-track document. It does not carry the
+   weight of RFC 8785.
+2. Its priority relationship to this work is unestablished. A draft's
+   publication date matters under §102(a)(1); which version first recited
+   `spending_authority` matters more than the draft's existence. Counsel should
+   pull the dated revision history from the Datatracker rather than the current
+   text.
+
+### 6.2 The MCP-native competitive set
+
+| Project | What the research records | Bears on |
+| --- | --- | --- |
+| [protect-mcp / ScopeBlind gateway](https://github.com/tomjwxf/scopeblind-gateway) | Recorded as **the closest competitor**. A proxy intercepting `tools/call`, per-tool Cedar policy, and optional **Ed25519-signed decision receipts verifiable without calling the issuer**. No wallet, budget, or charge-once semantics. Author of the draft in §6.1. | Mechanisms 3 and 4 — a network boundary paired with offline-verifiable receipts is occupied |
+| [jamjet-labs/jamjet](https://github.com/jamjet-labs/jamjet) | One `policy.yaml` across hooks, guardrails, MCP gateways and SDKs; **enforces budgets**; signed receipts with a hash-chained `previousReceiptHash` and **pre/post-execution signatures**. | Mechanism 1 (budget enforcement in an agent gateway is not novel) and mechanisms 3–4 |
+| [sangaraju1988/latch](https://github.com/sangaraju1988/latch) | Python library, not a proxy: **idempotency, budget guardrail**, circuit breaker, saga/compensation, Redis backend for cross-process idempotency. No signed receipts. | Mechanisms 1 and 2 — idempotency plus budget caps in one library |
+| [TraceAgent](https://www.traceagent.dev/) | Append-only receipts with SHA-256 hash chains. **Verified only that receipts are hash-chained**; whether they carry an issuer signature or verify offline is *not verified*. Do not classify as offline-verifiable without a primary source. | Mechanism 3, pending verification |
+| [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit) | An active proposal for independently verifiable compliance receipts. | Strategic risk; a large vendor entering the same space |
+
+### 6.3 Problem evidence, and why it belongs on the IDS
+
+The research also collected third-party reports of the retry/double-execution
+problem: [stripe/ai#402](https://github.com/stripe/ai/issues/402),
+[langchain-ai/langgraph#7417](https://github.com/langchain-ai/langgraph/issues/7417)
+(a confirmed production incident of a managed platform re-dispatching a tool call
+the caller believes is still running),
+[crewAIInc/crewAI#5802](https://github.com/crewAIInc/crewAI/issues/5802), and
+[OpenBB-finance/OpenBB#7455](https://github.com/OpenBB-finance/OpenBB/issues/7455)
+(an MCP operator asking for signed per-call evidence).
+
+These cut both ways and counsel should hear both. They are **evidence of a
+long-felt need** — a *Graham v. John Deere* secondary consideration, useful
+against an obviousness rejection. They are also **publicly available printed
+publications describing the problem**, which is exactly the material an examiner
+uses to establish that a person of ordinary skill was motivated to solve it.
+Disclose them; do not lean on them as though they only helped.
+
+---
+
+## 7. Where the room actually is
+
+Ranked by how defensible each looks against the art above. **This ranking was
+revised after §5 and §6 were added** — the earlier version placed offline
+verification third on the strength of a landscape that did not yet include the
+competitive set, and it read as more secure than the evidence supports.
+
+1. **Mechanism 2 — crash-recovery classification of a charged-but-unfinalized operation**
    (`app/services/idempotency.py:408`). Specific problem, specific asymmetric
-   solution, no clean analogue found in the searched art.
-3. **Offline verification with a status taxonomy that separates a signature
-   failure from a key the verifier does not hold**
-   (`b2a_sdk/.../receipt_verifier.py`). The "a missing key is never reported as
-   tampering" property is a genuine and articulable technical contribution.
-   Verifying a signature offline is not. State it in those terms rather than as
-   outage detection — the verifier fetches nothing and cannot observe an
-   outage (§4.6 of the disclosure).
-4. **Signature-stable schema evolution** (`app/services/receipts.py:312`).
+   solution, and still no clean analogue in the searched art — `latch` pairs
+   idempotency with saga/compensation, but compensation is a different answer
+   from *classifying* a crashed record into never-charged, charged-and-
+   reconstructable, or needs-review. This is now the strongest of the four
+   because it is the one the new art in §6 does not touch at all.
+2. **Mechanism 1 — atomic guarded reservation under weak isolation**
+   (`app/services/permits.py:426`, and the upstream dispatch path at
+   `app/services/mcp_dispatch_attempts.py:463`). Still a real solution to a real
+   bug — the repo history records the overspend being found under concurrency
+   and then fixed, twice, on two paths. Correctness on engines where
+   `SELECT ... FOR UPDATE` is silently a no-op remains a claim limitation
+   grounded in database behaviour rather than bookkeeping, and the §101 posture
+   is the best of the four. It moves to second because §5 names the general
+   technique it instantiates, and `jamjet` and `latch` both enforce budgets in
+   agent tooling. Draft it around the **classification of the zero-row
+   outcome**, which is where the distinction actually lives.
+3. **Mechanism 3 — signature-stable schema evolution** (`app/services/receipts.py:312`).
    Signing additive fields only when present, so old signatures keep verifying
    as the schema grows, with a fail-closed constrained fallback for the one
-   backfilled migration. Narrow, but clean and concrete.
+   backfilled migration. Narrow, clean and concrete — but check it against the
+   namespaced, versioned receipt types in the §6.1 draft before drafting, since
+   that is a published approach to the same problem.
+4. **Mechanism 4 — offline verification with a status taxonomy that separates
+   a signature failure from a key the verifier does not hold**
+   (`b2a_sdk/.../receipt_verifier.py`). **Demoted from second on the §6
+   evidence.** Offline-verifiable Ed25519 receipts at a network boundary are
+   occupied — protect-mcp emits receipts verifiable without calling the issuer,
+   and its author has an Internet-Draft for the format. So the claimable
+   surface is not "offline verification," which is now table stakes, and not
+   "signed receipts at a gateway." What survives is the **six-state taxonomy
+   itself**: that a key the verifier does not hold resolves to `UNKNOWN_KEY`
+   rather than to a tampering verdict, so a key-distribution failure is never
+   reported as fraud. That property is articulable and, on the reviewed
+   materials, unaddressed by the competitors — none of the records describes
+   what its verifier returns when the key is missing. It is also a much thinner
+   claim than the earlier ranking implied. State it as the taxonomy, never as
+   outage detection: the verifier fetches nothing and cannot observe an outage
+   (§4.6 of the disclosure).
+
+**The honest summary for counsel:** the two mechanisms on the *settlement* side
+— crash-recovery classification and cap enforcement — held up against the new
+art. The two on the *evidence* side weakened, because the evidence half of this
+category filled in during 2026 while this package was being drafted. That is an
+argument for filing promptly on the settlement mechanisms and for treating the
+receipt mechanisms as dependent claims rather than independent ones.
 
 ### The combination-claim trap
 
@@ -225,3 +378,11 @@ problem the art does not address** — not on the assembly. That is what
 - [Avoiding double payments in a distributed payments system — Airbnb Engineering](https://medium.com/airbnb-engineering/avoiding-double-payments-in-a-distributed-payments-system-2981f6b070bb)
 - [Google Patents — US 12,563,045 B1](https://patents.google.com/patent/US12563045B1/en)
 - [Macaroons: Cookies with Contextual Caveats — Google Research](https://research.google/pubs/macaroons-cookies-with-contextual-caveats-for-decentralized-authorization-in-the-cloud/)
+- Kung, H.T. & Robinson, J.T., *On Optimistic Methods for Concurrency Control*, ACM Transactions on Database Systems 6(2), June 1981, pp. 213–226 — [ACM DL](https://dl.acm.org/doi/10.1145/319566.319567), [author PDF](https://www.eecs.harvard.edu/~htk/publication/1981-tods-kung-robinson.pdf), [dblp](https://dblp.uni-trier.de/rec/journals/tods/KungR81.html)
+- [`draft-farley-acta-signed-receipts` — IETF Datatracker](https://datatracker.ietf.org/doc/draft-farley-acta-signed-receipts/)
+- [protect-mcp / ScopeBlind gateway](https://github.com/tomjwxf/scopeblind-gateway)
+- [jamjet-labs/jamjet](https://github.com/jamjet-labs/jamjet)
+- [sangaraju1988/latch](https://github.com/sangaraju1988/latch)
+- [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit)
+- [`docs/market-research-2026-08.md`](../market-research-2026-08.md) — competitive set and per-claim verification levels (added by #285)
+- [`docs/related-work.md`](../related-work.md) — external literature with per-source verification levels
