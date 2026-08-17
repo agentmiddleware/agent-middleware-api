@@ -917,9 +917,13 @@ async def test_receipt_commit_survives_worker_death_and_reconciles(
         blocked = await _invoke(steady_worker, seeded)
         _assert_in_progress(blocked)
 
-        reconciliation = await _reconcile(stress_harness, steady_worker)
-        assert reconciliation["idempotency_repaired"] == 1
-        assert reconciliation["idempotency_needs_review"] == 0
+        # Asserted against this record rather than the sweep's counters: those
+        # are cumulative over every record the shared database still holds, so
+        # reading them would couple this scenario to the order the module
+        # happens to run in.
+        assert (await _local_crash_state(seeded))["completed"] is False
+        await _reconcile(stress_harness, steady_worker)
+        assert (await _local_crash_state(seeded))["completed"] is True
 
         replay = await _invoke(steady_worker, seeded)
         assert replay.status_code == 200
@@ -966,9 +970,10 @@ async def test_post_side_effect_crash_requires_review_without_redispatch(
         assert before.debit_count == 1
         assert before.receipt_ids == ()
 
-        reconciliation = await _reconcile(stress_harness, steady_worker)
-        assert reconciliation["idempotency_repaired"] == 0
-        assert reconciliation["idempotency_needs_review"] == 1
+        # Per record, not the cumulative sweep counters: this scenario's proof
+        # is that its own record is left untouched, which is order-independent.
+        await _reconcile(stress_harness, steady_worker)
+        assert (await _local_crash_state(seeded))["completed"] is False
 
         replay = await _invoke(steady_worker, seeded)
         _assert_in_progress(replay)
@@ -1204,3 +1209,270 @@ async def test_kill_between_debit_and_dispatch_refunds_without_dispatching(
     assert again["dispatch_prepared_finalized"] == 0
     assert again["dispatch_failed_attempts"] == 0
     assert await _upstream_snapshot(seeded) == after
+
+
+@dataclass(frozen=True)
+class CrashExpectation:
+    """The durable disposition a kill at one commit boundary must leave."""
+
+    fault_point: str
+    executions: int
+    debits: int
+    receipts: int
+    budget_reserved: bool
+    released_for_retry: bool
+    why: str
+
+
+# The boundaries the three narrative scenarios above do not reach. Each row is
+# the contract for a kill at that point, and every one of them is conservative
+# by design: the local path never auto-releases a charged or executed record,
+# because a local tool's side effects are not observable to the reconciler the
+# way a dispatch attempt's are.
+#
+# Every assertion here is against the seeded call's own record. The sweep's
+# counters are cumulative over the shared database -- `stress_harness` is
+# module-scoped and this module deliberately does not truncate between tests,
+# because a kill-and-recover scenario needs its own prior state intact -- so
+# reading them would make each scenario depend on the order the module runs
+# in. The narrative scenarios above were converted to the same per-record
+# form for that reason.
+LOCAL_CRASH_CONTRACT = (
+    CrashExpectation(
+        fault_point="before_permit_reserve",
+        executions=0,
+        debits=0,
+        receipts=0,
+        budget_reserved=False,
+        released_for_retry=False,
+        why=(
+            "Provably effect-free, yet deliberately not released: the "
+            "effect-free sweep is scoped to operation_kind == 'upstream_mcp' "
+            "because a local tool's side-effect ordering is not knowable to "
+            "the reconciler. The key stays in progress rather than risking a "
+            "second execution."
+        ),
+    ),
+    CrashExpectation(
+        fault_point="after_idempotency_begin",
+        executions=0,
+        debits=0,
+        receipts=0,
+        budget_reserved=False,
+        released_for_retry=False,
+        why="Same effect-free window, one commit later; same fail-closed hold.",
+    ),
+    CrashExpectation(
+        fault_point="after_permit_reserve",
+        executions=0,
+        debits=0,
+        receipts=0,
+        budget_reserved=True,
+        released_for_retry=False,
+        why=(
+            "The reservation is stranded on a still-active permit and stays "
+            "stranded. reconcile_budgets only reclaims from permits that can "
+            "no longer admit a charge, since a long-running call is "
+            "indistinguishable from a dead one; the agent therefore spends "
+            "less than authorized, never more."
+        ),
+    ),
+    CrashExpectation(
+        fault_point="after_mark_charged",
+        executions=0,
+        debits=1,
+        receipts=0,
+        budget_reserved=True,
+        released_for_retry=False,
+        why=(
+            "Charged before the tool ran. The money moved and no receipt can "
+            "be reconstructed, so this is held for operator review rather "
+            "than refunded on a guess."
+        ),
+    ),
+    CrashExpectation(
+        fault_point="before_receipt_commit",
+        executions=1,
+        debits=1,
+        receipts=0,
+        budget_reserved=True,
+        released_for_retry=False,
+        why=(
+            "The side effect landed and the charge stands, but nothing was "
+            "signed. Ambiguous, so it fails closed to review."
+        ),
+    ),
+    CrashExpectation(
+        fault_point="after_audit_commit",
+        executions=1,
+        debits=1,
+        receipts=0,
+        budget_reserved=True,
+        released_for_retry=False,
+        why=(
+            "The audit event is durable but the receipt is not: on the local "
+            "path the audit precedes the receipt, so this is still the "
+            "unsigned-outcome case."
+        ),
+    ),
+    CrashExpectation(
+        fault_point="after_idempotency_complete",
+        executions=1,
+        debits=1,
+        receipts=1,
+        budget_reserved=True,
+        released_for_retry=True,
+        why=(
+            "Everything is durable and only the response to the caller was "
+            "lost. Nothing to reconcile; the retry replays the stored result."
+        ),
+    ),
+)
+
+
+async def _local_crash_state(seeded: SeededCall) -> dict[str, object]:
+    """Durable disposition of one governed local invocation."""
+    from app.db.database import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        record = (
+            await session.execute(
+                text(
+                    """
+                    SELECT record_id, (response_json IS NOT NULL) AS completed
+                    FROM idempotency_records
+                    WHERE wallet_id = :wallet_id
+                      AND endpoint = :endpoint
+                      AND idempotency_key = :idempotency_key
+                    """
+                ),
+                {
+                    "wallet_id": seeded.wallet_id,
+                    "endpoint": GOVERNED_MCP_ENDPOINT,
+                    "idempotency_key": seeded.idempotency_key,
+                },
+            )
+        ).first()
+        if record is None:
+            return {"record_present": False}
+        counts = {
+            "record_present": True,
+            "completed": bool(record.completed),
+            "executions": int(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT COUNT(*) FROM mcp_stress_tool_executions "
+                            "WHERE call_token = :call_token"
+                        ),
+                        {"call_token": seeded.call_token},
+                    )
+                ).scalar_one()
+            ),
+            "debits": int(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT COUNT(*) FROM ledger_entries "
+                            "WHERE operation_key = :record_id AND action = 'debit'"
+                        ),
+                        {"record_id": record.record_id},
+                    )
+                ).scalar_one()
+            ),
+            "receipts": int(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT COUNT(*) FROM receipts "
+                            "WHERE idempotency_record_id = :record_id"
+                        ),
+                        {"record_id": record.record_id},
+                    )
+                ).scalar_one()
+            ),
+            "permit_spent": str(
+                Decimal(
+                    (
+                        await session.execute(
+                            text(
+                                "SELECT spent_credits FROM permits "
+                                "WHERE permit_id = :permit_id"
+                            ),
+                            {"permit_id": seeded.permit_id},
+                        )
+                    ).scalar_one()
+                ).normalize()
+            ),
+        }
+    return counts
+
+
+@pytest.mark.parametrize(
+    "contract",
+    LOCAL_CRASH_CONTRACT,
+    ids=[expectation.fault_point for expectation in LOCAL_CRASH_CONTRACT],
+)
+@pytest.mark.asyncio(loop_scope="session")
+async def test_local_crash_boundary_disposition(
+    stress_harness: StressHarness,
+    steady_worker: StressWorker,
+    contract: CrashExpectation,
+) -> None:
+    """Every instrumented commit boundary lands in exactly one known state.
+
+    The harness instruments twelve fault points; the narrative scenarios above
+    reach five. This covers the remaining seven so that "the harness exposes
+    more fault points than the tests exercise" stops being true, and so that
+    the conservative dispositions -- a stranded reservation, a held review --
+    are pinned as intended behaviour rather than left as folklore.
+    """
+    seeded = await _seed_call(
+        stress_harness,
+        steady_worker,
+        scenario=f"boundary-{contract.fault_point.replace('_', '-')}",
+    )
+    fault_worker = await _start_worker(
+        stress_harness,
+        name=f"boundary-{contract.fault_point}-{uuid.uuid4().hex[:8]}",
+        fault_point=contract.fault_point,
+    )
+    first_task: asyncio.Task[httpx.Response] | None = None
+    try:
+        first_task = asyncio.create_task(_invoke(fault_worker, seeded))
+        marker = await _wait_for_marker(fault_worker)
+        assert marker["point"] == contract.fault_point
+        _stop_worker(fault_worker)
+        await asyncio.gather(first_task, return_exceptions=True)
+    finally:
+        _stop_worker(fault_worker)
+        if first_task is not None:
+            await asyncio.gather(first_task, return_exceptions=True)
+
+    before = await _local_crash_state(seeded)
+    assert before["record_present"] is True
+    assert before["executions"] == contract.executions, contract.why
+    assert before["debits"] == contract.debits, contract.why
+    assert before["receipts"] == contract.receipts, contract.why
+    assert before["permit_spent"] == ("2" if contract.budget_reserved else "0")
+
+    # Reconciliation is asserted through this record's own disposition rather
+    # than the sweep's counters: the counters are cumulative across every
+    # record the shared database still holds.
+    await _reconcile(stress_harness, steady_worker)
+    after = await _local_crash_state(seeded)
+    assert after == before, f"reconciliation must not move this state: {contract.why}"
+
+    replay = await _invoke(steady_worker, seeded)
+    if contract.released_for_retry:
+        assert "result" in replay.json(), contract.why
+    else:
+        _assert_in_progress(replay)
+
+    # The invariant that holds at every boundary, whatever the disposition.
+    settled = await _local_crash_state(seeded)
+    assert settled["executions"] <= 1
+    assert settled["debits"] <= 1
+    assert settled["receipts"] <= 1
+    assert settled == before

@@ -136,6 +136,16 @@ the cases apart. A crash before the checkpoint is provably non-delivered and is
 refunded; a crash after it is unknowable and terminalizes into
 `delivery_uncertain` instead of waiting for a human — and neither redispatches.
 
+Alongside those six narrative scenarios, a table-driven boundary suite kills a
+worker at each of the seven remaining instrumented commit boundaries and pins
+the disposition it must leave. Its value is mostly negative: it records that
+the local path is deliberately *more* conservative than the remote one. A
+provably effect-free local crash is still not released for retry, because the
+effect-free sweep is scoped to `operation_kind == "upstream_mcp"`; and a
+reservation stranded before any charge stays stranded on a live permit, because
+reclaiming it early could let a concurrent request over-spend. Both were
+verified against the code rather than inferred from the observed behaviour.
+
 All three remote-path proofs additionally rebuild the full evidence bundle for the
 recovered receipt and require every check to pass, so the claim is that the
 recovered evidence *verifies*, not merely that a receipt row exists. Each also
@@ -224,12 +234,11 @@ Being explicit about the boundary is what makes the proofs worth anything.
 - **The crash proof covers instrumented boundaries, not arbitrary failure.**
   Faults are injected at specific durable commit points. It does not prove
   survival of a kill at an arbitrary instruction, database crash or failover,
-  or multi-node high availability. The harness exposes more fault points than
-  the six CI-run scenarios currently exercise. Of the twelve instrumented
-  points those scenarios reach five; the other seven —
-  `before_permit_reserve`, `after_permit_reserve`, `after_idempotency_begin`,
-  `after_idempotency_complete`, `after_mark_charged`, `before_receipt_commit`,
-  and `after_audit_commit` — are instrumented but unexercised.
+  or multi-node high availability. All twelve instrumented fault points are now
+  reached by a test: five by the narrative scenarios above, and the remaining
+  seven by a table-driven boundary suite that pins the disposition a kill at
+  each commit boundary must leave. What is still not proven is a kill at an
+  *arbitrary* instruction — only at the instrumented boundaries.
 - **`make prove-trust-plane` runs on SQLite with a hardcoded demo signing
   seed.** It proves the logic, not the production posture. No target re-runs
   these assertions against PostgreSQL — see the defect note above. PostgreSQL
@@ -255,8 +264,9 @@ Ordered by how much each would strengthen the differentiator per unit of work.
    channel, is what makes the verifier meaningful against a compromised
    issuer.
 3. **Exercise the remaining crash fault points.** The harness already
-   instruments more commit boundaries than the six proven scenarios use:
-   seven of its twelve fault points are not yet reached by a test.
+   instrumented boundaries are all covered as of 2026-08-15; what remains is
+   coverage of failure modes the harness cannot inject at all — database crash
+   or failover, and multi-node high availability.
 4. **External anchoring or append-only storage**, which is what would let the
    project retire the "tamper-evident, not immutable" caveat.
 5. **KMS-backed signing custody**, designed in

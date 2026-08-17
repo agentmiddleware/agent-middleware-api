@@ -264,6 +264,23 @@ full release gate; do not backfill a final `v1.2.0` tag.
 - The upstream effects table permits duplicate call tokens deliberately, so a
   redispatch after ambiguity would surface as a second row rather than being
   hidden by a unique constraint.
+- **Every instrumented crash boundary is now exercised.** The harness
+  instruments twelve fault points; six scenarios reached five of them and the
+  proof matrix recorded the other seven as a known gap. A table-driven boundary
+  suite now kills a worker at each of the seven and pins the disposition it must
+  leave, so `prove-crash-recovery` runs thirteen scenarios and the gap is
+  closed. Each expectation was checked against the implementing code before
+  being asserted, rather than recorded from observed behaviour.
+- **Two conservative behaviours were documented more broadly than they are
+  implemented, and the docs now say so.** `failure-semantics.md` window E
+  claimed an effect-free crash releases the idempotency key for retry; that
+  sweep is scoped to `operation_kind == "upstream_mcp"`, so a local-path crash
+  in the same window is held in progress and the key cannot be reused without
+  an operator. A new window F records the matching budget case: a reservation
+  stranded before any charge stays on a live permit — reclaiming it early could
+  let a concurrent request over-spend — and is released only when the permit is
+  revoked or expires. Both are correct fail-closed choices; neither was
+  written down.
 - **The pre-checkpoint window is proved by kill too.** A third scenario gates
   `after_debit_commit` on the remote path, killing the worker while the attempt
   is still `prepared` and has not yet been told which ledger entry paid for it.
