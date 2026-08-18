@@ -208,6 +208,14 @@ def test_sqlite_without_url_falls_back_outside_production(monkeypatch):
 
 
 def test_sqlite_without_url_refuses_production_like(monkeypatch):
+    """Production still refuses this config; the reason is now stricter.
+
+    This previously failed only because SQLITE_URL was unset, which implied a
+    configured SQLITE_URL would have been accepted. SQLite is now refused in
+    production-like environments outright, so the refusal no longer depends on
+    the URL being missing -- see
+    ``test_sqlite_with_url_refuses_production_like`` for the configured case.
+    """
     reset_runtime_degradation()
     reset_durable_state_for_tests()
     monkeypatch.setenv("ENVIRONMENT", "production")
@@ -218,7 +226,7 @@ def test_sqlite_without_url_refuses_production_like(monkeypatch):
 
     get_settings.cache_clear()
     store = DurableStateStore()
-    with pytest.raises(DurableStateConfigError, match="SQLITE_URL"):
+    with pytest.raises(DurableStateConfigError, match="not allowed in production"):
         store._resolve_backend()
     get_settings.cache_clear()
     reset_durable_state_for_tests()
@@ -663,3 +671,55 @@ def test_close_does_not_block_on_a_connection_inherited_across_fork(tmp_path):
         f"parent could not close its own connection afterwards: {proc.stdout!r}"
     )
     assert proc.returncode == 0, f"unexpected exit code {proc.returncode}"
+
+
+def test_sqlite_with_url_refuses_production_like(monkeypatch):
+    """SQLite is not a supported production backend, even fully configured.
+
+    The trust plane's money and permit paths serialize concurrent writers with
+    ``SELECT ... FOR UPDATE``. SQLAlchemy silently drops that on SQLite, so the
+    once-only and read-modify-write guards those paths rely on stop holding.
+    A configured SQLITE_URL previously satisfied the explicit backend with no
+    production objection at all.
+    """
+    reset_runtime_degradation()
+    reset_durable_state_for_tests()
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("STATE_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_URL", "/var/lib/agent-middleware/state.db")
+    monkeypatch.setenv("DATABASE_URL", "")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    store = DurableStateStore()
+    with pytest.raises(DurableStateConfigError, match="not allowed in production"):
+        store._resolve_backend()
+    get_settings.cache_clear()
+    reset_durable_state_for_tests()
+    reset_runtime_degradation()
+
+
+def test_auto_backend_refuses_sqlite_in_production_like(monkeypatch):
+    """Auto-resolution must not quietly land on SQLite in production either.
+
+    A SQLite ``DATABASE_URL`` is the ordinary local-development setting, and
+    auto-resolution maps it to the sqlite backend. In a production-like
+    environment that turned a misconfigured DSN into an unsafe backend without
+    a word; it must fail closed instead.
+    """
+    reset_runtime_degradation()
+    reset_durable_state_for_tests()
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("STATE_BACKEND", "auto")
+    monkeypatch.setenv("SQLITE_URL", "")
+    monkeypatch.setenv("REDIS_URL", "")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./prod.db")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    store = DurableStateStore()
+    with pytest.raises(DurableStateConfigError, match="SQLite is not a supported"):
+        store._resolve_backend()
+    get_settings.cache_clear()
+    reset_durable_state_for_tests()
+    reset_runtime_degradation()

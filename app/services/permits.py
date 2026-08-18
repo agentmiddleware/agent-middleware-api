@@ -742,6 +742,10 @@ class PermitService:
                     now = utc_now()
                     # Atomic guarded reserve (see authorize_and_reserve): the cap
                     # is enforced by the WHERE clause, not a read-then-write.
+                    # The expiry term matters for the same reason it does there:
+                    # an expired permit keeps status="active" in storage, so
+                    # without it this second reservation path would still spend
+                    # against a permit that has crossed expires_at.
                     reserved = await session.execute(
                         sa_update(PermitModel)
                         .where(
@@ -752,6 +756,10 @@ class PermitService:
                             cast(
                                 ColumnElement[bool],
                                 PermitModel.status == "active",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.expires_at > now,
                             ),
                             cast(
                                 ColumnElement[bool],
@@ -769,6 +777,10 @@ class PermitService:
                         exists = await session.get(PermitModel, permit_id)
                         if exists is None:
                             raise PermitError("permit_not_found")
+                        if exists.status != "active":
+                            raise PermitError("permit_not_active")
+                        if exists.expires_at <= now:
+                            raise PermitError("permit_expired")
                         raise PermitError("permit_budget_exceeded")
 
                     # Budget percentage alerts, recomputed from the committed
@@ -869,6 +881,35 @@ class PermitService:
                     if attempt.budget_released_at is not None:
                         return False
                     now = utc_now()
+                    # Claim the release atomically before touching the permit.
+                    # The read above is guarded by a row lock, but SQLAlchemy
+                    # silently drops FOR UPDATE on engines that do not support
+                    # it (SQLite), so on those two concurrent callers would both
+                    # observe budget_released_at IS NULL and both decrement.
+                    # This guarded UPDATE is the once-only gate on every engine:
+                    # exactly one caller can flip NULL -> now, and only that
+                    # caller proceeds to release the budget.
+                    claimed = await session.execute(
+                        sa_update(McpDispatchAttemptModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                McpDispatchAttemptModel.attempt_id == attempt_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                cast(
+                                    Any, McpDispatchAttemptModel.budget_released_at
+                                ).is_(None),
+                            ),
+                        )
+                        .values(budget_released_at=now, updated_at=now)
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, claimed).rowcount or 0) != 1:
+                        # Another caller claimed it first; its transaction owns
+                        # the single decrement.
+                        return False
                     # Atomic clamped decrement so a concurrent reservation on the
                     # same permit is not clobbered by a read-modify-write here.
                     released = await session.execute(
@@ -899,6 +940,9 @@ class PermitService:
                     )
                     if (cast(Any, released).rowcount or 0) == 0:
                         raise PermitError("permit_not_found")
+                    # budget_released_at was already set by the guarded claim
+                    # above; refresh the identity-mapped instance so callers
+                    # holding it observe the committed value.
                     attempt.budget_released_at = now
                     attempt.updated_at = now
                     session.add(attempt)

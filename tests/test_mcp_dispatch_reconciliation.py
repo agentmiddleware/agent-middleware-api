@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import timedelta
@@ -1010,3 +1011,50 @@ async def test_lost_commit_ack_recovery_no_double_charge(
     permit_after_retry = await get_permit_service().get_permit(permit["permit_id"])
     assert permit_after_retry is not None
     assert permit_after_retry.spent_credits == spent_after_first
+
+
+@pytest.mark.anyio
+async def test_concurrent_budget_release_decrements_exactly_once(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """The release must be once-only without relying on a row lock.
+
+    ``release_dispatch_budget_once`` read ``budget_released_at`` under
+    ``with_for_update=True`` and then decremented the permit. SQLAlchemy
+    silently drops FOR UPDATE on engines that do not support it, so on those
+    two concurrent callers could both observe NULL and both decrement -- the
+    permit would be credited back twice for one dispatch. The claim is now a
+    guarded UPDATE, which is once-only on every engine.
+    """
+    seed = await _seed_attempt(
+        client,
+        suffix="concurrent-release",
+        state="returned_error",
+        result_payload={"error": "confirmed"},
+        error_code="upstream_returned_error",
+    )
+    permits = get_permit_service()
+    before = await permits.get_permit(seed.permit_id)
+    assert before is not None
+    spent_before = before.spent_credits
+
+    results = await asyncio.gather(
+        permits.release_dispatch_budget_once(seed.attempt_id),
+        permits.release_dispatch_budget_once(seed.attempt_id),
+        return_exceptions=True,
+    )
+    ok = [r for r in results if r is True]
+    errors = [r for r in results if isinstance(r, BaseException)]
+    assert not errors, f"release raised: {errors}"
+    assert len(ok) == 1, f"expected exactly one release to win, got {results}"
+
+    after = await permits.get_permit(seed.permit_id)
+    assert after is not None
+    # Exactly one decrement, of exactly the authorized amount.
+    assert after.spent_credits == spent_before - CREDITS
+
+    # A third call is still a no-op.
+    assert await permits.release_dispatch_budget_once(seed.attempt_id) is False
+    final = await permits.get_permit(seed.permit_id)
+    assert final is not None and final.spent_credits == after.spent_credits

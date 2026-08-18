@@ -181,6 +181,14 @@ class DurableStateStore:
                 return "redis"
             return self._missing_explicit_backend("redis", "REDIS_URL")
         if self._state_backend == "sqlite":
+            if self._production_like:
+                raise DurableStateConfigError(
+                    "STATE_BACKEND=sqlite is not allowed in production-like "
+                    "environments: the trust plane's money and permit paths "
+                    "serialize concurrent writers with SELECT ... FOR UPDATE, "
+                    "which SQLAlchemy silently drops on SQLite. Use "
+                    "STATE_BACKEND=postgres with DATABASE_URL."
+                )
             if self._sqlite_url:
                 return "sqlite"
             return self._missing_explicit_backend("sqlite", "SQLITE_URL")
@@ -197,12 +205,16 @@ class DurableStateStore:
             return "postgres"
         if self._redis_url:
             return "redis"
-        if self._sqlite_url:
+        if self._sqlite_url and not self._production_like:
             return "sqlite"
         if self._production_like:
+            # SQLITE_URL is deliberately not a production fallback here: see the
+            # explicit STATE_BACKEND=sqlite branch above for why row locks make
+            # SQLite unsafe for the money and permit paths.
             raise DurableStateConfigError(
-                "Production-like environments require DATABASE_URL, REDIS_URL, "
-                "or SQLITE_URL for durable state"
+                "Production-like environments require DATABASE_URL or REDIS_URL "
+                "for durable state (SQLite is not a supported production "
+                "backend)"
             )
         return "memory"
 

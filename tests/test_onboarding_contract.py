@@ -132,6 +132,10 @@ UNPUBLISHED_DISTRIBUTIONS = (
 _DOC_SWEEP_EXCLUDES = (
     "site/",
     "node_modules/",
+    # Gitignored agent scratch: `.claude/worktrees/` holds full checkouts, so a
+    # sweep that walks it re-finds every excluded file under a second path and
+    # fails on a copy of a file this list already forgave.
+    ".claude/",
     "tests/test_wedge_honesty.py",
     "tests/test_onboarding_contract.py",
     "docs/tech-debt-remediation-plan.md",

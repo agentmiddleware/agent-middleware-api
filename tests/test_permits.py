@@ -663,3 +663,50 @@ async def test_permit_service_validation_denial_reasons(client, clean_database):
     )
     assert validation.allowed is False
     assert validation.reason == "permit_signature_invalid"
+
+
+async def test_reserve_budget_refuses_an_expired_permit(
+    client,
+    clean_database,
+    enforce_naive_utc_datetime_columns,
+):
+    """reserve_budget is a second reservation path and must enforce expiry.
+
+    An expired permit keeps ``status="active"`` in storage, so a guarded update
+    without an expiry term happily spends against it. ``authorize_and_reserve``
+    grew that term; this path is the one that did not have it.
+    """
+    provisioned = await provision_agent_wallet(client)
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=provisioned["agent_wallet_id"],
+            subject_wallet_id=provisioned["agent_wallet_id"],
+            subject_key_id=provisioned["key_id"],
+            allowed_tools=["expiry-reserve-tool"],
+            scopes=["tool:expiry-reserve-tool:invoke"],
+            max_credits=Decimal("10"),
+            expires_at=(
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).replace(tzinfo=None),
+        )
+    )
+
+    # Cross expires_at without touching status, exactly as the clock would.
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            model = await session.get(PermitModel, permit.permit_id)
+            assert model is not None
+            model.expires_at = utc_now() - timedelta(seconds=1)
+            session.add(model)
+
+    with pytest.raises(PermitError) as excinfo:
+        await service.reserve_budget(permit.permit_id, Decimal("1"))
+    assert str(excinfo.value) == "permit_expired"
+
+    # And no budget moved.
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("0")
