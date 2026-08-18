@@ -18,6 +18,7 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     IdempotencyRecordModel,
+    LedgerEntryModel,
     McpDispatchAttemptModel,
     ReceiptModel,
 )
@@ -503,6 +504,101 @@ class IdempotencyService:
                     if attempt_id is None and receipt_id is None:
                         await session.delete(record)
                         repaired += 1
+
+                # Local governed calls fall through both passes above: the
+                # unstarted pass is scoped to operation_kind="upstream_mcp",
+                # and the stuck pass below requires a linked ledger_entry_id.
+                # A crash between the committed debit and the write that
+                # attaches that debit to the record therefore left an
+                # unresolvable row -- response_json IS NULL and
+                # ledger_entry_id IS NULL -- that no branch selected, so it
+                # never repaired and never counted toward needs_review. The
+                # charge carries operation_key=record_id (see the governed
+                # money.charge call in app/routers/mcp.py), so the orphaned
+                # debit is recoverable by that key: link it here and the stuck
+                # pass below resolves it exactly like any other crashed
+                # finalization. Engine-independent -- no row-lock behaviour
+                # involved.
+                orphaned_local = (
+                    (
+                        await session.execute(
+                            select(IdempotencyRecordModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.endpoint
+                                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.operation_kind == "local",
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, IdempotencyRecordModel.response_json).is_(
+                                        None
+                                    ),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(
+                                        Any, IdempotencyRecordModel.ledger_entry_id
+                                    ).is_(None),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.created_at < cutoff,
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for record in orphaned_local:
+                    debit = (
+                        await session.execute(
+                            select(LedgerEntryModel).where(
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.wallet_id == record.wallet_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.operation_key == record.record_id,
+                                ),
+                                # Compensation proof means money left the
+                                # wallet. The wallet/operation-key uniqueness
+                                # constraint already makes a same-key credit
+                                # impossible alongside the debit, but stating
+                                # the direction here means this pass can never
+                                # adopt a credit as evidence of a charge.
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.amount < 0,
+                                ),
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if debit is None:
+                        # Nothing provably moved, and a local identity must NOT
+                        # be expired on that basis: local tools run their side
+                        # effect before the debit exists, so deleting the record
+                        # would let a retry execute it a second time. That
+                        # invariant is asserted by
+                        # test_stale_local_identity_is_not_deleted_without
+                        # _compensation_proof. Leave it exactly as found.
+                        continue
+                    # A committed debit is compensation proof: money moved under
+                    # this identity. Link it, and the stuck pass below resolves
+                    # it from the receipt or counts it for manual review.
+                    record.ledger_entry_id = debit.entry_id
+                    session.add(record)
+                # The session does not autoflush, so the links just written are
+                # still pending; flush them so the stuck pass below selects the
+                # rows this pass just repaired into scope.
+                await session.flush()
 
                 stuck = (
                     (
