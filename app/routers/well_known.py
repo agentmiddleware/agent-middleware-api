@@ -230,6 +230,7 @@ def _local_try_it_manifest() -> dict[str, Any]:
     return {
         "mode": "local_self_hosted",
         "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
+        "repository_access": "private",
         "command": "make prove-trust-plane",
         "live_access": "operator_issued",
         "requires_live_credentials": False,
@@ -244,7 +245,9 @@ def _local_try_it_manifest() -> dict[str, Any]:
         "note": (
             "Runs the real FastAPI trust path against a throwaway local SQLite "
             "database. This is a reproducible proof, not a production or "
-            "settlement claim."
+            "settlement claim. The source repository is private during the "
+            "design-partner phase; request access from the operator listed on "
+            "the human site before cloning."
         ),
     }
 

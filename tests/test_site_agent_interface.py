@@ -226,6 +226,10 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     ]
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
+    # The repository went private in 2026-08; the manifest must say so rather
+    # than sending agents to clone a URL that 404s anonymously.
+    assert manifest["try_it"]["repository_access"] == "private"
+    assert manifest["github_access"] == "private"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
     assert "awi_manifest" not in manifest["discovery"]
@@ -269,6 +273,52 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
         content = path.read_text(encoding="utf-8").casefold()
         for suffix in PROVIDER_HOST_SUFFIXES:
             assert suffix not in content, f"{path} publishes {suffix}"
+
+
+REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
+
+
+def test_public_surfaces_disclose_private_repo_and_avoid_dead_deep_links(
+    tmp_path,
+) -> None:
+    """The source repository went private in 2026-08, so anonymous fetches of
+    ``github.com/PetrefiedThunder/...`` return 404. Public surfaces may still
+    name the repository as the source of record, but only next to an explicit
+    private/request-access disclosure — and never via ``/blob/`` deep links,
+    whose targets have live replacements served from the API origin
+    (``/WEDGE.md``, ``/SECURITY_LIMITATIONS.md``, ``/DESIGN_PARTNER_GUIDE.md``).
+    """
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    public_paths = (
+        output / "index.html",
+        output / "proof" / "index.html",
+        output / "compare" / "index.html",
+        output / "llm.txt",
+        output / "llms.txt",
+        output / "llms-full.txt",
+        output / ".well-known" / "agent.json",
+        output / ".well-known" / "security.txt",
+        ROOT / "static" / "llm.txt",
+    )
+    for path in public_paths:
+        content = path.read_text(encoding="utf-8")
+        assert f"{REPO_URL}/blob/" not in content, (
+            f"{path} deep-links into the private repository; anonymous fetches "
+            "404 — link the API-origin copy instead"
+        )
+        assert "raw.githubusercontent.com" not in content, (
+            f"{path} links raw.githubusercontent.com, which 404s on a private "
+            "repository"
+        )
+        if REPO_URL in content:
+            lowered = content.casefold()
+            assert "private" in lowered and "request" in lowered, (
+                f"{path} names the private repository without disclosing that "
+                "access must be requested"
+            )
 
 
 def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:

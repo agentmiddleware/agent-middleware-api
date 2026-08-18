@@ -174,6 +174,13 @@
             <code>b2a</code> in the package and command names is short for
             business-to-agent — it is the SDK's name, not a separate product.
           </p>
+          <p>
+            The verifier ships inside the source repository, which is private
+            during the design-partner phase.
+            <a href="mailto:@@PUBLIC_CONTACT_EMAIL@@">Request source access</a>
+            and the commands below run as written; the receipt and key snapshot
+            above stay downloadable by anyone.
+          </p>
           <pre tabindex="0"><code>git clone --depth=1 https://github.com/PetrefiedThunder/agent-middleware-api.git
 python -m pip install "./agent-middleware-api/b2a_sdk[verify]"
 b2a-verify-receipt \
@@ -245,16 +252,16 @@ b2a-verify-receipt \
           href="https://github.com/PetrefiedThunder/agent-middleware-api"
           target="_blank"
           rel="noopener noreferrer"
-          >Source code (GitHub)</a
+          >Source repository (private — request access)</a
         >
         <a
-          href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/docs/quickstart.md"
+          href="https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md"
           target="_blank"
           rel="noopener noreferrer"
-          >Quickstart docs</a
+          >Design partner guide</a
         >
         <a
-          href="https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md"
+          href="https://api.thisisatest.tech/SECURITY_LIMITATIONS.md"
           target="_blank"
           rel="noopener noreferrer"
           >Security limitations</a

@@ -7,6 +7,13 @@
 
 **Run date:** 2026-08-12 (UTC) · **Mode:** adversarial black-box, no operator credentials · **Volume:** dozens of spaced requests, no load/stress, no auth-bypass, no destructive writes. Rate-limit budget stayed healthy throughout (`x-ratelimit-remaining` never below 111/120).
 
+> **Status note (2026-08-17):** this report is a dated snapshot. Since it ran,
+> the Railway-generated origin above stopped being publicly routable (it now
+> returns 404); the canonical public API base is `https://api.thisisatest.tech/`.
+> The GitHub repository referenced throughout is now **private**, so anonymous
+> `github.com` fetches return 404. Reproduction commands still work with
+> `API=https://api.thisisatest.tech` and operator-granted source access.
+
 **Method:** discovery → runtime truth → authority wall → invoke → receipts/verify → negative-path matrix → fail-open hunt. Every claim below is backed by a real request/response captured live; a copy-pasteable reproduction command is in [Appendix A](#appendix-a--reproduction-commands).
 
 ---

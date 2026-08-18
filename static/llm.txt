@@ -140,8 +140,10 @@ libraries are optional and not required for the wedge.
 ### Python 0.4.0 (release artifact only)
 
 CI builds a wheel and sdist and attaches them to the
-`python-sdk-v0.4.0` GitHub release. It is **not** published to PyPI. Install a
-downloaded wheel, or install from a clone for development:
+`python-sdk-v0.4.0` GitHub release. It is **not** published to PyPI, and the
+repository (including its releases) is private — request source access from
+the operator. With access, install a downloaded wheel, or install from a
+clone for development:
 
 ```bash
 pip install ./b2a_sdk-0.4.0-py3-none-any.whl
@@ -203,4 +205,4 @@ are mounted only when `ENABLE_PROOF_SURFACES=true`.
 - OpenAPI Spec: `/openapi.json`
 - Wedge: `/WEDGE.md`
 - Security limitations: `/SECURITY_LIMITATIONS.md`
-- GitHub: https://github.com/PetrefiedThunder/agent-middleware-api
+- GitHub: https://github.com/PetrefiedThunder/agent-middleware-api (private — source access on request)

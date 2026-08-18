@@ -49,15 +49,19 @@ https://www.thisisatest.tech/proof/
 
 It labels the evidence as self-issued live gateway proof, not customer
 traction. The exact portable receipt and matching key snapshot can be checked
-offline with the repository SDK verifier.
+offline with the repository SDK verifier. The receipt and key files are public;
+the verifier ships in the source repository, which requires access (below).
 
 ## Try the complete loop locally
 
-No live credentials are required. Two local paths, both self-contained:
+No live credentials are required. The source repository is private during the
+design-partner phase: request access from the operator (security contact below)
+and the steps run as written. Two local paths, both self-contained:
 
 Drive it yourself (a real server, you hold the keys):
 
 1. Clone https://github.com/PetrefiedThunder/agent-middleware-api
+   (private — source access on request)
 2. Run `make quickstart` from the repository root.
 3. Follow docs/quickstart.md: mint your own wallet-scoped key, issue
    yourself a permit, invoke one governed tool, replay it, overspend it,
@@ -76,7 +80,7 @@ settlement or compliance claims.
 ## Humans and operators
 
 https://www.thisisatest.tech/
-https://github.com/PetrefiedThunder/agent-middleware-api
+https://github.com/PetrefiedThunder/agent-middleware-api (private — access on request)
 
 ## Longer machine brief
 
