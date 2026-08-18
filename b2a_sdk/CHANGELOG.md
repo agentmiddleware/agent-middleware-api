@@ -9,9 +9,22 @@
   from inside them.
 - Distinguish a failed verification (`INVALID`) from an undetermined one
   (`UNKNOWN_KEY`, `MALFORMED`, `UNSUPPORTED`), so callers do not mistake a
-  stale key cache for tampering.
-- Add the `b2a-verify-receipt` CLI, with exit codes `0` verified, `1` forged,
-  `2` undetermined.
+  stale key cache for tampering. A bundle that is internally inconsistent —
+  or that disagrees with a caller-supplied `expected_issuer` — is `MISMATCH`:
+  a finding about the bundle, distinct from both families.
+- Read `kid`, `alg`, and `canonicalization` from the **signed** payload, never
+  from the surrounding envelope. The envelope is unauthenticated, so letting it
+  select the key or gate the capability checks would let one edited byte
+  downgrade a genuine receipt to `UNSUPPORTED` — an attacker-chosen "your
+  verifier is too old" that reads as a verifier problem rather than a bundle
+  problem. Envelope values are cross-checked *after* the signature verifies,
+  and any disagreement is reported as `MISMATCH`.
+- Add `VerificationResult.is_rejected`, true for `INVALID` and `MISMATCH` —
+  the property callers should branch on for "do not trust this bundle".
+  `is_tampered` stays narrow (`INVALID` only), because `MISMATCH` also covers
+  an `expected_issuer` disagreement, which is not a claim about tampering.
+- Add the `b2a-verify-receipt` CLI, with exit codes `0` verified, `1` rejected
+  (`INVALID` or `MISMATCH`), `2` undetermined.
 - Add the `verify` extra (`pip install "b2a-sdk[verify]"`) for the
   `cryptography` dependency. The base install is unchanged; importing
   `b2a_sdk` without the extra still works, and only signature checking

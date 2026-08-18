@@ -14,7 +14,9 @@ Exit codes are meant to be branched on:
 
 ===  ==========================================================
 0    signature verified
-1    well-formed bundle that does not verify — treat as tampered
+1    well-formed bundle that does not hold together — treat as
+     tampered (failed signature, or a signature that verified over
+     bytes contradicting the envelope around them)
 2    could not determine (unknown key, malformed input, bad usage)
 ===  ==========================================================
 
@@ -32,7 +34,6 @@ from typing import Any
 
 from .receipt_verifier import (
     VerificationError,
-    VerificationStatus,
     key_set_from_document,
     verify_bundle,
 )
@@ -179,7 +180,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if result.ok:
         return EXIT_VERIFIED
-    if result.status is VerificationStatus.INVALID:
+    if result.is_rejected:
+        # MISMATCH belongs here, not in EXIT_UNDETERMINED. It is a determined
+        # rejection -- the signature verified and the signed bytes then
+        # contradicted the envelope -- which is exactly the relabelling attack
+        # this tool exists to catch. Routing it to "could not determine" told
+        # a branching script to treat a caught forgery as an outage.
         return EXIT_INVALID
     return EXIT_UNDETERMINED
 

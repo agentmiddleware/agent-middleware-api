@@ -448,16 +448,20 @@ async def _tool_verify_receipt(
             "signed claims are in structuredContent.claims; report only "
             "those fields as attested."
         )
-    elif result.is_tampered:
-        text = (
-            f"INVALID — {result.reason}. The bundle is well-formed but its "
-            "signature does not hold; treat it as altered or forged."
-        )
     elif result.status is _receipt_verifier.VerificationStatus.MISMATCH:
+        # Checked before is_tampered: a MISMATCH is a rejection, but saying its
+        # "signature does not hold" would be false. The signature may well have
+        # verified -- what failed is agreement between the signed bytes and the
+        # envelope around them, or an explicit caller expectation.
         text = (
             f"CANNOT ACCEPT (mismatch) — {result.reason}. The evidence or "
             "caller expectation is internally inconsistent; this does not "
             "mean the signature failed."
+        )
+    elif result.is_tampered:
+        text = (
+            f"INVALID — {result.reason}. The bundle is well-formed but its "
+            "signature does not hold; treat it as altered or forged."
         )
     else:
         text = (

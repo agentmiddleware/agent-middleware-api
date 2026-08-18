@@ -119,8 +119,25 @@ def test_key_set_rejects_a_document_with_no_keys_list():
         ({"kid": ""}, VerificationStatus.MALFORMED),
         ({"signing_input": "not json"}, VerificationStatus.MALFORMED),
         ({"signing_input": "[1,2]"}, VerificationStatus.MALFORMED),
-        ({"alg": "RS256"}, VerificationStatus.UNSUPPORTED),
-        ({"canonicalization": "something-else/9"}, VerificationStatus.UNSUPPORTED),
+        # UNSUPPORTED must be driven by what the SIGNER declared, inside the
+        # signed bytes -- never by the envelope. These still resolve before any
+        # signature check, so they need no key material.
+        (
+            {"signing_input": json.dumps({"receipt_id": "rcpt-1", "kid": "key-1", "alg": "RS256"})},
+            VerificationStatus.UNSUPPORTED,
+        ),
+        (
+            {
+                "signing_input": json.dumps(
+                    {
+                        "receipt_id": "rcpt-1",
+                        "kid": "key-1",
+                        "canonicalization": "something-else/9",
+                    }
+                )
+            },
+            VerificationStatus.UNSUPPORTED,
+        ),
     ],
 )
 def test_unusable_bundles_report_why(overrides, expected):

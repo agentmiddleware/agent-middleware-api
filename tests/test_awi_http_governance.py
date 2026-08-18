@@ -5,8 +5,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import func, select
 from httpx import ASGITransport, AsyncClient
 
+from app.db.database import get_session_factory
+from app.db.models import IdempotencyRecordModel, LedgerEntryModel
 from app.main import app
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
@@ -141,3 +144,78 @@ async def test_execute_denied_without_wallet_scoped_session(client, clean_databa
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "wallet_required"
+
+
+@pytest.mark.anyio
+async def test_awi_route_keys_its_debit_to_the_idempotency_record(
+    client, clean_database
+):
+    """The governed AWI route must key its debit to the request's identity.
+
+    This path used to call ``money.charge()`` with no ``operation_key``, so it
+    had neither the ``uq_ledger_wallet_operation_key`` constraint nor the
+    adopt-the-existing-debit recovery the governed MCP path relies on. A charge
+    that committed but whose acknowledgement was lost took the failure branch,
+    which releases the permit budget and *completes* the idempotency record as
+    ``charge_failed`` -- so the caller retried under a fresh key and paid twice
+    for one logical action.
+
+    Asserted on the real route rather than on ``money.charge`` directly,
+    because the defect was the wiring: the mechanism already existed and this
+    caller simply did not use it.
+    """
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="awi_rag_query",
+        max_credits=50,
+        idem_key="permit-awi-opkey",
+    )
+    resp = await client.post(
+        "/v1/awi/rag/query",
+        json={"query": "laptops", "top_k": 3},
+        headers={
+            **provisioned["agent_headers"],
+            "X-Wallet-Id": provisioned["agent_wallet_id"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": "awi-opkey-1",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    factory = get_session_factory()
+    async with factory() as session:
+        record_id = (
+            await session.execute(
+                select(IdempotencyRecordModel.record_id).where(
+                    IdempotencyRecordModel.wallet_id == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.idempotency_key == "awi-opkey-1",
+                )
+            )
+        ).scalar_one()
+        keyed = (
+            await session.execute(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(LedgerEntryModel.operation_key == record_id)
+            )
+        ).scalar_one()
+        unkeyed = (
+            await session.execute(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(
+                    LedgerEntryModel.wallet_id == provisioned["agent_wallet_id"],
+                    LedgerEntryModel.action == "charge",
+                    LedgerEntryModel.operation_key.is_(None),
+                )
+            )
+        ).scalar_one()
+
+    assert keyed == 1, (
+        "the AWI debit is not keyed to its idempotency record, so a retry "
+        "after a lost acknowledgement would debit again"
+    )
+    assert unkeyed == 0, "a governed AWI charge landed with no operation_key"

@@ -317,6 +317,24 @@ full release gate; do not backfill a final `v1.2.0` tag.
 
 ### 🔒 Security
 
+- **The governed AWI HTTP charge is now keyed to its idempotency record.**
+  `awi_http_governance.py` called `money.charge()` with no `operation_key`, so
+  the debit had neither the `uq_ledger_wallet_operation_key` constraint nor the
+  adopt-the-existing-debit recovery the governed MCP path relies on. If the
+  charge committed but its acknowledgement was lost, the handler released the
+  permit budget and *completed* the idempotency record as `charge_failed`; the
+  caller's key then replayed a permanent error, so a retry under a fresh key
+  was **debited a second time for one logical action**, and because
+  `response_json` was non-NULL neither reconciler branch ever flagged the
+  orphan. Six governed endpoints route through this path. Unlike the
+  read-modify-write races elsewhere in this codebase, this one did not depend
+  on a row lock being a no-op — it was exposed on PostgreSQL too.
+- **The public MCP `verify_receipt` tool no longer describes a caught forgery
+  as a verifier limitation.** It reports `MISMATCH` before consulting
+  `is_tampered`, so a bundle whose envelope disagrees with its signed content
+  is not narrated to the model as a bad signature — or, previously, as
+  "CANNOT VERIFY (unsupported)". See `b2a_sdk/CHANGELOG.md` for the verifier
+  change this depends on.
 - **`.env.production` now sets `ENVIRONMENT=production`.** It omitted the
   variable entirely, so `Settings.ENVIRONMENT` fell back to its `"local"`
   default and `is_production_like_environment()` returned `False` — meaning a

@@ -697,3 +697,97 @@ def test_cli_emits_machine_readable_output(tmp_path, capsys):
     assert emitted["ok"] is True
     assert emitted["status"] == "verified"
     assert emitted["claims"]["tool"] == "search"
+
+
+@pytest.mark.parametrize(
+    "overrides,label",
+    [
+        ({"alg": "RS256"}, "algorithm"),
+        ({"canonicalization": "awi-canonical-json/2"}, "canonicalization"),
+    ],
+)
+def test_envelope_cannot_downgrade_a_genuine_receipt_to_unsupported(overrides, label):
+    """An edited envelope must not let an attacker choose the verdict.
+
+    ``alg`` and ``canonicalization`` were read from the unauthenticated
+    envelope and short-circuited to UNSUPPORTED *before* the signature was
+    checked. So one edited byte on a genuine, fully-verifiable receipt
+    produced "this verifier is too old" -- a statement about the verifier's
+    own capability, chosen by whoever edited the bytes, carrying
+    ``is_tampered = False``.
+
+    That is the integrity/capability inversion the six-state taxonomy exists
+    to prevent, and it is a deniability primitive: anyone on the transport
+    path could convert a VERIFIED receipt into something an operator resolves
+    by upgrading rather than by escalating.
+
+    The bundle here is genuinely signed and verifies untouched, so the only
+    thing claiming otherwise is the envelope.
+    """
+    kid, key_set, sign = _local_signer()
+    payload = _hashed_payload(
+        {"receipt_id": "rcpt-downgrade", "kid": kid, "alg": "Ed25519"}
+    )
+
+    baseline = verify_bundle(_signed_bundle(payload, kid=kid, sign=sign), key_set)
+    assert baseline.status is VerificationStatus.VERIFIED, (
+        "fixture must verify untouched, or the test proves nothing"
+    )
+
+    result = verify_bundle(
+        _signed_bundle(payload, kid=kid, sign=sign, **overrides), key_set
+    )
+
+    assert result.status is not VerificationStatus.UNSUPPORTED, (
+        f"an edited envelope {label} downgraded a genuine receipt to "
+        "UNSUPPORTED, which reports a tampered bundle as a verifier limitation"
+    )
+    assert result.status is VerificationStatus.MISMATCH
+    # The envelope disagreeing with signed content means the bundle must not
+    # be accepted. Deliberately is_rejected rather than is_tampered: MISMATCH
+    # also covers caller-expectation failures like expected_issuer, and
+    # calling those forgery would be the same category error in reverse.
+    assert result.is_rejected
+    assert not result.is_tampered
+
+
+def test_envelope_kid_relabelling_is_a_mismatch_not_a_signature_failure():
+    """Selecting the key from the signed payload makes relabelling inert.
+
+    Key selection used to read the envelope's ``kid``, so relabelling a bundle
+    to a *different published* key made the verifier fetch the wrong key and
+    report INVALID -- indistinguishable from a forged payload, even though the
+    signed bytes were untouched. Selecting from the signed payload means the
+    envelope cannot steer key selection at all.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    kid, key_set, sign = _local_signer()
+    # A genuinely different published key. _local_signer() hardcodes its kid,
+    # so calling it twice yields one kid with the second key silently
+    # overwriting the first -- which makes the signature fail for the wrong
+    # reason and proves nothing about relabelling.
+    other_kid = "local-test-key-2"
+    other_public = (
+        Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(Encoding.Raw, PublicFormat.Raw)
+    )
+    key_set = {**key_set, other_kid: other_public}
+
+    payload = _hashed_payload(
+        {"receipt_id": "rcpt-relabel", "kid": kid, "alg": "Ed25519"}
+    )
+    # Sign under `kid`, then relabel the envelope to the other published key.
+    # Built and mutated rather than passed through **overrides, because
+    # _signed_bundle takes `kid` as a named parameter.
+    bundle = _signed_bundle(payload, kid=kid, sign=sign)
+    bundle["kid"] = other_kid
+
+    result = verify_bundle(bundle, key_set)
+
+    assert result.status is VerificationStatus.MISMATCH
+    assert result.is_rejected
+    # Reported against the key the signed bytes actually name.
+    assert result.key_id == kid

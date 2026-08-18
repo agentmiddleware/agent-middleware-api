@@ -57,6 +57,10 @@ class AwiHttpGovernedContext:
     credits: Decimal
     permit: PermitModel
     endpoint: str
+    #: Identity of this request's idempotency record. Used as the ledger
+    #: ``operation_key`` so a retried charge is deduplicated by the database
+    #: rather than by hoping the first attempt's outcome was observed.
+    record_id: str | None = None
     replay_response: dict[str, Any] | None = None
     replay_status_code: int | None = None
 
@@ -90,6 +94,7 @@ def _context_from_validation(
     credits: Decimal,
     permit: PermitModel,
     endpoint: str,
+    record_id: str | None = None,
     replay: IdempotencyReplay | None = None,
 ) -> AwiHttpGovernedContext:
     return AwiHttpGovernedContext(
@@ -101,6 +106,7 @@ def _context_from_validation(
         credits=credits,
         permit=permit,
         endpoint=endpoint,
+        record_id=record_id,
         replay_response=replay.response_json if replay else None,
         replay_status_code=replay.status_code if replay else None,
     )
@@ -178,7 +184,7 @@ async def begin_awi_http_governed(
 
     idem = get_idempotency_service()
     try:
-        replay = await idem.begin(
+        begun = await idem.begin_with_record(
             wallet_id=wallet_id,
             endpoint=endpoint,
             idempotency_key=idempotency_key.strip(),
@@ -189,6 +195,8 @@ async def begin_awi_http_governed(
                 "permit_id": permit_id.strip(),
             },
         )
+        replay = begun.replay
+        record_id = begun.record_id
     except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -205,6 +213,7 @@ async def begin_awi_http_governed(
             credits=credits,
             permit=validation.permit,
             endpoint=endpoint,
+            record_id=record_id,
             replay=replay,
         )
 
@@ -217,6 +226,7 @@ async def begin_awi_http_governed(
         credits=credits,
         permit=validation.permit,
         endpoint=endpoint,
+        record_id=record_id,
     )
 
 
@@ -248,6 +258,16 @@ async def complete_awi_http_governed(
             units=charge_units,
             request_path=ctx.endpoint,
             description=f"AWI HTTP {ctx.tool_name}",
+            # Key the debit to this request's durable identity. Without it this
+            # path had neither the uq_ledger_wallet_operation_key constraint nor
+            # the adopt-the-existing-debit recovery that the governed MCP path
+            # relies on -- so a charge that committed but whose acknowledgement
+            # was lost took the except branch below, which releases budget and
+            # *completes* the idempotency record as charge_failed. The caller
+            # then retried under a fresh key and was debited a second time for
+            # one logical action. With the key, the second attempt adopts the
+            # first durable debit instead of creating one.
+            operation_key=ctx.record_id,
         )
     except Exception as exc:
         await permits.release_budget(ctx.permit_id, ctx.credits)

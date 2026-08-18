@@ -621,9 +621,35 @@ async def test_expected_issuer_mismatch_is_not_a_signature_verdict(
     ("bundle", "expected_status"),
     [
         ("not-json", "malformed"),
-        ({**_unverifiable_bundle(), "alg": "RSA"}, "unsupported"),
+        # The unsupported cases must be declared inside the SIGNED bytes.
+        # Reading them from the envelope is what let an edited byte downgrade a
+        # genuine receipt to "this verifier is too old", so the envelope is no
+        # longer trusted for that decision -- which also means an envelope-only
+        # bad alg is no longer cheaply rejectable, by design.
         (
-            {**_unverifiable_bundle(), "canonicalization": "unknown/1"},
+            {
+                **_unverifiable_bundle(),
+                "signing_input": json.dumps(
+                    {
+                        "receipt_id": "rcpt-no-key",
+                        "kid": "no-published-key",
+                        "alg": "RSA",
+                    }
+                ),
+            },
+            "unsupported",
+        ),
+        (
+            {
+                **_unverifiable_bundle(),
+                "signing_input": json.dumps(
+                    {
+                        "receipt_id": "rcpt-no-key",
+                        "kid": "no-published-key",
+                        "canonicalization": "unknown/1",
+                    }
+                ),
+            },
             "unsupported",
         ),
     ],
@@ -716,6 +742,38 @@ async def test_verify_receipt_rejects_a_tampered_bundle(client, public_mcp_enabl
 
 @pytest.mark.anyio
 async def test_unknown_key_is_not_reported_as_tampering(client, public_mcp_enabled):
+    await get_signing_key_service().ensure_active_key()
+    # A key this plane genuinely does not publish, named inside the SIGNED
+    # bytes, is the real "unknown key" case.
+    unknown = await _signed_bundle()
+    payload = json.loads(unknown["signing_input"])
+    payload["kid"] = "kid-that-does-not-exist"
+    unknown["signing_input"] = json.dumps(payload)
+    unknown["kid"] = "kid-that-does-not-exist"
+    resp = await client.post(
+        PUBLIC_PATH,
+        json=_call("verify_receipt", {"bundle": unknown}),
+        headers=MCP_HEADERS,
+    )
+    structured = resp.json()["result"]["structuredContent"]
+    assert structured["ok"] is False
+    assert structured["status"] == "unknown_key"
+    text = resp.json()["result"]["content"][0]["text"]
+    assert "not evidence of tampering" in text.lower()
+
+
+@pytest.mark.anyio
+async def test_relabelled_envelope_kid_is_a_mismatch_not_an_unknown_key(
+    client, public_mcp_enabled
+):
+    """Editing only the envelope must not look like a key-distribution problem.
+
+    The signed payload still names the real key, so this plane holds it and the
+    receipt is genuine. Reporting UNKNOWN_KEY here would let anyone in the
+    transport path turn a valid receipt into "refresh your key set" with one
+    edited field -- an availability story for what is actually an altered
+    bundle.
+    """
     bundle = await _signed_bundle()
     await get_signing_key_service().ensure_active_key()
     relabeled = {**bundle, "kid": "kid-that-does-not-exist"}
@@ -726,9 +784,7 @@ async def test_unknown_key_is_not_reported_as_tampering(client, public_mcp_enabl
     )
     structured = resp.json()["result"]["structuredContent"]
     assert structured["ok"] is False
-    assert structured["status"] == "unknown_key"
-    text = resp.json()["result"]["content"][0]["text"]
-    assert "not evidence of tampering" in text.lower()
+    assert structured["status"] == "mismatch"
 
 
 @pytest.mark.anyio

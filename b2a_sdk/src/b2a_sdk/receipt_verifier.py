@@ -105,8 +105,35 @@ class VerificationResult:
         """True only for a bundle that is well-formed but does not verify.
 
         Distinct from :attr:`ok` being False, which also covers "cannot tell".
+
+        Deliberately narrow: this is a claim that a *signature failed*. It does
+        not cover ``MISMATCH``, because ``MISMATCH`` also carries caller-
+        expectation failures such as ``expected_issuer`` -- and reporting "you
+        asked for a different issuer" as forgery would be the same category
+        error, in the opposite direction, as reporting a missing key as
+        tampering. Use :attr:`is_rejected` to decide whether to accept a
+        bundle; use this only to assert that the cryptography failed.
         """
         return self.status is VerificationStatus.INVALID
+
+    @property
+    def is_rejected(self) -> bool:
+        """True when the bundle must not be accepted as evidence.
+
+        The verifier reached a verdict and the verdict is no. Covers a failed
+        signature (``INVALID``) and a bundle that does not hold together
+        (``MISMATCH`` -- the signature verified but the envelope, the signed
+        payload, or an explicit caller expectation disagree).
+
+        This is the property most callers want. It is distinct from ``not ok``,
+        which additionally sweeps in ``UNKNOWN_KEY``, ``MALFORMED`` and
+        ``UNSUPPORTED`` -- the "I cannot judge this" statuses, where the right
+        response is to fetch keys or upgrade, not to allege fraud.
+        """
+        return self.status in (
+            VerificationStatus.INVALID,
+            VerificationStatus.MISMATCH,
+        )
 
 
 def canonical_json(payload: Any) -> str:
@@ -286,60 +313,86 @@ def verify_bundle(
 
     signing_input = bundle.get("signing_input")
     signature_b64 = bundle.get("signature")
-    key_id = bundle.get("kid")
+    envelope_key_id = bundle.get("kid")
     if not isinstance(signing_input, str) or not signing_input:
         return _fail(VerificationStatus.MALFORMED, "bundle has no signing_input")
     if not isinstance(signature_b64, str) or not signature_b64:
         return _fail(VerificationStatus.MALFORMED, "bundle has no signature")
-    if not isinstance(key_id, str) or not key_id:
+    if not isinstance(envelope_key_id, str) or not envelope_key_id:
         return _fail(VerificationStatus.MALFORMED, "bundle has no kid")
-
-    algorithm = bundle.get("alg", "Ed25519")
-    if algorithm != "Ed25519":
-        return _fail(
-            VerificationStatus.UNSUPPORTED,
-            f"unsupported signature algorithm: {algorithm!r}",
-            key_id=key_id,
-        )
-
-    declared = bundle.get("canonicalization", CANONICALIZATION)
-    if declared != CANONICALIZATION:
-        # Verifying under rules the payload was not signed with would produce a
-        # confident answer to the wrong question.
-        return _fail(
-            VerificationStatus.UNSUPPORTED,
-            f"unsupported canonicalization: {declared!r} (this verifier "
-            f"implements {CANONICALIZATION!r})",
-            key_id=key_id,
-        )
 
     if expected_issuer is not None and bundle.get("issuer") != expected_issuer:
         return _fail(
             VerificationStatus.MISMATCH,
             f"issuer mismatch: bundle claims {bundle.get('issuer')!r}",
-            key_id=key_id,
+            key_id=envelope_key_id,
         )
 
-    # Parse the signed bytes before checking the signature so a malformed
-    # payload is reported as malformed rather than as a forgery.
+    # Parse the signed bytes before anything else that can decide an outcome.
+    #
+    # Ordering is the whole security property here. The envelope is
+    # unauthenticated: anyone in the transport path can edit it. So the
+    # capability gates below (algorithm, canonicalization) and the key
+    # selection must read the *signed* payload, never the envelope. An earlier
+    # version read `alg` and `canonicalization` from the envelope and
+    # short-circuited to UNSUPPORTED before the signature was ever checked,
+    # which let one edited byte turn a genuine receipt into "your verifier is
+    # too old" -- an attacker-chosen status, and the exact integrity/capability
+    # inversion this taxonomy exists to prevent. Envelope values are still
+    # checked, but afterwards, and disagreement is MISMATCH (a finding about
+    # the bundle) rather than UNSUPPORTED (a statement about this verifier).
     try:
         payload = json.loads(signing_input)
     except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError):
         return _fail(
             VerificationStatus.MALFORMED,
             "signing_input is not valid JSON",
-            key_id=key_id,
+            key_id=envelope_key_id,
         )
     if not isinstance(payload, dict):
         return _fail(
             VerificationStatus.MALFORMED,
             "signing_input is not a JSON object",
-            key_id=key_id,
+            key_id=envelope_key_id,
         )
     if _contains_invalid_unicode(payload):
         return _fail(
             VerificationStatus.MALFORMED,
             "signing_input contains invalid Unicode text",
+            key_id=envelope_key_id,
+        )
+
+    # Select the verification key by the kid inside the signed bytes. If the
+    # signature then verifies, that kid is authenticated retroactively, so a
+    # relabelled envelope cannot steer key selection at all.
+    key_id = payload.get("kid")
+    if not isinstance(key_id, str) or not key_id:
+        return _fail(
+            VerificationStatus.MALFORMED,
+            "signed payload has no kid",
+            key_id=envelope_key_id,
+        )
+
+    algorithm = payload.get("alg", "Ed25519")
+    if algorithm != "Ed25519":
+        # Signer-declared, and therefore a genuine statement about what this
+        # verifier can do.
+        return _fail(
+            VerificationStatus.UNSUPPORTED,
+            f"unsupported signature algorithm: {algorithm!r}",
+            key_id=key_id,
+        )
+
+    signed_canonicalization = payload.get("canonicalization")
+    if isinstance(signed_canonicalization, str) and signed_canonicalization != CANONICALIZATION:
+        # Verifying under rules the payload was not signed with would produce a
+        # confident answer to the wrong question. Only trusted because it is
+        # signed; receipts predating this field carry no counterpart and are
+        # handled by the envelope cross-check after verification.
+        return _fail(
+            VerificationStatus.UNSUPPORTED,
+            f"unsupported canonicalization: {signed_canonicalization!r} (this "
+            f"verifier implements {CANONICALIZATION!r})",
             key_id=key_id,
         )
 
@@ -359,6 +412,28 @@ def verify_bundle(
 
     raw_public_key = key_set.get(key_id)
     if raw_public_key is None:
+        # The payload names a key this verifier does not hold. Normally that is
+        # "cannot judge" -- but first check whether the envelope points at a
+        # key we *do* hold that actually signs these bytes. If it does, the
+        # bundle is provably self-contradicting (signed under one key while
+        # claiming another), and that is a verdict, not a gap. Skipping this
+        # would let a forger name a nonexistent kid to downgrade a detectable
+        # inconsistency into "refresh your key set and try again".
+        envelope_key = key_set.get(envelope_key_id) if envelope_key_id != key_id else None
+        if envelope_key is not None and len(envelope_key) == _ED25519_RAW_LEN:
+            try:
+                probe_bytes = signing_input.encode("utf-8")
+            except UnicodeEncodeError:
+                probe_bytes = None
+            if probe_bytes is not None and _verify_ed25519_signature(
+                envelope_key, signature, probe_bytes
+            ):
+                return _fail(
+                    VerificationStatus.MISMATCH,
+                    f"signed under kid {envelope_key_id!r} but the signed "
+                    f"payload names kid {key_id!r}",
+                    key_id=key_id,
+                )
         # Not a verdict on the receipt: this verifier simply does not hold the
         # key. Refresh the key set from the issuer before drawing conclusions.
         return _fail(
@@ -392,12 +467,36 @@ def verify_bundle(
             key_id=key_id,
         )
 
-    # The signature holds. Remaining checks are internal consistency of the
-    # signed payload itself.
-    if payload.get("kid") != key_id:
+    # The signature holds, so the signed payload is now authenticated ground
+    # truth. Every envelope value that claims to describe it is checked against
+    # it here. Disagreement is a finding about the bundle -- MISMATCH -- never
+    # UNSUPPORTED, because at this point the verifier demonstrably *could*
+    # judge the evidence.
+    if envelope_key_id != key_id:
         return _fail(
             VerificationStatus.MISMATCH,
-            "signed payload names a different kid than the bundle",
+            "bundle names a different kid than the signed payload",
+            key_id=key_id,
+        )
+
+    envelope_algorithm = bundle.get("alg", "Ed25519")
+    if envelope_algorithm != algorithm:
+        return _fail(
+            VerificationStatus.MISMATCH,
+            f"bundle claims algorithm {envelope_algorithm!r} but the signed "
+            f"payload declares {algorithm!r}",
+            key_id=key_id,
+        )
+
+    envelope_canonicalization = bundle.get("canonicalization", CANONICALIZATION)
+    expected_canonicalization = (
+        signed_canonicalization if isinstance(signed_canonicalization, str) else CANONICALIZATION
+    )
+    if envelope_canonicalization != expected_canonicalization:
+        return _fail(
+            VerificationStatus.MISMATCH,
+            f"bundle claims canonicalization {envelope_canonicalization!r} but "
+            f"the signed payload verifies under {expected_canonicalization!r}",
             key_id=key_id,
         )
 
