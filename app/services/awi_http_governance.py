@@ -29,7 +29,7 @@ from app.services.idempotency import (
     IdempotencyReplay,
     get_idempotency_service,
 )
-from app.services.permits import get_permit_service
+from app.services.permits import PermitError, get_permit_service
 from app.services.receipts import get_receipt_service
 
 logger = logging.getLogger(__name__)
@@ -237,7 +237,18 @@ async def complete_awi_http_governed(
     response_payload: dict[str, Any],
     money: AgentMoney | None = None,
 ) -> dict[str, Any]:
-    """Charge wallet, reserve permit budget, write receipt, complete idempotency."""
+    """Reserve permit budget, charge wallet, write receipt, complete idempotency.
+
+    The order is load-bearing and is stated here in the order the code runs.
+    The reservation is taken **first**, so a later failure compensates by
+    releasing it — with one deliberate exception: on ``ChargeCreditMismatchError``
+    the wallet has already been debited, so the reservation is *retained* rather
+    than released. Releasing it there would free budget the caller has in fact
+    spent.
+    An earlier revision of this line named the charge first; anyone reasoning
+    about crash compensation from that reading would have had the direction of
+    the required rollback backwards.
+    """
     if ctx.replay_response is not None:
         return ctx.replay_response
 
@@ -246,7 +257,45 @@ async def complete_awi_http_governed(
     money = money or get_agent_money()
     permits = get_permit_service()
     idem = get_idempotency_service()
-    await permits.reserve_budget(ctx.permit_id, ctx.credits)
+    try:
+        await permits.reserve_budget(ctx.permit_id, ctx.credits)
+    except PermitError as exc:
+        detail = {
+            "error": exc.reason,
+            "message": exc.reason,
+            "tool": ctx.tool_name,
+        }
+        if exc.reason == "permit_write_contended":
+            # Transient: the guarded write lost to contention and exhausted its
+            # retries. Nothing was reserved and nothing was charged, so the key
+            # must stay usable -- *completing* the record here would freeze a
+            # momentary database conflict into a permanent stored denial that
+            # every retry of that idempotency key replays, long after the
+            # contention cleared. Release the key and answer 503 instead.
+            await idem.abandon(
+                wallet_id=ctx.wallet_id,
+                endpoint=ctx.endpoint,
+                idempotency_key=ctx.idempotency_key,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=detail,
+            ) from exc
+        # Terminal: a permit that expired or was revoked between validation and
+        # this reservation is a *denial*, not a server fault. Nothing was
+        # reserved and nothing was charged, so the caller gets the same 403
+        # shape the up-front validation would have produced. Without this the
+        # PermitError escaped uncaught and the route answered 500, which tells
+        # an operator the service is broken when in fact the permit did its job.
+        await abort_awi_http_governed(
+            ctx,
+            status_code=status.HTTP_403_FORBIDDEN,
+            error_payload=detail,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=detail,
+        ) from exc
 
     unit_price = DEFAULT_PRICING[ServiceCategory.AGENT_COMMS][1]
     charge_units = ctx.credits / unit_price if unit_price else Decimal("1")

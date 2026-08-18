@@ -3,6 +3,7 @@ Tests for Stripe Integration Service.
 Validates fiat top-up flow, webhook handling, and idempotency.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,6 +12,7 @@ import stripe
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.exc import IntegrityError
 
+from app.core.time import utc_now
 from app.main import app
 from app.services.stripe_integration import StripeIntegration, StripeSettlementError
 
@@ -426,6 +428,63 @@ class TestStripeWebhookIdempotency:
         ledger = await money.get_ledger(wallet_id, 50)
         refunds = [e for e in ledger if e.action == "refund"]
         assert len(refunds) == 1
+
+    @pytest.mark.anyio
+    async def test_refund_clawback_advances_the_wallet_timestamp(
+        self, client, sponsor_wallet, api_headers
+    ):
+        """A clawback must not leave the wallet row looking untouched.
+
+        The clawback is a Core ``UPDATE``, which bypasses the ORM attribute
+        write, and ``WalletModel.updated_at`` has a default but no
+        ``onupdate`` -- so the timestamp only advances if the statement sets
+        it. Without that, the most consequential balance move the wallet sees
+        (real fiat returned by Stripe) is the one that leaves no trace in
+        ``updated_at``, and anything reading the row for recency -- an
+        operator triaging a disputed balance, a sweep ordered by staleness --
+        is looking at the time of the top-up instead.
+        """
+        from app.services.stripe_integration import get_stripe_integration
+        from app.db.database import get_session_factory
+        from app.db.models import WalletModel
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        factory = get_session_factory()
+
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_clawback_timestamp",
+            description="topup",
+        )
+
+        # Backdate the row so any advance is unambiguous rather than a
+        # sub-resolution tie against the mint that just ran.
+        stale = utc_now() - timedelta(hours=1)
+        async with factory() as session:
+            async with session.begin():
+                wallet = await session.get(WalletModel, wallet_id)
+                assert wallet is not None
+                wallet.updated_at = stale
+                session.add(wallet)
+
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_clawback_timestamp",
+                amount_refunded=5000,
+            ),
+            "evt_clawback_timestamp",
+        )
+
+        async with factory() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            assert wallet.balance == Decimal("0"), "the clawback did not apply"
+            assert wallet.updated_at > stale, (
+                "the clawback moved the balance but left updated_at at "
+                f"{wallet.updated_at}, the value set before it ran"
+            )
 
     @pytest.mark.anyio
     async def test_successive_partial_refunds_apply_only_new_cumulative_delta(

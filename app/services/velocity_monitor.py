@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.time import to_naive_utc, utc_now
@@ -109,13 +109,38 @@ class VelocityMonitor:
                 now = utc_now()
 
                 self._reset_if_needed(wallet, now)
+                # Land any period reset before the relative increment below, so
+                # the increment applies on top of the reset value rather than
+                # racing it inside the same statement.
+                await session.flush()
 
                 hourly_limit = wallet.hourly_limit or self._default_hourly_limit
                 daily_limit = wallet.daily_limit or self._default_daily_limit
 
-                wallet.hourly_spent += charge_amount
-                wallet.daily_spent += charge_amount
-                wallet.last_charge_at = now
+                # Accumulate relatively, in one statement. Reading a counter and
+                # writing back read+charge is a read-modify-write serialized
+                # only by the ``SELECT ... FOR UPDATE`` above, which is a silent
+                # no-op on SQLite: concurrent charges each add to the same
+                # observed total and all but one increment is lost. This counter
+                # is what the spend cap and the anomaly auto-freeze are measured
+                # against, so under-counting does not merely skew a metric -- it
+                # silently disables both controls, and it does so precisely when
+                # spend is most concurrent.
+                await session.execute(
+                    sa_update(WalletModel)
+                    .where(
+                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+                    )
+                    .values(
+                        hourly_spent=WalletModel.hourly_spent + charge_amount,
+                        daily_spent=WalletModel.daily_spent + charge_amount,
+                        last_charge_at=now,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                # The limit check below must see the totals this charge produced,
+                # not the ones read before it.
+                await session.refresh(wallet)
 
                 velocity_result = self._check_limits(
                     wallet=wallet,

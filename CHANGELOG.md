@@ -317,6 +317,66 @@ full release gate; do not backfill a final `v1.2.0` tag.
 
 ### 🔒 Security
 
+- **The child-wallet lifetime spend cap is enforced by the database.**
+  `lifetime_debits + charge_amount <= max_spend` was checked against an earlier
+  read while the increment happened later, so concurrent charges could push a
+  delegated wallet past the ceiling its parent granted. The cap now travels
+  with the debit as its own predicate. (Raised by review on #305 — the balance
+  guard and the cap are separate predicates, and fixing one did not carry the
+  other.)
+- **Every wallet money move is now decided by the database too.** The same
+  read-modify-write shape as the permit fixes below, in the paths that hold
+  actual credits. All were serialized only by `SELECT ... FOR UPDATE`, a
+  silent no-op on SQLite:
+  - `charge` read the balance, checked it, and several statements later wrote
+    back `balance - amount` computed from that read. A charge committing in
+    between was **overwritten**: the ledger recorded the debit but the balance
+    never reflected it, so that request was served for free and the books
+    stopped balancing. The debit is now one guarded UPDATE that repeats
+    `balance >= amount` as its own predicate.
+  - `reclaim_child_wallet` read the child's balance, zeroed the child, and
+    credited the parent by the amount it had read. Two concurrent reclaims
+    each credited the parent in full — **minting credits that never existed**.
+    The child's balance is now claimed by a guarded UPDATE before any of it
+    reaches the parent.
+  - Refund credits (`refund_charge`, and the operator repair in
+    `refund_reconciliation`) wrote absolute totals, so one of two concurrent
+    refunds was lost outright — the customer's money.
+  - The velocity counters `hourly_spent` / `daily_spent` accumulated by
+    read-modify-write. Under-counting there does not skew a metric; it is what
+    the spend cap and the anomaly auto-freeze are measured against, so **both
+    controls silently stopped firing** exactly when spend was most concurrent.
+  - The Stripe cumulative-refund clawback wrote a balance derived from an
+    earlier read, against fiat Stripe had already returned.
+  - `refund_reconciliation` also mutated `permit.spent_credits` directly,
+    outside the module that guarantees every such write is guarded. That
+    guarantee is only as good as its weakest caller.
+  - New `app/db/sql_expressions.py` holds the shared clamped-decrement
+    expression, so the safe form is defined once rather than re-derived.
+- **Every permit budget write is now decided by the database, not by a value
+  this process read earlier.** Three paths in `permits.py` wrote
+  `spent_credits` from a stale read, serialized only by `SELECT ... FOR
+  UPDATE` — which is a silent no-op on SQLite, and nothing in this repository
+  forbids SQLite in production. All three are fixed, and each ships a
+  regression test confirmed to fail against the unfixed source:
+  - `reserve_budget` gated on `status` and the cap but **not on expiry**, so a
+    permit past its `expires_at` kept funding work until some other process
+    happened to flip its status — authority outliving its own deadline. The
+    expiry is now in the statement's predicate.
+  - `reserve_budget` also collapsed every guarded-write failure to
+    `permit_budget_exceeded`, telling an operator to top up a permit that had
+    actually been revoked or had expired. It now classifies status, then
+    expiry, then budget, matching `authorize_and_reserve`.
+  - `release_dispatch_budget_once` decided whether it had already run by
+    reading `budget_released_at` and then writing it. Two callers both saw
+    `NULL`, both passed, and the reservation was released **twice**, leaving
+    the permit under-spent and able to exceed its own cap. The checkpoint is
+    now claimed by a guarded UPDATE before any budget moves.
+  - `reconcile_budgets` recomputed an absolute total from receipts and wrote
+    it back unconditionally, erasing any reservation that landed mid-pass. It
+    now commits only where the stored spend still equals what that pass read,
+    and skips rather than clobbering — optimistic concurrency control, with
+    the permit re-examined on the next pass.
 - **The governed AWI HTTP charge is now keyed to its idempotency record.**
   `awi_http_governance.py` called `money.charge()` with no `operation_key`, so
   the debit had neither the `uq_ledger_wallet_operation_key` constraint nor the

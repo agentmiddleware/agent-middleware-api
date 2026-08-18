@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -23,6 +24,8 @@ from app.db.models import (
 )
 from app.schemas.trust import PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service
+
+logger = logging.getLogger(__name__)
 
 
 class PermitError(RuntimeError):
@@ -67,6 +70,24 @@ def _stamp(value: datetime | None) -> str | None:
 # transient "database is locked"/"snapshot" conflict on the second writer; we
 # retry that with a small backoff. On PostgreSQL the row lock blocks instead of
 # raising, so the retry never triggers there.
+#
+# The guard takes one of two forms, and both are decided by the database rather
+# than by this process:
+#
+# * **Relative** — reservations and releases increment or decrement in place
+#   (``spent_credits + amount``), with the cap, the status and the expiry in
+#   the statement's own predicate. A row count other than 1 means the write
+#   lost, and the caller re-reads to classify *why* before reporting a reason.
+# * **Conditional on the observed value** — ``reconcile_budgets`` recomputes an
+#   absolute total from receipts, which has no relative form, so it commits
+#   only where the stored spend still equals the value that pass read. A
+#   concurrent reservation makes that predicate false and the repair is skipped
+#   rather than overwriting it. This is optimistic concurrency control: detect
+#   the lost race by affected-row count instead of holding a lock.
+#
+# The rule this encodes: no ``spent_credits`` value may be written from a number
+# this process read in an earlier statement without the database re-checking
+# that the number still holds.
 _PERMIT_WRITE_MAX_ATTEMPTS = 40
 
 
@@ -741,11 +762,12 @@ class PermitService:
                 async with session.begin():
                     now = utc_now()
                     # Atomic guarded reserve (see authorize_and_reserve): the cap
-                    # is enforced by the WHERE clause, not a read-then-write.
-                    # The expiry term matters for the same reason it does there:
-                    # an expired permit keeps status="active" in storage, so
-                    # without it this second reservation path would still spend
-                    # against a permit that has crossed expires_at.
+                    # *and the expiry* are enforced by the WHERE clause, not a
+                    # read-then-write. The expiry term matters for the same
+                    # reason it does in authorize_and_reserve: an expired permit
+                    # keeps status="active" in storage because the sweeper flips
+                    # it lazily, so without this term a second reservation path
+                    # still spends against a permit that has crossed expires_at.
                     reserved = await session.execute(
                         sa_update(PermitModel)
                         .where(
@@ -777,9 +799,14 @@ class PermitService:
                         exists = await session.get(PermitModel, permit_id)
                         if exists is None:
                             raise PermitError("permit_not_found")
+                        # Classify in the same order as authorize_and_reserve:
+                        # status, then expiry, then budget. Reporting an expired
+                        # or revoked permit as "out of money" sends the operator
+                        # to top up a permit that more money cannot revive.
+                        await session.refresh(exists)
                         if exists.status != "active":
-                            raise PermitError("permit_not_active")
-                        if exists.expires_at <= now:
+                            raise PermitError(f"permit_{exists.status}")
+                        if to_naive_utc(exists.expires_at) <= now:
                             raise PermitError("permit_expired")
                         raise PermitError("permit_budget_exceeded")
 
@@ -869,13 +896,15 @@ class PermitService:
         async def _once() -> bool:
             async with factory() as session:
                 async with session.begin():
-                    attempt = await session.get(
-                        McpDispatchAttemptModel,
-                        attempt_id,
-                        with_for_update=True,
-                    )
+                    attempt = await session.get(McpDispatchAttemptModel, attempt_id)
                     if attempt is None:
                         raise PermitError("dispatch_attempt_not_found")
+                    # Only a terminal returned_error attempt has a reservation
+                    # to give back. Releasing budget for a prepared or
+                    # dispatched attempt frees credits that attempt may still
+                    # go on to spend, so the cap would be enforced against a
+                    # reservation that no longer exists. This pre-check is the
+                    # contract; the guarded claim below is the once-only gate.
                     if attempt.state != "returned_error":
                         raise PermitError("dispatch_budget_release_state_invalid")
                     if attempt.budget_released_at is not None:
@@ -968,7 +997,13 @@ class PermitService:
         reclaiming their budget can never enable an over-spend. A crashed
         reservation on a still-active permit is left conservatively in place
         (the agent can spend *less* than authorized, never more) and is
-        reclaimed once the permit expires. Returns the number corrected.
+        reclaimed once the permit expires.
+
+        Returns the number of permits corrected. A permit whose guarded repair
+        matched no row -- a concurrent reservation moved ``spent_credits``
+        between the receipt scan and the write -- is *not* counted, is left
+        exactly as found, and is re-examined on the next pass; those skips are
+        logged rather than returned, so the count stays a count of writes.
         """
         from app.db.models import (
             IdempotencyRecordModel,
@@ -985,6 +1020,7 @@ class PermitService:
         cutoff = now - timedelta(seconds=idle_seconds)
         factory = get_session_factory()
         corrected = 0
+        skipped = 0
         async with factory() as session:
             async with session.begin():
                 stale = (
@@ -1171,12 +1207,54 @@ class PermitService:
                         ),
                         Decimal("0"),
                     )
-                    if permit.spent_credits != consumed_decimal:
-                        permit.spent_credits = consumed_decimal
-                        permit.updated_at = utc_now()
-                        session.add(permit)
-                        corrected += 1
+                    observed = permit.spent_credits
+                    if observed != consumed_decimal:
+                        # This is an absolute set recomputed from receipts, not
+                        # an increment, so it cannot be expressed as a relative
+                        # guarded UPDATE. Guard it on the value this pass
+                        # actually observed instead: if a reservation landed
+                        # between the receipt scan and this write, the row no
+                        # longer matches and we correct nothing rather than
+                        # erasing that reservation. ``with_for_update()`` above
+                        # does not cover this on SQLite, where it is a no-op.
+                        # The skipped permit is simply re-examined next pass.
+                        repaired = await session.execute(
+                            sa_update(PermitModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.permit_id == permit.permit_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.spent_credits == observed,
+                                ),
+                            )
+                            .values(
+                                spent_credits=consumed_decimal,
+                                updated_at=utc_now(),
+                            )
+                            .execution_options(synchronize_session=False)
+                        )
+                        if (cast(Any, repaired).rowcount or 0) == 1:
+                            corrected += 1
+                        else:
+                            skipped += 1
             await session.commit()
+        if skipped:
+            # A skipped permit is not a failure and needs no operator action --
+            # it is re-examined on the next pass, and the guard is the whole
+            # point (a concurrent reservation landed, so this pass's recomputed
+            # figure is already out of date). It is logged because the return
+            # value counts only repairs: without this line a pass that skipped
+            # every permit is indistinguishable from a pass that found nothing
+            # to repair, and a permit that never stops being skipped -- the
+            # signature of a hot permit under sustained contention -- would
+            # never surface anywhere.
+            logger.info(
+                "permit_budget_reconcile_skipped",
+                extra={"skipped": skipped, "corrected": corrected},
+            )
         return corrected
 
     async def verify_signature(self, model: PermitModel) -> bool:

@@ -66,12 +66,22 @@ have been regenerated from `wc -l`; see the [appendix](#appendix-mechanism-to-fi
 
 **Evidence confidence: Verified** (after corrections 2, 10, 11)
 
-Four operations commit as one crash-consistent unit: budget reservation under
-row lock, permit scope validation, creation of a durable dispatch attempt in
-`prepared`, and the debit ledger entry. Its docstring states the invariant
-directly — *"every durable reservation has a row the reconciler can compensate,
-and a failed transaction leaves neither"*
+Four operations commit as one crash-consistent unit: the idempotency record,
+the permit row and its budget reservation, permit scope validation, and
+creation of a durable dispatch attempt in `prepared`. Its docstring states the
+invariant directly — *"every durable reservation has a row the reconciler can
+compensate, and a failed transaction leaves neither"*
 (`mcp_dispatch_attempts.py:360-366`).
+
+**The debit is not in that transaction.** `money.charge()` commits on its own
+and the idempotency record learns the entry id afterwards, through
+`mark_charged()`. An earlier revision of this section listed the debit ledger
+entry as the fourth member of the atomic unit; that was an over-claim, and the
+correction matters because the gap between those two commits is a real crash
+window rather than an absent one. What closes it is not atomicity but
+recoverability: governed charges carry `operation_key = record_id`, so a debit
+whose checkpoint was lost is still findable, and `reconcile_stuck_records`
+adopts it and raises it for review instead of leaving it orphaned.
 
 A second boundary, the `dispatched` checkpoint, is written immediately before
 the network send. Past that point the system classifies failure as

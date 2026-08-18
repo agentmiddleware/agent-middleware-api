@@ -11,9 +11,9 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -500,10 +500,69 @@ class WalletEngine:
 
                 reclaim_amount = child.balance
 
+                # Claim the child's balance with a guarded UPDATE before any of
+                # it reaches the parent. Reading ``child.balance`` and then
+                # writing both wallets is a read-modify-write serialized only by
+                # the row locks taken above, and ``SELECT ... FOR UPDATE`` is a
+                # silent no-op on SQLite: two concurrent reclaims of the same
+                # child both read the full balance, both zero it, and both
+                # credit the parent -- minting credits that never existed. The
+                # database now admits exactly one reclaim, because only one
+                # transaction can move this row off the balance it was observed
+                # holding while it is still open.
+                claimed = await session.execute(
+                    sa_update(WalletModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            WalletModel.wallet_id == child_wallet_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            WalletModel.status != WalletStatus.CLOSED.value,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            WalletModel.balance == reclaim_amount,
+                        ),
+                    )
+                    .values(
+                        balance=Decimal("0"),
+                        status=WalletStatus.CLOSED.value,
+                        updated_at=utc_now(),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                if (cast(Any, claimed).rowcount or 0) != 1:
+                    # Someone else reclaimed this child, or its balance moved
+                    # under us. Either way no credits may be created here.
+                    await session.refresh(child)
+                    if child.status == WalletStatus.CLOSED.value:
+                        raise ValueError("Wallet already closed")
+                    raise ValueError("Child wallet balance changed during reclaim")
+
                 if reclaim_amount > Decimal("0"):
-                    child.balance = Decimal("0")
-                    parent.balance += reclaim_amount
-                    parent.lifetime_credits += reclaim_amount
+                    # Credit the parent relatively, so a concurrent credit to
+                    # the same parent is not lost.
+                    await session.execute(
+                        sa_update(WalletModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                WalletModel.wallet_id == parent_wallet_id,
+                            )
+                        )
+                        .values(
+                            balance=WalletModel.balance + reclaim_amount,
+                            lifetime_credits=WalletModel.lifetime_credits
+                            + reclaim_amount,
+                            updated_at=utc_now(),
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    # The parent's ledger entry records the balance this credit
+                    # produced, so it must be read after the write.
+                    await session.refresh(parent)
 
                     # Ledger entries
                     session.add(
@@ -527,7 +586,9 @@ class WalletEngine:
                         )
                     )
 
-                child.status = WalletStatus.CLOSED.value
+                # The guarded claim above already closed the child and zeroed
+                # its balance; re-reading keeps the returned view honest.
+                await session.refresh(child)
 
             await session.commit()
 

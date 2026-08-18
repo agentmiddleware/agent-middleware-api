@@ -159,7 +159,10 @@ or any application table that already holds rows, and it takes an advisory lock
 so two runs cannot overlap. Without the opt-in environment variables it skips,
 so it never interferes with `make test`.
 
-CI runs the same six tests in the `postgres_permit_concurrency` job. That job
+CI runs these in the `postgres_permit_concurrency` job, as two steps against
+one PostgreSQL service: the **13** crash-consistency tests in
+`tests/test_mcp_postgres_multiprocess.py`, then the **11** row-lock
+concurrency tests in `tests/test_permit_postgres_concurrency.py`. That job
 installs dependencies with `pip` rather than `uv`, so its step is spelled
 inline; the Make target is the operator-facing equivalent, not a literal
 copy of the CI step.
@@ -168,7 +171,7 @@ copy of the CI step.
 
 | Command | Enforces |
 |---|---|
-| `make trust-coverage-gate` | 20 focused trust test files at an **80% coverage floor** across 18 named trust-plane control modules |
+| `make trust-coverage-gate` | 24 focused trust test files at an **80% coverage floor** across 22 named trust-plane control modules |
 | `make trust-release-gate` | A 13-file trust suite (including the in-process adversarial pass over the five claims, `tests/test_adversarial_five_claims.py`), then the coverage gate, then the demo proof, then discovery-drift tests, then committed-OpenAPI parity, then simulation-inventory parity |
 
 CI runs `scripts/trust_release_gate.sh` as a dedicated required check

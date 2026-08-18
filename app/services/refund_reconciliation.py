@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 import json
 from typing import Any, Literal, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -22,6 +22,7 @@ from app.db.models import (
     ReceiptModel,
     WalletModel,
 )
+from app.db.sql_expressions import clamped_decrement
 from app.schemas.trust import RefundReconciliationItem
 from app.schemas.trust import ReceiptResponse
 from app.services.permits import get_permit_service
@@ -633,7 +634,7 @@ class RefundReconciliationService:
 
                 refund = existing_refund
                 if refund is None:
-                    self._apply_refund(wallet, charge, item.credits)
+                    await self._apply_refund(session, wallet, charge, item.credits)
                     refund = LedgerEntryModel(
                         entry_id=item.refund_entry_id,
                         wallet_id=item.wallet_id,
@@ -658,16 +659,35 @@ class RefundReconciliationService:
                         ),
                         correlation_id=item.ledger_entry_id,
                     )
-                    session.add(wallet)
                     session.add(refund)
-                permit.spent_credits -= item.credits
-                permit.updated_at = utc_now()
+                # Release the permit reservation with a clamped relative UPDATE
+                # for the same reason: ``permits.py`` guarantees that every
+                # ``spent_credits`` write is decided by the database, and that
+                # guarantee is only as good as its weakest caller. This one sat
+                # outside that module and wrote back a value read earlier.
+                await session.execute(
+                    sa_update(PermitModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.permit_id == permit.permit_id,
+                        )
+                    )
+                    .values(
+                        spent_credits=clamped_decrement(
+                            PermitModel.spent_credits, item.credits
+                        ),
+                        updated_at=utc_now(),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                await session.refresh(permit)
                 resolved_at = utc_now().isoformat()
                 state = cast(dict[str, Any], payload["refund_reconciliation"])
                 state["status"] = "resolved"
                 state["resolved_at"] = resolved_at
                 record.response_json = json.dumps(payload, default=str)
-                session.add(permit)
+                # `permit` was updated by the guarded statement above, not the ORM.
                 session.add(record)
                 await session.flush()
 
@@ -678,28 +698,44 @@ class RefundReconciliationService:
                 )
             return resolved, False
 
-    def _apply_refund(
+    async def _apply_refund(
         self,
+        session: AsyncSession,
         wallet: WalletModel,
         charge: LedgerEntryModel,
         amount: Decimal,
     ) -> None:
-        wallet.balance += amount
-        wallet.lifetime_debits = max(
-            Decimal("0"),
-            wallet.lifetime_debits - amount,
-        )
+        """Credit a refund back to the wallet in a single relative statement.
+
+        Reading each counter and writing back read±amount is a read-modify-write
+        serialized only by a row lock, and ``SELECT ... FOR UPDATE`` is a silent
+        no-op on SQLite. Two refunds reconciled together each computed a total
+        from the same observed balance, so one credit was lost outright — and a
+        lost credit here is the customer's money, not a metric.
+        """
+        values: dict[str, Any] = {
+            "balance": WalletModel.balance + amount,
+            "lifetime_debits": clamped_decrement(WalletModel.lifetime_debits, amount),
+            "updated_at": utc_now(),
+        }
         if _timestamp_in_current_period(charge.timestamp, wallet.hourly_reset_at):
-            wallet.hourly_spent = max(
-                Decimal("0"),
-                wallet.hourly_spent - amount,
+            values["hourly_spent"] = clamped_decrement(
+                WalletModel.hourly_spent, amount
             )
         if _timestamp_in_current_period(charge.timestamp, wallet.daily_reset_at):
-            wallet.daily_spent = max(
-                Decimal("0"),
-                wallet.daily_spent - amount,
+            values["daily_spent"] = clamped_decrement(WalletModel.daily_spent, amount)
+        await session.execute(
+            sa_update(WalletModel)
+            .where(
+                cast(
+                    ColumnElement[bool],
+                    WalletModel.wallet_id == wallet.wallet_id,
+                )
             )
-        wallet.updated_at = utc_now()
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        await session.refresh(wallet)
 
 
 _service: RefundReconciliationService | None = None

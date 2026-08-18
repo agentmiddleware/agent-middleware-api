@@ -708,6 +708,7 @@ class IdempotencyService:
                     record.status_code = status_code
                     session.add(record)
                     repaired += 1
+
         return repaired, needs_review
 
 
