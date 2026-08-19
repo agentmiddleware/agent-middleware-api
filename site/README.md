@@ -33,9 +33,15 @@ Open `http://127.0.0.1:8765/`.
 
 ## Public surfaces
 
-- `/` — human design-partner funnel; the hero renders the particle-wave
-  field from `/wave.js` (plain WebGL, no libraries) and pauses it once
-  scrolled out of view
+- `/` — human design-partner funnel over one persistent particle field
+  (`/wave.js`, plain WebGL, no libraries). Sections declare a field state
+  with `data-wave="preset"` and scrolling lerps between them — sea →
+  condense → order → stream → crystal → quiet → gridquiet → dark →
+  ember — while the
+  composite's ground color lerps from pure black into the ledger ink.
+  Hovering a governed-loop card or the booking CTA fires a pulse through
+  the field. Reduced motion renders one still frame per field state;
+  high contrast hides the field entirely
 - `/proof/` — portable receipt, matching key snapshot, and offline command
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
 - `/concept/` — unlisted landing-page design study (noindex, absent from the
@@ -73,7 +79,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-4`. When you
+query token**: every reference looks like `/styles.css?v=gateway-6`. When you
 change any of those files (including `/wave.js`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
 `404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or

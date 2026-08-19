@@ -395,7 +395,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-4"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-6"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -405,7 +405,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-4"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-6"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -877,6 +877,36 @@ def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
     assert 'class="wave-fallback"' in page
     assert re.search(r'<script defer src="/wave\.js\?v=[^"]+"></script>', page)
     assert (output / "wave.js").is_file()
+
+    # The scroll narrative is wired: sections declare field states and the
+    # renderer knows every one of them. All eight documented states must be
+    # present (site/README.md names the full arc), and no section may name
+    # a preset the renderer lacks. An unknown preset would not crash the
+    # renderer — measureSections skips names missing from PRESETS — but it
+    # would silently drop that section from the narrative, so the build
+    # contract refuses it here instead.
+    wave_js = (output / "wave.js").read_text(encoding="utf-8")
+    declared = re.findall(r'data-wave="([a-z]+)"', page)
+    required = {
+        "sea",
+        "condense",
+        "order",
+        "stream",
+        "crystal",
+        "quiet",
+        "gridquiet",
+        "dark",
+        "ember",
+    }
+    assert required.issubset(set(declared)), (
+        "landing page is missing field states: "
+        + ", ".join(sorted(required - set(declared)))
+    )
+    for preset in declared:
+        assert re.search(rf"\b{re.escape(preset)}: \{{", wave_js), (
+            f'index.html declares data-wave="{preset}" but wave.js has no '
+            "such preset"
+        )
 
     # The funnel's tested copy still leads the page: the wave is a treatment,
     # not a content change.

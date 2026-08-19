@@ -1,19 +1,35 @@
-/* Particle-wave background for the landing hero and the /concept/ study.
-   ----------------------------------------------------------------------
+/* Particle field for the landing page and the /concept/ study.
+   -------------------------------------------------------------
    A fixed lattice of luminous points on a ground plane, displaced by
    superposed traveling sine waves in a vertex shader, drawn additively
    into an offscreen target (half-float where the GPU allows), then
    bloomed, tonemapped, vignetted and grain-dithered in a composite pass.
    Plain WebGL, no libraries, no network.
 
+   On the landing page the field is one persistent full-page layer and
+   scroll is its director: sections declare a state via data-wave="name",
+   and as they cross the viewport the renderer lerps between presets —
+   the open sea of the hero condenses toward order at the gateway,
+   becomes a laminar stream with traveling pulses through the governed
+   loop, crystallizes into a gold-swept lattice at the proof section,
+   falls near-still behind the honest limitations, and returns as a soft
+   swell at the close. The ground the composite paints lerps from pure
+   black into the design system's ledger ink so field and page are one
+   surface. UI hooks: hovering a governed-loop card fires a pulse through
+   the stream from that card's position; the booking CTA emits one from
+   center. A page with no data-wave sections (the concept study) renders
+   the constant sea exactly as before.
+
    Debug/design hooks (URL query): ?t=SECONDS freezes time for
    deterministic frames, ?grid=WxH pins the lattice, ?noadapt disables
    the frame-time governor. State is exposed at window.__amwWave.
 
    Accessibility contract: prefers-reduced-motion or the site widget's
-   data-a11y-motion="reduce" renders one static frame; the widget's
-   high-contrast mode stops rendering entirely (concept.css hides the
-   canvas). Both react live to toggling. */
+   data-a11y-motion="reduce" renders one still frame — re-rendered only
+   when scrolling lands in a section with a different field state, a
+   discrete user-initiated update rather than continuous animation. The
+   widget's high-contrast mode stops rendering entirely (the stylesheets
+   hide the canvas). Both react live to toggling. */
 (function () {
   "use strict";
 
@@ -137,6 +153,9 @@
     "uniform vec4 uFade;\n" + // far start/end, near start/end
     "uniform float uIntensity;\n" +
     "uniform float uWarmth;\n" +
+    "uniform vec3 uMorph;\n" + // order, flow, crystal
+    "uniform float uPulseF[3];\n" + // pulse front x positions
+    "uniform float uPulseS[3];\n" + // pulse strengths
     "varying vec3 vColor;\n" +
     "void main() {\n" +
     "  vec2 g = aGrid / uGridN;\n" +
@@ -144,6 +163,9 @@
     "  float z = -(uSpan.y + g.y * uSpan.z);\n" +
     "  vec2 p = vec2(x, z);\n" +
     "  float t = uTime;\n" +
+    "  float order = uMorph.x;\n" +
+    "  float flow = uMorph.y;\n" +
+    "  float crystal = uMorph.z;\n" +
     // Superposed traveling waves: three planar directions, one radial
     // ripple, one very broad slow swell. Coefficients sum to ~3.5.
     "  float h = sin(x * 0.42 + t * 0.50)\n" +
@@ -151,7 +173,21 @@
     "          + 0.40 * sin((x + z) * 0.24 + t * 0.60)\n" +
     "          + 0.30 * sin(length(p - vec2(6.0, -14.0)) * 0.55 - t * 0.85)\n" +
     "          + 1.15 * sin(x * 0.085 - t * 0.14) * sin(z * 0.071 + t * 0.10);\n" +
-    "  float y = h * uAmp;\n" +
+    // Order damps the residual chop on top of the preset's amplitude cut,
+    // and crystal flattens the plane entirely.
+    "  float y = h * uAmp * (1.0 - order * 0.45) * (1.0 - crystal);\n" +
+    // Laminar flow: sharpened crest trains traveling +x — reads as calls
+    // moving through the gateway. Lifts the surface a touch as it passes.
+    "  float fl = flow * pow(0.5 + 0.5 * sin(x * 0.30 - t * 2.6 + z * 0.05), 6.0);\n" +
+    "  y += fl * 0.10;\n" +
+    // Interaction pulses: bright fronts sweeping +x from where the UI
+    // fired them.
+    "  float pulse = 0.0;\n" +
+    "  for (int i = 0; i < 3; i++) {\n" +
+    "    float dpx = x - uPulseF[i];\n" +
+    "    pulse += uPulseS[i] * exp(-dpx * dpx / 7.0);\n" +
+    "  }\n" +
+    "  y += pulse * 0.08;\n" +
     "  float pd = length(p - uPointer.xy);\n" +
     "  y += uPointer.z * exp(-pd * pd * 0.10) * sin(t * 1.8 - pd * 1.1);\n" +
     "  vec4 world = vec4(x, y, z, 1.0);\n" +
@@ -163,6 +199,19 @@
     "  float jig = fract(sin(dot(aGrid, vec2(127.1, 311.7))) * 43758.5453);\n" +
     "  float lum = mix(0.30, 1.0, crest * crest);\n" +
     "  lum *= 0.86 + 0.28 * sin(t * 0.9 + jig * 6.2831);\n" +
+    // Order evens the sea's tonal range and rules the lattice like graph
+    // paper: every eighth row and column brightens into a survey line.
+    "  lum = mix(lum, 0.55, order * 0.55);\n" +
+    "  float lineB = max(step(mod(aGrid.x, 8.0), 0.5), step(mod(aGrid.y, 8.0), 0.5));\n" +
+    "  lum += order * lineB * 0.35;\n" +
+    // Crystal: per-cell blocks twinkling slowly, plus a gold signing sweep
+    // that crosses the lattice like a verification pass.
+    "  float cell = fract(sin(dot(floor(aGrid / 8.0), vec2(12.9898, 78.233))) * 43758.5453);\n" +
+    "  float cellLum = 0.30 + 0.70 * step(0.55, fract(cell + t * 0.04));\n" +
+    "  lum = mix(lum, lum * cellLum + 0.10, crystal);\n" +
+    "  float sweepX = mod(t * 5.0, 90.0) - 45.0;\n" +
+    "  float sweep = crystal * exp(-(x - sweepX) * (x - sweepX) / 16.0);\n" +
+    "  lum += fl * 0.9 + pulse * 0.9 + sweep * 0.8;\n" +
     "  lum *= 1.0 - smoothstep(uFade.x, uFade.y, dist);\n" +
     "  lum *= smoothstep(uFade.z, uFade.w, dist);\n" +
     // Projected size plus a defocus circle-of-confusion; brightness is
@@ -177,6 +226,8 @@
     "  lum *= energy * uIntensity;\n" +
     "  vec3 tint = mix(vec3(0.80, 0.89, 1.0), vec3(1.0, 0.93, 0.72),\n" +
     "                  crest * uWarmth * 2.0);\n" +
+    // The signing sweep and the crystal state pull toward brass-gold.
+    "  tint = mix(tint, vec3(1.0, 0.86, 0.55), min(crystal * 0.45 + sweep, 1.0));\n" +
     "  vColor = tint * lum;\n" +
     "}\n";
 
@@ -236,6 +287,7 @@
     "uniform float uGrain;\n" +
     "uniform float uTime;\n" +
     "uniform vec2 uRes;\n" +
+    "uniform vec3 uGround;\n" + // flat base the field floats over
     "varying vec2 vUv;\n" +
     "void main() {\n" +
     "  vec3 c = texture2D(uScene, vUv).rgb\n" +
@@ -244,6 +296,9 @@
     "  c = 1.0 - exp(-c * uExposure);\n" +
     "  vec2 v = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0) * 0.85;\n" +
     "  c *= mix(1.0, smoothstep(1.05, 0.30, length(v)), uVignette);\n" +
+    // The ground is added after the vignette so it stays a flat, exact
+    // match for the design system's surfaces; only the field vignettes.
+    "  c += uGround;\n" +
     // Blue-noise-ish grain: hides 8-bit banding in the dark gradients.
     "  float n = fract(sin(dot(gl_FragCoord.xy + uTime, vec2(12.9898, 78.233)))\n" +
     "                  * 43758.5453);\n" +
@@ -495,6 +550,7 @@
 
   window.addEventListener("resize", function () {
     needResize = true;
+    measureSections();
     scheduleFrame();
   });
 
@@ -593,6 +649,200 @@
     scheduleFrame();
   }
 
+  /* ---- scroll director ---------------------------------------------------
+     Sections carry data-wave="preset"; as they cross the viewport the field
+     lerps between these states. Fields: amp and bright scale the base
+     amplitude/intensity; order, flow, crystal feed the shader morphs;
+     warmth tints crests; ground lerps the composite base from pure black
+     (0) to the design system's ledger ink (1). */
+
+  var PRESETS = {
+    sea: { amp: 1.0, order: 0.0, flow: 0.0, crystal: 0.0, bright: 1.0, warmth: 0.2, ground: 0.0 },
+    condense: { amp: 0.6, order: 0.5, flow: 0.25, crystal: 0.0, bright: 0.45, warmth: 0.22, ground: 0.75 },
+    order: { amp: 0.35, order: 0.75, flow: 0.25, crystal: 0.0, bright: 0.28, warmth: 0.22, ground: 1.0 },
+    stream: { amp: 0.4, order: 0.8, flow: 1.0, crystal: 0.0, bright: 0.55, warmth: 0.35, ground: 1.0 },
+    crystal: { amp: 0.35, order: 1.0, flow: 0.15, crystal: 1.0, bright: 0.5, warmth: 0.55, ground: 1.0 },
+    quiet: { amp: 0.3, order: 0.5, flow: 0.1, crystal: 0.0, bright: 0.2, warmth: 0.2, ground: 1.0 },
+    gridquiet: { amp: 0.22, order: 0.7, flow: 0.1, crystal: 0.35, bright: 0.28, warmth: 0.25, ground: 1.0 },
+    dark: { amp: 0.15, order: 0.4, flow: 0.0, crystal: 0.0, bright: 0.1, warmth: 0.15, ground: 1.0 },
+    ember: { amp: 0.6, order: 0.25, flow: 0.1, crystal: 0.0, bright: 0.42, warmth: 0.35, ground: 1.0 },
+  };
+  var PRESET_KEYS = ["amp", "order", "flow", "crystal", "bright", "warmth", "ground"];
+  var GROUND_INK = [11 / 255, 17 / 255, 32 / 255]; // --ink #0b1120
+
+  var sections = []; // { center, preset } in document coordinates
+  var pageHeight = 0;
+  var fieldNow = blankPreset(PRESETS.sea);
+  var dominantName = "sea";
+
+  function blankPreset(from) {
+    var out = {};
+    for (var i = 0; i < PRESET_KEYS.length; i++) {
+      out[PRESET_KEYS[i]] = from[PRESET_KEYS[i]];
+    }
+    return out;
+  }
+
+  function measureSections() {
+    var nodes = document.querySelectorAll("[data-wave]");
+    var list = [];
+    var scrollTop = window.pageYOffset || 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var preset = PRESETS[nodes[i].getAttribute("data-wave")];
+      if (!preset) continue;
+      var rect = nodes[i].getBoundingClientRect();
+      list.push({
+        center: scrollTop + rect.top + rect.height / 2,
+        preset: preset,
+        name: nodes[i].getAttribute("data-wave"),
+      });
+    }
+    list.sort(function (a, b) {
+      return a.center - b.center;
+    });
+    sections = list;
+    pageHeight = document.documentElement.scrollHeight;
+  }
+
+  // Blend of the two presets whose section centers bracket the viewport
+  // focus. Returns the target values and the dominant preset's name.
+  function directorTarget() {
+    if (!sections.length) {
+      dominantName = "sea";
+      return PRESETS.sea;
+    }
+    var focus = (window.pageYOffset || 0) + window.innerHeight * 0.55;
+    var below = sections[0];
+    var above = null;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].center <= focus) {
+        above = sections[i];
+      } else {
+        below = sections[i];
+        break;
+      }
+      below = sections[i];
+    }
+    if (!above) {
+      dominantName = sections[0].name;
+      return sections[0].preset;
+    }
+    if (above === below) {
+      dominantName = above.name;
+      return above.preset;
+    }
+    var span = below.center - above.center;
+    var raw = span > 0 ? (focus - above.center) / span : 1;
+    var k = raw * raw * (3 - 2 * raw); // smoothstep
+    dominantName = k < 0.5 ? above.name : below.name;
+    var out = {};
+    for (var j = 0; j < PRESET_KEYS.length; j++) {
+      var key = PRESET_KEYS[j];
+      out[key] = above.preset[key] + (below.preset[key] - above.preset[key]) * k;
+    }
+    return out;
+  }
+
+  function directorTick(snap) {
+    // Layout can shift under us (fonts, images); re-measure when the
+    // document height moves.
+    if (document.documentElement.scrollHeight !== pageHeight) {
+      measureSections();
+    }
+    var target = directorTarget();
+    var k = snap ? 1 : 0.08;
+    for (var i = 0; i < PRESET_KEYS.length; i++) {
+      var key = PRESET_KEYS[i];
+      fieldNow[key] += (target[key] - fieldNow[key]) * k;
+    }
+  }
+
+  /* ---- interaction pulses -------------------------------------------------
+     UI elements fire bright fronts that sweep +x through the field. At most
+     three live at once; each decays over ~4 seconds. */
+
+  var PULSE_SPEED = 9.0; // world units per second
+  var pulses = []; // { x, born }
+
+  function emitPulse(x01) {
+    if (prefersStatic() || contrastHigh() || dead) return;
+    pulses.push({
+      x: (Math.min(Math.max(x01, 0), 1) - 0.5) * CONFIG.spanX,
+      born: waveTime,
+    });
+    if (pulses.length > 3) pulses.shift();
+  }
+  state.emitPulse = emitPulse;
+
+  var pulseFronts = new Float32Array(3);
+  var pulseStrengths = new Float32Array(3);
+
+  function updatePulses() {
+    for (var i = 0; i < 3; i++) {
+      pulseFronts[i] = 0;
+      pulseStrengths[i] = 0;
+    }
+    for (var j = pulses.length - 1; j >= 0; j--) {
+      var age = waveTime - pulses[j].born;
+      if (age > 4 || age < 0) {
+        pulses.splice(j, 1);
+        continue;
+      }
+      pulseFronts[j] = pulses[j].x + age * PULSE_SPEED;
+      pulseStrengths[j] = 1.3 * Math.exp(-age * 0.9);
+    }
+    state.pulses = pulses.length;
+  }
+
+  // Wire the governed-loop cards and the booking CTA to the field. Cards
+  // map left-to-right onto the lattice, so a hover fires from "its"
+  // station; the CTA ripples from center. Hover-capable devices only.
+  function wireInteractions() {
+    if (!pointerOk) return;
+    var cards = document.querySelectorAll(".loop-track li");
+    for (var i = 0; i < cards.length; i++) {
+      (function (index, total) {
+        cards[index].addEventListener(
+          "pointerenter",
+          function () {
+            emitPulse((index + 0.5) / total);
+          },
+          { passive: true }
+        );
+      })(i, cards.length);
+    }
+    var ctas = document.querySelectorAll(".button-wave");
+    for (var c = 0; c < ctas.length; c++) {
+      ctas[c].addEventListener(
+        "pointerenter",
+        function () {
+          emitPulse(0.5);
+        },
+        { passive: true }
+      );
+    }
+  }
+
+  // In static (reduced-motion) mode the field re-renders only when the
+  // scroll lands in a section with a different state — a discrete,
+  // user-initiated update, not an animation.
+  var staticRenderedFor = "";
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (!sections.length || dead || contrastHigh()) return;
+      if (prefersStatic() && dominantNameAtFocus() !== staticRenderedFor) {
+        scheduleFrame();
+      }
+    },
+    { passive: true }
+  );
+
+  function dominantNameAtFocus() {
+    directorTarget();
+    return dominantName;
+  }
+
   /* ---- render ------------------------------------------------------------ */
 
   var viewMatrix = new Float32Array(16);
@@ -624,9 +874,14 @@
     gl.uniform2f(u.uGridN, gridCols - 1, gridRows - 1);
     gl.uniform3f(u.uSpan, CONFIG.spanX, CONFIG.z0, CONFIG.spanZ);
     gl.uniform1f(u.uTime, time);
-    gl.uniform1f(u.uAmp, CONFIG.amp);
+    gl.uniform1f(u.uAmp, CONFIG.amp * fieldNow.amp);
     gl.uniform1f(u.uCamY, CONFIG.camHeight);
     gl.uniform3f(u.uPointer, eased.px, eased.pz, eased.strength);
+    gl.uniform3f(u.uMorph, fieldNow.order, fieldNow.flow, fieldNow.crystal);
+    updatePulses();
+    // Drivers report array uniforms as either "name[0]" or bare "name".
+    gl.uniform1fv(u["uPulseF[0]"] || u.uPulseF, pulseFronts);
+    gl.uniform1fv(u["uPulseS[0]"] || u.uPulseS, pulseStrengths);
     gl.uniform2f(
       u.uSizeRange,
       CONFIG.sizeMin * dpr,
@@ -642,8 +897,8 @@
       CONFIG.nearFadeStart,
       CONFIG.nearFadeEnd
     );
-    gl.uniform1f(u.uIntensity, CONFIG.intensity);
-    gl.uniform1f(u.uWarmth, CONFIG.warmth);
+    gl.uniform1f(u.uIntensity, CONFIG.intensity * fieldNow.bright);
+    gl.uniform1f(u.uWarmth, fieldNow.warmth);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, gridBuffer);
     gl.enableVertexAttribArray(0);
@@ -677,6 +932,12 @@
     gl.uniform1f(uc.uGrain, CONFIG.grain);
     gl.uniform1f(uc.uTime, time % 64.0);
     gl.uniform2f(uc.uRes, viewW, viewH);
+    gl.uniform3f(
+      uc.uGround,
+      GROUND_INK[0] * fieldNow.ground,
+      GROUND_INK[1] * fieldNow.ground,
+      GROUND_INK[2] * fieldNow.ground
+    );
     drawQuad();
   }
 
@@ -728,13 +989,20 @@
       return;
     }
     if (prefersStatic()) {
-      // One deterministic beauty frame; re-armed only by a mode change,
-      // a resize, or a new ?t value.
+      // One deterministic still frame per field state; re-armed by a mode
+      // change, a resize, a new ?t value, or scrolling into a section
+      // with a different data-wave preset.
       running = false;
       state.mode = "static";
       eased.yaw = 0;
       eased.pitch = 0;
       eased.strength = 0;
+      // Pulses age by waveTime, which stands still here — a pulse fired
+      // before the toggle would otherwise bake a frozen streak into every
+      // later still frame. The still frame is the pure field state.
+      pulses.length = 0;
+      directorTick(true);
+      staticRenderedFor = dominantName;
       drawScene(frozenTime !== null ? frozenTime : CONFIG.staticTime);
       state.frame++;
       refreshStats();
@@ -751,6 +1019,7 @@
     waveTime += Math.min(rawMs / 1000, 0.05);
 
     easePointer();
+    directorTick(false);
     drawScene(waveTime);
     if (dead) return;
     state.lastFrameMs = rawMs;
@@ -783,9 +1052,9 @@
     }
   }
 
-  // On the homepage the canvas lives inside a scrollable hero: stop
-  // rendering entirely once it leaves the viewport. On /concept/ the
-  // canvas is viewport-sized, so this never unschedules anything.
+  // Both pages now pin the canvas to the viewport, so this almost never
+  // unschedules anything — it remains as a guard for any future page that
+  // embeds the canvas in a scrollable region.
   var inView = true;
   if (typeof IntersectionObserver === "function") {
     new IntersectionObserver(function (entries) {
@@ -874,5 +1143,7 @@
   /* ---- go ---------------------------------------------------------------- */
 
   buildGrid();
+  measureSections();
+  wireInteractions();
   scheduleFrame();
 })();

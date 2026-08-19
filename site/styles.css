@@ -333,27 +333,15 @@ p a {
   border-top-color: var(--rule-soft);
 }
 
-/* Hero: particle-wave treatment ---------------------------------------------
-   A full-viewport centered hero over the WebGL field painted by /wave.js.
-   The canvas is enhancement: .wave-fallback is a static glow horizon for
-   no-JS/no-WebGL/context-loss, and the ::after gradient melts the pure-black
-   field into the ledger-ink sections below. */
-
-.hero {
-  position: relative;
-  overflow: hidden;
-  min-height: calc(100vh - 4.5rem);
-  min-height: calc(100dvh - 4.5rem);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: clamp(3rem, 7vw, 5rem) var(--pad-x) clamp(5rem, 10vw, 8rem);
-  background: #000000;
-}
+/* The particle field --------------------------------------------------------
+   One persistent full-page layer painted by /wave.js: fixed behind all
+   content, its state directed by the sections' data-wave presets and its
+   ground color lerping from pure black (hero) into the ledger ink of the
+   sections. The canvas is enhancement: .wave-fallback is a static glow
+   horizon for no-JS/no-WebGL/context-loss, over the body's ink ground. */
 
 .wave-fallback {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 0;
   background:
@@ -366,9 +354,9 @@ p a {
 }
 
 .wave-canvas {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 1;
+  z-index: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -383,14 +371,33 @@ html[data-a11y-contrast="high"] .wave-fallback {
   display: none;
 }
 
+/* Everything readable rides above the field. */
+main,
+.site-footer {
+  position: relative;
+  z-index: 1;
+}
+
+/* Hero ----------------------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  min-height: calc(100vh - 4.5rem);
+  min-height: calc(100dvh - 4.5rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: clamp(3rem, 7vw, 5rem) var(--pad-x) clamp(5rem, 10vw, 8rem);
+}
+
 /* Soft scrims behind the copy — one for the headline block, one under the
-   email/constraint lines where the wave's crest band is brightest — then a
-   bridge into the ink sections. */
+   email/constraint lines where the wave's crest band is brightest. */
 .hero::before {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 0;
   pointer-events: none;
   background:
     radial-gradient(
@@ -403,18 +410,6 @@ html[data-a11y-contrast="high"] .wave-fallback {
       rgba(0, 0, 0, 0.55),
       rgba(0, 0, 0, 0) 72%
     );
-}
-
-.hero::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 9rem;
-  z-index: 2;
-  pointer-events: none;
-  background: linear-gradient(to bottom, rgba(11, 17, 32, 0), var(--ink));
 }
 
 .hero-copy {

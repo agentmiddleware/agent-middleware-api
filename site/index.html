@@ -69,19 +69,26 @@
     />
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-4" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-6" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-4"></script>
+    <script src="/a11y-preload.js?v=gateway-6"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/wave.js?v=gateway-4"></script>
-    <script defer src="/analytics.js?v=gateway-4"></script>
-    <script defer src="/proof/proof.js?v=gateway-4"></script>
-    <script defer src="/a11y.js?v=gateway-4"></script>
+    <script defer src="/wave.js?v=gateway-6"></script>
+    <script defer src="/analytics.js?v=gateway-6"></script>
+    <script defer src="/proof/proof.js?v=gateway-6"></script>
+    <script defer src="/a11y.js?v=gateway-6"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- One persistent particle field behind the whole page. /wave.js
+         renders it and lerps its state between the sections' data-wave
+         presets as they cross the viewport; the static backdrop stands in
+         without JavaScript or WebGL. -->
+    <div class="wave-fallback" aria-hidden="true"></div>
+    <canvas id="wave-canvas" class="wave-canvas" aria-hidden="true"></canvas>
 
     <nav class="site-nav" aria-label="Primary">
       <a class="nav-brand" href="#top" aria-label="Agent Middleware API home">
@@ -105,12 +112,7 @@
     </nav>
 
     <main id="main">
-      <header class="hero" id="top">
-        <!-- Particle-wave hero: the canvas is progressive enhancement over a
-             static glow backdrop; /wave.js renders it and honors the a11y
-             widget's motion and contrast preferences. -->
-        <div class="wave-fallback" aria-hidden="true"></div>
-        <canvas id="wave-canvas" class="wave-canvas" aria-hidden="true"></canvas>
+      <header class="hero" id="top" data-wave="sea">
         <div class="hero-copy">
           <p class="eyebrow">
             <span class="eyebrow-mark" aria-hidden="true"></span>
@@ -161,7 +163,7 @@
         </div>
       </header>
 
-      <section class="section offer-band" aria-label="How the gateway works and the pilot offer">
+      <section class="section offer-band" aria-label="How the gateway works and the pilot offer" data-wave="condense">
         <div class="offer-copy">
           <p class="hero-body">
             Agent Middleware API is a gateway between your agents and your paid
@@ -209,7 +211,7 @@
         </aside>
       </section>
 
-      <section class="section thesis-section" aria-labelledby="thesis-title">
+      <section class="section thesis-section" aria-labelledby="thesis-title" data-wave="order">
         <p class="section-kicker">00 / Operational problem</p>
         <div class="thesis-layout">
           <h2 id="thesis-title">Agent intent is not authority—or evidence.</h2>
@@ -246,7 +248,7 @@
         </ol>
       </section>
 
-      <section class="protocol-section" aria-labelledby="protocol-title">
+      <section class="protocol-section" aria-labelledby="protocol-title" data-wave="stream">
         <div class="section protocol-heading">
           <p class="section-kicker section-kicker-inverse">01 / Governed path</p>
           <h2 id="protocol-title">One control loop from intent to evidence.</h2>
@@ -291,7 +293,7 @@
         </ol>
       </section>
 
-      <section class="section proof-section" id="proof" aria-labelledby="proof-title">
+      <section class="section proof-section" id="proof" aria-labelledby="proof-title" data-wave="crystal">
         <div class="proof-heading">
           <div>
             <p class="section-kicker">02 / Portable evidence</p>
@@ -342,7 +344,7 @@
         </div>
       </section>
 
-      <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title">
+      <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title" data-wave="quiet">
         <div>
           <p class="section-kicker">03 / Design-partner pilot</p>
           <h2 id="pilot-title">Start with one tool, not a platform migration.</h2>
@@ -383,6 +385,7 @@
         class="section machine-section"
         id="machine-discovery"
         aria-labelledby="machine-title"
+        data-wave="gridquiet"
       >
         <div class="machine-heading">
           <p class="section-kicker">04 / Machine discovery</p>
@@ -438,7 +441,7 @@
         </p>
       </section>
 
-      <section class="boundary-section" aria-labelledby="boundary-title">
+      <section class="boundary-section" aria-labelledby="boundary-title" data-wave="dark">
         <div class="section boundary-layout">
           <div>
             <p class="section-kicker">05 / Honest limitations</p>
@@ -458,6 +461,7 @@
         class="provenance-section"
         id="provenance"
         aria-labelledby="provenance-title"
+        data-wave="ember"
       >
         <div class="section provenance-layout">
           <div class="provenance-copy">
