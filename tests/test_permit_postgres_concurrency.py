@@ -1405,3 +1405,152 @@ async def test_conflicting_payload_during_upstream_dispatch_rejects_in_postgres(
         if first_task is not None and not first_task.done():
             await asyncio.gather(first_task, return_exceptions=True)
         get_service_registry().unregister_local(tool_name)
+
+
+# ---------------------------------------------------------------------------
+# Wallet balance conservation under real concurrency
+#
+# The guarded UPDATEs on the wallet paths make a lost update impossible in the
+# statement rather than in the lock; SQLite proves that in
+# tests/test_wallet_concurrency.py, where the lock is a no-op and the window
+# can be injected into. Here the lock is real, so the interesting question is
+# different: with genuinely concurrent operations on one balance, does the
+# money add up? These would catch a regression that removed both the guard and
+# the lock, which no single-engine test can -- and unlike the SQLite proofs
+# they exercise the real engine the deployment runs on.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_wallet_for_concurrency(credits: Decimal) -> str:
+    """Create a sponsor wallet holding *credits*, returning its id."""
+    wallet = await get_agent_money().create_sponsor_wallet(
+        sponsor_name=f"pg-concurrency-{uuid.uuid4().hex[:8]}",
+        email="pg-concurrency@example.com",
+        initial_credits=credits,
+        require_kyc=False,
+    )
+    return wallet.wallet_id
+
+
+async def _wallet_balance(wallet_id: str) -> Decimal:
+    factory = get_session_factory()
+    async with factory() as session:
+        wallet = await session.get(WalletModel, wallet_id)
+        assert wallet is not None
+        return wallet.balance
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_concurrent_provisioning_never_overdraws_in_postgres() -> None:
+    """Six concurrent provisions against a budget that funds four.
+
+    Exactly four must succeed and the sponsor must land on zero -- never
+    negative, and never with credits stranded because a lost update erased a
+    sibling's debit.
+    """
+    _require_opted_in_postgres()
+    sponsor_id = await _seed_wallet_for_concurrency(Decimal("400"))
+
+    async def provision(index: int) -> object:
+        try:
+            return await get_agent_money().create_agent_wallet(
+                sponsor_wallet_id=sponsor_id,
+                agent_id=f"pg-conc-{index}-{uuid.uuid4().hex[:6]}",
+                budget_credits=Decimal("100"),
+            )
+        except Exception as exc:  # refusal is a valid outcome, not a failure
+            return exc
+
+    results = await asyncio.gather(*(provision(i) for i in range(6)))
+    granted = [r for r in results if not isinstance(r, Exception)]
+    refused = [r for r in results if isinstance(r, Exception)]
+
+    assert len(granted) == 4
+    # A pool timeout or a deadlock would otherwise count as a refusal and the
+    # split would come out right for the wrong reason.
+    assert all("insufficient" in str(exc).lower() for exc in refused), refused
+    assert await _wallet_balance(sponsor_id) == Decimal("0")
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_concurrent_transfers_conserve_credits_in_postgres() -> None:
+    """Concurrent transfers out of one wallet must conserve the total.
+
+    Whatever mix of transfers is admitted, the credits that left the source
+    must equal the credits that arrived -- a transfer that pays out more than
+    it took would mint credits from nothing.
+    """
+    _require_opted_in_postgres()
+    sponsor_id = await _seed_wallet_for_concurrency(Decimal("600"))
+    money = get_agent_money()
+    source = await money.create_agent_wallet(
+        sponsor_wallet_id=sponsor_id,
+        agent_id=f"pg-src-{uuid.uuid4().hex[:6]}",
+        budget_credits=Decimal("300"),
+    )
+    dest = await money.create_agent_wallet(
+        sponsor_wallet_id=sponsor_id,
+        agent_id=f"pg-dst-{uuid.uuid4().hex[:6]}",
+        budget_credits=Decimal("0"),
+    )
+
+    async def move() -> object:
+        try:
+            return await money.transfer(
+                from_wallet_id=source.wallet_id,
+                to_wallet_id=dest.wallet_id,
+                amount=Decimal("100"),
+            )
+        except Exception as exc:
+            return exc
+
+    results = await asyncio.gather(*(move() for _ in range(5)))
+    moved = len([r for r in results if not isinstance(r, Exception)])
+    refused = [r for r in results if isinstance(r, Exception)]
+
+    assert moved == 3
+    assert all("insufficient" in str(exc).lower() for exc in refused), refused
+    source_balance = await _wallet_balance(source.wallet_id)
+    dest_balance = await _wallet_balance(dest.wallet_id)
+    assert source_balance == Decimal("300") - Decimal("100") * moved
+    assert dest_balance == Decimal("100") * moved
+    assert source_balance + dest_balance == Decimal("300")
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_concurrent_reclaims_credit_the_parent_once_in_postgres() -> None:
+    """Three concurrent reclaims of one child credit the parent exactly once."""
+    _require_opted_in_postgres()
+    sponsor_id = await _seed_wallet_for_concurrency(Decimal("600"))
+    money = get_agent_money()
+    parent = await money.create_agent_wallet(
+        sponsor_wallet_id=sponsor_id,
+        agent_id=f"pg-parent-{uuid.uuid4().hex[:6]}",
+        budget_credits=Decimal("400"),
+    )
+    child = await money.create_child_wallet(
+        parent_wallet_id=parent.wallet_id,
+        child_agent_id=f"pg-child-{uuid.uuid4().hex[:6]}",
+        budget_credits=Decimal("150"),
+        max_spend=Decimal("150"),
+    )
+    parent_before = await _wallet_balance(parent.wallet_id)
+
+    async def reclaim() -> object:
+        try:
+            return await money.reclaim_child_wallet(child.wallet_id)
+        except Exception as exc:
+            return exc
+
+    results = await asyncio.gather(*(reclaim() for _ in range(3)))
+    succeeded = [r for r in results if not isinstance(r, Exception)]
+    refused = [r for r in results if isinstance(r, Exception)]
+
+    assert len(succeeded) == 1
+    # The losers must lose the claim, not fail for some unrelated reason.
+    assert all(
+        "already closed" in str(exc).lower() or "balance changed" in str(exc).lower()
+        for exc in refused
+    ), refused
+    assert await _wallet_balance(parent.wallet_id) == parent_before + Decimal("150")
+    assert await _wallet_balance(child.wallet_id) == Decimal("0")
