@@ -1,5 +1,5 @@
-/* Particle-wave background for the /concept/ landing study.
-   ---------------------------------------------------------
+/* Particle-wave background for the landing hero and the /concept/ study.
+   ----------------------------------------------------------------------
    A fixed lattice of luminous points on a ground plane, displaced by
    superposed traveling sine waves in a vertex shader, drawn additively
    into an offscreen target (half-float where the GPU allows), then
@@ -778,9 +778,28 @@
   }
 
   function scheduleFrame() {
-    if (!rafId && !dead && !document.hidden) {
+    if (!rafId && !dead && inView && !document.hidden) {
       rafId = window.requestAnimationFrame(frame);
     }
+  }
+
+  // On the homepage the canvas lives inside a scrollable hero: stop
+  // rendering entirely once it leaves the viewport. On /concept/ the
+  // canvas is viewport-sized, so this never unschedules anything.
+  var inView = true;
+  if (typeof IntersectionObserver === "function") {
+    new IntersectionObserver(function (entries) {
+      inView = entries[entries.length - 1].isIntersecting;
+      if (!inView) {
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        running = false;
+      } else {
+        scheduleFrame();
+      }
+    }).observe(canvas);
   }
 
   document.addEventListener("visibilitychange", function () {

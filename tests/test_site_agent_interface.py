@@ -395,7 +395,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-3"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-4"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -405,7 +405,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-3"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-4"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -862,6 +862,32 @@ def test_branded_404_offers_a_way_back(tmp_path) -> None:
     assert "@@" not in page
 
 
+def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
+    """The homepage hero's particle field must never become a dependency.
+
+    The canvas and its static CSS backdrop coexist, the shared renderer ships
+    at the site root with a cache token on every reference, and the stylesheet
+    keeps the field out of the way for high-contrast users and print.
+    """
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    page = (output / "index.html").read_text(encoding="utf-8")
+    assert 'id="wave-canvas"' in page
+    assert 'class="wave-fallback"' in page
+    assert re.search(r'<script defer src="/wave\.js\?v=[^"]+"></script>', page)
+    assert (output / "wave.js").is_file()
+
+    # The funnel's tested copy still leads the page: the wave is a treatment,
+    # not a content change.
+    text = _page_text(page)
+    assert "Authorize one agent action. Charge it once. Prove what happened." in text
+
+    stylesheet = (output / "styles.css").read_text(encoding="utf-8")
+    assert 'html[data-a11y-contrast="high"] .wave-canvas' in stylesheet
+    assert "html.wave-dead .wave-canvas" in stylesheet
+
+
 def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
     """/concept/ is a visual study of a particle-wave landing treatment.
 
@@ -884,10 +910,12 @@ def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
         assert "/concept" not in (output / funnel).read_text(encoding="utf-8")
 
     # The animated background is enhancement, not a dependency: the canvas and
-    # its static fallback are both present, and the assets actually ship.
+    # its static fallback are both present, and the assets actually ship. The
+    # renderer is shared with the homepage hero, so it lives at the site root.
     assert 'id="wave-canvas"' in page
     assert 'class="wave-fallback"' in page
-    assert (output / "concept" / "wave.js").is_file()
+    assert re.search(r'<script defer src="/wave\.js\?v=[^"]+"></script>', page)
+    assert (output / "wave.js").is_file()
     assert (output / "concept" / "concept.css").is_file()
 
     # The un-slashed URL must not 404.

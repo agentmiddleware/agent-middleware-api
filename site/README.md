@@ -33,14 +33,17 @@ Open `http://127.0.0.1:8765/`.
 
 ## Public surfaces
 
-- `/` — human design-partner funnel
+- `/` — human design-partner funnel; the hero renders the particle-wave
+  field from `/wave.js` (plain WebGL, no libraries) and pauses it once
+  scrolled out of view
 - `/proof/` — portable receipt, matching key snapshot, and offline command
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
 - `/concept/` — unlisted landing-page design study (noindex, absent from the
-  sitemap, never linked from the funnel): a WebGL particle-wave background
-  behind a single-fold hero. Plain WebGL in `concept/wave.js`, no libraries;
-  it honors the a11y widget's reduced-motion and high-contrast preferences
-  and degrades to a static CSS backdrop without JavaScript or WebGL
+  sitemap, never linked from the funnel): the single-fold treatment the
+  homepage hero was promoted from, kept as the archived study. It shares
+  `/wave.js` with the homepage; the renderer honors the a11y widget's
+  reduced-motion and high-contrast preferences and degrades to a static CSS
+  backdrop without JavaScript or WebGL
 - `/404.html` — branded not-found page with links back into the site
 - `/.well-known/agent.json` — marketing-origin pointer to API discovery
 - `/.well-known/security.txt` — vulnerability-report contact (RFC 9116)
@@ -70,15 +73,15 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-3`. When you
-change any of those files, bump the token in `index.html`, `proof/index.html`,
-`compare/index.html`, `concept/index.html`, `404.html`, and `build_site.py`'s
-`ANALYTICS_SCRIPTS`, or
+query token**: every reference looks like `/styles.css?v=gateway-4`. When you
+change any of those files (including `/wave.js`), bump the token in
+`index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
+`404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or
 returning visitors
 keep the old bytes for up to a week. HTML itself carries no long-lived
 `Cache-Control` rule and revalidates on every request. The concept page's own
-assets use an independent `?v=concept-N` token: bump it when
-`concept/concept.css` or `concept/wave.js` changes.
+stylesheet uses an independent `?v=concept-N` token: bump it when
+`concept/concept.css` changes.
 
 Explicit `/proof` → `/proof/` and `/compare` → `/compare/` redirects match
 those pages' `rel="canonical"`. Every directory page needs its own entry. Do **not** replace it with the global `trailingSlash: true`
@@ -138,7 +141,10 @@ preloaded.
 Preloads cover every face in the first viewport. Public Sans and Libre Franklin
 are variable, so one file each is enough; IBM Plex Mono is static, so weights
 400 (nav links), 500 (section kickers) and 600 (nav brand) are three separate
-files and all three are preloaded. A preload must carry `crossorigin` even
+files and all three are preloaded. Instrument Serif renders the homepage
+hero headline, so its single 400 face is preloaded too — the manifest is
+shared by every page, so subpages pay its ~21KB once rather than letting
+the landing headline flash Georgia and reflow. A preload must carry `crossorigin` even
 same-origin, or the browser discards it and fetches the file twice. The `404`
 page preloads nothing on purpose — it is `noindex` and mostly serves scanners.
 

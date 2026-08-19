@@ -333,27 +333,121 @@ p a {
   border-top-color: var(--rule-soft);
 }
 
-/* Hero ----------------------------------------------------------------------- */
+/* Hero: particle-wave treatment ---------------------------------------------
+   A full-viewport centered hero over the WebGL field painted by /wave.js.
+   The canvas is enhancement: .wave-fallback is a static glow horizon for
+   no-JS/no-WebGL/context-loss, and the ::after gradient melts the pure-black
+   field into the ledger-ink sections below. */
 
 .hero {
-  max-width: var(--page-max);
-  margin: 0 auto;
-  padding: clamp(3rem, 7vw, 5.5rem) var(--pad-x) clamp(3.5rem, 8vw, 6rem);
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  gap: clamp(2.5rem, 5vw, 4.5rem);
-  align-items: start;
+  position: relative;
+  overflow: hidden;
+  min-height: calc(100vh - 4.5rem);
+  min-height: calc(100dvh - 4.5rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: clamp(3rem, 7vw, 5rem) var(--pad-x) clamp(5rem, 10vw, 8rem);
+  background: #000000;
 }
 
-@media (max-width: 920px) {
-  .hero {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.wave-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(
+      ellipse 90% 24% at 50% 68%,
+      rgba(255, 255, 255, 0.09),
+      rgba(255, 255, 255, 0) 70%
+    ),
+    linear-gradient(to bottom, #000000 0%, #000000 52%, #0a0a09 68%, #000000 100%);
+}
+
+.wave-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+html.wave-dead .wave-canvas {
+  display: none;
+}
+
+html[data-a11y-contrast="high"] .wave-canvas,
+html[data-a11y-contrast="high"] .wave-fallback {
+  display: none;
+}
+
+/* Soft scrims behind the copy — one for the headline block, one under the
+   email/constraint lines where the wave's crest band is brightest — then a
+   bridge into the ink sections. */
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 64% 46% at 50% 40%,
+      rgba(0, 0, 0, 0.38),
+      rgba(0, 0, 0, 0) 74%
+    ),
+    radial-gradient(
+      ellipse 46% 26% at 50% 78%,
+      rgba(0, 0, 0, 0.55),
+      rgba(0, 0, 0, 0) 72%
+    );
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 9rem;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(11, 17, 32, 0), var(--ink));
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 3;
+  max-width: 52rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* These two lines ride over the brightest crest band; the scrim carries
+   most of the load and the shadow guarantees the rest. */
+.hero .email-fallback,
+.hero .constraint-line {
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85);
+}
+
+.hero h1 {
+  font-family: "Instrument Serif", Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  font-size: clamp(2.5rem, 5.4vw, 4.4rem);
+  line-height: 1.08;
+  letter-spacing: 0;
+  max-width: 22ch;
+  margin-bottom: 1.5rem;
+  text-shadow: 0 0 60px rgba(255, 255, 255, 0.12);
 }
 
 .eyebrow {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.6rem;
   font-family: var(--font-mono);
   font-size: 0.8rem;
@@ -384,6 +478,8 @@ p a {
 .cta-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
   gap: 0.9rem;
   margin: 2rem 0 1.25rem;
 }
@@ -445,6 +541,76 @@ p a {
 .button-secondary:hover {
   border-color: var(--brass);
   color: var(--brass-bright);
+}
+
+/* Hero booking CTA: chamfered gold. The clip-path lives on the inner face —
+   clipping the link itself would clip away its focus outline — while the
+   glow is a drop-shadow on the link so it follows the cut silhouette. */
+.button-wave {
+  display: inline-flex;
+  filter: drop-shadow(0 0 18px rgba(216, 160, 62, 0.4));
+  transition: filter 180ms ease, transform 180ms ease;
+}
+
+.button-wave-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.85rem 1.7rem;
+  min-height: 48px;
+  color: #0b1120;
+  background: var(--brass);
+  clip-path: polygon(
+    10px 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    10px 100%,
+    0 calc(100% - 10px),
+    0 10px
+  );
+  transition: background 180ms ease;
+}
+
+.button-wave:hover {
+  filter: drop-shadow(0 0 28px rgba(216, 160, 62, 0.6));
+  transform: translateY(-1px);
+  text-decoration: none;
+}
+
+.button-wave:hover .button-wave-face {
+  background: var(--brass-bright);
+}
+
+.button-wave:focus-visible {
+  outline-color: #ffffff;
+}
+
+/* Offer band: boundary copy beside the pilot ticket, first thing under the
+   wave hero. ------------------------------------------------------------- */
+
+.offer-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: clamp(2.5rem, 5vw, 4.5rem);
+  align-items: center;
+  padding-top: clamp(2.5rem, 5vw, 4rem);
+}
+
+@media (max-width: 920px) {
+  .offer-band {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.offer-copy .hero-body {
+  font-size: clamp(1.05rem, 1.6vw, 1.2rem);
+  color: var(--text);
 }
 
 /* Paper artifacts: pilot ticket + receipts ------------------------------------ */
@@ -1476,9 +1642,25 @@ p a {
   }
 
   .site-nav,
+  .wave-canvas,
+  .wave-fallback,
   .amw-a11y-toggle,
   .amw-a11y-panel {
     display: none;
+  }
+
+  .hero {
+    background: #fff;
+    min-height: 0;
+  }
+
+  .hero::before,
+  .hero::after {
+    display: none;
+  }
+
+  .hero h1 {
+    text-shadow: none;
   }
 
   .pilot-card,

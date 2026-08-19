@@ -60,6 +60,7 @@ ALLOWED_FONT_HOSTS = frozenset({"fonts.gstatic.com"})
 #: latin-ext exists for characters most pages never show.
 PRELOAD = (
     ("Libre Franklin", 800, "latin"),
+    ("Instrument Serif", 400, "latin"),
     ("Public Sans", 400, "latin"),
     ("IBM Plex Mono", 400, "latin"),
     ("IBM Plex Mono", 500, "latin"),
