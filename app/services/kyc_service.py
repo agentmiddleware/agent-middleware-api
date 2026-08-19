@@ -17,16 +17,30 @@ from typing import Any, Literal, Optional, cast
 from uuid import uuid4
 
 import stripe
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update as sa_update
 
 from ..core.time import utc_now
 from ..db.database import get_session_factory
 from ..db.models import KYCVerificationModel, WalletModel
 from ..core.config import get_settings
-from ..schemas.billing import KYCStatus
+from ..schemas.billing import KYCStatus, WalletStatus
 from .agent_money import WalletNotFoundError
 
 logger = logging.getLogger(__name__)
+
+# Statuses a KYC session must never overwrite: each was set by a control that
+# KYC does not own -- the velocity anomaly freeze, an operator suspension, or
+# wallet closure.
+_NON_SPENDABLE_WALLET_STATUSES = (
+    WalletStatus.FROZEN.value,
+    WalletStatus.SUSPENDED.value,
+    WalletStatus.CLOSED.value,
+)
+
+# ...with one exception: a suspension KYC itself imposed. handle_rejected and
+# handle_expired below suspend the wallet, so re-verifying is the documented
+# way out of that state and must stay reachable.
+_KYC_OWNED_SUSPENSION_REASONS = ("rejected", "expired")
 settings = get_settings()
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -158,8 +172,47 @@ class KYCService:
             )
             session.add(verification)
 
-            wallet.status = "pending_kyc"
-            session.add(wallet)
+            # Moving the wallet to pending_kyc must never WIDEN what it is
+            # allowed to do. pending_kyc is a spendable status, so writing it
+            # unconditionally turned a velocity auto-freeze, an operator
+            # suspension, or a closed wallet back into a spending one -- and
+            # the wallet was read before the Stripe network call above, so the
+            # write also clobbered anything committed while that call was in
+            # flight.
+            #
+            # A KYC session may only claim the status it is entitled to: one
+            # that is already spendable, or a suspension KYC itself imposed
+            # (a rejected or expired verification, set below). A freeze or a
+            # closure is not KYC's to lift; those wallets still get their
+            # session, and still get their kyc_status updated by the webhook,
+            # but stay exactly as non-spendable as they were.
+            claimed = await session.execute(
+                sa_update(WalletModel)
+                .where(
+                    cast(Any, WalletModel.wallet_id) == wallet_id,
+                    or_(
+                        cast(Any, WalletModel.status).notin_(
+                            _NON_SPENDABLE_WALLET_STATUSES
+                        ),
+                        and_(
+                            cast(Any, WalletModel.status)
+                            == WalletStatus.SUSPENDED.value,
+                            cast(Any, WalletModel.kyc_status).in_(
+                                _KYC_OWNED_SUSPENSION_REASONS
+                            ),
+                        ),
+                    ),
+                )
+                .values(status="pending_kyc", updated_at=utc_now())
+                .execution_options(synchronize_session=False)
+            )
+            if (cast(Any, claimed).rowcount or 0) != 1:
+                logger.info(
+                    "KYC session %s created for wallet %s without moving it to "
+                    "pending_kyc: its status is not KYC's to change",
+                    verification_id,
+                    wallet_id,
+                )
 
             await session.commit()
 
