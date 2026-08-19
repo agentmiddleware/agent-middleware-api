@@ -100,6 +100,16 @@ class Settings(BaseSettings):
     MCP_UPSTREAM_CALL_TIMEOUT_SECONDS: float = 30.0
     MCP_UPSTREAM_MAX_RESPONSE_BYTES: int = 1_048_576
 
+    # --- Inbound request size ---
+    # Ceiling on any request body the API will buffer, enforced for every
+    # route by `app.middleware.request_body_limit`. Mirrors the 1 MiB bound
+    # already placed on upstream MCP *responses* above: the gateway should not
+    # accept more from a caller than it is willing to relay from a tool.
+    # The opt-in MCP transports keep their own tighter caps (256 KiB public,
+    # 64 KiB partner); this is the floor under everything, `/mcp/messages`
+    # included. Raise it only for an operator who has a route that needs it.
+    MAX_REQUEST_BODY_BYTES: int = 1_048_576
+
     # --- Phase 9: WebAuthn mock (tests/local only) ---
     # When true and py_webauthn is absent, verification can short-circuit.
     # Production-like environments must keep this false.

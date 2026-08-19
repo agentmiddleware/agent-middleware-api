@@ -56,6 +56,14 @@ Keep these out of the wedge until a design partner requires them:
 - The upstream limit is enforced on the streamed identity-encoded HTTP body,
   including the JSON-RPC envelope, before buffering and parsing. Retained
   decoded discovery and result payloads are bounded again after validation.
+- Inbound request bodies are bounded on every route by
+  `MAX_REQUEST_BODY_BYTES` (1 MiB default), refused with a 413 before the rate
+  limiter or any handler buffers them. An oversized declared `Content-Length`
+  is rejected without reading the body; an understated one is caught by
+  measuring the stream. The opt-in MCP transports keep their own tighter caps
+  (256 KiB public, 64 KiB partner). This bounds per-request memory, not
+  aggregate concurrency — a request-count/connection limit at the edge is
+  still the operator's job.
 - No public uptime SLA, compliance scope, RTO/RPO, tenant-isolation guarantee,
   or immutable-ledger claim is made.
 - Sandbox and AWI/browser automation are not production isolation boundaries.

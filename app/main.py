@@ -33,6 +33,7 @@ from .core.durable_state import (
 from .core.health import gather_dependency_report
 from .core.public_contact import validated_public_contact as _public_contact_metadata
 from .core.rate_limiter import RateLimitMiddleware
+from .middleware.request_body_limit import RequestBodyLimitMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
     is_production_like_environment,
@@ -497,6 +498,14 @@ app = FastAPI(
 
 # Rate limiting (enforces documented 120 req/min per API key)
 app.add_middleware(RateLimitMiddleware)
+
+# Inbound body ceiling. Registered between the rate limiter and CORS so the
+# stack puts it outside RateLimitMiddleware — an oversized body is refused
+# before any per-key bookkeeping or handler buffers it — and inside
+# CORSMiddleware, so the 413 carries the same headers as every other response.
+app.add_middleware(
+    RequestBodyLimitMiddleware, max_body_size=settings.MAX_REQUEST_BODY_BYTES
+)
 
 
 def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:

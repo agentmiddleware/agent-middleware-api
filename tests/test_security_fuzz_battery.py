@@ -17,6 +17,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import get_settings
 from app.db.database import get_session_factory
 from app.db.models import PermitModel, ReceiptModel
 from app.main import app
@@ -524,8 +525,13 @@ async def test_malformed_json_on_permit_creation_returns_422(client, clean_datab
 
 
 @pytest.mark.anyio
-async def test_oversized_payload_on_invoke_observed(client, clean_database):
-    """Invoke with a 10MB argument string; observe whether size limits are enforced."""
+async def test_oversized_payload_on_invoke_is_refused(client, clean_database):
+    """Invoke with a 10MB argument string; the body ceiling must refuse it.
+
+    This used to observe-and-skip, which meant an unbounded body read as a
+    green run. `RequestBodyLimitMiddleware` now caps every route, so the
+    refusal is asserted and a regression fails the suite.
+    """
     provisioned = await provision_agent_wallet(client)
     wallet_id = provisioned["agent_wallet_id"]
     key_id = provisioned["key_id"]
@@ -544,13 +550,12 @@ async def test_oversized_payload_on_invoke_observed(client, clean_database):
             headers=agent_headers,
             idem_key="size-1",
         )
-        if r.status_code == 200 and "result" in r.json():
-            pytest.skip(
-                "No payload size limit enforced — consider adding MAX_CONTENT_LENGTH middleware"
-            )
-        else:
-            body = r.json()
-            assert "error" in body
+        assert r.status_code == 413, (
+            f"10MB body was not refused (got {r.status_code}); "
+            "the request body ceiling is not in force"
+        )
+        body = r.json()
+        assert body["max_request_body_bytes"] == get_settings().MAX_REQUEST_BODY_BYTES
     finally:
         get_service_registry().unregister_local(tool_name)
 
