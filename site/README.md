@@ -176,7 +176,19 @@ Analytics for the Vercel project first, then set the environment variable.
 ## Deployment
 
 Keep `vercel.json`; this change intentionally does not migrate configuration
-formats. The linked Vercel project uses `site/` as its root directory and runs
+formats.
+
+If a merge to `main` ever fails to produce a production deployment (observed
+2026-08-19: the push built and passed CI on GitHub while Vercel never started
+a production build — a missed webhook), deploy the missing commit rather than
+reaching for **Redeploy**: Redeploy rebuilds the selected deployment's own
+commit, and with the webhook missed the latest `main` deployment is still the
+previous commit, so redeploying it ships the stale tree again. Push a fresh
+commit to `main` (a docs-only change is enough) to re-fire the webhook, or
+create a deployment for the current `main` head explicitly (`vercel deploy
+--prod`, or the dashboard's **Create Deployment** flow). HTML carries no
+long-lived cache rule, so the fix is visible as soon as the new deployment
+goes live. The linked Vercel project uses `site/` as its root directory and runs
 the stdlib-only `python3 build_site.py` command before serving `dist/`. The
 dependency-free `package.json` gives Vercel's static builder an explicit build
 entrypoint; without it, a standalone JavaScript asset can be mistaken for the
