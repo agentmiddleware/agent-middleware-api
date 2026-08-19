@@ -10,9 +10,24 @@ permissions:
   contents: read
   pull-requests: read
 
+# Supersede in-flight PR runs when a branch is updated again.
+#
+# Push runs must never be grouped with each other. cancel-in-progress: false
+# alone is not enough: GitHub keeps at most one pending run per group and
+# cancels the older pending one when a newer run arrives, so a third push to
+# main would cancel the queued middle one. railway-deploy.yml gates a release
+# on that exact SHA's push run and treats a `cancelled` conclusion as a failed
+# gate — an intermediate commit would become unreleasable. Giving each push its
+# own group (run_id is unique per run) means pushes never queue behind one
+# another and are never superseded.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       # 3.13 is a non-required, experimental leg. Keep fail-fast off so a 3.13
       # breakage cannot cancel the still-running, branch-protection-required
@@ -22,10 +37,10 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -47,7 +62,12 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short -m "not production_trust"
 
+      # These files already ran unfiltered in "Run tests" above, and none carry
+      # a production_trust marker, so re-running them added no coverage. Keep
+      # the named checkpoint for a legible failure signal, but stop paying for
+      # it on all three matrix legs.
       - name: Run trust primitive invariant tests
+        if: matrix.python-version == '3.12'
         run: |
           pytest \
             tests/test_permits.py \
@@ -209,6 +229,7 @@ jobs:
 
   python_sdk:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       # See note on the `test` job: keep the non-required 3.13 leg from
       # cancelling the required 3.10/3.11/3.12 legs and blocking merges.
@@ -216,10 +237,10 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -255,7 +276,7 @@ jobs:
 
       - name: Upload SDK artifacts
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: python-sdk-${{ env.SDK_VERSION }}
           path: sdk-dist/*
@@ -267,6 +288,7 @@ jobs:
   # invisible everywhere else and only surface as production 500s.
   postgres_trust:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -284,10 +306,10 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -329,11 +351,12 @@ jobs:
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -362,6 +385,7 @@ jobs:
 
   postgres_permit_concurrency:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -378,10 +402,10 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -416,8 +440,9 @@ jobs:
   # main through scripts/stress_test_live.py because nothing scanned for this.
   secret_scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install gitleaks
         env:
@@ -458,11 +483,12 @@ jobs:
   # docs/trust-release-gate-branch-protection.md.
   trust_release_gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -479,11 +505,12 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -502,43 +529,3 @@ jobs:
 
       - name: Check doc references resolve
         run: python scripts/check_doc_references.py
-
-  # --- Autonomous PR Pipeline ---
-  # This job runs on a schedule and creates PRs automatically
-  # based on telemetry data. Uncomment when AUTO_PR_ENABLED=true.
-
-  # auto-pr:
-  #   runs-on: ubuntu-latest
-  #   if: github.event_name == 'schedule'
-  #   steps:
-  #     - uses: actions/checkout@v7
-  #
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v7
-  #       with:
-  #         python-version: "3.12"
-  #
-  #     - name: Install dependencies
-  #       run: pip install -r requirements.txt httpx
-  #
-  #     - name: Fetch anomalies and generate fixes
-  #       env:
-  #         API_URL: ${{ secrets.API_URL }}
-  #         API_KEY: ${{ secrets.API_KEY }}
-  #       run: |
-  #         python scripts/auto_pr_runner.py
-  #
-  #     - name: Create Pull Request
-  #       uses: peter-evans/create-pull-request@v6
-  #       with:
-  #         token: ${{ secrets.GITHUB_TOKEN }}
-  #         commit-message: "fix: auto-generated fix from Autonomous PM"
-  #         title: "[Auto-PM] Fix detected anomaly"
-  #         body: |
-  #           This PR was automatically generated by the Autonomous Product Manager
-  #           based on telemetry anomaly detection.
-  #
-  #           - Generated by: CI/CD Auto-PR Pipeline
-  #           - Anomaly data: See commit message for details
-  #         branch: auto-pm/fix-${{ github.run_number }}
-  #         base: master
