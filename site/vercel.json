@@ -49,6 +49,15 @@
       ]
     },
     {
+      "source": "/concept/:asset(concept.css|wave.js)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
       "source": "/.well-known/security.txt",
       "headers": [
         { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
@@ -139,6 +148,11 @@
     {
       "source": "/compare",
       "destination": "/compare/",
+      "permanent": true
+    },
+    {
+      "source": "/concept",
+      "destination": "/concept/",
       "permanent": true
     },
     {

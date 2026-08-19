@@ -50,6 +50,7 @@ FAMILIES = {
     "IBM Plex Mono": (400, 500, 600),
     "Public Sans": (400, 500, 600),
     "Libre Franklin": (700, 800),
+    "Instrument Serif": (400,),
 }
 WANTED_SUBSETS = ("latin", "latin-ext")
 #: Font URLs are read out of a fetched CSS response and whatever they name gets

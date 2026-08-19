@@ -2,7 +2,7 @@ Vendored webfonts — license and attribution
 ===========================================
 
 The .woff2 files in this directory are unmodified latin and latin-ext subsets,
-as served by the Google Fonts API, of three families released under the SIL
+as served by the Google Fonts API, of four families released under the SIL
 Open Font License, Version 1.1.
 
 The full license text is reproduced below rather than linked. The OFL FAQ
@@ -15,6 +15,9 @@ Copyright notices, verbatim from each family's upstream OFL.txt:
   IBM Plex Mono
     Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
     https://github.com/IBM/plex
+
+  Instrument Serif
+    Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif)
 
   Libre Franklin
     Copyright 2020 The Libre Franklin Project Authors

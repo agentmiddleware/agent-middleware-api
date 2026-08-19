@@ -36,6 +36,11 @@ Open `http://127.0.0.1:8765/`.
 - `/` — human design-partner funnel
 - `/proof/` — portable receipt, matching key snapshot, and offline command
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
+- `/concept/` — unlisted landing-page design study (noindex, absent from the
+  sitemap, never linked from the funnel): a WebGL particle-wave background
+  behind a single-fold hero. Plain WebGL in `concept/wave.js`, no libraries;
+  it honors the a11y widget's reduced-motion and high-contrast preferences
+  and degrades to a static CSS backdrop without JavaScript or WebGL
 - `/404.html` — branded not-found page with links back into the site
 - `/.well-known/agent.json` — marketing-origin pointer to API discovery
 - `/.well-known/security.txt` — vulnerability-report contact (RFC 9116)
@@ -67,10 +72,13 @@ same-origin file instead.
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
 query token**: every reference looks like `/styles.css?v=gateway-3`. When you
 change any of those files, bump the token in `index.html`, `proof/index.html`,
-`compare/index.html`, `404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or
+`compare/index.html`, `concept/index.html`, `404.html`, and `build_site.py`'s
+`ANALYTICS_SCRIPTS`, or
 returning visitors
 keep the old bytes for up to a week. HTML itself carries no long-lived
-`Cache-Control` rule and revalidates on every request.
+`Cache-Control` rule and revalidates on every request. The concept page's own
+assets use an independent `?v=concept-N` token: bump it when
+`concept/concept.css` or `concept/wave.js` changes.
 
 Explicit `/proof` → `/proof/` and `/compare` → `/compare/` redirects match
 those pages' `rel="canonical"`. Every directory page needs its own entry. Do **not** replace it with the global `trailingSlash: true`

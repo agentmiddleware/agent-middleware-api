@@ -262,6 +262,7 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
         output / "index.html",
         output / "proof" / "index.html",
         output / "compare" / "index.html",
+        output / "concept" / "index.html",
         output / "llm.txt",
         output / "llms.txt",
         output / ".well-known" / "agent.json",
@@ -446,7 +447,12 @@ def test_external_links_carry_noopener_noreferrer(tmp_path) -> None:
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "concept/index.html",
+    ):
         collector = _ExternalLinkCollector()
         collector.feed((output / relative_path).read_text(encoding="utf-8"))
         collector.close()
@@ -680,6 +686,7 @@ def test_pages_carry_no_inline_scripts(tmp_path) -> None:
             "index.html",
             "proof/index.html",
             "compare/index.html",
+            "concept/index.html",
             "404.html",
         ):
             collector = _InlineScriptCollector()
@@ -715,6 +722,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
             "index.html",
             "proof/index.html",
             "compare/index.html",
+            "concept/index.html",
             "404.html",
         ):
         page = (SITE / relative_path).read_text(encoding="utf-8")
@@ -852,6 +860,63 @@ def test_branded_404_offers_a_way_back(tmp_path) -> None:
     assert 'href="/proof/"' in page
     assert 'href="/#machine-discovery"' in page
     assert "@@" not in page
+
+
+def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
+    """/concept/ is a visual study of a particle-wave landing treatment.
+
+    It must stay unlisted (noindex, absent from the sitemap, never linked from
+    the funnel pages), keep working without JavaScript or WebGL (the canvas is
+    progressive enhancement over a static backdrop), and still honor the
+    site-wide contracts: build-time contacts, self-hosted typography, and a
+    booking CTA whose aria-label contains its visible text.
+    """
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    page = (output / "concept" / "index.html").read_text(encoding="utf-8")
+    assert 'name="robots" content="noindex' in page
+    assert "@@" not in page
+
+    # Unlisted: no sitemap entry, and the funnel pages do not link it.
+    assert "concept" not in (output / "sitemap.xml").read_text(encoding="utf-8")
+    for funnel in ("index.html", "proof/index.html", "compare/index.html"):
+        assert "/concept" not in (output / funnel).read_text(encoding="utf-8")
+
+    # The animated background is enhancement, not a dependency: the canvas and
+    # its static fallback are both present, and the assets actually ship.
+    assert 'id="wave-canvas"' in page
+    assert 'class="wave-fallback"' in page
+    assert (output / "concept" / "wave.js").is_file()
+    assert (output / "concept" / "concept.css").is_file()
+
+    # The un-slashed URL must not 404.
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    redirect = next(
+        entry
+        for entry in config["redirects"]
+        if "has" not in entry and entry["source"] == "/concept"
+    )
+    assert redirect["destination"] == "/concept/"
+
+    # Same typography contract as every other page: self-hosted fonts only.
+    assert '<link rel="stylesheet" href="/fonts.css' in page
+    for host in ("fonts.googleapis.com", "fonts.gstatic.com"):
+        assert host not in page
+
+    # The CTA books the real call, and labels keep their visible text.
+    collector = _LabeledLinkCollector()
+    collector.feed(page)
+    collector.close()
+    assert any(
+        href == VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]
+        for _visible, _label, href in collector.labeled_links
+    ), "concept page CTA does not resolve to the build-time booking URL"
+    for visible, label, _href in collector.labeled_links:
+        assert visible and visible in label, (
+            f"concept page aria-label {label!r} does not contain the visible "
+            f"text {visible!r} (WCAG 2.1 Label-in-Name)"
+        )
 
 
 def test_navigation_is_identical_across_pages(tmp_path) -> None:
@@ -1075,6 +1140,7 @@ def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
         "index.html",
         "proof/index.html",
         "compare/index.html",
+        "concept/index.html",
         "404.html",
     ):
         markup = (output / relative_path).read_text(encoding="utf-8")
