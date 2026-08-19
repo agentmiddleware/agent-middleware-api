@@ -11,6 +11,84 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔒 Production refuses a SQLite `DATABASE_URL` at boot
+
+- **The premise behind eleven of the twelve audit findings no longer holds.**
+  Those findings were live because `SELECT ... FOR UPDATE` is a silent no-op on
+  SQLite and nothing refused SQLite in production. `validate_trust_mode_config`
+  now refuses a SQLite `DATABASE_URL` — file *and* in-memory spellings — in
+  production-like environments, and refuses an empty one, since wallets,
+  permits, receipts, and the ledger are relational and `get_engine()` returns
+  `None` without it.
+- This is a **separate control** from the `STATE_BACKEND` guard added in #304.
+  That one governs the key/value durable-state store; this one governs the ORM
+  engine the money and permit paths actually write through. The gap between
+  them was reachable: `STATE_BACKEND=redis` with a `REDIS_URL` satisfies the
+  state check completely while `DATABASE_URL` stays SQLite, which is precisely
+  the posture `tests/test_trust_mode_guardrails.py::test_a_redis_state_backend_does_not_excuse_a_sqlite_database_url`
+  now pins.
+- Local development is untouched: SQLite remains the standard value outside
+  production-like environments, and a regression test asserts it stays
+  accepted there.
+
+### 🔒 A dry-run session no longer confirms another tenant's session exists
+
+- **`403` where a `404` was due.** Every `/v1/billing/dry-run/session`
+  endpoint looked the session up first and checked wallet access second, so a
+  caller holding any valid wallet-scoped key got `404` for an invented session
+  id and `403` for a real one — enough to tell them apart with no access at
+  all. The `403` body also carried the session's *owning* `wallet_id`,
+  disclosing another tenant's wallet id outright.
+- A session the caller may not see now answers exactly as one that does not
+  exist, on all five endpoints that accept a session id (`GET`, `DELETE`,
+  `commit`, `revert`, and `dry-run/charge`). Authorized callers are
+  unaffected — a regression test pins that the owner still reads its own
+  session.
+- Session ids are UUID4 and cannot be enumerated, so exploiting this needed an
+  id learned elsewhere (a log, a trace, a shared URL).
+
+### 🧾 Metering and velocity hardening
+
+- **A rejected charge no longer decrements a velocity period it never
+  contributed to.** The hourly and daily counters roll over independently, and
+  a rollover between the increment and its reversal left the reversal taking
+  credits off the *new* period's total. Each counter is now reversed under the
+  period marker it was recorded against, separately, so a rolled daily window
+  cannot suppress an hourly reversal that is still owed. The direction is the
+  point: an over-count throttles a caller who did not spend and heals at the
+  next rollover, while an under-count silently raises the effective spend cap
+  and delays the anomaly auto-freeze.
+- **`/v1/billing/charge` answers 404 for an unknown wallet** instead of letting
+  `WalletNotFoundError` escape as a 500 — the six other endpoints in that
+  router already did.
+- **Negative and zero `units` are refused at the billing engine.** A negative
+  `units` made `charge_amount` negative, and the guarded debit then read
+  `balance >= charge_amount` as trivially true and applied
+  `balance - charge_amount` — *raising* the balance. Reproduced against the
+  unfixed engine: a wallet at 100 charged `units=-5` ended at 110, with a
+  ledger entry recording `action="debit", amount=+10`, so the audit trail
+  agreed it was a charge. The router refused it through `gt=0`; the governed
+  MCP path and the SDK do not pass through the router.
+- **The dry-run endpoint validates `units` too.** `POST /v1/billing/dry-run/charge`
+  has two branches: with a session id it calls `ShadowLedger.simulate_charge`
+  directly and never reaches `BillingEngine.charge`, so the engine guard did
+  not cover it; without one it reached the engine and the guard escaped as a
+  500. `SimulatedChargeRequest.units` now carries the same `gt=0` and
+  `allow_inf_nan=False` constraints as the real charge, refusing both branches
+  with a 422 before either is chosen.
+- **Non-finite `units` are refused**, at the query boundary
+  (`allow_inf_nan=False`) and again in `BillingEngine.charge`, which the
+  governed MCP path and the SDK reach without passing the router. `gt=0` does
+  not exclude an infinite float, and one reaching a write would put a
+  non-finite amount in the ledger that no reconciliation can remove.
+- **Four guarded writes from the previous release gained the regression tests
+  they shipped without**: the `refund_charge` credit, `_apply_refund`, the
+  operator refund's permit release, and the Stripe fiat clawback. Each was
+  confirmed to fail against the read-modify-write it replaced.
+- Tests that force a concurrent writer into an open transaction are now skipped
+  when `DATABASE_URL` names a real-locking engine. They depend on the lock
+  being a no-op; against a real one they would hang rather than fail.
+
 ### 🔌 Standard `/mcp` endpoint now served by the official MCP SDK
 
 - **The opt-in `POST /mcp` endpoint no longer hand-rolls JSON-RPC.** The

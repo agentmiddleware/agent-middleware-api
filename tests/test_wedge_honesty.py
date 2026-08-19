@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -108,11 +110,37 @@ async def test_agent_json_sdk_integrations_are_honest(client):
     python_sdk = integrations["python_sdk"]
     assert isinstance(python_sdk, dict)
     assert python_sdk["status"] == "release_artifact_only"
-    assert python_sdk["version"] == "0.4.0"
+    # The advertised version must be the one an editable install actually
+    # yields. Read it from the SDK's own pyproject rather than restating a
+    # literal: a hand-copied number is exactly what drifts, and this endpoint
+    # exists to be honest about what a client gets.
+    sdk_pyproject = (
+        Path(__file__).resolve().parent.parent / "b2a_sdk" / "pyproject.toml"
+    ).read_text(encoding="utf-8")
+    source_version = re.search(
+        r'^version\s*=\s*"([^"]+)"', sdk_pyproject, re.MULTILINE
+    )
+    assert source_version is not None, "b2a_sdk/pyproject.toml has no version"
+    assert python_sdk["version"] == source_version.group(1)
     assert python_sdk["install"] == "pip install -e ./b2a_sdk"
     assert "pip install b2a-sdk" not in json.dumps(python_sdk)
     assert "not published" in python_sdk["note"].lower()
-    assert "python-sdk-v0.4.0" in python_sdk["note"]
+    # The release tag is a separate fact from the source version and may
+    # legitimately lag it. Pin the value rather than checking it appears in
+    # ``note``: a substring test passes for any tag, including a stale one,
+    # which is exactly the drift this endpoint is supposed to rule out.
+    # `python-sdk-v0.4.0` is the newest tag in the repository; bump this
+    # line in the same change that cuts the next release.
+    assert python_sdk["latest_release_tag"] == "python-sdk-v0.4.0"
+    assert python_sdk["latest_release_tag"] in python_sdk["note"]
+    # The two must not silently converge: the whole point of reporting them
+    # separately is that a source ahead of the last tag stays visible.
+    # Normalize before comparing -- "0.5.0" and "python-sdk-v0.4.0" differ as
+    # raw strings even when they name the same release, so a bare inequality
+    # would hold no matter what and assert nothing at all.
+    assert python_sdk["latest_release_tag"] != (
+        f"python-sdk-v{python_sdk['version']}"
+    )
 
     typescript_sdk = integrations["typescript_sdk"]
     assert isinstance(typescript_sdk, dict)

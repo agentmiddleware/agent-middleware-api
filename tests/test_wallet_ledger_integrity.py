@@ -2,8 +2,13 @@
 
 Each path here read a balance or counter in one statement and wrote it back in
 a later one, serialized only by ``SELECT ... FOR UPDATE``. That lock is a
-silent no-op on SQLite, and nothing in this repository forbids SQLite in
-production, so these are live on a supported configuration.
+silent no-op on SQLite, so these were live defects rather than theory.
+
+``validate_trust_mode_config`` now refuses a SQLite ``DATABASE_URL`` in
+production-like environments, closing the configuration that made them
+exploitable. These tests still run on SQLite deliberately: the missing lock is
+what makes the defect observable, and the boot guard does not reach the local
+and staging databases people do real work against.
 
 The interleaves are forced deterministically through an instrumented session
 rather than raced, so they cannot pass by scheduling luck. Each test asserts
@@ -23,8 +28,16 @@ from sqlalchemy import select
 from app.db.models import LedgerEntryModel, WalletModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
-from app.services.agent_money import get_agent_money
+from app.services.agent_money import InsufficientFundsResponse, get_agent_money
 from tests.test_trust_helpers import provision_agent_wallet
+
+from tests.conftest import interleaving_factory, requires_sqlite_row_lock_noop
+
+# Every test in this module forces a concurrent writer into an open
+# transaction, which is only a *concurrent* writer while the row lock is a
+# no-op. See the marker's definition for why these are skipped rather than
+# adapted on other engines.
+pytestmark = requires_sqlite_row_lock_noop
 
 
 @pytest.fixture
@@ -67,46 +80,15 @@ async def _set_balance(wallet_id: str, amount: Decimal) -> None:
             session.add(wallet)
 
 
-def _interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
-    """Wrap a session factory so `hook` runs once, mid-transaction.
+def _exact_amount(entry) -> Decimal:
+    """Magnitude of a ledger entry as a Decimal.
 
-    Fires after ``fire_on`` statements have been issued on the wrapped session,
-    which places it after the balance has been read and before it is written.
+    ``LedgerEntry.amount`` is a float for API compatibility; ``amount_exact``
+    carries the decimal string. Balances are Decimal, so comparing against the
+    float is both a TypeError and, if coerced, a rounding hazard on exactly
+    the arithmetic these tests exist to check.
     """
-
-    class _Session:
-        def __init__(self, inner):
-            self._inner = inner
-
-        def __getattr__(self, name):
-            return getattr(self._inner, name)
-
-        async def execute(self, *args, **kwargs):
-            state["executes"] = state.get("executes", 0) + 1
-            n = state["executes"]
-            # Fire *after* the statement returns, so the hook lands once the
-            # value has been read but before anything is written back. Firing
-            # beforehand would place the concurrent writer ahead of the read,
-            # which is not the race. Counting completed reads also keeps the
-            # seam identical across the fixed and unfixed code, which differ in
-            # how many statements they issue.
-            result = await self._inner.execute(*args, **kwargs)
-            if n == fire_on and not state.get("fired"):
-                state["fired"] = True
-                await hook()
-            return result
-
-    class _CM:
-        def __init__(self, cm):
-            self._cm = cm
-
-        async def __aenter__(self):
-            return _Session(await self._cm.__aenter__())
-
-        async def __aexit__(self, *exc):
-            return await self._cm.__aexit__(*exc)
-
-    return lambda: (lambda: _CM(real_factory()))
+    return abs(Decimal(entry.amount_exact or str(entry.amount)))
 
 
 @pytest.mark.anyio
@@ -149,7 +131,7 @@ async def test_a_concurrent_charge_cannot_vanish_from_the_balance(
     monkeypatch.setattr(
         money._billing_engine,
         "_session_factory",
-        _interleaving_factory(real_factory, _concurrent_charge, state, fire_on=1),
+        interleaving_factory(real_factory, _concurrent_charge, state, fire_on=1),
     )
 
     state["first"] = await money.charge(
@@ -218,7 +200,7 @@ async def test_reclaiming_a_child_twice_cannot_mint_credits(
     monkeypatch.setattr(
         money._wallet_engine,
         "_session_factory",
-        _interleaving_factory(real_factory, _concurrent_reclaim, state, fire_on=1),
+        interleaving_factory(real_factory, _concurrent_reclaim, state, fire_on=1),
     )
 
     try:
@@ -276,7 +258,7 @@ async def test_concurrent_charges_cannot_exceed_a_child_wallet_spend_cap(
     monkeypatch.setattr(
         money._billing_engine,
         "_session_factory",
-        _interleaving_factory(real_factory, _concurrent_charge, state, fire_on=1),
+        interleaving_factory(real_factory, _concurrent_charge, state, fire_on=1),
     )
 
     state["first"] = await money.charge(
@@ -338,7 +320,7 @@ async def test_a_rejected_charge_does_not_erase_another_charges_velocity(
     monkeypatch.setattr(
         money._billing_engine,
         "_session_factory",
-        _interleaving_factory(real_factory, _concurrent_charge, state, fire_on=1),
+        interleaving_factory(real_factory, _concurrent_charge, state, fire_on=1),
     )
 
     state["first"] = await money.charge(
@@ -393,7 +375,7 @@ async def test_a_wallet_frozen_mid_charge_is_not_debited(
     monkeypatch.setattr(
         money._billing_engine,
         "_session_factory",
-        _interleaving_factory(real_factory, _freeze_the_wallet, state, fire_on=1),
+        interleaving_factory(real_factory, _freeze_the_wallet, state, fire_on=1),
     )
 
     result = await money.charge(
@@ -412,3 +394,236 @@ async def test_a_wallet_frozen_mid_charge_is_not_debited(
     assert result.shortfall_exact == "0"
     assert await _debits(wallet_id) == Decimal("0")
     assert await _balance(wallet_id) == Decimal("100")
+
+
+@pytest.mark.anyio
+async def test_a_concurrent_charge_cannot_erase_a_refund_credit(
+    client, clean_database, monkeypatch
+):
+    """A refund credit must survive a charge landing mid-transaction.
+
+    ``refund_charge`` read the wallet, then several statements later wrote the
+    credit. Written as ``balance + refund_amount`` from that read, a charge
+    committing in the gap is erased — the ledger shows the debit, the balance
+    does not, and the customer keeps money the service already delivered
+    against. The duplicate-refund guards inside ``refund_charge`` do not help:
+    the two operations here are a refund and a charge, not two refunds.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    await _set_balance(wallet_id, Decimal("100"))
+
+    money = get_agent_money()
+    import app.services.billing_engine as billing_module
+
+    real_factory = get_session_factory()
+
+    # A real debit to refund. Its amount is what the credit will restore.
+    charge = await money.charge(
+        wallet_id=wallet_id,
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/to-be-refunded",
+    )
+    charged = _exact_amount(charge)
+    opening = await _balance(wallet_id)
+
+    state: dict = {}
+
+    async def _concurrent_charge() -> None:
+        monkeypatch.setattr(
+            billing_module, "get_session_factory", lambda: real_factory, raising=False
+        )
+        state["second"] = await money.charge(
+            wallet_id=wallet_id,
+            service_category=ServiceCategory.AGENT_COMMS,
+            units=Decimal("1"),
+            request_path="/concurrent-during-refund",
+        )
+
+    monkeypatch.setattr(
+        money._billing_engine,
+        "_session_factory",
+        interleaving_factory(real_factory, _concurrent_charge, state, fire_on=1),
+    )
+
+    await money.refund_charge(
+        wallet_id=wallet_id,
+        charge_entry_id=charge.entry_id,
+        description="refund during a concurrent charge",
+    )
+
+    assert state.get("fired"), "the interleave never ran — the test proved nothing"
+    second = _exact_amount(state["second"])
+    assert second > Decimal("0"), "the concurrent charge did not move money"
+    # The credit and the concurrent debit must both be on the balance.
+    assert await _balance(wallet_id) == opening - second + charged
+
+
+@pytest.mark.anyio
+async def test_a_concurrent_charge_cannot_erase_a_reconciled_refund(
+    client, clean_database, monkeypatch
+):
+    """``refund_reconciliation._apply_refund`` has the same shape.
+
+    It is the repair path for a charge whose tool call never delivered, so a
+    lost credit here is money taken for work that provably did not happen —
+    and it runs as a background sweep, precisely when other charges on the
+    same wallet are most likely to be in flight.
+    """
+    from app.services.refund_reconciliation import get_refund_reconciliation_service
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    await _set_balance(wallet_id, Decimal("100"))
+
+    money = get_agent_money()
+    import app.services.billing_engine as billing_module
+
+    real_factory = get_session_factory()
+
+    charge = await money.charge(
+        wallet_id=wallet_id,
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/undelivered",
+    )
+    charged = _exact_amount(charge)
+    opening = await _balance(wallet_id)
+
+    service = get_refund_reconciliation_service()
+    state: dict = {}
+
+    async def _concurrent_charge() -> None:
+        monkeypatch.setattr(
+            billing_module, "get_session_factory", lambda: real_factory, raising=False
+        )
+        state["second"] = await money.charge(
+            wallet_id=wallet_id,
+            service_category=ServiceCategory.AGENT_COMMS,
+            units=Decimal("1"),
+            request_path="/concurrent-during-reconcile",
+        )
+
+    async with real_factory() as session:
+        async with session.begin():
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            charge_row = await session.get(LedgerEntryModel, charge.entry_id)
+            assert charge_row is not None
+
+            # ``_apply_refund`` takes an already-loaded wallet, so the read
+            # this race turns on is the ``session.get`` above. The interleave
+            # therefore goes here — after the service has the wallet in hand
+            # and before it writes — rather than through the session wrapper
+            # the other tests use.
+            await _concurrent_charge()
+            state["fired"] = True
+            await service._apply_refund(
+                session=session,
+                wallet=wallet,
+                charge=charge_row,
+                amount=charged,
+            )
+
+    assert state.get("fired"), "the interleave never ran — the test proved nothing"
+    second = _exact_amount(state["second"])
+    assert second > Decimal("0"), "the concurrent charge did not move money"
+    assert await _balance(wallet_id) == opening - second + charged
+
+
+@pytest.mark.anyio
+async def test_a_period_rollover_is_not_charged_for_a_rejected_charge(
+    client, clean_database, monkeypatch
+):
+    """A reversal must not decrement a period the charge never contributed to.
+
+    ``check_and_record_charge`` commits the velocity increment before the
+    debit transaction takes the wallet, so a rejected debit has to compensate
+    it. The counters roll over on their own schedule, though, and a rollover
+    landing in between zeroes the counter this charge added to. Reversing
+    against the *new* period takes credits off a total that belongs to live
+    spend by other callers.
+
+    The direction matters. An over-count throttles a caller who did not spend
+    and heals at the next rollover; an under-count silently raises the
+    effective spend cap and delays the anomaly auto-freeze, which are the two
+    controls these counters exist to drive. So the reversal is guarded on the
+    period marker it was recorded against and skipped when that no longer
+    holds.
+    """
+    from datetime import timedelta
+
+    from app.core.time import utc_now
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    await _set_balance(wallet_id, Decimal("100"))
+
+    money = get_agent_money()
+    real_factory = get_session_factory()
+    state: dict = {}
+
+    async def _roll_the_period_and_freeze() -> None:
+        """The hourly and daily windows roll, then the wallet is frozen.
+
+        The freeze is what makes the debit reject, so the reversal runs. The
+        rollover is backdated past both windows and the counters are set to a
+        known live figure, standing in for spend by other callers in the new
+        period.
+        """
+        async with real_factory() as s:
+            async with s.begin():
+                wallet = await s.get(WalletModel, wallet_id)
+                assert wallet is not None
+                now = utc_now()
+                wallet.hourly_reset_at = now
+                wallet.daily_reset_at = now
+                wallet.hourly_spent = Decimal("7")
+                wallet.daily_spent = Decimal("9")
+                wallet.status = "frozen"
+                s.add(wallet)
+
+    # Put the wallet in an old period so the charge's own increment is
+    # recorded against a marker the hook below then replaces.
+    async with real_factory() as session:
+        async with session.begin():
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            stale = utc_now() - timedelta(days=2)
+            wallet.hourly_reset_at = stale
+            wallet.daily_reset_at = stale
+            session.add(wallet)
+
+    monkeypatch.setattr(
+        money._billing_engine,
+        "_session_factory",
+        interleaving_factory(real_factory, _roll_the_period_and_freeze, state, fire_on=1),
+    )
+
+    result = await money.charge(
+        wallet_id=wallet_id,
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/rollover-reversal",
+    )
+
+    assert state.get("fired"), "the interleave never ran — the test proved nothing"
+    # Pin the response, not merely the absence of a ledger entry. The freeze
+    # commits after the wallet SELECT returns, so the in-memory wallet still
+    # reads "active" at the status check and it is the guarded UPDATE that
+    # rejects the charge. Both branches reach the reversal this test measures,
+    # but they are separately reachable, and ``not hasattr(result, "entry_id")``
+    # records neither.
+    assert isinstance(result, InsufficientFundsResponse), (
+        f"a frozen wallet was debited: {result}"
+    )
+    assert result.error == "wallet_frozen"
+
+    async with real_factory() as session:
+        wallet = await session.get(WalletModel, wallet_id)
+        assert wallet is not None
+        # The new period's counters are untouched: this charge never added to
+        # them, so it has nothing to take back from them.
+        assert wallet.hourly_spent == Decimal("7")
+        assert wallet.daily_spent == Decimal("9")

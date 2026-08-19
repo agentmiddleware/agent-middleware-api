@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## Unreleased — 0.5.0
+
+`pyproject.toml` carries `0.5.0` from here on. `0.4.0` is published and
+tagged `python-sdk-v0.4.0`, and the entries below are new surface area on
+top of it, so leaving the source at `0.4.0` would have shipped something
+materially different under a version already in the wild. A minor bump:
+everything here is additive and no published behaviour changes. The tag is
+not cut by this change — `python-sdk-v0.5.0` is still a release decision.
 
 - Add `b2a_sdk.receipt_verifier` for offline verification of portable trust
   receipts. It imports nothing from the middleware application and needs no

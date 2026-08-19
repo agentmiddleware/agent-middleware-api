@@ -659,16 +659,18 @@ become stale; the CI badge and release gates are the source of truth.
 | [`migrations/`](migrations/) | Alembic history; use migrations for production schema changes |
 | [`scripts/`](scripts/) | Reproducible demos, release gates, OpenAPI export, and operator helpers |
 | [`tests/`](tests/) | Product, negative-path, concurrency, and proof-surface tests |
-| [`b2a_sdk/`](b2a_sdk/) | Python trust SDK 0.4.0 source and release build |
+| [`b2a_sdk/`](b2a_sdk/) | Python trust SDK 0.5.0 source and release build |
 | [`framework_integrations/`](framework_integrations/) | Source examples for agent frameworks; not published packages |
 | [`site/`](site/) | Static marketing and discovery pointer site |
 
-### Python SDK 0.4.0
+### Python SDK 0.5.0
 
 HTTP and MCP are the canonical integration surfaces. CI builds and smoke-tests
-Python SDK 0.4.0 wheels and sdists on Python 3.10 through 3.12. Pushing the
-matching `python-sdk-v0.4.0` tag attaches those artifacts to a GitHub release;
-the package is not published to PyPI. The typed `AgentMiddlewareClient` covers
+Python SDK 0.5.0 wheels and sdists on Python 3.10 through 3.12. Pushing the
+matching `python-sdk-v0.5.0` tag attaches those artifacts to a GitHub release;
+the package is not published to PyPI. The newest tag today is
+`python-sdk-v0.4.0` — the source here is ahead of it, and the wheel a release
+build produces carries the source version, not the tag's. The typed `AgentMiddlewareClient` covers
 tool discovery, permit creation, governed invocation, receipt verification, and
 evidence retrieval, and exposes idempotency conflicts and delivery uncertainty
 as explicit errors. For repository development (installs from this repo, not

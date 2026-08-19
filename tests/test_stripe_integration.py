@@ -10,9 +10,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import stripe
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
 from app.core.time import utc_now
+from tests.conftest import interleaving_factory, requires_sqlite_row_lock_noop
 from app.main import app
 from app.services.stripe_integration import StripeIntegration, StripeSettlementError
 
@@ -485,6 +487,81 @@ class TestStripeWebhookIdempotency:
                 "the clawback moved the balance but left updated_at at "
                 f"{wallet.updated_at}, the value set before it ran"
             )
+
+    @requires_sqlite_row_lock_noop
+    @pytest.mark.anyio
+    async def test_a_concurrent_charge_cannot_vanish_under_a_refund_clawback(
+        self, client, sponsor_wallet, api_headers, monkeypatch
+    ):
+        """A spend landing mid-clawback must not be erased.
+
+        The clawback read the sponsor wallet, then several statements later
+        wrote ``balance - refund_delta`` computed from that read. The
+        cumulative-refund arithmetic above it makes a *redelivered event*
+        idempotent, but it does nothing about a charge committing in the gap:
+        that debit is simply overwritten. The discrepancy is against fiat
+        Stripe has already returned, so the books are wrong in the direction
+        that costs the operator real money.
+
+        The interleave fires after the wallet SELECT and before the clawback
+        write, and is forced rather than raced.
+        """
+        from app.services.stripe_integration import get_stripe_integration
+        from app.db.database import get_session_factory
+        from app.db.models import WalletModel
+
+        wallet_id = sponsor_wallet["wallet_id"]
+        integration = get_stripe_integration()
+        real_factory = get_session_factory()
+
+        await integration._mint_credits(
+            wallet_id=wallet_id,
+            amount=Decimal("50000"),
+            payment_intent_id="pi_clawback_race",
+            description="topup",
+        )
+
+        spend = Decimal("100")
+        state: dict = {}
+
+        async def _concurrent_spend() -> None:
+            """A charge commits against the same wallet, mid-clawback."""
+            async with real_factory() as s:
+                async with s.begin():
+                    await s.execute(
+                        sa_update(WalletModel)
+                        .where(WalletModel.wallet_id == wallet_id)
+                        .values(balance=WalletModel.balance - spend)
+                        .execution_options(synchronize_session=False)
+                    )
+
+        monkeypatch.setattr(
+            integration,
+            "_session_factory",
+            # Statement 2 is the wallet SELECT. Firing after it returns puts
+            # the spend between the read and the clawback write.
+            interleaving_factory(real_factory, _concurrent_spend, state, fire_on=2),
+        )
+
+        # Stripe reports cents; the ledger is in credits at ten per cent (the
+        # existing redelivery test pins the same ratio: 5000 cents claws back
+        # the whole 50000-credit top-up).
+        refunded_cents = 500
+        refund_credits = Decimal(refunded_cents * 10)
+        await integration._handle_refund(
+            refunded_charge(
+                payment_intent_id="pi_clawback_race",
+                amount_refunded=refunded_cents,
+            ),
+            "evt_clawback_race",
+        )
+
+        assert state.get("fired"), "the interleave never ran — the test proved nothing"
+        async with real_factory() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            # Both the clawback and the concurrent spend are on the balance.
+            assert wallet.balance == Decimal("50000") - refund_credits - spend
 
     @pytest.mark.anyio
     async def test_successive_partial_refunds_apply_only_new_cumulative_delta(

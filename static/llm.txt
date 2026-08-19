@@ -137,16 +137,17 @@ Wallets are auto-frozen if spending exceeds:
 Prefer the HTTP trust loop above (permits → MCP invoke → receipts). Client
 libraries are optional and not required for the wedge.
 
-### Python 0.4.0 (release artifact only)
+### Python 0.5.0 source, 0.4.0 released (release artifact only)
 
-CI builds a wheel and sdist and attaches them to the
-`python-sdk-v0.4.0` GitHub release. It is **not** published to PyPI, and the
+CI builds a wheel and sdist from the source in `b2a_sdk/`, currently 0.5.0,
+and attaches them to the matching GitHub release. The newest tag today is
+`python-sdk-v0.4.0`; a clone install gives you 0.5.0. It is **not** published to PyPI, and the
 repository (including its releases) is private — request source access from
 the operator. With access, install a downloaded wheel, or install from a
 clone for development:
 
 ```bash
-pip install ./b2a_sdk-0.4.0-py3-none-any.whl
+pip install ./b2a_sdk-0.4.0-py3-none-any.whl  # the released wheel
 pip install -e ./b2a_sdk
 ```
 

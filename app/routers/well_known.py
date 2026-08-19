@@ -311,12 +311,22 @@ class AgentPluginManifest(BaseModel):
             # advertised as a package-registry install.
             "python_sdk": {
                 "status": "release_artifact_only",
-                "version": "0.4.0",
+                # The version an editable install of ``b2a_sdk/`` yields --
+                # this field describes what ``install`` below produces, so it
+                # tracks the source, not the newest tag. The two are named
+                # separately because they differ whenever source has moved
+                # past the last release, and collapsing them into one number
+                # is how a discovery surface starts lying about what a client
+                # will actually get. tests/test_wedge_honesty.py pins this
+                # against b2a_sdk/pyproject.toml so they cannot drift.
+                "version": "0.5.0",
                 "path": "b2a_sdk/",
                 "install": "pip install -e ./b2a_sdk",
+                "latest_release_tag": "python-sdk-v0.4.0",
                 "note": (
                     "Wheel and sdist are attached to python-sdk-v0.4.0 by the "
-                    "release workflow. Not published to PyPI."
+                    "release workflow; the source in b2a_sdk/ is 0.5.0 and is "
+                    "ahead of that tag. Not published to PyPI."
                 ),
             },
             "typescript_sdk": {

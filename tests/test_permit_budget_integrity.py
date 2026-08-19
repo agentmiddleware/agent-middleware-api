@@ -3,9 +3,15 @@
 Every test here targets a path that wrote ``spent_credits`` from a value this
 process had read in an earlier statement. On PostgreSQL the surrounding
 ``SELECT ... FOR UPDATE`` hid the problem; on SQLite that lock is a silent
-no-op, and nothing in this repository forbids SQLite in production
-(``config.py`` lists it and ``trust_mode.py`` has no engine guardrail), so
-these are live defects on a supported configuration rather than theory.
+no-op, so these were live defects rather than theory.
+
+``validate_trust_mode_config`` now refuses a SQLite ``DATABASE_URL`` in
+production-like environments, which closes the configuration these exploited.
+That guard is a second line, not a replacement: it is one environment-variable
+check away from being bypassed, it does not apply to the local and staging
+databases people do real work against, and a path that writes money from a
+stale read is wrong on its own terms. These tests therefore keep running on
+SQLite, where the missing lock makes the defect observable at all.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from app.main import app
 from app.schemas.trust import PermitCreateRequest
 from app.services.permits import PermitError, get_permit_service
 from tests.test_trust_helpers import provision_agent_wallet
+from tests.conftest import requires_sqlite_row_lock_noop
 
 
 @pytest.fixture
@@ -134,6 +141,7 @@ async def test_reserve_budget_still_denies_a_genuine_cap_breach(
     assert await _spent(permit.permit_id) == Decimal("4")
 
 
+@requires_sqlite_row_lock_noop
 @pytest.mark.anyio
 async def test_reconcile_budgets_does_not_erase_a_concurrent_reservation(
     client, clean_database, enforce_naive_utc_datetime_columns, monkeypatch

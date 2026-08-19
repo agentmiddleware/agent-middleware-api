@@ -439,13 +439,29 @@ class ShadowLedger:
                     ],
                     "created_at": session.created_at.isoformat(),
                 }
-                await redis_client.setex(
+                # ``xx=True``: write only if the key still exists. A terminal
+                # operation (commit/end/revert) can claim the session between
+                # the read above and this write, and an unconditional ``setex``
+                # would *recreate* it -- with every simulated charge intact,
+                # so it could be committed a second time and the same charges
+                # applied to the real wallet twice.
+                wrote = await redis_client.set(
                     await self._session_key(session_id),
-                    SESSION_TTL_SECONDS,
                     json.dumps(session_data),
+                    ex=SESSION_TTL_SECONDS,
+                    xx=True,
                 )
+                if not wrote:
+                    raise ValueError(f"Session not found: {session_id}")
             else:
-                self._memory_store[session_id]["session"] = session
+                # Same window, different symptom: the claim popped the entry,
+                # so ``self._memory_store[session_id]`` raised ``KeyError`` and
+                # escaped the router as a 500. Refuse the same way the Redis
+                # path does rather than resurrecting or crashing.
+                entry = self._memory_store.get(session_id)
+                if entry is None:
+                    raise ValueError(f"Session not found: {session_id}")
+                entry["session"] = session
 
             logger.debug(
                 f"Simulated charge {charge_id}: {charge_amount} credits "
@@ -460,22 +476,20 @@ class ShadowLedger:
 
         Does NOT affect real wallet state - just provides a summary
         of what would have been charged.
+
+        Claims the session rather than reading it and deleting it separately.
+        Read-then-delete leaves a window between the two: a concurrent
+        ``commit_session`` claims the session and charges the real wallet, this
+        method's delete becomes a no-op, and it still returns a summary built
+        from the stale read -- so the caller is told the session was ended
+        when a commit ended it, and ``revert_session`` reports a revert that
+        did not happen. ``_claim_session`` is the same atomic primitive commit
+        uses (GETDEL on Redis, ``dict.pop`` in memory), so exactly one of
+        end/commit/revert can win.
         """
-        session = await self.get_session(session_id)
+        session = await self._claim_session(session_id)
         if not session:
             return None
-
-        redis_client = await self._get_redis()
-
-        if redis_client:
-            await redis_client.delete(await self._session_key(session_id))
-            await redis_client.delete(await self._balance_key(session_id))
-            await redis_client.srem(
-                await self._wallet_sessions_key(session.wallet_id),
-                session_id,
-            )
-        else:
-            self._memory_store.pop(session_id, None)
 
         summary = SessionSummary(
             session_id=session_id,
@@ -672,7 +686,24 @@ class ShadowLedger:
         charge_count = len(session.simulated_charges)
         total = session.total_simulated
 
-        await self.end_session(session_id)
+        if await self.end_session(session_id) is None:
+            # The session was claimed between the read above and this call --
+            # by ``commit_session``, which claims atomically. Discarding this
+            # return value meant reporting ``reverted=True`` with the wallet id
+            # from the stale read, and a message reading "No changes made to
+            # real wallet" when the concurrent commit had already applied the
+            # charges to it. Reproduced: a wallet at 100 ended at 96 while the
+            # revert claimed nothing had moved.
+            #
+            # Reported as a missing session, matching the branch above, so the
+            # router's empty-``wallet_id`` check answers 404 rather than a 200
+            # asserting a revert that did not happen.
+            return RevertResult(
+                session_id=session_id,
+                wallet_id="",
+                reverted=False,
+                message="Session not found",
+            )
 
         logger.info(
             f"Reverted sandbox session {session_id}: "

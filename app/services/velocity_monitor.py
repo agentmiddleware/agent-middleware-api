@@ -39,6 +39,8 @@ class VelocityCheckResult:
         current_spend: float | None = None,
         limit: float | None = None,
         should_freeze: bool = False,
+        hourly_reset_at: datetime | None = None,
+        daily_reset_at: datetime | None = None,
     ):
         self.allowed = allowed
         self.reason = reason
@@ -47,6 +49,14 @@ class VelocityCheckResult:
         self.current_spend = current_spend
         self.limit = limit
         self.should_freeze = should_freeze
+        # The period this charge's increment was actually recorded into, or
+        # None when nothing was recorded. A caller reversing the increment
+        # needs it: the counters roll over on their own schedule, and a
+        # reversal that lands after a rollover would decrement a period this
+        # charge never contributed to. See BillingEngine's
+        # ``reverse_velocity_record``.
+        self.hourly_reset_at = hourly_reset_at
+        self.daily_reset_at = daily_reset_at
 
 
 class WalletFrozenError(Exception):
@@ -142,6 +152,11 @@ class VelocityMonitor:
                 # not the ones read before it.
                 await session.refresh(wallet)
 
+                # Stamp the period the increment landed in, so a caller
+                # reversing it can refuse to decrement a later one.
+                recorded_hourly_reset_at = wallet.hourly_reset_at
+                recorded_daily_reset_at = wallet.daily_reset_at
+
                 velocity_result = self._check_limits(
                     wallet=wallet,
                     hourly_limit=hourly_limit,
@@ -157,6 +172,8 @@ class VelocityMonitor:
                         reason="Wallet frozen due to anomalous spend velocity",
                         alert_triggered=True,
                         should_freeze=True,
+                        hourly_reset_at=recorded_hourly_reset_at,
+                        daily_reset_at=recorded_daily_reset_at,
                     )
 
                     logger.warning(
@@ -177,6 +194,8 @@ class VelocityMonitor:
 
                 await session.commit()
 
+                velocity_result.hourly_reset_at = recorded_hourly_reset_at
+                velocity_result.daily_reset_at = recorded_daily_reset_at
                 return velocity_result
 
     def _reset_if_needed(self, wallet: WalletModel, now: datetime) -> None:

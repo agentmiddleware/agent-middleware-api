@@ -49,6 +49,19 @@ def is_postgres_url(url: str) -> bool:
     )
 
 
+def is_sqlite_url(url: str) -> bool:
+    """True when ``url`` names SQLite, in-memory spellings included.
+
+    This is the question ``sqlite_path_from_url`` deliberately does not
+    answer. That helper returns "" for an in-memory URL because it is looking
+    for a *durable file*; a caller asking "is this SQLite?" for safety reasons
+    needs the opposite treatment, since ``sqlite+aiosqlite:///:memory:`` is
+    every bit as unsuitable for a production trust plane as a file is -- more
+    so, since it also loses everything on restart.
+    """
+    return (url or "").strip().lower().startswith(("sqlite://", "sqlite+"))
+
+
 def sqlite_path_from_url(url: str) -> str:
     """Return the **durable** SQLite file path in ``url``, or "" otherwise.
 

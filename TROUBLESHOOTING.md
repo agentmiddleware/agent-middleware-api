@@ -34,6 +34,24 @@ You set `ENVIRONMENT=production` but used SQLite or left `STATE_BACKEND=sqlite`.
 - Switch to `ENVIRONMENT=local` for local development, **or**
 - Set `STATE_BACKEND=postgres` and provide a `DATABASE_URL` with `postgresql+asyncpg://`.
 
+### `TrustModeGuardrailError: DATABASE_URL must not be SQLite in production-like environments`
+You set `ENVIRONMENT=production` (or another production-like value) with a
+SQLite `DATABASE_URL`. SQLAlchemy silently drops `SELECT ... FOR UPDATE` on
+SQLite, so concurrent charges, budget reservations, and velocity counters lose
+the serialization the money and permit paths depend on — two callers can each
+debit a balance only one of them fits inside. Either:
+- Switch to `ENVIRONMENT=local` for local development, **or**
+- Point `DATABASE_URL` at PostgreSQL (`postgresql+asyncpg://...`).
+
+This is a different check from `STATE_BACKEND` below: that one governs the
+key/value state store, this one governs the ORM engine. Satisfying one does
+not satisfy the other.
+
+### `TrustModeGuardrailError: DATABASE_URL must be set in production-like environments`
+Wallets, permits, receipts, and the ledger are relational. Without
+`DATABASE_URL` the engine is never created and the trust plane has nowhere
+durable to record what it authorized. Set it to your PostgreSQL DSN.
+
 ### `RuntimeError: ENABLE_PROOF_SURFACES must be false in production`
 Set `ENABLE_PROOF_SURFACES=false`. Proof surfaces are for local demos only.
 

@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from app.core.db_urls import is_sqlite_url
+
 if TYPE_CHECKING:
     from app.core.config import Settings
 
@@ -82,6 +84,7 @@ def validate_trust_mode_config(
     enable_public_mcp_endpoint: bool = False,
     redis_url: str = "",
     public_url: str = "",
+    database_url: str = "",
 ) -> None:
     """Refuse unsafe deploy postures in production-like environments.
 
@@ -147,6 +150,37 @@ def validate_trust_mode_config(
                 "in production-like environments (anonymous verification must "
                 "use shared rate-limit state)"
             )
+        configured_database_url = (database_url or "").strip()
+        if not configured_database_url:
+            violations.append(
+                "DATABASE_URL must be set in production-like environments "
+                "(wallets, permits, receipts, and the ledger are relational; "
+                "without it get_engine() returns None and the trust plane has "
+                "nowhere durable to record what it authorized)"
+            )
+        elif is_sqlite_url(configured_database_url):
+            # STATE_BACKEND already refuses SQLite (see
+            # app/core/durable_state.py), but that guard covers the key/value
+            # state store, not the ORM engine this URL builds. A deployment
+            # setting STATE_BACKEND=redis with REDIS_URL satisfies it while
+            # DATABASE_URL stays SQLite -- and the money and permit paths run
+            # against the ORM engine, not the state store. Every
+            # ``SELECT ... FOR UPDATE`` guarding a balance, a budget, or a
+            # counter is silently dropped by SQLAlchemy on SQLite, so the
+            # serialization those paths are written to rely on is simply
+            # absent. Refuse at boot rather than let concurrent writers
+            # discover it against real money.
+            violations.append(
+                "DATABASE_URL must not be SQLite in production-like "
+                "environments: SQLAlchemy silently drops SELECT ... FOR UPDATE "
+                "on SQLite, so concurrent charges, budget reservations, and "
+                "velocity counters lose the serialization the money and permit "
+                "paths depend on. Use PostgreSQL "
+                "(postgresql+asyncpg://...). This is a separate control from "
+                "STATE_BACKEND, which governs the key/value state store rather "
+                "than the ORM engine"
+            )
+
         if enable_public_mcp_endpoint and not (public_url or "").strip():
             violations.append(
                 "PUBLIC_URL is required when ENABLE_PUBLIC_MCP_ENDPOINT is true "
@@ -172,6 +206,7 @@ def validate_trust_mode_guardrails(settings: Settings) -> None:
         enable_public_mcp_endpoint=settings.ENABLE_PUBLIC_MCP_ENDPOINT,
         redis_url=settings.REDIS_URL,
         public_url=settings.PUBLIC_URL,
+        database_url=settings.DATABASE_URL,
     )
 
 

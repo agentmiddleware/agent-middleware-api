@@ -149,7 +149,7 @@ class AgentMiddlewareClient:
             headers={
                 "X-API-Key": api_key,
                 "Content-Type": "application/json",
-                "User-Agent": "b2a-sdk/0.4.0",
+                "User-Agent": "b2a-sdk/0.5.0",
             },
             timeout=timeout,
             transport=transport,

@@ -25,6 +25,7 @@ from app.services.refund_reconciliation import (
 )
 from app.services.receipts import ReceiptService
 from app.services.service_registry import get_service_registry
+from tests.conftest import interleaving_factory, requires_sqlite_row_lock_noop
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
     create_tool_permit,
@@ -43,6 +44,7 @@ async def _create_unrefunded_failure(
     client: AsyncClient,
     *,
     requires_human_approval: bool = False,
+    max_credits: int = 2,
 ) -> dict[str, Any]:
     provisioned = await provision_agent_wallet(client)
     registry = get_service_registry()
@@ -70,7 +72,7 @@ async def _create_unrefunded_failure(
         wallet_id=provisioned["agent_wallet_id"],
         key_id=provisioned["key_id"],
         tool_name=tool_name,
-        max_credits=2,
+        max_credits=max_credits,
         idem_key="operator-reconcile-permit-create",
         requires_human_approval=requires_human_approval,
     )
@@ -755,3 +757,76 @@ async def test_tampered_signed_receipt_cannot_authorize_refund(
         headers=case["provisioned"]["agent_headers"],
     )
     assert all(entry["action"] != "refund" for entry in ledger.json()["entries"])
+
+
+@requires_sqlite_row_lock_noop
+@pytest.mark.anyio
+async def test_operator_refund_release_cannot_erase_a_concurrent_reservation(
+    client,
+    clean_database,
+    monkeypatch,
+):
+    """The operator release must subtract, not overwrite.
+
+    ``permits.py`` guarantees that every ``spent_credits`` write is decided by
+    the database rather than by a value some process read earlier, and that
+    guarantee is only as strong as its weakest caller. This one lives outside
+    that module: it releases the reservation an operator refund settles, in
+    the middle of a long transaction that also verifies a receipt signature
+    and writes a ledger entry. A reservation landing in that window and then
+    being overwritten leaves the permit under-counting its own spend, which is
+    exactly the state that lets it be spent past its cap.
+
+    The interleave is forced deterministically: the hook fires after the
+    correlated-refund lookup, which is past the point where the service has
+    the permit row in hand and before it writes the release.
+    """
+    import app.services.refund_reconciliation as reconciliation_module
+    from app.db.models import PermitModel
+
+    # The permit is minted with one credit of headroom above the tool's cost.
+    # The default fixture spends its permit exactly to the cap, which would
+    # refuse the concurrent reservation and leave the interleave proving
+    # nothing -- and the headroom cannot be added afterwards, since
+    # ``max_credits`` is covered by the permit signature the service verifies.
+    case = await _create_unrefunded_failure(client, max_credits=3)
+    receipt_id = case["receipt"]["receipt_id"]
+    permit_id = case["permit"]["permit_id"]
+
+    real_factory = get_session_factory()
+
+    async with real_factory() as session:
+        permit = await session.get(PermitModel, permit_id)
+        assert permit is not None
+        assert permit.spent_credits == Decimal("2")
+
+    state: dict = {}
+
+    async def _concurrent_reservation() -> None:
+        await get_permit_service().reserve_budget(permit_id, Decimal("1"))
+
+    monkeypatch.setattr(
+        reconciliation_module,
+        "get_session_factory",
+        # Statement 3 is the correlated-refund lookup, the first statement
+        # visible to the wrapper *after* the permit row is loaded. The load
+        # itself is a ``session.get`` and bypasses the wrapper entirely, so
+        # firing any earlier lets the service re-read the permit after the
+        # reservation lands and the race never happens -- the first version of
+        # this test did exactly that and passed against the unfixed service.
+        interleaving_factory(real_factory, _concurrent_reservation, state, fire_on=3),
+    )
+
+    resolved = await client.post(
+        f"/v1/receipts/reconciliation/refunds/{receipt_id}/retry",
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert state.get("fired"), "the interleave never ran — the test proved nothing"
+
+    permit_after = await get_permit_service().get_permit(permit_id)
+    assert permit_after is not None
+    # 2 reserved, +1 from the concurrent reservation, -2 released by the
+    # refund. An absolute write of the recomputed 0 would erase that 1 and
+    # hand the permit a credit of headroom it never actually had returned.
+    assert permit_after.spent_credits == Decimal("1")

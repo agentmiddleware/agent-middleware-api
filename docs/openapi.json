@@ -12446,6 +12446,7 @@
           },
           "units": {
             "type": "number",
+            "exclusiveMinimum": 0.0,
             "title": "Units",
             "description": "Number of units",
             "default": 1.0

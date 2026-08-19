@@ -47,6 +47,11 @@ _PROD_TRUST_ENV = {
     "WEBAUTHN_ALLOW_MOCK": "false",
     "TRUST_SIGNING_PRIVATE_KEY_B64": _TEST_SIGNING_PRIVATE_KEY_B64,
     "PUBLIC_URL": "https://api.thisisatest.tech",
+    # A production posture is not complete without the relational database the
+    # wallets, permits, receipts, and ledger live in. It is PostgreSQL because
+    # validate_trust_mode_config refuses SQLite here: SQLAlchemy silently drops
+    # SELECT ... FOR UPDATE on SQLite, which the money and permit paths rely on.
+    "DATABASE_URL": "postgresql+asyncpg://user:pw@db.internal:5432/trust",
 }
 
 
@@ -145,6 +150,7 @@ def test_production_trust_flags_are_strict(production_trust_flags):
         debug=cfg.DEBUG,
         webauthn_allow_mock=cfg.WEBAUTHN_ALLOW_MOCK,
         enable_proof_surfaces=cfg.ENABLE_PROOF_SURFACES,
+        database_url=cfg.DATABASE_URL,
     )
     assert (
         describe_permissive_trust_mode(

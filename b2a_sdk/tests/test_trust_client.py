@@ -83,7 +83,7 @@ async def test_default_base_url_is_the_live_canonical_api() -> None:
 async def test_discover_tools_returns_typed_definitions() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/mcp/tools.json"
-        assert request.headers["user-agent"] == "b2a-sdk/0.4.0"
+        assert request.headers["user-agent"] == "b2a-sdk/0.5.0"
         return httpx.Response(
             200,
             json={
