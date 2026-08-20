@@ -1,6 +1,8 @@
 # LangChain + Agent Middleware API
 
-LangChain integration for the Agent Middleware API, providing MCP tools and AWI web interactions as LangChain tools.
+LangChain integration for the Agent Middleware API via governed **permit → invoke → receipt** flow.
+
+All tool invocations go through the trust plane: scoped permits, signed receipts, replay protection, and metered billing.
 
 ## Installation
 
@@ -19,66 +21,82 @@ depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `langchain_b2a`
 module used below.
 
-## Quick Start
+## Quick Start (Governed Flow)
 
 ```python
 from langchain_b2a import B2AClient, get_langgraph_tools
 from langgraph.prebuilt import create_react_agent
 
 # Initialize client
-client = B2AClient(
-    api_url="http://localhost:8000",
-    api_key="your-api-key",
-    wallet_id="agent-001",
-)
+client = B2AClient(api_key="your-api-key")
 
-# Get LangGraph-compatible tools
-tools = get_langgraph_tools(client)
+# Get LangGraph-compatible tools with wallet_id
+tools = get_langgraph_tools(client, wallet_id="agent-001")
 
 # Create agent
 model = ChatOpenAI(model="gpt-4o")
 agent = create_react_agent(model, tools)
 ```
 
-## MCP Tools
-
-> **Warning**: The LangChain wrapper's MCP tool calls bypass the trust-plane
-> loop (no permit, no idempotency key, no signed receipt, no replay protection).
-> Each call dispatches and charges independently. Retrying a call will execute
-> and charge again.
->
-> For production use with replay protection and signed receipts, use
-> `AgentMiddlewareClient` from `b2a_sdk` with the governed flow:
-> `discover_tools() → create_permit() → invoke_tool()`.
+## MCP Tools via Governed Flow
 
 ```python
 from langchain_b2a import B2AClient, get_mcp_tools
 
-client = B2AClient(api_key="...", wallet_id="...")
-mcp_tool = get_mcp_tools(client)
+client = B2AClient(api_key="...")
+mcp_tools = get_mcp_tools(client, wallet_id="agent-001")
+tool = mcp_tools[0]
 
-# Call an MCP tool (WARNING: bypasses trust plane, no replay protection)
-result = await mcp_tool.ainvoke({
+# Call an MCP tool with caller-supplied idempotency keys
+# The wrapper creates a permit, invokes the tool, and returns a signed receipt
+result = await tool.ainvoke({
     "tool_name": "data-indexer",
+    "idempotency_key": "unique-invoke-123",  # REQUIRED: caller must supply
+    "permit_idempotency_key": "permit-invoke-123",  # REQUIRED: stable for replay
     "arguments": {"documents": ["..."]},
+})
+
+# Result includes signed receipt
+# {'content': [...], 'receipt_id': '...', 'credits_charged': '2', 'signature': '...'}
+```
+
+## Idempotency and Replay Protection
+
+Both `idempotency_key` and `permit_idempotency_key` are **required** and must be supplied by the caller. Do not auto-generate keys.
+
+Replaying with the same keys returns the original receipt without recharging:
+
+```python
+# First call: charges credits
+result1 = await tool.ainvoke({
+    "tool_name": "partner.search",
+    "idempotency_key": "search-abc-123",
+    "permit_idempotency_key": "permit-abc-123",
+    "arguments": {"query": "test"},
+})
+
+# Replay: returns cached receipt, no additional charge
+result2 = await tool.ainvoke({
+    "tool_name": "partner.search",
+    "idempotency_key": "search-abc-123",  # same invoke key
+    "permit_idempotency_key": "permit-abc-123",  # same permit key
+    "arguments": {"query": "different"},  # different args ignored
 })
 ```
 
-## AWI Web Interactions
+## Permit Configuration
+
+Control permit budget and TTL:
 
 ```python
-from langchain_b2a import B2AClient
-from langchain_b2a.tools import create_awi_tool
+from decimal import Decimal
 
-client = B2AClient(api_key="...", wallet_id="...")
-awi_tool = create_awi_tool(client)
-
-# Execute web actions
-result = await awi_tool.ainvoke({
-    "target_url": "https://shop.example.com",
-    "action": "search_and_sort",
-    "parameters": {"query": "laptops", "sort_by": "price"},
-})
+tools = get_mcp_tools(
+    client,
+    wallet_id="agent-001",
+    permit_budget=Decimal("50"),  # max 50 credits per permit
+    permit_ttl_minutes=15,         # permit expires in 15 minutes
+)
 ```
 
 ## Requirements
