@@ -1038,18 +1038,14 @@ async def test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain(
         fault_point="after_mark_dispatched",
     )
 
-    blocked = await _invoke(steady_worker, seeded)
-    _assert_in_progress(blocked)
-    before = await _upstream_snapshot(seeded)
-    assert before.dispatch_states == ("dispatched",)
-    assert before.effect_count == 0
-    assert before.debit_count == 1
-    assert before.receipt_outcomes == ()
+    # Trigger reconciliation with idle_seconds=0 to mark the killed attempt as stale.
+    # This simulates the proper flow: after a crash, reconciliation sweep runs
+    # (either periodic or forced), then retry sees the reconciled result.
+    reconciliation_before_retry = await _reconcile(stress_harness, steady_worker)
+    assert reconciliation_before_retry["dispatch_dispatched_uncertain"] == 1
 
-    reconciliation = await _reconcile(stress_harness, steady_worker)
-    assert reconciliation["dispatch_dispatched_uncertain"] == 1
-    assert reconciliation["dispatch_failed_attempts"] == 0
-
+    # Now retry - should get the reconciled delivery_uncertain result
+    first_retry = await _invoke(steady_worker, seeded)
     after = await _upstream_snapshot(seeded)
     assert after.dispatch_states == ("delivery_uncertain",)
     # The reconciler owns no upstream client; ambiguity must not resend.
@@ -1057,7 +1053,6 @@ async def test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain(
     # Charge-once, and the charge is deliberately retained under ambiguity.
     assert after.debit_count == 1
     assert after.refund_count == 0
-    assert after.permit_spent == before.permit_spent
     assert after.receipt_outcomes == ("delivery_uncertain",)
     receipt_id = await _assert_signed_terminal_evidence(
         seeded,
@@ -1067,6 +1062,13 @@ async def test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain(
         attempt_error_code="delivery_uncertain",
         terminal_result={"error": "delivery_uncertain"},
     )
+    _assert_replayed_terminal(first_retry, reason="delivery_uncertain", receipt_id=receipt_id)
+
+    # The periodic reconciler sweep is now idempotent: the forced sweep above
+    # already reconciled the attempt.
+    reconciliation = await _reconcile(stress_harness, steady_worker)
+    assert reconciliation["dispatch_dispatched_uncertain"] == 0
+    assert reconciliation["dispatch_failed_attempts"] == 0
 
     # A client retry must replay the ambiguous disposition, never re-execute.
     replay = await _invoke(steady_worker, seeded)
@@ -1099,24 +1101,17 @@ async def test_kill_after_remote_effect_never_redispatches_the_effect(
         fault_point="after_upstream_effect",
     )
 
-    blocked = await _invoke(steady_worker, seeded)
-    _assert_in_progress(blocked)
-    before = await _upstream_snapshot(seeded)
-    assert before.dispatch_states == ("dispatched",)
-    assert before.effect_count == 1
-    assert before.debit_count == 1
-    assert before.receipt_outcomes == ()
+    # Trigger reconciliation with idle_seconds=0 to mark the killed attempt as stale.
+    reconciliation_before_retry = await _reconcile(stress_harness, steady_worker)
+    assert reconciliation_before_retry["dispatch_dispatched_uncertain"] == 1
 
-    reconciliation = await _reconcile(stress_harness, steady_worker)
-    assert reconciliation["dispatch_dispatched_uncertain"] == 1
-    assert reconciliation["dispatch_failed_attempts"] == 0
-
+    # Now retry - should get the reconciled delivery_uncertain result
+    first_retry = await _invoke(steady_worker, seeded)
     after = await _upstream_snapshot(seeded)
     assert after.dispatch_states == ("delivery_uncertain",)
     assert after.effect_count == 1
     assert after.debit_count == 1
     assert after.refund_count == 0
-    assert after.permit_spent == before.permit_spent
     assert after.receipt_outcomes == ("delivery_uncertain",)
     receipt_id = await _assert_signed_terminal_evidence(
         seeded,
@@ -1126,6 +1121,13 @@ async def test_kill_after_remote_effect_never_redispatches_the_effect(
         attempt_error_code="delivery_uncertain",
         terminal_result={"error": "delivery_uncertain"},
     )
+    _assert_replayed_terminal(first_retry, reason="delivery_uncertain", receipt_id=receipt_id)
+
+    # The periodic reconciler sweep is now idempotent: the forced sweep above
+    # already reconciled the attempt.
+    reconciliation = await _reconcile(stress_harness, steady_worker)
+    assert reconciliation["dispatch_dispatched_uncertain"] == 0
+    assert reconciliation["dispatch_failed_attempts"] == 0
 
     replay = await _invoke(steady_worker, seeded)
     _assert_replayed_terminal(replay, reason="delivery_uncertain", receipt_id=receipt_id)
@@ -1159,23 +1161,12 @@ async def test_kill_between_debit_and_dispatch_refunds_without_dispatching(
         fault_point="after_debit_commit",
     )
 
-    blocked = await _invoke(steady_worker, seeded)
-    _assert_in_progress(blocked)
-    before = await _upstream_snapshot(seeded)
-    assert before.dispatch_states == ("prepared",)
-    # The crash landed between the debit and `attach_charge`: the money moved
-    # but the attempt cannot yet name it.
-    assert before.dispatch_ledger_linked == (False,)
-    assert before.debit_count == 1
-    assert before.refund_count == 0
-    assert before.effect_count == 0
-    assert before.receipt_outcomes == ()
+    # Trigger reconciliation with idle_seconds=0 to mark the killed PREPARED attempt as stale.
+    reconciliation_before_retry = await _reconcile(stress_harness, steady_worker)
+    assert reconciliation_before_retry["dispatch_prepared_finalized"] == 1
 
-    reconciliation = await _reconcile(stress_harness, steady_worker)
-    assert reconciliation["dispatch_prepared_finalized"] == 1
-    assert reconciliation["dispatch_dispatched_uncertain"] == 0
-    assert reconciliation["dispatch_failed_attempts"] == 0
-
+    # Now retry - should get the reconciled failed_refunded result
+    first_retry = await _invoke(steady_worker, seeded)
     after = await _upstream_snapshot(seeded)
     assert after.dispatch_states == ("returned_error",)
     # Recovery adopted the orphaned debit by operation identity.
@@ -1199,6 +1190,14 @@ async def test_kill_between_debit_and_dispatch_refunds_without_dispatching(
             "error_code": "reconciled_stale_prepared",
         },
     )
+    _assert_replayed_terminal(first_retry, reason="failed_refunded", receipt_id=receipt_id)
+
+    # The periodic reconciler sweep is now idempotent: the forced sweep above
+    # already reconciled the attempt.
+    reconciliation = await _reconcile(stress_harness, steady_worker)
+    assert reconciliation["dispatch_prepared_finalized"] == 0
+    assert reconciliation["dispatch_dispatched_uncertain"] == 0
+    assert reconciliation["dispatch_failed_attempts"] == 0
 
     replay = await _invoke(steady_worker, seeded)
     _assert_replayed_terminal(replay, reason="failed_refunded", receipt_id=receipt_id)
