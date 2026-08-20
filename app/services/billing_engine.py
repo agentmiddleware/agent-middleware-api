@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from ..core.config import Settings
+from ..core.config import Settings, get_settings
 from ..core.time import utc_now
 from ..db.converters import billing_alert_model_to_schema, ledger_entry_model_to_schema
 from ..db.sql_expressions import clamped_decrement
@@ -44,6 +44,7 @@ from ..schemas.billing import (
     WalletStatus,
     WalletType,
 )
+from .pricing import PROOF_SURFACE_CATEGORIES
 from .shadow_ledger import SimulatedChargeResult, get_shadow_ledger
 from .velocity_monitor import get_velocity_monitor
 from .wallet_engine import (
@@ -1061,7 +1062,21 @@ class BillingEngine:
     # --- Pricing ---
 
     def get_pricing_table(self) -> list[ServicePricing]:
-        """Return the full pricing table."""
+        """Return the pricing table for the services this deployment mounts.
+
+        Categories whose only services are the frozen proof-surface routers are
+        omitted when those routers are not mounted. Listing them made the always
+        -mounted billing router publish a price list for media, IoT, oracle,
+        red-team and friends in the OpenAPI of a deployment that cannot serve
+        any of them — the advertising docs/PROOF_SURFACES.md rule 3 forbids.
+
+        This filters presentation only. DEFAULT_PRICING stays authoritative
+        server-side for every category, since it supplies the fallback price and
+        the unit divisor in pricing.charge_units_for, and a registered tool's
+        own credits_per_unit remains the authoritative per-tool price via
+        /v1/quotes and /mcp/tools.json.
+        """
+        show_proof_surfaces = get_settings().ENABLE_PROOF_SURFACES
         return [
             ServicePricing(
                 service_category=cat,
@@ -1071,6 +1086,7 @@ class BillingEngine:
                 description=desc,
             )
             for cat, (unit, price, desc) in self._default_pricing.items()
+            if show_proof_surfaces or cat not in PROOF_SURFACE_CATEGORIES
         ]
 
     # --- Alerts ---

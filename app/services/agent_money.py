@@ -24,6 +24,10 @@ from ..schemas.billing import (
     WalletResponse,
 )
 from .billing_engine import BillingEngine
+# DEFAULT_PRICING lives in .pricing so the governed price path, this facade,
+# and the dry-run shadow ledger all read one table. Re-exported here because
+# callers already import it from this module.
+from .pricing import DEFAULT_PRICING
 from .shadow_ledger import SimulatedChargeResult
 from .wallet_engine import WalletEngine
 
@@ -33,70 +37,6 @@ settings = get_settings()
 # Pricing Table
 # ---------------------------------------------------------------------------
 
-# Credits per unit for each service. Credits convert to fiat at
-# settings.EXCHANGE_RATE (1000 credits ≈ $1 USD by default).
-DEFAULT_PRICING: dict[ServiceCategory, tuple[str, Decimal, str]] = {
-    ServiceCategory.IOT_BRIDGE: (
-        "request",
-        Decimal("2.0"),
-        "Per IoT message bridged",
-    ),
-    ServiceCategory.TELEMETRY_PM: (
-        "event",
-        Decimal("1.0"),
-        "Per telemetry event ingested",
-    ),
-    ServiceCategory.MEDIA_ENGINE: (
-        "frame",
-        Decimal("0.5"),
-        "Per video frame processed",
-    ),
-    ServiceCategory.AGENT_COMMS: (
-        "message",
-        Decimal("1.5"),
-        "Per agent message routed",
-    ),
-    ServiceCategory.CONTENT_FACTORY: (
-        "piece",
-        Decimal("50.0"),
-        "Per content piece generated",
-    ),
-    ServiceCategory.RED_TEAM: (
-        "scan",
-        Decimal("100.0"),
-        "Per security scan executed",
-    ),
-    ServiceCategory.ORACLE: (
-        "crawl",
-        Decimal("25.0"),
-        "Per API crawled and indexed",
-    ),
-    ServiceCategory.PLATFORM_FEE: (
-        "request",
-        Decimal("0.1"),
-        "Base platform fee per API call",
-    ),
-    ServiceCategory.SWARM_DELEGATION: (
-        "child",
-        Decimal("5.0"),
-        "Per child wallet spawned",
-    ),
-    ServiceCategory.PROTOCOL_GEN: (
-        "generation",
-        Decimal("200.0"),
-        "Per llm.txt + OpenAPI spec generated",
-    ),
-    ServiceCategory.SANDBOX: (
-        "session",
-        Decimal("150.0"),
-        "Per sandbox environment session",
-    ),
-    ServiceCategory.RTAAS: (
-        "scan",
-        Decimal("100.0"),
-        "Per external Red Team scan",
-    ),
-}
 
 # Internal compute costs (what it actually costs us to serve)
 COMPUTE_COSTS: dict[ServiceCategory, Decimal] = {

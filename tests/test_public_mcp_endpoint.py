@@ -71,7 +71,6 @@ _PUBLIC_STATE_TABLES = (
     "daily_balance_snapshots",
     "kyc_verifications",
     "refresh_tokens",
-    "optimizer_telemetry",
 )
 
 

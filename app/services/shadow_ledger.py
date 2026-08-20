@@ -30,70 +30,12 @@ import redis.asyncio as redis
 from ..core.config import get_settings
 from ..schemas.billing import InsufficientFundsResponse, ServiceCategory
 
+# One pricing table, not a second copy. The dry run must quote exactly what
+# the real charge path would take, so both read .pricing.
+from .pricing import DEFAULT_PRICING
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_PRICING: dict[ServiceCategory, tuple[str, Decimal, str]] = {
-    ServiceCategory.IOT_BRIDGE: (
-        "request",
-        Decimal("2.0"),
-        "Per IoT message bridged",
-    ),
-    ServiceCategory.TELEMETRY_PM: (
-        "event",
-        Decimal("1.0"),
-        "Per telemetry event ingested",
-    ),
-    ServiceCategory.MEDIA_ENGINE: (
-        "frame",
-        Decimal("0.5"),
-        "Per video frame processed",
-    ),
-    ServiceCategory.AGENT_COMMS: (
-        "message",
-        Decimal("1.5"),
-        "Per agent message routed",
-    ),
-    ServiceCategory.CONTENT_FACTORY: (
-        "piece",
-        Decimal("50.0"),
-        "Per content piece generated",
-    ),
-    ServiceCategory.RED_TEAM: (
-        "scan",
-        Decimal("100.0"),
-        "Per security scan executed",
-    ),
-    ServiceCategory.ORACLE: (
-        "crawl",
-        Decimal("25.0"),
-        "Per API crawled and indexed",
-    ),
-    ServiceCategory.PLATFORM_FEE: (
-        "request",
-        Decimal("0.1"),
-        "Base platform fee per API call",
-    ),
-    ServiceCategory.SWARM_DELEGATION: (
-        "child",
-        Decimal("5.0"),
-        "Per child wallet spawned",
-    ),
-    ServiceCategory.PROTOCOL_GEN: (
-        "generation",
-        Decimal("200.0"),
-        "Per llm.txt + OpenAPI spec generated",
-    ),
-    ServiceCategory.SANDBOX: (
-        "session",
-        Decimal("150.0"),
-        "Per sandbox environment session",
-    ),
-    ServiceCategory.RTAAS: (
-        "scan",
-        Decimal("100.0"),
-        "Per external Red Team scan",
-    ),
-}
 
 SESSION_TTL_SECONDS = 900  # 15 minutes
 KEY_PREFIX = "dryrun"

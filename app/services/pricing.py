@@ -21,7 +21,95 @@ from decimal import Decimal
 from typing import Any
 
 from app.schemas.billing import ServiceCategory
-from app.services.agent_money import DEFAULT_PRICING
+
+
+# Credits per unit for each service. Credits convert to fiat at
+# settings.EXCHANGE_RATE (1000 credits ≈ $1 USD by default).
+DEFAULT_PRICING: dict[ServiceCategory, tuple[str, Decimal, str]] = {
+    ServiceCategory.IOT_BRIDGE: (
+        "request",
+        Decimal("2.0"),
+        "Per IoT message bridged",
+    ),
+    ServiceCategory.TELEMETRY_PM: (
+        "event",
+        Decimal("1.0"),
+        "Per telemetry event ingested",
+    ),
+    ServiceCategory.MEDIA_ENGINE: (
+        "frame",
+        Decimal("0.5"),
+        "Per video frame processed",
+    ),
+    ServiceCategory.AGENT_COMMS: (
+        "message",
+        Decimal("1.5"),
+        "Per agent message routed",
+    ),
+    ServiceCategory.CONTENT_FACTORY: (
+        "piece",
+        Decimal("50.0"),
+        "Per content piece generated",
+    ),
+    ServiceCategory.RED_TEAM: (
+        "scan",
+        Decimal("100.0"),
+        "Per security scan executed",
+    ),
+    ServiceCategory.ORACLE: (
+        "crawl",
+        Decimal("25.0"),
+        "Per API crawled and indexed",
+    ),
+    ServiceCategory.PLATFORM_FEE: (
+        "request",
+        Decimal("0.1"),
+        "Base platform fee per API call",
+    ),
+    ServiceCategory.SWARM_DELEGATION: (
+        "child",
+        Decimal("5.0"),
+        "Per child wallet spawned",
+    ),
+    ServiceCategory.PROTOCOL_GEN: (
+        "generation",
+        Decimal("200.0"),
+        "Per llm.txt + OpenAPI spec generated",
+    ),
+    ServiceCategory.SANDBOX: (
+        "session",
+        Decimal("150.0"),
+        "Per sandbox environment session",
+    ),
+    ServiceCategory.RTAAS: (
+        "scan",
+        Decimal("100.0"),
+        "Per external Red Team scan",
+    ),
+}
+
+
+# Categories whose only services are the frozen proof-surface routers in
+# app/main.py. DEFAULT_PRICING stays authoritative server-side for all of them
+# (it is the fallback price and the unit divisor in charge_units_for), but a
+# deployment that does not mount those routers should not advertise them as
+# purchasable: docs/PROOF_SURFACES.md rule 3 says not to present AWI, media,
+# IoT, or oracle as the product in OpenAPI. PLATFORM_FEE and SWARM_DELEGATION
+# are wallet/platform-level and stay listed either way.
+PROOF_SURFACE_CATEGORIES: frozenset[ServiceCategory] = frozenset(
+    {
+        ServiceCategory.IOT_BRIDGE,
+        ServiceCategory.TELEMETRY_PM,
+        ServiceCategory.MEDIA_ENGINE,
+        ServiceCategory.AGENT_COMMS,
+        ServiceCategory.CONTENT_FACTORY,
+        ServiceCategory.RED_TEAM,
+        ServiceCategory.ORACLE,
+        ServiceCategory.PROTOCOL_GEN,
+        ServiceCategory.SANDBOX,
+        ServiceCategory.RTAAS,
+    }
+)
 
 
 def tool_price(service: dict[str, Any], category: ServiceCategory) -> Decimal:

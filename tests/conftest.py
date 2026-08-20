@@ -299,7 +299,6 @@ async def clean_database():
         await session.execute(text("DELETE FROM control_plane_audit_events"))
         await session.execute(text("DELETE FROM audit_chain_heads"))
         await session.execute(text("DELETE FROM signing_keys"))
-        await session.execute(text("DELETE FROM optimizer_telemetry"))
         await session.execute(text("UPDATE wallets SET parent_wallet_id = NULL"))
         await session.execute(text("DELETE FROM wallets"))
         await session.commit()

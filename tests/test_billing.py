@@ -696,12 +696,80 @@ async def test_pricing_table(client, api_headers):
     data = resp.json()
     assert data["exchange_rate"] == 1000.0
     assert data["exchange_rate_exact"] == "1000.0"
-    assert len(data["pricing"]) >= 7  # At least one entry per service
+    # Tests run with ENABLE_PROOF_SURFACES=false, so only the categories a core
+    # deployment can actually serve are advertised.
+    assert [entry["service_category"] for entry in data["pricing"]] == [
+        "platform_fee",
+        "swarm_delegation",
+    ]
     # Check structure
     entry = data["pricing"][0]
     assert "service_category" in entry
     assert "unit" in entry
     assert "credits_per_unit" in entry
+
+
+@pytest.mark.anyio
+async def test_pricing_table_hides_frozen_proof_surfaces(client, api_headers):
+    """A core deployment must not advertise services it cannot serve.
+
+    billing is a CORE_TRUST_ROUTER, so it is mounted — and published in the
+    OpenAPI — even when every proof-surface router is not. Listing their
+    categories made the trust plane's own price list read as a menu for media,
+    IoT, oracle, red-team and friends, which docs/PROOF_SURFACES.md rule 3
+    forbids advertising as the product.
+    """
+    resp = await client.get("/v1/billing/pricing", headers=api_headers)
+    assert resp.status_code == 200
+    advertised = {e["service_category"] for e in resp.json()["pricing"]}
+
+    for frozen in (
+        "iot_bridge",
+        "media_engine",
+        "oracle",
+        "red_team",
+        "rtaas",
+        "sandbox",
+        "telemetry_pm",
+        "content_factory",
+        "protocol_gen",
+        "agent_comms",
+    ):
+        assert frozen not in advertised
+    # The platform fee is the category a governed MCP tool falls back to, so it
+    # must survive the filter or a core deployment would advertise no price.
+    assert "platform_fee" in advertised
+
+
+@pytest.mark.anyio
+async def test_pricing_table_lists_proof_surfaces_when_they_are_mounted(
+    client, api_headers, monkeypatch
+):
+    """Gating is presentation-only and follows the mount flag both ways."""
+    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "true")
+    get_settings.cache_clear()
+    try:
+        resp = await client.get("/v1/billing/pricing", headers=api_headers)
+        assert resp.status_code == 200
+        advertised = {e["service_category"] for e in resp.json()["pricing"]}
+        assert {"iot_bridge", "media_engine", "oracle", "platform_fee"} <= advertised
+    finally:
+        monkeypatch.delenv("ENABLE_PROOF_SURFACES", raising=False)
+        get_settings.cache_clear()
+
+
+def test_pricing_table_has_exactly_one_definition():
+    """The dry-run sandbox must price identically to the real charge path.
+
+    shadow_ledger carried its own byte-identical copy of DEFAULT_PRICING. Two
+    copies price the same only until someone edits one, and the failure mode is
+    a dry run that quotes a number the real charge would never take. Assert the
+    same object reaches every consumer.
+    """
+    from app.services import agent_money, pricing, shadow_ledger
+
+    assert agent_money.DEFAULT_PRICING is pricing.DEFAULT_PRICING
+    assert shadow_ledger.DEFAULT_PRICING is pricing.DEFAULT_PRICING
 
 
 @pytest.mark.anyio

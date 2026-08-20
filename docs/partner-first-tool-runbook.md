@@ -48,7 +48,7 @@ Do not mount AWI/media/oracle for this session.
 
 ## Rolling deployment safety
 
-Apply Alembic through the current head (`032_receipt_reason_code`)
+Apply Alembic through the current head (`033_drop_optimizer_telemetry`)
 before current workers take traffic. Confirm with `alembic heads` rather than
 trusting this line — a stale head here under-migrates the deployment.
 
@@ -58,7 +58,10 @@ that serializes pre-026 physical MCP endpoint keys with the current
 cannot be safely bound to their originating API key. Revisions 029-032 add
 permit v2 constraints, permit requests, signed quotes, and the machine-readable
 receipt reason code; a worker running current code against a database stopped
-at 028 fails on those columns.
+at 028 fails on those columns. Revision 033 drops `optimizer_telemetry`, a
+table no code reads, so it adds no column requirement — but a database stopped
+at 032 still fails startup, because `app/db/database.py` refuses to boot on any
+revision behind the packaged head, not only on missing columns.
 
 Revision 027 stops with only an aggregate conflict count if historical rows
 already reuse one wallet/key across MCP endpoint generations. Do not pick or
