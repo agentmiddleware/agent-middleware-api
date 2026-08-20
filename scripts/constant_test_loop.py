@@ -469,6 +469,23 @@ def run_constant_test(
             file=sys.stderr,
         )
 
+        # Verify receipt signature
+        print("[constant-test] verifying receipt signature", file=sys.stderr)
+        verify_resp = _post_json(
+            client,
+            "/v1/receipts/verify",
+            {"receipt_id": receipt["receipt_id"]},
+            expected_status=200,
+        )
+        require(
+            verify_resp.get("valid") is True,
+            f"receipt signature invalid: {verify_resp.get('reason')}",
+        )
+        print(
+            "[constant-test] signature OK: receipt signature verified",
+            file=sys.stderr,
+        )
+
         # Check ledger debit
         print("[constant-test] verifying ledger debit", file=sys.stderr)
         ledger = _get_json(
@@ -553,6 +570,23 @@ def run_constant_test(
             )
             print(
                 "[constant-test] denial OK: permit_tool_not_allowed, 0 credits charged",
+                file=sys.stderr,
+            )
+
+            # Verify denial receipt signature
+            print("[constant-test] verifying denial receipt signature", file=sys.stderr)
+            denial_verify_resp = _post_json(
+                client,
+                "/v1/receipts/verify",
+                {"receipt_id": denial_receipt["receipt_id"]},
+                expected_status=200,
+            )
+            require(
+                denial_verify_resp.get("valid") is True,
+                f"denial receipt signature invalid: {denial_verify_resp.get('reason')}",
+            )
+            print(
+                "[constant-test] denial signature OK: denial receipt signature verified",
                 file=sys.stderr,
             )
         else:
