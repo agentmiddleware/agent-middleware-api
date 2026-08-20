@@ -259,8 +259,17 @@ class ServiceRegistry:
         input_schema = pydantic_to_mcp_schema(input_model)
         output_schema = pydantic_to_mcp_schema(output_model)
 
-        if input_schema is None and output_schema is None:
-            input_schema, output_schema = extract_schema_from_callable(func)
+        # Each side falls back independently. Requiring *both* to be absent
+        # meant that supplying only an output_model -- a handler with plain
+        # typed arguments returning a model -- left the input schema empty, so
+        # the tool advertised "takes no arguments" and every obedient client
+        # call raised TypeError on the missing parameters.
+        if input_schema is None or output_schema is None:
+            derived_input, derived_output = extract_schema_from_callable(func)
+            if input_schema is None:
+                input_schema = derived_input
+            if output_schema is None:
+                output_schema = derived_output
 
         service_record = {
             "service_id": service_id,

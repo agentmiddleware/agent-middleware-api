@@ -335,7 +335,12 @@ async def create_agent_wallet(
             agent_id=request.agent_id,
             budget_credits=Decimal(str(request.budget_credits)),
             daily_limit=(
-                Decimal(str(request.daily_limit)) if request.daily_limit else None
+                # `is not None`: the schema declares ge=0, so 0 is a valid cap
+                # meaning "spend nothing", and a truthiness test turned that
+                # into None -- which the engine reads as "no cap at all".
+                Decimal(str(request.daily_limit))
+                if request.daily_limit is not None
+                else None
             ),
             auto_refill=request.auto_refill,
             auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),

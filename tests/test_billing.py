@@ -2212,3 +2212,97 @@ async def test_a_simulated_charge_cannot_recreate_a_claimed_redis_session(
     second = await ledger.commit_session(session_id, get_agent_money())
     assert second.wallet_id == "", second
     assert second.committed_charges == 0, second
+
+
+# --- Zero is a value, not an absence ---
+
+
+@pytest.mark.anyio
+async def test_zero_daily_limit_blocks_spending_rather_than_unlocking_it(
+    client, api_headers
+):
+    """``daily_limit=0`` is the strictest cap there is, not the absence of one.
+
+    ``daily_limit`` is Optional: ``None`` means "no cap". A truthiness test
+    conflates that with ``Decimal("0")`` -- the value an operator sets to halt
+    a runaway agent -- and hands it unlimited daily spend instead. The HTTP
+    schema advertises ``ge=0``, so zero is a documented input, and this line is
+    the only hard daily-spend enforcement in the system.
+    """
+
+    sponsor_resp = await client.post(
+        "/v1/billing/wallets/sponsor",
+        json={
+            "sponsor_name": "Zero Cap Co",
+            "email": "ops@zerocap.example",
+            "initial_credits": 10000,
+        },
+        headers=api_headers,
+    )
+    sponsor_id = sponsor_resp.json()["wallet_id"]
+
+    agent_resp = await client.post(
+        "/v1/billing/wallets/agent",
+        json={
+            "sponsor_wallet_id": sponsor_id,
+            "agent_id": "halted-bot",
+            "budget_credits": 5000,
+            "daily_limit": 0,
+        },
+        headers=api_headers,
+    )
+    assert agent_resp.status_code == 201
+    agent_wallet_id = agent_resp.json()["wallet_id"]
+
+    charge_resp = await client.post(
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}"
+        "&service=agent_comms&units=1",
+        headers=api_headers,
+    )
+    assert charge_resp.status_code == 402, (
+        "a zero daily limit was read as 'no limit' and the charge went through"
+    )
+
+    # The wallet keeps its funds: a refused charge must not debit.
+    wallet_resp = await client.get(
+        f"/v1/billing/wallets/{agent_wallet_id}", headers=api_headers
+    )
+    assert Decimal(wallet_resp.json()["balance_exact"]) == Decimal("5000")
+
+
+def test_register_local_derives_an_input_schema_alongside_an_output_model() -> None:
+    """Supplying only an output model must not erase the input contract.
+
+    The callable fallback used to run only when *both* schemas were absent, so
+    a handler with plain typed arguments plus an output model advertised
+    ``inputSchema: {}``. A client that obeyed that contract called the tool
+    with no arguments and got a TypeError.
+    """
+
+    from pydantic import BaseModel
+
+    from app.schemas.billing import ServiceCategory
+    from app.services.service_registry import get_service_registry
+
+    class Out(BaseModel):
+        echoed: str
+
+    registry = get_service_registry()
+
+    def handler(value: str) -> Out:
+        return Out(echoed=value)
+
+    record = registry.register_local(
+        service_id="schema-fallback-probe",
+        name="Schema fallback probe",
+        description="Input schema must still be derived from the callable",
+        category=ServiceCategory.AGENT_COMMS,
+        func=handler,
+        output_model=Out,
+    )
+
+    input_schema = record["input_schema"]
+    assert input_schema, "input schema was dropped because an output model was given"
+    assert "value" in (input_schema.get("properties") or {}), (
+        f"the handler's own parameter is missing from {input_schema!r}"
+    )

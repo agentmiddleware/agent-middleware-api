@@ -371,7 +371,14 @@ class BillingEngine:
                     message="Child wallet lifetime spend cap exceeded.",
                 )
 
-        if wallet.daily_limit and wallet.daily_spent > wallet.daily_limit:
+        # `is not None`, not truthiness: daily_limit is Optional where None
+        # means "no cap", so Decimal("0") is a real limit -- the one an
+        # operator sets to stop a runaway agent dead. Reading it as falsy
+        # turned the strictest possible cap into no cap at all, and this is
+        # the only hard daily-spend enforcement in the system (the velocity
+        # monitor only raises alerts). app/db/converters.py already draws the
+        # same distinction the same way.
+        if wallet.daily_limit is not None and wallet.daily_spent > wallet.daily_limit:
             prior_daily_spent = wallet.daily_spent - charge_amount
             remaining = wallet.daily_limit - prior_daily_spent
             shortfall = charge_amount - remaining
@@ -537,7 +544,17 @@ class BillingEngine:
         )
         session.add(entry)
 
-        if wallet.balance < (wallet.auto_refill_threshold or Decimal("100")):
+        # Same falsy-zero trap as the daily cap. auto_refill_threshold defaults
+        # to 100 and is non-Optional, so `or` could only ever fire on exactly
+        # Decimal("0") -- the value a wallet sets to mean "never alert, never
+        # refill" -- and silently restored the 100 it opted out of, alerting on
+        # every charge below that.
+        low_balance_threshold = (
+            wallet.auto_refill_threshold
+            if wallet.auto_refill_threshold is not None
+            else Decimal("100")
+        )
+        if wallet.balance < low_balance_threshold:
             session.add(
                 BillingAlertModel(
                     alert_id=str(uuid.uuid4())[:12],
