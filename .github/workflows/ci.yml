@@ -560,7 +560,8 @@ jobs:
           done
           
           # Run constant test loop (self-provision, no CI_SMOKE_AGENT_KEY)
-          python scripts/constant_test_loop.py
+          # Pass --other-tool to exercise out-of-scope denial with the second registered tool
+          python scripts/constant_test_loop.py --other-tool partner.notes.count
           TEST_EXIT=$?
           
           # Clean up server
