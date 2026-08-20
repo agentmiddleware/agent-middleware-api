@@ -6,83 +6,113 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141%2B-009688)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-> **Production beta, not production complete.** Agent Middleware API is a
-> replay-safe transaction boundary for metered MCP tool calls. The supported
-> design-partner deployment is vendor-managed and single-tenant. It is
-> **not a full agent middleware platform**, payment network, IAM replacement, or
-> compliance platform.
-
-Your agent invokes a costly tool. The request times out. Was the call
-dispatched? Should the agent retry? Will the retry create another debit? Can
-you prove who authorized the action and what the gateway observed?
-
-Agent Middleware accepts a scoped permit and an idempotency key before one
-governed call. Replaying the same request with the same accepted key returns
-the original result and signed receipt without another gateway dispatch or
-debit. A changed request under that key fails closed.
-
 > **Authorize one agent action. Charge it once. Prove what happened.**
+
+Your agent invokes a costly tool. The request times out. Was the call dispatched? Should the agent retry? Will the retry create another debit? Can you prove who authorized the action and what the gateway observed?
+
+Agent Middleware API is a replay-safe transaction boundary for metered MCP tool calls. A scoped permit and an idempotency key gate one governed call. Replaying the same request with the same accepted key returns the original result and signed receipt without another gateway dispatch or debit. A changed request under that key fails closed.
+
+```text
+scoped permit → governed MCP invoke → wallet charge → signed receipt
+→ replay without second debit → out-of-scope denial
+```
+
+The supported design-partner deployment is vendor-managed and single-tenant. This is **not a full agent middleware platform**, payment network, IAM replacement, or compliance platform.
 
 Try the failure yourself:
 
 ```bash
 git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
 cd agent-middleware-api
+make prove-trust-plane
+```
+
+That one command boots a local instance, walks the complete loop — discover, authenticate, authorize, invoke, meter, receipt, replay, and govern — and asserts every invariant: the call charges once, the replay returns the same receipt with no second debit, the audit chain verifies, and the out-of-scope call is denied. It exits non-zero the moment any stage's invariant breaks. Follow [docs/quickstart.md](docs/quickstart.md) to drive the loop yourself with your own keys.
+
+## Canonical API
+
+**https://api.thisisatest.tech**
+
+## Agent bootstrap
+
+Fetch in this order:
+
+1. `GET /.well-known/agent.json` — canonical agent bootstrap, product boundary, and discovery contract
+2. `GET /llms.txt` (alias: `/llm.txt`) — agent-oriented prose and vocabulary
+3. `GET /mcp/tools.json` — currently registered MCP tools with permit requirements and exact pricing
+4. `GET /openapi.json` — formal API contract
+
+Before assuming real side effects, check:
+
+```bash
+GET /health/dependencies
+```
+
+Inspect the JSON body: **HTTP 200 alone does not mean every dependency is ready**. Check `status`, the selected tool's dependencies, `simulation_modes`, and `enable_proof_surfaces`. Health never replaces authentication or permit checks.
+
+## Authentication
+
+Protected routes use the `X-API-Key` header. There is **no public self-serve key mint**. An operator provisions a wallet-scoped key with a bootstrap admin key, then transfers that key through a secure channel. See [docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md).
+
+### Local proof credentials
+
+For local testing only, provision your own wallet-scoped dev key:
+
+```bash
 make quickstart
 ```
 
-Follow [the 15-minute walkthrough](docs/quickstart.md) to execute a real local
-side effect, deliberately retry it, confirm one debit and one receipt, exceed
-the permit budget, and verify the receipt offline. The walkthrough is exercised
-in CI.
+Then follow [docs/quickstart.md](docs/quickstart.md): mint your own key (no operator, no pre-shared secret), issue yourself a permit, invoke a governed tool, deliberately retry and overspend, verify your wallet's audit chain, and finish holding a signed receipt you verified offline.
 
-Agent Middleware API puts a control boundary between autonomous agents and
-registered local tools or one operator-configured upstream MCP tool. Agents
-discover tools, authenticate with wallet-scoped keys, receive bounded permits,
-invoke through an HTTP/JSON-RPC MCP gateway, consume a credit budget, and get
-signed receipts plus a tamper-evident audit trail.
-
-```text
-discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
-```
-
-The initial product wedge is deliberately narrow: **replay-safe economic
-authorization for metered MCP calls**. Gateway replay safety does not make a
-remote tool's side effect exactly once unless that tool also honors the
-forwarded idempotency key. See [WEDGE.md](WEDGE.md) for the product thesis and
-[SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) for the claims the project
-does not make yet.
+See [docs/static-dev-api-keys.md](docs/static-dev-api-keys.md) for static bootstrap keys that never rotate (local-compatible environments only) and self-serve dev key provisioning (`POST /v1/dev-keys/self-provision`).
 
 ## What is implemented
 
+The core loop:
+
+```text
+discover → authenticate → authorize → invoke → meter → receipt → audit → govern
+```
+
 | Trust step | Implemented behavior | Primary surface |
 |---|---|---|
-| Discover | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth, and public signing keys | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt` (`/llm.txt` alias), `/openapi.json`, `/health/dependencies`, `/.well-known/trust-keys.json` (standard JWK Set mirror at `/.well-known/jwks.json`) |
-| Authenticate | Bootstrap operator keys plus database-issued wallet keys; trust-core API keys are stored as hashes | `X-API-Key`, `/v1/api-keys` |
-| Authorize | Ed25519-signed permits bound to issuer wallet, subject wallet/key, tools, scopes, budget, nonce, and expiry | `/v1/permits` |
-| Request | An agent with no authority asks a human for a scoped, budgeted permit; the permit is minted from the reviewed terms after approval | `/v1/permit-requests` |
-| Quote | Signed, single-use price commitments the metered charge honors, so a call's cost is known before it is committed to | `/v1/quotes` |
-| Invoke | The governed HTTP/JSON-RPC MCP subset requires a permit and idempotency key and can dispatch one configured Streamable HTTP partner tool | `/mcp/messages`, `/mcp/tools/{service_id}/invoke` |
-| Meter | Decimal wallet balances, row-locked debits, limits, ledger linkage, and replay-safe charging | `/v1/billing`, `/v1/me/*` |
-| Receipt | Signed post-permit success, denial, and failure receipts linked to permits, idempotency records, remote dispatch attempts, ledger entries, and audit events | `/v1/receipts`, `/v1/evidence/{receipt_id}` |
-| Audit | Per-wallet signed hash chains with concurrent append protection and verification | `/v1/audit`, `/v1/audit/verify-chain` |
-| Govern | Policy decisions, revocation, spend boundaries, signing-key metadata, and operator repair paths | `/v1/policies`, permit revocation, `/v1/signing-keys`, refund reconciliation |
+| **Discover** | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth, and public signing keys | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/openapi.json`, `/health/dependencies`, `/.well-known/trust-keys.json`, `/.well-known/jwks.json` |
+| **Authenticate** | Bootstrap operator keys plus database-issued wallet keys; API keys stored as hashes | `X-API-Key`, `/v1/api-keys` |
+| **Authorize** | Ed25519-signed permits bound to issuer wallet, subject wallet/key, tools, scopes, budget, nonce, and expiry | `/v1/permits` |
+| **Request** | An agent with no authority asks a human for a scoped, budgeted permit; the permit is minted from the reviewed terms after approval | `/v1/permit-requests` |
+| **Quote** | Signed, single-use price commitments the metered charge honors, so a call's cost is known before it is committed to | `/v1/quotes` |
+| **Invoke** | The governed HTTP/JSON-RPC MCP subset requires a permit and idempotency key and can dispatch one configured Streamable HTTP partner tool | `/mcp/messages`, `/mcp/tools/{service_id}/invoke` |
+| **Meter** | Decimal wallet balances, row-locked debits, limits, ledger linkage, and replay-safe charging | `/v1/billing`, `/v1/me/*` |
+| **Receipt** | Signed post-permit success, denial, and failure receipts linked to permits, idempotency records, remote dispatch attempts, ledger entries, and audit events | `/v1/receipts`, `/v1/evidence/{receipt_id}` |
+| **Audit** | Per-wallet signed hash chains with concurrent append protection and verification | `/v1/audit`, `/v1/audit/verify-chain` |
+| **Govern** | Policy decisions, revocation, spend boundaries, signing-key metadata, and operator repair paths | `/v1/policies`, permit revocation, `/v1/signing-keys`, refund reconciliation |
 
-The end-to-end governed MCP path lives in
-[`app/routers/mcp.py`](app/routers/mcp.py). The protocol-facing trust facade is
-[`app/trust/`](app/trust/); MCP is currently the only live governed adapter.
+The end-to-end governed MCP path lives in [`app/routers/mcp.py`](app/routers/mcp.py). The protocol-facing trust facade is [`app/trust/`](app/trust/); MCP is currently the only live governed adapter.
 
-Protocol status matters: OpenAPI is a formal API-description standard, while
-`/llms.txt` is a proposal and `/.well-known/agent.json` is this project's
-bootstrap convention, not an A2A Agent Card. MCP-native tool discovery is the
-JSON-RPC `tools/list` method; `/mcp/tools.json` is a convenient public mirror.
+## The loop proves these claims
+
+1. **Charge-once under retry.** Replaying the same governed invoke with the same idempotency key returns the same receipt without a second gateway dispatch or wallet debit, even across the governed MCP entrypoints; changed payloads conflict.
+2. **Budget over-spend containment.** Permit budget caps are reserved with a single atomic guarded `UPDATE` — the cap is enforced in the statement's `WHERE` clause, not a read-modify-write — so concurrent invocations against one permit cannot over-spend it on any storage engine, including SQLite.
+3. **Interrupted-invocation accounting.** For the configured upstream tool, one persisted chain links the idempotency record, permit reservation, ledger debit, dispatch attempt, signed receipt, and audit event. Recovery finalizes pre-dispatch failures or marks ambiguous post-dispatch calls `delivery_uncertain`; it never redispatches them.
+4. **Signed offline-verifiable receipts.** Receipts are Ed25519-signed and verifiable without credentials or network access to the issuing server. Export a receipt with `GET /v1/receipts/{receipt_id}/portable`, fetch the public key set from `/.well-known/trust-keys.json` or `/.well-known/jwks.json`, and verify with the SDK verifier or any off-the-shelf JOSE tooling.
+5. **Authority-before-money denial.** A request outside the permit scope, with no permit, or with an expired/revoked/tampered permit is denied with a concrete reason code before any wallet charge. When the trust plane refuses the call, a signed denial receipt proves *that* refusal.
+
+Adversarial coverage of all five claims, enforced gate-first, lives in [`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py). CI runs the full release gate as one dedicated check (`trust_release_gate`) so a claim cannot regress into `main` unproven.
+
+## What this is not
+
+From [WEDGE.md](WEDGE.md) and [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md):
+
+- **Not settlement.** This is an internal credit and budget ledger. It is not merchant settlement, a dispute system, or a compliance ledger.
+- **Not a compliance platform.** Receipts may be one input an operator's auditor accepts; that is the operator's determination, not ours. No mappings, no certifications, no "compliance-ready."
+- **Not an IAM replacement.** Wallet checks provide application-layer isolation; there is no row-level-security or public multi-tenant security claim.
+- **Not universal exactly-once.** Gateway replay safety does not make a remote tool's side effect exactly once unless that tool also honors the forwarded idempotency key.
+- **Not a transparency log.** Receipts can be verified offline, but there is no external transparency log. A receipt proves what happened, never what did not.
+- **No public SLA.** The supported design-partner deployment is vendor-managed and single-tenant: one Railway project, API service, PostgreSQL database, Redis instance, public origin, signing key, and bootstrap-admin set per customer. Customer deployments must not share runtime services, databases, signing material, or operator credentials.
 
 ## Product boundary
 
-The agent-action transaction boundary is the product. The broader agent
-features in this repository are retained as proof surfaces and are frozen
-unless a specific product decision brings one through the same permit,
-metering, receipt, and audit loop.
+The agent-action transaction boundary is the product. Broader agent features in this repository are retained as proof surfaces and are frozen unless a specific product decision brings one through the same permit, metering, receipt, and audit loop.
 
 | Core transaction boundary | Frozen proof surfaces |
 |---|---|
@@ -93,110 +123,7 @@ metering, receipt, and audit loop.
 | Signed receipts and evidence | Framework examples not yet shipped as packages |
 | Signed wallet audit chains | Marketing/demo workloads |
 
-Production-like deployments must set `ENABLE_PROOF_SURFACES=false`; startup
-refuses a production configuration that enables them. Locally mounted proof
-surfaces must not be interpreted as production integrations. The complete
-inventory and unfreeze rules are in
-[docs/PROOF_SURFACES.md](docs/PROOF_SURFACES.md).
-
-## Hardening now in the tree
-
-Recent work substantially tightened the trust and accounting boundary:
-
-- **Atomic permit admission.** Final permit checks run under the locked permit
-  row, and the budget reservation itself is a single guarded `UPDATE` that
-  enforces the cap in its `WHERE` clause — so competing reservations cannot
-  over-spend a permit on any storage engine, including SQLite, where
-  `SELECT ... FOR UPDATE` is a silent no-op. PostgreSQL concurrency tests cover
-  competing reservations and revoke-versus-invoke races, and an engine-agnostic
-  test asserts the cap holds under a parallel reservation burst.
-- **Replay-safe governed execution.** After completion, an identical replay
-  returns the original result and receipt without a second gateway dispatch or
-  wallet debit, even across the governed MCP entrypoints; changed payloads
-  conflict. During the in-progress window, overlapping local-tool requests fail
-  closed as `idempotency_in_progress`; the upstream path waits boundedly for the
-  finished replay. Remote side effects are not claimed as exactly once unless
-  the upstream also honors the forwarded key.
-- **Durable remote dispatch truth.** For the configured upstream tool, one
-  persisted chain links the idempotency record, permit reservation, ledger
-  debit, dispatch attempt, signed receipt, and audit event. Recovery finalizes
-  pre-dispatch failures or marks ambiguous post-dispatch calls
-  `delivery_uncertain`; it never redispatches them.
-- **Process-crash recovery proof.** An opt-in PostgreSQL harness starts two
-  independent Uvicorn processes against one isolated database and kills a
-  worker at durable commit boundaries. It proves one side effect/debit/receipt,
-  receipt-commit recovery, and fail-closed manual review after an ambiguous
-  side effect without automatic redispatch.
-- **Hardened upstream boundary.** Startup performs MCP `initialize` and
-  `tools/list` and registers one exact Streamable HTTP tool or fails closed.
-  Production requires a public HTTPS origin; redirect following and ambient
-  proxy use are disabled, while unsafe addresses, secret reflection, and
-  oversized metadata or results are rejected.
-- **Verifiable dispatch evidence.** Evidence checks bind a remote receipt to
-  its dispatch state, response hash, wallet, permit, ledger entry,
-  idempotency record, and signed audit event without exposing the bearer token
-  or raw request payload.
-- **Failure accounting and repair.** Local tool failures, confirmed
-  pre-dispatch failures, and upstream-returned errors are refunded and
-  receipted. Terminal non-success receipts sign a stable `reason_code` when
-  one exists, while legacy and successful receipts omit that optional claim.
-  If a required refund fails, the system writes a signed
-  `failed_unrefunded` receipt and a durable, bootstrap-admin-only
-  reconciliation item that can be retried exactly once. Ambiguous or rejected
-  post-dispatch outcomes remain charged.
-- **Settlement-gated top-ups.** Direct credit minting is disabled. Stripe
-  top-ups derive credits from a verified, fully settled USD PaymentIntent;
-  duplicate and stale webhook events do not mint or debit twice.
-- **Safer key custody.** Current wallet and service-registry models no longer
-  persist legacy plaintext owner keys. Migration 025 scrubs existing values
-  but retains empty compatibility columns for one rolling release; the deploy
-  gate re-scrubs and asserts them after old workers drain. That post-drain pass
-  also revokes any refresh token an old worker wrote without an originating
-  API-key binding. Wallet API keys are stored as SHA-256 hashes, while the
-  trust-signing private key is injected at runtime and only public signing
-  metadata is persisted.
-- **Signing-key lifecycle checks.** Reusing a key ID with different material is
-  rejected, disabled keys stay disabled, and retired public metadata remains
-  available for historical verification.
-- **Fail-closed production startup.** Production-like environments require
-  strict trust mode, a valid 32-byte Ed25519 private key, durable state,
-  disabled legacy unpermitted MCP, and disabled proof surfaces. A stamped
-  database behind the packaged Alembic head is rejected.
-- **Concurrent audit integrity.** Per-wallet chain heads serialize concurrent
-  appenders, and verification detects payload tampering, broken links, and tail
-  truncation.
-- **Adversarial coverage of the five claims, enforced gate-first.** The five
-  headline claims — charge-once under retry, budget over-spend containment,
-  interrupted-invocation accounting, signed offline-verifiable receipts, and
-  authority-before-money denial — have an in-process adversarial pass against
-  the real routers and services in
-  [`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py).
-  CI runs the full release gate as a single dedicated check
-  (`trust_release_gate`) so a claim cannot regress into `main` unproven; the
-  exact branch-protection settings are in
-  [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md).
-- **Standard JWKS discovery.** `/.well-known/jwks.json` serves the same
-  Ed25519 public keys as `/.well-known/trust-keys.json` as an RFC 7517 JWK Set
-  (OKP/Ed25519, `alg: EdDSA`) for verifiers using off-the-shelf JOSE tooling.
-  Neither endpoint ever serves an empty key set with 200 — "no usable key"
-  answers 503 so a verifier reads it as retry, not forgery. The
-  offline-verification anchor remains `/.well-known/trust-keys.json`, which
-  carries issuance/retirement metadata a bare JWK Set omits.
-
-The corresponding negative and concurrency coverage lives in
-[`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py),
-[`tests/test_trust_negative_security.py`](tests/test_trust_negative_security.py),
-[`tests/test_permit_postgres_concurrency.py`](tests/test_permit_postgres_concurrency.py),
-[`tests/test_refund_reconciliation.py`](tests/test_refund_reconciliation.py),
-[`tests/test_stripe_integration.py`](tests/test_stripe_integration.py),
-[`tests/test_secret_persistence.py`](tests/test_secret_persistence.py), and
-[`tests/test_signing_key_lifecycle.py`](tests/test_signing_key_lifecycle.py).
-The remote path is covered by
-[`tests/test_upstream_mcp.py`](tests/test_upstream_mcp.py),
-[`tests/test_mcp_upstream_governed.py`](tests/test_mcp_upstream_governed.py),
-[`tests/test_mcp_dispatch_reconciliation.py`](tests/test_mcp_dispatch_reconciliation.py),
-[`tests/test_mcp_dispatch_evidence.py`](tests/test_mcp_dispatch_evidence.py), and
-[`tests/test_governed_persistence.py`](tests/test_governed_persistence.py).
+Production-like deployments must set `ENABLE_PROOF_SURFACES=false`; startup refuses a production configuration that enables them. The complete inventory and unfreeze rules are in [docs/PROOF_SURFACES.md](docs/PROOF_SURFACES.md).
 
 ## Quick start: prove the trust loop
 
@@ -216,8 +143,7 @@ cd agent-middleware-api
 make prove-trust-plane
 ```
 
-The proof uses a throwaway local SQLite database and the real FastAPI routes. It
-asserts all of the following in one run:
+The proof uses a throwaway local SQLite database and the real FastAPI routes. It asserts all of the following in one run:
 
 1. Agent and MCP discovery.
 2. Sponsor wallet, agent wallet, and wallet-bound key provisioning.
@@ -226,8 +152,7 @@ asserts all of the following in one run:
 5. Signed receipt, evidence bundle, and valid audit chain.
 6. Replay returning the same receipt without a second debit or execution.
 7. Out-of-scope denial without a charge.
-8. Offline verification of the receipt with no credentials, including
-   detection of an edited bundle.
+8. Offline verification of the receipt with no credentials, including detection of an edited bundle.
 9. Detection of tampered receipt and audit data.
 
 To run the same proof without `uv`:
@@ -239,60 +164,68 @@ python -m pip install -r requirements.txt
 python scripts/demo_trust_plane.py --assert
 ```
 
-The walkthrough and representative output are in [DEMO_SCRIPT.md](DEMO_SCRIPT.md)
-and [docs/demo-trust-plane-output.md](docs/demo-trust-plane-output.md).
+The walkthrough and representative output are in [DEMO_SCRIPT.md](DEMO_SCRIPT.md) and [docs/demo-trust-plane-output.md](docs/demo-trust-plane-output.md).
 
 ### Operate it yourself: the 15-minute golden path
 
-`make prove-trust-plane` proves the loop *to* you; the quickstart lets you
-*drive* it. One command boots a real local trust plane with self-serve key
-minting and one invokable governed tool:
+`make prove-trust-plane` proves the loop *to* you; the quickstart lets you *drive* it. One command boots a real local trust plane with self-serve key minting and one invokable governed tool:
 
 ```bash
 make quickstart
 ```
 
-Then follow [docs/quickstart.md](docs/quickstart.md): mint your own
-wallet-scoped key (no operator, no pre-shared secret), issue yourself a
-permit, invoke a real governed tool, deliberately try to double-charge and
-overspend, verify your wallet's tamper-evident audit chain with your own
-key, and finish holding a signed receipt you verified offline — plus
-a forged one the verifier rejected. Every step of that page runs in CI
-against a freshly booted server (`make quickstart-check`), so the
-documented path cannot silently rot.
+Then follow [docs/quickstart.md](docs/quickstart.md): mint your own wallet-scoped key (no operator, no pre-shared secret), issue yourself a permit, invoke a real governed tool, deliberately try to double-charge and overspend, verify your wallet's tamper-evident audit chain with your own key, and finish holding a signed receipt you verified offline — plus a forged one the verifier rejected. Every step of that page runs in CI against a freshly booted server (`make quickstart-check`), so the documented path cannot silently rot.
 
 ### One command, whole loop, partner handoff bundle
 
-To drive the entire loop end-to-end against a running quickstart server —
-and produce artifacts you can hand to someone else to verify — run:
+To drive the entire loop end-to-end against a running quickstart server — and produce artifacts you can hand to someone else to verify — run:
 
 ```bash
 make quickstart        # terminal 1: boots the server
 make live-loop-proof   # terminal 2: drives the loop, writes the bundle
 ```
 
-`live-loop-proof` walks the full core loop as a self-provisioned non-admin
-caller — `discover → authenticate → authorize → invoke → meter → receipt →
-replay → audit → govern` — and asserts each invariant rather than only
-printing it: the call charges the known price once, the replay returns the
-same receipt with no second debit, the audit chain verifies, and the
-out-of-scope call is denied with a signed, zero-charge receipt. It exits
-non-zero the moment any stage's invariant breaks.
+`live-loop-proof` walks the full core loop as a self-provisioned non-admin caller and asserts each invariant rather than only printing it: the call charges the known price once, the replay returns the same receipt with no second debit, the audit chain verifies, and the out-of-scope call is denied with a signed, zero-charge receipt. It exits non-zero the moment any stage's invariant breaks.
 
-On success it writes a handoff bundle to `data/live-loop-proof/`: the
-portable success and denial receipts, the issuer's public key set, a
-machine-readable transcript, and a `VERIFY.md` a partner engineer can
-follow to verify both receipts offline — no account, no credential, and no
-network access to the issuing server. Handing that directory to a partner
-who verifies a receipt themselves is the independent-verification step the
-customer-validation milestone asks for. The command runs end to end in CI
-(`tests/test_quickstart_path.py`).
+On success it writes a handoff bundle to `data/live-loop-proof/`: the portable success and denial receipts, the issuer's public key set, a machine-readable transcript, and a `VERIFY.md` a partner engineer can follow to verify both receipts offline — no account, no credential, and no network access to the issuing server. Handing that directory to a partner who verifies a receipt themselves is the independent-verification step the customer-validation milestone asks for. The command runs end to end in CI (`tests/test_quickstart_path.py`).
+
+## Governed MCP call shape
+
+After an operator provisions a funded wallet and key, the normal flow is:
+
+1. Discover the tool through `/mcp/tools.json`.
+2. Create a signed permit through `POST /v1/permits` with an `Idempotency-Key` header.
+3. Optionally take a signed price with `POST /v1/quotes` and pass its `quote_id` in `mcpContext` to lock what the call will cost.
+4. Invoke the permitted tool with the wallet, permit, and invocation idempotency key in `mcpContext`.
+5. Verify the returned receipt or fetch its evidence bundle.
+
+An agent that holds no permit can ask a human for one first with `POST /v1/permit-requests` and poll until the signed permit is minted.
+
+```bash
+curl -sS -X POST "$API_URL/mcp/messages" \
+  -H "X-API-Key: $AGENT_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"jsonrpc\": \"2.0\",
+    \"id\": \"request-1\",
+    \"method\": \"tools/call\",
+    \"params\": {
+      \"name\": \"$TOOL_ID\",
+      \"arguments\": {\"input\": \"hello\"},
+      \"mcpContext\": {
+        \"wallet_id\": \"$WALLET_ID\",
+        \"permit_id\": \"$PERMIT_ID\",
+        \"idempotency_key\": \"invoke-1\"
+      }
+    }
+  }"
+```
+
+Use [docs/golden-path.md](docs/golden-path.md) for the complete HTTP sequence and [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) to put one real internal tool behind the governed path.
 
 ## Run the API locally
 
-The following keeps strict trust mode enabled while using local SQLite files.
-Generate the signing seed once for a new database, save it in the ignored
-`.env` file or another local secret store, and reuse it on every restart:
+The following keeps strict trust mode enabled while using local SQLite files. Generate the signing seed once for a new database, save it in the ignored `.env` file or another local secret store, and reuse it on every restart:
 
 ```bash
 python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'
@@ -325,38 +258,17 @@ curl -sS http://localhost:8000/mcp/tools.json
 curl -sS http://localhost:8000/health/dependencies
 ```
 
-Interactive OpenAPI documentation is available at `http://localhost:8000/docs`.
-Generate the local signing key once per database and reuse the same key material
-with the same key ID on subsequent starts; changing material under an existing
-key ID is rejected to preserve historical verification.
+Interactive OpenAPI documentation is available at `http://localhost:8000/docs`. Generate the local signing key once per database and reuse the same key material with the same key ID on subsequent starts; changing material under an existing key ID is rejected to preserve historical verification.
 
-`VALID_API_KEYS` contains bootstrap operator credentials, not agent runtime
-keys. There is no public self-serve key mint. An operator creates wallets and a
-wallet-scoped agent key, then transfers that key through a secure channel. See
-[docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md).
+`VALID_API_KEYS` contains bootstrap operator credentials, not agent runtime keys. There is no public self-serve key mint. An operator creates wallets and a wallet-scoped agent key, then transfers that key through a secure channel. See [docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md).
 
-For local testing and training material that needs a credential which never
-rotates, use `STATIC_DEV_API_KEYS` instead: static `amw_dev_` keys that
-authenticate only in local-compatible environments (a production-like
-deployment refuses to boot with them set). Generate with
-`python scripts/generate_static_dev_keys.py` — see
-[docs/static-dev-api-keys.md](docs/static-dev-api-keys.md).
+For local testing and training material that needs a credential which never rotates, use `STATIC_DEV_API_KEYS` instead: static `amw_dev_` keys that authenticate only in local-compatible environments (a production-like deployment refuses to boot with them set). Generate with `python scripts/generate_static_dev_keys.py` — see [docs/static-dev-api-keys.md](docs/static-dev-api-keys.md).
 
-An agent working against a local instance can also mint its own wallet-scoped
-dev key with no pre-shared secret. Opt in with
-`ENABLE_DEV_KEY_SELF_PROVISION=true`, then
-`POST /v1/dev-keys/self-provision` provisions a sponsor wallet, an agent
-wallet with bounded synthetic dev credits, and a wallet-scoped key shown once
-— the same credential class an operator bootstrap produces, never
-bootstrap-admin. The route answers 404 until the flag is set, and a
-production-like deployment refuses to boot with it enabled. Never enable it
-on a shared or hosted deployment; details are in the same
-[docs/static-dev-api-keys.md](docs/static-dev-api-keys.md).
+An agent working against a local instance can also mint its own wallet-scoped dev key with no pre-shared secret. Opt in with `ENABLE_DEV_KEY_SELF_PROVISION=true`, then `POST /v1/dev-keys/self-provision` provisions a sponsor wallet, an agent wallet with bounded synthetic dev credits, and a wallet-scoped key shown once — the same credential class an operator bootstrap produces, never bootstrap-admin. The route answers 404 until the flag is set, and a production-like deployment refuses to boot with it enabled. Never enable it on a shared or hosted deployment; details are in the same [docs/static-dev-api-keys.md](docs/static-dev-api-keys.md).
 
 ### Optional: connect one upstream MCP tool
 
-Design-partner mode exposes one exact tool from one Streamable HTTP MCP server
-through the same permit, debit, receipt, evidence, and audit path:
+Design-partner mode exposes one exact tool from one Streamable HTTP MCP server through the same permit, debit, receipt, evidence, and audit path:
 
 ```bash
 export MCP_UPSTREAM_ENABLED=true
@@ -367,58 +279,7 @@ export MCP_UPSTREAM_BEARER_TOKEN=...       # secret manager only
 export MCP_UPSTREAM_CREDITS_PER_CALL=7.5
 ```
 
-On startup, the gateway discovers the exact upstream tool and refuses readiness
-if configuration, connectivity, or discovery validation fails. Production
-requires a public HTTPS URL; plain HTTP is accepted only for an explicit
-loopback URL in local or test environments. The gateway forwards the invocation
-idempotency key as MCP request metadata, but remote exactly-once behavior still
-depends on the upstream honoring it. Inspect `/health/dependencies` for
-payload-free call, dispatch-state, uncertainty, and reconciliation-backlog
-counts. Upstream discovery keeps the legacy numeric `creditsPerCall` annotation
-and adds the authoritative Decimal string `creditsPerCallExact`; clients doing
-budget math must prefer the exact field. See
-[docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md)
-for the live checklist and failure semantics.
-
-## Governed MCP call shape
-
-After an operator provisions a funded wallet and key, the normal flow is:
-
-1. Discover the tool through `/mcp/tools.json`.
-2. Create a signed permit through `POST /v1/permits` with an
-   `Idempotency-Key` header.
-3. Optionally take a signed price with `POST /v1/quotes` and pass its
-   `quote_id` in `mcpContext` to lock what the call will cost.
-4. Invoke the permitted tool with the wallet, permit, and invocation
-   idempotency key in `mcpContext`.
-5. Verify the returned receipt or fetch its evidence bundle.
-
-An agent that holds no permit can ask a human for one first with
-`POST /v1/permit-requests` and poll until the signed permit is minted.
-
-```bash
-curl -sS -X POST "$API_URL/mcp/messages" \
-  -H "X-API-Key: $AGENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"jsonrpc\": \"2.0\",
-    \"id\": \"request-1\",
-    \"method\": \"tools/call\",
-    \"params\": {
-      \"name\": \"$TOOL_ID\",
-      \"arguments\": {\"input\": \"hello\"},
-      \"mcpContext\": {
-        \"wallet_id\": \"$WALLET_ID\",
-        \"permit_id\": \"$PERMIT_ID\",
-        \"idempotency_key\": \"invoke-1\"
-      }
-    }
-  }"
-```
-
-Use [docs/golden-path.md](docs/golden-path.md) for the complete HTTP sequence
-and [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) to
-put one real internal tool behind the governed path.
+On startup, the gateway discovers the exact upstream tool and refuses readiness if configuration, connectivity, or discovery validation fails. Production requires a public HTTPS URL; plain HTTP is accepted only for an explicit loopback URL in local or test environments. The gateway forwards the invocation idempotency key as MCP request metadata, but remote exactly-once behavior still depends on the upstream honoring it. Inspect `/health/dependencies` for payload-free call, dispatch-state, uncertainty, and reconciliation-backlog counts. Upstream discovery keeps the legacy numeric `creditsPerCall` annotation and adds the authoritative Decimal string `creditsPerCallExact`; clients doing budget math must prefer the exact field. See [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) for the live checklist and failure semantics.
 
 ## Core API surfaces
 
@@ -448,8 +309,7 @@ put one real internal tool behind the governed path.
 | `POST /v1/billing/top-up/prepare` | Create a Stripe PaymentIntent for a sponsor wallet | Authorized sponsor wallet |
 | `GET /health/dependencies` | Durable-state, upstream dispatch, reconciliation, simulation, and degradation truth | Public operator check |
 
-The generated contract at `/openapi.json` is canonical. A checked-in copy lives
-at [docs/openapi.json](docs/openapi.json) and is held in sync by CI.
+The generated contract at `/openapi.json` is canonical. A checked-in copy lives at [docs/openapi.json](docs/openapi.json) and is held in sync by CI.
 
 ## Security and accounting posture
 
@@ -474,105 +334,46 @@ TRUST_SIGNING_KEY_ID=...
 TRUST_SIGNING_PRIVATE_KEY_B64=...     # base64-encoded 32-byte Ed25519 seed
 ```
 
-The application refuses unsafe production combinations. It also refuses
-silent in-memory fallback when durable state was configured for production.
-Use `alembic upgrade head` for schema changes; production startup verifies the
-schema instead of relying on `create_all`.
+The application refuses unsafe production combinations. It also refuses silent in-memory fallback when durable state was configured for production. Use `alembic upgrade head` for schema changes; production startup verifies the schema instead of relying on `create_all`.
 
-Apply the current migration head before mixed old/current workers take traffic.
-Migration 027 serializes the legacy JSON-RPC and REST governed-MCP endpoint
-identities behind one wallet/idempotency-key uniqueness boundary.
+Apply the current migration head before mixed old/current workers take traffic. Migration 027 serializes the legacy JSON-RPC and REST governed-MCP endpoint identities behind one wallet/idempotency-key uniqueness boundary.
 
-The supported API deployment path is the repository Dockerfile on Railway:
-[docs/deploy-railway.md](docs/deploy-railway.md). The static agent-first site in
-[`site/`](site/) is a separate marketing/discovery surface, not the API runtime.
+The supported API deployment path is the repository Dockerfile on Railway: [docs/deploy-railway.md](docs/deploy-railway.md). The static agent-first site in [`site/`](site/) is a separate marketing/discovery surface, not the API runtime.
 
 ### Managed single-tenant pilot boundary
 
-The supported enterprise pilot is **vendor-managed and single-tenant**: one
-Railway project, API service, PostgreSQL database, Redis instance, public
-origin, signing key, and bootstrap-admin set per design partner. Customer
-deployments must not share runtime services, databases, signing material, or
-operator credentials.
+The supported enterprise pilot is **vendor-managed and single-tenant**: one Railway project, API service, PostgreSQL database, Redis instance, public origin, signing key, and bootstrap-admin set per design partner. Customer deployments must not share runtime services, databases, signing material, or operator credentials.
 
-This pilot accepts only synthetic or explicitly redacted, low-sensitivity
-workloads. It is not approved for PHI, PCI data, regulated production records,
-or sensitive tool arguments. The configured upstream MCP server must be one
-public HTTPS origin; customer-VPC/BYOC connectivity, shared multi-tenant SaaS,
-and an uptime or RTO/RPO commitment are not supported in this release.
+This pilot accepts only synthetic or explicitly redacted, low-sensitivity workloads. It is not approved for PHI, PCI data, regulated production records, or sensitive tool arguments. The configured upstream MCP server must be one public HTTPS origin; customer-VPC/BYOC connectivity, shared multi-tenant SaaS, and an uptime or RTO/RPO commitment are not supported in this release.
 
-The public site and `/proof/` receipt are self-issued product demonstrations.
-Customer evidence stays in the customer's dedicated API and database and is
-exported through the authenticated receipt/evidence APIs plus the offline SDK
-verifier.
+The public site and `/proof/` receipt are self-issued product demonstrations. Customer evidence stays in the customer's dedicated API and database and is exported through the authenticated receipt/evidence APIs plus the offline SDK verifier.
 
 ### Billing integrity
 
-- Credits use `Decimal` values internally and expose paired exact fields where
-  API compatibility also requires floats.
-- Charges, transfers, refunds, wallet provisioning, and Stripe settlement use
-  database transactions and row locks where ordering matters.
-- Permit budget caps are reserved with a single atomic guarded `UPDATE` — the
-  cap is enforced in the statement's `WHERE` clause, not a read-modify-write — so
-  concurrent invocations against one permit cannot over-spend it on any storage
-  engine, including SQLite, where `SELECT ... FOR UPDATE` is a silent no-op.
-  Covered by `tests/test_permits.py::test_concurrent_reservations_never_exceed_cap`
-  and the PostgreSQL `postgres_permit_concurrency` CI job.
-- Direct top-up is deprecated and returns `410 Gone`; a client-supplied token is
-  not treated as proof of payment.
-- Stripe webhooks are signature checked, settlement fields are validated, and
-  event identities prevent duplicate application.
-- This is an internal credit and budget ledger. It is not merchant settlement,
-  a dispute system, or a compliance ledger.
+- Credits use `Decimal` values internally and expose paired exact fields where API compatibility also requires floats.
+- Charges, transfers, refunds, wallet provisioning, and Stripe settlement use database transactions and row locks where ordering matters.
+- Permit budget caps are reserved with a single atomic guarded `UPDATE` — the cap is enforced in the statement's `WHERE` clause, not a read-modify-write — so concurrent invocations against one permit cannot over-spend it on any storage engine, including SQLite, where `SELECT ... FOR UPDATE` is a silent no-op. Covered by `tests/test_permits.py::test_concurrent_reservations_never_exceed_cap` and the PostgreSQL `postgres_permit_concurrency` CI job.
+- Direct top-up is deprecated and returns `410 Gone`; a client-supplied token is not treated as proof of payment.
+- Stripe webhooks are signature checked, settlement fields are validated, and event identities prevent duplicate application.
+- This is an internal credit and budget ledger. It is not merchant settlement, a dispute system, or a compliance ledger.
 
 ### Remaining limits
 
-- Signing keys are injected from environment/secret storage; an external KMS
-  integration is not implemented.
+- Signing keys are injected from environment/secret storage; an external KMS integration is not implemented.
 - Receipts are verifiable, but there is no external transparency log.
-- Audit chains are tamper-evident, not immutable against an administrator who
-  can alter both the database and its chain metadata.
-- MCP is the only live governed adapter; universal multi-protocol enforcement
-  is not implemented.
-- The public MCP surface is an HTTP/JSON-RPC tools subset at `/mcp/messages`,
-  plus an opt-in standard endpoint at `POST /mcp`
-  (`ENABLE_STANDARD_MCP_ENDPOINT`, default off) whose protocol surface —
-  `initialize` and version negotiation, notifications, `ping`, JSON-RPC
-  framing and errors — is served by the official MCP SDK's stateless
-  Streamable HTTP transport (JSON responses only, no SSE stream or sessions);
-  `tools/call` runs the governed pipeline with server-minted single-tool
-  permits. Upstream execution is intentionally limited to one
-  operator-configured Streamable HTTP server and one exact tool; resources,
-  prompts, OAuth, stdio, and multi-upstream registry management are not
-  implemented.
-- Permits are reusable budget envelopes, not one-shot delegation chains; parent
-  delegation containment is not implemented.
-- Database service registrations remain metadata and are omitted from
-  executable MCP discovery. Executable tools are local callables or the single
-  configured upstream tool.
-- Requests rejected before a valid permit and executable tool are established
-  may terminate without a receipt.
-- Replay safety is scoped to the governed gateway boundary. A post-dispatch
-  transport failure is signed as `delivery_uncertain`; an invalid or oversized
-  confirmed response is signed as `response_rejected`. Both remain charged and
-  are never automatically retried or refunded. The complete outcome-by-outcome
-  contract, including every crash window, is
-  [docs/failure-semantics.md](docs/failure-semantics.md).
-- Wallet isolation is enforced by application authorization and query scoping;
-  PostgreSQL row-level security and a public multi-tenant isolation guarantee
-  are not implemented.
-- Upstream connections pin one validated resolved address for the session while
-  preserving the configured HTTP Host and TLS SNI. Production operators should
-  still enforce a network egress allowlist or proxy as defense in depth.
-- Upstream responses are capped while streaming the identity-encoded wire body,
-  including the JSON-RPC envelope, and retained decoded payloads are capped
-  again after protocol validation.
-- AWI/browser and sandbox proof surfaces are not production isolation
-  boundaries.
+- Audit chains are tamper-evident, not immutable against an administrator who can alter both the database and its chain metadata.
+- MCP is the only live governed adapter; universal multi-protocol enforcement is not implemented.
+- The public MCP surface is an HTTP/JSON-RPC tools subset at `/mcp/messages`, plus an opt-in standard endpoint at `POST /mcp` (`ENABLE_STANDARD_MCP_ENDPOINT`, default off) whose protocol surface — `initialize` and version negotiation, notifications, `ping`, JSON-RPC framing and errors — is served by the official MCP SDK's stateless Streamable HTTP transport (JSON responses only, no SSE stream or sessions); `tools/call` runs the governed pipeline with server-minted single-tool permits. Upstream execution is intentionally limited to one operator-configured Streamable HTTP server and one exact tool; resources, prompts, OAuth, stdio, and multi-upstream registry management are not implemented.
+- Permits are reusable budget envelopes, not one-shot delegation chains; parent delegation containment is not implemented.
+- Database service registrations remain metadata and are omitted from executable MCP discovery. Executable tools are local callables or the single configured upstream tool.
+- Requests rejected before a valid permit and executable tool are established may terminate without a receipt.
+- Replay safety is scoped to the governed gateway boundary. A post-dispatch transport failure is signed as `delivery_uncertain`; an invalid or oversized confirmed response is signed as `response_rejected`. Both remain charged and are never automatically retried or refunded. The complete outcome-by-outcome contract, including every crash window, is [docs/failure-semantics.md](docs/failure-semantics.md).
+- Wallet isolation is enforced by application authorization and query scoping; PostgreSQL row-level security and a public multi-tenant isolation guarantee are not implemented.
+- Upstream connections pin one validated resolved address for the session while preserving the configured HTTP Host and TLS SNI. Production operators should still enforce a network egress allowlist or proxy as defense in depth.
+- Upstream responses are capped while streaming the identity-encoded wire body, including the JSON-RPC envelope, and retained decoded payloads are capped again after protocol validation.
+- AWI/browser and sandbox proof surfaces are not production isolation boundaries.
 
-Read [TRUST_MODEL.md](TRUST_MODEL.md), [SECURITY.md](SECURITY.md),
-[SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md), and
-[docs/threat-model.md](docs/threat-model.md) before a production evaluation.
+Read [TRUST_MODEL.md](TRUST_MODEL.md), [SECURITY.md](SECURITY.md), [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md), and [docs/threat-model.md](docs/threat-model.md) before a production evaluation.
 
 ## Tests and release gates
 
@@ -599,54 +400,25 @@ make trust-release-gate
 make prove-crash-recovery
 ```
 
-`make test`, `make test-all`, and `make coverage` provision requirements through
-`uv`. The focused coverage and release-gate targets assume the requirements are
-already installed in the active Python environment.
+`make test`, `make test-all`, and `make coverage` provision requirements through `uv`. The focused coverage and release-gate targets assume the requirements are already installed in the active Python environment.
 
-[docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the
-invariant it asserts — and, just as importantly, to what it does not prove. Two
-live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run
-the same class of invariants against a deployment you operate; both write test
-data, so point them at staging. A local red-team pass
-(`make red-team-trust-plane-check`) attacks the trust loop against a throwaway
-SQLite database. The stdlib-only [`scripts/invariant_attacks/`](scripts/invariant_attacks/)
-harness runs a hostile, concurrency-aware campaign against a live `make quickstart`
-instance — parallel double-charge, budget over-spend, scope escape, receipt
-forgery, crash consistency, and credential misuse — each with a
-HELD/BROKE/PARTIAL verdict backed by the exact request and observed response
-([Invariant Attack Report.md](<Invariant Attack Report.md>)).
+[docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the invariant it asserts — and, just as importantly, to what it does not prove. Two live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run the same class of invariants against a deployment you operate; both write test data, so point them at staging. A local red-team pass (`make red-team-trust-plane-check`) attacks the trust loop against a throwaway SQLite database. The stdlib-only [`scripts/invariant_attacks/`](scripts/invariant_attacks/) harness runs a hostile, concurrency-aware campaign against a live `make quickstart` instance — parallel double-charge, budget over-spend, scope escape, receipt forgery, crash consistency, and credential misuse — each with a HELD/BROKE/PARTIAL verdict backed by the exact request and observed response ([Invariant Attack Report.md](<Invariant Attack Report.md>)).
 
-The repository is intended to run **gate-first, execute-second**: CI exposes
-the release gate as one dedicated check named `trust_release_gate`, and
-[docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md)
-specifies the exact branch-protection settings that make it (and the other
-required checks) block `main`. The automated batteries prove the five claims
-from inside; the human usability milestone is the
-[stranger test](docs/stranger-test.md) — a person who has never seen the
-repository drives the whole governed loop and verifies the same claims from
-the published docs alone, asking zero questions. That test does not prove
-customer demand. The active business milestone is the partner-owned pilot in
-[the 30-day customer-validation sprint](docs/30-day-customer-validation.md).
+The repository is intended to run **gate-first, execute-second**: CI exposes the release gate as one dedicated check named `trust_release_gate`, and [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) specifies the exact branch-protection settings that make it (and the other required checks) block `main`. The automated batteries prove the five claims from inside; the human usability milestone is the [stranger test](docs/stranger-test.md) — a person who has never seen the repository drives the whole governed loop and verifies the same claims from the published docs alone, asking zero questions. That test does not prove customer demand. The active business milestone is the partner-owned pilot in [the 30-day customer-validation sprint](docs/30-day-customer-validation.md).
 
 The CI workflows also run:
 
-- The full trust release gate as a single required check
-  (`trust_release_gate`), exactly as `make trust-release-gate` runs it
-  locally.
+- The full trust release gate as a single required check (`trust_release_gate`), exactly as `make trust-release-gate` runs it locally.
 - Python 3.11 and 3.12 suites.
-- Python SDK wheel/sdist builds, clean-install smoke tests, typed-client tests,
-  Ruff, and mypy on Python 3.10 through 3.12.
+- Python SDK wheel/sdist builds, clean-install smoke tests, typed-client tests, Ruff, and mypy on Python 3.10 through 3.12.
 - Ruff and mypy.
 - Production-like startup and routing checks.
 - Migration-from-empty-database checks.
-- PostgreSQL permit/refund concurrency tests plus two-process crash and replay
-  proofs against the same row-locking backend.
-- Governed upstream replay, failure accounting, dispatch reconciliation,
-  evidence-linkage, and tenant-isolation tests.
+- PostgreSQL permit/refund concurrency tests plus two-process crash and replay proofs against the same row-locking backend.
+- Governed upstream replay, failure accounting, dispatch reconciliation, evidence-linkage, and tenant-isolation tests.
 - Trust-plane and adversarial demo smoke tests.
 
-Static test-count and coverage badges are intentionally avoided because they
-become stale; the CI badge and release gates are the source of truth.
+Static test-count and coverage badges are intentionally avoided because they become stale; the CI badge and release gates are the source of truth.
 
 ## Repository map
 
@@ -665,37 +437,19 @@ become stale; the CI badge and release gates are the source of truth.
 
 ### Python SDK 0.5.0
 
-HTTP and MCP are the canonical integration surfaces. CI builds and smoke-tests
-Python SDK 0.5.0 wheels and sdists on Python 3.10 through 3.12. Pushing the
-matching `python-sdk-v0.5.0` tag attaches those artifacts to a GitHub release;
-the package is not published to PyPI. The newest tag today is
-`python-sdk-v0.4.0` — the source here is ahead of it, and the wheel a release
-build produces carries the source version, not the tag's. The typed `AgentMiddlewareClient` covers
-tool discovery, permit creation, governed invocation, receipt verification, and
-evidence retrieval, and exposes idempotency conflicts and delivery uncertainty
-as explicit errors. For repository development (installs from this repo, not
-PyPI):
+HTTP and MCP are the canonical integration surfaces. CI builds and smoke-tests Python SDK 0.5.0 wheels and sdists on Python 3.10 through 3.12. Pushing the matching `python-sdk-v0.5.0` tag attaches those artifacts to a GitHub release; the package is not published to PyPI. The newest tag today is `python-sdk-v0.4.0` — the source here is ahead of it, and the wheel a release build produces carries the source version, not the tag's. The typed `AgentMiddlewareClient` covers tool discovery, permit creation, governed invocation, receipt verification, and evidence retrieval, and exposes idempotency conflicts and delivery uncertainty as explicit errors. For repository development (installs from this repo, not PyPI):
 
 ```bash
 python -m pip install -e './b2a_sdk[dev]'
 ```
 
-`B2AClient` remains as deprecated compatibility during the 0.4.x transition.
-No TypeScript package is published. Do not advertise PyPI or npm installation.
+`B2AClient` remains as deprecated compatibility during the 0.4.x transition. No TypeScript package is published. Do not advertise PyPI or npm installation.
 
-Offline receipt verification is deliberately dependency-minimal: the
-`b2a-verify-receipt` CLI (and `verify_bundle`) verify a signed receipt
-against a published key set with only `cryptography` installed — no
-networking library and no account. Importing the package no longer pulls in
-the HTTP client, so `pip install "./b2a_sdk[verify]"` (or just
-`cryptography` with `PYTHONPATH=b2a_sdk/src`) is enough to check a receipt.
-The networked `--issuer` fetch is the only path that additionally needs
-`httpx`.
+Offline receipt verification is deliberately dependency-minimal: the `b2a-verify-receipt` CLI (and `verify_bundle`) verify a signed receipt against a published key set with only `cryptography` installed — no networking library and no account. Importing the package no longer pulls in the HTTP client, so `pip install "./b2a_sdk[verify]"` (or just `cryptography` with `PYTHONPATH=b2a_sdk/src`) is enough to check a receipt. The networked `--issuer` fetch is the only path that additionally needs `httpx`.
 
 ## Documentation
 
-- [docs/30-day-customer-validation.md](docs/30-day-customer-validation.md) — active company milestone: customer interviews, partner-owned pilot, and
-  day-30 decision gate
+- [docs/30-day-customer-validation.md](docs/30-day-customer-validation.md) — active company milestone: customer interviews, partner-owned pilot, and day-30 decision gate
 - [WEDGE.md](WEDGE.md) — narrow product thesis and first design-partner motion
 - [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling
 - [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
