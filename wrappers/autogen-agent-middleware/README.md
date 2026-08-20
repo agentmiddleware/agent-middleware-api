@@ -56,6 +56,15 @@ asyncio.run(main())
 
 ## Direct Tool Usage
 
+> **Warning**: The `call_mcp_tool` method shown below bypasses the trust-plane
+> loop (no permit, no idempotency key, no signed receipt, no replay protection).
+> Each call dispatches and charges independently. Calling the same tool twice
+> will execute and charge twice.
+>
+> For production use with replay protection and signed receipts, use
+> `AgentMiddlewareClient` from `b2a_sdk` with the governed flow:
+> `discover_tools() → create_permit() → invoke_tool()`.
+
 ```python
 import asyncio
 from autogen_b2a import B2AFunctionTool
@@ -71,7 +80,7 @@ async def main():
     tools = await tool.list_mcp_tools()
     print(f"Available tools: {len(tools)}")
 
-    # Call a tool
+    # Call a tool (WARNING: bypasses trust plane, no replay protection)
     result = await tool.call_mcp_tool(
         "data-indexer",
         {"documents": ["doc1", "doc2"]},

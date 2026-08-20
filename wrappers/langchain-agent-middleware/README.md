@@ -42,13 +42,22 @@ agent = create_react_agent(model, tools)
 
 ## MCP Tools
 
+> **Warning**: The LangChain wrapper's MCP tool calls bypass the trust-plane
+> loop (no permit, no idempotency key, no signed receipt, no replay protection).
+> Each call dispatches and charges independently. Retrying a call will execute
+> and charge again.
+>
+> For production use with replay protection and signed receipts, use
+> `AgentMiddlewareClient` from `b2a_sdk` with the governed flow:
+> `discover_tools() → create_permit() → invoke_tool()`.
+
 ```python
 from langchain_b2a import B2AClient, get_mcp_tools
 
 client = B2AClient(api_key="...", wallet_id="...")
 mcp_tool = get_mcp_tools(client)
 
-# Call an MCP tool
+# Call an MCP tool (WARNING: bypasses trust plane, no replay protection)
 result = await mcp_tool.ainvoke({
     "tool_name": "data-indexer",
     "arguments": {"documents": ["..."]},

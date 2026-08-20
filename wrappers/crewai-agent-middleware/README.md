@@ -43,11 +43,20 @@ researcher = Agent(
 
 ## Operations
 
+> **Warning**: The CrewAI wrapper's `call_tool` operation bypasses the trust-plane
+> loop (no permit, no idempotency key, no signed receipt, no replay protection).
+> Each call dispatches and charges independently. Retrying a call will execute
+> and charge again.
+>
+> For production use with replay protection and signed receipts, use
+> `AgentMiddlewareClient` from `b2a_sdk` with the governed flow:
+> `discover_tools() → create_permit() → invoke_tool()`.
+
 ```python
 # List available MCP tools
 result = b2a_tool.run(operation="list_tools")
 
-# Call an MCP tool
+# Call an MCP tool (WARNING: bypasses trust plane, no replay protection)
 result = b2a_tool.run(
     operation="call_tool",
     tool_name="data-indexer",

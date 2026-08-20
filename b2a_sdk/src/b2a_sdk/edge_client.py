@@ -1,14 +1,23 @@
 """Legacy shared HTTP edge client for framework wrappers.
 
+.. deprecated:: 0.5.0
+    The edge client's ``call_mcp_tool`` bypasses the trust-plane loop
+    (no permit, no idempotency key, no signed receipt, no replay protection).
+    Each call dispatches and charges independently, making replay a double-charge.
+
+    Use ``AgentMiddlewareClient`` with the governed flow instead:
+    ``discover_tools() → create_permit() → invoke_tool()`` gives you
+    idempotent replay, signed receipts, and scoped authorization.
+
 The framework wrappers (langchain, crewai, autogen) all need the same
 narrow surface: list MCP tools, call an MCP tool, drive an AWI session, read
 a wallet balance. This base centralizes that surface so each wrapper only has
 to add the framework-specific glue.
 
-This is intentionally a smaller surface than ``B2AClient``. ``B2AClient`` is
-the full agent-facing client used by service code and decorators; this base
-is the wrapper-facing edge client used by framework integrations that just
-need to talk to the middleware over HTTP.
+This is intentionally a smaller surface than ``AgentMiddlewareClient``.
+``AgentMiddlewareClient`` is the full agent-facing client used by service code
+and decorators; this base is the wrapper-facing edge client used by framework
+integrations that just need to talk to the middleware over HTTP.
 """
 
 from __future__ import annotations
@@ -64,7 +73,17 @@ class B2AEdgeClient:
         name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        """Call an MCP tool by name."""
+        """Call an MCP tool by name.
+
+        .. warning::
+            This method bypasses the trust-plane loop: no permit, no idempotency
+            key, no signed receipt, no replay protection. Calling this method
+            twice with the same arguments dispatches and charges twice.
+
+            For governed invocations with replay protection and signed receipts,
+            use ``AgentMiddlewareClient.invoke_tool()`` instead, which requires
+            a permit and an idempotency key.
+        """
         payload: dict[str, Any] = {
             "jsonrpc": "2.0",
             "method": "tools/call",

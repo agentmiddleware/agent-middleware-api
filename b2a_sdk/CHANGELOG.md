@@ -9,6 +9,17 @@ materially different under a version already in the wild. A minor bump:
 everything here is additive and no published behaviour changes. The tag is
 not cut by this change — `python-sdk-v0.5.0` is still a release decision.
 
+### Deprecations
+
+- **Deprecated `B2AEdgeClient.call_mcp_tool()`**: This method bypasses the
+  trust-plane loop (no permit, no idempotency key, no signed receipt, no replay
+  protection). Each call dispatches and charges independently, making retry a
+  double-charge. Use `AgentMiddlewareClient.invoke_tool()` instead, which
+  requires a permit and idempotency key for governed invocations with replay
+  protection and signed receipts.
+- Updated framework wrapper READMEs (langchain, crewai, autogen) to document
+  that direct tool calls bypass the trust plane and lack replay protection.
+
 - Add `b2a_sdk.receipt_verifier` for offline verification of portable trust
   receipts. It imports nothing from the middleware application and needs no
   network access: given a bundle and a published key set, it checks the
