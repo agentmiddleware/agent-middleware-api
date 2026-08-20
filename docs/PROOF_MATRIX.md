@@ -188,18 +188,22 @@ Both write real rows to the target. Point them at staging.
 | Command | Proves | Requires |
 |---|---|---|
 | `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | `AGENT_MIDDLEWARE_API_KEY`; set `AGENT_MIDDLEWARE_API_URL` or it defaults to production |
-| `make scoped-smoke-loop` | Authority readable for the caller's own wallet; scoped permit issued and carrying a nonce; governed invoke; the debit matching the receipt's own stated cost; replay returning the same receipt and charging nothing further; a changed payload under a reused key refused; an out-of-scope but genuinely registered tool denied and not charged; the portable receipt carrying a signature, key id, and named canonicalization | `AGENT_MIDDLEWARE_API_KEY` holding a **wallet-scoped** key (the loop refuses a bootstrap admin key); `--tool` required off loopback |
+| `python scripts/constant_test_loop.py` | Scoped permit sized from the tool's advertised `creditsPerCall`; governed invoke; signed success receipt with a ledger entry; replay returning the same `receipt_id` with no second debit; an out-of-scope but genuinely registered tool refused with `permit_tool_not_allowed` and charged nothing | `CI_SMOKE_AGENT_KEY` holding a **wallet-scoped** key (self-provisions on loopback when absent); `--tool` and `--tool-args` required off loopback |
 | `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency; always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
 
-`scoped-smoke-loop` is the one built to run continuously: it needs no admin
-credential, so the key it runs on cannot mint keys or read another tenant's
-audit trail if the runner holding it is compromised. That is also its limit —
-tenant isolation, audit-chain verification, and refund reconciliation are
-absent from it precisely because a scoped key must not be able to reach them,
-and they stay in `trust-conformance-live` for an operator to run deliberately.
-It reports SKIP rather than a false PASS for the out-of-scope denial when the
-deployment registers only one tool, since invoking an unregistered name proves
-"tool not found" rather than "the permit refused it".
+`constant_test_loop.py` is the one built to run continuously: it needs no
+admin credential, so the key it runs on cannot mint keys or read another
+tenant's audit trail if the runner holding it is compromised. That is also its
+limit — tenant isolation, audit-chain verification, and refund reconciliation
+are absent from it precisely because a scoped key must not reach them, and
+they stay in `trust-conformance-live` for an operator to run deliberately.
+
+It skips rather than false-passes the out-of-scope denial when the deployment
+registers only one tool, since invoking an unregistered name proves "tool not
+found" rather than "the permit refused it". Off loopback it refuses to start
+without `--tool` and `--tool-args`: arguments derived from a schema satisfy a
+tool's declared shape but not its semantics, and the derivation picks the
+first enum member, which for a consequential tool could be `delete`.
 
 The battery reports SKIP — never a false PASS — for MCP-invocation checks when
 the deployment exposes no invokable `golden-path-echo` tool. It does not

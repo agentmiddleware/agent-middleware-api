@@ -24,6 +24,32 @@ The script self-provisions an agent key via `/v1/dev-keys/self-provision` when n
 
 ## Production Use
 
+Off loopback the loop refuses to start without `--tool` and `--tool-args`
+(or `$CI_SMOKE_TOOL` / the equivalent flags). This is deliberate, not a
+papercut:
+
+- **Tool selection.** `partner.echo` and `partner.notes.write` are tried in
+  order when present, but which tool a monitor invokes on every run is an
+  operator's decision, not the registry ordering's.
+- **Payload.** Arguments derived from a tool's `inputSchema` satisfy its
+  declared *shape*, not its *semantics*, and the derivation fills required
+  fields from types, defaults, and the **first enum member** — which for a
+  consequential tool could be `delete`. Schema validity is not evidence of
+  safety. Pass `--tool-args '{}'` if the tool genuinely needs no arguments;
+  the point is that it be a decision.
+
+The permit is sized from the selected tool's advertised
+`annotations.creditsPerCall` rather than a fixed cap, so pointing the loop at
+a pricier tool does not fail with `permit_budget_exceeded` on a healthy
+deployment.
+
+```bash
+python scripts/constant_test_loop.py \
+  --api-url https://api.thisisatest.tech \
+  --tool partner.echo \
+  --tool-args '{"text": "constant test loop"}'
+```
+
 Set `CI_SMOKE_AGENT_KEY` for a pre-provisioned agent credential. Optionally provide `CI_SMOKE_WALLET_ID` and `CI_SMOKE_KEY_ID` for faster startup (the script will fetch them from the API if not provided):
 
 ```bash
@@ -36,7 +62,7 @@ export CI_SMOKE_AGENT_KEY="$(python scripts/partner_api_key_bootstrap.py \
   --agent-id ci-smoke-agent \
   --key-name constant-test-loop \
   --budget-credits 5000 \
-  --json | jq -r .api_key)"
+  --key-only)"   # or --json | jq -r .api_key
 
 export CI_SMOKE_WALLET_ID="$(python scripts/partner_api_key_bootstrap.py \
   --api-url https://api.thisisatest.tech \
