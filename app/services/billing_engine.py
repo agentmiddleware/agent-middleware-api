@@ -89,6 +89,69 @@ def _timestamp_in_current_period(
     return _as_utc(timestamp) >= _as_utc(period_start)
 
 
+async def _reverse_velocity_counters(
+    session: Any,
+    *,
+    wallet_id: str,
+    amount: Decimal,
+    hourly_reset_at: datetime | None,
+    daily_reset_at: datetime | None,
+) -> None:
+    """Undo one velocity increment that the monitor already committed.
+
+    The velocity monitor records a charge in its own transaction, before the
+    billing transaction has taken the wallet lock. Any path that then declines
+    or loses that charge owes this reversal, and owes it in a session that is
+    still alive -- a reversal issued on the transaction that just rolled back
+    goes nowhere.
+
+    Relative, in one statement, for the same reason the increment is: reading a
+    counter and writing back read-charge is a read-modify-write, and these
+    counters are what the spend cap and the anomaly auto-freeze are measured
+    against. A lost reversal leaves the wallet permanently over-counted, which
+    throttles -- and eventually freezes -- a caller that never spent the money.
+
+    Each counter is reversed under its own period marker, because the two roll
+    over on independent schedules. If a period rolled between the increment and
+    this reversal, the counter this charge added to has already been zeroed and
+    the current one belongs to a period the charge never touched; decrementing
+    it would under-count live spend, which is the worse direction: an
+    over-count throttles a caller who did not spend, an under-count silently
+    raises the cap and delays the auto-freeze. A predicate covering both
+    markers at once would be wrong for the same reason -- a rolled daily period
+    would suppress an hourly reversal that is still owed.
+    """
+
+    reversals = (
+        (
+            "hourly_spent",
+            WalletModel.hourly_reset_at,
+            hourly_reset_at,
+            WalletModel.hourly_spent,
+        ),
+        (
+            "daily_spent",
+            WalletModel.daily_reset_at,
+            daily_reset_at,
+            WalletModel.daily_spent,
+        ),
+    )
+    for column_name, marker_column, recorded_marker, counter in reversals:
+        predicates: list[Any] = [
+            cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
+        ]
+        if recorded_marker is not None:
+            predicates.append(
+                cast(ColumnElement[bool], marker_column == recorded_marker)
+            )
+        await session.execute(
+            sa_update(WalletModel)
+            .where(*predicates)
+            .values(**{column_name: clamped_decrement(counter, amount)})
+            .execution_options(synchronize_session=False)
+        )
+
+
 class BillingEngine:
     """Internal billing and ledger implementation behind AgentMoney."""
 
@@ -263,58 +326,15 @@ class BillingEngine:
             raise self._wallet_not_found_error(wallet_id)
 
         async def reverse_velocity_record() -> None:
-            # The velocity monitor committed these counters before this
-            # transaction acquired the wallet lock. A rejected debit must
-            # reverse exactly that increment.
-            #
-            # Relative, in one statement, for the same reason the increment in
-            # velocity_monitor is: reading a counter and writing back
-            # read-charge is a read-modify-write, and these counters are what
-            # the spend cap and the anomaly auto-freeze are measured against.
-            # A lost reversal here leaves the wallet permanently over-counted,
-            # which throttles a caller that never spent the money.
-            #
-            # Each counter is reversed under its own period marker, because
-            # the two roll over on independent schedules. If the hourly period
-            # rolled between the increment and this reversal, the counter this
-            # charge added to has already been zeroed and the current one
-            # belongs to a period the charge never touched -- decrementing it
-            # would under-count live spend, which is the failure direction that
-            # actually matters here: an over-count throttles a caller who did
-            # not spend, an under-count silently raises the cap and delays the
-            # auto-freeze. A predicate covering both markers at once would be
-            # wrong for the same reason: a rolled daily period would suppress
-            # an hourly reversal that is still owed.
-            reversals = (
-                (
-                    "hourly_spent",
-                    WalletModel.hourly_reset_at,
-                    velocity_hourly_reset_at,
-                    WalletModel.hourly_spent,
-                ),
-                (
-                    "daily_spent",
-                    WalletModel.daily_reset_at,
-                    velocity_daily_reset_at,
-                    WalletModel.daily_spent,
-                ),
+            # Declined inside this transaction, which is still alive, so the
+            # reversal lands here and the refreshed wallet below reflects it.
+            await _reverse_velocity_counters(
+                session,
+                wallet_id=wallet_id,
+                amount=charge_amount,
+                hourly_reset_at=velocity_hourly_reset_at,
+                daily_reset_at=velocity_daily_reset_at,
             )
-            for column_name, marker_column, recorded_marker, counter in reversals:
-                predicates: list[Any] = [
-                    cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
-                ]
-                if recorded_marker is not None:
-                    predicates.append(
-                        cast(ColumnElement[bool], marker_column == recorded_marker)
-                    )
-                await session.execute(
-                    sa_update(WalletModel)
-                    .where(*predicates)
-                    .values(
-                        **{column_name: clamped_decrement(counter, charge_amount)}
-                    )
-                    .execution_options(synchronize_session=False)
-                )
             await session.refresh(wallet)
 
         if wallet.status in _NON_SPENDABLE_WALLET_STATUSES:
@@ -643,6 +663,10 @@ class BillingEngine:
                 raise ValueError("invalid_ledger_operation_key")
 
         velocity_monitor = get_velocity_monitor()
+        # Hoisted out of the transaction below so the recovery path can still
+        # see which increment it owes a reversal for. None until the monitor
+        # has actually committed one.
+        recorded_velocity: tuple[datetime | None, datetime | None] | None = None
 
         try:
             async with self._session_factory()() as session:
@@ -690,6 +714,10 @@ class BillingEngine:
                     velocity = await velocity_monitor.check_and_record_charge(
                         wallet_id, charge_amount
                     )
+                    recorded_velocity = (
+                        getattr(velocity, "hourly_reset_at", None),
+                        getattr(velocity, "daily_reset_at", None),
+                    )
 
                     return await self._apply_charge_to_locked_wallet(
                         session,
@@ -706,14 +734,21 @@ class BillingEngine:
                         operation_key=operation_key,
                         # Which period the increment landed in, so a reversal
                         # cannot decrement a later one.
-                        velocity_hourly_reset_at=getattr(
-                            velocity, "hourly_reset_at", None
-                        ),
-                        velocity_daily_reset_at=getattr(
-                            velocity, "daily_reset_at", None
-                        ),
+                        velocity_hourly_reset_at=recorded_velocity[0],
+                        velocity_daily_reset_at=recorded_velocity[1],
                     )
         except IntegrityError:
+            # The monitor committed this attempt's increment in its own
+            # transaction, before the one that just rolled back, so it survived
+            # that rollback and is now counting spend that produced no debit.
+            # Reverse it before deciding what to return: whether this attempt
+            # adopts the winner's durable debit or re-raises, its own increment
+            # was spurious either way. The winner recorded its own.
+            await self._reverse_recorded_velocity(
+                wallet_id=wallet_id,
+                amount=charge_amount,
+                recorded=recorded_velocity,
+            )
             if operation_key is None:
                 raise
             # The unique wallet/operation-key constraint is the final guard if
@@ -737,6 +772,43 @@ class BillingEngine:
                     request_path=request_path,
                 )
                 return ledger_entry_model_to_schema(existing_entry)
+        except Exception:
+            # Same debt on every other way out after the increment landed --
+            # a conflict raised by the ledger writer, a database error mid
+            # flush. No-ops when the increment never happened.
+            await self._reverse_recorded_velocity(
+                wallet_id=wallet_id,
+                amount=charge_amount,
+                recorded=recorded_velocity,
+            )
+            raise
+
+    async def _reverse_recorded_velocity(
+        self,
+        *,
+        wallet_id: str,
+        amount: Decimal,
+        recorded: tuple[datetime | None, datetime | None] | None,
+    ) -> None:
+        """Reverse a committed velocity increment from a fresh session.
+
+        ``recorded`` is None when the monitor never got as far as recording,
+        which is the common case for early validation failures -- there is
+        nothing owed then. Otherwise the reversal needs a session of its own:
+        the transaction that would have carried it has already rolled back.
+        """
+
+        if recorded is None:
+            return
+        async with self._session_factory()() as session:
+            async with session.begin():
+                await _reverse_velocity_counters(
+                    session,
+                    wallet_id=wallet_id,
+                    amount=amount,
+                    hourly_reset_at=recorded[0],
+                    daily_reset_at=recorded[1],
+                )
 
     async def refund_charge(
         self,
