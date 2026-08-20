@@ -555,12 +555,36 @@ class PermitRequestService:
             # A previous attempt already minted it; adopt rather than reissue.
             return await self._settle_minted(model, model.reserved_permit_id)
 
+        scopes = json.loads(model.scopes_json)
+        allowed_tools = json.loads(model.allowed_tools_json)
+
+        verified_hash = permit_request_hash(
+            issuer_wallet_id=model.issuer_wallet_id,
+            subject_wallet_id=model.subject_wallet_id,
+            allowed_tools=allowed_tools,
+            scopes=scopes,
+            max_credits=model.max_credits,
+            permit_expires_at=model.permit_expires_at,
+            requires_human_approval=model.requires_human_approval,
+            justification=model.justification,
+        )
+        if verified_hash != model.request_hash:
+            logger.error(
+                "permit_request_terms_tampered request_id=%s stored_hash=%s computed_hash=%s",
+                model.request_id,
+                model.request_hash,
+                verified_hash,
+            )
+            return await self._settle_failed(
+                model, "permit_request_terms_integrity_violation"
+            )
+
         request = PermitCreateRequest(
             issuer_wallet_id=model.issuer_wallet_id,
             subject_wallet_id=model.subject_wallet_id,
             subject_key_id=model.subject_key_id,
-            scopes=json.loads(model.scopes_json),
-            allowed_tools=json.loads(model.allowed_tools_json),
+            scopes=scopes,
+            allowed_tools=allowed_tools,
             max_credits=model.max_credits,
             expires_at=model.permit_expires_at,
             requires_human_approval=model.requires_human_approval,

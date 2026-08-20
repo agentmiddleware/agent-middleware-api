@@ -708,3 +708,79 @@ async def test_wallet_can_list_its_own_requests_without_advancing_them(
     assert (
         await client.get("/v1/me/permit-requests", headers=BOOTSTRAP_HEADERS)
     ).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tampered_request_terms_cannot_mint_after_approval(
+    client, clean_database, monkeypatch, sentinel
+):
+    """An attacker who modifies the stored terms after approval cannot escalate authority.
+    
+    The minted permit must carry exactly the terms the human reviewed. If the stored
+    terms are tampered with between approval and mint, the integrity check must fail
+    and no permit may be issued.
+    """
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+    request_id = (await _request(client, agent)).json()["request_id"]
+
+    # Simulate an attacker who gains DB access and tries to escalate authority
+    # by modifying the stored terms after the human approved.
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitRequestModel, request_id)
+        # Attacker tries to widen the tool scope and increase the budget.
+        model.allowed_tools_json = json.dumps([*TOOLS, "wire-transfer", "root-shell"])
+        model.max_credits = Decimal("9999")
+        # Attacker leaves the request_hash intact (hoping it won't be checked).
+        session.add(model)
+        await session.commit()
+
+    sentinel.status = "approved"
+    resp = await client.get(
+        f"/v1/permit-requests/{request_id}", headers=agent["agent_headers"]
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # The tampered request must fail to mint.
+    assert body["status"] == "failed"
+    assert body["reason"] == "permit_request_terms_integrity_violation"
+    assert body["permit"] is None
+    assert body["permit_id"] is None
+
+    # No permit was minted — the attacker gained nothing.
+    async with factory() as session:
+        assert (await session.execute(select(PermitModel))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_agent_cannot_escalate_via_poll_body_injection(
+    client, clean_database, monkeypatch, sentinel
+):
+    """An agent cannot escalate by injecting wider terms into the poll request.
+    
+    The poll endpoint takes no body — only the request_id path parameter. Even
+    if an attacker tried to inject terms via headers or query params, minting
+    reads from the stored row, not from the poll request.
+    """
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+    request_id = (await _request(client, agent)).json()["request_id"]
+
+    sentinel.status = "approved"
+    # Attacker tries to inject escalated terms via the poll (pointless, but verify).
+    escalated_headers = {
+        **agent["agent_headers"],
+        "X-Escalated-Tools": json.dumps([*TOOLS, "wire-transfer"]),
+        "X-Escalated-Credits": "9999",
+    }
+    resp = await client.get(
+        f"/v1/permit-requests/{request_id}",
+        headers=escalated_headers,
+    )
+    assert resp.status_code == 200
+    permit = resp.json()["permit"]
+    # The minted permit carries exactly the reviewed terms.
+    assert permit["allowed_tools"] == TOOLS
+    assert Decimal(str(permit["max_credits"])) == Decimal("20")
+    assert "wire-transfer" not in permit["allowed_tools"]
