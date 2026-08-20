@@ -21,7 +21,7 @@
       ]
     },
     {
-      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|wave.js|favicon.svg|social-card.png)",
+      "source": "/:asset(styles.css|fonts.css|a11y.js|a11y-preload.js|va-init.js|analytics.js|wave.js|arcade.js|arcade.css|favicon.svg|social-card.png)",
       "headers": [
         {
           "key": "Cache-Control",

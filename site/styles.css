@@ -1309,6 +1309,105 @@ main,
   margin: 0;
 }
 
+/* Waiting-room launcher ---------------------------------------------------------------------
+
+   The overlay itself is styled in arcade.css; these are the page-side pieces:
+   the footer control that opens it, and what the page does while it is open. */
+
+.footer-arcade {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+  border-top: 1px dashed var(--rule);
+  padding-top: 1.25rem;
+}
+
+.footer-arcade[hidden] {
+  display: none;
+}
+
+.arcade-launch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  padding: 0.75rem 1.2rem;
+  min-height: 48px;
+  background: none;
+  border: 1px solid var(--brass);
+  color: var(--brass-bright);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.arcade-launch:hover {
+  background: var(--brass);
+  color: var(--ink);
+}
+
+.footer-arcade-note {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/* While the waiting room is open the page recedes rather than unmounts, so
+   closing it restores scroll position and focus exactly. Hiding the canvas is
+   also what pauses the particle field: /wave.js unschedules its frame loop
+   when an IntersectionObserver reports the canvas out of view. */
+html.arcade-open,
+html.arcade-open body {
+  overflow: hidden;
+}
+
+html.arcade-open .wave-canvas,
+html.arcade-open .wave-fallback {
+  display: none;
+}
+
+/* The waiting room is a modal dialog, so the page's own floating controls go
+   with the page. Leaving the accessibility widget on top would put a
+   focusable, clickable control outside the dialog's focus trap — and it
+   overlaps the cabinets. Escape closes the arcade and brings it straight
+   back. */
+html.arcade-open .amw-a11y-toggle,
+html.arcade-open .amw-a11y-panel {
+  display: none;
+}
+
+html.arcade-open .site-nav,
+html.arcade-open main,
+html.arcade-open .site-footer {
+  opacity: 0.07;
+  filter: blur(3px);
+  pointer-events: none;
+  transition: opacity 420ms ease, filter 420ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.arcade-open .site-nav,
+  html.arcade-open main,
+  html.arcade-open .site-footer {
+    transition: none;
+  }
+
+  .arcade-launch {
+    transition: none;
+  }
+}
+
+html[data-a11y-motion="reduce"].arcade-open .site-nav,
+html[data-a11y-motion="reduce"].arcade-open main,
+html[data-a11y-motion="reduce"].arcade-open .site-footer {
+  transition: none;
+}
+
 /* Proof page ------------------------------------------------------------------------------- */
 
 .proof-page-header h1 {
@@ -1639,6 +1738,7 @@ main,
   .site-nav,
   .wave-canvas,
   .wave-fallback,
+  .footer-arcade,
   .amw-a11y-toggle,
   .amw-a11y-panel {
     display: none;

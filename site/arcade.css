@@ -1,0 +1,416 @@
+/* ==========================================================================
+   THE HUMAN WAITING ROOM — overlay styling.
+
+   Loaded on the landing page only. The overlay itself is built by
+   /arcade.js; everything here is presentation for that structure, plus the
+   reduced-motion and high-contrast behaviour the accessibility widget drives
+   through data-a11y-* attributes on <html>.
+
+   Cache token: this file is referenced from index.html with the shared
+   ?v=gateway-N token, so bump that token when this file changes.
+   ========================================================================== */
+
+/* Sits above the accessibility widget (z-index 90/91), which this overlay
+   hides while it is open: a modal that leaves a floating control from the
+   page underneath it is neither modal nor navigable by keyboard. */
+.arcade-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  /* flex-start plus margin:auto, not align-items:center — a centred flex item
+     taller than its scroll container has its overflowing top clipped and
+     unreachable, which on a phone means the title scrolls away upward. */
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(0.75rem, 3vw, 2rem);
+  overflow-y: auto;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(216, 160, 62, 0.09), transparent 60%),
+    #05070d;
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.arcade-overlay[hidden] {
+  display: none;
+}
+
+/* Scanlines. Purely decorative, so they sit on a pseudo-element that
+   reduced motion and high contrast can switch off without touching layout. */
+.arcade-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.035) 0 1px,
+    transparent 1px 3px
+  );
+}
+
+.arcade-frame {
+  position: relative;
+  margin: auto;
+  width: min(100%, 880px);
+  border: 1px solid var(--rule);
+  background: rgba(9, 13, 24, 0.92);
+  padding: clamp(0.9rem, 2.5vw, 1.6rem);
+  display: grid;
+  gap: 1rem;
+}
+
+/* ---- header ------------------------------------------------------------- */
+
+.arcade-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 0.5rem 1rem;
+}
+
+.arcade-title {
+  grid-column: 1;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: clamp(0.95rem, 2.6vw, 1.25rem);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--brass-bright);
+}
+
+.arcade-status {
+  grid-column: 1;
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  min-height: 1.2em;
+}
+
+.arcade-close {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  background: none;
+  border: 1px solid var(--rule);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  padding: 0.5rem 0.7rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.arcade-close:hover,
+.arcade-back:hover,
+.arcade-again:hover {
+  border-color: var(--brass);
+  color: var(--brass-bright);
+}
+
+/* ---- boot log ----------------------------------------------------------- */
+
+.arcade-boot {
+  margin: 0;
+  min-height: 6.5em;
+  font-family: var(--font-mono);
+  font-size: clamp(0.6rem, 1.8vw, 0.72rem);
+  line-height: 1.65;
+  letter-spacing: 0.04em;
+  color: var(--verify);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.arcade-boot[hidden] {
+  display: none;
+}
+
+/* ---- cabinet select ----------------------------------------------------- */
+
+.arcade-select[hidden],
+.arcade-stage[hidden],
+.arcade-over[hidden] {
+  display: none;
+}
+
+.arcade-select-heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+}
+
+/* Four cabinets, so two rows of two rather than whatever auto-fit lands on —
+   a 3 + 1 shelf reads as one cabinet having been left over. */
+.arcade-cabinets {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+@media (min-width: 560px) {
+  .arcade-cabinets {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.arcade-cabinet {
+  display: grid;
+  gap: 0.35rem;
+  text-align: left;
+  padding: 0.9rem;
+  min-height: 96px;
+  background: linear-gradient(180deg, rgba(216, 160, 62, 0.07), transparent 70%);
+  border: 1px solid var(--rule);
+  color: var(--text);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.arcade-cabinet:hover {
+  border-color: var(--brass);
+  transform: translateY(-2px);
+}
+
+.arcade-cabinet-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--brass-bright);
+}
+
+.arcade-cabinet-tag {
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.arcade-cabinet-controls {
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+/* ---- stage -------------------------------------------------------------- */
+
+.arcade-stage {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.arcade-hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.arcade-hud-name {
+  color: var(--brass-bright);
+  font-weight: 600;
+}
+
+.arcade-canvas {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--rule);
+  background: #05070d;
+  /* The field is authored at 320x240 and scaled by whole numbers; smoothing
+     would turn deliberate blocks into mush. */
+  image-rendering: pixelated;
+  touch-action: none;
+}
+
+.arcade-stagefoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.arcade-hint {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.arcade-back,
+.arcade-again {
+  background: none;
+  border: 1px solid var(--rule);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  padding: 0.55rem 0.9rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.arcade-again {
+  border-color: var(--brass);
+  color: var(--brass-bright);
+}
+
+/* ---- game over + prop receipt ------------------------------------------- */
+
+.arcade-over {
+  display: grid;
+  gap: 0.9rem;
+  justify-items: start;
+}
+
+.arcade-over-heading {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.12em;
+  color: var(--brass-bright);
+}
+
+.arcade-over-score {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+/* Deliberately unlike the real receipt on /proof/: dashed, stamped, and
+   captioned as theatre. A fake artifact that could be mistaken for the real
+   one would undercut the only claim this site actually makes. */
+.arcade-receipt {
+  width: min(100%, 460px);
+  border: 1px dashed var(--rule);
+  background: rgba(248, 245, 236, 0.05);
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.arcade-receipt-stamp {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--danger);
+}
+
+.arcade-receipt-rows {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(84px, auto) 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.arcade-receipt-rows dt {
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+
+.arcade-receipt-rows dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.arcade-receipt-note {
+  margin: 0;
+  font-size: 0.66rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.arcade-over-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+/* ---- live region -------------------------------------------------------- */
+
+.arcade-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- focus -------------------------------------------------------------- */
+
+.arcade-overlay :focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- reduced motion ----------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .arcade-overlay::after {
+    display: none;
+  }
+
+  .arcade-cabinet {
+    transition: none;
+  }
+
+  .arcade-cabinet:hover {
+    transform: none;
+  }
+}
+
+html[data-a11y-motion="reduce"] .arcade-overlay::after {
+  display: none;
+}
+
+html[data-a11y-motion="reduce"] .arcade-cabinet {
+  transition: none;
+}
+
+html[data-a11y-motion="reduce"] .arcade-cabinet:hover {
+  transform: none;
+}
+
+/* ---- high contrast ------------------------------------------------------ */
+
+html[data-a11y-contrast="high"] .arcade-overlay {
+  background: #000000;
+}
+
+html[data-a11y-contrast="high"] .arcade-overlay::after {
+  display: none;
+}
+
+html[data-a11y-contrast="high"] .arcade-frame {
+  background: #000000;
+  border-color: var(--rule);
+}
+
+html[data-a11y-contrast="high"] .arcade-cabinet {
+  background: none;
+}
+
+/* ---- print --------------------------------------------------------------
+
+   Nobody should print the waiting room, and a print of the landing page must
+   not carry a game over it. */
+@media print {
+  .arcade-overlay {
+    display: none !important;
+  }
+}

@@ -41,7 +41,8 @@ Open `http://127.0.0.1:8765/`.
   composite's ground color lerps from pure black into the ledger ink.
   Hovering a governed-loop card or the booking CTA fires a pulse through
   the field. Reduced motion renders one still frame per field state;
-  high contrast hides the field entirely
+  high contrast hides the field entirely. The footer opens
+  [the waiting room](#the-waiting-room) (`/arcade.js`, `/arcade.css`)
 - `/proof/` — portable receipt, matching key snapshot, and offline command
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
 - `/concept/` — unlisted landing-page design study (noindex, absent from the
@@ -79,8 +80,9 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-6`. When you
-change any of those files (including `/wave.js`), bump the token in
+query token**: every reference looks like `/styles.css?v=gateway-7`. When you
+change any of those files (including `/wave.js`, `/arcade.js`, and
+`/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
 `404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or
 returning visitors
@@ -101,6 +103,46 @@ receipt ID, amount, or verification verdict. If either proof file is absent or
 does not contain the receipt's matching key, the page says the artifact is not
 published and makes no validity claim. Cryptographic validity comes only from
 the offline verifier.
+
+## The waiting room
+
+This product is built for agents. During the governed loop the human has
+nothing to do, so the landing page's footer offers a way to spend that time:
+`HUMANS: PRESS START` fades the page and opens a full-screen arcade with four
+cabinets — SCOPE CREEP, TOKEN BUCKET, APPEND-ONLY, and RACE CONDITION. The
+whole feature lives in `/arcade.js` and `/arcade.css`, loaded on `/` only.
+
+Rules it is built to:
+
+- **Generic by construction.** No arcade trademark, character, or company name
+  appears in either file. Every cabinet is named after a failure mode of this
+  product's own domain instead, and
+  `test_arcade_cabinets_are_generic_and_unbranded` fails the build if a brand
+  name is ever added.
+- **Fake receipts must look fake.** A run ends by issuing a prop receipt that
+  says `SIMULATED · NOT A REAL RECEIPT` in its own body and links to `/proof/`
+  for a real one. This site's only real claim is that a receipt is verifiable;
+  a convincing fake would undercut it, so
+  `test_arcade_receipts_are_marked_simulated` guards the disclaimer.
+- **Progressive enhancement.** The launcher ships with `hidden` and is revealed
+  only once `arcade.js` runs, so a visitor without JavaScript never sees a
+  control that does nothing.
+- **The particle field pauses.** Opening the arcade sets `display: none` on
+  `.wave-canvas`. `/wave.js` already unschedules its frame loop when an
+  `IntersectionObserver` reports that canvas out of view, so the renderer stops
+  on open and resumes on close without either file importing the other.
+- **Accessibility.** The overlay is a focus-trapped `role="dialog"` with
+  `aria-modal`, Escape closes it, focus returns to the launcher, and the page
+  behind it goes `inert`. Reduced motion drops the decorative parts — the boot
+  sequence prints at once and the scanlines and hover lifts are removed —
+  while gameplay motion stays, since entering is an explicit opt-in. High
+  contrast switches the cabinet palette rather than hiding the feature.
+
+`?arcade=<cabinet-id>` opens straight into a cabinet, and
+`window.__amwArcade` exposes `open`/`close`/`start`/`step`/`state` so headless
+checks can advance the simulation deterministically instead of racing a frame
+budget. Cabinet ids are `scope-creep`, `token-bucket`, `append-only`, and
+`race-condition`.
 
 ## Typography
 
