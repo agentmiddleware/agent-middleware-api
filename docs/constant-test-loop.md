@@ -50,6 +50,21 @@ python scripts/constant_test_loop.py \
   --tool-args '{"text": "constant test loop"}'
 ```
 
+Every flag has an environment equivalent, so a CI job can be configured
+entirely through secrets without putting anything in argv:
+
+| Flag | Environment variable |
+|---|---|
+| `--api-url` | `API_URL` |
+| `--tool` | `CI_SMOKE_TOOL` |
+| `--other-tool` | `CI_SMOKE_OTHER_TOOL` |
+| `--tool-args` | `CI_SMOKE_TOOL_ARGS` (a JSON object) |
+
+A flag beats the corresponding variable when both are set. A malformed
+`CI_SMOKE_TOOL_ARGS` — invalid JSON, or valid JSON that is not an object —
+exits 2 as a configuration error rather than 1, so a payload typo never
+looks like the trust plane failing.
+
 Set `CI_SMOKE_AGENT_KEY` for a pre-provisioned agent credential. Optionally provide `CI_SMOKE_WALLET_ID` and `CI_SMOKE_KEY_ID` for faster startup (the script will fetch them from the API if not provided):
 
 ```bash

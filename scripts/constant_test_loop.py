@@ -582,6 +582,41 @@ def _validate_api_url(url: str) -> str:
     return url
 
 
+def _resolve_tool_args(cli_value: str | None) -> dict | None:
+    """Resolve the governed tool's payload from the flag or the environment.
+
+    ``--tool`` and ``--other-tool`` already fall back to $CI_SMOKE_TOOL and
+    $CI_SMOKE_OTHER_TOOL. Without the same fallback here, a CI job could
+    configure everything the off-loopback guard demands *except* the payload,
+    and would have to reach for argv to supply the one remaining piece —
+    which for a secret-adjacent value is the wrong place.
+
+    Returns a dict or None. Anything unparseable is a ConfigurationError
+    (exit 2), never an invariant failure: a malformed payload means the loop
+    was configured wrong, not that the trust plane broke.
+    """
+    raw = cli_value
+    source = "--tool-args"
+    if raw is None:
+        raw = os.environ.get("CI_SMOKE_TOOL_ARGS", "").strip() or None
+        source = "$CI_SMOKE_TOOL_ARGS"
+    if raw is None:
+        return None
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ConfigurationError(f"{source} is not valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        # A list or scalar would be forwarded as the tool's arguments and
+        # rejected downstream as a tool error, which reads as the product
+        # failing rather than the payload being the wrong shape.
+        raise ConfigurationError(
+            f"{source} must be a JSON object, got {type(parsed).__name__}"
+        )
+    return parsed
+
+
 def _require_deliberate_production_target(
     api_url: str, args: argparse.Namespace
 ) -> None:
@@ -639,17 +674,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--tool-args",
-        type=json.loads,
         default=None,
         help=(
-            "JSON object of arguments for the governed tool. Required off "
-            "loopback so the payload is one you approved for repeated "
-            "invocation; pass '{}' if the tool needs none."
+            "JSON object of arguments for the governed tool, or set "
+            "$CI_SMOKE_TOOL_ARGS. Required off loopback so the payload is one "
+            "you approved for repeated invocation; pass '{}' if the tool "
+            "needs none."
         ),
     )
     args = parser.parse_args(argv)
 
     try:
+        # Resolved before the production guard reads args.tool_args, so an
+        # env-configured payload satisfies it exactly as the flag does.
+        args.tool_args = _resolve_tool_args(args.tool_args)
         # Validate API URL (applies to both --api-url and $API_URL)
         api_url = _validate_api_url(args.api_url or _get_api_url())
         _require_deliberate_production_target(api_url, args)
