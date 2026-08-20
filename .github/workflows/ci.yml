@@ -503,6 +503,109 @@ jobs:
       - name: Run the trust release gate
         run: scripts/trust_release_gate.sh
 
+  # Constant test loop: proves the local trust-plane loop (self-provision path).
+  # Runs on pull_request and push to main. Production smoke (api.thisisatest.tech)
+  # runs only on push to main when CI_SMOKE_AGENT_KEY is set.
+  constant_test_loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx
+
+      - name: Run local trust-plane constant test loop (self-provision)
+        # Always run: proves the local loop with self-provisioned credentials.
+        # Uses quickstart path with ephemeral SQLite and dev key self-provision.
+        # Registers two tools (dogfood + harmless second) to prove out-of-scope denial.
+        env:
+          ENABLE_DEV_KEY_SELF_PROVISION: "true"
+          TRUST_MODE_ENABLED: "true"
+          ALLOW_LEGACY_UNPERMITTED_MCP: "false"
+          ENABLE_PROOF_SURFACES: "false"
+          ENABLE_DOGFOOD_TOOL: "true"
+          ENABLE_DOGFOOD_SECOND_TOOL: "true"
+          TRUST_SIGNING_PRIVATE_KEY_B64: dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU=
+          DATABASE_URL: sqlite+aiosqlite:///./constant-test-loop.db
+          STATE_BACKEND: sqlite
+          SQLITE_URL: ./constant-test-loop-kv.db
+        run: |
+          # Boot server in background
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          SERVER_PID=$!
+          
+          # Wait for health endpoint
+          for i in {1..60}; do
+            if curl -f http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              echo "Server ready"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Server failed to start"
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 1
+          done
+          
+          # Run constant test loop (self-provision, no CI_SMOKE_AGENT_KEY)
+          python scripts/constant_test_loop.py
+          TEST_EXIT=$?
+          
+          # Clean up server
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          
+          exit $TEST_EXIT
+
+      - name: Run production constant test loop (api.thisisatest.tech)
+        # SECURITY: Only run on push to default branch (main), never on pull_request.
+        # A PR from the same repo can inject code into constant_test_loop.py that
+        # exfiltrates CI_SMOKE_AGENT_KEY. Push to main is trusted (requires review).
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          API_URL: https://api.thisisatest.tech
+          CI_SMOKE_AGENT_KEY: ${{ secrets.CI_SMOKE_AGENT_KEY }}
+          CI_SMOKE_WALLET_ID: ${{ secrets.CI_SMOKE_WALLET_ID }}
+          CI_SMOKE_KEY_ID: ${{ secrets.CI_SMOKE_KEY_ID }}
+          CI_SMOKE_TOOL: ${{ vars.CI_SMOKE_TOOL }}
+          CI_SMOKE_TOOL_ARGS: ${{ vars.CI_SMOKE_TOOL_ARGS }}
+        run: |
+          # Genuinely opt-in. A secret cannot be tested in a step-level "if",
+          # so the skip has to happen here. Both the credential and the tool
+          # must be configured: without the key the loop tries to
+          # self-provision against production, where that endpoint is
+          # disabled, so the run would fail rather than skip.
+          if [ -z "$CI_SMOKE_AGENT_KEY" ] || [ -z "$CI_SMOKE_TOOL" ]; then
+            echo "Skipping production smoke: set the CI_SMOKE_AGENT_KEY secret"
+            echo "and the CI_SMOKE_TOOL variable to enable it."
+            exit 0
+          fi
+
+          # --tool and --tool-args are both mandatory off loopback: which tool
+          # a monitor invokes on every push, and with what payload, is an
+          # operator's decision rather than one discovery makes for them. An
+          # empty payload is a valid answer but still has to be given.
+          TOOL_ARGS="$CI_SMOKE_TOOL_ARGS"
+          if [ -z "$TOOL_ARGS" ]; then
+            TOOL_ARGS='{}'
+          fi
+
+          python scripts/constant_test_loop.py \
+            --tool "$CI_SMOKE_TOOL" \
+            --tool-args "$TOOL_ARGS"
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15

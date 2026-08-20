@@ -387,6 +387,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         "simulation_modes": sim_modes,
         "enable_proof_surfaces": bool(settings.ENABLE_PROOF_SURFACES),
         "enable_dogfood_tool": bool(settings.ENABLE_DOGFOOD_TOOL),
+        "enable_dogfood_second_tool": bool(settings.ENABLE_DOGFOOD_SECOND_TOOL),
         "runtime_degradation": runtime_degradation,
         "metric_scopes": _METRIC_SCOPES,
         "unhealthy": unhealthy,

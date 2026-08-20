@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     # /mcp/tools.json is non-empty for permit→invoke→receipt dogfood.
     # Default false: no stub pollution. Independent of ENABLE_PROOF_SURFACES.
     ENABLE_DOGFOOD_TOOL: bool = False
+    
+    # --- Second dogfood tool (opt-in read-only partner.notes.count) ---
+    # When true, registers a second harmless read-only tool for CI to test
+    # out-of-scope denial (permit allows first tool, denies second).
+    # Default false: only enable in test/CI environments.
+    ENABLE_DOGFOOD_SECOND_TOOL: bool = False
 
     # --- Governed upstream MCP partner tool ---
     # One explicitly configured Streamable HTTP server/tool for the
