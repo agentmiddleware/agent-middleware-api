@@ -4,7 +4,7 @@ All settings are loaded from environment variables for zero-GUI deployment.
 """
 
 from decimal import Decimal
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -162,8 +162,27 @@ class Settings(BaseSettings):
     KYC_REQUIRED_FOR_TOPUP: bool = False
 
     # --- Credit Exchange Rate ---
-    # 1000 credits = $1.00 USD (1 credit = $0.001)
+    # Credits minted per $1.00 USD settled (1000 credits = $1.00, 1 credit =
+    # $0.001). This is the single source of truth: Stripe settlement mints
+    # credits at this rate and /v1/billing/pricing advertises it. Do not
+    # re-declare it as a module constant — a second copy silently lets the
+    # advertised rate drift from the rate real money converts at.
     EXCHANGE_RATE: Decimal = Decimal("1000.0")
+
+    @field_validator("EXCHANGE_RATE")
+    @classmethod
+    def _validate_exchange_rate(cls, value: Decimal) -> Decimal:
+        """Refuse a rate that cannot convert settled fiat into credits.
+
+        Credit issuance multiplies settled fiat by this rate, so a zero or
+        negative value converts a real payment into no credits (or negative
+        ones). Fail at construction rather than at the first settlement.
+        NaN and infinities need no check here: pydantic's Decimal parsing
+        rejects them before this runs.
+        """
+        if value <= 0:
+            raise ValueError("EXCHANGE_RATE must be a positive decimal")
+        return value
 
     # --- Notification Service ---
     RESEND_API_KEY: str = ""

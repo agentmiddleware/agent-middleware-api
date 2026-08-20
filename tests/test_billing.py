@@ -9,9 +9,11 @@ import pytest
 from datetime import timedelta
 from decimal import Decimal
 from httpx import AsyncClient, ASGITransport
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.main import app
+from app.core.config import Settings, get_settings
 from app.db.database import get_session_factory
 from app.db.models import LedgerEntryModel, WalletModel
 from app.services.agent_money import get_agent_money
@@ -693,12 +695,59 @@ async def test_pricing_table(client, api_headers):
     assert resp.status_code == 200
     data = resp.json()
     assert data["exchange_rate"] == 1000.0
+    assert data["exchange_rate_exact"] == "1000.0"
     assert len(data["pricing"]) >= 7  # At least one entry per service
     # Check structure
     entry = data["pricing"][0]
     assert "service_category" in entry
     assert "unit" in entry
     assert "credits_per_unit" in entry
+
+
+@pytest.mark.anyio
+async def test_pricing_table_advertises_configured_exchange_rate(
+    client, api_headers, monkeypatch
+):
+    """The advertised rate must follow settings.EXCHANGE_RATE, not a constant.
+
+    Stripe settlement mints credits at settings.EXCHANGE_RATE. A second
+    hardcoded copy behind this endpoint meant an operator who moved the rate
+    kept being quoted the old one — the endpoint advertised a conversion that
+    no payment actually used. A non-round value also pins the exactness
+    contract: exchange_rate_exact must carry the configured decimal rather than
+    binary-float noise from an early float() coercion.
+    """
+    monkeypatch.setenv("EXCHANGE_RATE", "1234.567")
+    get_settings.cache_clear()
+    try:
+        resp = await client.get("/v1/billing/pricing", headers=api_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["exchange_rate"] == pytest.approx(1234.567)
+        assert data["exchange_rate_exact"] == "1234.567"
+    finally:
+        monkeypatch.delenv("EXCHANGE_RATE", raising=False)
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("bad_rate", ["0", "-1000", "NaN", "Infinity"])
+def test_unusable_exchange_rate_is_refused_at_construction(monkeypatch, bad_rate):
+    """A rate that cannot mint credits must fail before any settlement.
+
+    Credit issuance multiplies settled fiat by this rate, so these values would
+    convert a real payment into no credits (or negative ones) at the moment
+    money arrives. Zero and negative are caught by the field validator;
+    non-finite values are already refused by pydantic's Decimal parsing. This
+    asserts the field contract rather than either layer individually.
+    """
+    monkeypatch.setenv("EXCHANGE_RATE", bad_rate)
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(ValidationError):
+            Settings()
+    finally:
+        monkeypatch.delenv("EXCHANGE_RATE", raising=False)
+        get_settings.cache_clear()
 
 
 # --- Arbitrage Report ---

@@ -9804,7 +9804,6 @@
           "status": {
             "type": "string",
             "enum": [
-              "Optimal",
               "HeuristicFallback",
               "Infeasible"
             ],

@@ -100,7 +100,6 @@ class BillingEngine:
         wallet_engine: WalletEngine,
         default_pricing: dict[ServiceCategory, tuple[str, Decimal, str]],
         compute_costs: dict[ServiceCategory, Decimal],
-        exchange_rate: Decimal,
         wallet_not_found_error: WalletNotFoundFactory,
         kyc_required_error: KYCRequiredFactory,
     ) -> None:
@@ -109,7 +108,6 @@ class BillingEngine:
         self._wallet_engine = wallet_engine
         self._default_pricing = default_pricing
         self._compute_costs = compute_costs
-        self._exchange_rate = exchange_rate
         self._wallet_not_found_error = wallet_not_found_error
         self._kyc_required_error = kyc_required_error
 

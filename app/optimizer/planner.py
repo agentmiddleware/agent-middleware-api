@@ -5,10 +5,13 @@ from typing import Any
 from app.optimizer.policy import get_risk_budget, is_admissible
 from app.schemas.optimizer import OptimizerRequest, OptimizerState
 
-try:
-    import pulp
-except Exception:  # pragma: no cover
-    pulp = None
+# Selection is a deterministic greedy heuristic. An optional PuLP/CBC MILP
+# branch used to sit in front of it, but `pulp` was never a declared
+# dependency, so the import always failed and the solver never ran. Declaring
+# it would add a solver capability the wedge has no customer evidence for
+# (WEDGE.md freezes the planner; docs/PROOF_SURFACES.md prefers deleting
+# unused scaffolding), so the dead branch is gone and this module now does
+# exactly what it has always done at runtime.
 
 
 def _score(action: dict[str, Any], lambdas: dict[str, float]) -> float:
@@ -143,71 +146,6 @@ def optimize_action_set(
         )
 
     max_actions = 5 if req.max_actions is None else req.max_actions
-
-    if pulp is not None:
-        try:
-            prob = pulp.LpProblem("AgentPlanner", pulp.LpMaximize)
-            x = {
-                i: pulp.LpVariable(f"x_{i}", cat="Binary")
-                for i in range(len(admissible))
-            }
-            prob += pulp.lpSum(
-                x[i] * _score(action, lambdas) for i, action in enumerate(admissible)
-            )
-            prob += (
-                pulp.lpSum(
-                    x[i] * action.get("credit_cost", 0.0)
-                    for i, action in enumerate(admissible)
-                )
-                <= state.remaining_budget
-            )
-            prob += (
-                pulp.lpSum(
-                    x[i] * action.get("latency_ms", 0.0)
-                    for i, action in enumerate(admissible)
-                )
-                <= state.slo_window_seconds * 1000
-            )
-            prob += (
-                pulp.lpSum(
-                    x[i] * action.get("risk_score", 0.0)
-                    for i, action in enumerate(admissible)
-                )
-                <= risk_budget
-            )
-            prob += pulp.lpSum(x[i] for i in range(len(admissible))) <= max_actions
-            status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
-            if pulp.LpStatus[status] == "Optimal":
-                selected = [
-                    admissible[i]
-                    for i in range(len(admissible))
-                    if x[i].value() and x[i].value() > 0.5
-                ]
-                constraint_rejected = _individual_constraint_rejections(
-                    admissible, selected, state, risk_budget
-                )
-                all_rejected = rejected + constraint_rejected
-                if selected:
-                    return _pack_response(
-                        "Optimal",
-                        selected,
-                        all_rejected,
-                        state,
-                        risk_budget,
-                        lambdas,
-                        _policy_reasons(all_rejected),
-                    )
-                return _pack_response(
-                    "Infeasible",
-                    [],
-                    all_rejected,
-                    state,
-                    risk_budget,
-                    lambdas,
-                    _policy_reasons(all_rejected),
-                )
-        except Exception:
-            pass
 
     selected = _greedy_heuristic(admissible, state, risk_budget, max_actions, lambdas)
     constraint_rejected = _individual_constraint_rejections(

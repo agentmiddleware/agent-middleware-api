@@ -30,7 +30,10 @@ class OptimizerRequest(BaseModel):
 
 
 class OptimizerResponse(BaseModel):
-    status: Literal["Optimal", "HeuristicFallback", "Infeasible"]
+    # "Optimal" was only reachable through a MILP branch that never ran (its
+    # solver was never a declared dependency). Selection is the deterministic
+    # greedy heuristic, so these are the two statuses the planner can emit.
+    status: Literal["HeuristicFallback", "Infeasible"]
     selected_actions: List[Dict]
     rejected_actions: List[Dict]
     policy_reasons: Dict[str, str]

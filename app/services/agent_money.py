@@ -33,7 +33,8 @@ settings = get_settings()
 # Pricing Table
 # ---------------------------------------------------------------------------
 
-# Credits per unit for each service. 1000 credits ≈ $1 USD.
+# Credits per unit for each service. Credits convert to fiat at
+# settings.EXCHANGE_RATE (1000 credits ≈ $1 USD by default).
 DEFAULT_PRICING: dict[ServiceCategory, tuple[str, Decimal, str]] = {
     ServiceCategory.IOT_BRIDGE: (
         "request",
@@ -113,8 +114,12 @@ COMPUTE_COSTS: dict[ServiceCategory, Decimal] = {
     ServiceCategory.RTAAS: Decimal("15.0"),
 }
 
-# Fiat → credits exchange rate
-EXCHANGE_RATE = Decimal("1000.0")
+
+# The fiat → credits exchange rate is NOT defined here. It lives solely on
+# settings.EXCHANGE_RATE, which Stripe settlement uses to mint credits. A
+# module constant here previously shadowed it, so an operator who set the env
+# var moved the rate money actually converted at while /v1/billing/pricing kept
+# advertising the hardcoded default. Read the setting at the point of use.
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +179,6 @@ class AgentMoney:
             wallet_engine=self._wallet_engine,
             default_pricing=DEFAULT_PRICING,
             compute_costs=COMPUTE_COSTS,
-            exchange_rate=EXCHANGE_RATE,
             wallet_not_found_error=WalletNotFoundError,
             kyc_required_error=KYCVerificationRequiredError,
         )

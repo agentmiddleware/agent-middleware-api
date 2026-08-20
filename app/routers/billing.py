@@ -16,11 +16,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core.auth import AuthContext, get_auth_context, verify_api_key
+from ..core.config import get_settings
 from ..core.dependencies import get_agent_money
 from ..services.agent_money import (
     AgentMoney,
     DEFAULT_PRICING,
-    EXCHANGE_RATE,
     InsufficientFundsError,
     WalletNotFoundError,
 )
@@ -1138,9 +1138,15 @@ async def get_pricing(
 ):
     from datetime import datetime, timezone
 
+    # Read the configured rate per request so the advertised conversion always
+    # matches the one Stripe settlement mints credits at. The exact field is
+    # derived from the Decimal rather than from the float, so a non-round rate
+    # is advertised without binary-float noise.
+    exchange_rate = get_settings().EXCHANGE_RATE
     return PricingTableResponse(
         pricing=money.get_pricing_table(),
-        exchange_rate=float(EXCHANGE_RATE),
+        exchange_rate=float(exchange_rate),
+        exchange_rate_exact=str(exchange_rate),
         last_updated=datetime.now(timezone.utc),
     )
 
