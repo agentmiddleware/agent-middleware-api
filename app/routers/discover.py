@@ -278,112 +278,32 @@ def _build_capabilities() -> list[ServiceCapability]:
 
 
 def _build_mcp_tools() -> list[MCPToolInfo]:
-    """Build the list of available MCP tools for the discover catalog.
+    """Build the list of available MCP tools from the actual registry.
 
-    When proof surfaces are off, return an empty catalog and point agents at
-    ``/mcp/tools.json`` (ops-registered / dogfood tools only).
+    Returns the same tools as ``/mcp/tools.json`` to ensure discovery consistency.
+    When proof surfaces are off, returns only registered tools (dogfood/partner).
+    When on, includes proof-surface stubs plus any registered tools.
     """
-    if not get_settings().ENABLE_PROOF_SURFACES:
-        return []
+    from ..routers.mcp import _ensure_local_mcp_tools_registered
+    from ..services.service_registry import get_service_registry
 
-    return [
-        MCPToolInfo(
-            service_id="telemetry",
-            name="emit_telemetry_event",
-            description="Emit a telemetry event with custom properties",
-            category="observability",
-            credits_per_call=1.0,
-            unit_name="event",
-        ),
-        MCPToolInfo(
-            service_id="billing",
-            name="charge_wallet",
-            description="Deduct credits from a wallet",
-            category="financial",
-            credits_per_call=1.0,
-            unit_name="transaction",
-        ),
-        MCPToolInfo(
-            service_id="comms",
-            name="send_agent_message",
-            description="Send a message to another agent",
-            category="communication",
-            credits_per_call=1.0,
-            unit_name="message",
-        ),
-        MCPToolInfo(
-            service_id="ai",
-            name="decide",
-            description="Use AI to make autonomous decisions",
-            category="intelligence",
-            credits_per_call=10.0,
-            unit_name="decision",
-        ),
-        MCPToolInfo(
-            service_id="ai",
-            name="heal",
-            description="AI-powered self-healing diagnostics",
-            category="intelligence",
-            credits_per_call=15.0,
-            unit_name="diagnosis",
-        ),
-        MCPToolInfo(
-            service_id="awi",
-            name="create_session",
-            description="Create an AWI session for web automation",
-            category="automation",
-            credits_per_call=5.0,
-            unit_name="session",
-        ),
-        MCPToolInfo(
-            service_id="passkey",
-            name="create_passkey_challenge",
-            description="Create WebAuthn challenge for high-risk action verification (checkout, payment, etc.)",
-            category="security",
-            credits_per_call=2.0,
-            unit_name="challenge",
-        ),
-        MCPToolInfo(
-            service_id="passkey",
-            name="verify_passkey",
-            description="Verify WebAuthn credential response from biometric authentication",
-            category="security",
-            credits_per_call=1.0,
-            unit_name="verification",
-        ),
-        MCPToolInfo(
-            service_id="dom_bridge",
-            name="create_dom_session",
-            description="Create browser session for DOM automation via Playwright",
-            category="automation",
-            credits_per_call=5.0,
-            unit_name="session",
-        ),
-        MCPToolInfo(
-            service_id="dom_bridge",
-            name="sync_dom_action",
-            description="Execute AWI action via real browser DOM",
-            category="automation",
-            credits_per_call=3.0,
-            unit_name="action",
-        ),
-        MCPToolInfo(
-            service_id="rag_memory",
-            name="query_memories",
-            description="Semantic search over past AWI session memories",
-            category="intelligence",
-            credits_per_call=2.0,
-            unit_name="query",
-        ),
-        MCPToolInfo(
-            service_id="rag_memory",
-            name="get_session_context",
-            description="Get relevant context from past sessions for current session",
-            category="intelligence",
-            credits_per_call=2.0,
-            unit_name="context",
-        ),
-    ]
+    _ensure_local_mcp_tools_registered()
+    registry = get_service_registry()
+    tools = []
+    
+    for service in registry._local_registry.values():
+        tools.append(
+            MCPToolInfo(
+                service_id=service["service_id"],
+                name=service["service_id"],
+                description=service.get("description", ""),
+                category=service.get("category", "unknown"),
+                credits_per_call=service.get("credits_per_unit", 1.0),
+                unit_name=service.get("unit_name", "call"),
+            )
+        )
+    
+    return tools
 
 
 def _build_awi_endpoints() -> list[AWIEndpoint]:
@@ -542,6 +462,10 @@ async def get_discovery_manifest():
     Prefer `GET /.well-known/agent.json` first for `agent_first` metadata, then
     this payload for a fuller catalog when needed.
     """
+    # Ensure local tools are registered (lazy registration, respects flags)
+    from ..routers.mcp import _ensure_local_mcp_tools_registered
+    _ensure_local_mcp_tools_registered()
+    
     return DiscoveryManifest(
         name=settings.APP_NAME,
         version=settings.APP_VERSION,
@@ -572,9 +496,14 @@ async def list_mcp_tools(api_key: str = Depends(verify_api_key)):
     Tools are returned with full schema definitions suitable for
     direct use with MCP clients.
     """
+    # Ensure local tools are registered (lazy registration, respects flags)
+    from ..routers.mcp import _ensure_local_mcp_tools_registered
+    _ensure_local_mcp_tools_registered()
+    
+    tools = _build_mcp_tools()
     return {
-        "tools": _build_mcp_tools(),
-        "total": len(_build_mcp_tools()),
+        "tools": tools,
+        "total": len(tools),
         "mcp_endpoint": "/mcp",
         "mcp_tools_json": "/mcp/tools.json",
     }

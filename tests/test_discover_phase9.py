@@ -108,21 +108,32 @@ class TestDiscoverEndpoint:
             assert by_name[name].surface == "product"
 
     def test_discover_has_phase9_mcp_tools(self):
-        """Verify discover endpoint includes Phase 9 MCP tools."""
+        """Verify discover endpoint includes Phase 9 MCP tools when proof surfaces enabled."""
+        import os
+
         from app.routers.discover import _build_mcp_tools
 
-        tools = _build_mcp_tools()
-        tool_names = [t.name for t in tools]
+        os.environ["ENABLE_PROOF_SURFACES"] = "true"
+        try:
+            from app.core.config import get_settings
 
-        phase9_tools = [
-            "create_passkey_challenge",
-            "verify_passkey",
-            "create_dom_session",
-            "sync_dom_action",
-            "query_memories",
-        ]
-        for tool in phase9_tools:
-            assert tool in tool_names, f"Missing Phase 9 MCP tool: {tool}"
+            get_settings.cache_clear()
+            tools = _build_mcp_tools()
+            tool_names = [t.name for t in tools]
+
+            # These are the service_id-based names used by the registry
+            phase9_tools = [
+                "awi_passkey_challenge",
+                "awi_passkey_verify",
+                "awi_dom_bridge_session",
+                "awi_dom_sync",
+                "awi_rag_query",
+            ]
+            for tool in phase9_tools:
+                assert tool in tool_names, f"Missing Phase 9 MCP tool: {tool}"
+        finally:
+            del os.environ["ENABLE_PROOF_SURFACES"]
+            get_settings.cache_clear()
 
     def test_discover_has_phase9_awi_endpoints(self):
         """Verify discover endpoint includes Phase 9 AWI endpoints."""
