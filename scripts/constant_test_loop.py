@@ -433,6 +433,9 @@ def run_constant_test(
         permit = resp.json()
         permit_id = permit["permit_id"]
         print(f"[constant-test] permit_id={permit_id}", file=sys.stderr)
+        
+        # Track initial spent_credits (should be 0 for new permit)
+        initial_spent = Decimal(str(permit.get("spent_credits", "0")))
 
         # Invoke the governed tool (unique idempotency key per run)
         invoke_idempotency_key = f"constant-test-invoke-{run_id}"
@@ -483,6 +486,21 @@ def run_constant_test(
         )
         print(
             "[constant-test] signature OK: receipt signature verified",
+            file=sys.stderr,
+        )
+
+        # Verify permit spent_credits increased
+        print("[constant-test] verifying permit spent_credits", file=sys.stderr)
+        permit_after = _get_json(
+            client, f"/v1/permits/{permit_id}", expected_status=200
+        )
+        spent_after = Decimal(str(permit_after["spent_credits"]))
+        require(
+            spent_after == initial_spent + charged,
+            f"permit spent_credits {spent_after} != initial {initial_spent} + charged {charged}",
+        )
+        print(
+            f"[constant-test] permit budget OK: spent_credits increased by {charged}",
             file=sys.stderr,
         )
 
