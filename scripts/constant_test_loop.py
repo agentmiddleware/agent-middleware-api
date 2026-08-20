@@ -464,6 +464,10 @@ def run_constant_test(
             receipt["ledger_entry_id"] is not None,
             "success receipt missing ledger entry",
         )
+        require(
+            receipt["permit_id"] == permit_id,
+            f"receipt permit_id {receipt.get('permit_id')} != used permit {permit_id}",
+        )
         charged = Decimal(str(receipt["credits_charged"]))
         require(charged > 0, f"success charged {charged} credits (expected > 0)")
         print(
@@ -580,6 +584,10 @@ def run_constant_test(
             require(
                 denial_receipt["outcome"] == "denied",
                 "denial receipt outcome != denied",
+            )
+            require(
+                denial_receipt["permit_id"] == permit_id,
+                f"denial receipt permit_id {denial_receipt.get('permit_id')} != used permit {permit_id}",
             )
             denial_charged = Decimal(str(denial_receipt["credits_charged"]))
             require(
