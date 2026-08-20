@@ -82,7 +82,15 @@ def provision(
     key_name: str,
     sponsor_wallet_id: str | None,
     agent_wallet_id: str | None,
+    json_mode: bool = False,
 ) -> dict[str, Any]:
+    """Provision sponsor → agent → key via bootstrap/admin key.
+    
+    Args:
+        json_mode: If True, print only machine-readable status to stderr (never
+            the api_key or bootstrap_key). Human text goes to stderr so
+            `jq -r .api_key` works on stdout JSON output.
+    """
     base = _require_safe_api_url(api_url)
     headers = {
         "X-API-Key": bootstrap_key,
@@ -148,15 +156,11 @@ def provision(
             "api_url": base,
             "sponsor_wallet_id": sponsor_wallet_id,
             "agent_wallet_id": agent_wallet_id,
+            "wallet_id": agent_wallet_id,  # Documented field name (agent_wallet_id kept for compat)
             "agent_id": agent_id,
             "key_id": key.get("key_id"),
             "key_prefix": key.get("key_prefix"),
             "api_key": api_key,
-            "note": (
-                "Store api_key securely. Bootstrap key must not be shared "
-                "with the partner agent. On partial failure, re-run with "
-                "--sponsor-wallet-id / --agent-wallet-id to resume."
-            ),
         }
 
 
@@ -212,11 +216,15 @@ def main() -> int:
         key_name=args.key_name,
         sponsor_wallet_id=args.sponsor_wallet_id,
         agent_wallet_id=args.agent_wallet_id,
+        json_mode=args.json,
     )
 
     if args.json:
+        # Machine-readable: JSON to stdout, all status to stderr.
+        # Never print bootstrap_key. This lets `jq -r .api_key` work.
         print(json.dumps(result, indent=2))
     else:
+        # Human-readable summary to stdout (legacy behavior).
         print("Partner API key bootstrap OK")
         print(f"  api_url:            {result['api_url']}")
         print(f"  sponsor_wallet_id:  {result['sponsor_wallet_id']}")
@@ -224,7 +232,6 @@ def main() -> int:
         print(f"  key_id:             {result['key_id']}")
         print(f"  key_prefix:         {result['key_prefix']}")
         print(f"  api_key (once):     {result['api_key']}")
-        print(f"  note:               {result['note']}")
     return 0
 
 
