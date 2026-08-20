@@ -80,6 +80,8 @@ settlement or compliance claims.
 ## Humans and operators
 
 https://www.thisisatest.tech/
+https://www.thisisatest.tech/proof/ (download a receipt and verify it offline)
+https://www.thisisatest.tech/compare/ (named alternatives, including the rows this loses)
 https://github.com/PetrefiedThunder/agent-middleware-api (private — access on request)
 
 ## Longer machine brief

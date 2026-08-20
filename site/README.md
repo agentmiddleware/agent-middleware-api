@@ -65,6 +65,26 @@ Open `http://127.0.0.1:8765/`.
 `security.txt` never serves a lapsed `Expires`. Plain-text targets take the raw
 contact value; HTML and XML targets take the entity-escaped one.
 
+## Structured data
+
+Each indexable page publishes exactly one `application/ld+json` block holding a
+`@graph`. One block per page is the point: separate blocks cannot reference one
+another's nodes, and the subpages resolve the shared `#organization`,
+`#website`, `#software`, and `#logo` definitions the homepage declares rather
+than restating them and drifting. Nothing declares an offer, price, or rating,
+because this stage of the product has none.
+
+`/compare/` carries `@@FAQ_JSONLD@@` instead of a hand-written `FAQPage` node.
+`build_site.py` generates that node from the page's own
+`<dl class="faq-list">`, so the marked-up answers are by construction the
+answers a reader sees — the mismatch Google's FAQ guidance forbids cannot be
+introduced by editing one and forgetting the other. A page that carries the
+token without a populated, balanced FAQ list fails the build.
+
+Contact tokens are deliberately absent from every JSON-LD block: they are
+entity-escaped for HTML targets, and entity escapes are not decoded inside a
+`<script>`, so a contact value containing `&` or `"` would publish corrupted.
+
 ## Response headers and caching
 
 `vercel.json` sends a `Content-Security-Policy` with `script-src 'self'` and no

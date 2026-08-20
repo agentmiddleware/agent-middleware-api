@@ -11,8 +11,37 @@
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b1120" />
     <link rel="canonical" href="https://www.thisisatest.tech/proof/" />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://www.thisisatest.tech/proof/"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://www.thisisatest.tech/proof/"
+    />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="alternate"
+      type="application/json"
+      title="Agent manifest"
+      href="/.well-known/agent.json"
+    />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="Instructions for autonomous agents"
+      href="/llms.txt"
+    />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="Extended briefing for autonomous agents"
+      href="/llms-full.txt"
+    />
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="Agent Middleware API" />
     <meta property="og:title" content="Verify an agent-action receipt yourself" />
     <meta
@@ -43,15 +72,88 @@
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "WebPage",
-        "name": "Verify an agent-action receipt yourself",
-        "url": "https://www.thisisatest.tech/proof/",
-        "description": "Download a portable Agent Middleware API receipt and verify its Ed25519 signature offline.",
-        "isPartOf": {
-          "@type": "WebSite",
-          "name": "Agent Middleware API",
-          "url": "https://www.thisisatest.tech/"
-        }
+        "@graph": [
+          {
+            "@type": "WebPage",
+            "@id": "https://www.thisisatest.tech/proof/#webpage",
+            "name": "Verify an agent-action receipt yourself",
+            "url": "https://www.thisisatest.tech/proof/",
+            "description": "Download a portable Agent Middleware API receipt and verify its Ed25519 signature offline.",
+            "inLanguage": "en",
+            "isPartOf": { "@id": "https://www.thisisatest.tech/#website" },
+            "about": { "@id": "https://www.thisisatest.tech/#software" },
+            "primaryImageOfPage": { "@id": "https://www.thisisatest.tech/#logo" },
+            "breadcrumb": {
+              "@id": "https://www.thisisatest.tech/proof/#breadcrumb"
+            },
+            "mainEntity": { "@id": "https://www.thisisatest.tech/proof/#howto" }
+          },
+          {
+            "@type": "BreadcrumbList",
+            "@id": "https://www.thisisatest.tech/proof/#breadcrumb",
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Agent Middleware API",
+                "item": "https://www.thisisatest.tech/"
+              },
+              {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Verify this receipt",
+                "item": "https://www.thisisatest.tech/proof/"
+              }
+            ]
+          },
+          {
+            "@type": "HowTo",
+            "@id": "https://www.thisisatest.tech/proof/#howto",
+            "name": "Verify an agent-action receipt offline",
+            "description": "Check an Ed25519-signed Agent Middleware API receipt against a published key snapshot with networking disabled. Exit 0 means verified, 1 means the signature is invalid, and 2 means the verifier cannot determine.",
+            "inLanguage": "en",
+            "totalTime": "PT5M",
+            "tool": [
+              { "@type": "HowToTool", "name": "Python 3.11 or newer" },
+              { "@type": "HowToTool", "name": "git" }
+            ],
+            "supply": [
+              {
+                "@type": "HowToSupply",
+                "name": "receipt.json",
+                "url": "https://www.thisisatest.tech/proof/receipt.json"
+              },
+              {
+                "@type": "HowToSupply",
+                "name": "trust-keys.json",
+                "url": "https://www.thisisatest.tech/proof/trust-keys.json"
+              }
+            ],
+            "step": [
+              {
+                "@type": "HowToStep",
+                "position": 1,
+                "name": "Download the signed bundle and the key snapshot",
+                "text": "Save receipt.json and trust-keys.json from this page. Both stay downloadable by anyone, with no credentials.",
+                "url": "https://www.thisisatest.tech/proof/#artifact-title"
+              },
+              {
+                "@type": "HowToStep",
+                "position": 2,
+                "name": "Install the verifier",
+                "text": "Clone the source repository, which is private during the design-partner phase and available on request, then install the b2a SDK with its verify extra.",
+                "url": "https://www.thisisatest.tech/proof/#verify-title"
+              },
+              {
+                "@type": "HowToStep",
+                "position": 3,
+                "name": "Verify the signed bytes with networking disabled",
+                "text": "Run b2a-verify-receipt with the bundle, the key snapshot, and the expected issuer. Exit 0 proves the receipt matches the supplied key snapshot; it does not independently authenticate who supplied that snapshot, so pin the key through a trusted channel first.",
+                "url": "https://www.thisisatest.tech/proof/#verify-title"
+              }
+            ]
+          }
+        ]
       }
     </script>
     @@FONT_PRELOADS@@

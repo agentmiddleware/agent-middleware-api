@@ -24,6 +24,7 @@ import shutil
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -46,6 +47,7 @@ ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
 ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-7"></script>
     <script defer src="/_vercel/insights/script.js"></script>"""
 BUILD_DATE_TOKEN = "@@BUILD_DATE@@"
+FAQ_JSONLD_TOKEN = "@@FAQ_JSONLD@@"
 SECURITY_TXT_EXPIRES_TOKEN = "@@SECURITY_TXT_EXPIRES@@"
 # security.txt must carry a future Expires (RFC 9116 §2.5.5). Regenerating it
 # one year out on every build means a deployed site never serves a lapsed file.
@@ -345,6 +347,101 @@ def font_preload_tags() -> str:
     ).lstrip()
 
 
+class _FaqListParser(HTMLParser):
+    """Read the question/answer pairs out of a page's ``<dl class="faq-list">``.
+
+    Google's FAQPage guidance is that the marked-up answer must be the answer
+    the reader sees. Hand-maintained JSON-LD drifts from the prose the first
+    time someone edits one and not the other, so the structured data is
+    generated from the very markup it describes and cannot disagree with it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_list = False
+        self._depth = 0
+        self._collecting: str | None = None
+        self._parts: list[str] = []
+        self.questions: list[str] = []
+        self.answers: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attributes = dict(attrs)
+        if tag == "dl" and "faq-list" in (attributes.get("class") or "").split():
+            self._in_list = True
+            self._depth = 0
+            return
+        if not self._in_list:
+            return
+        if tag == "dl":
+            self._depth += 1
+        elif tag in {"dt", "dd"} and self._depth == 0:
+            self._collecting = tag
+            self._parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._in_list:
+            return
+        if tag == "dl":
+            if self._depth == 0:
+                self._in_list = False
+            else:
+                self._depth -= 1
+            return
+        if tag == self._collecting and self._depth == 0:
+            # Concatenated, not space-joined: the source already carries the
+            # whitespace around inline markup, so joining with spaces would
+            # publish "terminal outcome , and" wherever an <em> meets a comma.
+            text = " ".join("".join(self._parts).split())
+            (self.questions if tag == "dt" else self.answers).append(text)
+            self._collecting = None
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._collecting is not None:
+            self._parts.append(data)
+
+
+def faq_jsonld(markup: str, *, indent: str = " " * 10) -> str:
+    """Render the FAQPage node for a page from its own visible Q&A markup."""
+
+    parser = _FaqListParser()
+    parser.feed(markup)
+    parser.close()
+    questions, answers = parser.questions, parser.answers
+    if not questions:
+        raise LaunchConfigurationError(
+            "a page requests FAQ structured data but publishes no "
+            '<dl class="faq-list"> to build it from'
+        )
+    if len(questions) != len(answers):
+        raise LaunchConfigurationError(
+            f"FAQ markup is unbalanced: {len(questions)} questions, "
+            f"{len(answers)} answers"
+        )
+    empty = [question for question, answer in zip(questions, answers) if not answer]
+    if empty:
+        raise LaunchConfigurationError(
+            "FAQ answers must not be empty: " + "; ".join(empty)
+        )
+    node = {
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": question,
+                "acceptedAnswer": {"@type": "Answer", "text": answer},
+            }
+            for question, answer in zip(questions, answers)
+        ],
+    }
+    body = json.dumps(node, indent=2, ensure_ascii=False)
+    # Re-indent so the node sits inside the surrounding @graph array rather
+    # than flush against the left margin.
+    first, *rest = body.split("\n")
+    return "\n".join([first, *(indent + line for line in rest)])
+
+
 def _validated_output_path(output: Path) -> Path:
     """Resolve a build target without authorizing deletion of existing data."""
 
@@ -426,6 +523,8 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
         if relative_path.endswith(".html"):
             rendered = rendered.replace(FONT_PRELOAD_TOKEN, font_preload_tags())
             rendered = rendered.replace(FONTS_CSS_VERSION_TOKEN, fonts_css_version())
+            if FAQ_JSONLD_TOKEN in rendered:
+                rendered = rendered.replace(FAQ_JSONLD_TOKEN, faq_jsonld(rendered))
         replacements = (
             markup_replacements
             if relative_path.endswith((".html", ".xml"))

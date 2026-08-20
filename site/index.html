@@ -11,8 +11,18 @@
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b1120" />
     <link rel="canonical" href="https://www.thisisatest.tech/" />
+    <!-- One language, stated rather than guessed: hreflang plus x-default keeps
+         a search engine from inventing a regional variant of a single-locale
+         site. -->
+    <link rel="alternate" hreflang="en" href="https://www.thisisatest.tech/" />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://www.thisisatest.tech/"
+    />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="Agent Middleware API" />
     <meta
       property="og:title"
@@ -46,13 +56,83 @@
       name="twitter:image"
       content="https://www.thisisatest.tech/social-card.png"
     />
+    <!-- One @graph per page rather than several disconnected blocks: the
+         organization, site, page, and product nodes carry stable @ids, so the
+         subpages reference these definitions instead of restating them and
+         drifting. No offers, prices, or ratings are declared, because none
+         exist to declare. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "WebSite",
-        "name": "Agent Middleware API",
-        "url": "https://www.thisisatest.tech/",
-        "description": "Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://www.thisisatest.tech/#organization",
+            "name": "Agent Middleware API",
+            "url": "https://www.thisisatest.tech/",
+            "description": "A single accountable operator running a governed trust plane for agent-to-tool actions.",
+            "logo": {
+              "@type": "ImageObject",
+              "@id": "https://www.thisisatest.tech/#logo",
+              "url": "https://www.thisisatest.tech/social-card.png",
+              "contentUrl": "https://www.thisisatest.tech/social-card.png",
+              "width": 1200,
+              "height": 630,
+              "caption": "Agent Middleware API"
+            },
+            "image": { "@id": "https://www.thisisatest.tech/#logo" },
+            "knowsLanguage": "en"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://www.thisisatest.tech/#website",
+            "name": "Agent Middleware API",
+            "url": "https://www.thisisatest.tech/",
+            "description": "Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt.",
+            "inLanguage": "en",
+            "publisher": { "@id": "https://www.thisisatest.tech/#organization" }
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://www.thisisatest.tech/#software",
+            "name": "Agent Middleware API",
+            "applicationCategory": "DeveloperApplication",
+            "applicationSubCategory": "Agent authorization, metering, and receipt middleware",
+            "operatingSystem": "Linux, macOS, Windows (Docker or Python 3.11+)",
+            "url": "https://www.thisisatest.tech/",
+            "description": "Middleware that authorizes one agent action against a scoped permit, dispatches it once per idempotency key, meters the call, and issues an Ed25519-signed receipt anyone can verify offline.",
+            "featureList": [
+              "Scoped permits that constrain a single agent action before it is dispatched",
+              "One dispatch and one debit per accepted idempotency key, including on retry",
+              "Per-call metering bound to the authorization decision",
+              "Ed25519-signed receipts for allowed, denied, failed, and uncertain outcomes",
+              "Offline receipt verification against a published key snapshot",
+              "Append-only audit trail for the authorize-to-evidence loop"
+            ],
+            "keywords": "MCP gateway, agent authorization, tool-call metering, signed receipts, idempotency, exactly-once dispatch, agent governance",
+            "publisher": { "@id": "https://www.thisisatest.tech/#organization" },
+            "softwareHelp": {
+              "@type": "CreativeWork",
+              "url": "https://www.thisisatest.tech/proof/",
+              "name": "Verify an agent-action receipt yourself"
+            }
+          },
+          {
+            "@type": "WebPage",
+            "@id": "https://www.thisisatest.tech/#webpage",
+            "url": "https://www.thisisatest.tech/",
+            "name": "Authorize one agent action. Charge it once. Prove what happened.",
+            "description": "Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt.",
+            "inLanguage": "en",
+            "isPartOf": { "@id": "https://www.thisisatest.tech/#website" },
+            "about": { "@id": "https://www.thisisatest.tech/#software" },
+            "primaryImageOfPage": { "@id": "https://www.thisisatest.tech/#logo" },
+            "significantLink": [
+              "https://www.thisisatest.tech/proof/",
+              "https://www.thisisatest.tech/compare/"
+            ]
+          }
+        ]
       }
     </script>
     <link
@@ -66,6 +146,12 @@
       type="text/plain"
       title="Instructions for autonomous agents"
       href="/llms.txt"
+    />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="Extended briefing for autonomous agents"
+      href="/llms-full.txt"
     />
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />

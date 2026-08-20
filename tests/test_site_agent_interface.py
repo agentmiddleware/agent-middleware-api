@@ -49,6 +49,41 @@ class _TextExtractor(HTMLParser):
             self.parts.append(" ".join(data.split()))
 
 
+class _RunTogetherExtractor(_TextExtractor):
+    """Text as a reader sees it: chunks concatenated, whitespace collapsed.
+
+    ``<script>`` and ``<style>`` bodies are dropped. ``HTMLParser`` reports
+    them through ``handle_data`` like any other text, so a check that FAQ
+    answers appear "on the page" would otherwise be satisfied by the JSON-LD
+    block that contains those very answers — a test that can never fail.
+    """
+
+    _OPAQUE = frozenset({"script", "style"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._suppressed = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in self._OPAQUE:
+            self._suppressed += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._OPAQUE and self._suppressed:
+            self._suppressed -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._suppressed:
+            self.parts.append(data)
+
+
+def _visible_text(markup: str) -> str:
+    parser = _RunTogetherExtractor()
+    parser.feed(markup)
+    parser.close()
+    return " ".join("".join(parser.parts).split())
+
+
 def _page_text(markup: str) -> str:
     parser = _TextExtractor()
     parser.feed(markup)
@@ -564,27 +599,237 @@ class _JsonLdCollector(HTMLParser):
             self.payloads.append(data)
 
 
+INDEXABLE_PAGES = {
+    "index.html": "https://www.thisisatest.tech/",
+    "proof/index.html": "https://www.thisisatest.tech/proof/",
+    "compare/index.html": "https://www.thisisatest.tech/compare/",
+}
+
+
+def _json_ld_graph(markup: str, relative_path: str) -> list[dict]:
+    """Return the single JSON-LD graph a page publishes.
+
+    One block per page is a contract, not a coincidence: separate blocks cannot
+    reference each other's nodes, which is exactly what the shared
+    organization/site/product ``@id``s rely on.
+    """
+
+    collector = _JsonLdCollector()
+    collector.feed(markup)
+    collector.close()
+    assert len(collector.payloads) == 1, (
+        f"{relative_path} must publish exactly one JSON-LD block, found "
+        f"{len(collector.payloads)}"
+    )
+    document = json.loads(collector.payloads[0])
+    assert document["@context"] == "https://schema.org"
+    nodes = document["@graph"]
+    assert isinstance(nodes, list) and nodes, f"{relative_path} graph is empty"
+    return nodes
+
+
+def _defined_ids(value) -> set[str]:
+    """Collect every ``@id`` the graph *defines* rather than merely points at.
+
+    A definition is any object carrying an ``@id`` alongside other properties,
+    at any depth — the homepage defines its logo inline inside the organization
+    node, and the subpages still reference it by id.
+    """
+
+    if isinstance(value, dict):
+        found = set().union(*(_defined_ids(item) for item in value.values()), set())
+        if "@id" in value and len(value) > 1:
+            found.add(value["@id"])
+        return found
+    if isinstance(value, list):
+        return set().union(*(_defined_ids(item) for item in value), set())
+    return set()
+
+
+def _referenced_ids(value) -> set[str]:
+    """Collect every ``{"@id": ...}`` reference reachable from a graph node."""
+
+    if isinstance(value, dict):
+        if set(value) == {"@id"}:
+            return {value["@id"]}
+        return set().union(*(_referenced_ids(item) for item in value.values()), set())
+    if isinstance(value, list):
+        return set().union(*(_referenced_ids(item) for item in value), set())
+    return set()
+
+
 def test_pages_publish_valid_json_ld(tmp_path) -> None:
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
 
-    expected = {
-        "index.html": ("WebSite", "https://www.thisisatest.tech/"),
-        "proof/index.html": ("WebPage", "https://www.thisisatest.tech/proof/"),
-        "compare/index.html": ("WebPage", "https://www.thisisatest.tech/compare/"),
+    required_types = {
+        "index.html": {"Organization", "WebSite", "SoftwareApplication", "WebPage"},
+        "proof/index.html": {"WebPage", "BreadcrumbList", "HowTo"},
+        "compare/index.html": {"WebPage", "BreadcrumbList", "FAQPage"},
     }
-    for relative_path, (schema_type, url) in expected.items():
-        collector = _JsonLdCollector()
-        collector.feed((output / relative_path).read_text(encoding="utf-8"))
-        collector.close()
-        assert len(collector.payloads) == 1, f"{relative_path} JSON-LD missing"
-        document = json.loads(collector.payloads[0])
-        assert document["@context"] == "https://schema.org"
-        assert document["@type"] == schema_type
-        assert document["url"] == url
-        assert document["name"]
-        assert document["description"]
+    defined: set[str] = set()
+    referenced: set[str] = set()
+
+    for relative_path, url in INDEXABLE_PAGES.items():
+        nodes = _json_ld_graph(
+            (output / relative_path).read_text(encoding="utf-8"), relative_path
+        )
+        types = {node["@type"] for node in nodes}
+        assert required_types[relative_path] <= types, (
+            f"{relative_path} graph is missing "
+            f"{sorted(required_types[relative_path] - types)}"
+        )
+        defined |= _defined_ids(nodes)
+        referenced |= _referenced_ids(nodes)
+
+        page_nodes = [node for node in nodes if node["@type"] == "WebPage"]
+        assert len(page_nodes) == 1, f"{relative_path} declares several WebPages"
+        page = page_nodes[0]
+        assert page["url"] == url
+        assert page["name"] and page["description"]
+        assert page["inLanguage"] == "en"
+
+        for node in nodes:
+            # A structured-data node that names a price, an offer, or a rating
+            # would be inventing one: this is a design-partner product with no
+            # public pricing and no reviews.
+            assert not {"offers", "aggregateRating", "review"} & set(node), (
+                f"{relative_path} publishes commercial structured data the site "
+                "has no basis for"
+            )
+
+    # Cross-page @id references (the shared organization, site, and product
+    # nodes live on the homepage) must resolve somewhere in the site graph, or
+    # a consumer reading the subpage alone gets a dangling pointer.
+    assert referenced <= defined, (
+        f"dangling JSON-LD references: {sorted(referenced - defined)}"
+    )
+
+
+def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> None:
+    """Marked-up FAQ answers must be the answers a reader actually sees.
+
+    ``build_site.py`` derives the FAQPage node from the page's own
+    ``<dl class="faq-list">`` precisely so the two cannot diverge; this test is
+    what makes that guarantee observable rather than merely intended.
+    """
+
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    markup = (output / "compare" / "index.html").read_text(encoding="utf-8")
+    # ``_page_text`` space-joins its chunks, which inserts a space wherever an
+    # inline <em> abuts punctuation. The FAQ text has to match the sentence a
+    # reader sees, so this comparison concatenates instead.
+    text = _visible_text(markup)
+    nodes = _json_ld_graph(markup, "compare/index.html")
+    faq = next(node for node in nodes if node["@type"] == "FAQPage")
+
+    # Negative path first: if the extractor ever stops dropping <script>
+    # bodies, every assertion below passes for the wrong reason.
+    assert "@type" not in text and "acceptedAnswer" not in text, (
+        "the visible-text helper is reading the JSON-LD block, so FAQ parity "
+        "would be satisfied by the structured data quoting itself"
+    )
+
+    questions = faq["mainEntity"]
+    assert len(questions) >= 4, "the FAQ shrank without the structured data noticing"
+    for entry in questions:
+        assert entry["@type"] == "Question"
+        answer = entry["acceptedAnswer"]
+        assert answer["@type"] == "Answer"
+        assert entry["name"] in text, f"FAQ question not on the page: {entry['name']}"
+        assert answer["text"] in text, (
+            f"FAQ answer does not match the visible copy for {entry['name']!r}"
+        )
+        assert "@@" not in answer["text"]
+
+
+def test_every_indexable_page_is_canonical_localized_and_in_the_sitemap(
+    tmp_path,
+) -> None:
+    """Search-facing pages agree with themselves and with the sitemap.
+
+    Three separate declarations state where a page lives — the canonical link,
+    ``og:url``, and the sitemap entry — and a noindex page must appear in none
+    of them. Checking them together is the only way a mismatch shows up before
+    a crawler finds it.
+    """
+
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    sitemap = (output / "sitemap.xml").read_text(encoding="utf-8")
+    listed = set(re.findall(r"<loc>([^<]+)</loc>", sitemap))
+    assert listed == set(INDEXABLE_PAGES.values()), (
+        f"sitemap lists {sorted(listed)}, expected {sorted(INDEXABLE_PAGES.values())}"
+    )
+
+    for relative_path, url in INDEXABLE_PAGES.items():
+        page = (output / relative_path).read_text(encoding="utf-8")
+        assert f'<link rel="canonical" href="{url}"' in page
+        assert f'content="{url}"' in page, f"{relative_path} og:url disagrees"
+        assert 'name="robots" content="index, follow"' in page
+        assert 'property="og:locale" content="en_US"' in page
+        # Self-referential hreflang plus x-default: a single-locale site has to
+        # say so, or a search engine is free to guess at regional variants.
+        normalized = " ".join(page.split())
+        for hreflang in ("en", "x-default"):
+            assert (
+                f'<link rel="alternate" hreflang="{hreflang}" href="{url}" />'
+                in normalized
+            ), f"{relative_path} is missing hreflang={hreflang}"
+
+    # The design study stays out of the index and out of the sitemap.
+    concept = (output / "concept" / "index.html").read_text(encoding="utf-8")
+    assert 'name="robots" content="noindex, nofollow"' in concept
+    assert "/concept/" not in sitemap
+    # A noindex page must not be blocked in robots.txt as well: a crawler that
+    # is forbidden to fetch it never reads the noindex it is meant to obey.
+    robots = (output / "robots.txt").read_text(encoding="utf-8")
+    assert "Disallow:" not in robots
+
+
+def test_html_pages_point_crawlers_at_the_machine_readable_briefings(
+    tmp_path,
+) -> None:
+    """Every indexable page, not just the homepage, advertises the agent files."""
+
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    for relative_path in INDEXABLE_PAGES:
+        page = " ".join((output / relative_path).read_text(encoding="utf-8").split())
+        for href in ("/.well-known/agent.json", "/llms.txt", "/llms-full.txt"):
+            assert 'rel="alternate"' in page and f'href="{href}"' in page, (
+                f"{relative_path} does not advertise {href}"
+            )
+
+
+def test_faq_generator_refuses_unbalanced_or_absent_markup() -> None:
+    """The build fails loudly rather than publishing a hollow FAQPage node."""
+
+    build_module = runpy.run_path(str(SITE / "build_site.py"))
+    faq_jsonld = build_module["faq_jsonld"]
+    blocked = build_module["LaunchConfigurationError"]
+
+    with pytest.raises(blocked):
+        faq_jsonld("<main><p>no faq here</p></main>")
+    with pytest.raises(blocked):
+        faq_jsonld('<dl class="faq-list"><dt>Q1</dt><dd>A1</dd><dt>Q2</dt></dl>')
+    with pytest.raises(blocked):
+        faq_jsonld('<dl class="faq-list"><dt>Q1</dt><dd> </dd></dl>')
+
+    node = json.loads(
+        faq_jsonld(
+            '<dl class="faq-list"><dt>Q1</dt><dd>A1 <em>emphasis</em>.</dd></dl>'
+        )
+    )
+    assert node["@type"] == "FAQPage"
+    assert node["mainEntity"][0]["name"] == "Q1"
+    # Inline markup must not leave a space before the punctuation that follows it.
+    assert node["mainEntity"][0]["acceptedAnswer"]["text"] == "A1 emphasis."
 
 
 class _InlineScriptCollector(HTMLParser):

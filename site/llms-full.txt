@@ -109,5 +109,8 @@ operate internal MCP tools. The engagement is one tool, one operator, one
 governed action, scoped privately. There is no self-serve rollout.
 
 Human site: https://www.thisisatest.tech/
+Offline receipt verification: https://www.thisisatest.tech/proof/
+Comparison with named alternatives, including the rows this loses:
+https://www.thisisatest.tech/compare/
 Source: https://github.com/PetrefiedThunder/agent-middleware-api (private — access on request)
 Security contact: https://www.thisisatest.tech/.well-known/security.txt
