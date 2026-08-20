@@ -188,7 +188,18 @@ Both write real rows to the target. Point them at staging.
 | Command | Proves | Requires |
 |---|---|---|
 | `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | `AGENT_MIDDLEWARE_API_KEY`; set `AGENT_MIDDLEWARE_API_URL` or it defaults to production |
+| `make scoped-smoke-loop` | Authority readable for the caller's own wallet; scoped permit issued and carrying a nonce; governed invoke; the debit matching the receipt's own stated cost; replay returning the same receipt and charging nothing further; a changed payload under a reused key refused; an out-of-scope but genuinely registered tool denied and not charged; the portable receipt carrying a signature, key id, and named canonicalization | `AGENT_MIDDLEWARE_API_KEY` holding a **wallet-scoped** key (the loop refuses a bootstrap admin key); `--tool` required off loopback |
 | `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency; always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
+
+`scoped-smoke-loop` is the one built to run continuously: it needs no admin
+credential, so the key it runs on cannot mint keys or read another tenant's
+audit trail if the runner holding it is compromised. That is also its limit —
+tenant isolation, audit-chain verification, and refund reconciliation are
+absent from it precisely because a scoped key must not be able to reach them,
+and they stay in `trust-conformance-live` for an operator to run deliberately.
+It reports SKIP rather than a false PASS for the out-of-scope denial when the
+deployment registers only one tool, since invoking an unregistered name proves
+"tool not found" rather than "the permit refused it".
 
 The battery reports SKIP — never a false PASS — for MCP-invocation checks when
 the deployment exposes no invokable `golden-path-echo` tool. It does not

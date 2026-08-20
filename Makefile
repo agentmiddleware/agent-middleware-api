@@ -129,6 +129,9 @@ trust-conformance-live:
 adversarial-battery-live:
 	uv run --with-requirements requirements.txt python scripts/adversarial_battery.py
 
+scoped-smoke-loop:
+	uv run --with-requirements requirements.txt python scripts/scoped_smoke_loop.py $(SCOPED_SMOKE_ARGS)
+
 # Railway deploy gate. Run under `railway run` (or with DATABASE_URL +
 # PUBLIC_URL exported) to check migration parity and live posture together.
 railway-preflight:
