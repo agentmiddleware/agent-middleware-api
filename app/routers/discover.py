@@ -23,6 +23,11 @@ router = APIRouter(
 settings = get_settings()
 
 
+def _is_stripe_configured() -> bool:
+    """Check if Stripe is configured (same truth as /health/dependencies)."""
+    return bool(get_settings().STRIPE_SECRET_KEY)
+
+
 class ServiceCapability(BaseModel):
     name: str
     version: str
@@ -182,14 +187,18 @@ def _build_capabilities() -> list[ServiceCapability]:
             category="security",
             surface="product",
         ),
-        ServiceCapability(
-            name="kyc",
-            version="1.0",
-            description="Stripe Identity KYC verification for sponsor wallets",
-            category="compliance",
-            surface="product",
-        ),
     ]
+    
+    if _is_stripe_configured():
+        product.append(
+            ServiceCapability(
+                name="kyc",
+                version="1.0",
+                description="Stripe Identity KYC verification for sponsor wallets",
+                category="compliance",
+                surface="product",
+            )
+        )
 
     proof = [
         ServiceCapability(
