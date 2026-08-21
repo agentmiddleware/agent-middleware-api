@@ -38,8 +38,11 @@ def test_railway_git_commit_sha_wins_over_build_commit_sha(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_build_commit_sha_used_when_railway_unset(monkeypatch):
-    """BUILD_COMMIT_SHA is used when RAILWAY_GIT_COMMIT_SHA is not available."""
+def test_returns_none_when_railway_unset_and_only_build_commit_sha(monkeypatch):
+    """Returns None when only BUILD_COMMIT_SHA env exists (no Railway, no baked file).
+    
+    BUILD_COMMIT_SHA env is no longer trusted to prevent stale service variables.
+    """
     build_sha = "cccccccccccccccccccccccccccccccccccccccc"
     
     get_settings.cache_clear()
@@ -48,15 +51,15 @@ def test_build_commit_sha_used_when_railway_unset(monkeypatch):
     monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     
     result = get_build_commit_sha()
-    assert result == build_sha, (
-        "BUILD_COMMIT_SHA should be used when RAILWAY_GIT_COMMIT_SHA is absent"
+    assert result is None, (
+        "Must return None (not BUILD_COMMIT_SHA env) to prevent stale service vars"
     )
     
     get_settings.cache_clear()
 
 
-def test_railway_empty_string_does_not_block_build_commit_sha(monkeypatch):
-    """Empty RAILWAY_GIT_COMMIT_SHA should fall through to BUILD_COMMIT_SHA."""
+def test_railway_empty_returns_none_not_build_commit_sha(monkeypatch):
+    """Empty RAILWAY_GIT_COMMIT_SHA returns None (not BUILD_COMMIT_SHA env)."""
     build_sha = "dddddddddddddddddddddddddddddddddddddddd"
     
     get_settings.cache_clear()
@@ -65,15 +68,15 @@ def test_railway_empty_string_does_not_block_build_commit_sha(monkeypatch):
     monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "")
     
     result = get_build_commit_sha()
-    assert result == build_sha, (
-        "Empty RAILWAY_GIT_COMMIT_SHA should not block BUILD_COMMIT_SHA"
+    assert result is None, (
+        "Empty Railway env + no baked file = None (not BUILD_COMMIT_SHA env)"
     )
     
     get_settings.cache_clear()
 
 
-def test_railway_invalid_sha_falls_through_to_build_commit_sha(monkeypatch):
-    """Invalid RAILWAY_GIT_COMMIT_SHA should fall through to BUILD_COMMIT_SHA."""
+def test_railway_invalid_returns_none_not_build_commit_sha(monkeypatch):
+    """Invalid RAILWAY_GIT_COMMIT_SHA returns None (not BUILD_COMMIT_SHA env)."""
     build_sha = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     invalid_railway = "not-a-valid-sha"
     
@@ -83,8 +86,8 @@ def test_railway_invalid_sha_falls_through_to_build_commit_sha(monkeypatch):
     monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", invalid_railway)
     
     result = get_build_commit_sha()
-    assert result == build_sha, (
-        "Invalid RAILWAY_GIT_COMMIT_SHA should fall through to BUILD_COMMIT_SHA"
+    assert result is None, (
+        "Invalid Railway env + no baked file = None (not BUILD_COMMIT_SHA env)"
     )
     
     get_settings.cache_clear()
@@ -149,8 +152,8 @@ async def test_health_reports_railway_sha_over_stale_build_sha(client, monkeypat
 
 
 @pytest.mark.anyio
-async def test_health_uses_build_sha_when_railway_absent(client, monkeypatch):
-    """Health endpoints use BUILD_COMMIT_SHA when RAILWAY_GIT_COMMIT_SHA is absent."""
+async def test_health_returns_null_when_railway_absent_and_no_baked_file(client, monkeypatch):
+    """Health returns null when Railway absent and no baked file (not BUILD_COMMIT_SHA env)."""
     build_sha = "2222222222222222222222222222222222222222"
     
     get_settings.cache_clear()
@@ -164,7 +167,8 @@ async def test_health_uses_build_sha_when_railway_absent(client, monkeypatch):
     assert liveness.status_code == 200
     assert dependencies.status_code == 200
     
-    assert liveness.json()["commit_sha"] == build_sha
-    assert dependencies.json()["commit_sha"] == build_sha
+    # Must return null, not BUILD_COMMIT_SHA env
+    assert liveness.json()["commit_sha"] is None
+    assert dependencies.json()["commit_sha"] is None
     
     get_settings.cache_clear()

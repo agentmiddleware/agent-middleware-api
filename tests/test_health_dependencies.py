@@ -344,9 +344,11 @@ async def test_health_dependencies_endpoint_returns_report(client):
 
 
 @pytest.mark.anyio
-async def test_health_surfaces_report_validated_build_commit(client):
-    settings = get_settings()
-    settings.BUILD_COMMIT_SHA = "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+async def test_health_surfaces_report_validated_build_commit(client, monkeypatch):
+    """Health reports Railway git commit env (not BUILD_COMMIT_SHA env)."""
+    test_sha = "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", test_sha)
+    get_settings.cache_clear()
 
     liveness = await client.get("/health")
     dependencies = await client.get("/health/dependencies")
@@ -357,6 +359,8 @@ async def test_health_surfaces_report_validated_build_commit(client):
     assert dependencies.json()["commit_sha"] == (
         "abcdef0123456789abcdef0123456789abcdef01"
     )
+    
+    get_settings.cache_clear()
 
 
 @pytest.mark.anyio

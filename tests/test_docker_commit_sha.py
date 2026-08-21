@@ -31,11 +31,12 @@ def test_dockerfile_declares_commit_sha_arg_and_env():
 
 
 @pytest.mark.anyio
-async def test_build_commit_sha_env_appears_in_health(client, monkeypatch):
-    """When BUILD_COMMIT_SHA is set, health endpoints must report it."""
+async def test_build_commit_sha_env_ignored_without_railway_or_file(client, monkeypatch):
+    """BUILD_COMMIT_SHA env is ignored (returns null) to prevent stale service vars."""
     test_sha = "deadbeef1234567890abcdef1234567890abcdef"
     
     monkeypatch.setenv("BUILD_COMMIT_SHA", test_sha)
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
     get_settings.cache_clear()
     
     liveness = await client.get("/health")
@@ -44,8 +45,9 @@ async def test_build_commit_sha_env_appears_in_health(client, monkeypatch):
     assert liveness.status_code == 200
     assert dependencies.status_code == 200
     
-    assert liveness.json()["commit_sha"] == test_sha
-    assert dependencies.json()["commit_sha"] == test_sha
+    # Must return null, not BUILD_COMMIT_SHA env
+    assert liveness.json()["commit_sha"] is None
+    assert dependencies.json()["commit_sha"] is None
     
     get_settings.cache_clear()
 

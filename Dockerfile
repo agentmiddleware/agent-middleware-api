@@ -19,6 +19,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Bake the commit SHA into a file if provided via build arg
+RUN if [ -n "$COMMIT_SHA" ]; then \
+        echo "$COMMIT_SHA" > /app/.build_commit_sha; \
+    fi
+
 RUN chmod +x scripts/docker_entrypoint.sh \
     && groupadd --system app \
     && useradd --system --gid app --no-create-home --home-dir /app app \
