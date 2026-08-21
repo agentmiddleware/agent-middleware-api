@@ -2,8 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ARG COMMIT_SHA
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    BUILD_COMMIT_SHA=${COMMIT_SHA}
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

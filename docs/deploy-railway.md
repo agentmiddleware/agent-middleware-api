@@ -60,9 +60,8 @@ releases are operator-run from a clean exact-SHA checkout.**
 ```bash
 # From repository root, linked to the Railway service:
 DEPLOY_SHA="$(git rev-parse HEAD)"
-railway variable set BUILD_COMMIT_SHA="$DEPLOY_SHA" \
-  --service api-service --environment production --skip-deploys
-railway up --service api-service --environment production
+railway up --service api-service --environment production \
+  --build-arg COMMIT_SHA="$DEPLOY_SHA"
 ```
 
 That abbreviated command is appropriate only after the pre-deploy gates below.
@@ -71,10 +70,11 @@ For a stack that may hold customer data, follow the complete
 checklist. GitHub Actions validates the candidate release but deliberately does
 not deploy it or hold a Railway SSH key.
 
-`BUILD_COMMIT_SHA` is a persistent Railway variable. Refresh it from the exact
-checked-out commit before **every** manual `railway up`, even when the variable
-already exists; carrying a prior deploy's value forward makes health provenance
-stale and must fail the post-deploy parity gate.
+The `--build-arg COMMIT_SHA` stamps the exact deployed git SHA into the Docker
+image at build time. The Dockerfile bakes this into `BUILD_COMMIT_SHA` so
+`/health/dependencies` reports the true source revision. Pass the SHA on
+**every** `railway up`; omitting it leaves the image with no commit provenance
+and must fail the post-deploy parity gate.
 
 Railway uses `railway.json` → `build.builder = DOCKERFILE`. That is the only
 supported production image path for this project.
