@@ -20,6 +20,10 @@
   --brass-bright: #ebb958;
   --verify: #3fbf87;
   --danger: #e2694f;
+  /* --danger holds 4.5:1 only on the dark grounds; this is its resolution
+     for paper surfaces (the approval card resolves it as a literal because
+     mail clients cannot read var()). */
+  --danger-on-paper: #b03a22;
 
   --font-display: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
   --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;

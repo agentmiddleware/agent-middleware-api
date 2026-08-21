@@ -27,16 +27,24 @@ from datetime import datetime
 from decimal import Decimal
 from html import escape
 
-# site/styles.css, resolved. Mail clients need literals, not var().
-_PAPER = "#f2efe6"
-_PAPER_LIGHT = "#fbf9f3"
-_INK = "#151512"
-_INK_MUTED = "#5f5a50"
-_INK_FAINT = "#898277"
-_LINE = "rgba(21, 21, 18, 0.17)"
-_SIGNAL = "#e24b2a"
-_MONO = '"IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace'
-_BODY = '"Syne", system-ui, -apple-system, sans-serif'
+# site/styles.css tokens, resolved. Mail clients need literals, not var():
+# shell/blockquote = --paper-shade, card face = --paper, text = --paper-ink,
+# muted = --paper-dim, accents = the on-paper brass link tone and the
+# .button-primary brass/ink pair, alert = --danger-on-paper (the plain
+# --danger terracotta falls below 4.5:1 on the paper card face).
+_PAPER = "#efe9da"
+_PAPER_LIGHT = "#f8f5ec"
+_INK = "#141925"
+_INK_MUTED = "#4d5468"
+_INK_FAINT = "#4d5468"
+_LINE = "rgba(20, 25, 37, 0.17)"
+_BRASS_DARK = "#8a6414"
+_BUTTON_BRASS = "#d8a03e"
+_BUTTON_INK = "#0b1120"
+_SIGNAL = "#b03a22"
+_MONO = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
+_BODY = '"Public Sans", "Segoe UI", system-ui, sans-serif'
+_DISPLAY = '"Libre Franklin", "Helvetica Neue", Arial, sans-serif'
 
 
 @dataclass(frozen=True)
@@ -70,6 +78,7 @@ def _stamp(value: datetime) -> str:
 
 
 def _row(label: str, value: str, *, mono: bool = True) -> str:
+    """Render one label/value row of the card's terms table."""
     value_font = _MONO if mono else _BODY
     return (
         f'<tr><td style="padding:6px 0;vertical-align:top;font-family:{_BODY};'
@@ -82,6 +91,7 @@ def _row(label: str, value: str, *, mono: bool = True) -> str:
 
 
 def _banner(text: str, *, tone: str) -> str:
+    """Render a status strip above the terms; ``alert`` gets the danger tone."""
     color = _SIGNAL if tone == "alert" else _INK_MUTED
     return (
         f'<p style="margin:0 0 16px;padding:8px 12px;border:1px solid {color};'
@@ -140,8 +150,8 @@ def card_fragment_html(view: ApprovalCardView) -> str:
     if view.approval_url and view.status == "pending":
         action = (
             f'<p style="margin:20px 0 0;"><a href="{escape(view.approval_url, quote=True)}" '
-            f'style="display:inline-block;padding:12px 20px;background:{_SIGNAL};'
-            f'color:{_PAPER_LIGHT};text-decoration:none;font-family:{_BODY};'
+            f'style="display:inline-block;padding:12px 20px;background:{_BUTTON_BRASS};'
+            f'color:{_BUTTON_INK};text-decoration:none;font-family:{_BODY};'
             f'font-size:13px;letter-spacing:0.08em;text-transform:uppercase;">'
             "Review &amp; decide</a></p>"
             f'<p style="margin:10px 0 0;font-family:{_BODY};font-size:12px;'
@@ -159,13 +169,13 @@ def card_fragment_html(view: ApprovalCardView) -> str:
         f'<div style="max-width:560px;margin:0 auto;padding:28px;'
         f'background:{_PAPER_LIGHT};border:1px solid {_LINE};">'
         f'<p style="margin:0 0 4px;font-family:{_MONO};font-size:11px;'
-        f'letter-spacing:0.18em;text-transform:uppercase;color:{_SIGNAL};">'
+        f'letter-spacing:0.18em;text-transform:uppercase;color:{_BRASS_DARK};">'
         "Permit request</p>"
-        f'<h1 style="margin:0 0 20px;font-family:{_BODY};font-size:22px;'
+        f'<h1 style="margin:0 0 20px;font-family:{_DISPLAY};font-size:22px;'
         f'font-weight:700;color:{_INK};">An agent is asking for authority</h1>'
         f"{banners}"
         f'<blockquote style="margin:0 0 20px;padding:12px 16px;'
-        f'border-left:3px solid {_SIGNAL};background:{_PAPER};font-family:{_BODY};'
+        f'border-left:3px solid {_BRASS_DARK};background:{_PAPER};font-family:{_BODY};'
         f'font-size:14px;color:{_INK};">{escape(view.justification)}</blockquote>'
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         'style="width:100%;border-collapse:collapse;">'

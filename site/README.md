@@ -100,7 +100,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-7`. When you
+query token**: every reference looks like `/styles.css?v=gateway-8`. When you
 change any of those files (including `/wave.js`, `/arcade.js`, and
 `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
@@ -220,6 +220,49 @@ Adding a family or weight to `styles.css` without adding it to `FAMILIES` fails
 `test_font_stylesheet_and_files_agree` rather than letting the browser
 synthesise the weight. An interrupted vendoring run that empties `fonts/` fails
 the launch gate rather than deploying a stylesheet whose every `src` 404s.
+
+## Brand graphics
+
+`styles.css` is the palette's source of truth. `favicon.svg` and
+`social-card.svg` draw exclusively from its `:root` tokens — ink ground,
+text-light letterform and headline, brass seal marks (the rotated square is
+the same mark the nav brand carries).
+`test_brand_graphics_use_the_design_system_palette` fails if either file
+reintroduces an off-system color; that is exactly how the original graphics
+drifted, keeping a retired charcoal-and-ember palette long after the pages
+moved to ledger ink and brass, so tab icon and link preview advertised a
+different product than the page that loaded.
+
+`social-card.png` — the 1200×630 raster the `og:image`/`twitter:image` tags
+serve, because link crawlers do not rasterize SVG — is **generated**:
+
+```bash
+cd site
+python3 render_social_card.py    # rasterize social-card.svg → social-card.png
+```
+
+The script (stdlib-only, like `vendor_fonts.py`) inlines the SVG into a shim
+page, loads the vendored woff2 faces from `fonts/`, and screenshots it with
+headless Chromium, so the card's Instrument Serif headline and IBM Plex Mono
+labels are the site's own typography rather than an exporting machine's
+substitutes. It prefers a Playwright `headless_shell` build (found under
+`$PLAYWRIGHT_BROWSERS_PATH`; or point `$CHROMIUM` at any binary), whose
+viewport is exactly `--window-size`; a full-UI Chromium reserves toolbar
+height inside that size, so the script probes the render's bottom row for the
+ink ground and refuses a short viewport instead of committing a card with a
+blank band. Re-run it whenever `social-card.svg` or the vendored fonts
+change, and commit the SVG and PNG together. Neither the SVG nor the script
+deploys; `dist/` gets only the PNG.
+
+The same tokens are resolved into the two surfaces that cannot import
+`styles.css`: `static/dashboard.html` (the API origin's self-contained
+operator index) and `app/services/approval_card.py` (permit-approval email
+and hosted card, where mail clients drop `:root` and custom properties).
+When the palette moves, re-resolve both —
+`test_resolved_palette_surfaces_stay_within_the_stylesheet` fails on any
+literal hex or rgba hue the stylesheet does not itself use. `/concept/` is
+exempt on purpose: it is the archived design study, and its bespoke palette
+is part of what it archives.
 
 ## Analytics
 

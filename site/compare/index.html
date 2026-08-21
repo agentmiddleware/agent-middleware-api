@@ -114,14 +114,14 @@
     </script>
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-7" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-8" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-7"></script>
+    <script src="/a11y-preload.js?v=gateway-8"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/analytics.js?v=gateway-7"></script>
-    <script defer src="/a11y.js?v=gateway-7"></script>
+    <script defer src="/analytics.js?v=gateway-8"></script>
+    <script defer src="/a11y.js?v=gateway-8"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -553,8 +553,31 @@
       <div class="footer-directory">
         <p>Evidence and discovery</p>
         <a href="/proof/" data-analytics-event="proof_click">Receipt proof</a>
-        <a href="/compare/">How this compares</a>
-        <a href="/#machine-discovery">Machine discovery</a>
+        <a href="https://api.thisisatest.tech/.well-known/agent.json" target="_blank" rel="noopener noreferrer">Agent manifest</a>
+        <a href="https://api.thisisatest.tech/openapi.json" target="_blank" rel="noopener noreferrer">OpenAPI</a>
+        <a href="https://api.thisisatest.tech/health/dependencies" target="_blank" rel="noopener noreferrer">Live dependency status</a>
+      </div>
+      <div class="footer-directory">
+        <p>Source and policy</p>
+        <a
+          href="https://github.com/PetrefiedThunder/agent-middleware-api"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Source repository (private — request access)</a
+        >
+        <a
+          href="https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Design partner guide</a
+        >
+        <a
+          href="https://api.thisisatest.tech/SECURITY_LIMITATIONS.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Security limitations</a
+        >
+        <a href="/.well-known/security.txt">Report a vulnerability</a>
       </div>
       <p class="footer-note">
         Marketing: <code>www.thisisatest.tech</code> · API:

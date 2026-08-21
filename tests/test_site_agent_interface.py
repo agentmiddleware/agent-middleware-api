@@ -14,7 +14,7 @@ import tempfile
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 import runpy
 
 import pytest
@@ -430,7 +430,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-7"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-8"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -440,7 +440,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-7"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-8"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -1246,6 +1246,205 @@ def test_navigation_is_identical_across_pages(tmp_path) -> None:
         assert f'href="{anchor}"' in not_found, f"404.html cannot reach {anchor}"
 
 
+FOOTER_DIRECTORIES = ["Human contact", "Evidence and discovery", "Source and policy"]
+
+
+def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
+    """The footer directory is shared chrome, not per-page content.
+
+    Every full page offers the same three directories with the same
+    destinations, so where a visitor can go next never depends on which page
+    they happen to be reading. Only the waiting-room block differs — it is
+    landing-only by construction because ``arcade.js`` loads on ``/`` alone —
+    and the 404 keeps its deliberately minimal footer.
+    """
+
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    def footer(page: str) -> str:
+        return page[page.index("<footer") : page.index("</footer>")]
+
+    pages = {
+        relative_path: (output / relative_path).read_text(encoding="utf-8")
+        for relative_path in ("index.html", "proof/index.html", "compare/index.html")
+    }
+
+    for relative_path, page in pages.items():
+        headings = re.findall(r"<p>([^<]+)</p>", footer(page))
+        assert [
+            heading for heading in headings if heading in FOOTER_DIRECTORIES
+        ] == FOOTER_DIRECTORIES, (
+            f"{relative_path} footer directories diverge from the shared chrome"
+        )
+
+    landing_links = set(re.findall(r'href="([^"]+)"', footer(pages["index.html"])))
+    for relative_path in ("proof/index.html", "compare/index.html"):
+        links = set(re.findall(r'href="([^"]+)"', footer(pages[relative_path])))
+        assert links == landing_links, (
+            f"{relative_path} footer reaches different places than the landing "
+            f"footer: only in one of them: {sorted(links ^ landing_links)}"
+        )
+
+
+def test_brand_graphics_use_the_design_system_palette() -> None:
+    """favicon.svg and social-card.svg draw only ledger-and-seal colors.
+
+    Both graphics originally kept the warm charcoal-and-ember palette of a
+    design the pages no longer use, so the browser tab and every shared link
+    preview advertised a different product than the page that loaded. Hue is
+    pinned to the stylesheet's base tokens (opacity may vary via SVG opacity
+    attributes); a redesign that moves the palette moves the graphics with it
+    or fails here.
+    """
+
+    stylesheet = (SITE / "styles.css").read_text(encoding="utf-8")
+    root_block = re.search(r":root\s*\{([^}]*)\}", stylesheet)
+    assert root_block, "styles.css no longer declares a :root token block"
+    tokens = {
+        value.casefold()
+        for value in re.findall(r"#[0-9a-fA-F]{6}\b", root_block.group(1))
+    }
+    assert tokens, "no color tokens found in the styles.css :root block"
+
+    for name in ("favicon.svg", "social-card.svg"):
+        markup = (SITE / name).read_text(encoding="utf-8")
+        colors = re.findall(r"#[0-9a-fA-F]{3,8}\b", markup)
+        assert colors, f"{name} declares no colors"
+        for color in colors:
+            assert len(color) == 7, (
+                f"{name} uses {color!r}; spell colors as six-digit hex so "
+                "they can be checked against the design-system tokens"
+            )
+            assert color.casefold() in tokens, (
+                f"{name} uses {color}, which is not a styles.css :root token"
+            )
+
+
+def _stylesheet_palette() -> tuple[set[str], set[tuple[int, int, int]]]:
+    """Every color styles.css uses, as hex strings and RGB triplets.
+
+    Broader than the ``:root`` token block on purpose: the stylesheet also
+    spends a handful of literals (the darker on-paper brass, the print and
+    high-contrast overrides), and a resolved surface echoing one of those is
+    still inside the system.
+    """
+
+    stylesheet = (SITE / "styles.css").read_text(encoding="utf-8")
+    hexes = set()
+    for value in re.findall(r"#[0-9a-fA-F]{3,6}\b", stylesheet):
+        if len(value) == 4:
+            value = "#" + "".join(digit * 2 for digit in value[1:])
+        if len(value) == 7:
+            hexes.add(value.casefold())
+    triplets = {
+        tuple(int(value[i : i + 2], 16) for i in (1, 3, 5)) for value in hexes
+    }
+    return hexes, triplets
+
+
+def test_resolved_palette_surfaces_stay_within_the_stylesheet() -> None:
+    """Surfaces that resolve tokens to literals must stay inside the palette.
+
+    The API origin's operator index is a self-contained page, and the
+    approval card is email markup where mail clients drop ``:root`` and
+    custom properties — neither can import styles.css, so both carry
+    resolved literals. Literals drift silently (both once kept palettes the
+    site had retired), so every hex color and every rgba triplet must be a
+    color styles.css itself uses.
+    """
+
+    allowed_hex, allowed_rgb = _stylesheet_palette()
+    surfaces = {
+        "static/dashboard.html": ROOT / "static" / "dashboard.html",
+        "app/services/approval_card.py": ROOT / "app" / "services" / "approval_card.py",
+    }
+    for name, path in surfaces.items():
+        # unquote so the dashboard's %23-encoded data: URI favicon is scanned
+        # like any other markup.
+        content = unquote(path.read_text(encoding="utf-8"))
+        hexes = re.findall(r"#[0-9a-fA-F]{6}\b", content)
+        assert hexes, f"{name} declares no colors"
+        for value in hexes:
+            assert value.casefold() in allowed_hex, (
+                f"{name} uses {value}, which styles.css does not"
+            )
+        for triplet in re.findall(
+            r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", content
+        ):
+            rgb = tuple(int(channel) for channel in triplet)
+            assert rgb in allowed_rgb, (
+                f"{name} uses rgba{rgb}, whose hue styles.css does not"
+            )
+
+
+def test_palette_guards_reject_off_system_colors() -> None:
+    """The palette guards must be able to fire, not merely pass today.
+
+    Both allowed sets are built from styles.css, so the retired palettes —
+    the graphics' old charcoal-and-ember, the dashboard's old blues — must
+    be absent from them. If one ever reappears in the stylesheet (even in a
+    comment, which ``_stylesheet_palette`` deliberately scans), this fails
+    before the asset checks quietly start accepting it again.
+    """
+
+    stylesheet = (SITE / "styles.css").read_text(encoding="utf-8")
+    root_block = re.search(r":root\s*\{([^}]*)\}", stylesheet)
+    assert root_block
+    root_tokens = {
+        value.casefold()
+        for value in re.findall(r"#[0-9a-fA-F]{6}\b", root_block.group(1))
+    }
+    allowed_hex, allowed_rgb = _stylesheet_palette()
+
+    retired_hex = ("#151512", "#f2efe6", "#e24b2a", "#5f5a50", "#898277",
+                   "#6ec8ff", "#071018")
+    for value in retired_hex:
+        assert value not in root_tokens, f"{value} crept back into :root"
+        assert value not in allowed_hex, f"{value} crept back into styles.css"
+    # The dashboard's old blue header glow, as an rgba triplet.
+    assert (41, 128, 185) not in allowed_rgb
+
+
+def test_social_card_renderer_refuses_unusable_chromium(
+    tmp_path, monkeypatch
+) -> None:
+    """Broken renderer setups fail as launch errors, not tracebacks.
+
+    ``main()`` turns ``RenderError`` into the documented exit 2; any other
+    exception escapes as a traceback. So a non-executable ``$CHROMIUM``
+    candidate must be skipped during resolution, a binary the kernel cannot
+    exec must surface as ``RenderError`` rather than ``OSError``, and a
+    renderer that exits nonzero must too.
+    """
+
+    renderer = runpy.run_path(str(SITE / "render_social_card.py"))
+    render_error = renderer["RenderError"]
+
+    # Resolution: with only a non-executable candidate reachable, there is
+    # no browser to find. (os.access X_OK is false even for root when no
+    # execute bit is set, so this holds in CI containers too.)
+    monkeypatch.delenv("CHROMIUM", raising=False)
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    not_executable = tmp_path / "chromium"
+    not_executable.write_bytes(b"#!/bin/sh\n")
+    not_executable.chmod(0o644)
+    with pytest.raises(render_error, match="no Chromium binary found"):
+        renderer["find_chromium"](str(not_executable))
+
+    # Launch: a file the kernel cannot exec (ENOEXEC) is a launch error.
+    garbage = tmp_path / "garbage-binary"
+    garbage.write_bytes(b"\x00\x01 not an executable")
+    garbage.chmod(0o755)
+    with pytest.raises(render_error, match="could not start"):
+        renderer["render"](str(garbage), tmp_path / "card.png")
+
+    # A renderer that exits nonzero without writing a screenshot is too.
+    with pytest.raises(render_error, match="screenshot failed"):
+        renderer["render"]("/bin/false", tmp_path / "card.png")
+
+
 def _anchor_texts_and_hrefs(markup: str) -> list[tuple[str, str]]:
     """Return ``(visible_text, href)`` for every ``<a>`` in the page."""
 
@@ -1368,7 +1567,9 @@ def test_local_site_assets_exist() -> None:
         SITE / "styles.css",
         SITE / "analytics.js",
         SITE / "favicon.svg",
+        SITE / "social-card.svg",
         SITE / "social-card.png",
+        SITE / "render_social_card.py",
         SITE / "robots.txt",
         SITE / "sitemap.xml",
         SITE / "llm.txt",
