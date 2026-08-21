@@ -67,8 +67,8 @@ async def test_build_commit_sha_validation_rejects_malformed(client, monkeypatch
     get_settings.cache_clear()
 
 
-def test_build_metadata_prefers_build_commit_sha_over_railway(monkeypatch):
-    """BUILD_COMMIT_SHA takes precedence over RAILWAY_GIT_COMMIT_SHA."""
+def test_build_metadata_prefers_railway_over_build_commit_sha(monkeypatch):
+    """RAILWAY_GIT_COMMIT_SHA takes precedence over BUILD_COMMIT_SHA."""
     build_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     railway_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     
@@ -77,7 +77,7 @@ def test_build_metadata_prefers_build_commit_sha_over_railway(monkeypatch):
     settings.BUILD_COMMIT_SHA = build_sha
     monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", railway_sha)
     
-    assert get_build_commit_sha() == build_sha
+    assert get_build_commit_sha() == railway_sha
     
     get_settings.cache_clear()
 

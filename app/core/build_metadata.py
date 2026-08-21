@@ -14,14 +14,17 @@ _GIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
 def get_build_commit_sha() -> str | None:
     """Return a validated deployed Git SHA, or ``None`` when unavailable.
 
-    ``BUILD_COMMIT_SHA`` is the portable explicit setting. Railway's deployment
-    metadata variable is accepted as a fallback so the runtime can report the
-    exact source revision without copying it into application secrets.
+    Precedence (highest to lowest):
+    1. ``RAILWAY_GIT_COMMIT_SHA`` — Railway's automatic deployment metadata
+    2. ``BUILD_COMMIT_SHA`` — Docker build arg or explicit override
+
+    Railway's git commit env is checked first so fresh deployment metadata
+    always wins over stale service variables or cached build args.
     """
 
     candidates = (
-        get_settings().BUILD_COMMIT_SHA,
         os.getenv("RAILWAY_GIT_COMMIT_SHA", ""),
+        get_settings().BUILD_COMMIT_SHA,
     )
     for candidate in candidates:
         normalized = candidate.strip()
