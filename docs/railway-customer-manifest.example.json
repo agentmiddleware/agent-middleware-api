@@ -8,5 +8,5 @@
   "signing_key_id": "example-customer-production-ed25519-v1",
   "signing_public_key_sha256": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
   "expected_commit_sha": "0000000000000000000000000000000000000000",
-  "expected_alembic_revision": "033_drop_optimizer_telemetry"
+  "expected_alembic_revision": "034_add_permit_tool_call_counts"
 }

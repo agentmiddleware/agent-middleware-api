@@ -756,6 +756,11 @@ class PermitModel(SQLModel, table=True):
     aggregate_value_cap: Optional[Decimal] = Field(default=None, decimal_places=8)
     forbidden_fields_json: Optional[str] = Field(default=None)
     recipient_domain: Optional[str] = Field(default=None, max_length=255)
+    # Atomic call-count tracking for max_calls_per_tool enforcement.
+    # Maps tool name -> successful call count (e.g., {"partner.echo": 2}).
+    # Incremented when a success receipt is created; checked and incremented
+    # atomically to close the race where concurrent calls both pass validation.
+    tool_call_counts_json: Optional[str] = Field(default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 

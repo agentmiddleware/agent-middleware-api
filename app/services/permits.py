@@ -495,40 +495,92 @@ class PermitService:
                     # under a just-expired permit wherever the row lock above did
                     # not engage. Naive-UTC comparison matches the column type;
                     # see reconcile_expired_permits for the same pattern.
+                    #
+                    # For max_calls_per_tool enforcement, we use an optimistic
+                    # lock: read current counts, compute new counts, and UPDATE
+                    # only WHERE tool_call_counts_json still matches what we read.
+                    # A concurrent call that committed between our read and write
+                    # causes the UPDATE to match zero rows, and we retry.
                     now = utc_now()
+                    
+                    # Compute the updated call counter. If max_calls_per_tool is
+                    # set for this tool, the UPDATE will atomically increment it
+                    # via optimistic concurrency control (CAS on the JSON column).
+                    max_calls_config = _loads_dict(model.max_calls_per_tool_json or "{}")
+                    call_limit = max_calls_config.get(tool_name)
+                    original_counts_json = model.tool_call_counts_json
+                    updated_counts_json = None
+                    if call_limit is not None and type(call_limit) is int:
+                        current_counts = _loads_dict(original_counts_json or "{}")
+                        current_tool_count = current_counts.get(tool_name, 0)
+                        if not isinstance(current_tool_count, int):
+                            current_tool_count = 0
+                        new_tool_count = current_tool_count + 1
+                        if new_tool_count > call_limit:
+                            # This attempt would exceed the limit. Deny without
+                            # mutating anything.
+                            return PermitValidation(
+                                False,
+                                "permit_max_calls_exceeded",
+                                model,
+                                {
+                                    "tool": tool_name,
+                                    "limit": call_limit,
+                                    "calls_made": current_tool_count,
+                                },
+                            )
+                        updated_counts = dict(current_counts)
+                        updated_counts[tool_name] = new_tool_count
+                        updated_counts_json = json.dumps(updated_counts)
+                    
+                    # Build the UPDATE values and WHERE predicates.
+                    update_values: dict[str, Any] = {
+                        "spent_credits": PermitModel.spent_credits + estimated_credits,
+                        "updated_at": now,
+                    }
+                    where_conditions: list[ColumnElement[bool]] = [
+                        cast(ColumnElement[bool], PermitModel.permit_id == permit_id),
+                        cast(ColumnElement[bool], PermitModel.status == "active"),
+                        cast(ColumnElement[bool], PermitModel.expires_at > now),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits + estimated_credits
+                            <= PermitModel.max_credits,
+                        ),
+                    ]
+                    
+                    if updated_counts_json is not None:
+                        # Optimistic lock: only UPDATE if tool_call_counts_json
+                        # still equals the value we read. If another transaction
+                        # committed a count increment between our read and this
+                        # write, the WHERE won't match and we'll retry.
+                        update_values["tool_call_counts_json"] = updated_counts_json
+                        if original_counts_json is None:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(None),
+                                )
+                            )
+                        else:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.tool_call_counts_json == original_counts_json,
+                                )
+                            )
+                    
                     reserved = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == permit_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.status == "active",
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.expires_at > now,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.spent_credits + estimated_credits
-                                <= PermitModel.max_credits,
-                            ),
-                        )
-                        .values(
-                            spent_credits=PermitModel.spent_credits
-                            + estimated_credits,
-                            updated_at=now,
-                        )
+                        .where(*where_conditions)
+                        .values(**update_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, reserved).rowcount or 0) != 1:
-                        # A concurrent reservation consumed the remaining budget
-                        # (or a concurrent revocation flipped the status) between
-                        # the validation read and this guarded write. Re-read for
-                        # an accurate reason and deny — no budget moved.
+                        # A concurrent reservation consumed the remaining budget,
+                        # flipped the status, or (when max_calls_per_tool is set)
+                        # incremented the call counter, breaking the optimistic
+                        # lock. Re-read for an accurate reason and deny.
                         await session.refresh(model)
                         if model.status != "active":
                             return PermitValidation(
@@ -554,6 +606,25 @@ class PermitService:
                                     "checked_at": _stamp(now),
                                 },
                             )
+                        # Re-check max_calls_per_tool; a concurrent call may have
+                        # incremented the counter between our pre-check and the
+                        # failed optimistic UPDATE.
+                        if call_limit is not None and type(call_limit) is int:
+                            refreshed_counts = _loads_dict(model.tool_call_counts_json or "{}")
+                            refreshed_count = refreshed_counts.get(tool_name, 0)
+                            if not isinstance(refreshed_count, int):
+                                refreshed_count = 0
+                            if refreshed_count >= call_limit:
+                                return PermitValidation(
+                                    False,
+                                    "permit_max_calls_exceeded",
+                                    model,
+                                    {
+                                        "tool": tool_name,
+                                        "limit": call_limit,
+                                        "calls_made": refreshed_count,
+                                    },
+                                )
                         return PermitValidation(
                             False,
                             "permit_budget_exceeded",
@@ -682,13 +753,17 @@ class PermitService:
                     model,
                     {"tool": tool_name, "limit": "malformed"},
                 )
-            call_count = await self._count_tool_calls(model.permit_id, tool_name)
-            if call_count >= limit:
+            # Read the atomic call counter. Missing or null defaults to empty dict.
+            call_counts = _loads_dict(model.tool_call_counts_json or "{}")
+            current_count = call_counts.get(tool_name, 0)
+            if not isinstance(current_count, int):
+                current_count = 0
+            if current_count >= limit:
                 return PermitValidation(
                     False,
                     "permit_max_calls_exceeded",
                     model,
-                    {"tool": tool_name, "limit": limit, "calls_made": call_count},
+                    {"tool": tool_name, "limit": limit, "calls_made": current_count},
                 )
 
         # 2. aggregate_value_cap
@@ -729,8 +804,27 @@ class PermitService:
             )
         return PermitValidation(True, None, model)
 
-    async def _count_tool_calls(self, permit_id: str, tool_name: str) -> int:
-        """Count successful receipts for (permit_id, tool_name)."""
+    async def _count_tool_calls(
+        self,
+        permit_id: str,
+        tool_name: str,
+        session: Any | None = None,
+    ) -> int:
+        """Count successful receipts for (permit_id, tool_name).
+        
+        When called with an existing session, reads within that transaction's
+        isolation level (e.g., to re-check a constraint before commit).
+        """
+        if session:
+            result = await session.execute(
+                select(func.count()).select_from(ReceiptModel).where(
+                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
+                    cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
+                    cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
+                )
+            )
+            return int(result.scalar() or 0)
+        
         factory = get_session_factory()
         async with factory() as session:
             result = await session.execute(
