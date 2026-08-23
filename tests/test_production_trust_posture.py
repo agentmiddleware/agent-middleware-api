@@ -198,9 +198,9 @@ async def test_agent_json_reports_proof_surfaces_off(client, production_trust_fl
     body = resp.json()
     agent_first = body.get("agent_first") or {}
     assert agent_first.get("proof_surfaces_enabled") is False
-    # Catalog may still list proof ids, but they must be marked unmounted.
-    for entry in body.get("proof_surfaces") or []:
-        assert entry.get("mounted") is False
+    # Unmounted workloads are not discovery: the production manifest publishes
+    # no proof-surface catalog at all.
+    assert body.get("proof_surfaces") == []
 
 
 @pytest.mark.production_trust

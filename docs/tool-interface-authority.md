@@ -10,6 +10,11 @@ it is just an **implementation primitive, not a UX primitive**. On the
 standard `/mcp` surface the middleware materializes the appropriate permit
 from wallet policy at call time.
 
+The design for generalizing this — one `authority_required` envelope for
+every insufficient-authority outcome, an explicit resume contract in the
+remediation payload, and remediation that carries a live approval handle —
+lives in [`authority-required-flow.md`](authority-required-flow.md).
+
 ## The decision an invoke gets
 
 Every `tools/call` on the standard surface resolves to one of three

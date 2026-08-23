@@ -612,6 +612,51 @@ main,
   color: var(--text);
 }
 
+.offer-copy .wedge-line {
+  margin: 1rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/* Boundary figure: the non-bypassability diagram, full width beneath the
+   offer copy and pilot ticket. The scroll wrapper keeps the drawing legible
+   on narrow screens instead of shrinking its type below readability. */
+
+.boundary-figure {
+  grid-column: 1 / -1;
+  margin: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.boundary-scroll {
+  overflow-x: auto;
+  background: var(--ink);
+  border: 1px solid var(--rule-soft);
+  border-radius: 6px;
+}
+
+.boundary-scroll:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.boundary-scroll svg {
+  display: block;
+  width: 100%;
+  min-width: 680px;
+  height: auto;
+}
+
+.boundary-figure figcaption {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: var(--measure);
+}
+
 /* Paper artifacts: pilot ticket + receipts ------------------------------------ */
 
 .pilot-card,
@@ -1732,6 +1777,9 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
     --paper-shade: #dddddd;
     --paper-ink: #000000;
     --paper-dim: #333333;
+    /* Danger resolves to its paper value: #e2694f holds contrast only on
+       dark grounds, and print flattens every ground to white. */
+    --danger: #b03a22;
   }
 
   body {

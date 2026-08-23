@@ -479,10 +479,17 @@ def _build_integration_guides() -> dict[str, str]:
         else CoreDiscoveryManifest
     ),
     summary="Agent Discovery Manifest",
+    # Boot-time posture again: an instance that mounts no proof surfaces does
+    # not describe them either.
     description=(
-        "Aggregated capability index: services, MCP tools, and pricing — plus "
-        "agentic-web endpoints on instances that mount proof surfaces. "
-        "Bootstrap order is defined in `/.well-known/agent.json` under "
+        (
+            "Aggregated capability index: services, MCP tools, and pricing — "
+            "plus agentic-web endpoints on instances that mount proof "
+            "surfaces. "
+            if get_settings().ENABLE_PROOF_SURFACES
+            else "Aggregated capability index: services, MCP tools, and pricing. "
+        )
+        + "Bootstrap order is defined in `/.well-known/agent.json` under "
         "`agent_first.bootstrap_sequence` (this endpoint is optional after "
         "those hints)."
     ),
@@ -503,8 +510,12 @@ async def get_discovery_manifest():
         version=settings.APP_VERSION,
         description=(
             "Governed MCP trust plane for autonomous agents: scoped permits, "
-            "metered tool invocation, signed receipts, and wallet audit chains. "
-            "Capabilities with surface=proof_surface are labeled scaffolding."
+            "metered tool invocation, signed receipts, and wallet audit chains."
+            + (
+                " Capabilities with surface=proof_surface are labeled scaffolding."
+                if get_settings().ENABLE_PROOF_SURFACES
+                else ""
+            )
         ),
         capabilities=_build_capabilities(),
         mcp_tools=_build_mcp_tools(),

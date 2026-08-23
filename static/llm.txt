@@ -1,6 +1,6 @@
 # Agent Middleware API — LLM-Readable Documentation
 
-**Agent-first:** You are the intended reader. This file is primary prose for autonomous agents and orchestrators. Before acting, fetch `GET /.well-known/agent.json` and use `GET /health/dependencies` (`enable_proof_surfaces`; instances that mount proof surfaces also report per-service `simulation_modes`) so you do not treat simulated domains as real. When `enable_proof_surfaces` is false, only the trust-plane wedge is mounted and the report covers exactly what runs.
+**Agent-first:** You are the intended reader. This file is primary prose for autonomous agents and orchestrators. Before acting, fetch `GET /.well-known/agent.json`, then check `GET /health/dependencies` before assuming real side effects: HTTP 200 alone does not mean every dependency is ready.
 
 **Version:** use `version` from `GET /.well-known/agent.json` (this document may be cached).
 **Base URL:** {{PUBLIC_URL}}
@@ -20,15 +20,13 @@ discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> 
 ```
 
 Read `capabilities` on `GET /.well-known/agent.json` for the product wedge.
-Entries under `proof_surfaces` are labeled scaffolding — often simulated, and not
-mounted when `enable_proof_surfaces` is false.
 
 Core infrastructure:
 - **Identity & authority** — Wallet-scoped agents, API keys, signing keys, KYC hooks
 - **Discovery** — MCP tools, `.well-known/agent.json`, `llms.txt`, OpenAPI, `/v1/discover`
 - **Execution governance** — Permit-gated MCP invocation, receipts, audit chain
 - **Economics** — Wallet budgets, ledger charges, idempotent replay without double-charge
-- **Readiness** — `/health/dependencies` (`enable_proof_surfaces`; plus `simulation_modes` when proof surfaces are mounted)
+- **Readiness** — `/health/dependencies` (dependency truth for the selected tool)
 
 ---
 
@@ -93,24 +91,18 @@ GET /v1/receipts/{receipt_id}/portable
 `ENABLE_DOGFOOD_TOOL=false`; do not use that fixture as evidence of a partner
 integration.
 
-Do **not** start with telemetry, agent comms, or AI decide/heal endpoints —
-those are proof surfaces, not the wedge.
-
 ---
 
 ## MCP Tool Discovery
 
 ```bash
-# List available tools (ops-registered / dogfood only when proof surfaces are off)
+# List available tools
 GET /mcp/tools.json
 
 # Call a tool via MCP
 POST /mcp/messages
 {"jsonrpc": "2.0", "method": "tools/list", "id": 1}
 ```
-
-Phase9 AWI / marketplace preview stubs (`awi_*`, `data-indexer`, etc.) are
-**not** advertised when `ENABLE_PROOF_SURFACES=false`.
 
 ---
 
@@ -182,9 +174,6 @@ No published TypeScript SDK. Use HTTP (`/mcp`, `/v1/permits`, `/v1/receipts`).
 | Audit | `/v1/audit` | Required |
 | MCP | `/mcp` | Optional |
 | Health | `/health` | None |
-
-Proof-surface prefixes (`/v1/awi`, `/v1/telemetry`, `/v1/comms`, `/v1/ai`, …)
-are mounted only when `ENABLE_PROOF_SURFACES=true`.
 
 ---
 

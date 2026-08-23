@@ -114,14 +114,14 @@
     </script>
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-8" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-9" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-8"></script>
+    <script src="/a11y-preload.js?v=gateway-9"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/analytics.js?v=gateway-8"></script>
-    <script defer src="/a11y.js?v=gateway-8"></script>
+    <script defer src="/analytics.js?v=gateway-9"></script>
+    <script defer src="/a11y.js?v=gateway-9"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -229,14 +229,14 @@
               </tr>
               <tr>
                 <th scope="row">Tamper-evident chained audit</th>
-                <td>Per-wallet hash chain</td>
+                <td>Per-account hash chain</td>
                 <td>Varies</td>
                 <td>Yes</td>
                 <td>No</td>
               </tr>
               <tr>
                 <th scope="row">Budget enforced before execution</th>
-                <td>Wallet ledger</td>
+                <td>Budget ledger</td>
                 <td>Varies</td>
                 <td>No</td>
                 <td>Call and cost caps</td>

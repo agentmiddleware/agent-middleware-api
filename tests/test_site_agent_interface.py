@@ -177,16 +177,29 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         "Should the agent retry? Will the retry create another debit?"
     )
     boundary = (
-        "Agent Middleware API is a gateway between your agents and your paid MCP "
-        "(Model Context Protocol) tools. The first call executes and is charged "
-        "once; a retry carrying the same idempotency key cannot dispatch again or "
-        "debit again. Every completed call returns a signed receipt you can verify "
-        "offline."
+        "Agent Middleware API is a transaction boundary between your autonomous "
+        "agents and your consequential MCP (Model Context Protocol) tools. The "
+        "first call executes and is charged once; a retry carrying the same "
+        "idempotency key cannot dispatch again or debit again. Every completed "
+        "call returns a signed receipt you can verify offline."
+    )
+    wedge = (
+        "The wedge today is metered calls. The underlying primitive is bounded "
+        "authority for machine actions."
+    )
+    only_path = (
+        "The gateway sits between the agent and one tool, and becomes the only "
+        "path to that tool once you close the tool's other routes."
     )
 
     assert headline in text
     assert failure in text
     assert boundary in text
+    assert wedge in text
+    # The non-bypassability claim rides directly under the offer copy with its
+    # diagram, before the numbered sections begin.
+    assert only_path in text
+    assert page.index('class="boundary-figure"') < page.index('id="thesis-title"')
     assert "Book a one-tool pilot" in text
     assert "Verify our receipt yourself — offline" in text
     # One label for the booking CTA everywhere; the shorter "Book a pilot" and
@@ -430,7 +443,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-8"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-9"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -440,7 +453,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-8"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-9"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly

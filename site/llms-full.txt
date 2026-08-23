@@ -15,12 +15,13 @@ Do not treat the marketing origin as an API base URL.
 
 ## What the product is
 
-A gateway between an autonomous agent and one paid MCP (Model Context Protocol)
-tool. It is not an agent runtime, not an LLM provider, not an IAM replacement,
-and not a marketplace.
+A gateway between an autonomous agent and one consequential MCP (Model
+Context Protocol) tool. It is not an agent runtime, not an LLM provider,
+not an IAM replacement, and not a marketplace.
 
-The wedge is deliberately narrow: one governed action, on one tool, for one
-operator, with portable evidence afterwards.
+The wedge is deliberately narrow: metered calls — one governed action, on
+one tool, for one operator, with portable evidence afterwards. The
+underlying primitive is bounded authority for machine actions.
 
 ## Governed loop
 
@@ -84,9 +85,9 @@ are reproducible local proofs, not production or settlement claims.
 
 GET https://api.thisisatest.tech/health/dependencies
 
-HTTP 200 alone does not mean every dependency is ready. Inspect `status`, the
-selected tool's dependencies, `simulation_modes`, and `enable_proof_surfaces`.
-Health never replaces authentication or permit checks.
+HTTP 200 alone does not mean every dependency is ready. Inspect `status` and
+the selected tool's dependencies. Health never replaces authentication or
+permit checks.
 
 ## What is NOT established
 

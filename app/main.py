@@ -760,18 +760,24 @@ async def root(request: Request):
                 "planner",
                 "billing_expansion",
             ],
-            "proof_surface": [
-                "awi",
-                "browser_automation",
-                "content_generation",
-                "iot_bridge",
-                "media_engine",
-                "oracle",
-                "red_team",
-                "rtaas",
-                "sandbox",
-                "telemetry_pm",
-            ],
+            # Unmounted workloads are not discovery: the proof-surface name
+            # list is published only while those routers are actually mounted.
+            "proof_surface": (
+                [
+                    "awi",
+                    "browser_automation",
+                    "content_generation",
+                    "iot_bridge",
+                    "media_engine",
+                    "oracle",
+                    "red_team",
+                    "rtaas",
+                    "sandbox",
+                    "telemetry_pm",
+                ]
+                if get_settings().ENABLE_PROOF_SURFACES
+                else []
+            ),
             "proof_surfaces_mounted": bool(get_settings().ENABLE_PROOF_SURFACES),
         },
         "services": {

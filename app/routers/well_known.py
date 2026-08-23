@@ -49,7 +49,10 @@ PRODUCT_CAPABILITIES: list[str] = [
     "api_keys",
 ]
 
-# Proof-surface catalog — present for discovery honesty, not as product claims.
+# Proof-surface catalog — served only while these workloads are mounted
+# (ENABLE_PROOF_SURFACES=true), for honesty about what is actually reachable.
+# Unmounted instances publish an empty proof_surfaces list; the historical
+# inventory stays in docs/PROOF_SURFACES.md.
 PROOF_SURFACE_CATALOG: list[dict[str, Any]] = [
     {
         "id": "awi_automation",
@@ -132,7 +135,7 @@ def get_agent_first_metadata() -> dict[str, Any]:
         # Insert AWI manifest after agent.json when proof surfaces are mounted.
         bootstrap.insert(1, "/.well-known/awi.json")
 
-    return {
+    metadata: dict[str, Any] = {
         "primary_audience": "autonomous_agents",
         "design_principle": "agent_first",
         "product_wedge": "governed_mcp_trust_plane",
@@ -149,11 +152,6 @@ def get_agent_first_metadata() -> dict[str, Any]:
         "bootstrap_sequence": bootstrap,
         "simulation_and_dependency_truth": "/health/dependencies",
         "proof_surfaces_enabled": bool(cfg.ENABLE_PROOF_SURFACES),
-        "proof_surface_note": (
-            "Entries under proof_surfaces are demo/workload scaffolding. "
-            "They do not define the product unless they consume the same "
-            "permit, receipt, idempotency, and audit primitives via governed MCP."
-        ),
         "human_observability": {
             "human_dashboard_url": "/dashboard",
             "interactive_docs_url": "/docs",
@@ -164,6 +162,15 @@ def get_agent_first_metadata() -> dict[str, Any]:
             ),
         },
     }
+    if cfg.ENABLE_PROOF_SURFACES:
+        # The note explains the proof_surfaces catalog, so it travels with the
+        # catalog: an instance running only the wedge advertises only the wedge.
+        metadata["proof_surface_note"] = (
+            "Entries under proof_surfaces are demo/workload scaffolding. "
+            "They do not define the product unless they consume the same "
+            "permit, receipt, idempotency, and audit primitives via governed MCP."
+        )
+    return metadata
 
 
 def _provider_manifest(config: Any) -> dict[str, str]:
@@ -279,8 +286,12 @@ class AgentPluginManifest(BaseModel):
     proof_surfaces: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
-            "Labeled non-product workloads. Treat as simulated/demo unless "
-            "invoked through governed MCP with permits."
+            "Labeled non-product workloads mounted on this instance. Treat as "
+            "simulated/demo unless invoked through governed MCP with permits. "
+            "Empty when proof surfaces are unmounted "
+            "(ENABLE_PROOF_SURFACES=false): an unmounted workload is not "
+            "discovery, and the historical inventory stays in the source "
+            "repository (docs/PROOF_SURFACES.md)."
         ),
     )
 
@@ -436,22 +447,24 @@ def _build_agent_manifest() -> AgentPluginManifest:
             "phase9_rag": "/v1/awi/rag/ingest",
         }
     else:
-        proof_surfaces = [
-            {
-                **entry,
-                "mounted": False,
-                "note": (f"{entry['note']} Not mounted (ENABLE_PROOF_SURFACES=false)."),
-            }
-            for entry in proof_surfaces
-        ]
+        # An unmounted workload is not discovery. The primary manifest stays
+        # wedge-only; the historical proof-surface inventory lives in the
+        # source repository (docs/PROOF_SURFACES.md), not in every agent's
+        # bootstrap payload.
+        proof_surfaces = []
+
+    description = (
+        "Governed MCP trust plane for autonomous agents: scoped permits, "
+        "metered tool invocation, signed receipts, and wallet audit chains."
+    )
+    if cfg.ENABLE_PROOF_SURFACES:
+        description += (
+            " Additional routers are labeled proof surfaces, not the product wedge."
+        )
 
     return AgentPluginManifest(
         name="agent-middleware-api",
-        description=(
-            "Governed MCP trust plane for autonomous agents: scoped permits, "
-            "metered tool invocation, signed receipts, and wallet audit chains. "
-            "Additional routers are labeled proof surfaces, not the product wedge."
-        ),
+        description=description,
         version=cfg.APP_VERSION,
         canonical_api=public_api_origin(),
         provider=_provider_manifest(cfg),

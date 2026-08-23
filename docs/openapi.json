@@ -4796,7 +4796,7 @@
           "Agent Discovery"
         ],
         "summary": "Agent Discovery Manifest",
-        "description": "Aggregated capability index: services, MCP tools, and pricing — plus agentic-web endpoints on instances that mount proof surfaces. Bootstrap order is defined in `/.well-known/agent.json` under `agent_first.bootstrap_sequence` (this endpoint is optional after those hints).",
+        "description": "Aggregated capability index: services, MCP tools, and pricing. Bootstrap order is defined in `/.well-known/agent.json` under `agent_first.bootstrap_sequence` (this endpoint is optional after those hints).",
         "operationId": "get_discovery_manifest_v1_discover_get",
         "responses": {
           "200": {

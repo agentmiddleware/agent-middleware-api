@@ -202,14 +202,22 @@ class TestLlmTxt:
         assert "partner.notes.write" in content
         assert "POST /v1/telemetry/events" not in content
 
-    def test_llm_txt_notes_proof_surface_gate(self):
-        """Verify llm.txt discloses the Phase9/AWI discovery gate."""
+    def test_llm_txt_stays_wedge_only(self):
+        """The primary agent doc carries no proof-surface inventory.
+
+        Unmounted workloads are not discovery: an agent bootstrapping from
+        llm.txt should meet only the governed permit → invoke → receipt loop.
+        The proof-surface catalog lives in docs/PROOF_SURFACES.md.
+        """
         with open("static/llm.txt", "r") as f:
             content = f.read()
 
-        assert "ENABLE_PROOF_SURFACES" in content
-        assert "awi_" in content
         assert "/v1/permits" in content
+        assert "ENABLE_PROOF_SURFACES" not in content
+        assert "awi_" not in content
+        assert "proof surface" not in content.lower()
+        assert "proof-surface" not in content.lower()
+        assert "simulation_modes" not in content
 
 
 class TestPhase9ToolsRegistration:

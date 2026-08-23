@@ -62,7 +62,9 @@ async def test_agent_first_declares_product_wedge(client):
     assert meta["product_wedge"] == "governed_mcp_trust_plane"
     assert meta["product_loop"][0] == "discover"
     assert "receipt" in meta["product_loop"]
-    assert "proof_surface_note" in meta
+    # The suite runs with proof surfaces unmounted, so the primary manifest
+    # stays wedge-only: no proof-surface note travels without its catalog.
+    assert "proof_surface_note" not in meta
     resp = await client.get("/.well-known/agent.json")
     assert resp.json()["agent_first"] == meta
 

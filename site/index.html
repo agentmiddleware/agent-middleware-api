@@ -155,18 +155,18 @@
     />
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-8" />
-    <link rel="stylesheet" href="/arcade.css?v=gateway-8" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-9" />
+    <link rel="stylesheet" href="/arcade.css?v=gateway-9" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-8"></script>
+    <script src="/a11y-preload.js?v=gateway-9"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/wave.js?v=gateway-8"></script>
-    <script defer src="/arcade.js?v=gateway-8"></script>
-    <script defer src="/analytics.js?v=gateway-8"></script>
-    <script defer src="/proof/proof.js?v=gateway-8"></script>
-    <script defer src="/a11y.js?v=gateway-8"></script>
+    <script defer src="/wave.js?v=gateway-9"></script>
+    <script defer src="/arcade.js?v=gateway-9"></script>
+    <script defer src="/analytics.js?v=gateway-9"></script>
+    <script defer src="/proof/proof.js?v=gateway-9"></script>
+    <script defer src="/a11y.js?v=gateway-9"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -254,11 +254,16 @@
       <section class="section offer-band" aria-label="How the gateway works and the pilot offer" data-wave="condense">
         <div class="offer-copy">
           <p class="hero-body">
-            Agent Middleware API is a gateway between your agents and your paid
-            MCP (Model Context Protocol) tools. The first call executes and is
-            charged once; a retry carrying the same idempotency key cannot
-            dispatch again or debit again. Every completed call returns a signed
-            receipt you can verify offline.
+            Agent Middleware API is a transaction boundary between your
+            autonomous agents and your consequential MCP (Model Context
+            Protocol) tools. The first call executes and is charged once; a
+            retry carrying the same idempotency key cannot dispatch again or
+            debit again. Every completed call returns a signed receipt you can
+            verify offline.
+          </p>
+          <p class="wedge-line">
+            The wedge today is metered calls. The underlying primitive is
+            bounded authority for machine actions.
           </p>
         </div>
 
@@ -297,6 +302,72 @@
             >
           </div>
         </aside>
+
+        <!-- The non-bypassability claim, drawn. Colors come from the design
+             tokens via var() so the diagram follows the high-contrast and
+             print palettes; the CSP forbids style attributes, so everything
+             is SVG presentation attributes. -->
+        <figure class="boundary-figure">
+          <div
+            class="boundary-scroll"
+            tabindex="0"
+            role="group"
+            aria-label="Diagram: the governed boundary is the only path from the agent to the tool"
+          >
+            <svg
+              viewBox="0 0 920 316"
+              role="img"
+              aria-labelledby="bf-title bf-desc"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <title id="bf-title">The governed boundary</title>
+              <desc id="bf-desc">
+                An agent's tools/call passes through the governed boundary —
+                permit, scope, budget and expiry, replay protection, signed
+                receipt — before it reaches the tool. A dashed direct route
+                from the agent to the tool is marked closed by the operator,
+                so the boundary is the only path.
+              </desc>
+              <rect x="30" y="110" width="160" height="84" rx="6" fill="var(--panel)" stroke="var(--rule)" />
+              <text x="110" y="148" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="17" font-weight="600" letter-spacing="2" fill="var(--text)">AGENT</text>
+              <text x="110" y="172" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">decides intent</text>
+              <line x1="190" y1="152" x2="318" y2="152" stroke="var(--text-dim)" stroke-width="1.5" />
+              <polygon points="318,146 330,152 318,158" fill="var(--text-dim)" />
+              <text x="260" y="138" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">tools/call</text>
+              <rect x="330" y="42" width="260" height="220" rx="6" fill="var(--panel)" stroke="var(--brass)" stroke-width="1.5" />
+              <text x="460" y="72" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="13.5" font-weight="600" letter-spacing="2" fill="var(--brass)">GOVERNED BOUNDARY</text>
+              <line x1="350" y1="86" x2="570" y2="86" stroke="var(--rule-soft)" />
+              <rect x="356" y="107" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 110)" />
+              <text x="374" y="115" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">permit</text>
+              <rect x="356" y="137" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 140)" />
+              <text x="374" y="145" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">scope</text>
+              <rect x="356" y="167" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 170)" />
+              <text x="374" y="175" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">budget · expiry</text>
+              <rect x="356" y="197" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 200)" />
+              <text x="374" y="205" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">replay protection</text>
+              <rect x="356" y="227" width="6" height="6" fill="var(--brass)" transform="rotate(45 359 230)" />
+              <text x="374" y="235" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="14" fill="var(--text)">signed receipt</text>
+              <line x1="590" y1="152" x2="718" y2="152" stroke="var(--text-dim)" stroke-width="1.5" />
+              <polygon points="718,146 730,152 718,158" fill="var(--text-dim)" />
+              <text x="660" y="138" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">authorized</text>
+              <text x="660" y="174" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">metered</text>
+              <rect x="730" y="110" width="160" height="84" rx="6" fill="var(--panel)" stroke="var(--rule)" />
+              <text x="810" y="148" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="17" font-weight="600" letter-spacing="2" fill="var(--text)">TOOL</text>
+              <text x="810" y="172" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--text-dim)">consequential action</text>
+              <path d="M110 194 V280 H444" fill="none" stroke="var(--text-dim)" stroke-opacity="0.55" stroke-width="1.25" stroke-dasharray="5 6" />
+              <path d="M476 280 H810 V194" fill="none" stroke="var(--text-dim)" stroke-opacity="0.55" stroke-width="1.25" stroke-dasharray="5 6" />
+              <line x1="452" y1="272" x2="468" y2="288" stroke="var(--danger)" stroke-width="2" />
+              <line x1="468" y1="272" x2="452" y2="288" stroke="var(--danger)" stroke-width="2" />
+              <text x="460" y="308" text-anchor="middle" font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="12" fill="var(--danger)">direct route — closed by the operator</text>
+            </svg>
+          </div>
+          <figcaption>
+            The gateway sits between the agent and one tool, and becomes the
+            only path to that tool once you close the tool's other routes.
+            The agent decides what it wants; the operator decides what
+            authority it holds.
+          </figcaption>
+        </figure>
       </section>
 
       <section class="section thesis-section" aria-labelledby="thesis-title" data-wave="order">
@@ -307,13 +378,17 @@
             <p>
               An agent can be correct and still exceed its mandate, retry an
               expensive call, or leave an operator unable to prove what ran.
-              The gateway sits between the agent and one tool, and becomes
-              the only path to that tool once you close the tool's other
-              routes.
+              The gateway holds the authority at the resource boundary, so
+              the agent's intent is checked against what it is actually
+              allowed to do — before the tool runs.
             </p>
             <p>
               The result is inspectable before, during, and after execution
               without asking you to replace your agent framework.
+            </p>
+            <p>
+              Built for agents. Controlled by operators. For the teams
+              responsible for both.
             </p>
           </div>
         </div>
@@ -321,7 +396,7 @@
           <li>
             <span>Before</span>
             <strong>Bound the authority</strong>
-            <p>Tool, wallet, budget, expiry, and operator-defined scope.</p>
+            <p>Agent identity, tool, scope, budget, and expiry.</p>
           </li>
           <li>
             <span>During</span>
@@ -356,7 +431,7 @@
           </li>
           <li>
             <span>03</span><strong>Authorize</strong>
-            <p>A scoped permit binds the call to one tool, one wallet, a budget, and an expiry.</p>
+            <p>A scoped permit binds the call to one tool, one agent identity, a budget, and an expiry.</p>
           </li>
           <li>
             <span>04</span><strong>Invoke</strong>
@@ -364,7 +439,7 @@
           </li>
           <li>
             <span>05</span><strong>Meter</strong>
-            <p>The call is debited from the scoped wallet, once. The same key never debits twice.</p>
+            <p>The call is debited from the agent's scoped budget, once. The same key never debits twice.</p>
           </li>
           <li>
             <span>06</span><strong>Receipt</strong>
@@ -372,7 +447,7 @@
           </li>
           <li>
             <span>07</span><strong>Audit</strong>
-            <p>Wallet events are chained, so a later edit to the record is detectable.</p>
+            <p>Ledger events are chained, so a later edit to the record is detectable.</p>
           </li>
           <li>
             <span>08</span><strong>Govern</strong>
