@@ -473,3 +473,105 @@ async def test_expired_db_key_cannot_authenticate(client, api_headers, sponsor_w
         headers={"X-API-Key": key["api_key"]},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_create_api_key_with_max_uses(client, api_headers, sponsor_wallet):
+    """max_uses is persisted and echoed back, not silently dropped."""
+    resp = await client.post(
+        "/v1/api-keys",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "key_name": "limited_key",
+            "max_uses": 3,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["max_uses"] == 3
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}",
+        headers=api_headers,
+    )
+    assert list_resp.status_code == 200
+    (listed,) = list_resp.json()["keys"]
+    assert listed["max_uses"] == 3
+    assert listed["use_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_max_uses_exhausts_key(client, api_headers, sponsor_wallet):
+    """A key minted with max_uses stops authenticating after that many uses."""
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "max_uses": 2},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    for _ in range(2):
+        resp = await client.get(
+            "/v1/billing/pricing",
+            headers={"X-API-Key": key["api_key"]},
+        )
+        assert resp.status_code == 200
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert resp.status_code == 403
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}",
+        headers=api_headers,
+    )
+    (listed,) = list_resp.json()["keys"]
+    assert listed["use_count"] == 2
+    assert listed["max_uses"] == 2
+
+
+@pytest.mark.anyio
+async def test_key_without_max_uses_stays_unlimited(
+    client, api_headers, sponsor_wallet
+):
+    """Omitting max_uses keeps the historical unlimited behavior."""
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+    assert key["max_uses"] is None
+
+    for _ in range(5):
+        resp = await client.get(
+            "/v1/billing/pricing",
+            headers={"X-API-Key": key["api_key"]},
+        )
+        assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_exhausted_key_is_not_live(client, api_headers, sponsor_wallet):
+    """Exhaustion kills key liveness, so JWTs minted from the key die with it."""
+    from app.services.api_key_service import get_api_key_service
+
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "max_uses": 1},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    service = get_api_key_service()
+    assert await service.is_key_live(key["key_id"]) is True
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert resp.status_code == 200
+
+    assert await service.is_key_live(key["key_id"]) is False

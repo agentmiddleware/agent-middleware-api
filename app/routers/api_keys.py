@@ -73,6 +73,7 @@ async def create_api_key(
             wallet_id=request.wallet_id,
             key_name=request.key_name,
             expires_in_days=request.expires_in_days,
+            max_uses=request.max_uses,
         )
         return APIKeyWithSecret(
             key_id=result["key_id"],
@@ -83,6 +84,7 @@ async def create_api_key(
             key_name=result["key_name"],
             created_at=result["created_at"],
             expires_at=result["expires_at"],
+            max_uses=result["max_uses"],
         )
     except WalletNotFoundError as e:
         raise HTTPException(

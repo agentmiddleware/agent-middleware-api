@@ -7205,6 +7205,22 @@
               }
             ],
             "title": "Expires At"
+          },
+          "max_uses": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Uses"
+          },
+          "use_count": {
+            "type": "integer",
+            "title": "Use Count",
+            "default": 0
           }
         },
         "type": "object",
@@ -7271,6 +7287,17 @@
               }
             ],
             "title": "Expires At"
+          },
+          "max_uses": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Uses"
           },
           "warning": {
             "type": "string",

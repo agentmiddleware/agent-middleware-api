@@ -280,6 +280,12 @@ class APIKeyModel(SQLModel, table=True):
     )
     expires_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
+    # Bounded-use keys: None = unlimited. use_count only advances through the
+    # guarded UPDATE in APIKeyService.validate_key so the cap cannot be
+    # overshot by concurrent requests.
+    max_uses: Optional[int] = Field(default=None)
+    use_count: int = Field(default=0)
+
     revoked_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     revoke_reason: Optional[str] = Field(default=None, max_length=255)
 

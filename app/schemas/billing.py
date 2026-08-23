@@ -743,6 +743,8 @@ class APIKeyResponse(BaseModel):
     last_used_at: datetime | None = None
     created_at: datetime
     expires_at: datetime | None = None
+    max_uses: int | None = None
+    use_count: int = 0
 
 
 class APIKeyWithSecret(BaseModel):
@@ -756,6 +758,7 @@ class APIKeyWithSecret(BaseModel):
     key_name: str = "default"
     created_at: datetime
     expires_at: datetime | None = None
+    max_uses: int | None = None
     warning: str = "Store this key securely. It will not be shown again."
 
 

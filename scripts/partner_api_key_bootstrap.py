@@ -82,6 +82,9 @@ def provision(
     key_name: str,
     sponsor_wallet_id: str | None,
     agent_wallet_id: str | None,
+    daily_limit: float | None = None,
+    expires_in_days: int | None = None,
+    max_uses: int | None = None,
     json_mode: bool = False,
 ) -> dict[str, Any]:
     """Provision sponsor → agent → key via bootstrap/admin key.
@@ -125,15 +128,14 @@ def provision(
         if agent_wallet_id:
             print(f"[resume] using agent_wallet_id={agent_wallet_id}", file=sys.stderr)
         else:
-            agent = _post(
-                client,
-                "/v1/billing/wallets/agent",
-                {
-                    "sponsor_wallet_id": sponsor_wallet_id,
-                    "agent_id": agent_id,
-                    "budget_credits": budget_credits,
-                },
-            )
+            agent_body: dict[str, Any] = {
+                "sponsor_wallet_id": sponsor_wallet_id,
+                "agent_id": agent_id,
+                "budget_credits": budget_credits,
+            }
+            if daily_limit is not None:
+                agent_body["daily_limit"] = daily_limit
+            agent = _post(client, "/v1/billing/wallets/agent", agent_body)
             agent_wallet_id = agent.get("wallet_id")
             _require(bool(agent_wallet_id), "agent wallet_id missing")
             print(
@@ -141,14 +143,15 @@ def provision(
                 file=sys.stderr,
             )
 
-        key = _post(
-            client,
-            "/v1/api-keys",
-            {
-                "wallet_id": agent_wallet_id,
-                "key_name": key_name,
-            },
-        )
+        key_body: dict[str, Any] = {
+            "wallet_id": agent_wallet_id,
+            "key_name": key_name,
+        }
+        if expires_in_days is not None:
+            key_body["expires_in_days"] = expires_in_days
+        if max_uses is not None:
+            key_body["max_uses"] = max_uses
+        key = _post(client, "/v1/api-keys", key_body)
         api_key = key.get("api_key")
         _require(bool(api_key), "api_key missing (shown only once)")
 
@@ -183,6 +186,24 @@ def main() -> int:
     parser.add_argument("--budget-credits", type=float, default=1000.0)
     parser.add_argument("--initial-credits", type=float, default=10000.0)
     parser.add_argument("--key-name", default="partner-agent")
+    parser.add_argument(
+        "--daily-limit",
+        type=float,
+        default=None,
+        help="Optional daily spend cap (credits) on the agent wallet",
+    )
+    parser.add_argument(
+        "--expires-in-days",
+        type=int,
+        default=None,
+        help="Optional key expiry in days (default: never expires)",
+    )
+    parser.add_argument(
+        "--max-uses",
+        type=int,
+        default=None,
+        help="Optional cap on successful authentications for the minted key",
+    )
     parser.add_argument(
         "--sponsor-wallet-id",
         default=None,
@@ -228,6 +249,9 @@ def main() -> int:
         key_name=args.key_name,
         sponsor_wallet_id=args.sponsor_wallet_id,
         agent_wallet_id=args.agent_wallet_id,
+        daily_limit=args.daily_limit,
+        expires_in_days=args.expires_in_days,
+        max_uses=args.max_uses,
         json_mode=args.json,
     )
 

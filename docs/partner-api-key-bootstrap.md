@@ -29,6 +29,13 @@ uv run --with-requirements requirements.txt \
   --budget-credits 1000
 ```
 
+Optional bounds on what you mint (all default to unlimited):
+
+- `--daily-limit 250` — daily spend cap (credits) on the agent wallet
+- `--expires-in-days 30` — key stops authenticating after this many days
+- `--max-uses 1000` — key stops authenticating after this many successful
+  authentications (enforced server-side)
+
 On partial failure, re-run with the IDs printed to stderr:
 
 ```bash

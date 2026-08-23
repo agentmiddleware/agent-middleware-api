@@ -16,7 +16,7 @@ import json
 import secrets
 import logging
 from datetime import timedelta
-from typing import Optional
+from typing import Any, Optional, cast
 from uuid import uuid4
 
 from sqlalchemy import select, update
@@ -120,6 +120,7 @@ class APIKeyService:
         wallet_id: str,
         key_name: str = "default",
         expires_in_days: int | None = None,
+        max_uses: int | None = None,
     ) -> dict:
         """
         Create a new API key for a wallet.
@@ -128,6 +129,7 @@ class APIKeyService:
             wallet_id: Wallet to create key for
             key_name: Human-readable name for the key
             expires_in_days: Optional expiration in days
+            max_uses: Optional cap on successful authentications (None = unlimited)
 
         Returns:
             {
@@ -139,6 +141,7 @@ class APIKeyService:
                 "key_name": str,
                 "created_at": datetime,
                 "expires_at": datetime | None,
+                "max_uses": int | None,
             }
         """
         async with self._session_factory()() as session:
@@ -166,6 +169,7 @@ class APIKeyService:
                 status=APIKeyStatus.ACTIVE.value,
                 metadata_json=json.dumps({"name": key_name}),
                 expires_at=(to_naive_utc(expires_at) if expires_at else None),
+                max_uses=max_uses,
             )
             session.add(api_key)
             await session.commit()
@@ -181,6 +185,7 @@ class APIKeyService:
             "key_name": key_name,
             "created_at": now,
             "expires_at": expires_at,
+            "max_uses": max_uses,
         }
 
     async def get_keys(self, wallet_id: str) -> dict:
@@ -234,6 +239,8 @@ class APIKeyService:
                     "last_used_at": key.last_used_at,
                     "created_at": key.created_at,
                     "expires_at": key.expires_at,
+                    "max_uses": key.max_uses,
+                    "use_count": key.use_count,
                 }
             )
 
@@ -268,6 +275,8 @@ class APIKeyService:
                 )
             )
             for key in result.scalars().all():
+                if key.max_uses is not None and key.use_count >= key.max_uses:
+                    continue
                 expires_at = key.expires_at
                 if not expires_at or expires_at >= now:
                     return True
@@ -289,6 +298,8 @@ class APIKeyService:
             )
             key = result.scalar_one_or_none()
         if not key or key.status != APIKeyStatus.ACTIVE.value:
+            return False
+        if key.max_uses is not None and key.use_count >= key.max_uses:
             return False
         expires_at = key.expires_at
         return not expires_at or expires_at >= utc_now()
@@ -329,9 +340,31 @@ class APIKeyService:
             if expires_at and expires_at < now:
                 return None
 
-            key.last_used_at = to_naive_utc(now)
-            session.add(key)
-            await session.commit()
+            if key.max_uses is not None:
+                # Guarded increment: the WHERE clause makes concurrent
+                # requests race for the remaining budget instead of all
+                # reading the same stale count, so max_uses cannot be
+                # overshot. rowcount 0 means the budget is spent.
+                consumed = await session.execute(
+                    update(APIKeyModel)
+                    .where(
+                        col(APIKeyModel.key_id) == key.key_id,
+                        col(APIKeyModel.status) == APIKeyStatus.ACTIVE.value,
+                        col(APIKeyModel.use_count) < col(APIKeyModel.max_uses),
+                    )
+                    .values(
+                        use_count=APIKeyModel.use_count + 1,
+                        last_used_at=to_naive_utc(now),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                await session.commit()
+                if (cast(Any, consumed).rowcount or 0) == 0:
+                    return None
+            else:
+                key.last_used_at = to_naive_utc(now)
+                session.add(key)
+                await session.commit()
 
         return key
 
