@@ -232,7 +232,17 @@ async def get_tools_json(
     return JSONResponse(content=manifest)
 
 
-@router.post("/messages", name="MCP JSON-RPC Messages")
+@router.post(
+    "/messages",
+    name="MCP JSON-RPC Messages",
+    deprecated=True,
+    description=(
+        "Legacy project JSON-RPC endpoint, kept for existing clients and the "
+        "local proof scripts. New integrations should use the standard MCP "
+        "Streamable HTTP endpoint at POST /mcp (official MCP SDK transport); "
+        "both run the same governed permit→meter→receipt path."
+    ),
+)
 async def handle_messages(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
@@ -2780,6 +2790,14 @@ async def _handle_tools_call(
     "/tools/{service_id}/invoke",
     name="Invoke MCP Tool",
     summary="Invoke a registered MCP tool",
+    deprecated=True,
+    description=(
+        "Legacy REST-shaped invoke, kept for existing clients. New "
+        "integrations should call tools through the standard MCP Streamable "
+        "HTTP endpoint at POST /mcp (or the legacy JSON-RPC POST "
+        "/mcp/messages); every entry point runs the same governed "
+        "permit→meter→receipt path."
+    ),
 )
 async def invoke_tool(
     service_id: str,

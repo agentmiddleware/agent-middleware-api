@@ -296,6 +296,18 @@ async def _check_signing_key() -> dict[str, Any]:
     return {"status": "up", "state": "loaded"}
 
 
+async def check_mqtt_readiness() -> dict[str, Any]:
+    """Sim-aware mqtt entry for ``/health/ready``.
+
+    Shares ``_check_mqtt`` with ``/health/dependencies`` so the two endpoints
+    can never disagree: when ``iot_bridge`` is in simulation mode both report
+    ``not_used`` instead of ready claiming ``up`` for a broker nothing
+    touches.
+    """
+    sim_modes = get_simulation_modes()
+    return await _run_check("mqtt", lambda: _check_mqtt(sim_modes))
+
+
 # ---------------------------------------------------------------------------
 # Public aggregator
 # ---------------------------------------------------------------------------
@@ -388,6 +400,64 @@ async def gather_dependency_report() -> dict[str, Any]:
         "enable_proof_surfaces": bool(settings.ENABLE_PROOF_SURFACES),
         "enable_dogfood_tool": bool(settings.ENABLE_DOGFOOD_TOOL),
         "enable_dogfood_second_tool": bool(settings.ENABLE_DOGFOOD_SECOND_TOOL),
+        "runtime_degradation": runtime_degradation,
+        "metric_scopes": _METRIC_SCOPES,
+        "unhealthy": unhealthy,
+    }
+
+
+# Dependencies the trust-plane wedge actually runs on. Everything else in the
+# full report exists for proof-surface consumers (mqtt/iot, llm/telemetry_pm,
+# sentinel/human_approval) or gated expansion surfaces (stripe: top-up, KYC).
+PUBLIC_DEPENDENCY_KEYS: frozenset[str] = frozenset(
+    {"postgres", "redis", "signing_key", "upstream_mcp"}
+)
+
+
+def build_public_dependency_report(full_report: dict[str, Any]) -> dict[str, Any]:
+    """Project the full dependency report onto the wedge's public surface.
+
+    The unauthenticated ``/health/dependencies`` payload used to publish the
+    per-service ``simulation_modes`` map and probe results for dependencies
+    only frozen proof surfaces consume — a public billboard of everything the
+    platform is *not* running. When proof surfaces are unmounted
+    (``ENABLE_PROOF_SURFACES=false``, the required production posture) none of
+    those services are reachable, so their flags describe nothing a caller can
+    exercise. This projection reports only what the wedge runs on: postgres,
+    redis, the signing key, the upstream MCP tool, version + commit SHA, and
+    the resolved environment posture. The overall verdict and ``unhealthy``
+    list are recomputed from the projected set so a hidden proof-surface
+    dependency can never flip the public status.
+
+    The full report — simulation modes included — remains available to
+    operators in the startup log (``phase="runtime_posture"``) and on
+    deployments that mount proof surfaces, where those flags describe live,
+    reachable routes.
+    """
+    dependencies = {
+        name: result
+        for name, result in full_report["dependencies"].items()
+        if name in PUBLIC_DEPENDENCY_KEYS
+    }
+    unhealthy = [
+        name for name, r in dependencies.items() if r.get("status") not in _OK_STATUSES
+    ]
+    runtime_degradation = full_report["runtime_degradation"]
+    if runtime_degradation.get("degraded"):
+        overall = "degraded"
+        if "runtime_degradation" not in unhealthy:
+            unhealthy = [*unhealthy, "runtime_degradation"]
+    else:
+        overall = "healthy" if not unhealthy else "degraded"
+
+    return {
+        "status": overall,
+        "version": full_report["version"],
+        "commit_sha": full_report["commit_sha"],
+        "environment": full_report["environment"],
+        "production_like": full_report["production_like"],
+        "dependencies": dependencies,
+        "enable_proof_surfaces": full_report["enable_proof_surfaces"],
         "runtime_degradation": runtime_degradation,
         "metric_scopes": _METRIC_SCOPES,
         "unhealthy": unhealthy,

@@ -42,7 +42,22 @@ def test_simulation_settings_field_unknown_raises():
 
 @pytest.mark.anyio
 async def test_health_dependencies_simulation_modes_complete(client):
-    resp = await client.get("/health/dependencies")
+    """With proof surfaces mounted, the payload reports every sim flag.
+
+    With them unmounted (production posture) the public payload omits
+    simulation_modes entirely — see test_health_public_projection.py — so the
+    completeness contract is asserted on the proof-surface posture where the
+    flags describe live routes.
+    """
+    from app.core.config import get_settings
+
+    cfg = get_settings()
+    previous = cfg.ENABLE_PROOF_SURFACES
+    cfg.ENABLE_PROOF_SURFACES = True
+    try:
+        resp = await client.get("/health/dependencies")
+    finally:
+        cfg.ENABLE_PROOF_SURFACES = previous
     assert resp.status_code == 200
     body = resp.json()
     sm = body["simulation_modes"]

@@ -121,8 +121,19 @@ async def client():
 
 @pytest.mark.anyio
 async def test_health_dependencies_surfaces_simulation_modes(client):
-    """/health/dependencies must expose simulation state for operators."""
-    resp = await client.get("/health/dependencies")
+    """Simulation state stays fully reported wherever proof surfaces mount.
+
+    With them unmounted (production posture) the public payload omits the
+    map — the full truth lives in the startup runtime_posture log and in
+    gather_dependency_report(); see test_health_public_projection.py.
+    """
+    settings = get_settings()
+    previous = settings.ENABLE_PROOF_SURFACES
+    settings.ENABLE_PROOF_SURFACES = True
+    try:
+        resp = await client.get("/health/dependencies")
+    finally:
+        settings.ENABLE_PROOF_SURFACES = previous
     assert resp.status_code == 200
     body = resp.json()
     assert "simulation_modes" in body

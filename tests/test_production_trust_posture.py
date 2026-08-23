@@ -226,4 +226,7 @@ async def test_health_dependencies_reports_proof_surfaces_off(
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("enable_proof_surfaces") is False
-    assert body.get("enable_dogfood_tool") is False
+    # The production payload is the wedge projection: dogfood/test-tooling
+    # flags and per-service simulation modes are not published there.
+    assert "enable_dogfood_tool" not in body
+    assert "simulation_modes" not in body

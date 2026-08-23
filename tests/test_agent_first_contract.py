@@ -27,12 +27,33 @@ async def test_bootstrap_sequence_urls_are_public_ok(client):
 
 @pytest.mark.anyio
 async def test_simulation_truth_endpoint_has_simulation_modes(client):
+    """The advertised truth endpoint reports posture on every deployment.
+
+    `enable_proof_surfaces` is always present. The per-service
+    `simulation_modes` map appears only when proof surfaces are mounted —
+    with them unmounted (the posture this suite runs, and production's) the
+    payload covers exactly the wedge dependencies and there is no simulated
+    surface to disclose.
+    """
+    from app.core.config import get_settings
+
     path = get_agent_first_metadata()["simulation_and_dependency_truth"]
     resp = await client.get(path)
     assert resp.status_code == 200
     data = resp.json()
-    assert "simulation_modes" in data
     assert "enable_proof_surfaces" in data
+    assert data["enable_proof_surfaces"] is False
+    assert "simulation_modes" not in data
+
+    cfg = get_settings()
+    previous = cfg.ENABLE_PROOF_SURFACES
+    cfg.ENABLE_PROOF_SURFACES = True
+    try:
+        mounted = (await client.get(path)).json()
+    finally:
+        cfg.ENABLE_PROOF_SURFACES = previous
+    assert "simulation_modes" in mounted
+    assert mounted["enable_proof_surfaces"] is True
 
 
 @pytest.mark.anyio

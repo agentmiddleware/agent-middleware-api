@@ -758,17 +758,24 @@ class TestAWIRouter:
             assert data["profile"] == "awi-over-mcp"
             assert data["endpoints"]["execute"] == "/v1/awi/execute"
             assert data["safety_capabilities"]["sensitive_parameter_redaction"] is True
-            openapi = app.openapi()
-            manifest_schema = openapi["paths"]["/.well-known/awi.json"]["get"][
-                "responses"
-            ]["200"]["content"]["application/json"]["schema"]
             assert set(actions) == {action.value for action in AWIStandardAction}
             assert set(data["representation_types"]) == {
                 item.value for item in AWIRepresentationType
             }
-            assert manifest_schema == {
-                "$ref": "#/components/schemas/AWIDiscoveryManifest"
-            }
+            # The route still declares AWIDiscoveryManifest as its response
+            # model. Asserted on the route object rather than app.openapi():
+            # the path is hidden from the schema when the app boots with
+            # ENABLE_PROOF_SURFACES=false (the suite's shared-app posture),
+            # while a proof deployment advertises it normally.
+            from app.schemas.awi import AWIDiscoveryManifest
+            from tests.conftest import iter_routes
+
+            manifest_route = next(
+                r
+                for r in iter_routes(app.routes)
+                if getattr(r, "path", "") == "/.well-known/awi.json"
+            )
+            assert manifest_route.response_model is AWIDiscoveryManifest
             assert actions["login"]["status"] == "provisional"
             assert actions["click_button"]["tier"] == "compatibility"
 

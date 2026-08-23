@@ -306,8 +306,8 @@ On startup, the gateway discovers the exact upstream tool and refuses readiness 
 | `GET /v1/evidence/{receipt_id}` | Permit, dispatch, ledger, receipt, and audit evidence bundle | Authorized wallet/admin |
 | `POST /v1/audit/verify-chain` | Verify a wallet audit chain | Authorized wallet/admin |
 | `GET /v1/receipts/reconciliation/refunds` | Inspect failed-refund work items | Bootstrap admin only |
-| `POST /v1/billing/top-up/prepare` | Create a Stripe PaymentIntent for a sponsor wallet | Authorized sponsor wallet |
-| `GET /health/dependencies` | Durable-state, upstream dispatch, reconciliation, simulation, and degradation truth | Public operator check |
+| `POST /v1/billing/top-up/prepare` | Create a Stripe PaymentIntent for a sponsor wallet | Authorized sponsor wallet; dormant expansion surface — mounts only with `ENABLE_PROOF_SURFACES=true`, never in production |
+| `GET /health/dependencies` | Wedge dependency truth (postgres, redis, signing key, upstream MCP, version + commit SHA); instances that mount proof surfaces also report simulation modes | Public operator check |
 
 The generated contract at `/openapi.json` is canonical. A checked-in copy lives at [docs/openapi.json](docs/openapi.json) and is held in sync by CI.
 

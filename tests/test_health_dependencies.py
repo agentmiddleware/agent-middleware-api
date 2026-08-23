@@ -306,6 +306,12 @@ async def test_missing_signing_key_degrades_when_trust_mode_is_enabled():
 
 @pytest.mark.anyio
 async def test_health_dependencies_endpoint_returns_report(client):
+    """The endpoint serves the public (wedge) projection when proof surfaces
+    are unmounted — the suite default and the required production posture.
+
+    Full-report shape and the proof-surface branch are covered by
+    test_report_default_shape above and test_health_public_projection.py.
+    """
     resp = await client.get("/health/dependencies")
     assert resp.status_code == 200
     body = resp.json()
@@ -314,14 +320,10 @@ async def test_health_dependencies_endpoint_returns_report(client):
     assert set(body["dependencies"].keys()) == {
         "postgres",
         "redis",
-        "mqtt",
-        "stripe",
-        "llm",
         "upstream_mcp",
         "signing_key",
-        "sentinel",
     }
-    assert "simulation_modes" in body
+    assert "simulation_modes" not in body
     assert body["version"] == "1.3.0"
     assert "commit_sha" in body
     assert body["metric_scopes"] == {

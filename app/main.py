@@ -30,9 +30,15 @@ from .core.durable_state import (
     close_durable_state,
     get_durable_state,
 )
-from .core.health import gather_dependency_report
+from .core.health import (
+    build_public_dependency_report,
+    check_mqtt_readiness,
+    gather_dependency_report,
+)
 from .core.public_contact import validated_public_contact as _public_contact_metadata
 from .core.rate_limiter import RateLimitMiddleware
+from .core.runtime_mode import get_simulation_modes
+from .middleware.head_method import HeadMethodMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 from .core.trust_mode import (
@@ -152,6 +158,34 @@ _SIGNING_KEY_REMEDIATION = {
 async def lifespan(app: FastAPI):
     validate_trust_mode_guardrails(settings)
     warn_if_trust_mode_permissive(settings)
+    # Operator-facing posture record. The unauthenticated /health/dependencies
+    # payload no longer publishes per-service simulation modes when proof
+    # surfaces are unmounted, so this startup line is where that truth lives
+    # for production operators.
+    logger.info(
+        "app_startup",
+        phase="runtime_posture",
+        environment=settings.ENVIRONMENT,
+        production_like=is_production_like_environment(settings.ENVIRONMENT),
+        enable_proof_surfaces=bool(settings.ENABLE_PROOF_SURFACES),
+        enable_dogfood_tool=bool(settings.ENABLE_DOGFOOD_TOOL),
+        enable_dogfood_second_tool=bool(settings.ENABLE_DOGFOOD_SECOND_TOOL),
+        simulation_modes=get_simulation_modes(),
+        cors_origins=settings.CORS_ORIGINS,
+    )
+    # A public deployment whose manifest tells agents the operator has no
+    # contact is a discovery-honesty defect, not a neutral default. Partial
+    # configuration already fails the boot (validated_public_contact raises at
+    # import); complete absence is legal for local instances, so production
+    # only gets this loud nudge.
+    if public_contact is None and is_production_like_environment(settings.ENVIRONMENT):
+        logger.warning(
+            "public_contact_not_configured: /.well-known/agent.json is "
+            "reporting provider.status=contact_not_configured on a "
+            "production-like deployment. Set PUBLIC_CONTACT_NAME, "
+            "PUBLIC_CONTACT_EMAIL, and PUBLIC_CONTACT_URL together "
+            "(see docs/deploy-railway.md, Required production variables)."
+        )
     try:
         signing_key_state = validate_signing_key_configuration(settings)
     except SigningKeyError as exc:
@@ -323,8 +357,6 @@ async def lifespan(app: FastAPI):
 
     startup_time = time.monotonic()
     if settings.DATABASE_URL:
-        from .core.trust_mode import is_production_like_environment
-
         try:
             await init_db()
             logger.info(
@@ -463,8 +495,8 @@ app = FastAPI(
         "- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, "
         "`/llms.txt`, `/v1/discover`\n\n"
         "### Proof Surfaces\n\n"
-        "AWI, browser, content, oracle, sandbox, media, IoT, red-team, and "
-        "telemetry demos are labeled scaffolding. They mount only when "
+        "Agentic-web, browser, content, oracle, sandbox, media, IoT, red-team, "
+        "and telemetry demos are labeled scaffolding. They mount only when "
         "`ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n"
         "### Authentication\n\n"
         "Protected endpoints require an API key via the `X-API-Key` header.\n\n"
@@ -529,19 +561,38 @@ def add_cors_middleware(application: FastAPI, origins: list[str]) -> None:
 
 
 # CORS origins are configurable via the CORS_ORIGINS env var (comma-separated).
+# The default wildcard is a deliberate posture, not an accident: every
+# authenticated route takes explicit header credentials (X-API-Key / Bearer),
+# never cookies, and add_cors_middleware disables credentialed CORS under a
+# wildcard, so `*` here grants cross-origin reads of public discovery
+# surfaces and nothing else. Operators fronting a browser app that sends
+# credentials must set an explicit origin list instead. Decision documented
+# in SECURITY_LIMITATIONS.md ("CORS posture").
 cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 add_cors_middleware(app, cors_origins)
+if "*" in cors_origins:
+    logger.info(
+        "cors_wildcard_active: credential-less wildcard CORS is the documented "
+        "default for this header-authenticated API; set CORS_ORIGINS to an "
+        "explicit list to change it (see SECURITY_LIMITATIONS.md)"
+    )
 
 # Baseline response hardening (nosniff, framing, referrer, HSTS over TLS).
-# Registered last so it wraps outermost: Starlette builds the stack in reverse
-# registration order, and stamping rate-limit 429s and CORS preflights too is
-# the point.
+# Registered near-last so it wraps almost everything: Starlette builds the
+# stack in reverse registration order, and stamping rate-limit 429s and CORS
+# preflights too is the point.
 app.add_middleware(SecurityHeadersMiddleware)
+
+# HEAD → GET translation, outermost. FastAPI's APIRoute does not auto-register
+# HEAD for GET routes (plain Starlette routes like /openapi.json do), which
+# made HEAD answer 405 on most public GETs. Outermost placement means every
+# layer below — routing included — sees a GET, and the response leaves with
+# the GET's status and headers but no body, per RFC 9110 §9.3.2.
+app.add_middleware(HeadMethodMiddleware)
 
 # --- Mount service routers ---
 
 CORE_TRUST_ROUTERS = (
-    auth,
     audit,
     policies,
     billing,
@@ -551,21 +602,51 @@ CORE_TRUST_ROUTERS = (
     receipts,
     evidence,
     preflight,
-    webhooks,
     mcp,
     mcp_standard,
     mcp_public,
-    kyc,
     api_keys,
-    dev_keys,
     keys,
     me,
     discover,
-    planner,
     well_known,
     static,
     docs,
 )
+
+# Dormant trust surfaces — real trust-plane features with no active customer
+# demand (see AGENTS.md: no new core capability without documented customer
+# evidence). Unlike PROOF_SURFACE_ROUTERS these are not demo scaffolding, but
+# they are not the wedge either, so production deployments
+# (ENABLE_PROOF_SURFACES=false) neither mount nor advertise them:
+#   - auth: JWT exchange — a second authentication story; the wedge contract
+#     is "send the API key" (X-API-Key). app.core.auth still *validates*
+#     Bearer JWTs, but nothing can mint one while this router is unmounted.
+#   - kyc: Stripe Identity verification; Stripe is not configured in
+#     production and /v1/discover already omits the capability without it.
+#   - planner: budget optimizer, adjacent to but outside the
+#     permit→invoke→receipt loop.
+# Billing expansion surfaces (transfers, top-ups, child/swarm wallets,
+# dry-run sandbox, marketplace) gate the same way via
+# billing.expansion_router — see app/routers/billing.py.
+DORMANT_TRUST_ROUTERS = (
+    auth,
+    kyc,
+    planner,
+)
+
+
+def mount_dormant_trust_surfaces(application: FastAPI) -> None:
+    """Mount every dormant trust surface (single source of truth).
+
+    Used below when ENABLE_PROOF_SURFACES is true and by the test suite's
+    dormant-marked fixtures, so the mounted set can never drift between the
+    two.
+    """
+    for router_module in DORMANT_TRUST_ROUTERS:
+        application.include_router(router_module.router)
+    application.include_router(billing.expansion_router)
+
 
 # Frozen scaffolding — do not expand. See docs/PROOF_SURFACES.md.
 PROOF_SURFACE_ROUTERS = (
@@ -592,13 +673,33 @@ PROOF_SURFACE_ROUTERS = (
 for router_module in CORE_TRUST_ROUTERS:
     app.include_router(router_module.router)
 
+# Self-serve dev keys: the handler is triple-gated at runtime (its own
+# ENABLE_DEV_KEY_SELF_PROVISION flag answers 404, production-like environments
+# fail closed with 403, and cross-origin browser calls are refused), so the
+# route stays mounted for local flag flips — but it is only *advertised* in
+# the OpenAPI schema when the local opt-in flag is actually on. Production
+# cannot set the flag (validate_trust_mode_guardrails refuses to boot), so
+# the public spec never carries the path.
+app.include_router(
+    dev_keys.router, include_in_schema=settings.ENABLE_DEV_KEY_SELF_PROVISION
+)
+
+# Stripe webhooks answer only signed Stripe traffic; a deployment with no
+# Stripe key configured has nothing that could ever call them, so they are
+# mounted only when Stripe is actually configured (or on instances that mount
+# every surface anyway).
+if settings.STRIPE_SECRET_KEY or settings.ENABLE_PROOF_SURFACES:
+    app.include_router(webhooks.router)
+
 if settings.ENABLE_PROOF_SURFACES:
+    mount_dormant_trust_surfaces(app)
     for router_module in PROOF_SURFACE_ROUTERS:
         app.include_router(router_module.router)
 else:
     logger.info(
         "proof_surfaces_disabled: ENABLE_PROOF_SURFACES=false; "
-        "only CORE_TRUST_ROUTERS are mounted"
+        "only CORE_TRUST_ROUTERS are mounted (dormant trust surfaces and "
+        "proof surfaces stay unmounted and unadvertised)"
     )
 
 
@@ -650,10 +751,14 @@ async def root(request: Request):
                 "mcp",
                 "api_keys",
                 "signing_keys",
-                "kyc",
                 "discover",
-                "planner",
                 "policies",
+            ],
+            "dormant_trust": [
+                "auth_jwt",
+                "kyc",
+                "planner",
+                "billing_expansion",
             ],
             "proof_surface": [
                 "awi",
@@ -775,25 +880,35 @@ async def root(request: Request):
             "agent_billing": {
                 "base_path": "/v1/billing",
                 "description": (
-                    "Two-tier wallet system with per-action micro-metering, "
-                    "fiat-to-credit conversion, and swarm arbitrage profit "
-                    "engine."
+                    "Two-tier wallet system (sponsor funds agent) with "
+                    "ledger-backed per-action metering."
                 ),
+                # Only routes billing.router actually mounts in the wedge
+                # posture. Expansion routes (child/swarm wallets, top-ups,
+                # arbitrage, alerts) live on billing.expansion_router and are
+                # advertised only when they are mounted — never list a path
+                # that answers 404.
                 "endpoints": [
                     "POST /v1/billing/wallets/sponsor",
                     "POST /v1/billing/wallets/agent",
-                    "POST /v1/billing/wallets/child",
-                    "POST /v1/billing/wallets/{wallet_id}/reclaim",
-                    "GET /v1/billing/wallets/{wallet_id}/swarm",
                     "GET /v1/billing/wallets/{wallet_id}",
                     "GET /v1/billing/wallets",
                     "GET /v1/billing/ledger/{wallet_id}",
                     "POST /v1/billing/charge",
-                    "POST /v1/billing/top-up/prepare",
                     "GET /v1/billing/pricing",
-                    "GET /v1/billing/arbitrage",
-                    "GET /v1/billing/alerts",
-                ],
+                ]
+                + (
+                    [
+                        "POST /v1/billing/wallets/child",
+                        "POST /v1/billing/wallets/{wallet_id}/reclaim",
+                        "GET /v1/billing/wallets/{wallet_id}/swarm",
+                        "POST /v1/billing/top-up/prepare",
+                        "GET /v1/billing/arbitrage",
+                        "GET /v1/billing/alerts",
+                    ]
+                    if get_settings().ENABLE_PROOF_SURFACES
+                    else []
+                ),
             },
             "mcp_server": {
                 "base_path": "/mcp",
@@ -990,10 +1105,14 @@ async def health_ready():
     if checks["state_store"]["status"] == "down":
         all_healthy = False
 
-    checks["mqtt"] = {
-        "status": "up" if settings.MQTT_BROKER_URL else "not_configured",
-        "configured": bool(settings.MQTT_BROKER_URL),
-    }
+    # Same sim-aware check /health/dependencies uses, so the two endpoints
+    # cannot contradict each other: with iot_bridge in simulation mode both
+    # report `not_used` — never "up" for a broker nothing touches. Only a
+    # probe that actually fails (`down`) degrades readiness, and a probe only
+    # runs when iot_bridge is real.
+    checks["mqtt"] = await check_mqtt_readiness()
+    if checks["mqtt"]["status"] == "down":
+        all_healthy = False
 
     if settings.DATABASE_URL:
         checks["database"] = {"status": "up", "configured": True}
@@ -1012,12 +1131,23 @@ async def health_ready():
     tags=["Discovery"],
     summary="Dependency health check",
     description=(
-        "Probes every external dependency (PostgreSQL, Redis, MQTT broker, "
-        "Stripe, LLM provider, signing key) in parallel with a short timeout. "
-        "Each entry reports status, latency_ms, and an error message when unreachable. "
-        "Deps whose consumers are in simulation mode return `not_used` so "
-        "the health verdict doesn't degrade on mock-only deployments."
+        "Probes the dependencies this deployment runs on, in parallel with a "
+        "short timeout. Each entry reports status, latency_ms, and an error "
+        "message when unreachable. With proof surfaces unmounted (the "
+        "production posture) the payload covers the trust-plane wedge only: "
+        "postgres, redis, signing key, upstream MCP, version + commit SHA. "
+        "Instances that mount proof surfaces additionally report those "
+        "surfaces' dependencies and per-service simulation modes; deps whose "
+        "consumers are simulated return `not_used` so the verdict doesn't "
+        "degrade on mock-only deployments."
     ),
 )
 async def health_dependencies():
-    return await gather_dependency_report()
+    report = await gather_dependency_report()
+    if get_settings().ENABLE_PROOF_SURFACES:
+        # Proof surfaces are mounted and reachable, so their dependency truth
+        # and simulation flags are live, relevant disclosures.
+        return report
+    # Production posture: report the wedge, not a billboard of unmounted
+    # surfaces. Full truth stays in the startup log (phase="runtime_posture").
+    return build_public_dependency_report(report)

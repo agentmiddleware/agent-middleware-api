@@ -19,7 +19,19 @@ Remediation context: [`tech-debt-remediation-plan.md`](tech-debt-remediation-pla
 Defined in `app/main.py`:
 
 - `CORE_TRUST_ROUTERS` — always mounted (permits, MCP, receipts, audit, …).
+- `DORMANT_TRUST_ROUTERS` — real trust features with no active customer
+  demand; mounted **only** when `ENABLE_PROOF_SURFACES=true` (see
+  "Dormant trust surfaces" below).
 - `PROOF_SURFACE_ROUTERS` — mounted **only** when `ENABLE_PROOF_SURFACES=true`.
+
+Two conditional mounts sit beside the groups:
+
+- `app.routers.dev_keys` always mounts (its handler is runtime-gated and
+  fails closed in production) but appears in the OpenAPI schema only when
+  `ENABLE_DEV_KEY_SELF_PROVISION=true` — never in production, which refuses
+  to boot with that flag.
+- `app.routers.webhooks` (Stripe) mounts only when `STRIPE_SECRET_KEY` is
+  configured (or proof surfaces are on).
 
 Do not add new routers to `PROOF_SURFACE_ROUTERS` without an explicit product
 decision to unfreeze. Prefer deleting unused stubs over growing them.
@@ -78,14 +90,32 @@ Unfreezing any item requires a narrow product decision, a tenant and threat
 model, and a vertical slice that consumes the permit → invoke → meter → receipt
 → audit loop. Historical issue text is not approval to unfreeze a surface.
 
-## Deferred (needs product approval — separate PR)
+## Dormant trust surfaces (`DORMANT_TRUST_ROUTERS`)
 
-These are currently in `CORE_TRUST_ROUTERS` and are **not** moved by Phase 6:
+Product decision (2026-08 teardown follow-up): the public production surface
+is the wedge — sponsor/agent wallets, ledger, charge, permits, MCP invoke,
+receipts, evidence, audit, policies, discovery. Trust features beyond that
+are **dormant**: real code kept warm, unmounted and unadvertised until a
+named customer needs them (see AGENTS.md, "Current Company Phase").
 
-- `app.routers.kyc`
-- `app.routers.planner`
+| Module / router | Surface |
+|-----------------|---------|
+| `app.routers.auth` (dormant) | JWT exchange (`/v1/auth/*`) — second auth story; wedge contract is `X-API-Key` |
+| `app.routers.kyc` (dormant) | Stripe Identity KYC |
+| `app.routers.planner` (dormant) | Budget optimizer |
+| `app.routers.billing.expansion_router` (dormant) | Child/swarm wallets, transfers, top-ups, marketplace, velocity status, dry-run sandbox |
 
-Do not demote them without an explicit product decision.
+They mount via `app.main.mount_dormant_trust_surfaces` when
+`ENABLE_PROOF_SURFACES=true`. Unlike proof surfaces they are not demo
+scaffolding, so they carry no freeze marker and their tests stay in the fast
+core loop (marked `dormant` by `tests/conftest.py`, which mounts the routes
+for those modules). The service layer underneath (transfers, velocity
+enforcement, KYC checks on charge paths) stays active — only the HTTP
+surface gates.
+
+Re-promoting one to `CORE_TRUST_ROUTERS` requires the unfreeze evidence bar
+in AGENTS.md: a named active prospect, a concrete tool, a documented
+workflow blocker, a committed owner and date.
 
 ## Agent rules
 

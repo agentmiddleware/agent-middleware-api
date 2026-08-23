@@ -70,7 +70,14 @@ class PricingTier(BaseModel):
     features: list[str]
 
 
-class DiscoveryManifest(BaseModel):
+class CoreDiscoveryManifest(BaseModel):
+    """Wedge-only discovery manifest — what a production deployment serves.
+
+    Response model for /v1/discover when proof surfaces are unmounted, so the
+    public OpenAPI contract carries no proof-surface vocabulary. Instances
+    that mount proof surfaces serve the DiscoveryManifest subclass instead.
+    """
+
     name: str = Field(description="Service name")
     version: str = Field(description="API version")
     description: str = Field(description="What this service provides")
@@ -81,10 +88,6 @@ class DiscoveryManifest(BaseModel):
 
     mcp_tools: list[MCPToolInfo] = Field(
         default_factory=list, description="Available MCP tools"
-    )
-
-    awi_endpoints: list[AWIEndpoint] = Field(
-        default_factory=list, description="AWI (Agentic Web Interface) endpoints"
     )
 
     pricing: list[PricingTier] = Field(
@@ -127,6 +130,14 @@ class DiscoveryManifest(BaseModel):
             "Same metadata as /.well-known/agent.json agent_first: "
             "bootstrap order and where to read simulation vs real state."
         ),
+    )
+
+
+class DiscoveryManifest(CoreDiscoveryManifest):
+    """Full discovery manifest for instances that mount proof surfaces."""
+
+    awi_endpoints: list[AWIEndpoint] = Field(
+        default_factory=list, description="AWI (Agentic Web Interface) endpoints"
     )
 
 
@@ -189,7 +200,11 @@ def _build_capabilities() -> list[ServiceCapability]:
         ),
     ]
     
-    if _is_stripe_configured():
+    # KYC is a dormant trust surface: its router mounts only with
+    # ENABLE_PROOF_SURFACES, and it is only *usable* with Stripe configured.
+    # Advertise the capability only when both hold, so discovery never points
+    # at routes that answer 404.
+    if _is_stripe_configured() and get_settings().ENABLE_PROOF_SURFACES:
         product.append(
             ServiceCapability(
                 name="kyc",
@@ -455,13 +470,21 @@ def _build_integration_guides() -> dict[str, str]:
 
 @router.get(
     "/discover",
-    response_model=DiscoveryManifest,
+    # Boot-time posture decides the public contract: with proof surfaces
+    # unmounted the response model is the wedge-only manifest, so the OpenAPI
+    # schema (and the serialized response) carry no AWI vocabulary at all.
+    response_model=(
+        DiscoveryManifest
+        if get_settings().ENABLE_PROOF_SURFACES
+        else CoreDiscoveryManifest
+    ),
     summary="Agent Discovery Manifest",
     description=(
-        "Aggregated capability index: services, MCP tools, AWI endpoints, and "
-        "pricing. Bootstrap order is defined in `/.well-known/agent.json` under "
-        "`agent_first.bootstrap_sequence` (this endpoint is optional after those "
-        "hints)."
+        "Aggregated capability index: services, MCP tools, and pricing — plus "
+        "agentic-web endpoints on instances that mount proof surfaces. "
+        "Bootstrap order is defined in `/.well-known/agent.json` under "
+        "`agent_first.bootstrap_sequence` (this endpoint is optional after "
+        "those hints)."
     ),
 )
 async def get_discovery_manifest():
@@ -522,6 +545,10 @@ async def list_mcp_tools(api_key: str = Depends(verify_api_key)):
     "/discover/awi",
     summary="List AWI Endpoints",
     description="Returns all Agentic Web Interface endpoints and the action vocabulary.",
+    # AWI is a gated proof surface. The route keeps answering its honest
+    # "not mounted" payload for direct callers, but it is only advertised in
+    # the OpenAPI contract when proof surfaces are actually mounted.
+    include_in_schema=get_settings().ENABLE_PROOF_SURFACES,
 )
 async def list_awi_endpoints(api_key: str = Depends(verify_api_key)):
     """

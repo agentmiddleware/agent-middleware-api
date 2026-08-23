@@ -156,11 +156,22 @@ async def test_well_known_tools_json_matches_dogfood_gate(client, dogfood_tool_o
 
 @pytest.mark.anyio
 async def test_health_reports_dogfood_flag(client, dogfood_tool_on):
+    """Operator truth keeps the flag; the public wedge payload omits it.
+
+    /mcp/tools.json remains the authoritative public truth for whether the
+    dogfood tool exists — the health flag is operator telemetry.
+    """
+    from app.core.health import gather_dependency_report
+
+    report = await gather_dependency_report()
+    assert report["enable_dogfood_tool"] is True
+    assert report["enable_proof_surfaces"] is False
+
     resp = await client.get("/health/dependencies")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["enable_dogfood_tool"] is True
     assert body["enable_proof_surfaces"] is False
+    assert "enable_dogfood_tool" not in body
 
 
 @pytest.mark.anyio

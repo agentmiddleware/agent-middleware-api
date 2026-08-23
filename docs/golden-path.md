@@ -164,6 +164,11 @@ Expected result: `403 Forbidden`.
 
 ## 7. Simulate Cost Before Acting
 
+> **Dormant expansion surface.** The dry-run sandbox (and the velocity
+> status read in step 9) mounts only when the local instance runs with
+> `ENABLE_PROOF_SURFACES=true`. Production deployments do not mount these
+> routes; the wedge path is quote → permit → invoke → receipt.
+
 ```bash
 DRY_RUN_JSON=$(
   curl -s -X POST "$API_URL/v1/billing/dry-run/session" \
@@ -361,6 +366,8 @@ curl -X POST "$API_URL/v1/audit/verify-chain" \
 curl "$API_URL/v1/billing/ledger/$AGENT_WALLET_ID" \
   -H "X-API-Key: $AGENT_API_KEY"
 
+# Velocity status is a dormant expansion surface: requires a local instance
+# running with ENABLE_PROOF_SURFACES=true (never mounted in production).
 curl "$API_URL/v1/billing/wallets/$AGENT_WALLET_ID/velocity" \
   -H "X-API-Key: $AGENT_API_KEY"
 ```

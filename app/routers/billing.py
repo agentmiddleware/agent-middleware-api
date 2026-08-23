@@ -263,6 +263,23 @@ router = APIRouter(
     },
 )
 
+# Expansion surfaces beyond the wedge's "one debit per dispatch" story:
+# child/swarm wallets, wallet-to-wallet transfers, Stripe self-serve top-ups,
+# the marketplace (service registration/listing, arbitrage), velocity status,
+# and the dry-run sandbox. Real code, dormant demand — mounted only via
+# app.main.mount_dormant_trust_surfaces (ENABLE_PROOF_SURFACES=true), so the
+# production OpenAPI advertises the wedge: sponsor/agent wallet CRUD, ledger,
+# charge, pricing. The service layer underneath (transfers, velocity
+# enforcement, shadow ledger) is untouched — only the HTTP surface gates.
+expansion_router = APIRouter(
+    prefix="/v1/billing",
+    tags=["Agent Financial Gateways"],
+    responses={
+        401: {"description": "Missing API key"},
+        402: {"description": "Insufficient funds", "model": InsufficientFundsResponse},
+    },
+)
+
 
 # --- Wallet Management ---
 
@@ -370,7 +387,7 @@ async def create_agent_wallet(
         )
 
 
-@router.post(
+@expansion_router.post(
     "/wallets/child",
     response_model=ChildWalletResponse,
     status_code=status.HTTP_201_CREATED,
@@ -447,7 +464,7 @@ async def create_child_wallet(
         )
 
 
-@router.post(
+@expansion_router.post(
     "/wallets/{wallet_id}/reclaim",
     response_model=ReclaimResponse,
     summary="Reclaim unspent credits from a child wallet",
@@ -480,7 +497,7 @@ async def reclaim_child_wallet(
         )
 
 
-@router.get(
+@expansion_router.get(
     "/wallets/{wallet_id}/swarm",
     response_model=SwarmBudgetSummary,
     summary="Get swarm budget summary",
@@ -823,7 +840,7 @@ async def charge_wallet(
 # --- Top-Up ---
 
 
-@router.post(
+@expansion_router.post(
     "/top-up",
     response_model=None,
     status_code=status.HTTP_410_GONE,
@@ -892,7 +909,7 @@ async def top_up_wallet(
     )
 
 
-@router.post(
+@expansion_router.post(
     "/top-up/prepare",
     summary="Prepare a fiat top-up via Stripe",
     description=(
@@ -968,7 +985,7 @@ async def prepare_top_up(
         )
 
 
-@router.post(
+@expansion_router.post(
     "/transfer",
     summary="Transfer credits between wallets",
     description="Transfer credits from one wallet to another (agent-to-agent handoff).",
@@ -1159,7 +1176,7 @@ async def get_pricing(
 # --- Arbitrage ---
 
 
-@router.get(
+@expansion_router.get(
     "/arbitrage",
     response_model=ArbitrageReport,
     summary="Get arbitrage report",
@@ -1174,7 +1191,7 @@ async def get_arbitrage_report(
 # --- Alerts ---
 
 
-@router.get(
+@expansion_router.get(
     "/alerts",
     response_model=AlertListResponse,
     summary="Get billing alerts",
@@ -1199,7 +1216,7 @@ async def get_alerts(
     )
 
 
-@router.post(
+@expansion_router.post(
     "/services",
     response_model=ServiceRegistration,
     status_code=status.HTTP_201_CREATED,
@@ -1246,7 +1263,7 @@ async def register_service(
         )
 
 
-@router.get(
+@expansion_router.get(
     "/services",
     summary="List available services",
     description="List all registered billable services in the marketplace.",
@@ -1262,7 +1279,7 @@ async def list_services(
     return {"services": services, "total": len(services)}
 
 
-@router.get(
+@expansion_router.get(
     "/wallets/{wallet_id}/velocity",
     summary="Get spend velocity status",
     description="Get current spend velocity metrics for a wallet.",
@@ -1356,7 +1373,7 @@ class SimulatedChargeResponse(ExactDecimalFieldsMixin):
     reason: str | None = None
 
 
-@router.post(
+@expansion_router.post(
     "/dry-run/session",
     response_model=DryRunSessionResponse,
     status_code=status.HTTP_201_CREATED,
@@ -1405,7 +1422,7 @@ async def create_dry_run_session(
     )
 
 
-@router.get(
+@expansion_router.get(
     "/dry-run/session/{session_id}",
     summary="Get dry-run session status",
     description="Retrieve current state of a dry-run session.",
@@ -1438,7 +1455,7 @@ async def get_dry_run_session(
     }
 
 
-@router.delete(
+@expansion_router.delete(
     "/dry-run/session/{session_id}",
     summary="End a dry-run session",
     description=(
@@ -1478,7 +1495,7 @@ async def end_dry_run_session(
     }
 
 
-@router.post(
+@expansion_router.post(
     "/dry-run/session/{session_id}/commit",
     summary="Commit sandbox session to billing",
     description=(
@@ -1528,7 +1545,7 @@ async def commit_dry_run_session(
     }
 
 
-@router.post(
+@expansion_router.post(
     "/dry-run/session/{session_id}/revert",
     summary="Revert sandbox session",
     description=(
@@ -1565,7 +1582,7 @@ async def revert_dry_run_session(
     }
 
 
-@router.post(
+@expansion_router.post(
     "/dry-run/charge",
     response_model=SimulatedChargeResponse,
     summary="Simulate a charge",

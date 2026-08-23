@@ -111,10 +111,34 @@ async def test_root_and_discover_hide_unmounted_proof_services(
     assert root_data["surface_boundaries"]["proof_surfaces_mounted"] is False
     assert "/.well-known/awi.json" not in root_data["agent_first"]["bootstrap_sequence"]
 
+    # The surviving agent_billing service entry must list only routes the
+    # wedge posture actually mounts — advertising an endpoint that answers
+    # 404 is the drift this gate exists to prevent.
+    from tests.conftest import iter_routes
+
+    billing_endpoints = root_data["services"]["agent_billing"]["endpoints"]
+    mounted_paths = {
+        getattr(route, "path", "") for route in iter_routes(app.routes)
+    }
+    for entry in billing_endpoints:
+        _method, _, path = entry.partition(" ")
+        assert path in mounted_paths, f"root advertises unmounted {entry}"
+    for gated in (
+        "/v1/billing/wallets/child",
+        "/v1/billing/wallets/{wallet_id}/swarm",
+        "/v1/billing/top-up/prepare",
+        "/v1/billing/arbitrage",
+        "/v1/billing/alerts",
+    ):
+        assert not any(path == gated for _m, _, path in
+                       (e.partition(" ") for e in billing_endpoints))
+
     discover = await client.get("/v1/discover")
     assert discover.status_code == 200
     discover_data = discover.json()
-    assert discover_data["awi_endpoints"] == []
+    # The wedge response model omits the field entirely — the public contract
+    # carries no proof-surface vocabulary when those routes are unmounted.
+    assert "awi_endpoints" not in discover_data
     # mcp_tools may include registered dogfood/partner tools, but should not
     # include proof-surface stubs (awi_*, telemetry, etc.)
     mcp_tool_names = {tool["service_id"] for tool in discover_data["mcp_tools"]}

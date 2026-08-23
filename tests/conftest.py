@@ -61,13 +61,49 @@ PROOF_SURFACE_TEST_MODULES = frozenset(
 )
 
 
+# Tests that exercise dormant trust surfaces — routers and billing expansion
+# routes that production (ENABLE_PROOF_SURFACES=false) does not mount: JWT
+# auth, KYC, planner, Stripe webhooks, child/swarm wallets, transfers,
+# top-ups, marketplace, velocity status, and the dry-run sandbox. These are
+# real trust features (not proof scaffolding), so they stay in the fast core
+# loop; the autouse fixture below mounts the dormant routes for them without
+# flipping ENABLE_PROOF_SURFACES.
+DORMANT_SURFACE_TEST_MODULES = frozenset(
+    {
+        "test_api_keys",
+        "test_audit_routes",
+        "test_billing",
+        "test_discovery_drift",
+        "test_golden_path",
+        "test_kyc",
+        "test_mcp_trust_mode",
+        "test_mcp_upstream_governed",
+        "test_planner_constraints",
+        "test_policy_bundles",
+        "test_revocation_containment",
+        "test_secret_persistence",
+        "test_stripe_integration",
+        "test_swarm_wallets",
+        "test_tenant_isolation_hardening",
+        "test_transfers",
+        "test_trust_package",
+        "test_velocity_monitor",
+        "test_wallet_ledger_integrity",
+        "test_wallet_status_enforcement",
+    }
+)
+
+
 def pytest_collection_modifyitems(config, items):
-    """Auto-apply the `proof` marker to proof-surface test modules."""
+    """Auto-apply the `proof` / `dormant` markers by test module."""
     proof = pytest.mark.proof
+    dormant = pytest.mark.dormant
     for item in items:
         stem = Path(item.nodeid.split("::", 1)[0]).stem
         if stem in PROOF_SURFACE_TEST_MODULES:
             item.add_marker(proof)
+        if stem in DORMANT_SURFACE_TEST_MODULES:
+            item.add_marker(dormant)
 
 
 def iter_routes(routes):
@@ -210,6 +246,24 @@ def anyio_backend():
     return "asyncio"
 
 
+def _mount_dormant_test_routes() -> None:
+    """Mount dormant trust surfaces (+ Stripe webhooks) on the shared app once.
+
+    Mirrors what app.main does when ENABLE_PROOF_SURFACES is true, via the
+    same mount_dormant_trust_surfaces helper so the sets cannot drift. The
+    webhooks router is added here because production mounts it on Stripe
+    configuration, which the suite deliberately never sets globally.
+    """
+    from app.main import app, mount_dormant_trust_surfaces
+    from app.routers import webhooks
+
+    if getattr(app.state, "dormant_test_routes_mounted", False):
+        return
+    mount_dormant_trust_surfaces(app)
+    app.include_router(webhooks.router)
+    app.state.dormant_test_routes_mounted = True
+
+
 @pytest.fixture(autouse=True)
 def enable_proof_surfaces_for_marked_tests(request):
     """Explicitly opt proof-marked tests into the frozen route collection."""
@@ -228,12 +282,32 @@ def enable_proof_surfaces_for_marked_tests(request):
         for router_module in PROOF_SURFACE_ROUTERS:
             app.include_router(router_module.router)
         app.state.proof_test_routes_mounted = True
+    # Proof-surface flows may also lean on dormant trust surfaces (e.g. child
+    # wallets for swarm demos); production mounts both groups under the same
+    # flag, so the test posture mirrors that.
+    _mount_dormant_test_routes()
     sync_proof_surface_mcp_registration()
     try:
         yield
     finally:
         cfg.ENABLE_PROOF_SURFACES = previous
         sync_proof_surface_mcp_registration()
+
+
+@pytest.fixture(autouse=True)
+def mount_dormant_surfaces_for_marked_tests(request):
+    """Mount dormant trust routes for dormant-marked tests.
+
+    Unlike the proof fixture this does NOT flip ENABLE_PROOF_SURFACES: the
+    dormant routers have no request-time flag checks, and several dormant
+    modules also assert flag-off behavior of other payloads (e.g. core-only
+    billing categories).
+    """
+    if request.node.get_closest_marker("dormant") is None:
+        yield
+        return
+    _mount_dormant_test_routes()
+    yield
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)

@@ -555,6 +555,11 @@ async def get_agent_json(request: Request):
         "representation types, endpoints, safety capabilities, and known limits. "
         "Marked as a proof surface — not the product wedge."
     ),
+    # AWI is a gated proof surface; every other AWI route mounts only when
+    # ENABLE_PROOF_SURFACES is true. This one lives in the always-mounted
+    # well-known router so a direct fetch keeps its explanatory 404 below,
+    # but it must not leak into the wedge's public OpenAPI contract.
+    include_in_schema=settings.ENABLE_PROOF_SURFACES,
 )
 async def get_awi_json():
     """Serve the draft AWI-over-MCP manifest (only when proof surfaces are on)."""

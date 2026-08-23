@@ -19,14 +19,33 @@ async def client():
         yield c
 
 
+@pytest.fixture
+def proof_surfaces_on():
+    """KYC routes mount only with proof surfaces; capability honesty follows.
+
+    The KYC router is a dormant trust surface now, so /v1/discover may only
+    advertise the capability when the routes are actually mounted. These
+    tests flip the flag to exercise the stripe-configured half of the truth;
+    test_discover_omits_kyc_when_proof_surfaces_off covers the other half.
+    """
+    cfg = get_settings()
+    previous = cfg.ENABLE_PROOF_SURFACES
+    cfg.ENABLE_PROOF_SURFACES = True
+    yield cfg
+    cfg.ENABLE_PROOF_SURFACES = previous
+
+
 @pytest.mark.anyio
-async def test_discover_omits_kyc_when_stripe_not_configured(client, monkeypatch):
+async def test_discover_omits_kyc_when_stripe_not_configured(
+    client, monkeypatch, proof_surfaces_on
+):
     """When Stripe is not configured, /v1/discover must not list KYC capability."""
     import app.routers.discover as discover_mod
     
     monkeypatch.setenv("STRIPE_SECRET_KEY", "")
     get_settings.cache_clear()
     cfg = get_settings()
+    cfg.ENABLE_PROOF_SURFACES = True
     assert not cfg.STRIPE_SECRET_KEY
     monkeypatch.setattr(discover_mod, "settings", cfg, raising=False)
     
@@ -48,13 +67,16 @@ async def test_discover_omits_kyc_when_stripe_not_configured(client, monkeypatch
 
 
 @pytest.mark.anyio
-async def test_discover_includes_kyc_when_stripe_configured(client, monkeypatch):
+async def test_discover_includes_kyc_when_stripe_configured(
+    client, monkeypatch, proof_surfaces_on
+):
     """When Stripe is configured, /v1/discover must list KYC capability."""
     import app.routers.discover as discover_mod
     
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake_key_for_testing")
     get_settings.cache_clear()
     cfg = get_settings()
+    cfg.ENABLE_PROOF_SURFACES = True
     assert cfg.STRIPE_SECRET_KEY
     monkeypatch.setattr(discover_mod, "settings", cfg, raising=False)
     
@@ -76,7 +98,9 @@ async def test_discover_includes_kyc_when_stripe_configured(client, monkeypatch)
 
 
 @pytest.mark.anyio
-async def test_discover_and_health_stripe_truth_match(client, monkeypatch):
+async def test_discover_and_health_stripe_truth_match(
+    client, monkeypatch, proof_surfaces_on
+):
     """Discover's KYC presence must match health's stripe.status truth."""
     import app.routers.discover as discover_mod
     
@@ -87,6 +111,7 @@ async def test_discover_and_health_stripe_truth_match(client, monkeypatch):
         monkeypatch.setenv("STRIPE_SECRET_KEY", stripe_key)
         get_settings.cache_clear()
         cfg = get_settings()
+        cfg.ENABLE_PROOF_SURFACES = True
         monkeypatch.setattr(discover_mod, "settings", cfg, raising=False)
         
         health_resp = await client.get("/health/dependencies")
@@ -111,4 +136,26 @@ async def test_discover_and_health_stripe_truth_match(client, monkeypatch):
                 "discover must list KYC"
             )
     
+    get_settings.cache_clear()
+
+
+@pytest.mark.anyio
+async def test_discover_omits_kyc_when_proof_surfaces_off(client, monkeypatch):
+    """Stripe configured but proof surfaces unmounted: KYC routes answer 404,
+    so discover must not advertise the capability."""
+    import app.routers.discover as discover_mod
+
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake_key_for_testing")
+    get_settings.cache_clear()
+    cfg = get_settings()
+    cfg.ENABLE_PROOF_SURFACES = False
+    monkeypatch.setattr(discover_mod, "settings", cfg, raising=False)
+
+    discover_resp = await client.get("/v1/discover")
+    assert discover_resp.status_code == 200
+    capability_names = {
+        cap["name"] for cap in discover_resp.json()["capabilities"]
+    }
+    assert "kyc" not in capability_names
+
     get_settings.cache_clear()

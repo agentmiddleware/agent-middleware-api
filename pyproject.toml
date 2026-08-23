@@ -22,6 +22,7 @@ testpaths = ["tests"]
 pythonpath = [".", "b2a_sdk/src"]
 markers = [
     "proof: exercises an example proof-surface workload, not the trust-plane product. Skipped by `make test`; run the full suite with `make test-all`.",
+    "dormant: exercises a dormant trust surface (JWT auth, KYC, planner, Stripe webhooks, billing expansion) that production leaves unmounted; the conftest fixture mounts those routes for these tests. Stays in the fast core loop.",
     "production_trust: runs under production-like trust flags (TRUST_MODE_ENABLED=true, ALLOW_LEGACY_UNPERMITTED_MCP=false, ENABLE_PROOF_SURFACES=false). Dedicated CI job sets those env vars.",
 ]
 filterwarnings = [

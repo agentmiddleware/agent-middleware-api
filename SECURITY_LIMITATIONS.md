@@ -112,3 +112,60 @@ repo; do not Redeploy from GitHub source).
   `create_all` remains only for ephemeral non-production SQLite (tests/local).
 - Keep CI trust invariant tests required before merge. CI also runs a
   `production_trust` subset with production-like trust flags.
+
+## CORS Posture
+
+The default `CORS_ORIGINS=*` is a deliberate decision, not an oversight:
+
+- Every authenticated route takes explicit header credentials (`X-API-Key`
+  or `Authorization: Bearer`), never cookies or other ambient browser
+  credentials, so there is nothing a cross-origin page can ride.
+- `app.main.add_cors_middleware` refuses to pair a wildcard with
+  credentialed CORS: under `*`, `Access-Control-Allow-Credentials` is never
+  emitted. An explicit origin list is required before credentialed
+  cross-origin requests are possible at all.
+- What the wildcard actually grants is cross-origin *reads of public
+  discovery surfaces* (`/.well-known/*`, `/health*`, `/llms.txt`,
+  `/openapi.json`) — the same material any non-browser client already gets —
+  which is standard posture for a public, header-authenticated API.
+- The one route that is unauthenticated yet returns a secret
+  (`/v1/dev-keys/self-provision`, local-only) independently rejects
+  cross-origin browser calls by `Origin` check, and production-like
+  environments refuse to boot with it enabled.
+
+Operators who put a credentialed browser app in front of this API must set
+`CORS_ORIGINS` to an explicit comma-separated origin list. Startup logs
+`cors_wildcard_active` whenever the wildcard posture is in effect.
+
+## One Auth Story, One Invoke Story (Dormant Surfaces)
+
+The wedge contract is **send the API key** (`X-API-Key`). Surfaces that told
+a second story are unmounted in production and absent from the public
+OpenAPI contract (they mount only with `ENABLE_PROOF_SURFACES=true`, which
+production-like boots refuse):
+
+- `/v1/auth/token|refresh|revoke` (JWT exchange) — `app.core.auth` still
+  *validates* Bearer JWTs, but nothing can mint one while the router is
+  unmounted, so the key header is the only production auth path.
+- `/v1/kyc/*` (Stripe Identity), `/v1/planner/optimize`, and the billing
+  expansion surfaces (child/swarm wallets, transfers, top-ups, marketplace,
+  velocity status, dry-run sandbox) — real code, dormant demand; see
+  `DORMANT_TRUST_ROUTERS` in `app/main.py`.
+- `/v1/webhooks/stripe*` mount only when Stripe is actually configured.
+- `/v1/dev-keys/self-provision` stays runtime-gated by its own flag and is
+  advertised in the schema only when that flag is on (never in production).
+
+The legacy invoke entry points `POST /mcp/messages` and
+`POST /mcp/tools/{id}/invoke` remain mounted for existing clients and the
+local proof scripts but are marked `deprecated` in the spec; the standard
+MCP Streamable HTTP endpoint at `POST /mcp` is the supported path. All entry
+points run the same governed permit→meter→receipt path.
+
+## Public Health Reporting
+
+With proof surfaces unmounted, the unauthenticated `/health/dependencies`
+payload reports only what the wedge runs on (postgres, redis, signing key,
+upstream MCP, version + commit SHA, environment posture). Per-service
+simulation flags and proof-surface dependency probes are not published
+there; they appear in the startup log (`phase="runtime_posture"`) and on
+instances that mount proof surfaces, where they describe live routes.
