@@ -167,6 +167,7 @@ async def rotate_api_key(
                 key_name=result["new_key"]["key_name"],
                 created_at=result["new_key"]["created_at"],
                 expires_at=result["new_key"]["expires_at"],
+                max_uses=result["new_key"]["max_uses"],
             )
 
         return RotationResponse(
@@ -263,6 +264,7 @@ async def emergency_revoke(
                 key_name=result["new_key"]["key_name"],
                 created_at=result["new_key"]["created_at"],
                 expires_at=result["new_key"]["expires_at"],
+                max_uses=result["new_key"]["max_uses"],
             )
 
         return {

@@ -575,3 +575,428 @@ async def test_exhausted_key_is_not_live(client, api_headers, sponsor_wallet):
     assert resp.status_code == 200
 
     assert await service.is_key_live(key["key_id"]) is False
+
+
+@pytest.mark.anyio
+async def test_rotated_key_inherits_remaining_budget(
+    client, api_headers, sponsor_wallet
+):
+    """Rotation must not widen authority: the new key gets the remaining uses."""
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "max_uses": 5},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    for _ in range(2):
+        resp = await client.get(
+            "/v1/billing/pricing",
+            headers={"X-API-Key": key["api_key"]},
+        )
+        assert resp.status_code == 200
+
+    rotate_resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "key_id": key["key_id"],
+            "revoke_old": True,
+        },
+        headers=api_headers,
+    )
+    assert rotate_resp.status_code == 200
+    new_key = rotate_resp.json()["new_key"]
+    assert new_key["max_uses"] == 3
+
+    for _ in range(3):
+        resp = await client.get(
+            "/v1/billing/pricing",
+            headers={"X-API-Key": new_key["api_key"]},
+        )
+        assert resp.status_code == 200
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": new_key["api_key"]},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_rotated_key_inherits_expiry_and_name(
+    client, api_headers, sponsor_wallet
+):
+    """Rotation keeps the original expiry window and the key's name."""
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "key_name": "partner-runtime",
+            "expires_in_days": 30,
+        },
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    rotate_resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "key_id": key["key_id"],
+            "revoke_old": True,
+        },
+        headers=api_headers,
+    )
+    new_key = rotate_resp.json()["new_key"]
+    assert new_key["key_name"] == "partner-runtime"
+    assert new_key["expires_at"] is not None
+
+    old_expiry = datetime.fromisoformat(key["expires_at"]).replace(tzinfo=None)
+    new_expiry = datetime.fromisoformat(new_key["expires_at"]).replace(tzinfo=None)
+    assert abs((new_expiry - old_expiry).total_seconds()) < 5
+
+
+@pytest.mark.anyio
+async def test_rotate_without_key_id_stays_unbounded(
+    client, api_headers, sponsor_wallet
+):
+    """Creating an extra key via rotate (no key_id) keeps historical behavior."""
+    rotate_resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={"wallet_id": sponsor_wallet["wallet_id"]},
+        headers=api_headers,
+    )
+    assert rotate_resp.status_code == 200
+    new_key = rotate_resp.json()["new_key"]
+    assert new_key["max_uses"] is None
+    assert new_key["expires_at"] is None
+
+
+@pytest.mark.anyio
+async def test_rotating_exhausted_key_yields_dead_key(
+    client, api_headers, sponsor_wallet
+):
+    """A spent budget cannot be rotated back to life."""
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "max_uses": 1},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert resp.status_code == 200
+
+    rotate_resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "key_id": key["key_id"],
+            "revoke_old": True,
+        },
+        headers=api_headers,
+    )
+    new_key = rotate_resp.json()["new_key"]
+    assert new_key["max_uses"] == 0
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": new_key["api_key"]},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_emergency_key_inherits_loosest_live_bounds(
+    client, api_headers, sponsor_wallet
+):
+    """Emergency replacement gets the widest authority the wallet already had."""
+    wallet_id = sponsor_wallet["wallet_id"]
+    await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "max_uses": 2},
+        headers=api_headers,
+    )
+    big_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "max_uses": 10},
+        headers=api_headers,
+    )
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": big_resp.json()["api_key"]},
+    )
+    assert resp.status_code == 200
+
+    revoke_resp = await client.post(
+        "/v1/api-keys/emergency-revoke",
+        json={"wallet_id": wallet_id, "reason": "test_incident"},
+        headers=api_headers,
+    )
+    assert revoke_resp.status_code == 200
+    new_key = revoke_resp.json()["new_key"]
+    assert new_key["max_uses"] == 9
+
+
+@pytest.mark.anyio
+async def test_emergency_key_unbounded_when_any_live_key_is(
+    client, api_headers, sponsor_wallet
+):
+    """An unlimited live key means the replacement is not an escalation."""
+    wallet_id = sponsor_wallet["wallet_id"]
+    await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "max_uses": 2},
+        headers=api_headers,
+    )
+    await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id},
+        headers=api_headers,
+    )
+
+    revoke_resp = await client.post(
+        "/v1/api-keys/emergency-revoke",
+        json={"wallet_id": wallet_id, "reason": "test_incident"},
+        headers=api_headers,
+    )
+    new_key = revoke_resp.json()["new_key"]
+    assert new_key["max_uses"] is None
+    assert new_key["expires_at"] is None
+
+
+@pytest.mark.anyio
+async def test_emergency_revoke_with_own_last_use_stays_bounded(
+    client, api_headers, sponsor_wallet
+):
+    """Spending a key's final use to call emergency-revoke must not launder it.
+
+    Authenticating the emergency-revoke request itself consumes the sole
+    key's last use, so the replacement must inherit a zero budget — not an
+    unbounded one (the caller was never a bootstrap admin).
+    """
+    wallet_id = sponsor_wallet["wallet_id"]
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "max_uses": 1},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    revoke_resp = await client.post(
+        "/v1/api-keys/emergency-revoke",
+        json={"wallet_id": wallet_id, "reason": "self_service_attempt"},
+        headers={"X-API-Key": key["api_key"]},
+    )
+    assert revoke_resp.status_code == 200
+    new_key = revoke_resp.json()["new_key"]
+    assert new_key["max_uses"] == 0
+
+    resp = await client.get(
+        "/v1/billing/pricing",
+        headers={"X-API-Key": new_key["api_key"]},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_rotate_capped_key_requires_revoke_old(
+    client, api_headers, sponsor_wallet
+):
+    """Non-revoking rotation of a budgeted key would double the budget — 422."""
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": sponsor_wallet["wallet_id"], "max_uses": 3},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": sponsor_wallet["wallet_id"],
+            "key_id": key["key_id"],
+            "revoke_old": False,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "invalid_rotation_request"
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{sponsor_wallet['wallet_id']}",
+        headers=api_headers,
+    )
+    assert list_resp.json()["total_active"] == 1
+
+
+@pytest.mark.anyio
+async def test_emergency_key_inherits_latest_expiry(
+    client, api_headers, sponsor_wallet
+):
+    """All active keys expire → the replacement uses the latest expiry."""
+    wallet_id = sponsor_wallet["wallet_id"]
+    await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "expires_in_days": 10},
+        headers=api_headers,
+    )
+    long_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "expires_in_days": 30},
+        headers=api_headers,
+    )
+
+    revoke_resp = await client.post(
+        "/v1/api-keys/emergency-revoke",
+        json={"wallet_id": wallet_id, "reason": "test_incident"},
+        headers=api_headers,
+    )
+    new_key = revoke_resp.json()["new_key"]
+    assert new_key["expires_at"] is not None
+
+    latest = datetime.fromisoformat(long_resp.json()["expires_at"]).replace(
+        tzinfo=None
+    )
+    inherited = datetime.fromisoformat(new_key["expires_at"]).replace(tzinfo=None)
+    assert abs((inherited - latest).total_seconds()) < 5
+
+
+@pytest.mark.anyio
+async def test_emergency_key_never_expires_if_any_active_key_does_not(
+    client, api_headers, sponsor_wallet
+):
+    """One non-expiring active key → the replacement does not expire either."""
+    wallet_id = sponsor_wallet["wallet_id"]
+    await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "expires_in_days": 10},
+        headers=api_headers,
+    )
+    await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id},
+        headers=api_headers,
+    )
+
+    revoke_resp = await client.post(
+        "/v1/api-keys/emergency-revoke",
+        json={"wallet_id": wallet_id, "reason": "test_incident"},
+        headers=api_headers,
+    )
+    assert revoke_resp.json()["new_key"]["expires_at"] is None
+
+
+@pytest.mark.anyio
+async def test_emergency_key_bounds_come_from_one_donor_credential(
+    client, api_headers, sponsor_wallet
+):
+    """Bounds must not mix across keys into authority nothing possessed.
+
+    A 1-use never-expiring key plus a 99-use short-lived key must not
+    combine into a 99-use never-expiring replacement: both bounds come
+    from the single donor with the largest remaining budget.
+    """
+    wallet_id = sponsor_wallet["wallet_id"]
+    await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "max_uses": 1},
+        headers=api_headers,
+    )
+    big_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id, "max_uses": 99, "expires_in_days": 1},
+        headers=api_headers,
+    )
+
+    revoke_resp = await client.post(
+        "/v1/api-keys/emergency-revoke",
+        json={"wallet_id": wallet_id, "reason": "test_incident"},
+        headers=api_headers,
+    )
+    new_key = revoke_resp.json()["new_key"]
+    assert new_key["max_uses"] == 99
+    assert new_key["expires_at"] is not None
+
+    donor_expiry = datetime.fromisoformat(big_resp.json()["expires_at"]).replace(
+        tzinfo=None
+    )
+    inherited = datetime.fromisoformat(new_key["expires_at"]).replace(tzinfo=None)
+    assert abs((inherited - donor_expiry).total_seconds()) < 5
+
+
+@pytest.mark.anyio
+async def test_rotate_revoked_key_is_rejected(client, api_headers, sponsor_wallet):
+    """A revoked key must not be rotatable back into an active credential."""
+    wallet_id = sponsor_wallet["wallet_id"]
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    revoke_resp = await client.delete(
+        f"/v1/api-keys/{wallet_id}/{key['key_id']}",
+        headers=api_headers,
+    )
+    assert revoke_resp.status_code == 204
+
+    resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": wallet_id,
+            "key_id": key["key_id"],
+            "revoke_old": True,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "invalid_rotation_request"
+
+    list_resp = await client.get(
+        f"/v1/api-keys/{wallet_id}",
+        headers=api_headers,
+    )
+    assert list_resp.json()["total_active"] == 0
+
+
+@pytest.mark.anyio
+async def test_emergency_revoked_keys_cannot_be_rotated_back(
+    client, api_headers, sponsor_wallet
+):
+    """Emergency revocation must not be undone by rotating a revoked key."""
+    wallet_id = sponsor_wallet["wallet_id"]
+    key_resp = await client.post(
+        "/v1/api-keys",
+        json={"wallet_id": wallet_id},
+        headers=api_headers,
+    )
+    key = key_resp.json()
+
+    revoke_resp = await client.post(
+        "/v1/api-keys/emergency-revoke",
+        json={
+            "wallet_id": wallet_id,
+            "reason": "test_incident",
+            "create_new_key": False,
+        },
+        headers=api_headers,
+    )
+    assert revoke_resp.status_code == 200
+    assert key["key_id"] in revoke_resp.json()["revoked_keys"]
+
+    resp = await client.post(
+        "/v1/api-keys/rotate",
+        json={
+            "wallet_id": wallet_id,
+            "key_id": key["key_id"],
+            "revoke_old": True,
+        },
+        headers=api_headers,
+    )
+    assert resp.status_code == 422
