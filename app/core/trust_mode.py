@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import os
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -44,6 +46,59 @@ LOCAL_COMPATIBLE_ENVIRONMENTS = frozenset(
 
 class TrustModeGuardrailError(RuntimeError):
     """Raised when trust mode is unsafe for a production-like deployment."""
+
+
+# The raw variable the explicitness check reads. Settings.ENVIRONMENT cannot
+# be used for this: pydantic fills in its "local" default when the variable
+# is absent, erasing the difference between "operator chose local" and
+# "variable was dropped".
+RUNTIME_ENVIRONMENT_VARIABLE = "ENVIRONMENT"
+
+# Variables the Railway runtime always injects into a deployed container.
+# Their presence distinguishes a hosted deployment from a local checkout.
+HOSTED_RUNTIME_MARKER_VARS = (
+    "RAILWAY_ENVIRONMENT_ID",
+    "RAILWAY_ENVIRONMENT",
+    "RAILWAY_PROJECT_ID",
+    "RAILWAY_SERVICE_ID",
+)
+
+
+def require_explicit_environment_on_hosted_runtime(
+    environment: str | None,
+    runtime_env: Mapping[str, str] | None = None,
+) -> None:
+    """Refuse to boot on a hosted runtime with no explicit ENVIRONMENT.
+
+    An unset ENVIRONMENT is local-compatible by design, which keeps local
+    checkouts friction-free — but on a managed platform that same default
+    silently disables every production guardrail in
+    ``validate_trust_mode_config`` if the variable is ever dropped from the
+    service. Railway always injects its RAILWAY_* identifiers, so their
+    presence alongside a missing ENVIRONMENT is a misconfiguration, not a
+    local run. An explicitly local-compatible value (say, ENVIRONMENT=dev on
+    a hosted sandbox) stays allowed: the operator made a visible choice.
+
+    ``environment`` must be the RAW variable (``os.environ`` /
+    ``RUNTIME_ENVIRONMENT_VARIABLE``), never ``Settings.ENVIRONMENT``: the
+    settings field substitutes its "local" default when the variable is
+    absent, which would make the deleted-variable case — the exact failure
+    this guard exists for — look explicit.
+    """
+    if normalize_environment(environment):
+        return
+    env = os.environ if runtime_env is None else runtime_env
+    markers = [
+        name for name in HOSTED_RUNTIME_MARKER_VARS if (env.get(name) or "").strip()
+    ]
+    if markers:
+        raise TrustModeGuardrailError(
+            "ENVIRONMENT must be set explicitly on a hosted runtime: "
+            f"{', '.join(markers)} indicate a Railway deployment, and an "
+            "empty ENVIRONMENT would boot with local-compatible defaults — "
+            "no production trust guardrails. Set ENVIRONMENT=production (or "
+            "an explicit non-production value for a deliberate sandbox)."
+        )
 
 
 def _has_valid_ed25519_private_key(signing_private_key_b64: str) -> bool:
@@ -193,6 +248,12 @@ def validate_trust_mode_config(
 
 
 def validate_trust_mode_guardrails(settings: Settings) -> None:
+    # Deliberately the raw variable, not settings.ENVIRONMENT: the settings
+    # field defaults to "local" when the variable is absent, which is
+    # exactly the dropped-variable case this check must catch.
+    require_explicit_environment_on_hosted_runtime(
+        os.environ.get(RUNTIME_ENVIRONMENT_VARIABLE)
+    )
     validate_trust_mode_config(
         environment=settings.ENVIRONMENT,
         trust_mode_enabled=settings.TRUST_MODE_ENABLED,

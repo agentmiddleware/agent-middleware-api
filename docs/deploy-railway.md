@@ -113,7 +113,7 @@ in committed defaults.
 
 | Variable | Required value | Notes |
 |----------|----------------|-------|
-| `ENVIRONMENT` | `production` (or other production-like) | Engages trust guardrails |
+| `ENVIRONMENT` | `production` (or other production-like) | Engages trust guardrails. Must be set explicitly: on Railway (detected via the injected `RAILWAY_*` variables) an empty `ENVIRONMENT` refuses to boot rather than silently running with local-compatible defaults |
 | `DEBUG` | `false` | Empty-key auth bootstrap is forbidden in prod-like |
 | `ENABLE_PROOF_SURFACES` | `false` | Mount only core trust routers + MCP |
 | `ENABLE_DOGFOOD_TOOL` | `false` | The simulated `partner.notes.write` tool is local proof infrastructure, not a production integration. The live posture gate fails unless this is explicitly false. |

@@ -463,3 +463,94 @@ async def test_lifespan_refuses_a_sqlite_database_url_in_production(monkeypatch)
             pytest.fail("lifespan must not start against SQLite in production")
 
     assert "DATABASE_URL must not be SQLite" in str(exc_info.value)
+
+
+class TestExplicitEnvironmentOnHostedRuntime:
+    """Empty ENVIRONMENT must not silently disable guardrails on Railway."""
+
+    def test_empty_environment_refused_when_railway_markers_present(self):
+        from app.core.trust_mode import (
+            require_explicit_environment_on_hosted_runtime,
+        )
+
+        with pytest.raises(TrustModeGuardrailError, match="RAILWAY_ENVIRONMENT_ID"):
+            require_explicit_environment_on_hosted_runtime(
+                "", {"RAILWAY_ENVIRONMENT_ID": "env-123"}
+            )
+
+    def test_whitespace_environment_counts_as_empty(self):
+        from app.core.trust_mode import (
+            require_explicit_environment_on_hosted_runtime,
+        )
+
+        with pytest.raises(TrustModeGuardrailError):
+            require_explicit_environment_on_hosted_runtime(
+                "   ", {"RAILWAY_PROJECT_ID": "proj-123"}
+            )
+
+    def test_explicit_production_allowed_on_hosted_runtime(self):
+        from app.core.trust_mode import (
+            require_explicit_environment_on_hosted_runtime,
+        )
+
+        require_explicit_environment_on_hosted_runtime(
+            "production", {"RAILWAY_ENVIRONMENT_ID": "env-123"}
+        )
+
+    def test_explicit_dev_sandbox_allowed_on_hosted_runtime(self):
+        """A deliberately local-compatible hosted sandbox is a visible choice."""
+        from app.core.trust_mode import (
+            require_explicit_environment_on_hosted_runtime,
+        )
+
+        require_explicit_environment_on_hosted_runtime(
+            "dev", {"RAILWAY_ENVIRONMENT_ID": "env-123"}
+        )
+
+    def test_empty_environment_allowed_locally(self):
+        from app.core.trust_mode import (
+            require_explicit_environment_on_hosted_runtime,
+        )
+
+        require_explicit_environment_on_hosted_runtime("", {})
+
+    def test_blank_marker_values_do_not_count(self):
+        from app.core.trust_mode import (
+            require_explicit_environment_on_hosted_runtime,
+        )
+
+        require_explicit_environment_on_hosted_runtime(
+            "", {"RAILWAY_ENVIRONMENT_ID": "  ", "RAILWAY_PROJECT_ID": ""}
+        )
+
+    def test_boot_guardrails_enforce_it_from_process_env(self, monkeypatch):
+        from app.core.trust_mode import (
+            require_explicit_environment_on_hosted_runtime,
+        )
+
+        monkeypatch.setenv("RAILWAY_SERVICE_ID", "svc-123")
+        with pytest.raises(TrustModeGuardrailError, match="RAILWAY_SERVICE_ID"):
+            require_explicit_environment_on_hosted_runtime("")
+
+    def test_absent_variable_refused_at_boot_despite_settings_default(
+        self, monkeypatch
+    ):
+        """Settings.ENVIRONMENT defaults to "local" when the variable is
+        absent, so the boot wiring must read the raw variable — otherwise the
+        dropped-variable case (the exact scenario this guard closes) looks
+        like an explicit choice."""
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env-123")
+        settings = Settings(
+            _env_file=None,
+            TRUST_SIGNING_PRIVATE_KEY_B64=VALID_SIGNING_PRIVATE_KEY_B64,
+        )
+        assert settings.ENVIRONMENT == "local"
+        with pytest.raises(TrustModeGuardrailError, match="RAILWAY_ENVIRONMENT_ID"):
+            validate_trust_mode_guardrails(settings)
+
+    def test_boot_passes_when_variable_is_explicit(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env-123")
+        settings = Settings(_env_file=None, ENVIRONMENT="dev")
+        validate_trust_mode_guardrails(settings)
