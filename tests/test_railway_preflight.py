@@ -818,11 +818,87 @@ def test_live_fails_on_bad_posture(monkeypatch, override):
     assert preflight.check_live("https://api.example.com") is False
 
 
-def test_live_fails_when_dogfood_posture_is_missing(monkeypatch):
+def _patch_get_with_discovery(monkeypatch, payload, discovery_payload):
+    import httpx
+
+    def get(url, **_kwargs):
+        if url.endswith("/v1/discover"):
+            return _Response(discovery_payload)
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+
+def test_live_passes_when_dogfood_flag_absent_and_discovery_clean(monkeypatch):
+    """The public projection stopped publishing the flag; a clean /v1/discover
+    (no dogfood tools) is the replacement evidence."""
     payload = {
         key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
     }
-    _patch_get(monkeypatch, payload)
+    _patch_get_with_discovery(
+        monkeypatch,
+        payload,
+        {"mcp_tools": [{"service_id": "partner.echo"}]},
+    )
+
+    assert preflight.check_live("https://api.example.com") is True
+
+
+@pytest.mark.parametrize(
+    "discovery_payload",
+    [
+        ["not", "a", "dict"],
+        {},
+        {"mcp_tools": "partner.echo"},
+        {"mcp_tools": ["partner.notes.write"]},
+        {"tools": [{"service_id": "partner.echo"}]},
+    ],
+)
+def test_live_fails_when_discovery_shape_is_unrecognized(
+    monkeypatch, discovery_payload
+):
+    """An unrecognized /v1/discover shape must fail closed, never read as
+    "no dogfood tools"."""
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    _patch_get_with_discovery(monkeypatch, payload, discovery_payload)
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_fails_when_dogfood_tool_exposed_in_discovery(monkeypatch):
+    import httpx
+
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+
+    def get(url, **_kwargs):
+        if url.endswith("/v1/discover"):
+            return _Response(
+                {"mcp_tools": [{"service_id": "partner.notes.write"}]}
+            )
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_fails_when_dogfood_flag_absent_and_discovery_unreachable(monkeypatch):
+    import httpx
+
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+
+    def get(url, **_kwargs):
+        if url.endswith("/v1/discover"):
+            raise httpx.ConnectError("boom")
+        return _Response(payload)
+
+    monkeypatch.setattr(httpx, "get", get)
 
     assert preflight.check_live("https://api.example.com") is False
 
@@ -950,4 +1026,49 @@ def test_live_fails_when_unreachable(monkeypatch):
         raise httpx.ConnectError("no route")
 
     monkeypatch.setattr(httpx, "get", _boom)
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_fails_when_dogfood_flag_published_as_null(monkeypatch):
+    """A *published* null is not the post-#348 omission: the exactly-false
+    requirement still applies, discovery fallback or not."""
+    _patch_get_with_discovery(
+        monkeypatch,
+        {**HEALTHY, "enable_dogfood_tool": None},
+        {"mcp_tools": []},
+    )
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_fails_when_dogfood_name_hides_behind_benign_service_id(monkeypatch):
+    """service_id and name are checked independently: a benign service_id
+    must not mask a dogfood tool name."""
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    _patch_get_with_discovery(
+        monkeypatch,
+        payload,
+        {
+            "mcp_tools": [
+                {"service_id": "partner.echo", "name": "partner.notes.write"}
+            ]
+        },
+    )
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_fails_on_non_string_tool_identifier(monkeypatch):
+    """A list-valued identifier must fail closed, not crash on set membership."""
+    payload = {
+        key: value for key, value in HEALTHY.items() if key != "enable_dogfood_tool"
+    }
+    _patch_get_with_discovery(
+        monkeypatch,
+        payload,
+        {"mcp_tools": [{"service_id": ["partner.notes.write"]}]},
+    )
+
     assert preflight.check_live("https://api.example.com") is False
