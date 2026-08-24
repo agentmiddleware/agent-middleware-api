@@ -138,17 +138,21 @@ class StripeIntegration:
             int(credits) if credits == credits.to_integral_value() else float(credits)
         )
 
-        # Known limitation: this sync Stripe call blocks the event loop like
-        # charge_shared_payment_token used to; offloading it is out of scope here.
-        intent = stripe.PaymentIntent.create(
-            amount=amount_cents,
-            currency=SUPPORTED_TOP_UP_CURRENCY,
-            metadata={
-                "wallet_id": wallet_id,
-                "credits": credits_metadata,
-                "idempotency_key": str(uuid4()),
-            },
-        )
+        def _create_top_up_payment_intent() -> Any:
+            return stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=SUPPORTED_TOP_UP_CURRENCY,
+                metadata={
+                    "wallet_id": wallet_id,
+                    "credits": credits_metadata,
+                    "idempotency_key": str(uuid4()),
+                },
+            )
+
+        # The Stripe SDK call is synchronous network I/O; run it on a worker
+        # thread so it never blocks the event loop (same offload pattern as
+        # charge_shared_payment_token).
+        intent = await to_thread.run_sync(_create_top_up_payment_intent)
 
         logger.info(
             f"Created PaymentIntent {intent.id} for wallet {wallet_id}: "
@@ -218,6 +222,47 @@ class StripeIntegration:
             "status": self._stripe_value(intent, "status"),
             "amount": self._stripe_value(intent, "amount"),
             "currency": self._stripe_value(intent, "currency"),
+        }
+
+    async def cancel_payment_intent(
+        self,
+        payment_intent_id: str,
+        idempotency_key: str | None = None,
+    ) -> dict:
+        """Cancel a not-yet-settled PaymentIntent.
+
+        Used by the ACP commerce bridge when a Shared Payment Token charge
+        confirms but does not settle (e.g. "requires_action"): the refused
+        checkout is rolled back on our side, so the still-live PaymentIntent
+        must not be left able to settle later with no governance record.
+        Only cancelable statuses should reach this call (Stripe refuses to
+        cancel e.g. a "processing" intent); the caller treats failure as
+        best-effort evidence, never as a masking error. No wallet, ledger,
+        or minting logic is touched here.
+        """
+        if not payment_intent_id:
+            raise ValueError("missing_payment_intent_id")
+
+        def _cancel_payment_intent() -> Any:
+            kwargs: dict[str, Any] = {}
+            if idempotency_key is not None:
+                kwargs["idempotency_key"] = idempotency_key
+            return stripe.PaymentIntent.cancel(payment_intent_id, **kwargs)
+
+        # The Stripe SDK call is synchronous network I/O; run it on a worker
+        # thread so it never blocks the event loop (same offload pattern as
+        # charge_shared_payment_token).
+        intent = await to_thread.run_sync(_cancel_payment_intent)
+
+        logger.info(
+            "Canceled PaymentIntent %s (status=%s)",
+            self._stripe_value(intent, "id"),
+            self._stripe_value(intent, "status"),
+        )
+
+        return {
+            "payment_intent_id": self._stripe_value(intent, "id"),
+            "status": self._stripe_value(intent, "status"),
         }
 
     async def handle_webhook(
