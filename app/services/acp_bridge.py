@@ -568,6 +568,17 @@ class ACPCommerceAdapter:
             await _rollback()
             raise ACPBridgeError("acp_spt_charge_failed") from exc
 
+        # 6b. Mark the charge landed IMMEDIATELY after successful settlement.
+        # Sets ledger_entry_id on the idempotency record, preventing abandon()
+        # from deleting it if audit/receipt creation fails below. This prevents
+        # cart rebinding even if post-charge bookkeeping fails.
+        await idem.mark_charged(
+            wallet_id=agent_wallet_id,
+            endpoint=ACP_CHECKOUT_ENDPOINT,
+            idempotency_key=request.intent_id,
+            ledger_entry_id=charge.get("payment_intent_id") or "unknown",
+        )
+
         try:
             # 7. Bind the order to the tamper-evident chain: the order id is
             # signed into the metadata (payload_hash → signature → chain
@@ -654,16 +665,6 @@ class ACPCommerceAdapter:
             response_reference=receipt.receipt_id,
             response_json=response.model_dump(mode="json"),
             status_code=200,
-        )
-        # 10. Mark the charge landed: sets ledger_entry_id AFTER complete()
-        # succeeds, indicating full settlement completion. This prevents
-        # abandon() from deleting this record if a future settlement-path
-        # rollback is needed (preventing cart rebind via repeat intent_id).
-        await idem.mark_charged(
-            wallet_id=agent_wallet_id,
-            endpoint=ACP_CHECKOUT_ENDPOINT,
-            idempotency_key=request.intent_id,
-            ledger_entry_id=charge.get("payment_intent_id") or "unknown",
         )
         return response
 
