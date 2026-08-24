@@ -1,0 +1,565 @@
+"""Tests for the enterprise IGA bridge (app/core/oidc_iga.py).
+
+Service-level: tokens are minted in-test with a locally generated RSA key,
+issuer keys are pinned via IGA_TRUSTED_ISSUERS, and PolicyBundle/Wallet rows
+are inserted directly through the session factory (mirroring how
+tests/test_policy_bundles.py provisions wallets, minus the HTTP hop).
+FastAPI dependency behavior is tested by calling the dependencies directly.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+
+import jwt
+import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+)
+from fastapi import HTTPException
+
+import app.core.oidc_iga as oidc_iga
+from app.core.auth import get_enterprise_principal, require_enterprise_tool_access
+from app.core.config import get_settings
+from app.core.oidc_iga import (
+    IGAError,
+    enforce_tool_call,
+    parse_enterprise_token,
+    reset_iga_counters,
+    resolve_policy_grants,
+)
+from app.db.database import get_session_factory
+from app.db.models import PolicyBundleModel, WalletModel
+
+
+OKTA_ISS = "https://example.okta.com/oauth2/default"
+ENTRA_ISS = "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+AUDIENCE = "api://agent-middleware"
+KID = "iga-test-kid"
+TOOL = "demo.tool"
+
+
+# --- key material / token helpers -------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def rsa_key():
+    # 2048-bit generation is slow enough to share across the module; the key
+    # never leaves the test process.
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+@pytest.fixture(scope="module")
+def wrong_rsa_key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _pem(private_key) -> bytes:
+    return private_key.private_bytes(
+        Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
+    )
+
+
+def _b64url_uint(value: int) -> str:
+    data = value.to_bytes((value.bit_length() + 7) // 8, "big")
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _jwks(private_key, kid: str = KID) -> dict:
+    numbers = private_key.public_key().public_numbers()
+    return {
+        "keys": [
+            {
+                "kty": "RSA",
+                "use": "sig",
+                "alg": "RS256",
+                "kid": kid,
+                "n": _b64url_uint(numbers.n),
+                "e": _b64url_uint(numbers.e),
+            }
+        ]
+    }
+
+
+def _mint(
+    private_key,
+    *,
+    iss: str = OKTA_ISS,
+    aud: str = AUDIENCE,
+    sub: str = "user-1",
+    kid: str = KID,
+    exp_delta: int = 300,
+    extra: dict | None = None,
+) -> str:
+    now = datetime.now(timezone.utc)
+    claims = {
+        "iss": iss,
+        "aud": aud,
+        "sub": sub,
+        "iat": now - timedelta(seconds=600),
+        "exp": now + timedelta(seconds=exp_delta),
+    }
+    if extra:
+        claims.update(extra)
+    return jwt.encode(claims, _pem(private_key), algorithm="RS256", headers={"kid": kid})
+
+
+def _okta_issuers(private_key) -> dict:
+    # provider omitted on purpose: inferred from the example.okta.com host.
+    return {
+        OKTA_ISS: {
+            "audience": AUDIENCE,
+            "algorithms": ["RS256"],
+            "jwks": _jwks(private_key),
+        }
+    }
+
+
+def _entra_issuers(private_key) -> dict:
+    # provider omitted on purpose: inferred from login.microsoftonline.com.
+    return {
+        ENTRA_ISS: {
+            "audience": AUDIENCE,
+            "algorithms": ["RS256"],
+            "jwks": _jwks(private_key),
+        }
+    }
+
+
+# --- settings / counters fixtures --------------------------------------------
+
+
+@pytest.fixture
+def iga_config():
+    """Apply IGA env config with get_settings.cache_clear(), restoring after.
+
+    Env + cache_clear is the repo's settings-override idiom (see
+    tests/test_billing.py); restoration happens here rather than via
+    monkeypatch so the cache is cleared AFTER the env vars are removed.
+    """
+
+    def _apply(trusted: dict | str, group_map: dict | str = "") -> None:
+        os.environ["IGA_TRUSTED_ISSUERS"] = (
+            trusted if isinstance(trusted, str) else json.dumps(trusted)
+        )
+        os.environ["IGA_GROUP_POLICY_MAP"] = (
+            group_map if isinstance(group_map, str) else json.dumps(group_map)
+        )
+        get_settings.cache_clear()
+
+    yield _apply
+    os.environ.pop("IGA_TRUSTED_ISSUERS", None)
+    os.environ.pop("IGA_GROUP_POLICY_MAP", None)
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_iga_counters():
+    """Runtime cap counters are process-global; isolate every test."""
+    reset_iga_counters()
+    yield
+    reset_iga_counters()
+
+
+# --- DB row helpers -----------------------------------------------------------
+
+
+async def _make_wallet() -> str:
+    wallet_id = f"iga-w-{uuid.uuid4().hex[:10]}"
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            WalletModel(
+                wallet_id=wallet_id,
+                wallet_type="agent",
+                balance=Decimal("1000"),
+            )
+        )
+        await session.commit()
+    return wallet_id
+
+
+async def _make_bundle(
+    wallet_id: str,
+    *,
+    allowed_tools: list[str] | None,
+    is_active: bool = True,
+) -> str:
+    policy_id = f"polb-{uuid.uuid4().hex[:16]}"
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            PolicyBundleModel(
+                policy_id=policy_id,
+                wallet_id=wallet_id,
+                name="IGA test bundle",
+                allowed_tools_json=(
+                    json.dumps(allowed_tools) if allowed_tools is not None else None
+                ),
+                is_active=is_active,
+            )
+        )
+        await session.commit()
+    return policy_id
+
+
+# --- happy path / claim shapes ------------------------------------------------
+
+
+async def test_okta_principal_with_mapped_active_bundle_allows(
+    iga_config, clean_database, rsa_key
+):
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+    token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    principal = parse_enterprise_token(token)
+    assert principal.provider == "okta"
+    assert principal.issuer == OKTA_ISS
+    assert principal.subject == "user-1"
+    assert principal.groups == ("payments-ops",)
+
+    decision = await enforce_tool_call(principal, TOOL)
+    assert decision.allowed is True
+    assert decision.reason == "allowed"
+    assert decision.group == "payments-ops"
+    assert decision.policy_id == policy_id
+
+
+async def test_tool_outside_bundle_allowlist_is_blocked(
+    iga_config, clean_database, rsa_key
+):
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+    decision = await enforce_tool_call(principal, "some.other.tool")
+    assert decision.allowed is False
+    assert decision.reason == "iga_tool_not_allowed"
+    assert decision.policy_id == policy_id
+
+
+async def test_unauthorized_principal_without_required_role_is_blocked(
+    iga_config, clean_database, rsa_key
+):
+    """Acceptance criterion: lacking the required Okta/Entra role blocks."""
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+    principal = parse_enterprise_token(
+        _mint(rsa_key, sub="intruder", extra={"groups": ["random-team"]})
+    )
+    assert resolve_policy_grants(principal) == []
+
+    decision = await enforce_tool_call(principal, TOOL)
+    assert decision.allowed is False
+    assert decision.reason == "iga_no_matching_role"
+
+
+async def test_entra_roles_claim_allows(iga_config, clean_database, rsa_key):
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(
+        _entra_issuers(rsa_key), {"Payments.Operator": {"policy_id": policy_id}}
+    )
+
+    token = _mint(
+        rsa_key, iss=ENTRA_ISS, sub="entra-user", extra={"roles": ["Payments.Operator"]}
+    )
+    principal = parse_enterprise_token(token)
+    assert principal.provider == "entra"
+    assert principal.groups == ("Payments.Operator",)
+
+    decision = await enforce_tool_call(principal, TOOL)
+    assert decision.allowed is True
+    assert decision.policy_id == policy_id
+
+
+async def test_entra_groups_claim_fallback(iga_config, rsa_key):
+    iga_config(_entra_issuers(rsa_key))
+    token = _mint(
+        rsa_key, iss=ENTRA_ISS, sub="entra-user", extra={"groups": ["entra-group-1"]}
+    )
+    principal = parse_enterprise_token(token)
+    assert principal.provider == "entra"
+    # No roles claim: group-claims configuration falls back to `groups`.
+    assert principal.groups == ("entra-group-1",)
+
+
+async def test_missing_group_claim_is_empty_not_error(iga_config, rsa_key):
+    iga_config(_okta_issuers(rsa_key))
+    principal = parse_enterprise_token(_mint(rsa_key))
+    assert principal.groups == ()
+
+
+# --- verification negative paths ---------------------------------------------
+
+
+async def test_expired_token_rejected(iga_config, rsa_key):
+    iga_config(_okta_issuers(rsa_key))
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(rsa_key, exp_delta=-60))
+    assert excinfo.value.reason == "iga_token_expired"
+
+
+async def test_wrong_audience_rejected(iga_config, rsa_key):
+    iga_config(_okta_issuers(rsa_key))
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(rsa_key, aud="api://someone-else"))
+    assert excinfo.value.reason == "iga_audience_mismatch"
+
+
+async def test_unknown_issuer_rejected(iga_config, rsa_key):
+    iga_config(_okta_issuers(rsa_key))
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(rsa_key, iss="https://evil.example.com"))
+    assert excinfo.value.reason == "iga_issuer_not_trusted"
+
+
+async def test_token_signed_with_wrong_key_rejected(
+    iga_config, rsa_key, wrong_rsa_key
+):
+    iga_config(_okta_issuers(rsa_key))
+    # Same kid so key selection succeeds and the signature check itself fails.
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(wrong_rsa_key, kid=KID))
+    assert excinfo.value.reason == "iga_signature_invalid"
+
+
+async def test_unknown_kid_rejected(iga_config, rsa_key):
+    iga_config(_okta_issuers(rsa_key))
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(rsa_key, kid="some-unpinned-kid"))
+    assert excinfo.value.reason == "iga_signing_key_not_found"
+
+
+async def test_hs256_token_rejected_when_only_rs256_allowed(iga_config, rsa_key):
+    """Alg-confusion negative test: symmetric alg against an RS256 allowlist."""
+    iga_config(_okta_issuers(rsa_key))
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "iss": OKTA_ISS,
+            "aud": AUDIENCE,
+            "sub": "user-1",
+            "iat": now,
+            "exp": now + timedelta(seconds=300),
+        },
+        "shared-secret-material-of-at-least-32-bytes",
+        algorithm="HS256",
+        headers={"kid": KID},
+    )
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(token)
+    assert excinfo.value.reason == "iga_algorithm_not_allowed"
+
+
+async def test_malformed_token_rejected(iga_config, rsa_key):
+    iga_config(_okta_issuers(rsa_key))
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token("not-a-jwt")
+    assert excinfo.value.reason == "iga_token_malformed"
+
+
+async def test_malformed_issuer_config_fails_closed_at_use_time(iga_config, rsa_key):
+    iga_config("{this is not json", "")
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(rsa_key))
+    assert excinfo.value.reason == "iga_config_invalid"
+
+
+async def test_malformed_group_map_fails_closed_at_use_time(iga_config, rsa_key):
+    iga_config(_okta_issuers(rsa_key), "{this is not json")
+    principal = parse_enterprise_token(_mint(rsa_key, extra={"groups": ["x"]}))
+    with pytest.raises(IGAError) as excinfo:
+        resolve_policy_grants(principal)
+    assert excinfo.value.reason == "iga_config_invalid"
+
+
+# --- runtime caps -------------------------------------------------------------
+
+
+async def test_max_uses_exhausted_blocks_third_call(
+    iga_config, clean_database, rsa_key
+):
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(
+        _okta_issuers(rsa_key),
+        {"payments-ops": {"policy_id": policy_id, "max_uses": 2}},
+    )
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+
+    first = await enforce_tool_call(principal, TOOL)
+    second = await enforce_tool_call(principal, TOOL)
+    assert first.allowed is True and second.allowed is True
+
+    third = await enforce_tool_call(principal, TOOL)
+    assert third.allowed is False
+    assert third.reason == "iga_max_uses_exceeded"
+    assert third.details == {"used": 2, "limit": 2}
+
+
+async def test_velocity_window_blocks_burst_then_recovers(
+    iga_config, clean_database, rsa_key, monkeypatch
+):
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(
+        _okta_issuers(rsa_key),
+        {
+            "payments-ops": {
+                "policy_id": policy_id,
+                "velocity_window_seconds": 60,
+                "velocity_max_calls": 3,
+            }
+        },
+    )
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(oidc_iga, "_monotonic", lambda: clock["now"])
+
+    for _ in range(3):
+        assert (await enforce_tool_call(principal, TOOL)).allowed is True
+
+    fourth = await enforce_tool_call(principal, TOOL)
+    assert fourth.allowed is False
+    assert fourth.reason == "iga_velocity_exceeded"
+    assert fourth.details == {"window_seconds": 60, "calls_in_window": 3, "limit": 3}
+
+    # Once the window passes, the burst has aged out and calls flow again.
+    clock["now"] = 1061.0
+    recovered = await enforce_tool_call(principal, TOOL)
+    assert recovered.allowed is True
+
+
+async def test_inactive_policy_bundle_blocks(iga_config, clean_database, rsa_key):
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL], is_active=False)
+    iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+    decision = await enforce_tool_call(principal, TOOL)
+    assert decision.allowed is False
+    assert decision.reason == "iga_policy_inactive"
+
+
+async def test_denial_prefers_tool_not_allowed_over_inactive(
+    iga_config, clean_database, rsa_key
+):
+    wallet_id = await _make_wallet()
+    inactive_id = await _make_bundle(wallet_id, allowed_tools=[TOOL], is_active=False)
+    wrong_tool_id = await _make_bundle(wallet_id, allowed_tools=["other.tool"])
+    iga_config(
+        _okta_issuers(rsa_key),
+        {
+            "ops-a": {"policy_id": inactive_id},
+            "ops-b": {"policy_id": wrong_tool_id},
+        },
+    )
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["ops-a", "ops-b"]})
+    )
+    decision = await enforce_tool_call(principal, TOOL)
+    assert decision.allowed is False
+    # tool-not-allowed proves a live grant existed — more informative than
+    # a stale/inactive mapping.
+    assert decision.reason == "iga_tool_not_allowed"
+
+
+# --- FastAPI dependency wiring (called directly) ------------------------------
+
+
+async def test_get_enterprise_principal_none_when_disabled_or_headerless(rsa_key):
+    # IGA disabled (no IGA_TRUSTED_ISSUERS): even a Bearer header yields None.
+    assert not get_settings().IGA_TRUSTED_ISSUERS
+    assert await get_enterprise_principal(authorization=None) is None
+    assert (
+        await get_enterprise_principal(authorization=f"Bearer {_mint(rsa_key)}")
+        is None
+    )
+
+
+async def test_get_enterprise_principal_ignores_internal_issuer_tokens(
+    iga_config, rsa_key
+):
+    iga_config(_okta_issuers(rsa_key))
+    assert await get_enterprise_principal(authorization=None) is None
+    assert await get_enterprise_principal(authorization="Basic abc123") is None
+    # The internal EdDSA flow's issuer is not IGA-trusted: fall through (None)
+    # so get_auth_context keeps owning those tokens.
+    internal_token = _mint(rsa_key, iss="agent-middleware-api")
+    assert await get_enterprise_principal(
+        authorization=f"Bearer {internal_token}"
+    ) is None
+
+
+async def test_get_enterprise_principal_401_on_bad_enterprise_token(
+    iga_config, rsa_key
+):
+    iga_config(_okta_issuers(rsa_key))
+    with pytest.raises(HTTPException) as excinfo:
+        await get_enterprise_principal(
+            authorization=f"Bearer {_mint(rsa_key, exp_delta=-60)}"
+        )
+    assert excinfo.value.status_code == 401
+    assert excinfo.value.detail["error"] == "iga_token_expired"
+
+
+async def test_get_enterprise_principal_returns_verified_principal(
+    iga_config, rsa_key
+):
+    iga_config(_okta_issuers(rsa_key))
+    token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    principal = await get_enterprise_principal(authorization=f"Bearer {token}")
+    assert principal is not None
+    assert principal.subject == "user-1"
+    assert principal.groups == ("payments-ops",)
+
+
+async def test_require_enterprise_tool_access_403_with_decision_reason(
+    iga_config, clean_database, rsa_key
+):
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+    dependency = require_enterprise_tool_access(TOOL)
+
+    # No enterprise principal: the layer is optional and enforces nothing.
+    assert await dependency(principal=None) is None
+
+    unauthorized = parse_enterprise_token(
+        _mint(rsa_key, sub="intruder", extra={"groups": ["random-team"]})
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        await dependency(principal=unauthorized)
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.detail == "iga_no_matching_role"
+
+    authorized = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+    decision = await dependency(principal=authorized)
+    assert decision is not None
+    assert decision.allowed is True
+    assert decision.policy_id == policy_id

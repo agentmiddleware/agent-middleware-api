@@ -75,6 +75,32 @@ class Settings(BaseSettings):
     # handler independently fails closed there. See docs/static-dev-api-keys.md.
     ENABLE_DEV_KEY_SELF_PROVISION: bool = False
 
+    # --- Enterprise IGA bridge (OIDC -> PolicyBundle) ---
+    # JSON object mapping a trusted enterprise OIDC issuer URL to its pinned
+    # verification material, e.g.
+    #   {"https://example.okta.com/oauth2/default": {
+    #      "audience": "api://agent-middleware",
+    #      "algorithms": ["RS256"],
+    #      "provider": "okta",            # optional; inferred from the host
+    #      "jwks": {"keys": [...]}}}      # or "public_key_pem": "-----BEGIN..."
+    # Keys are pinned here on purpose: there is NO network JWKS fetch, so a
+    # compromised IdP hostname cannot rotate keys under us — rotation is an
+    # explicit config change. Parsed lazily and fail-closed by
+    # app.core.oidc_iga (malformed JSON raises at use time, never at import).
+    # Empty string (the default) disables the IGA layer entirely: no bearer
+    # token is ever treated as an enterprise token and every existing auth
+    # path is untouched.
+    IGA_TRUSTED_ISSUERS: str = ""
+    # JSON object mapping an enterprise group/role name to a PolicyBundle
+    # grant with optional runtime caps, e.g.
+    #   {"payments-ops": {"policy_id": "polb-...", "max_uses": 100,
+    #     "velocity_window_seconds": 60, "velocity_max_calls": 10}}
+    # Caps are nullable (null = uncapped) and enforced by in-process,
+    # per-instance counters in app.core.oidc_iga — PolicyBundle rows carry no
+    # such columns by design. Empty string (the default) grants nothing:
+    # every enterprise principal is blocked with iga_no_matching_role.
+    IGA_GROUP_POLICY_MAP: str = ""
+
     # --- Proof surfaces ---
     # When false, only CORE_TRUST_ROUTERS (+ MCP) are mounted. Production-like
     # environments must set this false — see validate_trust_mode_guardrails.

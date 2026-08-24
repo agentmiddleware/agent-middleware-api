@@ -10,9 +10,10 @@ import hmac
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Header, HTTPException, Security, status
+from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from .config import get_settings
+from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError
 from .trust_mode import is_production_like_environment
 
 settings = get_settings()
@@ -317,3 +318,73 @@ async def verify_api_key(
     """
     context = await get_auth_context(api_key)
     return context.raw_key
+
+
+async def get_enterprise_principal(
+    authorization: Annotated[str | None, Header()] = None,
+) -> EnterprisePrincipal | None:
+    """Optional enterprise IGA identity layer (app.core.oidc_iga).
+
+    Returns None — leaving every existing auth path untouched — when the
+    Authorization header is absent or not Bearer-shaped, when IGA is disabled
+    (IGA_TRUSTED_ISSUERS empty), or when the bearer token's issuer is not an
+    IGA-trusted issuer (internal EdDSA JWTs land here and continue through
+    get_auth_context unchanged). A token FROM a trusted enterprise issuer
+    that fails verification raises 401 with the IGAError reason: a bad
+    enterprise token must never fall through to another auth path.
+    """
+    from .oidc_iga import parse_enterprise_token, token_issuer_is_trusted
+
+    # Settings are re-read per call for the same reason get_auth_context
+    # documents: tests rebind IGA_* env vars after this module is imported.
+    settings = get_settings()
+    if not settings.IGA_TRUSTED_ISSUERS.strip():
+        return None
+    if authorization is None or not authorization.startswith("Bearer "):
+        return None
+    token = authorization[len("Bearer ") :].strip()
+    if not token:
+        return None
+
+    try:
+        if not token_issuer_is_trusted(token):
+            return None
+        return parse_enterprise_token(token)
+    except IGAError as exc:
+        # Covers both a failed verification of an IGA-issuer token and a
+        # malformed IGA configuration while the layer is enabled: fail closed.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": exc.reason,
+                "message": str(exc),
+            },
+        ) from exc
+
+
+def require_enterprise_tool_access(tool_name: str):
+    """Dependency factory: enforce IGA group->PolicyBundle grants for a tool.
+
+    The returned dependency 403s with the IGA decision reason when an
+    enterprise principal is present but no mapped, active PolicyBundle grants
+    ``tool_name`` (or a runtime cap is exhausted). When no enterprise
+    principal is presented it returns None and enforces nothing — the layer
+    is optional and API-key/JWT callers are governed by the existing paths.
+    """
+
+    async def _enterprise_tool_access(
+        principal: EnterprisePrincipal | None = Depends(get_enterprise_principal),
+    ) -> IGADecision | None:
+        if principal is None:
+            return None
+        from .oidc_iga import enforce_tool_call
+
+        decision = await enforce_tool_call(principal, tool_name)
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=decision.reason,
+            )
+        return decision
+
+    return _enterprise_tool_access
