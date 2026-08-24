@@ -1082,3 +1082,241 @@ async def test_release_tool_call_compensation_semantics(client, clean_database):
         await session.commit()
     await permits.release_tool_call(permit_id, "x402.payment")
     assert await counter() is True
+
+
+# ---------------------------------------------------------------------------
+# Stale idempotency-record recovery and the settlement freeze
+# ---------------------------------------------------------------------------
+
+
+async def _backdate_settle_record(
+    idempotency_key: str, *, wallet_id: str
+) -> None:
+    """Age one wallet's settle record past the router's staleness threshold.
+
+    Constrained by the full idempotency identity (wallet, endpoint, key), the
+    same discipline as the ACP bridge's test helper."""
+    from sqlalchemy import select
+
+    from app.core.time import utc_now
+    from app.db.database import get_session_factory
+    from app.db.models import IdempotencyRecordModel
+    from app.routers.x402 import _SETTLE_ENDPOINT, _SETTLE_STALE_SECONDS
+
+    factory = get_session_factory()
+    async with factory() as session:
+        record = (
+            await session.execute(
+                select(IdempotencyRecordModel).where(
+                    IdempotencyRecordModel.wallet_id == wallet_id,
+                    IdempotencyRecordModel.endpoint == _SETTLE_ENDPOINT,
+                    IdempotencyRecordModel.idempotency_key == idempotency_key,
+                )
+            )
+        ).scalar_one()
+        assert record.response_json is None  # crashed before completion
+        record.created_at = utc_now() - timedelta(
+            seconds=_SETTLE_STALE_SECONDS + 1
+        )
+        session.add(record)
+        await session.commit()
+
+
+@pytest.mark.anyio
+async def test_x402_stale_receiptless_record_recovers_and_settles(
+    client, clean_database
+):
+    """A settle key wedged by an attempt that died BEFORE any receipt was
+    written (the fully compensated crash shape) must not be wedged forever:
+    once the record is stale it is abandoned — with an x402_settle_recovered
+    audit event — and the retry settles fresh. A FRESH in-progress record
+    (possibly a live concurrent settle) stays a hard 409."""
+    from app.routers.x402 import _SETTLE_ENDPOINT, X402SettleRequest
+    from app.services.idempotency import get_idempotency_service
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-recover-permit",
+    )
+    body = _settle_body(
+        permit_id=permit["permit_id"], wallet_id=wallet_id, amount="0.03"
+    )
+    headers = {**provisioned["agent_headers"], "Idempotency-Key": "x402-recover-1"}
+
+    # Simulate the crashed attempt: its record was begun with exactly the
+    # payload the route hashes, and the process died before completing it.
+    idem = get_idempotency_service()
+    begun = await idem.begin_with_record(
+        wallet_id=wallet_id,
+        endpoint=_SETTLE_ENDPOINT,
+        idempotency_key="x402-recover-1",
+        request_payload=X402SettleRequest(**body).model_dump(mode="json"),
+    )
+    assert begun.replay is None
+
+    # Fresh in-progress record: still refused — it could be a live attempt.
+    blocked = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "idempotency_in_progress"
+
+    await _backdate_settle_record("x402-recover-1", wallet_id=wallet_id)
+
+    # Stale + receiptless: recovered — the retry runs the settle for real.
+    ok = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert ok.status_code == 200, ok.text
+    settlement = ok.json()
+    assert settlement["receipt_id"].startswith("rcpt-")
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    _, total = await get_receipt_service().list_receipts(
+        permit_id=permit["permit_id"]
+    )
+    assert total == 1
+
+    # The recovery is durable evidence on the wallet's chain, naming the
+    # abandoned record so an operator can read the shape as crash recovery.
+    recovered = await list_audit_events(
+        event="x402_settle_recovered", wallet_id=wallet_id
+    )
+    assert len(recovered) == 1
+    assert recovered[0].ok is True
+    assert recovered[0].metadata["abandoned_record_id"] == begun.record_id
+    assert recovered[0].metadata["idempotency_key"] == "x402-recover-1"
+    assert recovered[0].metadata["permit_id"] == permit["permit_id"]
+
+    # The recovered key now replays like any settled one: same settlement,
+    # no double reservation.
+    replay = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert replay.status_code == 200
+    assert replay.json()["receipt_id"] == settlement["receipt_id"]
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+
+
+@pytest.mark.anyio
+async def test_x402_stale_receipted_record_is_settled_unrecoverable(
+    client, clean_database, monkeypatch
+):
+    """Crash shape 2: death between the receipt write and idem.complete. The
+    settlement is durable (budget consumed, verifiable receipt) but the
+    verbatim X402SettleResponse is NOT reconstructable from persisted state:
+    receipts keep only request/response payload hashes, and the response's
+    attestation signature and shadow-ledger ids live nowhere that can be
+    proven byte-identical. The recovery path must not guess — once stale,
+    replays of the key get the DISTINCT typed conflict
+    x402_settled_unrecoverable_replay (never a fabricated 200, never an
+    eternal idempotency_in_progress), and nothing re-executes."""
+    from app.services.idempotency import IdempotencyService
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-wedge-permit",
+    )
+    body = _settle_body(
+        permit_id=permit["permit_id"], wallet_id=wallet_id, amount="0.03"
+    )
+    headers = {**provisioned["agent_headers"], "Idempotency-Key": "x402-wedge-1"}
+
+    original_complete = IdempotencyService.complete
+
+    async def _crash_complete(self, **complete_kwargs):
+        raise RuntimeError("induced crash before idem.complete")
+
+    monkeypatch.setattr(IdempotencyService, "complete", _crash_complete)
+    with pytest.raises(RuntimeError):
+        await client.post("/v1/x402/settle", json=body, headers=headers)
+    monkeypatch.setattr(IdempotencyService, "complete", original_complete)
+
+    # The settlement itself is durable: budget reserved, one receipt exists.
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    receipts, total = await get_receipt_service().list_receipts(
+        permit_id=permit["permit_id"]
+    )
+    assert total == 1
+
+    # Fresh record: the generic in-progress conflict, as ever.
+    blocked = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "idempotency_in_progress"
+
+    await _backdate_settle_record("x402-wedge-1", wallet_id=wallet_id)
+
+    # Stale + receipted: the distinct typed contract. The caller learns the
+    # settlement DID happen and can fetch the verifiable receipt; the exact
+    # original response body is the one thing that cannot be replayed.
+    conflicted = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert conflicted.status_code == 409
+    assert conflicted.json()["detail"] == "x402_settled_unrecoverable_replay"
+
+    # Nothing re-ran: no double reservation, no second receipt.
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("30")
+    receipts_after, total_after = await get_receipt_service().list_receipts(
+        permit_id=permit["permit_id"]
+    )
+    assert total_after == 1
+    assert receipts_after[0].receipt_id == receipts[0].receipt_id
+
+
+@pytest.mark.anyio
+async def test_x402_settle_never_touches_real_ledger_entries(
+    client, clean_database
+):
+    """The module docstring's settlement-freeze claim, asserted: a successful
+    settle writes NO real ledger entries — the ledger_entries row count is
+    unchanged across the settle and the receipt's ledger_entry_id is None
+    (shadow-ledger metering plus a signed receipt only)."""
+    from sqlalchemy import func, select
+
+    from app.db.database import get_session_factory
+    from app.db.models import LedgerEntryModel
+
+    async def _ledger_rows() -> int:
+        factory = get_session_factory()
+        async with factory() as session:
+            return (
+                await session.execute(
+                    select(func.count()).select_from(LedgerEntryModel)
+                )
+            ).scalar_one()
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-freeze-permit",
+    )
+    rows_before = await _ledger_rows()
+    # Provisioning itself wrote real entries (sponsor mint, agent funding),
+    # so the counter is provably live before the claim is tested.
+    assert rows_before > 0
+
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit["permit_id"], wallet_id=wallet_id, amount="0.03"
+        ),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "x402-freeze-1"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert Decimal(resp.json()["credits"]) == Decimal("30")
+
+    assert await _ledger_rows() == rows_before
+    receipts, total = await get_receipt_service().list_receipts(
+        permit_id=permit["permit_id"]
+    )
+    assert total == 1
+    assert receipts[0].ledger_entry_id is None

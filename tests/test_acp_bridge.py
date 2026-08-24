@@ -171,11 +171,14 @@ async def test_acp_checkout_end_to_end(client, spt_stub, clean_database):
     assert data["derived_total"] == "0.50"
 
     # Exactly one outbound charge, with the server-derived amount and the
-    # order-derived Stripe idempotency key.
+    # wallet-scoped, order-derived Stripe idempotency key.
     assert len(spt_stub) == 1
     assert spt_stub[0]["amount_minor"] == 50
     assert spt_stub[0]["currency"] == "usd"
-    assert spt_stub[0]["idempotency_key"] == "acp-intent-e2e-1"
+    assert (
+        spt_stub[0]["idempotency_key"]
+        == f"acp-intent-e2e-1:{ctx['agent_wallet_id']}"
+    )
 
     # The permit carries the exact v2 bounds the checkout was translated to.
     permit = await get_permit_service().get_permit(data["permit_id"])
@@ -560,9 +563,21 @@ async def test_acp_unsettled_stripe_status_is_a_failure(
             "currency": currency,
         }
 
+    cancels: list[dict[str, Any]] = []
+
+    async def _fake_cancel(self, payment_intent_id, idempotency_key=None):
+        cancels.append(
+            {
+                "payment_intent_id": payment_intent_id,
+                "idempotency_key": idempotency_key,
+            }
+        )
+        return {"payment_intent_id": payment_intent_id, "status": "canceled"}
+
     monkeypatch.setattr(
         StripeIntegration, "charge_shared_payment_token", _pending_charge
     )
+    monkeypatch.setattr(StripeIntegration, "cancel_payment_intent", _fake_cancel)
 
     resp = await client.post(
         checkout_url(ctx),
@@ -582,16 +597,91 @@ async def test_acp_unsettled_stripe_status_is_a_failure(
     )
     assert receipts_total == 0
 
+    # requires_action is a cancelable status: the confirmed-but-not-settled
+    # PaymentIntent must not be left live at Stripe (it could settle later
+    # with no governance record), so the rollback attempts a best-effort
+    # cancel of exactly that intent.
+    expected_stripe_key = f"acp-intent-pending-1:{ctx['agent_wallet_id']}"
+    assert cancels == [
+        {
+            "payment_intent_id": "pi_acp_pending",
+            "idempotency_key": f"{expected_stripe_key}:cancel",
+        }
+    ]
+
     # Uniform rule: every rollback after the charge attempt leaves evidence —
     # a definitively non-settled status included, since Stripe may still hold
-    # a resolvable PaymentIntent under the recorded idempotency key.
+    # a resolvable PaymentIntent under the recorded idempotency key. The
+    # evidence also records the cancel outcome.
     events = await list_audit_events(request_id="acp-intent-pending-1")
     failures = [e for e in events if e.event == "acp_checkout_charge_failed"]
     assert len(failures) == 1
     assert failures[0].ok is False
-    assert (
-        failures[0].metadata["stripe_idempotency_key"] == "acp-intent-pending-1"
+    assert failures[0].metadata["stripe_idempotency_key"] == expected_stripe_key
+    assert failures[0].metadata["stripe_payment_intent_id"] == "pi_acp_pending"
+    assert failures[0].metadata["stripe_payment_status"] == "requires_action"
+    assert failures[0].metadata["payment_intent_cancel"] == "canceled"
+
+
+@pytest.mark.anyio
+async def test_acp_processing_stripe_status_fails_without_cancel_attempt(
+    client, monkeypatch, clean_database
+):
+    """A "processing" PaymentIntent is not cancelable per Stripe: the failed
+    checkout must NOT attempt the cancel (which would only add a guaranteed
+    API error) and the rollback evidence must record not_cancelable so the
+    still-live intent stays discoverable."""
+    ctx = await provision_agent_wallet(client)
+
+    async def _processing_charge(
+        self, *, spt_token, amount_minor, currency, idempotency_key
+    ):
+        return {
+            "payment_intent_id": "pi_acp_processing",
+            "status": "processing",
+            "amount": amount_minor,
+            "currency": currency,
+        }
+
+    cancels: list[str] = []
+
+    async def _fake_cancel(self, payment_intent_id, idempotency_key=None):
+        cancels.append(payment_intent_id)
+        return {"payment_intent_id": payment_intent_id, "status": "canceled"}
+
+    monkeypatch.setattr(
+        StripeIntegration, "charge_shared_payment_token", _processing_charge
     )
+    monkeypatch.setattr(StripeIntegration, "cancel_payment_intent", _fake_cancel)
+
+    resp = await client.post(
+        checkout_url(ctx),
+        json=checkout_body("intent-processing-1"),
+        headers=ctx["agent_headers"],
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "acp_spt_charge_failed"
+    assert cancels == []  # never attempted
+
+    # Budget released, no receipt — same atomicity as every charge failure.
+    permits, permits_total = await get_permit_service().list_permits(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert permits_total == 1
+    assert permits[0].spent_credits == Decimal("0")
+    _, receipts_total = await get_receipt_service().list_receipts(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert receipts_total == 0
+
+    events = await list_audit_events(request_id="acp-intent-processing-1")
+    failures = [e for e in events if e.event == "acp_checkout_charge_failed"]
+    assert len(failures) == 1
+    assert failures[0].metadata["payment_intent_cancel"] == "not_cancelable"
+    assert (
+        failures[0].metadata["stripe_payment_intent_id"] == "pi_acp_processing"
+    )
+    assert failures[0].metadata["stripe_payment_status"] == "processing"
 
 
 @pytest.mark.anyio
@@ -647,7 +737,10 @@ async def test_acp_ambiguous_charge_failure_leaves_audit_evidence(
     assert failure.metadata["merchant_domain"] == "merchant.example.com"
     assert failure.metadata["derived_total_minor"] == 50
     assert failure.metadata["currency"] == "usd"
-    assert failure.metadata["stripe_idempotency_key"] == "acp-intent-ambiguous-1"
+    assert (
+        failure.metadata["stripe_idempotency_key"]
+        == f"acp-intent-ambiguous-1:{ctx['agent_wallet_id']}"
+    )
     assert failure.metadata["failure"] == "RuntimeError"
     assert SPT_TOKEN not in json.dumps(failure.metadata, default=str)
 
@@ -693,6 +786,185 @@ async def test_charge_shared_payment_token_runs_stripe_io_off_the_event_loop(
     assert seen["kwargs"]["payment_method"] == "tok_offload"
     # The sync Stripe call ran on a worker thread, not the loop's thread.
     assert seen["thread"] is not threading.current_thread()
+
+
+@pytest.mark.anyio
+async def test_cancel_payment_intent_runs_stripe_io_off_the_event_loop(
+    monkeypatch,
+):
+    """The cancel helper mirrors the charge helper: sync Stripe SDK I/O is
+    offloaded to a worker thread, with idempotency-key passthrough."""
+    seen: dict[str, Any] = {}
+
+    def _sync_cancel(payment_intent_id, **kwargs):
+        seen["thread"] = threading.current_thread()
+        seen["payment_intent_id"] = payment_intent_id
+        seen["kwargs"] = kwargs
+        return {"id": payment_intent_id, "status": "canceled"}
+
+    monkeypatch.setattr(
+        "app.services.stripe_integration.stripe.PaymentIntent.cancel",
+        _sync_cancel,
+    )
+
+    result = await StripeIntegration().cancel_payment_intent(
+        "pi_cancel_offload_1",
+        idempotency_key="acp-intent-x:agt-1:cancel",
+    )
+
+    assert result == {
+        "payment_intent_id": "pi_cancel_offload_1",
+        "status": "canceled",
+    }
+    assert seen["payment_intent_id"] == "pi_cancel_offload_1"
+    assert seen["kwargs"] == {"idempotency_key": "acp-intent-x:agt-1:cancel"}
+    assert seen["thread"] is not threading.current_thread()
+
+    # No idempotency key -> none is sent (Stripe treats absence as "no key").
+    seen.clear()
+    await StripeIntegration().cancel_payment_intent("pi_cancel_offload_2")
+    assert seen["kwargs"] == {}
+
+    # Best-effort or not, an empty id is a caller bug, refused outright.
+    with pytest.raises(ValueError):
+        await StripeIntegration().cancel_payment_intent("")
+
+
+@pytest.mark.anyio
+async def test_acp_permit_error_at_reserve_frees_the_intent_id(
+    client, spt_stub, monkeypatch, clean_database
+):
+    """A PermitError from the atomic reserve step (e.g. write contention) is
+    surfaced as a typed ACPBridgeError AND abandons the begun idempotency
+    record — the immediate same-intent retry re-runs instead of being wedged
+    on acp_intent_in_progress until the 300s stale-recovery window."""
+    from app.services.permits import PermitError, PermitService
+
+    ctx = await provision_agent_wallet(client)
+    adapter = get_acp_commerce_adapter()
+    request = ACPCheckoutRequest.model_validate(checkout_body("intent-reserve-1"))
+    kwargs = {
+        "sponsor_wallet_id": ctx["sponsor_wallet_id"],
+        "agent_wallet_id": ctx["agent_wallet_id"],
+        "key_id": ctx["key_id"],
+    }
+
+    original_reserve = PermitService.authorize_and_reserve
+
+    async def _contended(self, **reserve_kwargs):
+        raise PermitError("permit_write_contended")
+
+    monkeypatch.setattr(PermitService, "authorize_and_reserve", _contended)
+    with pytest.raises(ACPBridgeError) as failed:
+        await adapter.execute_checkout(request, **kwargs)
+    assert failed.value.reason == "permit_write_contended"
+    assert spt_stub == []  # the settlement rail was never reached
+
+    # The record was abandoned, so the retry re-runs and settles — it does
+    # NOT die on acp_intent_in_progress.
+    monkeypatch.setattr(
+        PermitService, "authorize_and_reserve", original_reserve
+    )
+    settled = await adapter.execute_checkout(request, **kwargs)
+    assert settled.status == "settled"
+    assert len(spt_stub) == 1
+
+
+@pytest.mark.anyio
+async def test_acp_rollback_release_failure_neither_masks_nor_skips_abandon(
+    client, spt_stub, monkeypatch, clean_database
+):
+    """Each rollback step is guarded on its own: a release_budget failure
+    during the settlement-record-failure rollback must not replace the
+    ORIGINAL error the caller sees, and must not stop the abandon — the
+    immediate retry re-runs (Stripe-side idempotency makes the second charge
+    a replay of the first) instead of being 409-wedged."""
+    from app.services.permits import PermitService
+    from app.services.receipts import ReceiptService
+
+    ctx = await provision_agent_wallet(client)
+    adapter = get_acp_commerce_adapter()
+    request = ACPCheckoutRequest.model_validate(checkout_body("intent-rollbk-1"))
+    kwargs = {
+        "sponsor_wallet_id": ctx["sponsor_wallet_id"],
+        "agent_wallet_id": ctx["agent_wallet_id"],
+        "key_id": ctx["key_id"],
+    }
+
+    original_create_receipt = ReceiptService.create_receipt
+    original_release = PermitService.release_budget
+
+    async def _receipt_failure(self, **receipt_kwargs):
+        raise RuntimeError("induced receipt failure")
+
+    release_calls: list[str] = []
+
+    async def _broken_release(self, permit_id, amount):
+        release_calls.append(permit_id)
+        raise RuntimeError("induced release failure")
+
+    monkeypatch.setattr(ReceiptService, "create_receipt", _receipt_failure)
+    monkeypatch.setattr(PermitService, "release_budget", _broken_release)
+    with pytest.raises(ACPBridgeError) as failed:
+        await adapter.execute_checkout(request, **kwargs)
+    # The ORIGINAL settlement-record failure surfaces, not the rollback's.
+    assert failed.value.reason == "acp_settlement_record_failed"
+    assert len(release_calls) == 1  # the release WAS attempted...
+    assert len(spt_stub) == 1
+
+    # ...and its failure did not prevent the abandon: the retry re-runs with
+    # the SAME deterministic Stripe idempotency key (one customer charge).
+    monkeypatch.setattr(
+        ReceiptService, "create_receipt", original_create_receipt
+    )
+    monkeypatch.setattr(PermitService, "release_budget", original_release)
+    settled = await adapter.execute_checkout(request, **kwargs)
+    assert settled.status == "settled"
+    assert len(spt_stub) == 2
+    assert spt_stub[0]["idempotency_key"] == spt_stub[1]["idempotency_key"]
+
+
+@pytest.mark.anyio
+async def test_acp_stripe_idempotency_key_is_wallet_scoped(
+    client, spt_stub, clean_database
+):
+    """Two wallets reusing the SAME client-chosen intent_id must not share a
+    Stripe idempotency key: the key is scoped by the agent wallet, so wallet
+    B can neither silently replay wallet A's PaymentIntent (identical
+    params) nor draw a Stripe idempotency_error (different params). It stays
+    deterministic per (wallet, intent) — the crash-retry double-charge
+    defense — and the caller-visible order_id itself is unchanged."""
+    from app.services.acp_bridge import stripe_idempotency_key
+
+    first = await provision_agent_wallet(client)
+    second = await provision_agent_wallet(client)
+    body = checkout_body("intent-shared-id-1")
+
+    resp_a = await client.post(
+        checkout_url(first), json=body, headers=first["agent_headers"]
+    )
+    assert resp_a.status_code == 201, resp_a.text
+    resp_b = await client.post(
+        checkout_url(second), json=body, headers=second["agent_headers"]
+    )
+    assert resp_b.status_code == 201, resp_b.text
+    # Same caller-visible order handle for both...
+    assert resp_a.json()["order_id"] == "acp-intent-shared-id-1"
+    assert resp_b.json()["order_id"] == "acp-intent-shared-id-1"
+
+    # ...but two distinct wallet-scoped keys on the settlement rail.
+    assert len(spt_stub) == 2
+    key_a = spt_stub[0]["idempotency_key"]
+    key_b = spt_stub[1]["idempotency_key"]
+    assert key_a == f"acp-intent-shared-id-1:{first['agent_wallet_id']}"
+    assert key_b == f"acp-intent-shared-id-1:{second['agent_wallet_id']}"
+    assert key_a != key_b
+
+    # The helper itself is a pure deterministic function of its inputs, and
+    # a maximal-length key provably fits Stripe's 255-char cap (order_id is
+    # capped at 132 chars by the schema, wallet ids at 50 by the table).
+    assert stripe_idempotency_key("acp-x", "agt-1") == "acp-x:agt-1"
+    assert len(stripe_idempotency_key("acp-" + "i" * 128, "w" * 50)) <= 255
 
 
 @pytest.mark.anyio
@@ -878,9 +1150,9 @@ async def test_acp_stale_intent_crashed_before_receipt_reruns_without_double_cha
     BaseException models a killed process: the adapter's rollback guard
     (except Exception) never runs, so the reservation and record stay put.
     Once stale, the receiptless record is abandoned and the checkout re-runs;
-    Stripe-side idempotency (key = deterministic order_id) guarantees the
-    re-executed charge is the original one, not a second (settlement-rails
-    checklist item 7)."""
+    Stripe-side idempotency (key deterministic per (wallet, intent) via
+    stripe_idempotency_key) guarantees the re-executed charge is the original
+    one, not a second (settlement-rails checklist item 7)."""
     import app.services.acp_bridge as acp_module
 
     ctx = crash_recovery_ctx["ctx"]
