@@ -36,9 +36,15 @@ def test_proof_surface_routers_include_awi_and_media():
 
 
 def test_dormant_trust_routers_hold_the_second_auth_story_and_kyc():
-    """auth (JWT), kyc, and planner are dormant trust surfaces, not core."""
+    """auth (JWT), kyc, planner, and x402 are dormant trust surfaces, not core.
+
+    x402 settlement facilitation joined the dormant tier deliberately: it is
+    a real trust surface with no active customer demand, and the settlement
+    freeze in docs/settlement-rails.md keeps it unmounted (and unadvertised)
+    in production posture.
+    """
     dormant = {mod.__name__.split(".")[-1] for mod in DORMANT_TRUST_ROUTERS}
-    assert dormant == {"auth", "kyc", "planner"}
+    assert dormant == {"auth", "kyc", "planner", "x402"}
 
     core = {mod.__name__.split(".")[-1] for mod in CORE_TRUST_ROUTERS}
     assert not (dormant & core)
