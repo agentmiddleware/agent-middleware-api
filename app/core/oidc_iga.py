@@ -519,16 +519,17 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
                         )
                     )
                     continue
-                has_velocity_cap = (
-                    grant.velocity_window_seconds is not None
-                    and grant.velocity_max_calls is not None
-                )
-                if has_velocity_cap:
+                # Bound to locals so the None-narrowing survives into the
+                # arithmetic below (config guarantees the pair is set together).
+                window_seconds = grant.velocity_window_seconds
+                max_calls = grant.velocity_max_calls
+                has_velocity_cap = window_seconds is not None and max_calls is not None
+                if window_seconds is not None and max_calls is not None:
                     window = _window_calls.setdefault(counter_key, deque())
-                    cutoff = now - float(grant.velocity_window_seconds)
+                    cutoff = now - float(window_seconds)
                     while window and window[0] <= cutoff:
                         window.popleft()
-                    if len(window) >= grant.velocity_max_calls:
+                    if len(window) >= max_calls:
                         candidates.append(
                             IGADecision(
                                 False,
@@ -536,9 +537,9 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
                                 grant.group,
                                 grant.policy_id,
                                 {
-                                    "window_seconds": grant.velocity_window_seconds,
+                                    "window_seconds": window_seconds,
                                     "calls_in_window": len(window),
-                                    "limit": grant.velocity_max_calls,
+                                    "limit": max_calls,
                                 },
                             )
                         )
