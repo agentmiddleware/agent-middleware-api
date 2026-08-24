@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 # Fail closed on denomination: only currencies on this allowlist may reach the
 # settlement path. Anything else — including uppercase variants — is rejected
@@ -31,9 +31,7 @@ _MERCHANT_DOMAIN_PATTERN = re.compile(
     rf"^{_HOSTNAME_LABEL}(?:\.{_HOSTNAME_LABEL})+$"
 )
 
-_MAX_METADATA_ENTRIES = 16
-_MAX_METADATA_KEY_LENGTH = 64
-_MAX_METADATA_VALUE_LENGTH = 256
+_MAX_SPT_TOKEN_LENGTH = 512
 
 
 class ACPLineItem(BaseModel):
@@ -62,14 +60,16 @@ class ACPCheckoutRequest(BaseModel):
     intent_id: str
     line_items: list[ACPLineItem] = Field(..., min_length=1, max_length=100)
     # Shared Payment Token — see the module docstring: never logged, never
-    # persisted. ``repr=False`` keeps it out of accidental model reprs.
-    spt_token: str = Field(..., min_length=1, max_length=512, repr=False)
+    # persisted. ``SecretStr`` masks it in reprs AND in model_dump /
+    # model_dump_json, so an accidental serialization of the request cannot
+    # leak the raw credential; only an explicit ``.get_secret_value()`` call
+    # (the outbound Stripe charge) ever sees it.
+    spt_token: SecretStr
     merchant_domain: str = Field(..., min_length=1, max_length=253)
     # Client-asserted total in minor units. The adapter derives the total
     # server-side and requires exact equality; this value never drives the
     # charged amount.
     client_total: int = Field(..., ge=0)
-    metadata: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("intent_id")
     @classmethod
@@ -78,23 +78,20 @@ class ACPCheckoutRequest(BaseModel):
             raise ValueError("acp_intent_id_invalid")
         return value
 
+    @field_validator("spt_token")
+    @classmethod
+    def _spt_token_bounded(cls, value: SecretStr) -> SecretStr:
+        # Length bounds live here because pydantic Field length constraints
+        # do not apply to the inner value of a SecretStr.
+        if not 1 <= len(value.get_secret_value()) <= _MAX_SPT_TOKEN_LENGTH:
+            raise ValueError("acp_spt_token_invalid")
+        return value
+
     @field_validator("merchant_domain")
     @classmethod
     def _merchant_domain_shape(cls, value: str) -> str:
         if not _MERCHANT_DOMAIN_PATTERN.fullmatch(value):
             raise ValueError("acp_merchant_domain_invalid")
-        return value
-
-    @field_validator("metadata")
-    @classmethod
-    def _metadata_bounded(cls, value: dict[str, str]) -> dict[str, str]:
-        if len(value) > _MAX_METADATA_ENTRIES:
-            raise ValueError("acp_metadata_too_large")
-        for key, entry in value.items():
-            if not key or len(key) > _MAX_METADATA_KEY_LENGTH:
-                raise ValueError("acp_metadata_key_invalid")
-            if len(entry) > _MAX_METADATA_VALUE_LENGTH:
-                raise ValueError("acp_metadata_value_invalid")
         return value
 
 

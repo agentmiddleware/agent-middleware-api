@@ -17,6 +17,7 @@ from typing import Any, Optional, cast
 from uuid import uuid4
 
 import stripe
+from anyio import to_thread
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, update as sa_update
 from sqlalchemy.sql.elements import ColumnElement
@@ -32,6 +33,17 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+# Explicit HTTP timeout on the shared Stripe client (the SDK's RequestsClient
+# default, stated here so it is a contract rather than an accident). The ACP
+# bridge's stale-intent recovery depends on it: the only long-blocking step in
+# a live checkout is this client's call, so its timeout must stay well under
+# acp_bridge._INTENT_STALE_SECONDS (300s) for "idle past the threshold" to
+# imply "not a live attempt".
+STRIPE_HTTP_TIMEOUT_SECONDS = 80
+stripe.default_http_client = stripe.new_default_http_client(
+    timeout=STRIPE_HTTP_TIMEOUT_SECONDS
+)
 
 SUPPORTED_TOP_UP_CURRENCY = "usd"
 
@@ -126,6 +138,8 @@ class StripeIntegration:
             int(credits) if credits == credits.to_integral_value() else float(credits)
         )
 
+        # Known limitation: this sync Stripe call blocks the event loop like
+        # charge_shared_payment_token used to; offloading it is out of scope here.
         intent = stripe.PaymentIntent.create(
             amount=amount_cents,
             currency=SUPPORTED_TOP_UP_CURRENCY,
@@ -179,13 +193,18 @@ class StripeIntegration:
         if not spt_token:
             raise ValueError("missing_shared_payment_token")
 
-        intent = stripe.PaymentIntent.create(
-            amount=amount_minor,
-            currency=normalized_currency,
-            payment_method=spt_token,
-            confirm=True,
-            idempotency_key=idempotency_key,
-        )
+        def _create_payment_intent() -> Any:
+            return stripe.PaymentIntent.create(
+                amount=amount_minor,
+                currency=normalized_currency,
+                payment_method=spt_token,
+                confirm=True,
+                idempotency_key=idempotency_key,
+            )
+
+        # The Stripe SDK call is synchronous network I/O; run it on a worker
+        # thread so it never blocks the event loop mid-checkout.
+        intent = await to_thread.run_sync(_create_payment_intent)
 
         intent_id = self._stripe_value(intent, "id")
         logger.info(

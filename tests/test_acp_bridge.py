@@ -13,7 +13,9 @@ billing expansion routes are mounted automatically for these tests.
 from __future__ import annotations
 
 import json
+import os
 import statistics
+import threading
 import time
 from decimal import Decimal
 from typing import Any
@@ -25,13 +27,15 @@ from app.main import app
 from app.schemas.acp import ACPCheckoutRequest
 from app.services.acp_bridge import (
     ACP_CHECKOUT_ENDPOINT,
+    ACPBridgeError,
     get_acp_commerce_adapter,
     translate_to_permit_bounds,
 )
 from app.services.audit_log import list_audit_events
-from app.services.idempotency import get_idempotency_service
+from app.services.idempotency import IdempotencyService, get_idempotency_service
 from app.services.permits import get_permit_service
 from app.services.receipts import get_receipt_service
+from app.services.signing_keys import sha256_hex
 from app.services.stripe_integration import StripeIntegration
 from tests.test_trust_helpers import provision_agent_wallet
 
@@ -163,7 +167,8 @@ async def test_acp_checkout_end_to_end(client, spt_stub, clean_database):
     assert data["order_id"] == "acp-intent-e2e-1"
     assert data["intent_id"] == "intent-e2e-1"
     assert data["status"] == "settled"
-    assert Decimal(data["derived_total"]) == Decimal("0.50")
+    # Exact string: 50 cents must render as "0.50", never "0.5".
+    assert data["derived_total"] == "0.50"
 
     # Exactly one outbound charge, with the server-derived amount and the
     # order-derived Stripe idempotency key.
@@ -203,11 +208,17 @@ async def test_acp_checkout_end_to_end(client, spt_stub, clean_database):
     assert Decimal(receipt["credits_charged"]) == Decimal("500")
     assert receipt["ledger_entry_id"] is None  # no real ledger writes
 
-    # The order id is bound into a chained audit event...
+    # The order id is bound into a chained audit event, and the router's
+    # governance event is indexed under the SAME request key — one checkout,
+    # one request_id across governance and settlement evidence.
     events = await list_audit_events(request_id=data["order_id"])
-    assert len(events) == 1
-    event = events[0]
-    assert event.event == "acp_checkout_settled"
+    assert {e.event for e in events} == {
+        "acp_checkout_settled",
+        "billing.acp_checkout",
+    }
+    settled_events = [e for e in events if e.event == "acp_checkout_settled"]
+    assert len(settled_events) == 1
+    event = settled_events[0]
     assert event.event_id == data["audit_event_id"]
     assert event.wallet_id == ctx["agent_wallet_id"]
     assert event.tool == "acp.checkout"
@@ -257,8 +268,10 @@ async def test_acp_checkout_end_to_end_under_45ms(client, spt_stub, clean_databa
         assert result.status == "settled"
 
     # Median rather than max: a single noisy CI scheduling blip must not
-    # flake the suite, but the typical checkout must stay fast.
-    assert statistics.median(samples) < 0.045, samples
+    # flake the suite, but the typical checkout must stay fast. The bound is
+    # env-overridable so a slow runner can widen it without editing code.
+    budget_s = float(os.environ.get("ACP_CHECKOUT_MEDIAN_BUDGET_S", "0.045"))
+    assert statistics.median(samples) < budget_s, samples
 
 
 @pytest.mark.anyio
@@ -301,6 +314,34 @@ async def test_acp_duplicate_intent_id_does_not_double_charge(
 
 
 @pytest.mark.anyio
+async def test_acp_same_intent_different_body_is_rejected(
+    client, spt_stub, clean_database
+):
+    """Reusing a settled intent id with a different cart is a 409 conflict —
+    the original checkout is neither replayed for the new body nor
+    re-charged."""
+    ctx = await provision_agent_wallet(client)
+    first = await client.post(
+        checkout_url(ctx),
+        json=checkout_body("intent-conflict-1"),
+        headers=ctx["agent_headers"],
+    )
+    assert first.status_code == 201, first.text
+    assert len(spt_stub) == 1
+
+    # Same intent id, larger cart: the idempotency request hash differs.
+    conflicting = checkout_body("intent-conflict-1", quantity=3, client_total=75)
+    second = await client.post(
+        checkout_url(ctx), json=conflicting, headers=ctx["agent_headers"]
+    )
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"]["error"] == "acp_intent_conflict"
+
+    # The settlement rail was hit exactly once, by the original checkout.
+    assert len(spt_stub) == 1
+
+
+@pytest.mark.anyio
 async def test_acp_client_total_mismatch_rejected(client, spt_stub, clean_database):
     ctx = await provision_agent_wallet(client)
     # Off by one cent from the derived 50: must be refused outright.
@@ -322,6 +363,32 @@ async def test_acp_client_total_mismatch_rejected(client, spt_stub, clean_databa
         wallet_id=ctx["agent_wallet_id"]
     )
     assert receipts_total == 0
+
+
+@pytest.mark.anyio
+async def test_acp_checkout_exceeding_wallet_balance_rejected(
+    client, spt_stub, clean_database
+):
+    """A derived total beyond the agent wallet's balance is refused before
+    any permit is minted or the settlement rail is touched."""
+    ctx = await provision_agent_wallet(client)
+    # provision_agent_wallet funds the agent wallet with 1000 budget credits
+    # = 100 cents at the default 1000 credits/$ rate; 101 cents overruns it.
+    body = checkout_body(
+        "intent-overrun-1", quantity=1, unit_amount=101, client_total=101
+    )
+    resp = await client.post(
+        checkout_url(ctx), json=body, headers=ctx["agent_headers"]
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["error"] == "permit_budget_exceeds_wallet_balance"
+
+    # Nothing moved: no Stripe call, no permit reserved.
+    assert spt_stub == []
+    _, permits_total = await get_permit_service().list_permits(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert permits_total == 0
 
 
 @pytest.mark.anyio
@@ -515,6 +582,118 @@ async def test_acp_unsettled_stripe_status_is_a_failure(
     )
     assert receipts_total == 0
 
+    # Uniform rule: every rollback after the charge attempt leaves evidence —
+    # a definitively non-settled status included, since Stripe may still hold
+    # a resolvable PaymentIntent under the recorded idempotency key.
+    events = await list_audit_events(request_id="acp-intent-pending-1")
+    failures = [e for e in events if e.event == "acp_checkout_charge_failed"]
+    assert len(failures) == 1
+    assert failures[0].ok is False
+    assert (
+        failures[0].metadata["stripe_idempotency_key"] == "acp-intent-pending-1"
+    )
+
+
+@pytest.mark.anyio
+async def test_acp_ambiguous_charge_failure_leaves_audit_evidence(
+    client, monkeypatch, clean_database
+):
+    """A transport-style failure (timeout/connection reset) after the charge
+    was dispatched may hide money Stripe actually captured. The rollback must
+    still append an ok=False audit event carrying the Stripe idempotency key,
+    so an orphaned charge is always discoverable from the audit chain."""
+    ctx = await provision_agent_wallet(client)
+
+    async def _transport_failure(
+        self, *, spt_token, amount_minor, currency, idempotency_key
+    ):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(
+        StripeIntegration, "charge_shared_payment_token", _transport_failure
+    )
+
+    resp = await client.post(
+        checkout_url(ctx),
+        json=checkout_body("intent-ambiguous-1"),
+        headers=ctx["agent_headers"],
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "acp_spt_charge_failed"
+
+    # The reservation was released and no receipt exists...
+    permits, permits_total = await get_permit_service().list_permits(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert permits_total == 1
+    assert permits[0].spent_credits == Decimal("0")
+    _, receipts_total = await get_receipt_service().list_receipts(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert receipts_total == 0
+
+    # ...but the failure is durable evidence, indexed under the SAME request
+    # key a settlement would use and carrying everything needed to find a
+    # possibly-orphaned Stripe charge — never the token.
+    events = await list_audit_events(request_id="acp-intent-ambiguous-1")
+    failures = [e for e in events if e.event == "acp_checkout_charge_failed"]
+    assert len(failures) == 1
+    failure = failures[0]
+    assert failure.ok is False
+    assert failure.wallet_id == ctx["agent_wallet_id"]
+    assert failure.tool == "acp.checkout"
+    assert failure.metadata["order_id"] == "acp-intent-ambiguous-1"
+    assert failure.metadata["intent_id"] == "intent-ambiguous-1"
+    assert failure.metadata["merchant_domain"] == "merchant.example.com"
+    assert failure.metadata["derived_total_minor"] == 50
+    assert failure.metadata["currency"] == "usd"
+    assert failure.metadata["stripe_idempotency_key"] == "acp-intent-ambiguous-1"
+    assert failure.metadata["failure"] == "RuntimeError"
+    assert SPT_TOKEN not in json.dumps(failure.metadata, default=str)
+
+
+@pytest.mark.anyio
+async def test_charge_shared_payment_token_runs_stripe_io_off_the_event_loop(
+    monkeypatch,
+):
+    """The real charge helper must offload the sync Stripe SDK call to a
+    worker thread instead of blocking the event loop."""
+    seen: dict[str, Any] = {}
+
+    def _sync_create(**kwargs):
+        seen["thread"] = threading.current_thread()
+        seen["kwargs"] = kwargs
+        return {
+            "id": "pi_offload_1",
+            "status": "succeeded",
+            "amount": kwargs["amount"],
+            "currency": kwargs["currency"],
+        }
+
+    monkeypatch.setattr(
+        "app.services.stripe_integration.stripe.PaymentIntent.create",
+        _sync_create,
+    )
+
+    result = await StripeIntegration().charge_shared_payment_token(
+        spt_token="tok_offload",
+        amount_minor=50,
+        currency="usd",
+        idempotency_key="acp-intent-offload-1",
+    )
+
+    assert result == {
+        "payment_intent_id": "pi_offload_1",
+        "status": "succeeded",
+        "amount": 50,
+        "currency": "usd",
+    }
+    # Idempotency-key passthrough semantics are unchanged by the offload.
+    assert seen["kwargs"]["idempotency_key"] == "acp-intent-offload-1"
+    assert seen["kwargs"]["payment_method"] == "tok_offload"
+    # The sync Stripe call ran on a worker thread, not the loop's thread.
+    assert seen["thread"] is not threading.current_thread()
+
 
 @pytest.mark.anyio
 async def test_acp_spt_token_never_persisted(client, spt_stub, clean_database):
@@ -558,9 +737,27 @@ async def test_acp_spt_token_never_persisted(client, spt_stub, clean_database):
     assert record.response_json is not None
     assert SPT_TOKEN not in record.response_json
 
+    # The stored request identity must be the hash of the SANITIZED payload:
+    # rebuild it independently with the bridge's own payload builder and the
+    # exact hashing begin_with_record applies (sha256_hex over the dict). Any
+    # future change that starts folding the token into the hashed payload
+    # changes the digest and fails here.
+    sanitized_payload = get_acp_commerce_adapter()._idempotency_payload(
+        ACPCheckoutRequest.model_validate(checkout_body("intent-secret-1")),
+        sponsor_wallet_id=ctx["sponsor_wallet_id"],
+        agent_wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+    )
+    assert SPT_TOKEN not in json.dumps(sanitized_payload, default=str)
+    assert record.request_hash == sha256_hex(sanitized_payload)
 
-async def _backdate_intent_record(intent_id: str) -> None:
-    """Age an intent's idempotency record past the staleness threshold."""
+
+async def _backdate_intent_record(intent_id: str, *, wallet_id: str) -> None:
+    """Age one wallet's intent record past the staleness threshold.
+
+    Constrained by the full idempotency identity (wallet, endpoint, key) so
+    two wallets reusing an intent id can never make ``scalar_one`` ambiguous.
+    """
     from datetime import timedelta
 
     from sqlalchemy import select
@@ -575,7 +772,9 @@ async def _backdate_intent_record(intent_id: str) -> None:
         record = (
             await session.execute(
                 select(IdempotencyRecordModel).where(
-                    IdempotencyRecordModel.idempotency_key == intent_id
+                    IdempotencyRecordModel.wallet_id == wallet_id,
+                    IdempotencyRecordModel.endpoint == ACP_CHECKOUT_ENDPOINT,
+                    IdempotencyRecordModel.idempotency_key == intent_id,
                 )
             )
         ).scalar_one()
@@ -585,46 +784,63 @@ async def _backdate_intent_record(intent_id: str) -> None:
         await session.commit()
 
 
-@pytest.mark.anyio
-async def test_acp_stale_crashed_intent_recovers_without_double_charge(
-    client, spt_stub, monkeypatch, clean_database
-):
-    """A process that dies mid-finalization leaves the intent's record in
-    progress with no repair path of its own. A fresh retry is still refused
-    (live-attempt protection); once stale, recovery depends on crash shape:
-    died after the receipt -> the settlement is durable, so the record is
-    completed FROM the receipt with zero re-execution; died before the
-    receipt -> the record is abandoned and the checkout re-runs, with
-    Stripe-side idempotency (key = deterministic order_id) guaranteeing the
-    re-executed charge is the original one, not a second."""
-    from app.services.acp_bridge import ACPBridgeError
-    from app.services.idempotency import IdempotencyService
-
+@pytest.fixture
+async def crash_recovery_ctx(client, clean_database):
+    """Shared setup for the stale-crashed-intent recovery tests: a funded
+    wallet, the adapter, and the checkout kwargs. A process that dies
+    mid-finalization leaves the intent's record in progress with no repair
+    path of its own; each recovery test induces one crash shape on top of
+    this context with its own isolated patches."""
     ctx = await provision_agent_wallet(client)
-    adapter = get_acp_commerce_adapter()
-    kwargs = {
-        "sponsor_wallet_id": ctx["sponsor_wallet_id"],
-        "agent_wallet_id": ctx["agent_wallet_id"],
-        "key_id": ctx["key_id"],
+    return {
+        "ctx": ctx,
+        "adapter": get_acp_commerce_adapter(),
+        "kwargs": {
+            "sponsor_wallet_id": ctx["sponsor_wallet_id"],
+            "agent_wallet_id": ctx["agent_wallet_id"],
+            "key_id": ctx["key_id"],
+        },
     }
 
-    # --- Crash shape 1: death between the receipt write and idem.complete.
+
+@pytest.mark.anyio
+async def test_acp_stale_intent_crashed_after_receipt_recovers_from_receipt(
+    spt_stub, monkeypatch, crash_recovery_ctx
+):
+    """Crash shape 1: death between the receipt write and idem.complete. The
+    settlement is durable, so once the record goes stale it is completed FROM
+    the receipt with zero re-execution — and the original crash surfaces
+    unwrapped, with the budget reservation intact."""
+    ctx = crash_recovery_ctx["ctx"]
+    adapter = crash_recovery_ctx["adapter"]
+    kwargs = crash_recovery_ctx["kwargs"]
     request = ACPCheckoutRequest.model_validate(checkout_body("intent-crash-1"))
+
     original_complete = IdempotencyService.complete
-    crashed = {"done": False}
 
-    async def _crash_once(self, **complete_kwargs):
-        if not crashed["done"]:
-            crashed["done"] = True
-            raise RuntimeError("induced crash before idem.complete")
-        return await original_complete(self, **complete_kwargs)
+    async def _crash_complete(self, **complete_kwargs):
+        raise RuntimeError("induced crash before idem.complete")
 
-    monkeypatch.setattr(IdempotencyService, "complete", _crash_once)
-    # The adapter treats the complete-failure as a settlement-record failure,
-    # but the charge, audit event, and receipt are already durable.
-    with pytest.raises((RuntimeError, ACPBridgeError)):
+    monkeypatch.setattr(IdempotencyService, "complete", _crash_complete)
+    # idem.complete runs OUTSIDE the settlement rollback guard: once the
+    # charge, audit event, and receipt are durable the checkout IS settled,
+    # so the induced error must surface as itself — not re-labeled a
+    # settlement-record failure.
+    with pytest.raises(RuntimeError) as crash:
         await adapter.execute_checkout(request, **kwargs)
+    assert not isinstance(crash.value, ACPBridgeError)
     assert len(spt_stub) == 1  # the charge itself succeeded
+
+    # The budget reservation SURVIVED: the charge is durable, so the
+    # rollback (release + abandon) must not have run.
+    permits, permits_total = await get_permit_service().list_permits(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert permits_total == 1
+    assert permits[0].spent_credits == Decimal("500")
+
+    # Restore the real complete so recovery can finish the record.
+    monkeypatch.setattr(IdempotencyService, "complete", original_complete)
 
     # Fresh record = possibly a live concurrent attempt: still refused.
     with pytest.raises(ACPBridgeError) as blocked:
@@ -632,7 +848,9 @@ async def test_acp_stale_crashed_intent_recovers_without_double_charge(
     assert blocked.value.reason == "acp_intent_in_progress"
     assert len(spt_stub) == 1
 
-    await _backdate_intent_record("intent-crash-1")
+    await _backdate_intent_record(
+        "intent-crash-1", wallet_id=ctx["agent_wallet_id"]
+    )
 
     # Recovery completes the record from the durable receipt: NO re-charge,
     # NO re-execution — the original settlement's identifiers come back.
@@ -640,6 +858,7 @@ async def test_acp_stale_crashed_intent_recovers_without_double_charge(
     settled = await adapter.execute_checkout(request, **kwargs)
     assert settled.order_id == "acp-intent-crash-1"
     assert settled.status == "settled"
+    assert settled.derived_total == "0.50"
     assert len(spt_stub) == 1
     receipts_after, _ = await get_receipt_service().list_receipts()
     assert len(receipts_after) == len(receipts_before)
@@ -650,37 +869,74 @@ async def test_acp_stale_crashed_intent_recovers_without_double_charge(
     assert replay == settled
     assert len(spt_stub) == 1
 
-    # --- Crash shape 2: hard death after the charge but before the receipt.
-    # A BaseException models a killed process: the adapter's rollback guard
-    # (except Exception) never runs, so the reservation and record stay put.
-    request2 = ACPCheckoutRequest.model_validate(checkout_body("intent-crash-2"))
 
+@pytest.mark.anyio
+async def test_acp_stale_intent_crashed_before_receipt_reruns_without_double_charge(
+    spt_stub, monkeypatch, crash_recovery_ctx
+):
+    """Crash shape 2: hard death after the charge but before the receipt. A
+    BaseException models a killed process: the adapter's rollback guard
+    (except Exception) never runs, so the reservation and record stay put.
+    Once stale, the receiptless record is abandoned and the checkout re-runs;
+    Stripe-side idempotency (key = deterministic order_id) guarantees the
+    re-executed charge is the original one, not a second (settlement-rails
+    checklist item 7)."""
     import app.services.acp_bridge as acp_module
 
+    ctx = crash_recovery_ctx["ctx"]
+    adapter = crash_recovery_ctx["adapter"]
+    kwargs = crash_recovery_ctx["kwargs"]
+    request = ACPCheckoutRequest.model_validate(checkout_body("intent-crash-2"))
+
     original_audit = acp_module.record_audit_event
-    died = {"done": False}
 
-    async def _hard_death_once(**audit_kwargs):
-        # One-shot: monkeypatch.undo() would also strip the spt_stub patch
-        # (the fixture shares this monkeypatch instance), so the fake death
-        # restores itself instead.
-        if not died["done"]:
-            died["done"] = True
-            raise KeyboardInterrupt("induced hard death before the receipt")
-        return await original_audit(**audit_kwargs)
+    async def _hard_death(**audit_kwargs):
+        raise KeyboardInterrupt("induced hard death before the receipt")
 
-    monkeypatch.setattr(acp_module, "record_audit_event", _hard_death_once)
+    monkeypatch.setattr(acp_module, "record_audit_event", _hard_death)
     with pytest.raises(KeyboardInterrupt):
-        await adapter.execute_checkout(request2, **kwargs)
-    assert len(spt_stub) == 2  # this intent's charge went through once
+        await adapter.execute_checkout(request, **kwargs)
+    assert len(spt_stub) == 1  # the charge went through once
 
-    await _backdate_intent_record("intent-crash-2")
+    # Restore the real audit writer so the recovery re-run can settle.
+    monkeypatch.setattr(acp_module, "record_audit_event", original_audit)
+
+    await _backdate_intent_record(
+        "intent-crash-2", wallet_id=ctx["agent_wallet_id"]
+    )
 
     # Recovery abandons the receiptless record and re-runs the checkout; the
     # re-executed charge carries the SAME Stripe idempotency key, so Stripe
-    # returns the original PaymentIntent — one customer charge, not two
-    # (settlement-rails checklist item 7).
-    settled2 = await adapter.execute_checkout(request2, **kwargs)
-    assert settled2.order_id == "acp-intent-crash-2"
-    assert len(spt_stub) == 3
-    assert spt_stub[1]["idempotency_key"] == spt_stub[2]["idempotency_key"]
+    # returns the original PaymentIntent — one customer charge, not two.
+    settled = await adapter.execute_checkout(request, **kwargs)
+    assert settled.order_id == "acp-intent-crash-2"
+    assert settled.status == "settled"
+    assert len(spt_stub) == 2
+    assert spt_stub[0]["idempotency_key"] == spt_stub[1]["idempotency_key"]
+
+    # Exactly ONE settlement artifact set exists for the recovered intent...
+    receipts, receipts_total = await get_receipt_service().list_receipts(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert receipts_total == 1
+    assert receipts[0].receipt_id == settled.receipt_id
+    assert receipts[0].permit_id == settled.permit_id
+
+    # ...while the crashed attempt's permit is orphaned (left to expire for
+    # the budget sweep), never reused: the re-run minted a fresh one.
+    permits, permits_total = await get_permit_service().list_permits(
+        wallet_id=ctx["agent_wallet_id"]
+    )
+    assert permits_total == 2
+    assert settled.permit_id in {p.permit_id for p in permits}
+    orphaned = [p for p in permits if p.permit_id != settled.permit_id]
+    assert len(orphaned) == 1
+
+    # The chain marks this two-permits-one-receipt shape as crash recovery,
+    # indexed under the same request key as the settlement itself.
+    events = await list_audit_events(request_id="acp-intent-crash-2")
+    recovered = [e for e in events if e.event == "acp_intent_recovered"]
+    assert len(recovered) == 1
+    assert recovered[0].ok is True
+    assert recovered[0].metadata["intent_id"] == "intent-crash-2"
+    assert recovered[0].metadata["abandoned_record_id"]

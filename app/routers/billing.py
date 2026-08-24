@@ -36,7 +36,11 @@ from ..services.velocity_monitor import WalletFrozenError
 from ..services.wallet_engine import WalletExpiredError
 from ..services.stripe_integration import get_stripe_integration
 from ..services.shadow_ledger import SimulatedChargeResult, get_shadow_ledger
-from ..services.acp_bridge import ACPBridgeError, get_acp_commerce_adapter
+from ..services.acp_bridge import (
+    ACPBridgeError,
+    audit_request_id,
+    get_acp_commerce_adapter,
+)
 from ..schemas.acp import ACPCheckoutRequest, ACPCheckoutResponse
 from ..schemas.billing import (
     CreateSponsorWalletRequest,
@@ -1165,8 +1169,17 @@ async def transfer_wallets(
         "intent replays the original order and never charges twice."
     ),
     responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "Checkout refused (total mismatch, budget, charge failure)",
+        },
         status.HTTP_403_FORBIDDEN: {
             "description": "Wallet access denied",
+        },
+        status.HTTP_409_CONFLICT: {
+            "description": (
+                "Intent id already used with a different request, or the "
+                "same intent is still being processed"
+            ),
         },
     },
 )
@@ -1203,9 +1216,12 @@ async def acp_checkout(
         )
     endpoint = "/v1/billing/acp/checkout"
     # Governance metadata below must never include the spt_token: it is
-    # persisted into the signed audit trail. request_id is truncated to the
-    # audit column's 100-char cap; the untruncated intent_id is in metadata.
-    governance_request_id = request.intent_id[:100]
+    # persisted into the signed audit trail. The request_id is derived from
+    # the SAME acp-{intent_id} order key the bridge indexes its settlement
+    # events under (collision-safe digest past the audit column's 100-char
+    # cap — never a plain truncation), so one checkout's governance and
+    # settlement events share one request_id.
+    governance_request_id = audit_request_id(f"acp-{request.intent_id}")
     try:
         result = await get_acp_commerce_adapter().execute_checkout(
             request,
@@ -1229,8 +1245,16 @@ async def acp_checkout(
                 "client_total": request.client_total,
             },
         )
+        # Conflict/retry conditions are 409, not 400: the request itself is
+        # well-formed, the intent id is just contended or already bound to a
+        # different body.
+        status_code = (
+            status.HTTP_409_CONFLICT
+            if exc.reason in {"acp_intent_conflict", "acp_intent_in_progress"}
+            else status.HTTP_400_BAD_REQUEST
+        )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status_code,
             detail={"error": exc.reason, "message": str(exc)},
         )
     await _record_billing_governance(

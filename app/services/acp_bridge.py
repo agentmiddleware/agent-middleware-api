@@ -27,6 +27,7 @@ metadata.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -46,6 +47,8 @@ from app.services.receipts import get_receipt_service
 from app.services.signing_keys import sha256_hex
 from app.services.stripe_integration import get_stripe_integration
 
+logger = logging.getLogger(__name__)
+
 ACP_CHECKOUT_TOOL = "acp.checkout"
 ACP_CHECKOUT_ENDPOINT = "/v1/billing/acp/checkout"
 # Short expiry: the permit exists only to bound this one checkout, so it must
@@ -56,6 +59,13 @@ _SETTLED_STRIPE_STATUSES = frozenset({"succeeded"})
 # An in-progress intent record idle past this threshold is treated as a
 # crashed attempt and recovered (see execute_checkout); mirrors the 300s
 # staleness standard used by the governed-MCP reconciliation sweep.
+# Safety invariant, not a heuristic: the only long-blocking step in a live
+# checkout is the outbound Stripe call, and the Stripe HTTP client's explicit
+# timeout (stripe_integration.STRIPE_HTTP_TIMEOUT_SECONDS, 80s) sits far
+# below this threshold — so a record older than this cannot belong to a live
+# attempt. Backstop if that ever regresses: abandon() refuses completed or
+# charged records, and the receipts table's idempotency_record_id FK stops a
+# record a receipt references from being deleted.
 _INTENT_STALE_SECONDS = 300
 
 
@@ -87,11 +97,16 @@ def line_items_digest(line_items: list[ACPLineItem]) -> str:
     )
 
 
-def _audit_request_id(order_id: str) -> str:
-    # The audit table's indexed request_id column is capped at 100 chars;
-    # order ids derived from a maximum-length intent_id (128 chars) exceed it.
-    # Fall back to a deterministic digest rather than a truncation that could
-    # collide. The full order id is always in the signed metadata regardless.
+def audit_request_id(order_id: str) -> str:
+    """Collision-safe audit ``request_id`` for an ``acp-{intent_id}`` order id.
+
+    The audit table's indexed request_id column is capped at 100 chars;
+    order ids derived from a maximum-length intent_id (128 chars) exceed it.
+    Fall back to a deterministic digest rather than a truncation that could
+    collide. The full order id is always in the signed metadata regardless.
+    Public so the router's governance events can index under the SAME key as
+    the bridge's settlement events — one checkout, one request_id.
+    """
     if len(order_id) <= 100:
         return order_id
     return f"acp-{sha256_hex(order_id)}"
@@ -188,7 +203,11 @@ class ACPCommerceAdapter:
         if request.client_total != total_minor:
             raise ACPBridgeError("acp_total_mismatch")
         credits = total_minor_to_credits(total_minor)
-        derived_total = str(Decimal(total_minor) / Decimal("100"))
+        # Quantize to exactly two decimals so 50 cents renders as "0.50",
+        # never "0.5": receipts and replays compare this string byte-for-byte.
+        derived_total = str(
+            (Decimal(total_minor) / Decimal("100")).quantize(Decimal("0.01"))
+        )
         currency = request.line_items[0].currency
         order_id = f"acp-{request.intent_id}"
 
@@ -269,6 +288,32 @@ class ACPCommerceAdapter:
                     status_code=200,
                 )
                 return recovered
+            # Mark the recovery on the audit chain BEFORE abandoning: after
+            # the re-run this order legitimately shows two permits and one
+            # receipt, and this event lets an operator read that shape as
+            # crash recovery rather than a defect. Best-effort — recovering
+            # a wedged intent must not fail on evidence bookkeeping.
+            try:
+                await record_audit_event(
+                    event="acp_intent_recovered",
+                    wallet_id=agent_wallet_id,
+                    tool=ACP_CHECKOUT_TOOL,
+                    endpoint=ACP_CHECKOUT_ENDPOINT,
+                    key_id=key_id,
+                    request_id=audit_request_id(order_id),
+                    ok=True,
+                    metadata={
+                        "order_id": order_id,
+                        "intent_id": request.intent_id,
+                        "abandoned_record_id": record.record_id,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to record acp_intent_recovered evidence for "
+                    "order %s",
+                    order_id,
+                )
             await self._abandon_intent(
                 agent_wallet_id=agent_wallet_id, intent_id=request.intent_id
             )
@@ -334,12 +379,49 @@ class ACPCommerceAdapter:
                 agent_wallet_id=agent_wallet_id, intent_id=request.intent_id
             )
 
+        async def _record_rollback_evidence(
+            event: str, failure: BaseException
+        ) -> None:
+            # A rollback after the charge attempt may be hiding real money
+            # movement: a transport failure (timeout/connection reset) can
+            # land AFTER Stripe captured, and a definitively non-settled
+            # status can still resolve later on Stripe's side. Best-effort
+            # append an ok=False audit event carrying the Stripe idempotency
+            # key so any orphaned charge is always discoverable from the
+            # audit chain. Guarded so this write can never mask the original
+            # error — and it never includes the token.
+            try:
+                await record_audit_event(
+                    event=event,
+                    wallet_id=agent_wallet_id,
+                    tool=ACP_CHECKOUT_TOOL,
+                    endpoint=ACP_CHECKOUT_ENDPOINT,
+                    key_id=key_id,
+                    request_id=audit_request_id(order_id),
+                    ok=False,
+                    metadata={
+                        "order_id": order_id,
+                        "intent_id": request.intent_id,
+                        "merchant_domain": request.merchant_domain,
+                        "derived_total_minor": total_minor,
+                        "currency": currency,
+                        "stripe_idempotency_key": order_id,
+                        "failure": type(failure).__name__,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to record %s audit evidence for order %s",
+                    event,
+                    order_id,
+                )
+
         # 6. Outbound settlement via the Shared Payment Token. The intent id
         # rides to Stripe as the PaymentIntent idempotency key, so even a
         # crash-retry that reaches Stripe twice cannot charge twice.
         try:
             charge = await get_stripe_integration().charge_shared_payment_token(
-                spt_token=request.spt_token,
+                spt_token=request.spt_token.get_secret_value(),
                 amount_minor=total_minor,
                 currency=currency,
                 idempotency_key=order_id,
@@ -347,6 +429,7 @@ class ACPCommerceAdapter:
             if charge.get("status") not in _SETTLED_STRIPE_STATUSES:
                 raise RuntimeError("acp_spt_not_settled")
         except Exception as exc:
+            await _record_rollback_evidence("acp_checkout_charge_failed", exc)
             await _rollback()
             raise ACPBridgeError("acp_spt_charge_failed") from exc
 
@@ -360,7 +443,7 @@ class ACPCommerceAdapter:
                 tool=ACP_CHECKOUT_TOOL,
                 endpoint=ACP_CHECKOUT_ENDPOINT,
                 key_id=key_id,
-                request_id=_audit_request_id(order_id),
+                request_id=audit_request_id(order_id),
                 ok=True,
                 metadata={
                     "order_id": order_id,
@@ -405,10 +488,12 @@ class ACPCommerceAdapter:
                 idempotency_record_id=begun.record_id,
             )
 
-        except ACPBridgeError:
+        except ACPBridgeError as exc:
+            await _record_rollback_evidence("acp_settlement_record_failed", exc)
             await _rollback()
             raise
         except Exception as exc:
+            await _record_rollback_evidence("acp_settlement_record_failed", exc)
             await _rollback()
             raise ACPBridgeError("acp_settlement_record_failed") from exc
 
