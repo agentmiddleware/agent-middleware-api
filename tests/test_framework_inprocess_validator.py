@@ -261,6 +261,184 @@ async def test_governed_tool_refuses_sync_functions_at_call_time(
         await sdk.close()
 
 
+@pytest.mark.anyio
+async def test_governed_tool_sends_declared_defaults_and_owns_key_handling(
+    client,
+    clean_database,
+) -> None:
+    """The stub's contract governs the wire call.
+
+    Declared-default parameters must travel to the server (the stub's
+    default, not the server implementation's); a supplied blank idempotency
+    key is rejected rather than silently replaced; an omitted (or None) key
+    derives a fresh one per call, making each call a new invocation.
+    """
+    registry = get_service_registry()
+    calls = 0
+    received: list[dict[str, Any]] = []
+
+    def inproc_defaults(
+        message: str = "server-default", label: str = "server-label"
+    ) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        received.append({"message": message, "label": label})
+        return {"message": message, "label": label}
+
+    registry.register_local(
+        service_id="inproc-default-tool",
+        name="Inproc Defaults",
+        description="Governed default-parameter contract tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=inproc_defaults,
+        credits_per_unit=1.0,
+        unit_name="call",
+    )
+    try:
+        provisioned = await provision_agent_wallet(client)
+        wallet_id = provisioned["agent_wallet_id"]
+        permit = await create_tool_permit(
+            client,
+            wallet_id=wallet_id,
+            key_id=provisioned["key_id"],
+            tool_name="inproc-default-tool",
+            idem_key="inproc-permit-defaults",
+        )
+        sdk = AgentMiddlewareClient(
+            api_key=provisioned["agent_headers"]["X-API-Key"],
+            base_url="http://test",
+            transport=ASGITransport(app=app),
+        )
+        try:
+            session = await GovernedEdgeSession.open(
+                sdk, permit_id=permit["permit_id"], wallet_id=wallet_id
+            )
+
+            @langgraph_governed_tool(session, tool_name="inproc-default-tool")
+            async def defaults_stub(
+                message: str, label: str = "stub-label"
+            ) -> dict[str, Any]:
+                """Client-side stub with its own declared default."""
+                raise AssertionError("stub body must never run locally")
+
+            # The stub's declared default travels to the server; the server
+            # implementation's differing default must never be substituted.
+            await defaults_stub(message="explicit", idempotency_key="inproc-defaults-1")
+            assert calls == 1
+            assert received[-1] == {"message": "explicit", "label": "stub-label"}
+
+            # A supplied blank/whitespace key is a caller bug: reject it
+            # instead of silently degrading replay to a fresh invocation.
+            for blank in ("", "   "):
+                with pytest.raises(ValueError, match="idempotency_key"):
+                    await defaults_stub(message="explicit", idempotency_key=blank)
+            assert calls == 1  # the rejected calls never reached the server
+
+            # Omitted key: a fresh uuid per call, so each call is a new
+            # invocation with its own receipt. Explicit None behaves the same.
+            await defaults_stub(message="explicit")
+            first_receipt = defaults_stub.last_receipt
+            await defaults_stub(message="explicit")
+            second_receipt = defaults_stub.last_receipt
+            await defaults_stub(message="explicit", idempotency_key=None)
+            third_receipt = defaults_stub.last_receipt
+            assert calls == 4
+            receipt_ids = {
+                first_receipt.receipt_id,
+                second_receipt.receipt_id,
+                third_receipt.receipt_id,
+            }
+            assert len(receipt_ids) == 3
+        finally:
+            await sdk.close()
+    finally:
+        registry.unregister_local("inproc-default-tool")
+
+
+@pytest.mark.anyio
+async def test_governed_tool_last_receipt_is_per_task(
+    client,
+    clean_database,
+) -> None:
+    """Concurrent tasks each observe their OWN receipt via last_receipt.
+
+    The read is backed by a contextvar: task A completes its call first,
+    task B then completes its own call, and only afterwards does task A read
+    ``last_receipt`` — a shared mutable attribute would hand task A the
+    receipt of task B's call.
+    """
+    registry = get_service_registry()
+
+    def inproc_conc(message: str = "ok") -> dict[str, Any]:
+        return {"message": message}
+
+    registry.register_local(
+        service_id="inproc-conc-tool",
+        name="Inproc Concurrency",
+        description="Governed per-task receipt tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=inproc_conc,
+        credits_per_unit=1.0,
+        unit_name="call",
+    )
+    try:
+        provisioned = await provision_agent_wallet(client)
+        wallet_id = provisioned["agent_wallet_id"]
+        permit = await create_tool_permit(
+            client,
+            wallet_id=wallet_id,
+            key_id=provisioned["key_id"],
+            tool_name="inproc-conc-tool",
+            idem_key="inproc-permit-conc",
+        )
+        sdk = AgentMiddlewareClient(
+            api_key=provisioned["agent_headers"]["X-API-Key"],
+            base_url="http://test",
+            transport=ASGITransport(app=app),
+        )
+        try:
+            session = await GovernedEdgeSession.open(
+                sdk, permit_id=permit["permit_id"], wallet_id=wallet_id
+            )
+
+            @pydantic_ai_governed_tool(session, tool_name="inproc-conc-tool")
+            async def conc_stub(message: str = "ok") -> dict[str, Any]:
+                """Client-side stub; the registered tool executes server-side."""
+                raise AssertionError("stub body must never run locally")
+
+            a_called = asyncio.Event()
+            b_done = asyncio.Event()
+
+            async def first_task() -> Any:
+                await conc_stub(message="alpha", idempotency_key="inproc-conc-a")
+                a_called.set()
+                # Read only after the other task has completed ITS call —
+                # the interleaving a shared attribute cannot survive.
+                await b_done.wait()
+                return conc_stub.last_receipt
+
+            async def second_task() -> Any:
+                await a_called.wait()
+                await conc_stub(message="beta", idempotency_key="inproc-conc-b")
+                b_done.set()
+                return conc_stub.last_receipt
+
+            receipt_a, receipt_b = await asyncio.gather(first_task(), second_task())
+            assert receipt_a is not None and receipt_b is not None
+            assert receipt_a.receipt_id != receipt_b.receipt_id
+
+            # Anchor each observed receipt to its own idempotency key via
+            # governed replay: the same key returns the same receipt.
+            await conc_stub(message="alpha", idempotency_key="inproc-conc-a")
+            assert conc_stub.last_receipt.receipt_id == receipt_a.receipt_id
+            await conc_stub(message="beta", idempotency_key="inproc-conc-b")
+            assert conc_stub.last_receipt.receipt_id == receipt_b.receipt_id
+        finally:
+            await sdk.close()
+    finally:
+        registry.unregister_local("inproc-conc-tool")
+
+
 class _RecordingReceiptService:
     """Delegates to the real ReceiptService, recording arrival order."""
 
@@ -364,6 +542,73 @@ class _NullReceiptService:
         return kwargs
 
 
+class _StallingReceiptService:
+    """Stalls every create_receipt until released, counting arrivals."""
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.calls = 0
+
+    async def create_receipt(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        await self.release.wait()
+        return kwargs
+
+
+@pytest.mark.anyio
+async def test_batching_receipt_emitter_saturation_rejects_and_closes_cleanly() -> None:
+    """A stalled ReceiptService must not grow an unbounded backlog.
+
+    With ``max_pending`` items already waiting, ``enqueue`` raises
+    ``ReceiptError("receipt_emitter_saturated")`` instead of queueing, and a
+    rejected call leaves the queue accounting intact: once the service
+    unsticks, every ACCEPTED item still flushes and ``aclose()`` returns.
+    """
+    service = _StallingReceiptService()
+    emitter = BatchingReceiptEmitter(
+        service, max_batch=1, flush_interval=0.0, max_pending=2
+    )
+    await emitter.start()
+
+    first = await emitter.enqueue(seq=0)
+    # Let the drain task pull the first item and stall inside create_receipt,
+    # so the queue slots below are purely pending backlog.
+    while service.calls == 0:
+        await asyncio.sleep(0)
+
+    second = await emitter.enqueue(seq=1)
+    third = await emitter.enqueue(seq=2)
+    with pytest.raises(ReceiptError, match="receipt_emitter_saturated"):
+        await emitter.enqueue(seq=3)
+
+    # Backpressure, not breakage: releasing the service drains the accepted
+    # items and aclose() completes (join stays balanced despite the reject).
+    service.release.set()
+    await emitter.aclose()
+    assert [future.result()["seq"] for future in (first, second, third)] == [0, 1, 2]
+    with pytest.raises(RuntimeError, match="receipt_emitter_closed"):
+        await emitter.enqueue(seq=4)
+
+
+def test_batching_receipt_emitter_rejects_invalid_construction() -> None:
+    """flush_interval must be finite and non-negative; max_pending positive.
+
+    ``inf`` would make ``_drain`` wait forever on a partial batch (and
+    ``aclose`` hang in ``queue.join()``); ``NaN`` slips past a plain ``< 0``
+    comparison entirely.
+    """
+    with pytest.raises(ValueError, match="flush_interval must be finite"):
+        BatchingReceiptEmitter(_NullReceiptService(), flush_interval=float("inf"))
+    with pytest.raises(ValueError, match="flush_interval must be finite"):
+        BatchingReceiptEmitter(_NullReceiptService(), flush_interval=float("nan"))
+    with pytest.raises(ValueError, match="flush_interval must be non-negative"):
+        BatchingReceiptEmitter(_NullReceiptService(), flush_interval=-0.5)
+    with pytest.raises(ValueError, match="max_pending must be at least 1"):
+        BatchingReceiptEmitter(_NullReceiptService(), max_pending=0)
+    with pytest.raises(ValueError, match="max_batch must be at least 1"):
+        BatchingReceiptEmitter(_NullReceiptService(), max_batch=0)
+
+
 @pytest.mark.anyio
 async def test_inprocess_validation_overhead_under_5ms() -> None:
     """Mean added overhead of local check + record + batching enqueue < 5ms.
@@ -372,8 +617,14 @@ async def test_inprocess_validation_overhead_under_5ms() -> None:
     validator's check+record path and a BatchingReceiptEmitter enqueue (with
     a null sink, so the number measures the in-process bookkeeping the WP
     adds — not the database write, which happens off the caller's path).
+
+    Robust to a loaded runner: each loop is measured over three rounds and
+    the BEST (minimum) elapsed time per side is compared — a scheduler
+    hiccup inflates individual rounds, but the minimum approximates the
+    machine's actual cost of each path.
     """
     iterations = 200
+    rounds = 3
     now = datetime.now(timezone.utc)
     permit = {
         "permit_id": "permit-perf-1",
@@ -392,7 +643,13 @@ async def test_inprocess_validation_overhead_under_5ms() -> None:
         "issued_at": now.isoformat(),
     }
     validator = LocalPermitValidator(permit, {})
-    emitter = BatchingReceiptEmitter(_NullReceiptService(), max_batch=64)
+    emitter = BatchingReceiptEmitter(
+        _NullReceiptService(),
+        max_batch=64,
+        # Headroom for every round's enqueues even if the drain task never
+        # gets scheduled mid-round (the measured loops do not yield).
+        max_pending=iterations * rounds + 16,
+    )
     await emitter.start()
 
     async def bare(message: str) -> dict[str, str]:
@@ -404,27 +661,37 @@ async def test_inprocess_validation_overhead_under_5ms() -> None:
         assert validator.check("perf-tool", Decimal("1")).allowed is True
         warm = await emitter.enqueue(seq=-1)
 
-        start = time.perf_counter()
-        for _ in range(iterations):
-            await bare("payload")
-        baseline = time.perf_counter() - start
+        baseline_rounds: list[float] = []
+        for _ in range(rounds):
+            start = time.perf_counter()
+            for _ in range(iterations):
+                await bare("payload")
+            baseline_rounds.append(time.perf_counter() - start)
 
         futures = []
-        start = time.perf_counter()
-        for index in range(iterations):
-            decision = validator.check("perf-tool", Decimal("1"))
-            assert decision.allowed is True
-            validator.record_use("perf-tool", Decimal("1"))
-            await bare("payload")
-            futures.append(
-                await emitter.enqueue(seq=index, idempotency_key=uuid.uuid4().hex)
-            )
-        governed = time.perf_counter() - start
+        governed_rounds: list[float] = []
+        seq = 0
+        for _ in range(rounds):
+            start = time.perf_counter()
+            for _ in range(iterations):
+                decision = validator.check("perf-tool", Decimal("1"))
+                assert decision.allowed is True
+                validator.record_use("perf-tool", Decimal("1"))
+                await bare("payload")
+                futures.append(
+                    await emitter.enqueue(seq=seq, idempotency_key=uuid.uuid4().hex)
+                )
+                seq += 1
+            governed_rounds.append(time.perf_counter() - start)
+            # Let the drain catch up between rounds so backlog from one
+            # round cannot bleed into the next round's measurement.
+            await asyncio.gather(*futures[-iterations:])
 
-        mean_overhead = (governed - baseline) / iterations
+        mean_overhead = (min(governed_rounds) - min(baseline_rounds)) / iterations
         assert mean_overhead < 0.005, (
             f"mean in-process overhead {mean_overhead * 1000:.3f}ms "
-            f"exceeds the 5ms acceptance bound"
+            f"exceeds the 5ms acceptance bound "
+            f"(baseline rounds {baseline_rounds}, governed rounds {governed_rounds})"
         )
         await asyncio.gather(warm, *futures)
     finally:

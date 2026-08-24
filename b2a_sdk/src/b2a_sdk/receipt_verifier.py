@@ -48,6 +48,7 @@ __all__ = [
     "canonical_json",
     "key_set_from_document",
     "verify_bundle",
+    "verify_ed25519",
 ]
 
 # The canonicalization contract these rules implement. A bundle declaring a
@@ -264,6 +265,25 @@ def _verify_ed25519_signature(
         # forged.
         raise VerificationError("Ed25519 verifier failed unexpectedly") from exc
     return True
+
+
+def verify_ed25519(
+    raw_public_key: bytes,
+    signature: bytes,
+    signing_bytes: bytes,
+) -> bool:
+    """Verify one raw Ed25519 signature over ``signing_bytes``.
+
+    Public seam for other SDK modules (e.g. the edge client's local permit
+    validator) that need the same primitive :func:`verify_bundle` is built on,
+    without reaching into this module's private helpers. Delegates to the
+    private implementation with identical signature and behavior: returns
+    ``False`` only for cryptography's explicit bad-signature result, and
+    raises :class:`VerificationError` when the verifier itself is unavailable
+    (``cryptography`` not installed) or fails unexpectedly — a verifier
+    failure is never reported as a cryptographic negative.
+    """
+    return _verify_ed25519_signature(raw_public_key, signature, signing_bytes)
 
 
 def _fail(

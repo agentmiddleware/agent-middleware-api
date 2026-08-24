@@ -9,6 +9,7 @@ latency.
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any
 
 from app.services.receipts import (
@@ -36,6 +37,13 @@ class BatchingReceiptEmitter:
     directly; this emitter is only for callers that deliberately accept the
     window in exchange for taking the receipt write off their latency path.
     Nothing else in this facade changes — the emitter is opt-in only.
+
+    BACKPRESSURE: the queue is bounded at ``max_pending`` items. When the
+    drain task cannot keep up (a stalled ``ReceiptService``), ``enqueue``
+    raises ``ReceiptError("receipt_emitter_saturated")`` instead of
+    retaining an unbounded backlog of payloads and futures. A rejected item
+    is never enqueued, so ``aclose()`` still flushes exactly the accepted
+    items and returns.
     """
 
     def __init__(
@@ -44,14 +52,20 @@ class BatchingReceiptEmitter:
         *,
         max_batch: int = 32,
         flush_interval: float = 0.05,
+        max_pending: int = 1024,
     ) -> None:
         if max_batch < 1:
             raise ValueError("max_batch must be at least 1")
+        if not math.isfinite(flush_interval):
+            raise ValueError("flush_interval must be finite")
         if flush_interval < 0:
             raise ValueError("flush_interval must be non-negative")
+        if max_pending < 1:
+            raise ValueError("max_pending must be at least 1")
         self._service = service
         self._max_batch = max_batch
         self._flush_interval = flush_interval
+        self._max_pending = max_pending
         self._queue: asyncio.Queue[tuple[dict[str, Any], asyncio.Future]] | None = None
         self._task: asyncio.Task | None = None
         self._closed = False
@@ -64,7 +78,7 @@ class BatchingReceiptEmitter:
         if self._closed:
             raise RuntimeError("receipt_emitter_closed")
         if self._task is None:
-            self._queue = asyncio.Queue()
+            self._queue = asyncio.Queue(maxsize=self._max_pending)
             self._task = asyncio.create_task(self._drain())
 
     async def enqueue(self, **create_receipt_kwargs: Any) -> asyncio.Future:
@@ -75,13 +89,22 @@ class BatchingReceiptEmitter:
         to the ``ReceiptResponse`` (or raises that item's emission error)
         once the batch containing it is flushed. Starts the drain task on
         first use so ``start()`` need not be called separately.
+
+        Raises ``ReceiptError("receipt_emitter_saturated")`` when
+        ``max_pending`` items are already waiting — backpressure instead of
+        an unbounded backlog behind a stalled ``ReceiptService``. Nothing is
+        queued for a rejected call.
         """
         if self._closed:
             raise RuntimeError("receipt_emitter_closed")
         await self.start()
         assert self._queue is not None
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._queue.put_nowait((create_receipt_kwargs, future))
+        try:
+            self._queue.put_nowait((create_receipt_kwargs, future))
+        except asyncio.QueueFull:
+            future.cancel()
+            raise ReceiptError("receipt_emitter_saturated") from None
         return future
 
     async def _drain(self) -> None:

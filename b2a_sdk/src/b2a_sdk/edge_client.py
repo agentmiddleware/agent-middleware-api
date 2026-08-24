@@ -51,9 +51,10 @@ import httpx
 
 from .errors import PermitDeniedError
 from .receipt_verifier import (
-    _verify_ed25519_signature,
+    VerificationError,
     canonical_json,
     key_set_from_document,
+    verify_ed25519,
 )
 
 if TYPE_CHECKING:  # imported for annotations only; no runtime coupling
@@ -351,11 +352,19 @@ class LocalPermitValidator:
         """Verify a permit's Ed25519 signature against the held key set.
 
         Verifies the permit passed in, or the cached one when omitted. Fails
-        closed, mirroring the server's ``verify_payload``: a malformed permit
-        dict, an unknown/absent signing key, undecodable material, or a bad
-        signature all return ``False`` — never raise. ``cryptography`` must be
-        installed (the ``verify`` extra); it is imported lazily inside the
-        verification helper, so merely importing this module needs nothing.
+        closed on the *evidence*, mirroring the server's ``verify_payload``:
+        a malformed permit dict, an unknown/absent signing key, undecodable
+        material, or a bad signature all return ``False``.
+
+        Verifier failures are different:
+        :class:`~b2a_sdk.receipt_verifier.VerificationError` propagates when
+        the Ed25519 verifier itself is unavailable (``cryptography`` not
+        installed — the ``verify`` extra) or its backend fails unexpectedly.
+        A verifier failure is NOT a cryptographic negative and is never
+        swallowed as a forged signature; callers that must not raise should
+        catch it and report "cannot verify" rather than "invalid".
+        ``cryptography`` is imported lazily inside the verification helper,
+        so merely importing this module needs nothing.
         """
         target = self._permit if permit is None else permit
         try:
@@ -368,7 +377,7 @@ class LocalPermitValidator:
             return False
         if len(signature) != 64:
             return False
-        return _verify_ed25519_signature(
+        return verify_ed25519(
             raw_public_key,
             signature,
             canonical_json(payload).encode("utf-8"),
@@ -404,8 +413,11 @@ class LocalPermitValidator:
             return LocalDecision(False, "permit_expired")
         if expires_at <= moment:
             return LocalDecision(False, "permit_expired")
+        # Mirror the server exactly (app/services/permits.py): an EMPTY
+        # allowlist means unrestricted — only a non-empty list that omits the
+        # tool denies. The scope check below still gates every tool.
         allowed_tools = [str(tool) for tool in permit.get("allowed_tools") or []]
-        if tool_name not in allowed_tools:
+        if allowed_tools and tool_name not in allowed_tools:
             return LocalDecision(False, "permit_tool_not_allowed")
         scopes = {str(scope) for scope in permit.get("scopes") or []}
         if f"tool:{tool_name}:invoke" not in scopes or "billing:charge" not in scopes:
@@ -485,9 +497,21 @@ class GovernedEdgeSession:
 
         ``trust_keys_document`` short-circuits the key fetch for callers that
         already hold (or pin) the issuer's ``trust-keys.json``. Raises
-        :class:`~b2a_sdk.errors.PermitDeniedError` with reason
-        ``permit_signature_invalid`` when the fetched permit does not verify
-        against the published keys.
+        :class:`~b2a_sdk.errors.PermitDeniedError` with reason:
+
+        * ``permit_signature_invalid`` — the fetched permit does not verify
+          against the published keys (a genuine cryptographic negative);
+        * ``permit_trust_keys_invalid`` — the trust-keys document is not a
+          usable key set (malformed document, no ``keys`` list);
+        * ``permit_verification_unavailable`` — the Ed25519 verifier itself
+          is unavailable or failed (``cryptography`` missing, backend
+          error). Deliberately distinct from ``permit_signature_invalid``: a
+          verifier failure is not evidence of forgery.
+
+        The latter two wrap the underlying
+        :class:`~b2a_sdk.receipt_verifier.VerificationError` as ``__cause__``
+        so callers see the documented boundary error type without losing the
+        diagnostic.
         """
         permit = await client._request_json("GET", f"/v1/permits/{permit_id}")
         document = trust_keys_document
@@ -495,9 +519,16 @@ class GovernedEdgeSession:
             document = await client._request_json(
                 "GET", "/.well-known/trust-keys.json"
             )
-        key_set = key_set_from_document(document)
+        try:
+            key_set = key_set_from_document(document)
+        except VerificationError as exc:
+            raise PermitDeniedError("permit_trust_keys_invalid") from exc
         validator = LocalPermitValidator(permit, key_set)
-        if not validator.verify_permit():
+        try:
+            verified = validator.verify_permit()
+        except VerificationError as exc:
+            raise PermitDeniedError("permit_verification_unavailable") from exc
+        if not verified:
             raise PermitDeniedError("permit_signature_invalid", payload=permit)
         return cls(client, validator, permit_id=permit_id, wallet_id=wallet_id)
 

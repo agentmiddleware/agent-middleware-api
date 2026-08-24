@@ -23,7 +23,7 @@ import pytest
 from b2a_sdk.client import AgentMiddlewareClient
 from b2a_sdk.edge_client import GovernedEdgeSession, LocalPermitValidator
 from b2a_sdk.errors import PermitDeniedError
-from b2a_sdk.receipt_verifier import key_set_from_document
+from b2a_sdk.receipt_verifier import VerificationError, key_set_from_document
 
 KID = "local-validator-test-ed25519"
 TOOL = "partner.search"
@@ -326,6 +326,34 @@ def test_check_uses_server_reason_strings_for_denials():
     assert allowed.reason is None
 
 
+def test_check_treats_empty_allowed_tools_as_unrestricted_like_the_server():
+    """An empty allowlist means unrestricted, mirroring the server.
+
+    ``app/services/permits.py`` denies on the allowlist only when it is
+    non-empty (``if allowed_tools and tool_name not in allowed_tools``), the
+    same convention as the evidence bundle's tool check. The local mirror
+    must not be stricter, or it would locally deny calls the server allows.
+    The scope check still gates every tool either way.
+    """
+    key_set: dict[str, bytes] = {}
+    unrestricted = LocalPermitValidator(
+        _permit_dict(
+            allowed_tools=[],
+            scopes=["tool:any.other.tool:invoke", "billing:charge"],
+        ),
+        key_set,
+    )
+    decision = unrestricted.check("any.other.tool", Decimal("1"))
+    assert decision.allowed is True
+    assert decision.reason is None
+
+    # Scopes still gate the call: no tool:<name>:invoke scope, no call —
+    # exactly the server's ordering (allowlist first, then scopes).
+    unscoped = unrestricted.check("not.in.scopes.tool", Decimal("1"))
+    assert unscoped.allowed is False
+    assert unscoped.reason == "permit_scope_missing"
+
+
 def test_record_use_advances_local_reservation_and_counters():
     validator = LocalPermitValidator(
         _permit_dict(max_credits="10", spent_credits="4"), {}
@@ -426,6 +454,42 @@ async def test_session_open_verifies_and_local_denial_skips_the_server():
         assert result.receipt.credits_charged == Decimal("2")
         assert session.validator.reserved_credits == Decimal("2")
         assert session.validator.call_counts == {TOOL: 1}
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_session_open_raises_permit_denied_for_malformed_trust_keys():
+    """A broken trust-keys.json surfaces as the documented boundary error.
+
+    ``key_set_from_document`` raises ``VerificationError`` for a document
+    with no usable ``keys`` list; ``GovernedEdgeSession.open`` must translate
+    that into ``PermitDeniedError("permit_trust_keys_invalid")`` (with the
+    original error as ``__cause__``) rather than leaking the verifier's
+    internal exception type across the session boundary.
+    """
+    permit = _permit_dict()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/permits/permit-local-1":
+            return httpx.Response(200, json=permit)
+        if request.url.path == "/.well-known/trust-keys.json":
+            # A JSON object, but not a key set: no "keys" list at all.
+            return httpx.Response(200, json={"schema_version": "1.0"})
+        raise AssertionError(f"unexpected path: {request.url.path}")
+
+    client = AgentMiddlewareClient(
+        api_key="test-key",
+        base_url="https://gateway.example",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(PermitDeniedError) as exc_info:
+            await GovernedEdgeSession.open(
+                client, permit_id="permit-local-1", wallet_id="wallet-1"
+            )
+        assert exc_info.value.reason == "permit_trust_keys_invalid"
+        assert isinstance(exc_info.value.__cause__, VerificationError)
     finally:
         await client.close()
 
