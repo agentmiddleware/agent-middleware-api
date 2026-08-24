@@ -36,6 +36,8 @@ from ..services.velocity_monitor import WalletFrozenError
 from ..services.wallet_engine import WalletExpiredError
 from ..services.stripe_integration import get_stripe_integration
 from ..services.shadow_ledger import SimulatedChargeResult, get_shadow_ledger
+from ..services.acp_bridge import ACPBridgeError, get_acp_commerce_adapter
+from ..schemas.acp import ACPCheckoutRequest, ACPCheckoutResponse
 from ..schemas.billing import (
     CreateSponsorWalletRequest,
     CreateAgentWalletRequest,
@@ -1144,6 +1146,111 @@ async def transfer_wallets(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "transfer_error", "message": str(e)},
         )
+
+
+# --- ACP Checkout (Agentic Commerce Protocol) ---
+
+
+@expansion_router.post(
+    "/acp/checkout",
+    response_model=ACPCheckoutResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Settle an ACP checkout under PermitV2 bounds",
+    description=(
+        "Translate an OpenAI/Stripe Agentic Commerce Protocol checkout into "
+        "PermitV2 tool-execution bounds, settle it via a Stripe Shared "
+        "Payment Token, and bind the order id into the signed receipt and "
+        "tamper-evident audit chain. No credits are minted and no real "
+        "ledger entries are written. Idempotent on `intent_id`: a repeated "
+        "intent replays the original order and never charges twice."
+    ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Wallet access denied",
+        },
+    },
+)
+async def acp_checkout(
+    request: ACPCheckoutRequest,
+    sponsor_wallet_id: str = Query(
+        ..., description="Sponsor wallet that issues the checkout permit"
+    ),
+    agent_wallet_id: str = Query(
+        ..., description="Agent wallet the checkout is bound to (permit subject)"
+    ),
+    auth: AuthContext = Depends(get_auth_context),
+    money: AgentMoney = Depends(get_agent_money),
+):
+    # The agent wallet is the permit subject — the wallet whose budget the
+    # checkout encumbers — so it is the tenant boundary for this endpoint.
+    _require_wallet_access(auth, agent_wallet_id)
+    # The named sponsor becomes the permit's issuer. A wallet key must not be
+    # able to attribute issuance to an arbitrary sponsor: the agent wallet has
+    # to actually sit under it in the funding hierarchy. Mirrors POST
+    # /v1/permits' subject/issuer hierarchy check, inverted for the
+    # subject-side caller. Bootstrap admins are unrestricted.
+    if not auth.is_bootstrap_admin and not await money.is_wallet_or_descendant(
+        agent_wallet_id, sponsor_wallet_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "sponsor_wallet_access_denied",
+                "message": (
+                    "The agent wallet must be funded by the named sponsor wallet."
+                ),
+            },
+        )
+    endpoint = "/v1/billing/acp/checkout"
+    # Governance metadata below must never include the spt_token: it is
+    # persisted into the signed audit trail. request_id is truncated to the
+    # audit column's 100-char cap; the untruncated intent_id is in metadata.
+    governance_request_id = request.intent_id[:100]
+    try:
+        result = await get_acp_commerce_adapter().execute_checkout(
+            request,
+            sponsor_wallet_id=sponsor_wallet_id,
+            agent_wallet_id=agent_wallet_id,
+            key_id=auth.key_id,
+        )
+    except ACPBridgeError as exc:
+        await _record_billing_governance(
+            event="billing.acp_checkout",
+            auth=auth,
+            wallet_id=agent_wallet_id,
+            service_category="acp_checkout",
+            endpoint=endpoint,
+            request_id=governance_request_id,
+            ok=False,
+            error=exc.reason,
+            metadata={
+                "intent_id": request.intent_id,
+                "merchant_domain": request.merchant_domain,
+                "client_total": request.client_total,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": exc.reason, "message": str(exc)},
+        )
+    await _record_billing_governance(
+        event="billing.acp_checkout",
+        auth=auth,
+        wallet_id=agent_wallet_id,
+        service_category="acp_checkout",
+        endpoint=endpoint,
+        request_id=governance_request_id,
+        ok=True,
+        metadata={
+            "intent_id": request.intent_id,
+            "order_id": result.order_id,
+            "merchant_domain": request.merchant_domain,
+            "permit_id": result.permit_id,
+            "receipt_id": result.receipt_id,
+            "derived_total": result.derived_total,
+        },
+    )
+    return result
 
 
 # --- Pricing ---

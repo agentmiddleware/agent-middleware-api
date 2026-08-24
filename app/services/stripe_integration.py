@@ -149,6 +149,58 @@ class StripeIntegration:
             "currency": SUPPORTED_TOP_UP_CURRENCY.upper(),
         }
 
+    async def charge_shared_payment_token(
+        self,
+        *,
+        spt_token: str,
+        amount_minor: int,
+        currency: str,
+        idempotency_key: str,
+    ) -> dict:
+        """Create and confirm a PaymentIntent from a Shared Payment Token.
+
+        Pure outbound-charge helper for the ACP commerce bridge: it never
+        touches wallets, the ledger, or ``_mint_credits`` — settlement
+        evidence is recorded by the caller (permit reservation, signed
+        receipt, audit chain), and no credits are ever minted from this path.
+        ``idempotency_key`` is passed through to Stripe so a retried checkout
+        with the same key cannot charge twice. The token itself is never
+        logged.
+        """
+        normalized_currency = currency.lower()
+        if normalized_currency != SUPPORTED_TOP_UP_CURRENCY:
+            raise ValueError("unsupported_acp_currency: only USD is supported")
+        if (
+            isinstance(amount_minor, bool)
+            or not isinstance(amount_minor, int)
+            or amount_minor <= 0
+        ):
+            raise ValueError("invalid_acp_charge_amount")
+        if not spt_token:
+            raise ValueError("missing_shared_payment_token")
+
+        intent = stripe.PaymentIntent.create(
+            amount=amount_minor,
+            currency=normalized_currency,
+            payment_method=spt_token,
+            confirm=True,
+            idempotency_key=idempotency_key,
+        )
+
+        intent_id = self._stripe_value(intent, "id")
+        logger.info(
+            "Confirmed shared-payment-token PaymentIntent %s for %s minor units",
+            intent_id,
+            amount_minor,
+        )
+
+        return {
+            "payment_intent_id": intent_id,
+            "status": self._stripe_value(intent, "status"),
+            "amount": self._stripe_value(intent, "amount"),
+            "currency": self._stripe_value(intent, "currency"),
+        }
+
     async def handle_webhook(
         self,
         payload: bytes,
