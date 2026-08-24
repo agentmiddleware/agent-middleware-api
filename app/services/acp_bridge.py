@@ -39,6 +39,7 @@ from app.schemas.acp import ACPCheckoutRequest, ACPCheckoutResponse, ACPLineItem
 from app.schemas.trust import PermitCreateRequest
 from app.services.audit_log import record_audit_event
 from app.services.idempotency import (
+    IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     get_idempotency_service,
@@ -313,11 +314,13 @@ class ACPCommerceAdapter:
         except IdempotencyInProgressError as exc:
             # A record left in progress can be a live concurrent checkout — or
             # the wreckage of a process that died between the Stripe charge
-            # and `idem.complete`. Nothing repairs this endpoint's records
-            # (reconcile_stuck_records covers only the governed MCP endpoint,
-            # and no ledger_entry_id checkpoint exists here), so without this
-            # branch a crashed intent is wedged forever: charged at Stripe,
-            # no order, every retry rejected. A record idle past the repo's
+            # and `idem.complete`. The charge is guarded by mark_charged() which
+            # sets ledger_entry_id immediately upon settlement, preventing
+            # abandon() from deleting the record on audit/receipt failure.
+            # So a record in progress with response_json=None and ledger_entry_id set
+            # is always a crash (since mark_charged() runs before audit/receipt).
+            # Without this branch a crashed intent is wedged forever: charged at
+            # Stripe, no order, every retry rejected. A record idle past the repo's
             # standard 300s staleness threshold is treated as crashed and
             # recovered by crash shape:
             #  - died AFTER the receipt (the durable settlement record): the
@@ -340,7 +343,6 @@ class ACPCommerceAdapter:
             stale = (
                 record is not None
                 and record.response_json is None
-                and not record.ledger_entry_id
                 and record.created_at
                 < utc_now() - timedelta(seconds=_INTENT_STALE_SECONDS)
             )
@@ -408,7 +410,18 @@ class ACPCommerceAdapter:
             except IdempotencyConflictError as retry_exc:
                 raise ACPBridgeError("acp_intent_conflict") from retry_exc
             except IdempotencyInProgressError as retry_exc:
-                raise ACPBridgeError("acp_intent_in_progress") from retry_exc
+                # If abandon() couldn't delete the record (because ledger_entry_id
+                # is set), the record is still in progress. For stale recovery, we
+                # can re-use it since we know it's a crash (created_at is stale).
+                # We just need to treat it like a fresh begin for the re-run.
+                if record.ledger_entry_id:
+                    begun = IdempotencyBegin(
+                        record_id=record.record_id,
+                        request_hash=record.request_hash,
+                        replay=None,
+                    )
+                else:
+                    raise ACPBridgeError("acp_intent_in_progress") from retry_exc
         if begun.replay is not None:
             payload = begun.replay.response_json
             if not isinstance(payload, dict):

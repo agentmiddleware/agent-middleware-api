@@ -912,12 +912,21 @@ async def test_acp_rollback_release_failure_neither_masks_nor_skips_abandon(
     assert len(release_calls) == 1  # the release WAS attempted...
     assert len(spt_stub) == 1
 
-    # ...and its failure did not prevent the abandon: the retry re-runs with
-    # the SAME deterministic Stripe idempotency key (one customer charge).
+    # Restore original services and backdate the record for stale recovery.
     monkeypatch.setattr(
         ReceiptService, "create_receipt", original_create_receipt
     )
     monkeypatch.setattr(PermitService, "release_budget", original_release)
+
+    # The stale recovery allows the retry to proceed (no immediate retry due to
+    # ledger_entry_id protection from the security fix).
+    await _backdate_intent_record(
+        "intent-rollbk-1", wallet_id=ctx["agent_wallet_id"]
+    )
+
+    # Recovery re-runs with the SAME deterministic Stripe idempotency key (one
+    # customer charge), demonstrating that mark_charged() protected the record
+    # from being abandoned by the failed release.
     settled = await adapter.execute_checkout(request, **kwargs)
     assert settled.status == "settled"
     assert len(spt_stub) == 2
