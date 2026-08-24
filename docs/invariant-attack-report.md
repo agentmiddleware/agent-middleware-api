@@ -69,7 +69,7 @@ curl -s -X POST "$API_URL/v1/dev-keys/self-provision" \
 ```
 
 The wallet holds 1000 synthetic dev credits. The automated harness that produced
-every result below lives in [`scripts/invariant_attacks/`](scripts/invariant_attacks/)
+every result below lives in [`scripts/invariant_attacks/`](../scripts/invariant_attacks/)
 (stdlib only; see its README). Each script provisions its own fresh wallet, so
 runs are independent and repeatable.
 
@@ -428,7 +428,7 @@ record).
 **Deterministic Postgres verdict: HELD. Live SQLite classification: PARTIAL while
 proof remains pending**, matching the repo's
 documented `delivery_uncertain` / manual-review semantics
-([`docs/failure-semantics.md`](docs/failure-semantics.md)): immediately after a
+([`docs/failure-semantics.md`](failure-semantics.md)): immediately after a
 crash there is a transient "charged, proof-pending" window during which the
 client sees `idempotency_in_progress` rather than a receipt, until the background
 reconcile (which runs every 5 min on ≥5-min-idle records) repairs or flags it.
@@ -621,4 +621,4 @@ checks, and ledger reconciliation so reviewers can evaluate the verdict without
 trusting console prose.
 
 Reproduce: see "Shared crash-storm attack" in
-[`scripts/invariant_attacks/README.md`](scripts/invariant_attacks/README.md).
+[`scripts/invariant_attacks/README.md`](../scripts/invariant_attacks/README.md).

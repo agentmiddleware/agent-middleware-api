@@ -14,7 +14,9 @@ Two framing rules keep this honest:
 - **Posture labels follow the repo's reality levels.** *Enforced* means the
   control runs on the governed path and a named proof attacks it. *Contained*
   means the risk is not prevented but its blast radius is bounded and
-  evidenced. *Out of scope* means this layer deliberately does not address it.
+  evidenced. *Partially addressed* means part of the risk's surface is
+  structurally absent here rather than defended, and the remainder is
+  unmanaged. *Out of scope* means this layer deliberately does not address it.
   See [SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md) and
   [threat-model.md](threat-model.md) for the boundary itself.
 
@@ -68,17 +70,25 @@ with a different payload fails closed.
 
 ## ASI03 — Agent Identity & Privilege Abuse
 
-**Posture: enforced.** Every caller is a wallet-scoped API key (stored hashed,
-compared constant-time in `app/core/auth.py`). A key acts only within its
-wallet: cross-tenant reads and invokes return 403, and rotation/replacement
-keys inherit their parents' bounds rather than escalating.
+**Posture: enforced for DB-backed wallet keys.** A DB-issued key (stored
+hashed, compared constant-time in `app/core/auth.py`) is scoped to exactly
+one wallet: cross-tenant reads and invokes return 403, and
+rotation/replacement keys inherit their parents' bounds rather than
+escalating. Bootstrap-admin keys (`VALID_API_KEYS`, `STATIC_DEV_API_KEYS`)
+are the intentional exception: `AuthContext.require_wallet_access`
+(`app/core/auth.py`) grants them every wallet by design, so this claim does
+not extend to admin-shaped credentials. `STATIC_DEV_API_KEYS` is refused at
+boot on a production-like deployment (`app/core/trust_mode.py`);
+`VALID_API_KEYS` is not — it is the intended production bootstrap mechanism.
 
 - Proof: `scripts/invariant_attacks/attack6_key_misuse.py` (invalid, revoked,
-  confused-deputy, and cross-tenant cases — HELD);
-  `tests/test_tool_interface_authority.py`; the tenant-isolation leg of
-  `make prove-trust-plane`.
+  confused-deputy, and cross-tenant cases — HELD, exercised with DB-backed
+  keys); `tests/test_tool_interface_authority.py`; the tenant-isolation leg
+  of `make prove-trust-plane`.
 - Gap: single-tenant vendor-managed pilot; application-layer isolation only —
-  no row-level security, no external IdP/KMS integration.
+  no row-level security, no external IdP/KMS integration. A bootstrap-admin
+  key is a full-control credential by design, not a tenant boundary — treat
+  it like a root key, not like proof that isolation holds against it.
 
 ## ASI04 — Agentic Supply Chain Compromise
 
@@ -169,5 +179,6 @@ tool. Risks that live in the model (ASI01, ASI06), the process (ASI05), or
 between agents (ASI07) need controls at those layers; this mapping marks them
 contained or out of scope rather than claiming coverage. Attacks on the
 documented gaps above are the most useful ones a reviewer can run — start from
-[SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md) and the
-[security review path](../README.md#security-review-path).
+[SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md), the
+[security review path](../README.md#security-review-path), and the rules of
+engagement in [security-review-kit.md](security-review-kit.md).

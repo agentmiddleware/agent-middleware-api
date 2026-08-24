@@ -379,13 +379,14 @@ Read [TRUST_MODEL.md](TRUST_MODEL.md), [SECURITY.md](SECURITY.md), [SECURITY_LIM
 
 Reviewing this repository adversarially? The fastest route from clone to verdict:
 
-1. **Run the proof.** `make prove-trust-plane` boots a local instance and asserts every core invariant end to end — one charge per accepted call, replay without a second debit, a signed denial receipt for the out-of-scope call, offline receipt verification, and a tampered receipt or audit event failing closed.
-2. **Attack the invariants.** [`scripts/invariant_attacks/`](scripts/invariant_attacks/) is a stdlib-only hostile harness: parallel double-charge, budget over-spend races, scope escape, receipt forgery, `kill -9` crash consistency, and credential misuse. [docs/invariant-attack-report.md](docs/invariant-attack-report.md) records each verdict — including the one invariant that broke, its root cause, and the fix that closed it.
-3. **Aim at the documented weak points.** [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) and [TRUST_MODEL.md](TRUST_MODEL.md) list the accepted gaps — origin-trusted key distribution, no external audit anchoring, MCP as the only governed adapter. Attacks on the documented limits are the most useful ones.
-4. **Map it to your framework.** [docs/owasp-agentic-top10-mapping.md](docs/owasp-agentic-top10-mapping.md) maps each OWASP Top 10 for Agentic Applications risk (ASI01–ASI10, 2026) to this plane's posture, the enforcing code, the proof that exercises it, and the honest gap.
-5. **Black-box the live plane.** [docs/hard-run-report-2026-08-12.md](docs/hard-run-report-2026-08-12.md) is a dated credential-less adversarial run against the production deployment, with reproduction commands.
+1. **Read the rules of engagement.** [docs/security-review-kit.md](docs/security-review-kit.md) says which target to attack, how to mint your own credentials instead of asking for production secrets, the five claims a finding has to break, what is already a documented limit, and what to put in a report.
+2. **Run the proof.** `make prove-trust-plane` boots a local instance and asserts every core invariant end to end — one charge per accepted call, replay without a second debit, a signed denial receipt for the out-of-scope call, offline receipt verification, and a tampered receipt or audit event failing closed.
+3. **Attack the invariants.** [`scripts/invariant_attacks/`](scripts/invariant_attacks/) is a stdlib-only hostile harness: parallel double-charge, budget over-spend races, scope escape, receipt forgery, `kill -9` crash consistency, and credential misuse. [docs/invariant-attack-report.md](docs/invariant-attack-report.md) records each verdict — including the one invariant that broke, its root cause, and the fix that closed it.
+4. **Aim at the documented weak points.** [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) and [TRUST_MODEL.md](TRUST_MODEL.md) list the accepted gaps — origin-trusted key distribution, no external audit anchoring, MCP as the only governed adapter. Attacks on the documented limits are the most useful ones.
+5. **Map it to your framework.** [docs/owasp-agentic-top10-mapping.md](docs/owasp-agentic-top10-mapping.md) maps each OWASP Top 10 for Agentic Applications risk (ASI01–ASI10, 2026) to this plane's posture, the enforcing code, the proof that exercises it, and the honest gap.
+6. **Black-box the live plane.** [docs/hard-run-report-2026-08-12.md](docs/hard-run-report-2026-08-12.md) is a dated credential-less adversarial run against the production deployment, with reproduction commands.
 
-Findings: see [SECURITY.md](SECURITY.md) for disclosure.
+Findings: private security advisory per [SECURITY.md](SECURITY.md); [docs/security-review-kit.md](docs/security-review-kit.md#5-what-makes-a-finding-land) lists what to include.
 
 ## Tests and release gates
 
@@ -471,6 +472,7 @@ Offline receipt verification is deliberately dependency-minimal: the `b2a-verify
 - [docs/hard-run-report-2026-08-12.md](docs/hard-run-report-2026-08-12.md) — adversarial black-box run against the live production trust plane, with reproduction commands
 - [docs/invariant-attack-report.md](docs/invariant-attack-report.md) — hostile concurrency/tampering/crash/credential campaign against a local instance, the one invariant it broke (permit-cap over-spend on SQLite), and the fix that closed it
 - [docs/owasp-agentic-top10-mapping.md](docs/owasp-agentic-top10-mapping.md) — OWASP Top 10 for Agentic Applications (ASI01–ASI10, 2026) mapped to controls, proofs, and known gaps
+- [docs/security-review-kit.md](docs/security-review-kit.md) — rules of engagement for an external reviewer: which target to attack, how to mint your own credentials, the claims a finding must break, and the limits already documented
 - [docs/failure-semantics.md](docs/failure-semantics.md) — every terminal outcome of a metered call that dies mid-flight, and the test that proves each
 - [docs/agent-accountability.md](docs/agent-accountability.md) — why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path

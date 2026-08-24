@@ -963,8 +963,10 @@ async def root(request: Request):
             "rtaas": {
                 "base_path": "/v1/rtaas",
                 "description": (
-                    "Red-Team-as-a-Service. Hire our security swarm to "
-                    "attack YOUR endpoints before deployment."
+                    "Simulated Red-Team-as-a-Service (dormant proof "
+                    "surface). Models a scan-job lifecycle for an agent's "
+                    "own external endpoints; contacts nothing and refuses "
+                    "to run unless simulation is explicitly enabled."
                 ),
                 "endpoints": [
                     "POST /v1/rtaas/jobs",
