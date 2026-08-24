@@ -70,6 +70,7 @@ PROOF_SURFACE_TEST_MODULES = frozenset(
 # flipping ENABLE_PROOF_SURFACES.
 DORMANT_SURFACE_TEST_MODULES = frozenset(
     {
+        "test_acp_bridge",
         "test_api_keys",
         "test_audit_routes",
         "test_billing",
@@ -90,6 +91,7 @@ DORMANT_SURFACE_TEST_MODULES = frozenset(
         "test_velocity_monitor",
         "test_wallet_ledger_integrity",
         "test_wallet_status_enforcement",
+        "test_x402",
     }
 )
 
