@@ -407,7 +407,10 @@ def require_enterprise_tool_access(tool_name: str):
         if not decision.allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=decision.reason,
+                detail={
+                    "error": decision.reason,
+                    "message": f"Enterprise access to {tool_name!r} is denied.",
+                },
             )
         return decision
 

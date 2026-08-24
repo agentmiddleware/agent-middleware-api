@@ -1005,7 +1005,11 @@ class PermitService:
                         original_counts_json = model.tool_call_counts_json
                         counts = _loads_dict(original_counts_json or "{}")
                         current = counts.get(tool_name, 0)
-                        if not isinstance(current, int) or current <= 0:
+                        # type() not isinstance(): bool subclasses int, and a
+                        # malformed stored counter of `true` must not be
+                        # coerced into a decrementable number (same rule the
+                        # reserve path applies to the configured limit).
+                        if type(current) is not int or current <= 0:
                             return
                         updated = dict(counts)
                         updated[tool_name] = current - 1
@@ -1033,6 +1037,15 @@ class PermitService:
                 # CAS miss: a concurrent reservation moved the counter between
                 # our read and write (only possible where the row lock above is
                 # a no-op, i.e. SQLite). Re-read and try again.
+            # Exhausted retries: the counter stays conservatively high, which
+            # can deny a legitimate retry with permit_max_calls_exceeded.
+            # Surface it the way reconcile_budgets surfaces its skips so a
+            # permit under sustained contention is visible to an operator.
+            logger.info(
+                "permit_tool_call_release_contended permit_id=%s tool=%s",
+                permit_id,
+                tool_name,
+            )
 
         await self._run_with_write_retry(_once)
 

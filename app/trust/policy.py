@@ -12,6 +12,8 @@ from __future__ import annotations
 from app.core.oidc_iga import (
     EnterprisePrincipal,
     IGADecision,
+    IGAError,
+    IGAGrant,
     enforce_tool_call,
     parse_enterprise_token,
     resolve_policy_grants,
@@ -32,6 +34,8 @@ from app.services.policies import (
 __all__ = [
     "EnterprisePrincipal",
     "IGADecision",
+    "IGAError",
+    "IGAGrant",
     "PolicyDecision",
     "PolicyEvaluation",
     "enforce_tool_call",

@@ -948,3 +948,92 @@ async def test_x402_max_calls_released_on_failed_settlement(
     )
     assert second.status_code == 400
     assert second.json()["detail"] == "permit_max_calls_exceeded"
+
+
+@pytest.mark.anyio
+async def test_release_tool_call_compensation_semantics(client, clean_database):
+    """Direct coverage of PermitService.release_tool_call: decrements exactly
+    one reserved use, clamps at zero, no-ops on missing permits, absent or
+    malformed counters, and never loses a concurrent reservation's increment."""
+    from sqlalchemy import select
+
+    from app.db.database import get_session_factory
+    from app.db.models import PermitModel
+    from app.services.permits import get_permit_service
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": provisioned["key_id"],
+            "allowed_tools": ["x402.payment"],
+            "scopes": ["tool:x402.payment:invoke", "billing:charge"],
+            "max_credits": 100,
+            "max_calls_per_tool": {"x402.payment": 3},
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "x402-release-permit"},
+    )
+    assert resp.status_code == 201
+    permit_id = resp.json()["permit_id"]
+    permits = get_permit_service()
+
+    async def counter() -> object:
+        factory = get_session_factory()
+        async with factory() as session:
+            model = (
+                await session.execute(
+                    select(PermitModel).where(PermitModel.permit_id == permit_id)
+                )
+            ).scalar_one()
+            import json as _json
+
+            counts = _json.loads(model.tool_call_counts_json or "{}")
+            return counts.get("x402.payment")
+
+    # Missing permit and absent counter are silent no-ops.
+    await permits.release_tool_call("permit-does-not-exist", "x402.payment")
+    await permits.release_tool_call(permit_id, "x402.payment")
+    assert await counter() is None
+
+    # Two concurrent-style reservations, one release: the surviving count is
+    # exactly one — the release never clobbers the other reservation.
+    for idx in range(2):
+        validation = await permits.authorize_and_reserve(
+            permit_id=permit_id,
+            wallet_id=wallet_id,
+            tool_name="x402.payment",
+            estimated_credits=Decimal("1"),
+            key_id=provisioned["key_id"],
+        )
+        assert validation.allowed, validation.reason
+    assert await counter() == 2
+    await permits.release_tool_call(permit_id, "x402.payment")
+    assert await counter() == 1
+
+    # Clamp at zero: releasing past the floor stops at 0, never negative.
+    await permits.release_tool_call(permit_id, "x402.payment")
+    assert await counter() == 0
+    await permits.release_tool_call(permit_id, "x402.payment")
+    assert await counter() == 0
+
+    # A malformed boolean counter is rejected, not coerced and decremented.
+    factory = get_session_factory()
+    async with factory() as session:
+        model = (
+            await session.execute(
+                select(PermitModel).where(PermitModel.permit_id == permit_id)
+            )
+        ).scalar_one()
+        import json as _json
+
+        model.tool_call_counts_json = _json.dumps({"x402.payment": True})
+        session.add(model)
+        await session.commit()
+    await permits.release_tool_call(permit_id, "x402.payment")
+    assert await counter() is True

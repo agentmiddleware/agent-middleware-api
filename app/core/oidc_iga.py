@@ -432,10 +432,16 @@ def resolve_policy_grants(principal: EnterprisePrincipal) -> list[IGAGrant]:
 
 
 # In-process, per-instance counters (see module docstring for the honesty
-# about scope). Keyed by (issuer, subject, tool): subjects are unique only
-# within an issuer, so the issuer participates in the key.
-_lifetime_uses: dict[tuple[str, str, str], int] = {}
-_window_calls: dict[tuple[str, str, str], deque[float]] = {}
+# about scope). Keyed by (issuer, subject, tool, group, policy_id): subjects
+# are unique only within an issuer, so the issuer participates in the key,
+# and each grant's caps bound the calls THAT grant authorized — a shared
+# per-principal key would let one grant's short-window pruning erase the
+# history a longer-window grant still needs, and would make two grants'
+# max_uses budgets draw down a single counter. Two groups may map to the
+# same policy_id with different caps, so the group participates too.
+_CounterKey = tuple[str, str, str, str, str]
+_lifetime_uses: dict[_CounterKey, int] = {}
+_window_calls: dict[_CounterKey, deque[float]] = {}
 _counter_lock: asyncio.Lock = asyncio.Lock()
 
 # Monotonic time source for the velocity window. Module-level indirection so
@@ -529,8 +535,16 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
         # observe the last remaining use.
         async with _counter_lock:
             now = _monotonic()
-            counter_key = (principal.issuer, principal.subject, tool_name)
             for grant in eligible:
+                # Per-grant key: each grant's counters track only the calls
+                # it authorized (see the _CounterKey comment above).
+                counter_key: _CounterKey = (
+                    principal.issuer,
+                    principal.subject,
+                    tool_name,
+                    grant.group,
+                    grant.policy_id,
+                )
                 used = _lifetime_uses.get(counter_key, 0)
                 if grant.max_uses is not None and used >= grant.max_uses:
                     candidates.append(
@@ -549,11 +563,18 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
                 max_calls = grant.velocity_max_calls
                 has_velocity_cap = window_seconds is not None and max_calls is not None
                 if window_seconds is not None and max_calls is not None:
-                    window = _window_calls.setdefault(counter_key, deque())
-                    cutoff = now - float(window_seconds)
-                    while window and window[0] <= cutoff:
-                        window.popleft()
-                    if len(window) >= max_calls:
+                    window = _window_calls.get(counter_key)
+                    if window is not None:
+                        cutoff = now - float(window_seconds)
+                        while window and window[0] <= cutoff:
+                            window.popleft()
+                        if not window:
+                            # Fully aged out: drop the key so idle principals
+                            # do not pin empty deques for the life of the
+                            # process. Re-created below on the next ALLOW.
+                            del _window_calls[counter_key]
+                            window = None
+                    if window is not None and len(window) >= max_calls:
                         candidates.append(
                             IGADecision(
                                 False,

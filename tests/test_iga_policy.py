@@ -395,6 +395,99 @@ async def test_malformed_group_map_fails_closed_at_use_time(iga_config, rsa_key)
     assert excinfo.value.reason == "iga_config_invalid"
 
 
+@pytest.mark.parametrize(
+    "make_entry",
+    [
+        pytest.param(
+            lambda jwks: {
+                "audience": AUDIENCE,
+                "algorithms": ["RS256", "none"],
+                "jwks": jwks,
+            },
+            id="algorithm-none-listed",
+        ),
+        pytest.param(
+            lambda jwks: {
+                "audience": AUDIENCE,
+                "algorithms": ["RS256"],
+                "jwks": jwks,
+                "public_key_pem": "-----BEGIN PUBLIC KEY-----\nirrelevant",
+            },
+            id="both-key-sources",
+        ),
+        pytest.param(
+            lambda jwks: {"audience": AUDIENCE, "algorithms": ["RS256"]},
+            id="no-key-source",
+        ),
+        pytest.param(
+            lambda jwks: {"algorithms": ["RS256"], "jwks": jwks},
+            id="missing-audience",
+        ),
+        pytest.param(
+            lambda jwks: {"audience": "   ", "algorithms": ["RS256"], "jwks": jwks},
+            id="blank-audience",
+        ),
+    ],
+)
+async def test_structurally_invalid_issuer_config_fails_closed(
+    iga_config, rsa_key, make_entry
+):
+    """Every malformed issuer entry poisons the whole roster (fail closed)."""
+    iga_config({OKTA_ISS: make_entry(_jwks(rsa_key))})
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(rsa_key))
+    assert excinfo.value.reason == "iga_config_invalid"
+
+
+async def test_unknown_issuer_host_without_explicit_provider_fails_closed(
+    iga_config, rsa_key
+):
+    """A vanity/unknown IdP host needs an explicit provider; guessing is out."""
+    vanity_iss = "https://idp.internal.example.com"
+    iga_config(
+        {
+            vanity_iss: {
+                "audience": AUDIENCE,
+                "algorithms": ["RS256"],
+                "jwks": _jwks(rsa_key),
+            }
+        }
+    )
+    with pytest.raises(IGAError) as excinfo:
+        parse_enterprise_token(_mint(rsa_key, iss=vanity_iss))
+    assert excinfo.value.reason == "iga_config_invalid"
+
+
+@pytest.mark.parametrize(
+    "group_entry",
+    [
+        pytest.param(
+            {"policy_id": "polb-x", "velocity_window_seconds": 60},
+            id="velocity-window-without-max-calls",
+        ),
+        pytest.param(
+            {"policy_id": "polb-x", "velocity_max_calls": 3},
+            id="velocity-max-calls-without-window",
+        ),
+        pytest.param({"policy_id": "polb-x", "max_uses": 0}, id="max-uses-zero"),
+        pytest.param({"policy_id": "polb-x", "max_uses": -1}, id="max-uses-negative"),
+        pytest.param({"policy_id": "polb-x", "max_uses": True}, id="max-uses-bool"),
+    ],
+)
+async def test_structurally_invalid_group_map_fails_closed(
+    iga_config, rsa_key, group_entry
+):
+    """Half-set velocity caps and non-positive/bool max_uses never enforce
+    silently — the whole grant map fails closed at use time."""
+    iga_config(_okta_issuers(rsa_key), {"payments-ops": group_entry})
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+    with pytest.raises(IGAError) as excinfo:
+        resolve_policy_grants(principal)
+    assert excinfo.value.reason == "iga_config_invalid"
+
+
 # --- runtime caps -------------------------------------------------------------
 
 
@@ -455,6 +548,110 @@ async def test_velocity_window_blocks_burst_then_recovers(
     clock["now"] = 1061.0
     recovered = await enforce_tool_call(principal, TOOL)
     assert recovered.allowed is True
+
+
+async def test_velocity_windows_are_tracked_per_grant(
+    iga_config, clean_database, rsa_key, monkeypatch
+):
+    """Each grant's velocity history is its own (regression for the shared
+    (issuer, subject, tool) counter key): the short-window grant's pruning
+    must not erase the history the long-window grant still needs, and one
+    grant's calls must not count against another's cap."""
+    wallet_id = await _make_wallet()
+    short_policy = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    long_policy = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(
+        _okta_issuers(rsa_key),
+        {
+            "ops-short": {
+                "policy_id": short_policy,
+                "velocity_window_seconds": 60,
+                "velocity_max_calls": 2,
+            },
+            "ops-long": {
+                "policy_id": long_policy,
+                "velocity_window_seconds": 3600,
+                "velocity_max_calls": 2,
+            },
+        },
+    )
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["ops-short", "ops-long"]})
+    )
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(oidc_iga, "_monotonic", lambda: clock["now"])
+
+    async def _call_at(now: float):
+        clock["now"] = now
+        return await enforce_tool_call(principal, TOOL)
+
+    # Burst: the short grant authorizes two calls, then the long grant takes
+    # over for two more. Under the old shared deque the third call would have
+    # been BLOCKED — the long grant counted the short grant's calls as its own.
+    for now, expected_group in (
+        (1000.0, "ops-short"),
+        (1001.0, "ops-short"),
+        (1002.0, "ops-long"),
+        (1003.0, "ops-long"),
+    ):
+        decision = await _call_at(now)
+        assert decision.allowed is True, (now, decision)
+        assert decision.group == expected_group
+
+    fifth = await _call_at(1004.0)
+    assert fifth.allowed is False
+    assert fifth.reason == "iga_velocity_exceeded"
+
+    # The short window recovers at t=1100 — and its pruning at that moment is
+    # exactly the operation that used to destroy the long grant's history.
+    for now in (1100.0, 1101.0):
+        decision = await _call_at(now)
+        assert decision.allowed is True
+        assert decision.group == "ops-short"
+
+    # No empty deques may linger after pruning (idle-principal eviction).
+    assert all(window for window in oidc_iga._window_calls.values())
+
+    # The long grant still remembers the two calls IT authorized at
+    # t=1002/1003 — they are within its hour, so with the short grant capped
+    # again the call is blocked rather than slipping through ungoverned.
+    blocked = await _call_at(1102.0)
+    assert blocked.allowed is False
+    assert blocked.reason == "iga_velocity_exceeded"
+    long_key = (OKTA_ISS, "user-1", TOOL, "ops-long", long_policy)
+    assert list(oidc_iga._window_calls[long_key]) == [1002.0, 1003.0]
+
+
+async def test_max_uses_are_tracked_per_grant(iga_config, clean_database, rsa_key):
+    """Two grants of max_uses=2 yield 2 uses EACH, drawn down independently."""
+    wallet_id = await _make_wallet()
+    policy_a = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    policy_b = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(
+        _okta_issuers(rsa_key),
+        {
+            "ops-a": {"policy_id": policy_a, "max_uses": 2},
+            "ops-b": {"policy_id": policy_b, "max_uses": 2},
+        },
+    )
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["ops-a", "ops-b"]})
+    )
+
+    groups = []
+    for _ in range(4):
+        decision = await enforce_tool_call(principal, TOOL)
+        assert decision.allowed is True
+        groups.append(decision.group)
+    # Under the old shared lifetime counter the third call would have been
+    # blocked (2 total instead of 2 each).
+    assert groups == ["ops-a", "ops-a", "ops-b", "ops-b"]
+
+    fifth = await enforce_tool_call(principal, TOOL)
+    assert fifth.allowed is False
+    assert fifth.reason == "iga_max_uses_exceeded"
+    assert fifth.details == {"used": 2, "limit": 2}
 
 
 async def test_inactive_policy_bundle_blocks(iga_config, clean_database, rsa_key):
@@ -560,7 +757,8 @@ async def test_require_enterprise_tool_access_403_with_decision_reason(
     with pytest.raises(HTTPException) as excinfo:
         await dependency(principal=unauthorized)
     assert excinfo.value.status_code == 403
-    assert excinfo.value.detail == "iga_no_matching_role"
+    assert excinfo.value.detail["error"] == "iga_no_matching_role"
+    assert TOOL in excinfo.value.detail["message"]
 
     authorized = parse_enterprise_token(
         _mint(rsa_key, extra={"groups": ["payments-ops"]})

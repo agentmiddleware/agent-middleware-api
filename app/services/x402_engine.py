@@ -198,8 +198,10 @@ class X402PaymentHandler:
         # The engine only knows USDC: amounts convert at six USDC decimals and
         # EVM authorizations pin the per-network USDC contract. Accepting any
         # other asset string would emit settlement evidence claiming one token
-        # while the typed data moves another.
-        if asset.strip() != "USDC":
+        # while the typed data moves another. Normalize before storing so the
+        # receipts/audit evidence carry exactly "USDC", never a padded variant.
+        asset = asset.strip()
+        if asset != "USDC":
             raise X402Error("x402_asset_unsupported")
 
         pay_to = pay_to.strip()
