@@ -26,7 +26,7 @@ cryptography>=50.0.0       # Ed25519 trust-plane signatures (>=50.0.0 fixes GHSA
 redis>=8.1.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
 greenlet>=3.5.5         # SQLAlchemy async engine support
-stripe>=15.5.0           # Stripe payment processing
+stripe>=15.5.1           # Stripe payment processing
 mcp>=1.29.0,<2         # MCP SDK; >=1.29.0 provides the pre-parse request-body guard used by public/partner transports; <2 guards v1 internals
 
 # --- Database ---
