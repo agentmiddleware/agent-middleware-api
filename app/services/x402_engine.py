@@ -1,0 +1,506 @@
+"""x402 payment facilitation against permit budgets.
+
+Posture — read this before extending (docs/settlement-rails.md keeps the
+settlement freeze in force): x402 here is a *facilitator* surface. It parses
+HTTP 402 payment requirements, authorizes them against permit budgets, and
+records micro-settlements in the shadow ledger plus signed receipts. It never
+mints credits and never writes real ledger entries. The payer wallet — not the
+trust plane — signs the on-chain authorization (``eth_signTypedData_v4`` over
+the EIP-712 payload for EVM USDC; Solana's native Ed25519 for Solana). What
+this module signs is an Ed25519 *facilitator attestation*: evidence that the
+trust plane authorized and metered the payment, never the secp256k1 on-chain
+authorization itself. There is no keccak and no EVM key anywhere in this repo,
+by design.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any, Mapping
+
+from app.core.config import get_settings
+from app.schemas.billing import ServiceCategory
+from app.services.audit_log import record_audit_event
+from app.services.permits import get_permit_service
+from app.services.pricing import charge_units_for
+from app.services.receipts import get_receipt_service
+from app.services.shadow_ledger import get_shadow_ledger
+from app.services.signing_keys import get_signing_key_service
+
+logger = logging.getLogger(__name__)
+
+
+class X402Error(RuntimeError):
+    """Fail-closed x402 facilitation error with a snake_case reason."""
+
+    def __init__(self, reason: str, details: dict[str, Any] | None = None) -> None:
+        self.reason = reason
+        self.details = details
+        super().__init__(reason)
+
+
+# The tool name every x402 settlement is authorized and receipted under. A
+# permit must list it in allowed_tools (scopes "tool:x402.payment:invoke" +
+# "billing:charge") before any settlement can reserve budget.
+X402_TOOL_NAME = "x402.payment"
+
+# USDC is a 6-decimal token on every supported network; amounts with more
+# precision cannot be represented on-chain and are rejected rather than
+# rounded (rounding would settle a different number than was demanded).
+_USDC_DECIMALS = 6
+
+# Facilitation guardrail, not a business rule: one x402 demand above this is
+# outside micro-settlement territory and refused outright rather than being
+# allowed to encumber an entire permit budget in one call.
+_MAX_AMOUNT_USD = Decimal("10000")
+
+# Canonical USDC deployments per EVM network: (chainId, verifyingContract).
+# These pin the EIP-712 domain so the payer wallet's signature can only ever
+# authorize the real USDC contract on the intended chain.
+_EVM_NETWORKS: dict[str, tuple[int, str]] = {
+    "base": (8453, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+    "base-sepolia": (84532, "0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
+    "ethereum": (1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+}
+
+_SOLANA_NETWORKS = frozenset({"solana", "solana-devnet"})
+
+SUPPORTED_NETWORKS = frozenset(_EVM_NETWORKS) | _SOLANA_NETWORKS
+
+_EVM_ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}\Z")
+# Base58 alphabet (no 0, O, I, l), the shape of a Solana account address.
+_SOLANA_ADDRESS_RE = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}\Z")
+
+_AMOUNT_HEADER = "x-402-amount"
+_PAY_TO_HEADER = "x-402-payto"
+_NETWORK_HEADER = "x-402-network"
+
+# Least-wrong existing ServiceCategory for a micro-settlement's shadow-ledger
+# entry: PLATFORM_FEE is the only platform-level (non-proof-surface) category,
+# and the enum is not extended here because its members feed real pricing and
+# ledger rows (adding one is a product decision, not a facilitation detail).
+_SETTLEMENT_CATEGORY = ServiceCategory.PLATFORM_FEE
+
+
+@dataclass(frozen=True)
+class X402PaymentRequirement:
+    """A validated x402 payment demand extracted from an HTTP 402 response."""
+
+    amount_usd: Decimal
+    pay_to: str
+    network: str
+    asset: str = "USDC"
+
+    @property
+    def amount_base_units(self) -> int:
+        """The amount as USDC base units (6 decimals); exact by validation."""
+        return int(self.amount_usd.scaleb(_USDC_DECIMALS))
+
+
+@dataclass(frozen=True)
+class X402Settlement:
+    """One completed facilitation: authorization + attestation + receipt.
+
+    ``authorization`` is what the payer wallet must sign; the attestation
+    fields are the trust plane's Ed25519 evidence that this settlement was
+    permit-authorized and metered — they are not an on-chain signature.
+    """
+
+    requirement: X402PaymentRequirement
+    permit_id: str
+    wallet_id: str
+    credits: Decimal
+    authorization: dict[str, Any]
+    attestation_signature: str
+    attestation_key_id: str
+    attestation_payload_hash: str
+    receipt_id: str
+    shadow_session_id: str
+    shadow_charge_id: str | None
+    audit_event_id: str | None
+    idempotency_key: str
+
+
+def _epoch_seconds(value: datetime) -> int:
+    """Naive-UTC column value -> unix seconds (naive is UTC by repo contract)."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp())
+
+
+class X402PaymentHandler:
+    """Parse, authorize, and facilitate x402 micro-settlements."""
+
+    def parse_402(
+        self,
+        status_code: int,
+        headers: Mapping[str, str],
+    ) -> X402PaymentRequirement:
+        """Parse the X-402-* headers of an HTTP 402 response, failing closed.
+
+        Only status 402 is parseable; every header is validated strictly with
+        a distinct reason so a caller can tell a malformed demand from a
+        missing one.
+        """
+        if status_code != 402:
+            raise X402Error("x402_not_payment_required")
+        lowered = {str(key).lower(): str(value) for key, value in headers.items()}
+        amount = lowered.get(_AMOUNT_HEADER)
+        if amount is None:
+            raise X402Error("x402_amount_missing")
+        pay_to = lowered.get(_PAY_TO_HEADER)
+        if pay_to is None:
+            raise X402Error("x402_pay_to_missing")
+        network = lowered.get(_NETWORK_HEADER)
+        if network is None:
+            raise X402Error("x402_network_missing")
+        return self.build_requirement(amount=amount, pay_to=pay_to, network=network)
+
+    def build_requirement(
+        self,
+        *,
+        amount: str | Decimal,
+        pay_to: str,
+        network: str,
+        asset: str = "USDC",
+    ) -> X402PaymentRequirement:
+        """Validate raw requirement fields into an X402PaymentRequirement.
+
+        Shared by header parsing and the settle endpoint so both surfaces
+        enforce identical constraints.
+        """
+        if isinstance(amount, Decimal):
+            parsed = amount
+        else:
+            try:
+                parsed = Decimal(str(amount).strip())
+            except InvalidOperation as exc:
+                raise X402Error("x402_amount_invalid") from exc
+        if not parsed.is_finite():
+            raise X402Error("x402_amount_invalid")
+        if parsed <= 0:
+            raise X402Error("x402_amount_not_positive")
+        exponent = parsed.as_tuple().exponent
+        if isinstance(exponent, int) and -exponent > _USDC_DECIMALS:
+            raise X402Error("x402_amount_precision_exceeded")
+        if parsed > _MAX_AMOUNT_USD:
+            raise X402Error("x402_amount_too_large")
+
+        network = network.strip()
+        if network not in SUPPORTED_NETWORKS:
+            raise X402Error("x402_network_unsupported")
+
+        pay_to = pay_to.strip()
+        if network in _EVM_NETWORKS:
+            if not _EVM_ADDRESS_RE.fullmatch(pay_to):
+                raise X402Error("x402_pay_to_invalid")
+        else:
+            if not _SOLANA_ADDRESS_RE.fullmatch(pay_to):
+                raise X402Error("x402_pay_to_invalid")
+
+        return X402PaymentRequirement(
+            amount_usd=parsed,
+            pay_to=pay_to,
+            network=network,
+            asset=asset,
+        )
+
+    @staticmethod
+    def _derive_nonce_hex(permit_id: str, idempotency_key: str) -> str:
+        """32-byte hex nonce, deterministic per (permit, idempotency key).
+
+        Determinism is the replay defense: an idempotent retry rebuilds the
+        byte-identical authorization instead of minting a second, differently
+        nonced transfer the payer wallet might also sign.
+        """
+        return hashlib.sha256(
+            f"{permit_id}:{idempotency_key}".encode()
+        ).hexdigest()
+
+    def build_transfer_authorization(
+        self,
+        requirement: X402PaymentRequirement,
+        *,
+        permit_id: str,
+        wallet_id: str,
+        idempotency_key: str,
+        valid_after: int = 0,
+        valid_before: int | None = None,
+    ) -> dict[str, Any]:
+        """Build the transfer authorization the *payer wallet* must sign.
+
+        EVM networks get a full EIP-712 TransferWithAuthorization (EIP-3009)
+        typed-data dict in ``eth_signTypedData_v4`` shape; ``message.from`` is
+        left empty because the trust plane neither knows nor controls the
+        payer's on-chain address — the payer wallet fills it in and computes
+        the EIP-712 digest itself. Solana networks get a structured transfer
+        message (Ed25519 is Solana's native scheme). Nothing here is signed by
+        this method; the wallet binding lives in the facilitator attestation
+        that ``settle`` produces over this payload.
+        """
+        del wallet_id  # bound via the attestation payload, not the on-chain bytes
+        nonce_hex = self._derive_nonce_hex(permit_id, idempotency_key)
+        value = str(requirement.amount_base_units)
+        if requirement.network in _EVM_NETWORKS:
+            if valid_before is None:
+                raise X402Error("x402_validity_window_required")
+            chain_id, usdc_contract = _EVM_NETWORKS[requirement.network]
+            return {
+                "types": {
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "version", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"},
+                    ],
+                    "TransferWithAuthorization": [
+                        {"name": "from", "type": "address"},
+                        {"name": "to", "type": "address"},
+                        {"name": "value", "type": "uint256"},
+                        {"name": "validAfter", "type": "uint256"},
+                        {"name": "validBefore", "type": "uint256"},
+                        {"name": "nonce", "type": "bytes32"},
+                    ],
+                },
+                "primaryType": "TransferWithAuthorization",
+                "domain": {
+                    "name": "USD Coin",
+                    "version": "2",
+                    "chainId": chain_id,
+                    "verifyingContract": usdc_contract,
+                },
+                "message": {
+                    # Filled in by the payer wallet before signing.
+                    "from": "",
+                    "to": requirement.pay_to,
+                    "value": value,
+                    "validAfter": str(valid_after),
+                    "validBefore": str(valid_before),
+                    "nonce": f"0x{nonce_hex}",
+                },
+            }
+        return {
+            "scheme": "x402-solana-transfer/1",
+            "network": requirement.network,
+            "asset": requirement.asset,
+            "pay_to": requirement.pay_to,
+            "amount": value,
+            "decimals": _USDC_DECIMALS,
+            "memo": f"awi-permit:{permit_id}",
+            "nonce": nonce_hex,
+        }
+
+    async def settle(
+        self,
+        *,
+        permit_id: str,
+        wallet_id: str,
+        key_id: str | None,
+        requirement: X402PaymentRequirement,
+        idempotency_key: str,
+        idempotency_record_id: str | None = None,
+    ) -> X402Settlement:
+        """Authorize a 402 demand against a permit and record the settlement.
+
+        Sequence: reserve permit budget atomically, build the transfer
+        authorization, sign the facilitator attestation, meter the amount in a
+        shadow-ledger dry-run session, append an audit event, emit the signed
+        receipt. Compensation invariant: any failure after the reservation
+        releases the exact reserved amount and leaves no live shadow session
+        and no receipt — no partial settlement may persist.
+        """
+        settings = get_settings()
+        # settings.EXCHANGE_RATE is the single credits-per-USD source of truth
+        # (see app/core/config.py — do not re-declare it as a constant here).
+        credits = requirement.amount_usd * settings.EXCHANGE_RATE
+
+        permits = get_permit_service()
+        validation = await permits.authorize_and_reserve(
+            permit_id=permit_id,
+            wallet_id=wallet_id,
+            tool_name=X402_TOOL_NAME,
+            estimated_credits=credits,
+            key_id=key_id,
+            # pay_to / network / amount ride along so permit v2 constraints
+            # (forbidden_fields, and recipient checks where enforced) can bite.
+            arguments={
+                "pay_to": requirement.pay_to,
+                "network": requirement.network,
+                "amount_usd": str(requirement.amount_usd),
+            },
+        )
+        if not validation.allowed:
+            # Budget-cap denials surface reason "permit_budget_exceeded"
+            # untouched, with the service's own numbers in details.
+            raise X402Error(
+                validation.reason or "x402_authorization_denied",
+                validation.details,
+            )
+        permit_model = validation.permit
+        assert permit_model is not None  # allowed=True always carries the row
+
+        # Budget is now reserved. From here on every failure must compensate.
+        shadow_session_id: str | None = None
+        try:
+            authorization = self.build_transfer_authorization(
+                requirement,
+                permit_id=permit_id,
+                wallet_id=wallet_id,
+                idempotency_key=idempotency_key,
+                valid_after=_epoch_seconds(permit_model.issued_at),
+                valid_before=_epoch_seconds(permit_model.expires_at),
+            )
+
+            # Ed25519 facilitator attestation: trust-plane evidence over the
+            # authorization + permit binding, NOT the on-chain signature.
+            attestation_payload: dict[str, Any] = {
+                "authorization": authorization,
+                "permit_id": permit_id,
+                "wallet_id": wallet_id,
+                "credits": credits,
+                "idempotency_key": idempotency_key,
+            }
+            signing = get_signing_key_service()
+            (
+                attestation_signature,
+                attestation_key_id,
+                attestation_payload_hash,
+            ) = await signing.sign_payload(attestation_payload)
+
+            # Micro-settlement metering goes to the shadow ledger only: one
+            # dry-run session per settle call, funded with exactly this
+            # settlement's credit value, charged once, then ended. Never
+            # commit_session — that debits real money, which the settlement
+            # freeze forbids.
+            ledger = get_shadow_ledger()
+            session = await ledger.create_session(wallet_id, real_balance=credits)
+            shadow_session_id = session.session_id
+            units = charge_units_for(credits, _SETTLEMENT_CATEGORY)
+            charge = await ledger.simulate_charge(
+                session.session_id,
+                _SETTLEMENT_CATEGORY,
+                units=float(units),
+                description=(
+                    f"x402 {requirement.amount_usd} USD -> {requirement.pay_to} "
+                    f"on {requirement.network} under permit {permit_id}"
+                ),
+            )
+            if not charge.would_succeed:
+                raise X402Error("x402_shadow_ledger_rejected")
+            # Ending the session before the receipt means a receipt-step
+            # failure leaves zero live shadow state: the ephemeral session is
+            # already terminally claimed, and the durable receipt — the actual
+            # settlement record — is written last or not at all.
+            summary = await ledger.end_session(session.session_id)
+            if summary is None:
+                raise X402Error("x402_shadow_session_lost")
+
+            audit_event = await record_audit_event(
+                event="x402.settlement",
+                wallet_id=wallet_id,
+                tool=X402_TOOL_NAME,
+                endpoint="/v1/x402/settle",
+                key_id=key_id,
+                request_id=idempotency_key[:100],
+                ok=True,
+                metadata={
+                    "permit_id": permit_id,
+                    "pay_to": requirement.pay_to,
+                    "network": requirement.network,
+                    "asset": requirement.asset,
+                    "amount_usd": str(requirement.amount_usd),
+                    "credits": str(credits),
+                    "shadow_session_id": session.session_id,
+                    "shadow_charge_id": charge.charge_id,
+                    "nonce": self._derive_nonce_hex(permit_id, idempotency_key),
+                    "idempotency_key": idempotency_key,
+                },
+            )
+
+            # credits_charged feeds _validate_model_for_action's aggregate sum
+            # (SUM of ReceiptModel.credits_charged), so these receipts count
+            # toward the permit's aggregate_value_cap like any governed spend.
+            receipt = await get_receipt_service().create_receipt(
+                permit_id=permit_id,
+                wallet_id=wallet_id,
+                key_id=key_id,
+                tool=X402_TOOL_NAME,
+                request_payload={
+                    "amount_usd": str(requirement.amount_usd),
+                    "pay_to": requirement.pay_to,
+                    "network": requirement.network,
+                    "asset": requirement.asset,
+                    "idempotency_key": idempotency_key,
+                },
+                response_payload={
+                    "authorization": authorization,
+                    "attestation": {
+                        "alg": "Ed25519",
+                        "signature": attestation_signature,
+                        "key_id": attestation_key_id,
+                        "payload_hash": attestation_payload_hash,
+                    },
+                    "shadow_session_id": session.session_id,
+                    "shadow_charge_id": charge.charge_id,
+                    "credits": str(credits),
+                },
+                ledger_entry_id=None,
+                credits_authorized=credits,
+                credits_charged=credits,
+                outcome="success",
+                audit_event_id=audit_event.event_id,
+                idempotency_record_id=idempotency_record_id,
+            )
+        except Exception as exc:
+            # No partial settlement may persist: release the exact reserved
+            # amount. The shadow session either never charged, was already
+            # terminally ended, or (best effort) is discarded here; nothing
+            # durable was written before the receipt.
+            if shadow_session_id is not None:
+                try:
+                    await get_shadow_ledger().revert_session(shadow_session_id)
+                except Exception:
+                    logger.exception(
+                        "x402 shadow session discard failed for %s",
+                        shadow_session_id,
+                    )
+            try:
+                await permits.release_budget(permit_id, credits)
+            except Exception:
+                logger.exception(
+                    "x402 budget release failed for permit %s", permit_id
+                )
+            if isinstance(exc, X402Error):
+                raise
+            raise X402Error("x402_settlement_failed") from exc
+
+        return X402Settlement(
+            requirement=requirement,
+            permit_id=permit_id,
+            wallet_id=wallet_id,
+            credits=credits,
+            authorization=authorization,
+            attestation_signature=attestation_signature,
+            attestation_key_id=attestation_key_id,
+            attestation_payload_hash=attestation_payload_hash,
+            receipt_id=receipt.receipt_id,
+            shadow_session_id=session.session_id,
+            shadow_charge_id=charge.charge_id,
+            audit_event_id=audit_event.event_id,
+            idempotency_key=idempotency_key,
+        )
+
+
+_handler: X402PaymentHandler | None = None
+
+
+def get_x402_handler() -> X402PaymentHandler:
+    global _handler
+    if _handler is None:
+        _handler = X402PaymentHandler()
+    return _handler

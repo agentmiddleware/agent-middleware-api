@@ -1,0 +1,667 @@
+"""x402 settlement-facilitation surface (dormant).
+
+Covers strict HTTP 402 parsing (per-header failure reasons, network
+allowlist, address shapes), the permit-governed settle loop (budget caps,
+atomic compensation on mid-flight failure, idempotent replay), the
+transfer-authorization shapes (EIP-712 TransferWithAuthorization for EVM,
+structured Ed25519-signable message for Solana), and the SDK helpers.
+
+The module stem is in conftest's DORMANT_SURFACE_TEST_MODULES, so the x402
+router is mounted on the shared app by the dormant-marked fixture. Nothing
+here touches real ledger entries: settlements land in the shadow ledger and
+signed receipts only (docs/settlement-rails.md settlement freeze).
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
+from app.services.receipts import ReceiptService, get_receipt_service
+from app.services.shadow_ledger import get_shadow_ledger
+from app.services.x402_engine import X402Error, get_x402_handler
+from b2a_sdk.errors import PermitDeniedError
+from b2a_sdk.x402 import X402Client, parse_402_response
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
+
+EVM_PAY_TO = "0x1111111111111111111111111111111111111111"
+SOLANA_PAY_TO = "A" * 40  # valid base58 alphabet, length within 32-44
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+def _x402_headers(
+    amount: str = "1.50",
+    pay_to: str = EVM_PAY_TO,
+    network: str = "base",
+) -> dict[str, str]:
+    return {
+        "X-402-Amount": amount,
+        "X-402-PayTo": pay_to,
+        "X-402-Network": network,
+    }
+
+
+def _settle_body(
+    *,
+    permit_id: str,
+    wallet_id: str,
+    amount: str = "0.03",
+    pay_to: str = EVM_PAY_TO,
+    network: str = "base",
+) -> dict:
+    return {
+        "permit_id": permit_id,
+        "wallet_id": wallet_id,
+        "amount": amount,
+        "pay_to": pay_to,
+        "network": network,
+    }
+
+
+async def _permit_spent(client: AsyncClient, permit_id: str) -> Decimal:
+    resp = await client.get(f"/v1/permits/{permit_id}", headers=BOOTSTRAP_HEADERS)
+    assert resp.status_code == 200
+    return Decimal(str(resp.json()["spent_credits"]))
+
+
+class _StubResponse:
+    """Duck-typed stand-in for httpx.Response in SDK parse tests."""
+
+    def __init__(self, status_code: int, headers: dict[str, str]):
+        self.status_code = status_code
+        self.headers = headers
+
+
+# ---------------------------------------------------------------------------
+# Acceptance tests (exact names required by the work package)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_x402_permit_budget_cap_exceeded(client, clean_database):
+    """A settle whose credits exceed the permit cap is denied atomically:
+    reason surfaces untouched, no budget is consumed, no receipt exists."""
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=10,
+        idem_key="x402-cap-permit",
+    )
+    permit_id = permit["permit_id"]
+
+    # $0.02 at the default 1000 credits/USD rate = 20 credits > 10 cap.
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            amount="0.02",
+        ),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "x402-cap-1"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "permit_budget_exceeded"
+
+    assert await _permit_spent(client, permit_id) == Decimal("0")
+    receipts, total = await get_receipt_service().list_receipts(permit_id=permit_id)
+    assert total == 0
+    assert receipts == []
+
+
+@pytest.mark.anyio
+async def test_x402_atomic_settlement(client, clean_database, monkeypatch):
+    """A failure at the receipt step compensates fully (budget released, no
+    receipt, no live shadow session); the retried key then settles exactly
+    once, the receipt verifies, and replay returns the same settlement."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-atomic-permit",
+    )
+    permit_id = permit["permit_id"]
+    body = _settle_body(permit_id=permit_id, wallet_id=wallet_id, amount="0.03")
+    headers = {**provisioned["agent_headers"], "Idempotency-Key": "x402-atomic-1"}
+
+    assert await _permit_spent(client, permit_id) == Decimal("0")
+
+    async def _induced_receipt_failure(self, **kwargs):
+        raise RuntimeError("induced receipt failure")
+
+    monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
+    failed = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert failed.status_code == 400
+    assert failed.json()["detail"] == "x402_settlement_failed"
+
+    # Full compensation: reservation released, no receipt, no live shadow
+    # session left holding the simulated charge.
+    assert await _permit_spent(client, permit_id) == Decimal("0")
+    _, total = await get_receipt_service().list_receipts(permit_id=permit_id)
+    assert total == 0
+    assert await get_shadow_ledger().list_sessions(wallet_id) == []
+
+    # Un-patch and retry the SAME idempotency key: the failed attempt was
+    # side-effect free, so the key must be reusable.
+    monkeypatch.undo()
+    ok = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert ok.status_code == 200
+    settlement = ok.json()
+    assert settlement["receipt_id"].startswith("rcpt-")
+    assert Decimal(settlement["credits"]) == Decimal("30")
+    assert await _permit_spent(client, permit_id) == Decimal("30")
+
+    receipts, total = await get_receipt_service().list_receipts(permit_id=permit_id)
+    assert total == 1
+    assert receipts[0].receipt_id == settlement["receipt_id"]
+    assert receipts[0].outcome == "success"
+    assert Decimal(str(receipts[0].credits_charged)) == Decimal("30")
+
+    verify = await client.post(
+        "/v1/receipts/verify",
+        json={"receipt_id": settlement["receipt_id"]},
+        headers=provisioned["agent_headers"],
+    )
+    assert verify.status_code == 200
+    assert verify.json()["valid"] is True
+
+    # Replay with the SAME key and body: same settlement, no double-reserve.
+    replay = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert replay.status_code == 200
+    replayed = replay.json()
+    assert replayed["receipt_id"] == settlement["receipt_id"]
+    assert replayed["authorization"] == settlement["authorization"]
+    assert await _permit_spent(client, permit_id) == Decimal("30")
+    _, total = await get_receipt_service().list_receipts(permit_id=permit_id)
+    assert total == 1
+
+
+# ---------------------------------------------------------------------------
+# Parsing and transfer-authorization shapes
+# ---------------------------------------------------------------------------
+
+
+def test_x402_parse_evm_happy_path_and_eip712_shape():
+    handler = get_x402_handler()
+    # Case-insensitive header lookup is part of the contract.
+    requirement = handler.parse_402(
+        402,
+        {
+            "x-402-amount": "1.50",
+            "X-402-PAYTO": EVM_PAY_TO,
+            "X-402-Network": "base",
+        },
+    )
+    assert requirement.amount_usd == Decimal("1.50")
+    assert requirement.pay_to == EVM_PAY_TO
+    assert requirement.network == "base"
+    assert requirement.asset == "USDC"
+
+    authorization = handler.build_transfer_authorization(
+        requirement,
+        permit_id="permit-abc",
+        wallet_id="wallet-abc",
+        idempotency_key="idem-abc",
+        valid_after=100,
+        valid_before=200,
+    )
+    assert authorization["primaryType"] == "TransferWithAuthorization"
+    assert authorization["domain"] == {
+        "name": "USD Coin",
+        "version": "2",
+        "chainId": 8453,
+        "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    }
+    field_names = [
+        item["name"] for item in authorization["types"]["TransferWithAuthorization"]
+    ]
+    assert field_names == ["from", "to", "value", "validAfter", "validBefore", "nonce"]
+    message = authorization["message"]
+    assert message["to"] == EVM_PAY_TO
+    assert message["value"] == "1500000"  # $1.50 in 6-decimal USDC base units
+    assert message["validAfter"] == "100"
+    assert message["validBefore"] == "200"
+    assert message["from"] == ""  # payer wallet fills its own address in
+    nonce = message["nonce"]
+    assert nonce.startswith("0x") and len(nonce) == 66  # 32 bytes of hex
+    int(nonce, 16)  # must be hex
+
+    # Deterministic per (permit_id, idempotency_key): idempotent replays
+    # rebuild the identical authorization; a new key gets a new nonce.
+    again = handler.build_transfer_authorization(
+        requirement,
+        permit_id="permit-abc",
+        wallet_id="wallet-abc",
+        idempotency_key="idem-abc",
+        valid_after=100,
+        valid_before=200,
+    )
+    assert again == authorization
+    other = handler.build_transfer_authorization(
+        requirement,
+        permit_id="permit-abc",
+        wallet_id="wallet-abc",
+        idempotency_key="idem-other",
+        valid_after=100,
+        valid_before=200,
+    )
+    assert other["message"]["nonce"] != nonce
+
+
+@pytest.mark.parametrize(
+    ("network", "chain_id", "contract"),
+    [
+        ("base-sepolia", 84532, "0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
+        ("ethereum", 1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+    ],
+)
+def test_x402_evm_usdc_domain_per_network(network, chain_id, contract):
+    handler = get_x402_handler()
+    requirement = handler.parse_402(
+        402, _x402_headers(amount="0.25", network=network)
+    )
+    authorization = handler.build_transfer_authorization(
+        requirement,
+        permit_id="permit-net",
+        wallet_id="wallet-net",
+        idempotency_key="idem-net",
+        valid_after=0,
+        valid_before=10,
+    )
+    assert authorization["domain"]["chainId"] == chain_id
+    assert authorization["domain"]["verifyingContract"] == contract
+    assert authorization["message"]["value"] == "250000"
+
+
+def test_x402_parse_solana_happy_path_and_message_shape():
+    handler = get_x402_handler()
+    requirement = handler.parse_402(
+        402,
+        _x402_headers(amount="0.25", pay_to=SOLANA_PAY_TO, network="solana"),
+    )
+    assert requirement.network == "solana"
+
+    authorization = handler.build_transfer_authorization(
+        requirement,
+        permit_id="permit-sol",
+        wallet_id="wallet-sol",
+        idempotency_key="idem-sol",
+    )
+    assert "types" not in authorization  # not EIP-712; structured message
+    assert authorization["network"] == "solana"
+    assert authorization["pay_to"] == SOLANA_PAY_TO
+    assert authorization["amount"] == "250000"
+    assert authorization["decimals"] == 6
+    assert "permit-sol" in authorization["memo"]
+    assert len(authorization["nonce"]) == 64
+
+
+def test_x402_parse_rejects_non_402_status():
+    handler = get_x402_handler()
+    with pytest.raises(X402Error) as exc:
+        handler.parse_402(200, _x402_headers())
+    assert exc.value.reason == "x402_not_payment_required"
+
+
+@pytest.mark.parametrize(
+    ("missing", "reason"),
+    [
+        ("X-402-Amount", "x402_amount_missing"),
+        ("X-402-PayTo", "x402_pay_to_missing"),
+        ("X-402-Network", "x402_network_missing"),
+    ],
+)
+def test_x402_parse_rejects_missing_headers(missing, reason):
+    handler = get_x402_handler()
+    headers = _x402_headers()
+    del headers[missing]
+    with pytest.raises(X402Error) as exc:
+        handler.parse_402(402, headers)
+    assert exc.value.reason == reason
+
+
+@pytest.mark.parametrize(
+    ("amount", "reason"),
+    [
+        ("-1", "x402_amount_not_positive"),
+        ("0", "x402_amount_not_positive"),
+        ("not-a-decimal", "x402_amount_invalid"),
+        ("NaN", "x402_amount_invalid"),
+        ("Infinity", "x402_amount_invalid"),
+        ("0.1234567", "x402_amount_precision_exceeded"),  # > 6 dp (USDC)
+        ("10000.01", "x402_amount_too_large"),
+    ],
+)
+def test_x402_parse_rejects_malformed_amounts(amount, reason):
+    handler = get_x402_handler()
+    with pytest.raises(X402Error) as exc:
+        handler.parse_402(402, _x402_headers(amount=amount))
+    assert exc.value.reason == reason
+
+
+def test_x402_parse_rejects_unknown_network():
+    handler = get_x402_handler()
+    with pytest.raises(X402Error) as exc:
+        handler.parse_402(402, _x402_headers(network="polygon"))
+    assert exc.value.reason == "x402_network_unsupported"
+
+
+@pytest.mark.parametrize(
+    ("pay_to", "network"),
+    [
+        (SOLANA_PAY_TO, "base"),  # base58 address on an EVM network
+        ("0x1234", "base"),  # too short
+        ("0x" + "g" * 40, "ethereum"),  # non-hex characters
+        (EVM_PAY_TO, "solana"),  # 0x address on Solana
+        ("A" * 31, "solana"),  # below base58 length floor
+        ("A" * 45, "solana-devnet"),  # above base58 length ceiling
+        ("O0Il" + "A" * 30, "solana"),  # excluded base58 characters
+    ],
+)
+def test_x402_parse_rejects_wrong_shape_pay_to(pay_to, network):
+    handler = get_x402_handler()
+    with pytest.raises(X402Error) as exc:
+        handler.parse_402(402, _x402_headers(pay_to=pay_to, network=network))
+    assert exc.value.reason == "x402_pay_to_invalid"
+
+
+@pytest.mark.anyio
+async def test_x402_parse_endpoint_maps_reasons_and_requires_auth(client):
+    ok = await client.post(
+        "/v1/x402/parse",
+        json={"status_code": 402, "headers": _x402_headers()},
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert ok.status_code == 200
+    assert ok.json() == {
+        "amount_usd": "1.50",
+        "pay_to": EVM_PAY_TO,
+        "network": "base",
+        "asset": "USDC",
+    }
+
+    bad = await client.post(
+        "/v1/x402/parse",
+        json={"status_code": 402, "headers": {"X-402-PayTo": EVM_PAY_TO}},
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert bad.status_code == 400
+    assert bad.json()["detail"] == "x402_amount_missing"
+
+    unauthenticated = await client.post(
+        "/v1/x402/parse",
+        json={"status_code": 402, "headers": _x402_headers()},
+    )
+    assert unauthenticated.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Settle endpoint negative paths
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_x402_settle_requires_idempotency_key(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id="permit-any",
+            wallet_id=provisioned["agent_wallet_id"],
+        ),
+        headers=provisioned["agent_headers"],
+    )
+    assert resp.status_code == 422  # missing required Idempotency-Key header
+
+
+@pytest.mark.anyio
+async def test_x402_settle_foreign_wallet_denied(client, clean_database):
+    """Tenant isolation: a key for wallet B cannot settle against wallet A."""
+    victim = await provision_agent_wallet(client)
+    attacker = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=victim["agent_wallet_id"],
+        key_id=victim["key_id"],
+        tool_name="x402.payment",
+        max_credits=50,
+        idem_key="x402-foreign-permit",
+    )
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit["permit_id"],
+            wallet_id=victim["agent_wallet_id"],
+            amount="0.01",
+        ),
+        headers={**attacker["agent_headers"], "Idempotency-Key": "x402-foreign-1"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "wallet_access_denied"
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_x402_settle_permit_wallet_mismatch(client, clean_database):
+    """A caller settling its own wallet under another wallet's permit is
+    denied on the permit's subject-wallet binding."""
+    owner = await provision_agent_wallet(client)
+    other = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=owner["agent_wallet_id"],
+        key_id=owner["key_id"],
+        tool_name="x402.payment",
+        max_credits=50,
+        idem_key="x402-mismatch-permit",
+    )
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit["permit_id"],
+            wallet_id=other["agent_wallet_id"],
+            amount="0.01",
+        ),
+        headers={**other["agent_headers"], "Idempotency-Key": "x402-mismatch-1"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "permit_wallet_mismatch"
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
+    _, total = await get_receipt_service().list_receipts(
+        permit_id=permit["permit_id"]
+    )
+    assert total == 0
+
+
+@pytest.mark.anyio
+async def test_x402_settle_unknown_permit_is_404(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id="permit-does-not-exist",
+            wallet_id=provisioned["agent_wallet_id"],
+            amount="0.01",
+        ),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "x402-missing-1"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "permit_not_found"
+
+
+@pytest.mark.anyio
+async def test_x402_settle_rejects_malformed_requirement(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    base = _settle_body(
+        permit_id="permit-any",
+        wallet_id=provisioned["agent_wallet_id"],
+    )
+    for override, reason in (
+        ({"amount": "-5"}, "x402_amount_not_positive"),
+        ({"amount": "0.1234567"}, "x402_amount_precision_exceeded"),
+        ({"network": "dogecoin"}, "x402_network_unsupported"),
+        ({"pay_to": "0xdeadbeef"}, "x402_pay_to_invalid"),
+    ):
+        resp = await client.post(
+            "/v1/x402/settle",
+            json={**base, **override},
+            headers={
+                **provisioned["agent_headers"],
+                "Idempotency-Key": "x402-malformed-1",
+            },
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == reason
+
+
+@pytest.mark.anyio
+async def test_x402_settle_conflicting_replay_is_409(client, clean_database):
+    """Reusing an idempotency key with a different payload is refused, not
+    silently settled twice (matching the POST /v1/permits semantics)."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-conflict-permit",
+    )
+    headers = {**provisioned["agent_headers"], "Idempotency-Key": "x402-conflict-1"}
+    first = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit["permit_id"], wallet_id=wallet_id, amount="0.01"
+        ),
+        headers=headers,
+    )
+    assert first.status_code == 200
+
+    conflicting = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit["permit_id"], wallet_id=wallet_id, amount="0.02"
+        ),
+        headers=headers,
+    )
+    assert conflicting.status_code == 409
+    assert conflicting.json()["detail"] == "idempotency_key_reused"
+    # The conflicting attempt reserved nothing on top of the first settle.
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("10")
+
+
+# ---------------------------------------------------------------------------
+# SDK helpers
+# ---------------------------------------------------------------------------
+
+
+def test_sdk_parse_402_response_stub():
+    requirement = parse_402_response(_StubResponse(402, _x402_headers()))
+    assert requirement == {
+        "amount": "1.50",
+        "pay_to": EVM_PAY_TO,
+        "network": "base",
+    }
+    # Non-402 responses and 402s without the x402 header set are not demands.
+    assert parse_402_response(_StubResponse(200, _x402_headers())) is None
+    assert (
+        parse_402_response(_StubResponse(402, {"X-402-Amount": "1.00"})) is None
+    )
+
+
+@pytest.mark.anyio
+async def test_sdk_handle_402_settles_against_app(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=50,
+        idem_key="x402-sdk-permit",
+    )
+    api_key = provisioned["agent_headers"]["X-API-Key"]
+    sdk = X402Client(
+        api_key=api_key,
+        base_url="http://test",
+        transport=ASGITransport(app=app),
+    )
+    try:
+        assert (
+            await sdk.handle_402(
+                _StubResponse(200, {}),
+                permit_id=permit["permit_id"],
+                wallet_id=wallet_id,
+                idempotency_key="x402-sdk-1",
+            )
+            is None
+        )
+        settlement = await sdk.handle_402(
+            _StubResponse(402, _x402_headers(amount="0.01")),
+            permit_id=permit["permit_id"],
+            wallet_id=wallet_id,
+            idempotency_key="x402-sdk-1",
+        )
+        assert settlement is not None
+        assert settlement["receipt_id"].startswith("rcpt-")
+        assert Decimal(settlement["credits"]) == Decimal("10")
+        assert settlement["authorization"]["domain"]["chainId"] == 8453
+    finally:
+        await sdk.close()
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("10")
+
+
+@pytest.mark.anyio
+async def test_sdk_settle_surfaces_permit_denial(client, clean_database):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=5,
+        idem_key="x402-sdk-deny-permit",
+    )
+    sdk = X402Client(
+        api_key=provisioned["agent_headers"]["X-API-Key"],
+        base_url="http://test",
+        transport=ASGITransport(app=app),
+    )
+    try:
+        with pytest.raises(PermitDeniedError) as exc:
+            await sdk.settle_402(
+                permit_id=permit["permit_id"],
+                wallet_id=wallet_id,
+                requirement={
+                    "amount": "0.02",  # 20 credits > 5-credit cap
+                    "pay_to": EVM_PAY_TO,
+                    "network": "base",
+                },
+                idempotency_key="x402-sdk-deny-1",
+            )
+        assert exc.value.reason == "permit_budget_exceeded"
+    finally:
+        await sdk.close()
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
