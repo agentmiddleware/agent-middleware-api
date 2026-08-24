@@ -45,6 +45,10 @@ class X402SettleRequest(BaseModel):
     pay_to: str
     network: str
     asset: str = "USDC"
+    # Payer wallet's on-chain address. Required for EVM networks: the
+    # facilitator attestation signs the exact EIP-712 message, so `from`
+    # must be the real payer, not a blank the wallet fills in afterwards.
+    payer: str | None = None
 
 
 class X402AttestationResponse(BaseModel):
@@ -141,6 +145,7 @@ async def settle_payment_required(
             key_id=auth.key_id,
             requirement=requirement,
             idempotency_key=idempotency_key,
+            payer=request.payer,
             idempotency_record_id=begun.record_id,
         )
     except X402Error as exc:

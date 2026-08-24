@@ -195,6 +195,13 @@ class X402PaymentHandler:
         if network not in SUPPORTED_NETWORKS:
             raise X402Error("x402_network_unsupported")
 
+        # The engine only knows USDC: amounts convert at six USDC decimals and
+        # EVM authorizations pin the per-network USDC contract. Accepting any
+        # other asset string would emit settlement evidence claiming one token
+        # while the typed data moves another.
+        if asset.strip() != "USDC":
+            raise X402Error("x402_asset_unsupported")
+
         pay_to = pay_to.strip()
         if network in _EVM_NETWORKS:
             if not _EVM_ADDRESS_RE.fullmatch(pay_to):
@@ -229,19 +236,24 @@ class X402PaymentHandler:
         permit_id: str,
         wallet_id: str,
         idempotency_key: str,
+        payer: str | None = None,
         valid_after: int = 0,
         valid_before: int | None = None,
     ) -> dict[str, Any]:
         """Build the transfer authorization the *payer wallet* must sign.
 
         EVM networks get a full EIP-712 TransferWithAuthorization (EIP-3009)
-        typed-data dict in ``eth_signTypedData_v4`` shape; ``message.from`` is
-        left empty because the trust plane neither knows nor controls the
-        payer's on-chain address — the payer wallet fills it in and computes
-        the EIP-712 digest itself. Solana networks get a structured transfer
-        message (Ed25519 is Solana's native scheme). Nothing here is signed by
-        this method; the wallet binding lives in the facilitator attestation
-        that ``settle`` produces over this payload.
+        typed-data dict in ``eth_signTypedData_v4`` shape. ``payer`` is the
+        payer wallet's on-chain address and is REQUIRED for EVM networks:
+        the facilitator attestation signs this exact payload, so a blank
+        ``from`` would leave the actually-signed transfer unbound from the
+        attestation the receipt carries. The payer wallet still computes the
+        EIP-712 digest and produces the on-chain signature itself. Solana
+        networks get a structured transfer message (Ed25519 is Solana's
+        native scheme); ``payer`` is optional there and included when given.
+        Nothing here is signed by this method; the wallet binding lives in
+        the facilitator attestation that ``settle`` produces over this
+        payload.
         """
         del wallet_id  # bound via the attestation payload, not the on-chain bytes
         nonce_hex = self._derive_nonce_hex(permit_id, idempotency_key)
@@ -249,6 +261,11 @@ class X402PaymentHandler:
         if requirement.network in _EVM_NETWORKS:
             if valid_before is None:
                 raise X402Error("x402_validity_window_required")
+            if payer is None:
+                raise X402Error("x402_payer_required")
+            payer = payer.strip()
+            if not _EVM_ADDRESS_RE.fullmatch(payer):
+                raise X402Error("x402_payer_invalid")
             chain_id, usdc_contract = _EVM_NETWORKS[requirement.network]
             return {
                 "types": {
@@ -275,8 +292,7 @@ class X402PaymentHandler:
                     "verifyingContract": usdc_contract,
                 },
                 "message": {
-                    # Filled in by the payer wallet before signing.
-                    "from": "",
+                    "from": payer,
                     "to": requirement.pay_to,
                     "value": value,
                     "validAfter": str(valid_after),
@@ -284,7 +300,11 @@ class X402PaymentHandler:
                     "nonce": f"0x{nonce_hex}",
                 },
             }
-        return {
+        if payer is not None:
+            payer = payer.strip()
+            if not _SOLANA_ADDRESS_RE.fullmatch(payer):
+                raise X402Error("x402_payer_invalid")
+        authorization: dict[str, Any] = {
             "scheme": "x402-solana-transfer/1",
             "network": requirement.network,
             "asset": requirement.asset,
@@ -294,6 +314,9 @@ class X402PaymentHandler:
             "memo": f"awi-permit:{permit_id}",
             "nonce": nonce_hex,
         }
+        if payer is not None:
+            authorization["payer"] = payer
+        return authorization
 
     async def settle(
         self,
@@ -303,6 +326,7 @@ class X402PaymentHandler:
         key_id: str | None,
         requirement: X402PaymentRequirement,
         idempotency_key: str,
+        payer: str | None = None,
         idempotency_record_id: str | None = None,
     ) -> X402Settlement:
         """Authorize a 402 demand against a permit and record the settlement.
@@ -318,6 +342,17 @@ class X402PaymentHandler:
         # settings.EXCHANGE_RATE is the single credits-per-USD source of truth
         # (see app/core/config.py — do not re-declare it as a constant here).
         credits = requirement.amount_usd * settings.EXCHANGE_RATE
+
+        # Validate the payer before touching the permit so a missing or
+        # malformed address never reserves budget it must then compensate.
+        # build_transfer_authorization re-checks as defense in depth.
+        if requirement.network in _EVM_NETWORKS:
+            if payer is None:
+                raise X402Error("x402_payer_required")
+            if not _EVM_ADDRESS_RE.fullmatch(payer.strip()):
+                raise X402Error("x402_payer_invalid")
+        elif payer is not None and not _SOLANA_ADDRESS_RE.fullmatch(payer.strip()):
+            raise X402Error("x402_payer_invalid")
 
         permits = get_permit_service()
         validation = await permits.authorize_and_reserve(
@@ -352,6 +387,7 @@ class X402PaymentHandler:
                 permit_id=permit_id,
                 wallet_id=wallet_id,
                 idempotency_key=idempotency_key,
+                payer=payer,
                 valid_after=_epoch_seconds(permit_model.issued_at),
                 valid_before=_epoch_seconds(permit_model.expires_at),
             )
@@ -460,7 +496,8 @@ class X402PaymentHandler:
             # No partial settlement may persist: release the exact reserved
             # amount. The shadow session either never charged, was already
             # terminally ended, or (best effort) is discarded here; nothing
-            # durable was written before the receipt.
+            # durable was written before the receipt except the audit event,
+            # which the compensating failure event below corrects.
             if shadow_session_id is not None:
                 try:
                     await get_shadow_ledger().revert_session(shadow_session_id)
@@ -474,6 +511,42 @@ class X402PaymentHandler:
             except Exception:
                 logger.exception(
                     "x402 budget release failed for permit %s", permit_id
+                )
+            # authorize_and_reserve consumed one max_calls_per_tool use along
+            # with the budget; a compensated failure must give both back or a
+            # one-call permit's legitimate retry is denied
+            # permit_max_calls_exceeded with no receipt to show for it.
+            try:
+                await permits.release_tool_call(permit_id, X402_TOOL_NAME)
+            except Exception:
+                logger.exception(
+                    "x402 tool-call release failed for permit %s", permit_id
+                )
+            # The success audit event (if it was written) must not stand as
+            # the last word on an attempt that did not settle: append a
+            # compensating failure event so the chain records what actually
+            # happened instead of a success with no receipt.
+            reason = exc.reason if isinstance(exc, X402Error) else "x402_settlement_failed"
+            try:
+                await record_audit_event(
+                    event="x402.settlement_failed",
+                    wallet_id=wallet_id,
+                    tool=X402_TOOL_NAME,
+                    endpoint="/v1/x402/settle",
+                    key_id=key_id,
+                    request_id=idempotency_key[:100],
+                    ok=False,
+                    error=reason,
+                    metadata={
+                        "permit_id": permit_id,
+                        "idempotency_key": idempotency_key,
+                        "credits_released": str(credits),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "x402 compensating audit event failed for permit %s",
+                    permit_id,
                 )
             if isinstance(exc, X402Error):
                 raise

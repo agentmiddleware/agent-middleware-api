@@ -99,13 +99,16 @@ class X402Client:
         wallet_id: str,
         requirement: dict[str, Any],
         idempotency_key: str,
+        payer: str | None = None,
     ) -> dict[str, Any]:
         """POST the requirement to ``/v1/x402/settle`` and return the settlement.
 
         ``requirement`` is the dict from :func:`parse_402_response` (keys
-        ``amount``/``pay_to``/``network``, optional ``asset``); the server
-        response includes the transfer authorization for the payer wallet to
-        sign plus the settlement receipt id.
+        ``amount``/``pay_to``/``network``, optional ``asset``); ``payer`` is
+        the payer wallet's on-chain address — required by the server for EVM
+        networks so the attested EIP-712 message binds the real ``from``. The
+        server response includes the transfer authorization for the payer
+        wallet to sign plus the settlement receipt id.
         """
         key = idempotency_key.strip()
         if not key:
@@ -123,6 +126,8 @@ class X402Client:
         asset = requirement.get("asset")
         if asset:
             body["asset"] = asset
+        if payer is not None:
+            body["payer"] = payer
         try:
             response = await self._client.post(
                 "/v1/x402/settle",
@@ -169,6 +174,7 @@ class X402Client:
         permit_id: str,
         wallet_id: str,
         idempotency_key: str,
+        payer: str | None = None,
     ) -> dict[str, Any] | None:
         """Parse a 402 response and settle it in one step.
 
@@ -184,6 +190,7 @@ class X402Client:
             wallet_id=wallet_id,
             requirement=requirement,
             idempotency_key=idempotency_key,
+            payer=payer,
         )
 
     async def close(self) -> None:

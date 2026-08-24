@@ -14,12 +14,14 @@ signed receipts only (docs/settlement-rails.md settlement freeze).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.services.audit_log import list_audit_events
 from app.services.receipts import ReceiptService, get_receipt_service
 from app.services.shadow_ledger import get_shadow_ledger
 from app.services.x402_engine import X402Error, get_x402_handler
@@ -32,6 +34,7 @@ from tests.test_trust_helpers import (
 )
 
 EVM_PAY_TO = "0x1111111111111111111111111111111111111111"
+EVM_PAYER = "0x2222222222222222222222222222222222222222"
 SOLANA_PAY_TO = "A" * 40  # valid base58 alphabet, length within 32-44
 
 
@@ -61,14 +64,18 @@ def _settle_body(
     amount: str = "0.03",
     pay_to: str = EVM_PAY_TO,
     network: str = "base",
+    payer: str | None = EVM_PAYER,
 ) -> dict:
-    return {
+    body = {
         "permit_id": permit_id,
         "wallet_id": wallet_id,
         "amount": amount,
         "pay_to": pay_to,
         "network": network,
     }
+    if payer is not None:
+        body["payer"] = payer
+    return body
 
 
 async def _permit_spent(client: AsyncClient, permit_id: str) -> Decimal:
@@ -221,6 +228,7 @@ def test_x402_parse_evm_happy_path_and_eip712_shape():
         permit_id="permit-abc",
         wallet_id="wallet-abc",
         idempotency_key="idem-abc",
+        payer=EVM_PAYER,
         valid_after=100,
         valid_before=200,
     )
@@ -240,7 +248,10 @@ def test_x402_parse_evm_happy_path_and_eip712_shape():
     assert message["value"] == "1500000"  # $1.50 in 6-decimal USDC base units
     assert message["validAfter"] == "100"
     assert message["validBefore"] == "200"
-    assert message["from"] == ""  # payer wallet fills its own address in
+    # The attested message binds the real payer address: the facilitator
+    # signature covers this exact payload, so a blank `from` would leave the
+    # actually-signed transfer unbound from the attestation.
+    assert message["from"] == EVM_PAYER
     nonce = message["nonce"]
     assert nonce.startswith("0x") and len(nonce) == 66  # 32 bytes of hex
     int(nonce, 16)  # must be hex
@@ -252,6 +263,7 @@ def test_x402_parse_evm_happy_path_and_eip712_shape():
         permit_id="permit-abc",
         wallet_id="wallet-abc",
         idempotency_key="idem-abc",
+        payer=EVM_PAYER,
         valid_after=100,
         valid_before=200,
     )
@@ -261,10 +273,34 @@ def test_x402_parse_evm_happy_path_and_eip712_shape():
         permit_id="permit-abc",
         wallet_id="wallet-abc",
         idempotency_key="idem-other",
+        payer=EVM_PAYER,
         valid_after=100,
         valid_before=200,
     )
     assert other["message"]["nonce"] != nonce
+
+    # EVM authorizations without a (valid) payer are refused outright.
+    with pytest.raises(X402Error) as missing:
+        handler.build_transfer_authorization(
+            requirement,
+            permit_id="permit-abc",
+            wallet_id="wallet-abc",
+            idempotency_key="idem-abc",
+            valid_after=100,
+            valid_before=200,
+        )
+    assert missing.value.reason == "x402_payer_required"
+    with pytest.raises(X402Error) as malformed:
+        handler.build_transfer_authorization(
+            requirement,
+            permit_id="permit-abc",
+            wallet_id="wallet-abc",
+            idempotency_key="idem-abc",
+            payer="0xnothex",
+            valid_after=100,
+            valid_before=200,
+        )
+    assert malformed.value.reason == "x402_payer_invalid"
 
 
 @pytest.mark.parametrize(
@@ -284,6 +320,7 @@ def test_x402_evm_usdc_domain_per_network(network, chain_id, contract):
         permit_id="permit-net",
         wallet_id="wallet-net",
         idempotency_key="idem-net",
+        payer=EVM_PAYER,
         valid_after=0,
         valid_before=10,
     )
@@ -622,6 +659,7 @@ async def test_sdk_handle_402_settles_against_app(client, clean_database):
             permit_id=permit["permit_id"],
             wallet_id=wallet_id,
             idempotency_key="x402-sdk-1",
+            payer=EVM_PAYER,
         )
         assert settlement is not None
         assert settlement["receipt_id"].startswith("rcpt-")
@@ -660,8 +698,178 @@ async def test_sdk_settle_surfaces_permit_denial(client, clean_database):
                     "network": "base",
                 },
                 idempotency_key="x402-sdk-deny-1",
+                payer=EVM_PAYER,
             )
         assert exc.value.reason == "permit_budget_exceeded"
     finally:
         await sdk.close()
     assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
+
+
+# ---------------------------------------------------------------------------
+# Settlement-integrity regressions (PR #363 review findings)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_x402_settle_rejects_unsupported_asset(client, clean_database):
+    """The engine only knows USDC: any other asset string must be refused
+    before it can produce evidence claiming one token while the typed data
+    moves another."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-asset-permit",
+    )
+    body = _settle_body(permit_id=permit["permit_id"], wallet_id=wallet_id)
+    body["asset"] = "DAI"
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=body,
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "x402-asset-1"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "x402_asset_unsupported"
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
+
+    with pytest.raises(X402Error) as exc:
+        get_x402_handler().build_requirement(
+            amount="1.00", pay_to=EVM_PAY_TO, network="base", asset="DAI"
+        )
+    assert exc.value.reason == "x402_asset_unsupported"
+
+
+@pytest.mark.anyio
+async def test_x402_settle_requires_payer_for_evm(client, clean_database):
+    """EVM settlements without a (valid) payer address are refused before any
+    budget is reserved: the attestation must bind the real EIP-712 `from`."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-payer-permit",
+    )
+    for payer, reason in ((None, "x402_payer_required"), ("0xzz", "x402_payer_invalid")):
+        resp = await client.post(
+            "/v1/x402/settle",
+            json=_settle_body(
+                permit_id=permit["permit_id"], wallet_id=wallet_id, payer=payer
+            ),
+            headers={
+                **provisioned["agent_headers"],
+                "Idempotency-Key": f"x402-payer-{reason}",
+            },
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == reason
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_x402_failed_settlement_appends_compensating_audit_event(
+    client, clean_database, monkeypatch
+):
+    """A settlement that fails after its success audit event was written must
+    not let that event stand as the last word: a compensating failure event
+    joins the chain, and the chain still verifies."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-comp-permit",
+    )
+
+    async def _induced_receipt_failure(self, **kwargs):
+        raise RuntimeError("induced receipt failure")
+
+    monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
+    failed = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(permit_id=permit["permit_id"], wallet_id=wallet_id),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "x402-comp-1"},
+    )
+    assert failed.status_code == 400
+    monkeypatch.undo()
+
+    failures = await list_audit_events(
+        event="x402.settlement_failed", wallet_id=wallet_id
+    )
+    assert len(failures) == 1
+    assert failures[0].ok is False
+    assert failures[0].error == "x402_settlement_failed"
+    assert failures[0].metadata["permit_id"] == permit["permit_id"]
+
+    chain = await client.post(
+        "/v1/audit/verify-chain",
+        json={"wallet_id": wallet_id},
+        headers=BOOTSTRAP_HEADERS,
+    )
+    assert chain.status_code == 200
+    assert chain.json()["valid"] is True
+
+
+@pytest.mark.anyio
+async def test_x402_max_calls_released_on_failed_settlement(
+    client, clean_database, monkeypatch
+):
+    """A compensated failure gives back the max_calls_per_tool use it
+    consumed: a one-call permit's retried key settles instead of dying on
+    permit_max_calls_exceeded, and the cap still bites after the success."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": wallet_id,
+            "subject_wallet_id": wallet_id,
+            "subject_key_id": provisioned["key_id"],
+            "allowed_tools": ["x402.payment"],
+            "scopes": ["tool:x402.payment:invoke", "billing:charge"],
+            "max_credits": 100,
+            "max_calls_per_tool": {"x402.payment": 1},
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "x402-maxcall-permit"},
+    )
+    assert resp.status_code == 201
+    permit_id = resp.json()["permit_id"]
+    body = _settle_body(permit_id=permit_id, wallet_id=wallet_id, amount="0.01")
+    headers = {**provisioned["agent_headers"], "Idempotency-Key": "x402-maxcall-1"}
+
+    async def _induced_receipt_failure(self, **kwargs):
+        raise RuntimeError("induced receipt failure")
+
+    monkeypatch.setattr(ReceiptService, "create_receipt", _induced_receipt_failure)
+    failed = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert failed.status_code == 400
+    monkeypatch.undo()
+
+    # The retry must not be told the single allowed call was already used by
+    # the compensated failure.
+    ok = await client.post("/v1/x402/settle", json=body, headers=headers)
+    assert ok.status_code == 200
+    assert await _permit_spent(client, permit_id) == Decimal("10")
+
+    # The successful settlement legitimately consumed the one allowed call.
+    second = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(permit_id=permit_id, wallet_id=wallet_id, amount="0.01"),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "x402-maxcall-2"},
+    )
+    assert second.status_code == 400
+    assert second.json()["detail"] == "permit_max_calls_exceeded"

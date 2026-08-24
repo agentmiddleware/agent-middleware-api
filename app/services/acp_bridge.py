@@ -53,6 +53,11 @@ ACP_CHECKOUT_ENDPOINT = "/v1/billing/acp/checkout"
 ACP_PERMIT_TTL = timedelta(minutes=15)
 _SETTLED_STRIPE_STATUSES = frozenset({"succeeded"})
 
+# An in-progress intent record idle past this threshold is treated as a
+# crashed attempt and recovered (see execute_checkout); mirrors the 300s
+# staleness standard used by the governed-MCP reconciliation sweep.
+_INTENT_STALE_SECONDS = 300
+
 
 class ACPBridgeError(RuntimeError):
     def __init__(self, reason: str) -> None:
@@ -190,22 +195,94 @@ class ACPCommerceAdapter:
         # 2. Idempotency on intent_id (checklist item 7): a repeated intent
         # replays the original result and must not reach the charge path.
         idem = get_idempotency_service()
+        idem_payload = self._idempotency_payload(
+            request,
+            sponsor_wallet_id=sponsor_wallet_id,
+            agent_wallet_id=agent_wallet_id,
+            key_id=key_id,
+        )
         try:
             begun = await idem.begin_with_record(
                 wallet_id=agent_wallet_id,
                 endpoint=ACP_CHECKOUT_ENDPOINT,
                 idempotency_key=request.intent_id,
-                request_payload=self._idempotency_payload(
-                    request,
-                    sponsor_wallet_id=sponsor_wallet_id,
-                    agent_wallet_id=agent_wallet_id,
-                    key_id=key_id,
-                ),
+                request_payload=idem_payload,
             )
         except IdempotencyConflictError as exc:
             raise ACPBridgeError("acp_intent_conflict") from exc
         except IdempotencyInProgressError as exc:
-            raise ACPBridgeError("acp_intent_in_progress") from exc
+            # A record left in progress can be a live concurrent checkout — or
+            # the wreckage of a process that died between the Stripe charge
+            # and `idem.complete`. Nothing repairs this endpoint's records
+            # (reconcile_stuck_records covers only the governed MCP endpoint,
+            # and no ledger_entry_id checkpoint exists here), so without this
+            # branch a crashed intent is wedged forever: charged at Stripe,
+            # no order, every retry rejected. A record idle past the repo's
+            # standard 300s staleness threshold is treated as crashed and
+            # recovered by crash shape:
+            #  - died AFTER the receipt (the durable settlement record): the
+            #    checkout DID settle — reconstruct the response from the
+            #    receipt (order_id and derived_total are deterministic) and
+            #    complete the record with it, exactly what
+            #    reconcile_stuck_records does for receipted MCP records.
+            #  - died BEFORE the receipt: abandon the record (abandon refuses
+            #    completed/charged ones) and re-run. Re-execution cannot
+            #    double-charge — the Stripe idempotency key is the
+            #    deterministic order_id, so Stripe returns the original
+            #    PaymentIntent (checklist item 7). The crashed attempt's
+            #    single-use permit is left to expire; the budget
+            #    reconciliation sweep already handles expired permits.
+            record = await idem.get_record(
+                wallet_id=agent_wallet_id,
+                endpoint=ACP_CHECKOUT_ENDPOINT,
+                idempotency_key=request.intent_id,
+            )
+            stale = (
+                record is not None
+                and record.response_json is None
+                and not record.ledger_entry_id
+                and record.created_at
+                < utc_now() - timedelta(seconds=_INTENT_STALE_SECONDS)
+            )
+            if not stale:
+                raise ACPBridgeError("acp_intent_in_progress") from exc
+            assert record is not None
+            receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+                record.record_id
+            )
+            if receipt is not None and receipt.audit_event_id is not None:
+                recovered = ACPCheckoutResponse(
+                    order_id=order_id,
+                    intent_id=request.intent_id,
+                    permit_id=receipt.permit_id,
+                    receipt_id=receipt.receipt_id,
+                    audit_event_id=receipt.audit_event_id,
+                    derived_total=derived_total,
+                    status="settled",
+                )
+                await idem.complete(
+                    wallet_id=agent_wallet_id,
+                    endpoint=ACP_CHECKOUT_ENDPOINT,
+                    idempotency_key=request.intent_id,
+                    response_reference=receipt.receipt_id,
+                    response_json=recovered.model_dump(mode="json"),
+                    status_code=200,
+                )
+                return recovered
+            await self._abandon_intent(
+                agent_wallet_id=agent_wallet_id, intent_id=request.intent_id
+            )
+            try:
+                begun = await idem.begin_with_record(
+                    wallet_id=agent_wallet_id,
+                    endpoint=ACP_CHECKOUT_ENDPOINT,
+                    idempotency_key=request.intent_id,
+                    request_payload=idem_payload,
+                )
+            except IdempotencyConflictError as retry_exc:
+                raise ACPBridgeError("acp_intent_conflict") from retry_exc
+            except IdempotencyInProgressError as retry_exc:
+                raise ACPBridgeError("acp_intent_in_progress") from retry_exc
         if begun.replay is not None:
             payload = begun.replay.response_json
             if not isinstance(payload, dict):
