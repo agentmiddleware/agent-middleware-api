@@ -1219,6 +1219,11 @@ async def test_acp_rebind_prevented_by_mark_charged(client, spt_stub, clean_data
     """After a Stripe charge succeeds, mark_charged sets ledger_entry_id.
     On retry with different cart but same intent_id, idempotency conflict
     is detected immediately (not a rebind to the original charge)."""
+    from sqlalchemy import select
+
+    from app.db.database import get_session_factory
+    from app.db.models import IdempotencyRecordModel
+
     ctx = await provision_agent_wallet(client)
 
     # First checkout with intent_id="rebind-1", merchant="alice.com", total=$50
@@ -1230,10 +1235,25 @@ async def test_acp_rebind_prevented_by_mark_charged(client, spt_stub, clean_data
     assert first.status_code == 201, first.text
     assert len(spt_stub) == 1
 
+    # Verify mark_charged() set ledger_entry_id on the idempotency record
+    factory = get_session_factory()
+    async with factory() as session:
+        record = (
+            await session.execute(
+                select(IdempotencyRecordModel).where(
+                    IdempotencyRecordModel.wallet_id == ctx["wallet_id"],
+                    IdempotencyRecordModel.endpoint == ACP_CHECKOUT_ENDPOINT,
+                    IdempotencyRecordModel.idempotency_key == "rebind-1",
+                )
+            )
+        ).scalar_one()
+        # ledger_entry_id should be set to the Stripe payment_intent_id
+        assert record.ledger_entry_id is not None
+        assert record.ledger_entry_id.startswith("pi_")
+
     # Second attempt: same intent_id, different cart (quantity 3 instead of 2).
-    # The idempotency record should have ledger_entry_id set from the first
-    # charge (mark_charged), so this should be rejected as a conflict before
-    # any Stripe call is made.
+    # The idempotency record has ledger_entry_id set, so this is rejected
+    # as a conflict before any Stripe call is made.
     conflicting = await client.post(
         checkout_url(ctx),
         json=checkout_body("rebind-1", quantity=3, client_total="75"),
