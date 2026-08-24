@@ -15,6 +15,11 @@ from typing import Any
 
 import httpx
 
+# Same lazy tier as this module: both x402 and client require httpx, and the
+# package only reaches either through the PEP 562 lazy attributes in
+# __init__.py, so importing .client here keeps the offline (no-httpx)
+# verification path dependency-free.
+from .client import AgentMiddlewareClient
 from .errors import (
     APIError,
     AuthenticationError,
@@ -28,20 +33,10 @@ _AMOUNT_HEADER = "x-402-amount"
 _PAY_TO_HEADER = "x-402-payto"
 _NETWORK_HEADER = "x-402-network"
 
-
-def _detail_from(payload: dict[str, Any], fallback: str) -> str:
-    """Extract the API's error detail string (mirrors client.py's helper)."""
-    detail = payload.get("detail")
-    if isinstance(detail, str) and detail:
-        return detail
-    if isinstance(detail, dict):
-        nested = detail.get("error") or detail.get("detail")
-        if isinstance(nested, str) and nested:
-            return nested
-    error = payload.get("error")
-    if isinstance(error, str) and error:
-        return error
-    return fallback
+# Reuse the core client's private helpers instead of duplicating them here;
+# client.py is the single source of truth for both behaviors.
+_error_detail = AgentMiddlewareClient._error_detail
+_validate_idempotency_key = AgentMiddlewareClient._validate_idempotency_key
 
 
 def parse_402_response(response: Any) -> dict[str, Any] | None:
@@ -85,6 +80,9 @@ class X402Client:
             headers={
                 "X-API-Key": api_key,
                 "Content-Type": "application/json",
+                # Source of truth for the User-Agent string is
+                # AgentMiddlewareClient.__init__ in client.py (it exposes no
+                # importable constant); keep the two in lockstep.
                 "User-Agent": "b2a-sdk/0.5.0",
             },
             timeout=timeout,
@@ -110,11 +108,7 @@ class X402Client:
         server response includes the transfer authorization for the payer
         wallet to sign plus the settlement receipt id.
         """
-        key = idempotency_key.strip()
-        if not key:
-            raise ValueError("idempotency_key must not be blank")
-        if len(key) > 128:
-            raise ValueError("idempotency_key must be at most 128 characters")
+        key = _validate_idempotency_key(idempotency_key)
         amount = requirement.get("amount", requirement.get("amount_usd"))
         body: dict[str, Any] = {
             "permit_id": permit_id,
@@ -149,13 +143,16 @@ class X402Client:
                 status_code=response.status_code,
             )
         if response.is_error:
-            detail = _detail_from(payload, f"HTTP {response.status_code}")
+            detail = _error_detail(payload, f"HTTP {response.status_code}")
             if response.status_code == 401:
                 raise AuthenticationError(
                     detail, status_code=401, payload=payload
                 )
-            # Permit denials arrive as 400 (denied reason) or 404 (not found)
-            # with a permit_* detail; surface them as the typed permit error.
+            # Deliberate divergence from client.py's _raise_http_error, which
+            # maps permit_* details to PermitDeniedError only on 403: the x402
+            # settle endpoint returns permit denials as 400 (denied reason) or
+            # 404 (permit_not_found), so any permit_* detail is surfaced as
+            # the typed permit error regardless of status.
             if detail.startswith("permit_"):
                 raise PermitDeniedError(detail, payload=payload)
             if response.status_code == 403:

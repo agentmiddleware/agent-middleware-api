@@ -202,6 +202,64 @@ async def test_x402_atomic_settlement(client, clean_database, monkeypatch):
     assert total == 1
 
 
+@pytest.mark.anyio
+async def test_x402_settle_solana_end_to_end(client, clean_database):
+    """The full Solana settle path: permit reservation, attestation over the
+    Solana structured message (payer optional on Solana), shadow metering,
+    a verifiable receipt, and exact budget consumption."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-solana-permit",
+    )
+    permit_id = permit["permit_id"]
+
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit_id,
+            wallet_id=wallet_id,
+            amount="0.03",
+            pay_to=SOLANA_PAY_TO,
+            network="solana",
+            payer=None,  # optional on Solana; the wallet signs natively
+        ),
+        headers={**provisioned["agent_headers"], "Idempotency-Key": "x402-solana-1"},
+    )
+    assert resp.status_code == 200
+    settlement = resp.json()
+    assert settlement["network"] == "solana"
+    assert settlement["receipt_id"].startswith("rcpt-")
+
+    authorization = settlement["authorization"]
+    assert authorization["scheme"] == "x402-solana-transfer/1"
+    assert authorization["pay_to"] == SOLANA_PAY_TO
+    assert authorization["amount"] == "30000"  # $0.03 in 6-decimal base units
+    assert "payer" not in authorization
+    # settle threads the permit's issued_at..expires_at window (unix seconds)
+    # into the signed Solana message, mirroring EVM validAfter/validBefore.
+    valid_after = int(authorization["valid_after"])
+    valid_before = int(authorization["valid_before"])
+    assert 0 < valid_after < valid_before
+
+    verify = await client.post(
+        "/v1/receipts/verify",
+        json={"receipt_id": settlement["receipt_id"]},
+        headers=provisioned["agent_headers"],
+    )
+    assert verify.status_code == 200
+    assert verify.json()["valid"] is True
+
+    # $0.03 at the default 1000 credits/USD rate = 30 credits, all reserved.
+    assert Decimal(settlement["credits"]) == Decimal("30")
+    assert await _permit_spent(client, permit_id) == Decimal(settlement["credits"])
+
+
 # ---------------------------------------------------------------------------
 # Parsing and transfer-authorization shapes
 # ---------------------------------------------------------------------------
@@ -350,6 +408,23 @@ def test_x402_parse_solana_happy_path_and_message_shape():
     assert authorization["decimals"] == 6
     assert "permit-sol" in authorization["memo"]
     assert len(authorization["nonce"]) == 64
+    # The validity window is part of the signed Solana message (defaults
+    # when no window is supplied): a late signer must be able to see it.
+    assert authorization["valid_after"] == "0"
+    assert authorization["valid_before"] is None
+
+    windowed = handler.build_transfer_authorization(
+        requirement,
+        permit_id="permit-sol",
+        wallet_id="wallet-sol",
+        idempotency_key="idem-sol",
+        valid_after=100,
+        valid_before=200,
+    )
+    assert windowed["valid_after"] == "100"
+    assert windowed["valid_before"] == "200"
+    # The window fields never perturb the deterministic nonce.
+    assert windowed["nonce"] == authorization["nonce"]
 
 
 def test_x402_parse_rejects_non_402_status():

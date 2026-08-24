@@ -313,6 +313,12 @@ class X402PaymentHandler:
             "decimals": _USDC_DECIMALS,
             "memo": f"awi-permit:{permit_id}",
             "nonce": nonce_hex,
+            # The permit validity window rides in the structured message —
+            # mirroring the EVM validAfter/validBefore — so a payer wallet
+            # signing late, or replaying a stored payload, can see that the
+            # permit window has closed instead of blindly signing it.
+            "valid_after": str(valid_after),
+            "valid_before": str(valid_before) if valid_before is not None else None,
         }
         if payer is not None:
             authorization["payer"] = payer
