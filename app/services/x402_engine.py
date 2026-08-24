@@ -59,13 +59,18 @@ _USDC_DECIMALS = 6
 # allowed to encumber an entire permit budget in one call.
 _MAX_AMOUNT_USD = Decimal("10000")
 
-# Canonical USDC deployments per EVM network: (chainId, verifyingContract).
-# These pin the EIP-712 domain so the payer wallet's signature can only ever
-# authorize the real USDC contract on the intended chain.
-_EVM_NETWORKS: dict[str, tuple[int, str]] = {
-    "base": (8453, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
-    "base-sepolia": (84532, "0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
-    "ethereum": (1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+# Canonical USDC deployments per EVM network:
+# (chainId, verifyingContract, EIP-712 domain name). These pin the EIP-712
+# domain so the payer wallet's signature can only ever authorize the real
+# USDC contract on the intended chain. The domain name is the FiatToken
+# contract's initialized name(), which feeds its DOMAIN_SEPARATOR — Circle's
+# mainnet deployments register "USD Coin" while the Base Sepolia test
+# deployment registers "USDC"; a mismatched name makes every signature
+# unverifiable on-chain.
+_EVM_NETWORKS: dict[str, tuple[int, str, str]] = {
+    "base": (8453, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "USD Coin"),
+    "base-sepolia": (84532, "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "USDC"),
+    "ethereum": (1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "USD Coin"),
 }
 
 _SOLANA_NETWORKS = frozenset({"solana", "solana-devnet"})
@@ -268,7 +273,9 @@ class X402PaymentHandler:
             payer = payer.strip()
             if not _EVM_ADDRESS_RE.fullmatch(payer):
                 raise X402Error("x402_payer_invalid")
-            chain_id, usdc_contract = _EVM_NETWORKS[requirement.network]
+            chain_id, usdc_contract, domain_name = _EVM_NETWORKS[
+                requirement.network
+            ]
             return {
                 "types": {
                     "EIP712Domain": [
@@ -288,7 +295,7 @@ class X402PaymentHandler:
                 },
                 "primaryType": "TransferWithAuthorization",
                 "domain": {
-                    "name": "USD Coin",
+                    "name": domain_name,
                     "version": "2",
                     "chainId": chain_id,
                     "verifyingContract": usdc_contract,

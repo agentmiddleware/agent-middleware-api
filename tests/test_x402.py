@@ -260,6 +260,41 @@ async def test_x402_settle_solana_end_to_end(client, clean_database):
     assert await _permit_spent(client, permit_id) == Decimal(settlement["credits"])
 
 
+@pytest.mark.anyio
+async def test_x402_settle_solana_rejects_malformed_payer(client, clean_database):
+    """Payer is optional on Solana, but a PRESENT payer must be a valid
+    base58 address: a malformed one is refused before any budget moves."""
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=provisioned["key_id"],
+        tool_name="x402.payment",
+        max_credits=100,
+        idem_key="x402-solana-payer-permit",
+    )
+
+    resp = await client.post(
+        "/v1/x402/settle",
+        json=_settle_body(
+            permit_id=permit["permit_id"],
+            wallet_id=wallet_id,
+            amount="0.03",
+            pay_to=SOLANA_PAY_TO,
+            network="solana",
+            payer="0Ol-invalid",  # excluded base58 characters, wrong length
+        ),
+        headers={
+            **provisioned["agent_headers"],
+            "Idempotency-Key": "x402-solana-payer-1",
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "x402_payer_invalid"
+    assert await _permit_spent(client, permit["permit_id"]) == Decimal("0")
+
+
 # ---------------------------------------------------------------------------
 # Parsing and transfer-authorization shapes
 # ---------------------------------------------------------------------------
@@ -362,13 +397,22 @@ def test_x402_parse_evm_happy_path_and_eip712_shape():
 
 
 @pytest.mark.parametrize(
-    ("network", "chain_id", "contract"),
+    ("network", "chain_id", "contract", "domain_name"),
     [
-        ("base-sepolia", 84532, "0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
-        ("ethereum", 1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+        # Base Sepolia's FiatToken test deployment initializes name() as
+        # "USDC" (mainnet deployments use "USD Coin"); the name feeds the
+        # contract's DOMAIN_SEPARATOR, so signing under the wrong one yields
+        # signatures that can never verify on that chain.
+        (
+            "base-sepolia",
+            84532,
+            "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "USDC",
+        ),
+        ("ethereum", 1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "USD Coin"),
     ],
 )
-def test_x402_evm_usdc_domain_per_network(network, chain_id, contract):
+def test_x402_evm_usdc_domain_per_network(network, chain_id, contract, domain_name):
     handler = get_x402_handler()
     requirement = handler.parse_402(
         402, _x402_headers(amount="0.25", network=network)
@@ -384,6 +428,7 @@ def test_x402_evm_usdc_domain_per_network(network, chain_id, contract):
     )
     assert authorization["domain"]["chainId"] == chain_id
     assert authorization["domain"]["verifyingContract"] == contract
+    assert authorization["domain"]["name"] == domain_name
     assert authorization["message"]["value"] == "250000"
 
 
