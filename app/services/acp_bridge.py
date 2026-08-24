@@ -17,8 +17,9 @@ Settlement-rails conformance (docs/settlement-rails.md):
 * item 5 — currency is validated against a fail-closed allowlist at the
   schema boundary and revalidated by the Stripe helper;
 * item 7 — a repeated ``intent_id`` replays the original checkout result via
-  the durable idempotency service and provably never charges twice (the
-  intent id also rides to Stripe as the PaymentIntent idempotency key).
+  the durable idempotency service and provably never charges twice (a
+  wallet-scoped key derived from the intent id also rides to Stripe as the
+  PaymentIntent idempotency key — see ``stripe_idempotency_key``).
 
 The ``spt_token`` is never logged and never persisted: it is excluded from
 the idempotency request payload, the receipt payloads, and the audit
@@ -55,6 +56,13 @@ ACP_CHECKOUT_ENDPOINT = "/v1/billing/acp/checkout"
 # not remain reservable long after the settlement window has passed.
 ACP_PERMIT_TTL = timedelta(minutes=15)
 _SETTLED_STRIPE_STATUSES = frozenset({"succeeded"})
+# PaymentIntent statuses Stripe allows to be canceled. Deliberately excludes
+# "processing": Stripe refuses to cancel an intent that is already being
+# captured, so attempting it would only add a guaranteed API error on top of
+# the failure being handled.
+_CANCELABLE_STRIPE_STATUSES = frozenset(
+    {"requires_action", "requires_confirmation", "requires_payment_method"}
+)
 
 # An in-progress intent record idle past this threshold is treated as a
 # crashed attempt and recovered (see execute_checkout); mirrors the 300s
@@ -95,6 +103,31 @@ def line_items_digest(line_items: list[ACPLineItem]) -> str:
     return sha256_hex(
         {"line_items": [item.model_dump(mode="json") for item in line_items]}
     )
+
+
+def stripe_idempotency_key(order_id: str, agent_wallet_id: str) -> str:
+    """Wallet-scoped Stripe PaymentIntent idempotency key for one checkout.
+
+    Deterministic for (agent_wallet_id, intent_id) — that determinism IS the
+    double-charge defense: every re-run of the same wallet's intent (a crash
+    retry, the stale-intent recovery re-run in ``execute_checkout``) presents
+    the same key, so Stripe replays the original PaymentIntent instead of
+    creating a second charge. Never derive anything time- or attempt-varying
+    into this key.
+
+    Scoped by the agent wallet because our intent idempotency records are per
+    wallet: a bare order id would be one GLOBAL Stripe key, so a second wallet
+    reusing the same client-chosen intent id would either silently replay the
+    first wallet's PaymentIntent (identical parameters) or draw a Stripe
+    idempotency_error (different parameters). The order id itself stays the
+    caller-visible order handle and is unchanged by this scoping.
+
+    Length is provably within Stripe's 255-char idempotency-key cap with no
+    digest fallback needed: the order id is at most 132 chars ("acp-" plus
+    the schema's 128-char intent_id cap) and wallet ids are capped at 50
+    chars by the wallets table, so the joined key never exceeds 183 chars.
+    """
+    return f"{order_id}:{agent_wallet_id}"
 
 
 def audit_request_id(order_id: str) -> str:
@@ -177,6 +210,53 @@ class ACPCommerceAdapter:
             idempotency_key=intent_id,
         )
 
+    @staticmethod
+    async def _cancel_unsettled_charge(
+        charge: dict[str, Any],
+        *,
+        order_id: str,
+        stripe_idem_key: str,
+    ) -> dict[str, Any]:
+        """Best-effort cancel of a confirmed-but-not-settled PaymentIntent.
+
+        A charge that came back non-settled is refused and rolled back on
+        our side, but the PaymentIntent itself stays live at Stripe and can
+        still settle later with no governance record. Cancel it when Stripe
+        allows (see _CANCELABLE_STRIPE_STATUSES) and report the outcome —
+        "canceled", "cancel_failed", or "not_cancelable" — as evidence
+        metadata for the rollback audit event. Never raises: a failing
+        cancel must not mask the original non-settled error, and the
+        cancel-failed evidence is what makes the orphaned intent findable.
+        """
+        payment_intent_id = charge.get("payment_intent_id")
+        payment_status = charge.get("status")
+        evidence: dict[str, Any] = {
+            "stripe_payment_intent_id": payment_intent_id,
+            "stripe_payment_status": payment_status,
+        }
+        if (
+            not payment_intent_id
+            or payment_status not in _CANCELABLE_STRIPE_STATUSES
+        ):
+            evidence["payment_intent_cancel"] = "not_cancelable"
+            return evidence
+        try:
+            await get_stripe_integration().cancel_payment_intent(
+                payment_intent_id,
+                # Deterministic per (wallet, intent), like the charge key, so
+                # a crash-retried cancel replays instead of erroring.
+                idempotency_key=f"{stripe_idem_key}:cancel",
+            )
+            evidence["payment_intent_cancel"] = "canceled"
+        except Exception:
+            logger.exception(
+                "Failed to cancel unsettled PaymentIntent %s for order %s",
+                payment_intent_id,
+                order_id,
+            )
+            evidence["payment_intent_cancel"] = "cancel_failed"
+        return evidence
+
     async def execute_checkout(
         self,
         request: ACPCheckoutRequest,
@@ -210,6 +290,7 @@ class ACPCommerceAdapter:
         )
         currency = request.line_items[0].currency
         order_id = f"acp-{request.intent_id}"
+        stripe_idem_key = stripe_idempotency_key(order_id, agent_wallet_id)
 
         # 2. Idempotency on intent_id (checklist item 7): a repeated intent
         # replays the original result and must not reach the charge path.
@@ -246,11 +327,11 @@ class ACPCommerceAdapter:
             #    reconcile_stuck_records does for receipted MCP records.
             #  - died BEFORE the receipt: abandon the record (abandon refuses
             #    completed/charged ones) and re-run. Re-execution cannot
-            #    double-charge — the Stripe idempotency key is the
-            #    deterministic order_id, so Stripe returns the original
-            #    PaymentIntent (checklist item 7). The crashed attempt's
-            #    single-use permit is left to expire; the budget
-            #    reconciliation sweep already handles expired permits.
+            #    double-charge — the Stripe idempotency key is deterministic
+            #    for (wallet, intent) via stripe_idempotency_key, so Stripe
+            #    returns the original PaymentIntent (checklist item 7). The
+            #    crashed attempt's single-use permit is left to expire; the
+            #    budget reconciliation sweep already handles expired permits.
             record = await idem.get_record(
                 wallet_id=agent_wallet_id,
                 endpoint=ACP_CHECKOUT_ENDPOINT,
@@ -353,18 +434,28 @@ class ACPCommerceAdapter:
             )
             raise ACPBridgeError(exc.reason) from exc
 
-        # 4. Atomic authorize + budget reservation under the permit.
-        validation = await get_permit_service().authorize_and_reserve(
-            permit_id=permit.permit_id,
-            wallet_id=agent_wallet_id,
-            tool_name=ACP_CHECKOUT_TOOL,
-            estimated_credits=credits,
-            key_id=key_id,
-            arguments={
-                "merchant_domain": request.merchant_domain,
-                "intent_id": request.intent_id,
-            },
-        )
+        # 4. Atomic authorize + budget reservation under the permit. A
+        # PermitError here (e.g. permit_write_contended) must free the intent
+        # id exactly like a create_permit failure: nothing was reserved, so
+        # leaving the begun record in progress would wedge the intent until
+        # the stale-recovery window instead of letting the caller retry.
+        try:
+            validation = await get_permit_service().authorize_and_reserve(
+                permit_id=permit.permit_id,
+                wallet_id=agent_wallet_id,
+                tool_name=ACP_CHECKOUT_TOOL,
+                estimated_credits=credits,
+                key_id=key_id,
+                arguments={
+                    "merchant_domain": request.merchant_domain,
+                    "intent_id": request.intent_id,
+                },
+            )
+        except PermitError as exc:
+            await self._abandon_intent(
+                agent_wallet_id=agent_wallet_id, intent_id=request.intent_id
+            )
+            raise ACPBridgeError(exc.reason) from exc
         if not validation.allowed:
             await self._abandon_intent(
                 agent_wallet_id=agent_wallet_id, intent_id=request.intent_id
@@ -372,15 +463,40 @@ class ACPCommerceAdapter:
             raise ACPBridgeError(validation.reason or "acp_authorization_denied")
 
         # 5. From here on, every failure must release the exact reservation
-        # (and free the intent id) before re-raising: no partial state.
+        # (and free the intent id) before re-raising: no partial state. Each
+        # compensation step is guarded on its own: this runs inside an except
+        # block, so an unguarded failure here would REPLACE the original
+        # error being handled — and a failing release must never stop the
+        # abandon from freeing the intent id (the reservation dies with the
+        # short-TTL permit; a wedged intent record has no such expiry).
         async def _rollback() -> None:
-            await get_permit_service().release_budget(permit.permit_id, credits)
-            await self._abandon_intent(
-                agent_wallet_id=agent_wallet_id, intent_id=request.intent_id
-            )
+            try:
+                await get_permit_service().release_budget(
+                    permit.permit_id, credits
+                )
+            except Exception:
+                logger.exception(
+                    "ACP rollback failed to release %s credits on permit %s "
+                    "for order %s",
+                    credits,
+                    permit.permit_id,
+                    order_id,
+                )
+            try:
+                await self._abandon_intent(
+                    agent_wallet_id=agent_wallet_id, intent_id=request.intent_id
+                )
+            except Exception:
+                logger.exception(
+                    "ACP rollback failed to abandon the intent record for "
+                    "order %s",
+                    order_id,
+                )
 
         async def _record_rollback_evidence(
-            event: str, failure: BaseException
+            event: str,
+            failure: BaseException,
+            extra_metadata: dict[str, Any] | None = None,
         ) -> None:
             # A rollback after the charge attempt may be hiding real money
             # movement: a transport failure (timeout/connection reset) can
@@ -405,8 +521,9 @@ class ACPCommerceAdapter:
                         "merchant_domain": request.merchant_domain,
                         "derived_total_minor": total_minor,
                         "currency": currency,
-                        "stripe_idempotency_key": order_id,
+                        "stripe_idempotency_key": stripe_idem_key,
                         "failure": type(failure).__name__,
+                        **(extra_metadata or {}),
                     },
                 )
             except Exception:
@@ -416,20 +533,38 @@ class ACPCommerceAdapter:
                     order_id,
                 )
 
-        # 6. Outbound settlement via the Shared Payment Token. The intent id
-        # rides to Stripe as the PaymentIntent idempotency key, so even a
-        # crash-retry that reaches Stripe twice cannot charge twice.
+        # 6. Outbound settlement via the Shared Payment Token. The
+        # wallet-scoped intent key rides to Stripe as the PaymentIntent
+        # idempotency key, so even a crash-retry that reaches Stripe twice
+        # cannot charge twice — and two wallets reusing one client-chosen
+        # intent id never share a Stripe key (see stripe_idempotency_key).
+        charge_evidence: dict[str, Any] = {}
         try:
             charge = await get_stripe_integration().charge_shared_payment_token(
                 spt_token=request.spt_token.get_secret_value(),
                 amount_minor=total_minor,
                 currency=currency,
-                idempotency_key=order_id,
+                idempotency_key=stripe_idem_key,
             )
             if charge.get("status") not in _SETTLED_STRIPE_STATUSES:
+                # The confirmed PaymentIntent is still live at Stripe: left
+                # alone it could settle later (e.g. requires_action resolved
+                # out-of-band) with no governance record on our side. Cancel
+                # it best-effort before rolling back — only for statuses
+                # Stripe can cancel ("processing" cannot be), and never
+                # letting a cancel failure mask the original non-settled
+                # error. The outcome lands in the rollback evidence either
+                # way, so an operator can find any intent left live.
+                charge_evidence = await self._cancel_unsettled_charge(
+                    charge,
+                    order_id=order_id,
+                    stripe_idem_key=stripe_idem_key,
+                )
                 raise RuntimeError("acp_spt_not_settled")
         except Exception as exc:
-            await _record_rollback_evidence("acp_checkout_charge_failed", exc)
+            await _record_rollback_evidence(
+                "acp_checkout_charge_failed", exc, charge_evidence
+            )
             await _rollback()
             raise ACPBridgeError("acp_spt_charge_failed") from exc
 
@@ -455,6 +590,7 @@ class ACPCommerceAdapter:
                     "credits": str(credits),
                     "permit_id": permit.permit_id,
                     "stripe_payment_intent_id": charge.get("payment_intent_id"),
+                    "stripe_idempotency_key": stripe_idem_key,
                 },
             )
 

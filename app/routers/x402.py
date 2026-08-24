@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -7,17 +9,37 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.auth import AuthContext, get_auth_context
-from app.services.x402_engine import X402Error, get_x402_handler
+from app.core.time import utc_now
+from app.services.x402_engine import X402_TOOL_NAME, X402Error, get_x402_handler
 from app.trust import (
+    IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     PermitError,
     get_idempotency_service,
+    get_receipt_service,
+    record_audit_event,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/x402", tags=["X402 Settlement"])
 
 _SETTLE_ENDPOINT = "/v1/x402/settle"
+
+# An in-progress settle record idle past this threshold is treated as a
+# crashed attempt and recovered (see _recover_stale_settle_record); mirrors
+# the repo's 300s staleness standard (the ACP bridge's stale-intent recovery
+# and the governed-MCP reconciliation sweep). Safety invariant, not a
+# heuristic: a live settle makes no outbound network call at all — permit
+# reservation, Ed25519 attestation signing, shadow-ledger metering, and the
+# receipt write are all local DB/CPU work — so its wall-clock upper bound
+# sits far below this threshold and a record older than it cannot belong to
+# a live attempt. Backstop if that ever regresses: abandon() refuses
+# completed or charged records, and the receipts table's
+# idempotency_record_id link means a receipted record is never abandoned
+# here (it takes the settled-unrecoverable branch instead).
+_SETTLE_STALE_SECONDS = 300
 
 
 # Response/request models live in the router module: the x402 surface is small
@@ -99,6 +121,109 @@ async def parse_payment_required(
     )
 
 
+async def _recover_stale_settle_record(
+    request: X402SettleRequest,
+    *,
+    idempotency_key: str,
+    key_id: str | None,
+    in_progress: IdempotencyInProgressError,
+) -> IdempotencyBegin:
+    """Recover a settle Idempotency-Key wedged by a crashed attempt.
+
+    begin_with_record raising IdempotencyInProgressError can mean a live
+    concurrent settle — or the wreckage of a process that died between
+    handler.settle and idem.complete. Nothing else repairs this endpoint's
+    records (reconcile_stuck_records covers only governed MCP identities,
+    and no ledger_entry_id checkpoint exists here), so without this branch a
+    crashed attempt wedges the key forever: every retry 409s. Port of the
+    ACP bridge's stale-intent recovery, resolved by crash shape once the
+    record is idle past _SETTLE_STALE_SECONDS:
+
+    - no receipt references the record: the attempt died before the durable
+      settlement record was written, and the engine's compensation (budget
+      release, no receipt, no live shadow session) either ran or is covered
+      by permit expiry. Record the recovery on the audit chain, abandon the
+      record (abandon refuses completed/charged ones), and re-run begin so
+      the retry proceeds fresh.
+    - a receipt DOES reference the record: the settlement happened and is
+      durable, but the original X402SettleResponse cannot be rebuilt from
+      what is persisted — receipts store only request/response payload
+      *hashes*, and the response's authorization dict, Ed25519 attestation
+      signature, and shadow session/charge ids live nowhere reconstructable
+      byte-for-byte (re-signing the attestation is only bit-stable while
+      the signing key is unrotated, and the shadow ids are in unsigned
+      audit metadata, not the receipt). Completing the record with guessed
+      or partial fields would forge a replay, so this returns a DISTINCT
+      typed 409 — x402_settled_unrecoverable_replay — telling the caller
+      the key settled durably (budget consumed, receipt verifiable via
+      /v1/receipts) but the verbatim response is unrecoverable. Contract
+      asserted by test_x402_stale_receipted_record_is_settled_unrecoverable.
+    """
+    idem = get_idempotency_service()
+    record = await idem.get_record(
+        wallet_id=request.wallet_id,
+        endpoint=_SETTLE_ENDPOINT,
+        idempotency_key=idempotency_key,
+    )
+    stale = (
+        record is not None
+        and record.response_json is None
+        and not record.ledger_entry_id
+        and record.created_at
+        < utc_now() - timedelta(seconds=_SETTLE_STALE_SECONDS)
+    )
+    if not stale:
+        # Possibly a live concurrent attempt: refuse, exactly as before.
+        raise HTTPException(status_code=409, detail=in_progress.args[0])
+    assert record is not None
+    receipt = await get_receipt_service().get_receipt_by_idempotency_record_id(
+        record.record_id
+    )
+    if receipt is not None:
+        raise HTTPException(
+            status_code=409, detail="x402_settled_unrecoverable_replay"
+        )
+    # Mark the recovery on the audit chain BEFORE abandoning (mirrors
+    # acp_intent_recovered): the re-run may legitimately leave a second
+    # reservation trail for this key, and this event lets an operator read
+    # that shape as crash recovery rather than a defect. Best-effort —
+    # recovering a wedged key must not fail on evidence bookkeeping.
+    try:
+        await record_audit_event(
+            event="x402_settle_recovered",
+            wallet_id=request.wallet_id,
+            tool=X402_TOOL_NAME,
+            endpoint=_SETTLE_ENDPOINT,
+            key_id=key_id,
+            request_id=idempotency_key[:100],
+            ok=True,
+            metadata={
+                "idempotency_key": idempotency_key,
+                "permit_id": request.permit_id,
+                "abandoned_record_id": record.record_id,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to record x402_settle_recovered evidence for key %s",
+            idempotency_key,
+        )
+    await idem.abandon(
+        wallet_id=request.wallet_id,
+        endpoint=_SETTLE_ENDPOINT,
+        idempotency_key=idempotency_key,
+    )
+    try:
+        return await idem.begin_with_record(
+            wallet_id=request.wallet_id,
+            endpoint=_SETTLE_ENDPOINT,
+            idempotency_key=idempotency_key,
+            request_payload=request.model_dump(mode="json"),
+        )
+    except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
+        raise HTTPException(status_code=409, detail=exc.args[0])
+
+
 @router.post("/settle", response_model=X402SettleResponse)
 async def settle_payment_required(
     request: X402SettleRequest,
@@ -133,8 +258,18 @@ async def settle_payment_required(
             idempotency_key=idempotency_key,
             request_payload=request.model_dump(mode="json"),
         )
-    except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
+    except IdempotencyConflictError as exc:
         raise HTTPException(status_code=409, detail=exc.args[0])
+    except IdempotencyInProgressError as exc:
+        # A fresh in-progress record is still a hard 409; a stale one is a
+        # crashed attempt and is recovered (or reported as settled-but-
+        # unrecoverable) — see _recover_stale_settle_record.
+        begun = await _recover_stale_settle_record(
+            request,
+            idempotency_key=idempotency_key,
+            key_id=auth.key_id,
+            in_progress=exc,
+        )
     if begun.replay and begun.replay.response_json:
         return X402SettleResponse(**begun.replay.response_json)
 
