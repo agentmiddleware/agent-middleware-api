@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -387,6 +388,22 @@ async def test_malformed_issuer_config_fails_closed_at_use_time(iga_config, rsa_
     assert excinfo.value.reason == "iga_config_invalid"
 
 
+async def test_malformed_issuer_config_disables_routing_loudly(
+    iga_config, rsa_key, caplog
+):
+    """is_iga_issuer_token swallows a config IGAError (routing must fail
+    closed to the internal-JWT verifier), but NOT silently: disabling the
+    whole enterprise layer is logged at error level — reason only, never
+    token material."""
+    iga_config("{this is not json", "")
+    token = _mint(rsa_key)
+    with caplog.at_level(logging.ERROR, logger="app.core.oidc_iga"):
+        assert oidc_iga.is_iga_issuer_token(token) is False
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("iga_config_invalid" in message for message in messages), messages
+    assert all(token not in message for message in messages)
+
+
 async def test_malformed_group_map_fails_closed_at_use_time(iga_config, rsa_key):
     iga_config(_okta_issuers(rsa_key), "{this is not json")
     principal = parse_enterprise_token(_mint(rsa_key, extra={"groups": ["x"]}))
@@ -652,6 +669,41 @@ async def test_max_uses_are_tracked_per_grant(iga_config, clean_database, rsa_ke
     assert fifth.allowed is False
     assert fifth.reason == "iga_max_uses_exceeded"
     assert fifth.details == {"used": 2, "limit": 2}
+
+
+async def test_release_tool_use_compensates_exactly_and_clamps_at_zero(
+    iga_config, clean_database, rsa_key
+):
+    """release_tool_use hands back exactly one recorded use for the exact
+    grant, and an over-release is a no-op (counters never go negative)."""
+    wallet_id = await _make_wallet()
+    policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
+    iga_config(
+        _okta_issuers(rsa_key),
+        {"payments-ops": {"policy_id": policy_id, "max_uses": 2}},
+    )
+    principal = parse_enterprise_token(
+        _mint(rsa_key, extra={"groups": ["payments-ops"]})
+    )
+
+    first = await enforce_tool_call(principal, TOOL)
+    assert first.allowed is True
+    await oidc_iga.release_tool_use(
+        principal, TOOL, group="payments-ops", policy_id=policy_id
+    )
+    assert oidc_iga._lifetime_uses == {}
+    # Over-release must not create negative budget.
+    await oidc_iga.release_tool_use(
+        principal, TOOL, group="payments-ops", policy_id=policy_id
+    )
+    assert oidc_iga._lifetime_uses == {}
+
+    # The full max_uses budget is available again — and only that budget.
+    assert (await enforce_tool_call(principal, TOOL)).allowed is True
+    assert (await enforce_tool_call(principal, TOOL)).allowed is True
+    blocked = await enforce_tool_call(principal, TOOL)
+    assert blocked.allowed is False
+    assert blocked.reason == "iga_max_uses_exceeded"
 
 
 async def test_inactive_policy_bundle_blocks(iga_config, clean_database, rsa_key):
@@ -979,6 +1031,77 @@ async def test_api_key_only_governed_call_unaffected_by_iga_config(
         assert payload["result"]["isError"] is False
         assert payload["result"]["receipt"]["outcome"] == "success"
         assert calls == [{"message": "hello"}]
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_insufficient_funds_denial_releases_iga_use(
+    iga_config, clean_database, rsa_key, client
+):
+    """A pre-dispatch insufficient-funds refusal charges nothing and
+    dispatches nothing, so the IGA use recorded at the gate is handed back:
+    a max_uses=1 principal is NOT locked out forever by an under-funded
+    wallet, and a properly funded retry succeeds."""
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        # Provision funded (permit creation requires the subject wallet to
+        # cover max_credits), then drain the wallet below the tool's cost.
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-funds-permit")
+        wallet_id = setup["agent_wallet_id"]
+        agent_headers = setup["agent_headers"]
+        permit = {"permit_id": setup["permit_id"]}
+
+        async def _set_balance(amount: str) -> None:
+            factory = get_session_factory()
+            async with factory() as session:
+                wallet = await session.get(WalletModel, wallet_id)
+                assert wallet is not None
+                wallet.balance = Decimal(amount)
+                session.add(wallet)
+                await session.commit()
+
+        # The tool costs 2 credits; a balance of 1 cannot cover it.
+        await _set_balance("1")
+
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(
+            _okta_issuers(rsa_key),
+            {"payments-ops": {"policy_id": policy_id, "max_uses": 1}},
+        )
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        headers = {**agent_headers, "Authorization": f"Bearer {token}"}
+
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=wallet_id,
+            permit_id=permit["permit_id"],
+            idem_key="iga-e2e-funds-1",
+            headers=headers,
+        )
+        assert "error" in payload, payload
+        assert payload["error"]["message"] == "insufficient_funds"
+        assert calls == []
+        # The recorded use was compensated: nothing dispatched, nothing kept.
+        assert oidc_iga._lifetime_uses == {}
+        assert oidc_iga._window_calls == {}
+
+        # Fund the wallet; the same max_uses=1 principal can now act.
+        await _set_balance("100")
+
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=wallet_id,
+            permit_id=permit["permit_id"],
+            idem_key="iga-e2e-funds-2",
+            headers=headers,
+        )
+        assert "result" in payload, payload
+        assert payload["result"]["receipt"]["outcome"] == "success"
+        assert calls == [{"message": "hello"}]
+        # The dispatched call keeps its committed use.
+        assert sum(oidc_iga._lifetime_uses.values()) == 1
     finally:
         registry.unregister_local(E2E_TOOL)
 

@@ -37,6 +37,7 @@ from ..core.oidc_iga import (
     enforce_tool_call,
     is_iga_issuer_token,
     parse_enterprise_token,
+    release_tool_use,
 )
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
@@ -943,6 +944,9 @@ async def _execute_registered_tool(
     # JWT, auth.enterprise_bearer_token is None and this gate is inert.
     iga_denial_reason: str | None = None
     iga_denial_details: dict[str, Any] | None = None
+    # The exact grant an ALLOW consumed a use under, kept so a later
+    # pre-dispatch refusal that charges nothing can hand the use back.
+    iga_granted_use: tuple[EnterprisePrincipal, str, str] | None = None
     try:
         enterprise_principal = _verified_enterprise_principal(
             auth.enterprise_bearer_token
@@ -955,10 +959,21 @@ async def _execute_registered_tool(
                     "reason_code": iga_decision.reason,
                     **iga_decision.details,
                 }
+            elif iga_decision.group is not None and iga_decision.policy_id is not None:
+                iga_granted_use = (
+                    enterprise_principal,
+                    iga_decision.group,
+                    iga_decision.policy_id,
+                )
     except IGAError as exc:
-        # A bearer FROM a pinned enterprise issuer that fails verification —
-        # or a malformed IGA config while the layer is enabled — must never
-        # fall through to ungoverned execution: fail closed with its reason.
+        # Catches verification failures for bearers routed to the IGA layer
+        # (bad signature / audience / expiry / kid from a pinned enterprise
+        # issuer) and a malformed IGA_GROUP_POLICY_MAP surfaced by
+        # enforce_tool_call: fail closed with the reason, never fall through
+        # to ungoverned execution. A malformed IGA_TRUSTED_ISSUERS never
+        # reaches this handler — is_iga_issuer_token fails closed to the
+        # internal-JWT verifier (401 at auth time) and logs the config fault
+        # at error level.
         iga_denial_reason = exc.reason
     if iga_denial_reason is not None:
         audit_event = await _audit_mcp_invocation(
@@ -1397,6 +1412,24 @@ async def _execute_registered_tool(
         # the price it was promised.
         if quoted is not None and quote_id:
             await get_quote_service().release(quote_id)
+        # Likewise the IGA use recorded at the enterprise gate: this refusal
+        # charges nothing and dispatches nothing, so a max_uses / velocity
+        # budget must not burn down on it (a max_uses=1 principal would
+        # otherwise be locked out forever by one under-funded wallet).
+        # Best-effort — compensation must never mask the funds denial.
+        if iga_granted_use is not None:
+            try:
+                await release_tool_use(
+                    iga_granted_use[0],
+                    tool_name,
+                    group=iga_granted_use[1],
+                    policy_id=iga_granted_use[2],
+                )
+            except Exception:
+                logger.exception(
+                    "iga_use_release_failed",
+                    extra={"tool": tool_name},
+                )
         denial_reason = charge_result.error
         denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:

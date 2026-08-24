@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -33,6 +34,8 @@ from typing import Any
 import jwt
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 # Providers this bridge understands. The provider selects which token claim
@@ -281,15 +284,24 @@ def is_iga_issuer_token(token: str) -> bool:
 
     Fails closed: an unparseable token, a disabled IGA layer, or a malformed
     IGA configuration all return False, which leaves the bearer to the
-    internal-JWT verifier (where it is rejected). Never logs token material.
+    internal-JWT verifier (where it is rejected). A malformed configuration
+    is additionally logged at error level (stable reason only) because it
+    disables routing for the ENTIRE enterprise layer — silently, it would be
+    indistinguishable from "IGA off". Never logs token material.
     """
     try:
         return token_issuer_is_trusted(token)
-    except IGAError:
+    except IGAError as exc:
         # Malformed IGA configuration: route nothing to the IGA layer. The
         # bearer then faces the internal-JWT verifier and fails closed (401);
         # parse_enterprise_token still surfaces the config error wherever the
-        # layer is actually exercised.
+        # layer is actually exercised. Log the stable reason ONLY — never the
+        # token or any of its claims.
+        logger.error(
+            "IGA configuration unusable (%s): enterprise bearer routing is "
+            "disabled; bearers fail closed against the internal-JWT verifier",
+            exc.reason,
+        )
         return False
 
 
@@ -607,3 +619,47 @@ async def enforce_tool_call(principal: EnterprisePrincipal, tool_name: str) -> I
     # keeps the first of equally ranked candidates, preserving grant order.
     best = max(candidates, key=lambda d: _REASON_RANK.get(d.reason, 0))
     return best
+
+
+async def release_tool_use(
+    principal: EnterprisePrincipal,
+    tool_name: str,
+    *,
+    group: str,
+    policy_id: str,
+) -> None:
+    """Compensate one recorded use whose action never dispatched.
+
+    :func:`enforce_tool_call` records a use atomically with its ALLOW, but
+    later pre-dispatch gates can still refuse the action — e.g. an
+    insufficient-funds refusal that charges nothing and dispatches nothing.
+    Without compensation a ``max_uses`` budget (and the velocity window)
+    burns down on actions that never happened: a max_uses=1 principal who
+    hits insufficient funds once would be locked out forever.
+
+    ``group``/``policy_id`` identify the exact grant the ALLOW decision was
+    issued under (IGADecision carries both). Under the same counter lock as
+    the check-and-record, the grant's lifetime counter is decremented
+    (clamped at zero) and the MOST RECENT velocity timestamp for that
+    per-grant key is dropped — mirroring precisely what the ALLOW recorded.
+    Callers should treat this as best-effort compensation; it never raises
+    on an already-empty counter.
+    """
+    key: _CounterKey = (
+        principal.issuer,
+        principal.subject,
+        tool_name,
+        group,
+        policy_id,
+    )
+    async with _counter_lock:
+        used = _lifetime_uses.get(key, 0)
+        if used > 1:
+            _lifetime_uses[key] = used - 1
+        elif used == 1:
+            del _lifetime_uses[key]
+        window = _window_calls.get(key)
+        if window:
+            window.pop()
+            if not window:
+                del _window_calls[key]
