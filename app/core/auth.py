@@ -7,13 +7,13 @@ Agents pass credentials via:
 """
 
 import hmac
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from .config import get_settings
-from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError
+from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
 from .trust_mode import is_production_like_environment
 
 settings = get_settings()
@@ -41,6 +41,13 @@ class AuthContext:
     wallet_id: str | None = None
     is_bootstrap_admin: bool = False
     scopes: list[str] = None  # type: ignore[assignment]
+    # Enterprise (Okta/Entra) bearer that accompanied an X-API-Key call. Set
+    # ONLY when the Authorization header carried a token whose UNVERIFIED
+    # issuer names a pinned IGA issuer (see get_auth_context). It is identity
+    # attribution for the human behind the agent, NEVER an API credential:
+    # enforcement points (app/core/oidc_iga.parse_enterprise_token +
+    # enforce_tool_call) fully verify it before any trust decision.
+    enterprise_bearer_token: str | None = None
 
     def __post_init__(self):
         if self.scopes is None:
@@ -104,6 +111,23 @@ async def get_auth_context(
     # principal than the caller intended.
     if authorization is not None:
         token = _parse_bearer_authorization(authorization)
+        # Enterprise IGA reroute — deliberately narrow. is_iga_issuer_token
+        # peeks ONLY at the token's unverified `iss` claim and is True solely
+        # when it names an issuer pinned in IGA_TRUSTED_ISSUERS; with IGA
+        # disabled (the default) it is always False, so every bearer keeps
+        # today's internal-JWT handling byte for byte. When an enterprise
+        # bearer rides alongside an X-API-Key, the API key is the
+        # authenticating credential (the recursive call below runs the
+        # standard API-key path unchanged) and the bearer is carried as
+        # human-identity attribution that the IGA enforcement points fully
+        # VERIFY (pinned key, algorithm allowlist, audience, issuer, expiry)
+        # before any trust decision — the unverified peek here only routes,
+        # it never authenticates. An enterprise bearer with NO accompanying
+        # API key is not an API credential: it falls through to
+        # _auth_from_jwt and fails with 401 exactly as before.
+        if api_key and is_iga_issuer_token(token):
+            context = await get_auth_context(api_key=api_key, authorization=None)
+            return replace(context, enterprise_bearer_token=token)
         return await _auth_from_jwt(token)
 
     # Preserve the pre-header direct-call/X-API-Key compatibility path.

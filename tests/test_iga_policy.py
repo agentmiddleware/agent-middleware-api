@@ -25,6 +25,7 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 
 import app.core.oidc_iga as oidc_iga
 from app.core.auth import get_enterprise_principal, require_enterprise_tool_access
@@ -38,6 +39,11 @@ from app.core.oidc_iga import (
 )
 from app.db.database import get_session_factory
 from app.db.models import PolicyBundleModel, WalletModel
+from app.main import app
+from app.schemas.billing import ServiceCategory
+from app.services.service_registry import get_service_registry
+
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
 
 OKTA_ISS = "https://example.okta.com/oauth2/default"
@@ -563,3 +569,258 @@ async def test_require_enterprise_tool_access_403_with_decision_reason(
     assert decision is not None
     assert decision.allowed is True
     assert decision.policy_id == policy_id
+
+
+# --- End-to-end enforcement on the real governed tool-call path ---------------
+#
+# These drive POST /mcp/messages (a CORE route) over the real app: wallet +
+# key + permit are provisioned via the canonical helpers, a throwaway local
+# tool is registered, and the enterprise bearer rides the Authorization
+# header alongside the X-API-Key — the exact shape the auth fallthrough in
+# get_auth_context and the IGA gate in _execute_registered_tool exist for.
+
+
+E2E_TOOL = "iga-e2e-echo"
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+def _register_e2e_tool(calls: list[dict]):
+    """Register the throwaway tool; returns the registry for unregistering."""
+
+    def _e2e_echo(message: str = "ok") -> dict:
+        calls.append({"message": message})
+        return {"message": message}
+
+    registry = get_service_registry()
+    registry.register_local(
+        service_id=E2E_TOOL,
+        name="IGA E2E Echo",
+        description="Throwaway tool for IGA enforcement tests",
+        category=ServiceCategory.AGENT_COMMS,
+        func=_e2e_echo,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    return registry
+
+
+async def _invoke_tool_call(
+    client: AsyncClient,
+    *,
+    wallet_id: str,
+    permit_id: str,
+    idem_key: str,
+    headers: dict[str, str],
+) -> dict:
+    resp = await client.post(
+        "/mcp/messages",
+        json={
+            "jsonrpc": "2.0",
+            "id": f"iga-{idem_key}",
+            "method": "tools/call",
+            "params": {
+                "name": E2E_TOOL,
+                "arguments": {"message": "hello"},
+                "mcpContext": {
+                    "wallet_id": wallet_id,
+                    "permit_id": permit_id,
+                    "idempotency_key": idem_key,
+                },
+            },
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    return resp.json()
+
+
+async def _provision_for_e2e(client: AsyncClient, *, idem_key: str) -> dict:
+    """Wallet + wallet-scoped key + permit for E2E_TOOL, via the real routes."""
+    setup = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=setup["agent_wallet_id"],
+        key_id=setup["key_id"],
+        tool_name=E2E_TOOL,
+        idem_key=idem_key,
+    )
+    return {**setup, "permit_id": permit["permit_id"]}
+
+
+async def test_enterprise_bearer_with_required_group_allows_governed_call(
+    iga_config, clean_database, rsa_key, client
+):
+    """API-key auth falls through with the enterprise bearer; IGA allows."""
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-allow-permit")
+        # The bundle backing the IGA grant lives on its own wallet so the
+        # agent wallet's own policy evaluation stays unconstrained.
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-allow-1",
+            headers={
+                **setup["agent_headers"],
+                "Authorization": f"Bearer {token}",
+            },
+        )
+        assert "result" in payload, payload
+        assert payload["result"]["isError"] is False
+        receipt = payload["result"]["receipt"]
+        assert receipt["outcome"] == "success"
+        assert receipt["permit_id"] == setup["permit_id"]
+        assert calls == [{"message": "hello"}]
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_enterprise_bearer_without_required_group_is_blocked_on_wire(
+    iga_config, clean_database, rsa_key, client
+):
+    """Acceptance criterion on the REAL path: the human principal lacks the
+    required Okta/Entra role, so the agent tool call is blocked outright —
+    same denial envelope and signed denied receipt as permit denials."""
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-deny-permit")
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+        token = _mint(rsa_key, sub="intruder", extra={"groups": ["random-team"]})
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-deny-1",
+            headers={
+                **setup["agent_headers"],
+                "Authorization": f"Bearer {token}",
+            },
+        )
+        assert "error" in payload, payload
+        assert payload["error"]["message"] == "iga_no_matching_role"
+        assert payload["error"]["code"] == -32003
+        denied_receipt = payload["error"]["data"]["receipt"]
+        assert denied_receipt["outcome"] == "denied"
+        assert denied_receipt["credits_charged"] == "0"
+        assert denied_receipt["reason_code"] == "iga_no_matching_role"
+        # The tool itself must never have executed.
+        assert calls == []
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_enterprise_bearer_with_invalid_signature_is_denied_not_dispatched(
+    iga_config, clean_database, rsa_key, wrong_rsa_key, client
+):
+    """A bearer FROM a pinned issuer that fails verification fails closed."""
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-badsig-permit")
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+        # Same iss/kid so the token routes to the IGA layer and key selection
+        # succeeds; the signature check itself must fail.
+        token = _mint(wrong_rsa_key, kid=KID, extra={"groups": ["payments-ops"]})
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-badsig-1",
+            headers={
+                **setup["agent_headers"],
+                "Authorization": f"Bearer {token}",
+            },
+        )
+        assert "error" in payload, payload
+        assert payload["error"]["message"] == "iga_signature_invalid"
+        assert calls == []
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_api_key_only_governed_call_unaffected_by_iga_config(
+    iga_config, clean_database, rsa_key, client
+):
+    """Regression guard: no bearer at all — the governed loop is untouched."""
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-nobearer-permit")
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(_okta_issuers(rsa_key), {"payments-ops": {"policy_id": policy_id}})
+
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-nobearer-1",
+            headers=setup["agent_headers"],
+        )
+        assert "result" in payload, payload
+        assert payload["result"]["isError"] is False
+        assert payload["result"]["receipt"]["outcome"] == "success"
+        assert calls == [{"message": "hello"}]
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_enterprise_shaped_bearer_still_401s_when_iga_disabled(
+    clean_database, rsa_key, client
+):
+    """Regression guard for today's behavior: with IGA unconfigured, a bearer
+    from an enterprise-shaped issuer is handled as an internal JWT and 401s
+    even when a valid X-API-Key accompanies it."""
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        assert not get_settings().IGA_TRUSTED_ISSUERS
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-disabled-permit")
+
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        resp = await client.post(
+            "/mcp/messages",
+            json={
+                "jsonrpc": "2.0",
+                "id": "iga-disabled-1",
+                "method": "tools/call",
+                "params": {
+                    "name": E2E_TOOL,
+                    "arguments": {"message": "hello"},
+                    "mcpContext": {
+                        "wallet_id": setup["agent_wallet_id"],
+                        "permit_id": setup["permit_id"],
+                        "idempotency_key": "iga-e2e-disabled-1",
+                    },
+                },
+            },
+            headers={
+                **setup["agent_headers"],
+                "Authorization": f"Bearer {token}",
+            },
+        )
+        assert resp.status_code == 401
+        assert resp.json()["detail"]["error"] == "invalid_token"
+        assert calls == []
+    finally:
+        registry.unregister_local(E2E_TOOL)

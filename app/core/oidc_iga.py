@@ -269,6 +269,30 @@ def token_issuer_is_trusted(token: str) -> bool:
     return isinstance(iss, str) and iss in issuers
 
 
+def is_iga_issuer_token(token: str) -> bool:
+    """Routing predicate: does this bearer belong to the IGA layer at all?
+
+    True ONLY when IGA_TRUSTED_ISSUERS is configured AND the token's
+    UNVERIFIED ``iss`` claim names a configured issuer. The unverified peek
+    is acceptable because this function only ROUTES the token to the right
+    auth layer — it grants nothing; full verification (pinned key, algorithm
+    allowlist, audience, issuer, expiry) still happens in
+    :func:`parse_enterprise_token` before any trust decision.
+
+    Fails closed: an unparseable token, a disabled IGA layer, or a malformed
+    IGA configuration all return False, which leaves the bearer to the
+    internal-JWT verifier (where it is rejected). Never logs token material.
+    """
+    try:
+        return token_issuer_is_trusted(token)
+    except IGAError:
+        # Malformed IGA configuration: route nothing to the IGA layer. The
+        # bearer then faces the internal-JWT verifier and fails closed (401);
+        # parse_enterprise_token still surfaces the config error wherever the
+        # layer is actually exercised.
+        return False
+
+
 def _resolve_verification_key(config: _IssuerConfig, header: dict[str, Any], alg: str) -> Any:
     """Select the pinned verification key for this token's header.
 
