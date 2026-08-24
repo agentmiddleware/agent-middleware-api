@@ -21,7 +21,7 @@ httpcore==1.0.9         # Verified implementation of the DNS-pin + TLS SNI hando
 python-multipart>=0.0.32 # File upload support (>=0.0.30 fixes CVE-2026-53538/53539, >=0.0.31 fixes CVE-2026-53540)
 
 # --- Utilities ---
-python-dotenv>=1.2.2    # .env file loading
+python-dotenv>=1.2.3    # .env file loading
 cryptography>=50.0.0       # Ed25519 trust-plane signatures (>=50.0.0 fixes GHSA-g6cj-pr64-35w5)
 redis>=8.1.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
