@@ -4,7 +4,7 @@ Adversarial, concurrency-aware tests that try to make the trust plane **violate
 its own promises** — double-charge, overspend a permit, escape a permit's scope,
 pass off a forged receipt, lose accounting integrity across a crash, or act
 outside a credential's authority. Companion to
-[`../../Invariant Attack Report.md`](../../Invariant%20Attack%20Report.md),
+[`../../docs/invariant-attack-report.md`](../../docs/invariant-attack-report.md),
 which records the exact requests, observed responses, and HELD/BROKE/PARTIAL
 verdict for each.
 

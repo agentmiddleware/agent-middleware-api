@@ -454,9 +454,12 @@ jobs:
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
-      # Working tree only, not history: history already contains the leaked key,
-      # so a history scan would fail on every run forever and train reviewers to
-      # ignore the job. That key is handled by rotation, not by this gate.
+      # Working tree only, for speed. History was verified separately on
+      # 2026-08-24 with a full-history gitleaks scan across every ref (see
+      # the scope note in .gitleaks.toml): the only real credential ever
+      # committed is the 2026-08-06 key — rotated dead at the provider, gone
+      # from main's flattened history, still reachable on stale unmerged
+      # branches until they are pruned.
       - name: Scan working tree for committed secrets
         run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose
 

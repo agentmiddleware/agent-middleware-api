@@ -1,21 +1,13 @@
 """
-Red-Team-as-a-Service (RTaaS) — Pillar 12
-============================================
-Multi-tenant security scanning for agent-built tools.
+Red-Team-as-a-Service (RTaaS) modeling — dormant simulated proof surface.
 
-When an agent builds a tool, it can hire our Red Team swarm to
-attack its endpoints before deployment. The RTaaS layer wraps the
-internal Red Team with tenant isolation, job tracking, and
-structured vulnerability reports.
-
-Architecture:
-  External Agent → POST /v1/rtaas/jobs → RTaaS Engine
-    → Spawns scan against EXTERNAL endpoints
-    → Returns structured vulnerability JSON
-    → Agent patches → re-scans → deploys
-
-Unlike the internal /v1/security endpoints (which attack our own API),
-RTaaS attacks *external* services specified by the requesting agent.
+Models a tenant-scoped scan-job lifecycle (job intake, tracking, structured
+vulnerability reports) for scans an agent would request against its own
+external endpoints. It is a simulation: no external service is ever
+contacted and no scanning engine exists. Entry points are guarded by
+``require_simulation`` and refuse to run unless the simulation flag is
+explicitly enabled; the routes that expose this module are proof surfaces,
+unmounted by default (see docs/PROOF_SURFACES.md).
 """
 
 import json

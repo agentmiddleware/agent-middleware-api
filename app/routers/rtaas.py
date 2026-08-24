@@ -1,9 +1,10 @@
 """
 PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
-Red-Team-as-a-Service Router (Pillar 12)
-------------------------------------------
-Multi-tenant security scanning for agent-built tools.
-Agents hire our Red Team swarm to attack *their* endpoints.
+Red-Team-as-a-Service modeling router
+-------------------------------------
+Tenant-scoped SIMULATED scan jobs for agent-built tools. The backing
+service models the job lifecycle only: it contacts no external service
+and refuses to run unless its simulation flag is explicitly enabled.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status

@@ -375,6 +375,18 @@ The public site and `/proof/` receipt are self-issued product demonstrations. Cu
 
 Read [TRUST_MODEL.md](TRUST_MODEL.md), [SECURITY.md](SECURITY.md), [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md), and [docs/threat-model.md](docs/threat-model.md) before a production evaluation.
 
+## Security review path
+
+Reviewing this repository adversarially? The fastest route from clone to verdict:
+
+1. **Run the proof.** `make prove-trust-plane` boots a local instance and asserts every core invariant end to end — one charge per accepted call, replay without a second debit, a signed denial receipt for the out-of-scope call, offline receipt verification, and a tampered receipt or audit event failing closed.
+2. **Attack the invariants.** [`scripts/invariant_attacks/`](scripts/invariant_attacks/) is a stdlib-only hostile harness: parallel double-charge, budget over-spend races, scope escape, receipt forgery, `kill -9` crash consistency, and credential misuse. [docs/invariant-attack-report.md](docs/invariant-attack-report.md) records each verdict — including the one invariant that broke, its root cause, and the fix that closed it.
+3. **Aim at the documented weak points.** [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) and [TRUST_MODEL.md](TRUST_MODEL.md) list the accepted gaps — origin-trusted key distribution, no external audit anchoring, MCP as the only governed adapter. Attacks on the documented limits are the most useful ones.
+4. **Map it to your framework.** [docs/owasp-agentic-top10-mapping.md](docs/owasp-agentic-top10-mapping.md) maps each OWASP Top 10 for Agentic Applications risk (ASI01–ASI10, 2026) to this plane's posture, the enforcing code, the proof that exercises it, and the honest gap.
+5. **Black-box the live plane.** [docs/hard-run-report-2026-08-12.md](docs/hard-run-report-2026-08-12.md) is a dated credential-less adversarial run against the production deployment, with reproduction commands.
+
+Findings: see [SECURITY.md](SECURITY.md) for disclosure.
+
 ## Tests and release gates
 
 ```bash
@@ -402,7 +414,7 @@ make prove-crash-recovery
 
 `make test`, `make test-all`, and `make coverage` provision requirements through `uv`. The focused coverage and release-gate targets assume the requirements are already installed in the active Python environment.
 
-[docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the invariant it asserts — and, just as importantly, to what it does not prove. Two live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run the same class of invariants against a deployment you operate; both write test data, so point them at staging. A local red-team pass (`make red-team-trust-plane-check`) attacks the trust loop against a throwaway SQLite database. The stdlib-only [`scripts/invariant_attacks/`](scripts/invariant_attacks/) harness runs a hostile, concurrency-aware campaign against a live `make quickstart` instance — parallel double-charge, budget over-spend, scope escape, receipt forgery, crash consistency, and credential misuse — each with a HELD/BROKE/PARTIAL verdict backed by the exact request and observed response ([Invariant Attack Report.md](<Invariant Attack Report.md>)).
+[docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the invariant it asserts — and, just as importantly, to what it does not prove. Two live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run the same class of invariants against a deployment you operate; both write test data, so point them at staging. A local red-team pass (`make red-team-trust-plane-check`) attacks the trust loop against a throwaway SQLite database. The stdlib-only [`scripts/invariant_attacks/`](scripts/invariant_attacks/) harness runs a hostile, concurrency-aware campaign against a live `make quickstart` instance — parallel double-charge, budget over-spend, scope escape, receipt forgery, crash consistency, and credential misuse — each with a HELD/BROKE/PARTIAL verdict backed by the exact request and observed response ([docs/invariant-attack-report.md](docs/invariant-attack-report.md)).
 
 The repository is intended to run **gate-first, execute-second**: CI exposes the release gate as one dedicated check named `trust_release_gate`, and [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) specifies the exact branch-protection settings that make it (and the other required checks) block `main`. The automated batteries prove the five claims from inside; the human usability milestone is the [stranger test](docs/stranger-test.md) — a person who has never seen the repository drives the whole governed loop and verifies the same claims from the published docs alone, asking zero questions. That test does not prove customer demand. The active business milestone is the partner-owned pilot in [the 30-day customer-validation sprint](docs/30-day-customer-validation.md).
 
@@ -456,8 +468,9 @@ Offline receipt verification is deliberately dependency-minimal: the `b2a-verify
 - [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
 - [docs/stranger-test.md](docs/stranger-test.md) — the human milestone: a stranger drives the governed loop and checks the five claims from the public docs alone
 - [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) — gate-first branch protection: the exact required checks for `main`
-- [Hard Run Report.md](<Hard Run Report.md>) — adversarial black-box run against the live production trust plane, with reproduction commands
-- [Invariant Attack Report.md](<Invariant Attack Report.md>) — hostile concurrency/tampering/crash/credential campaign against a local instance, the one invariant it broke (permit-cap over-spend on SQLite), and the fix that closed it
+- [docs/hard-run-report-2026-08-12.md](docs/hard-run-report-2026-08-12.md) — adversarial black-box run against the live production trust plane, with reproduction commands
+- [docs/invariant-attack-report.md](docs/invariant-attack-report.md) — hostile concurrency/tampering/crash/credential campaign against a local instance, the one invariant it broke (permit-cap over-spend on SQLite), and the fix that closed it
+- [docs/owasp-agentic-top10-mapping.md](docs/owasp-agentic-top10-mapping.md) — OWASP Top 10 for Agentic Applications (ASI01–ASI10, 2026) mapped to controls, proofs, and known gaps
 - [docs/failure-semantics.md](docs/failure-semantics.md) — every terminal outcome of a metered call that dies mid-flight, and the test that proves each
 - [docs/agent-accountability.md](docs/agent-accountability.md) — why an autonomous agent runs inside the permit/receipt loop, how to verify a receipt offline, and what receipts do not prove
 - [DESIGN_PARTNER_GUIDE.md](DESIGN_PARTNER_GUIDE.md) — partner evaluation path

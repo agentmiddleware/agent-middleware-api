@@ -1,10 +1,16 @@
 # Secret-scanning config for CI.
 #
-# Scope note: CI scans the WORKING TREE, not git history. History already
-# contains a leaked production key (removed from HEAD in the commit that added
-# this file), so a history scan would fail permanently and teach everyone to
-# ignore the job. The exposed key must be rotated at the provider instead —
-# deleting it from HEAD removes it from neither history nor existing clones.
+# Scope note: CI scans the WORKING TREE for speed. History was separately
+# verified on 2026-08-24 with a full-history `gitleaks detect` under this
+# config across every ref — main plus all stale branches. The only real
+# credential ever committed is the 2026-08-06 leaked key (see
+# docs/api-key-rotation.md): main's flattened history no longer contains it,
+# but stale unmerged branches that preserve the pre-flatten history still do,
+# and so do old clones. The key was rotated dead at the provider — deleting a
+# secret from HEAD removes it from neither old refs nor old clones, so
+# rotation remains the only real remediation; pruning the stale branches
+# removes the reachable copies. Every other historical finding is synthetic
+# test material, allowlisted below.
 
 [extend]
 useDefault = true
@@ -33,6 +39,8 @@ description = "Synthetic credentials used by tests, demos and CI — not real se
 paths = [
   # Test suites construct synthetic keys by design.
   '''^tests/''',
+  # The SDK's test suite does too (mock-transport clients with fake keys).
+  '''^b2a_sdk/tests/''',
   # Demo transcripts and copy-paste docs use placeholder keys.
   '''^docs/demo-.*\.md$''',
 ]
@@ -43,6 +51,14 @@ regexes = [
   '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=''',
   # base64 of the literal string "test-signing-key-material-32byte".
   '''dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU=''',
+  # base64 of "test-signing-key-not-for-prod" — a historical CI test constant
+  # (commented "Non-secret test material" at its use site); allowlisted so
+  # full-history scans stay noise-free.
+  '''dGVzdC1zaWduaW5nLWtleS1ub3QtZm9yLXByb2Q=''',
+  # Deliberately invalid key used by the credential-misuse invariant attack.
+  '''not_a_real_key''',
+  # Truncated static-dev-key placeholder in copy-paste docs ("amw_dev_...").
+  '''^amw_dev_\.\.\.$''',
   # Placeholder API keys in demos, docs and CI env blocks.
   '''(?i)\b(demo|dogfood|test|example|dummy|fake|placeholder)[-_](admin[-_])?key([-_][0-9]+)?\b''',
   # Copy-paste placeholders in SDK READMEs and quickstarts, e.g. "your-api-key",

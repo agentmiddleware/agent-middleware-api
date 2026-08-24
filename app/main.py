@@ -935,9 +935,10 @@ async def root(request: Request):
             "red_team_security": {
                 "base_path": "/v1/security",
                 "description": (
-                    "Autonomous penetration testing swarm. Continuously attacks "
-                    "all API endpoints to find vulnerabilities before "
-                    "external agents do."
+                    "Simulated red-team scan lifecycle (dormant proof "
+                    "surface). Models scan jobs and findings; probes "
+                    "nothing and refuses to run unless simulation is "
+                    "explicitly enabled."
                 ),
                 "endpoints": [
                     "POST /v1/security/scans",

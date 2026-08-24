@@ -24,7 +24,7 @@ removes it from neither git history nor existing clones.
 
 | Date | Key | Exposure | Action |
 | --- | --- | --- | --- |
-| 2026-08-06 | `***REMOVED***` | Hardcoded in `scripts/stress_test_live.py`, reachable on public `main` (removed from HEAD in #201; still present in history) | 2026-08-07: `VALID_API_KEYS` fully replaced on Railway and cutover completed via dashboard Redeploy of the last good deployment (variable-triggered rebuilds were crash-looping on the stale `master` trigger — see warning below). Verified with `rotate_api_keys.py verify`: retired key rejected (403), replacement accepted (200) |
+| 2026-08-06 | `***REMOVED***` | Hardcoded in `scripts/stress_test_live.py`, reachable on public `main` (removed from HEAD in #201; `main`'s flattened history no longer contains it, but an all-refs gitleaks scan on 2026-08-24 confirmed it remains reachable on stale unmerged branches that preserve the pre-flatten history, and in old clones — prune those branches before or when making the repository public) | 2026-08-07: `VALID_API_KEYS` fully replaced on Railway and cutover completed via dashboard Redeploy of the last good deployment (variable-triggered rebuilds were crash-looping on the stale `master` trigger — see warning below). Verified with `rotate_api_keys.py verify`: retired key rejected (403), replacement accepted (200) |
 
 ## Rotation procedure (Railway)
 

@@ -1,16 +1,16 @@
 """
 PROOF SURFACE — frozen. Do not expand; see docs/PROOF_SURFACES.md.
-Red Team Security Swarm Router
--------------------------------
-Endpoints for triggering, monitoring, and reviewing automated
-security scans against all API services.
+Red-team scan modeling router
+-----------------------------
+Endpoints for triggering, monitoring, and reviewing SIMULATED security
+scans. The backing service models a scan lifecycle across 7 attack
+categories (ACL bypass, auth probes, injection, rate limit evasion,
+privilege escalation, schema abuse, enumeration) but sends no traffic
+and attacks nothing; it refuses to run unless its simulation flag is
+explicitly enabled. The repository's real adversarial tooling is
+scripts/invariant_attacks/.
 
-The swarm runs 7 attack categories across all 33+ endpoints:
-ACL bypass, auth probes, injection, rate limit evasion,
-privilege escalation, schema abuse, and enumeration.
-
-All findings are machine-readable so the Autonomous PM
-can auto-generate fix PRs.
+Findings are structured and machine-readable.
 """
 
 from fastapi import APIRouter, Depends, HTTPException

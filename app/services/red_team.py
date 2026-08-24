@@ -1,20 +1,18 @@
 """
-Red Team Security Swarm — Service Layer
-=========================================
-Autonomous penetration testing agents that continuously probe
-all API endpoints for vulnerabilities.
+Red-team scan modeling — dormant simulated proof surface.
 
-Attack Philosophy:
-- Every endpoint gets hit with every applicable vector
-- ACL bypass is priority #1 (the DJI lesson)
-- Auth edge cases are priority #2
-- All findings generate machine-readable reports so the
-  Autonomous PM can auto-generate fix PRs
+This module MODELS a red-team scan lifecycle (scan records, findings,
+severities, machine-readable reports) so the surrounding API shape could be
+exercised end to end. It probes nothing: no requests are sent, no endpoints
+are attacked, and no scanner integrations (ZAP, Nuclei, fuzzers) exist.
+Entry points are guarded by ``require_simulation`` and refuse to run unless
+the service's simulation flag is explicitly enabled; the routes that expose
+this module are proof surfaces, unmounted by default (see
+docs/PROOF_SURFACES.md).
 
-Production wiring:
-- OWASP ZAP integration for deep scanning
-- Nuclei templates for known CVE patterns
-- Custom MQTT/CoAP protocol fuzzers
+The real, runnable adversarial tooling for this repository lives in
+scripts/invariant_attacks/ and scripts/red_team_trust_plane.py, with recorded
+verdicts in docs/invariant-attack-report.md.
 """
 
 import uuid
@@ -858,8 +856,9 @@ class ScanStore:
 
 class RedTeamSwarm:
     """
-    Top-level orchestrator for the Red Team Security Swarm.
-    Coordinates attack vector generation, execution, and reporting.
+    Simulated top-level orchestrator for the modeled scan lifecycle.
+    Coordinates vector generation, simulated execution, and reporting;
+    sends no traffic (see the module docstring).
     """
 
     def __init__(self):
