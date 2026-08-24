@@ -8,7 +8,10 @@ outside a credential's authority. Companion to
 which records the exact requests, observed responses, and HELD/BROKE/PARTIAL
 verdict for each.
 
-Stdlib only (`urllib` + `threading` + `sqlite3`) — no test dependencies. The
+Stdlib only (`urllib` + `threading` + `sqlite3`) — no test dependencies,
+except that the receipt-forgery attack and the combined crash storm invoke
+the shipped offline SDK verifier (`b2a_sdk.verify_cli` via `sys.executable`),
+which needs `cryptography` importable by the interpreter running the harness. The
 isolated concurrency attacks release threads from a `threading.Barrier`; the
 combined crash storm uses an interleaved worker queue and records which variants
 actually started. DB reconciliation for the crash test reads the SQLite file

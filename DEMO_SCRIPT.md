@@ -92,8 +92,11 @@ make live-loop-proof   # terminal 2: drives the loop, writes the bundle
 ```
 
 Handing that bundle's directory to a partner engineer, and having them run
-the verifier themselves, is the partner-owned verification step the
-customer-validation milestone asks for.
+the verifier themselves, rehearses the independent-verification mechanics of
+the customer-validation milestone; the milestone step itself requires the
+receipt to come from a partner-owned agent and staging tool and be verified
+in the partner's environment
+([docs/30-day-customer-validation.md](docs/30-day-customer-validation.md)).
 
 The proof artifact shape is captured in
 [`docs/demo-trust-plane-output.md`](docs/demo-trust-plane-output.md). Use the
