@@ -1241,7 +1241,7 @@ async def test_acp_rebind_prevented_by_mark_charged(client, spt_stub, clean_data
         record = (
             await session.execute(
                 select(IdempotencyRecordModel).where(
-                    IdempotencyRecordModel.wallet_id == ctx["wallet_id"],
+                    IdempotencyRecordModel.wallet_id == ctx["agent_wallet_id"],
                     IdempotencyRecordModel.endpoint == ACP_CHECKOUT_ENDPOINT,
                     IdempotencyRecordModel.idempotency_key == "rebind-1",
                 )
