@@ -655,6 +655,16 @@ class ACPCommerceAdapter:
             response_json=response.model_dump(mode="json"),
             status_code=200,
         )
+        # 10. Mark the charge landed: sets ledger_entry_id AFTER complete()
+        # succeeds, indicating full settlement completion. This prevents
+        # abandon() from deleting this record if a future settlement-path
+        # rollback is needed (preventing cart rebind via repeat intent_id).
+        await idem.mark_charged(
+            wallet_id=agent_wallet_id,
+            endpoint=ACP_CHECKOUT_ENDPOINT,
+            idempotency_key=request.intent_id,
+            ledger_entry_id=charge.get("payment_intent_id") or "unknown",
+        )
         return response
 
 

@@ -1212,3 +1212,36 @@ async def test_acp_stale_intent_crashed_before_receipt_reruns_without_double_cha
     assert recovered[0].ok is True
     assert recovered[0].metadata["intent_id"] == "intent-crash-2"
     assert recovered[0].metadata["abandoned_record_id"]
+
+
+@pytest.mark.anyio
+async def test_acp_rebind_prevented_by_mark_charged(client, spt_stub, clean_database):
+    """After a Stripe charge succeeds, mark_charged sets ledger_entry_id.
+    On retry with different cart but same intent_id, idempotency conflict
+    is detected immediately (not a rebind to the original charge)."""
+    ctx = await provision_agent_wallet(client)
+
+    # First checkout with intent_id="rebind-1", merchant="alice.com", total=$50
+    first = await client.post(
+        checkout_url(ctx),
+        json=checkout_body("rebind-1"),
+        headers=ctx["agent_headers"],
+    )
+    assert first.status_code == 201, first.text
+    assert len(spt_stub) == 1
+
+    # Second attempt: same intent_id, different cart (quantity 3 instead of 2).
+    # The idempotency record should have ledger_entry_id set from the first
+    # charge (mark_charged), so this should be rejected as a conflict before
+    # any Stripe call is made.
+    conflicting = await client.post(
+        checkout_url(ctx),
+        json=checkout_body("rebind-1", quantity=3, client_total="75"),
+        headers=ctx["agent_headers"],
+    )
+    assert conflicting.status_code == 409, conflicting.text
+    assert conflicting.json()["detail"]["error"] == "acp_intent_conflict"
+
+    # Stripe was called only once (for the first checkout); the second attempt
+    # was rejected by idempotency conflict before reaching Stripe.
+    assert len(spt_stub) == 1
