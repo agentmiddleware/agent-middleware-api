@@ -6,8 +6,8 @@ this script proves all of them in one command, as the non-admin caller a
 partner's agent would be, against an already-running quickstart-posture
 server (``make quickstart``):
 
-  discover -> authenticate -> authorize -> invoke -> meter -> receipt
-  -> replay -> audit -> govern
+  discover -> authenticate -> authorize -> verify -> invoke -> meter
+  -> receipt -> replay -> audit -> govern
 
 Every stage is asserted, not just printed: the run exits non-zero the moment
 any invariant breaks (wrong charge, replay minting a second receipt, audit
@@ -383,6 +383,67 @@ class ProofRun:
         path.write_text(keys.text, encoding="utf-8")
         return path
 
+    def verify_permit(self, wallet_id: str, permit_id: str) -> dict[str, Any]:
+        """Prove the standalone authorization check agrees with the dispatcher.
+
+        ``POST /v1/permits/verify`` answers "would this exact action be
+        admitted?", so it is asked with the whole action: acting wallet, tool,
+        and price. Asked that way it must admit the granted call and refuse the
+        same permit for a *registered* tool it does not name — permit scope,
+        not tool existence. An unregistered name would prove nothing here:
+        "no such tool" is not "your permit does not cover it".
+        """
+        allowed = self.client.post(
+            "/v1/permits/verify",
+            json={
+                "permit_id": permit_id,
+                "wallet_id": wallet_id,
+                "tool": GOVERNED_TOOL,
+                "estimated_credits": str(EXPECTED_CREDITS_PER_CALL),
+            },
+        )
+        require(
+            allowed.status_code == 200,
+            f"permit verify failed ({allowed.status_code}): {allowed.text}",
+        )
+        verdict = allowed.json()
+        require(
+            verdict["valid"] is True,
+            f"granted action verified as invalid: reason={verdict.get('reason')} "
+            f"details={verdict.get('details')}",
+        )
+        self.record("verify-permit", tool=GOVERNED_TOOL, valid=True)
+        return verdict
+
+    def verify_permit_scope(self, wallet_id: str, narrow_permit: str) -> None:
+        """The same endpoint must refuse a registered tool the permit omits."""
+        refused = self.client.post(
+            "/v1/permits/verify",
+            json={
+                "permit_id": narrow_permit,
+                "wallet_id": wallet_id,
+                "tool": GOVERNED_TOOL,
+                "estimated_credits": str(EXPECTED_CREDITS_PER_CALL),
+            },
+        )
+        require(
+            refused.status_code == 200,
+            f"permit verify failed ({refused.status_code}): {refused.text}",
+        )
+        verdict = refused.json()
+        require(
+            verdict["valid"] is False
+            and verdict.get("reason") == "permit_tool_not_allowed",
+            "out-of-scope action verified as allowed: "
+            f"valid={verdict.get('valid')} reason={verdict.get('reason')}",
+        )
+        self.record(
+            "verify-scope",
+            tool=GOVERNED_TOOL,
+            valid=False,
+            reason=verdict["reason"],
+        )
+
     def replay(self, wallet_id: str, permit_id: str,
                receipt: dict[str, Any], debits_before: int) -> None:
         replayed = self.client.post(
@@ -430,6 +491,9 @@ class ProofRun:
         narrow_permit = self.authorize(
             identity, allowed_tool=UNGRANTED_TOOL, label="deny", record=False
         )
+        # Same permit, asked ahead of time: the standalone check must refuse
+        # the call the dispatcher is about to deny, for the same reason.
+        self.verify_permit_scope(identity["wallet_id"], narrow_permit)
         denied = self.client.post(
             "/mcp/messages",
             json=self._invoke_body(
@@ -513,6 +577,7 @@ def run(api_url: str, output_dir: Path) -> None:
         permit_id = proof.authorize(
             identity, allowed_tool=GOVERNED_TOOL, label="grant"
         )
+        proof.verify_permit(identity["wallet_id"], permit_id)
         receipt = proof.invoke(identity["wallet_id"], permit_id)
         debits = proof.meter(identity["wallet_id"], receipt)
 
