@@ -6,8 +6,11 @@
 tagged `python-sdk-v0.4.0`, and the entries below are new surface area on
 top of it, so leaving the source at `0.4.0` would have shipped something
 materially different under a version already in the wild. A minor bump:
-everything here is additive and no published behaviour changes. The tag is
-not cut by this change — `python-sdk-v0.5.0` is still a release decision.
+everything here is additive, with one bounded exception: `settle_402()` now
+prefers `amount_usd` over the legacy `amount` alias when a requirement carries
+both with different values (see below). `parse_402_response()` always sets the
+two equal, so the normal path is unchanged. The tag is not cut by this
+change — `python-sdk-v0.5.0` is still a release decision.
 
 ### Added
 
@@ -30,8 +33,10 @@ not cut by this change — `python-sdk-v0.5.0` is still a release decision.
   (the governed invoke endpoint reads the bearer when `IGA_TRUSTED_ISSUERS` is
   set). The client never mints tokens itself.
 - **x402 parse endpoint**: Add `X402Client.parse_402()` method for POST
-  /v1/x402/parse, returning typed models with `amount_usd`, `pay_to`, `network`,
-  and `asset` fields (not just `amount`). The client-side `parse_402_response()`
+  /v1/x402/parse. It returns a validated requirement dict — not a typed model —
+  with `amount_usd`, `pay_to` and `network` required and `asset` optional; a 2xx
+  body missing a required field raises `APIError` rather than reaching
+  settlement. The client-side `parse_402_response()`
   helper now returns `amount_usd` to match, alongside the legacy `amount`
   key (same value) so existing callers keep working. `settle_402()` reads
   `amount_usd` first and falls back to `amount` only when it is absent, so the

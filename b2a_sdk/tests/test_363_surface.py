@@ -468,10 +468,10 @@ class TestParseResponseValidation:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "missing",
-        ["amount_usd", "pay_to", "network", "asset"],
+        ["amount_usd", "pay_to", "network"],
     )
     async def test_missing_required_field_raises(self, x402_client, missing):
-        """Every documented field is required; a gap is an APIError."""
+        """A gap in a required field is an APIError."""
         body = {
             "amount_usd": "1.50",
             "pay_to": "0x1111111111111111111111111111111111111111",
@@ -484,6 +484,37 @@ class TestParseResponseValidation:
         ) as mock_post:
             mock_post.return_value = self._response(body)
             with pytest.raises(APIError, match=missing):
+                await x402_client.parse_402(402, {"X-402-Amount": "1.50"})
+
+    @pytest.mark.asyncio
+    async def test_asset_less_response_is_accepted(self, x402_client):
+        """`asset` is optional, as it is in parse_402_response and settle_402."""
+        body = {
+            "amount_usd": "1.50",
+            "pay_to": "0x1111111111111111111111111111111111111111",
+            "network": "base",
+        }
+        with patch.object(
+            x402_client._client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._response(body)
+            assert await x402_client.parse_402(402, {"X-402-Amount": "1.50"}) == body
+
+    @pytest.mark.asyncio
+    async def test_malformed_asset_still_rejected(self, x402_client):
+        """Optional does not mean unchecked: a present `asset` must be usable."""
+        with patch.object(
+            x402_client._client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._response(
+                {
+                    "amount_usd": "1.50",
+                    "pay_to": "0x1111111111111111111111111111111111111111",
+                    "network": "base",
+                    "asset": "",
+                }
+            )
+            with pytest.raises(APIError, match="asset"):
                 await x402_client.parse_402(402, {"X-402-Amount": "1.50"})
 
     @pytest.mark.asyncio
@@ -518,3 +549,37 @@ class TestParseResponseValidation:
             mock_post.return_value = self._response(body)
             assert await x402_client.parse_402(402, {"X-402-Amount": "1.50"}) == body
 
+
+
+class TestACPLineItemBounds:
+    """ACPLineItem rejects what the server would 422, before the SPT is sent."""
+
+    @pytest.mark.parametrize("quantity", [0, -1, 10_001])
+    def test_invalid_quantity_rejected(self, quantity):
+        """Quantity must be in 1..10000, mirroring app/schemas/acp.py."""
+        with pytest.raises(ValueError, match="quantity"):
+            ACPLineItem(
+                name="Widget",
+                quantity=quantity,
+                unit_amount=2125,
+                currency="usd",
+            )
+
+    @pytest.mark.parametrize("unit_amount", [-1, 10_000_001])
+    def test_invalid_unit_amount_rejected(self, unit_amount):
+        """unit_amount must be in 0..10000000 minor units."""
+        with pytest.raises(ValueError, match="unit_amount"):
+            ACPLineItem(
+                name="Widget",
+                quantity=1,
+                unit_amount=unit_amount,
+                currency="usd",
+            )
+
+    @pytest.mark.parametrize("unit_amount", [0, 10_000_000])
+    def test_boundary_unit_amounts_accepted(self, unit_amount):
+        """A zero-cost or max-cost line is legal; the bounds are inclusive."""
+        item = ACPLineItem(
+            name="Widget", quantity=1, unit_amount=unit_amount, currency="usd"
+        )
+        assert item.to_payload()["unit_amount"] == unit_amount

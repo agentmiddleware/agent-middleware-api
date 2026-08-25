@@ -112,11 +112,14 @@ class X402Client:
     ) -> dict[str, Any]:
         """POST the observed response to /v1/x402/parse and return the requirement.
 
-        The server strictly validates the headers and returns a typed
-        requirement dict with ``amount_usd``, ``pay_to``, ``network``, and
-        ``asset`` fields. Raises APIError on invalid/missing headers, and also
-        when a 2xx body does not carry those four fields as non-empty strings —
-        a malformed requirement must not reach settlement.
+        The server strictly validates the headers and returns a requirement
+        dict with ``amount_usd``, ``pay_to``, ``network``, and an optional
+        ``asset``. Raises APIError on invalid/missing headers, and also when a
+        2xx body omits the three required fields or carries them as anything
+        other than non-empty strings — a malformed requirement must not reach
+        settlement. ``asset`` stays optional here, matching
+        :func:`parse_402_response` and :meth:`settle_402`; when present it is
+        still required to be a non-empty string.
         """
         try:
             response = await self._client.post(
@@ -146,11 +149,13 @@ class X402Client:
             if response.status_code == 403:
                 raise AuthorizationError(detail, status_code=403, payload=payload)
             raise APIError(detail, status_code=response.status_code, payload=payload)
-        # A 2xx body still has to honour the documented contract: the server's
-        # X402RequirementResponse declares all four as required strings. Without
-        # this, a malformed body would reach settle_402() as an empty amount or
+        # A 2xx body still has to honour the documented contract. Without this,
+        # a malformed body would reach settle_402() as an empty amount or
         # pay_to, or raise KeyError in a caller reading the documented fields.
-        for required in ("amount_usd", "pay_to", "network", "asset"):
+        # Only these three are required: parse_402_response() and settle_402()
+        # both treat `asset` as optional, so requiring it here would reject an
+        # asset-less requirement the rest of the SDK handles fine.
+        for required in ("amount_usd", "pay_to", "network"):
             value = payload.get(required)
             if not isinstance(value, str) or not value:
                 raise APIError(
@@ -159,6 +164,14 @@ class X402Client:
                     status_code=response.status_code,
                     payload=payload,
                 )
+        asset = payload.get("asset")
+        if asset is not None and (not isinstance(asset, str) or not asset):
+            raise APIError(
+                "invalid_x402_parse_response: 'asset' must be a non-empty "
+                "string when present",
+                status_code=response.status_code,
+                payload=payload,
+            )
         return payload
 
     async def settle_402(

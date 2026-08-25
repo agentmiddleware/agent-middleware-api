@@ -244,6 +244,23 @@ class ACPLineItem:
     # without a SKU is constructed by omitting it, not by passing None.
     sku: str | None = None
 
+    def __post_init__(self) -> None:
+        """Reject line items the server would refuse, before the SPT is sent.
+
+        Bounds mirror ``app/schemas/acp.py::ACPLineItem`` exactly. Catching
+        these here keeps a delegated payment credential off the wire on a
+        request that could only 422.
+        """
+        if not 0 < self.quantity <= 10_000:
+            raise ValueError(
+                f"quantity must be in 1..10000, got {self.quantity!r}"
+            )
+        if not 0 <= self.unit_amount <= 10_000_000:
+            raise ValueError(
+                "unit_amount must be in 0..10000000 minor units, got "
+                f"{self.unit_amount!r}"
+            )
+
     def to_payload(self) -> JsonObject:
         payload: JsonObject = {
             "name": self.name,
