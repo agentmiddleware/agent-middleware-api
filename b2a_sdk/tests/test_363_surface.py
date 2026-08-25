@@ -436,3 +436,75 @@ class TestSettleAmountPrecedence:
                 idempotency_key="settle-precedence-2",
             )
             assert mock_post.call_args[1]["json"]["amount"] == "2.25"
+
+
+class TestParseResponseValidation:
+    """parse_402() must not pass a malformed 2xx body through to callers."""
+
+    @pytest.fixture
+    def x402_client(self):
+        """An X402Client pointed at a stub base URL."""
+        return X402Client(api_key="test-key", base_url="http://test")
+
+    @staticmethod
+    def _response(body):
+        """A 200 response carrying the given JSON body."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.is_error = False
+        mock_response.json.return_value = body
+        return mock_response
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "missing",
+        ["amount_usd", "pay_to", "network", "asset"],
+    )
+    async def test_missing_required_field_raises(self, x402_client, missing):
+        """Every documented field is required; a gap is an APIError."""
+        body = {
+            "amount_usd": "1.50",
+            "pay_to": "0x1111111111111111111111111111111111111111",
+            "network": "base",
+            "asset": "usdc",
+        }
+        del body[missing]
+        with patch.object(
+            x402_client._client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._response(body)
+            with pytest.raises(APIError, match=missing):
+                await x402_client.parse_402(402, {"X-402-Amount": "1.50"})
+
+    @pytest.mark.asyncio
+    async def test_wrong_type_field_raises(self, x402_client):
+        """A non-string amount must not reach settlement."""
+        with patch.object(
+            x402_client._client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._response(
+                {
+                    "amount_usd": 1.50,  # number, not the documented string
+                    "pay_to": "0x1111111111111111111111111111111111111111",
+                    "network": "base",
+                    "asset": "usdc",
+                }
+            )
+            with pytest.raises(APIError, match="amount_usd"):
+                await x402_client.parse_402(402, {"X-402-Amount": "1.50"})
+
+    @pytest.mark.asyncio
+    async def test_wellformed_response_returned(self, x402_client):
+        """A complete requirement still passes through unchanged."""
+        body = {
+            "amount_usd": "1.50",
+            "pay_to": "0x1111111111111111111111111111111111111111",
+            "network": "base",
+            "asset": "usdc",
+        }
+        with patch.object(
+            x402_client._client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._response(body)
+            assert await x402_client.parse_402(402, {"X-402-Amount": "1.50"}) == body
+

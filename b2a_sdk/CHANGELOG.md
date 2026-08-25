@@ -14,7 +14,10 @@ not cut by this change — `python-sdk-v0.5.0` is still a release decision.
 - **ACP (Agentic Commerce Protocol) checkout**: Add `ACPLineItem`,
   `ACPCheckoutRequest`, `ACPCheckoutResponse` models and
   `AgentMiddlewareClient.acp_checkout()` method for POST /v1/billing/acp/checkout.
-  The server mints the permit; this is not invoke_tool. `sponsor_wallet_id` and
+  The server mints the permit; this is not invoke_tool. Proof-only: the
+  endpoint is on the server's dormant `billing.expansion_router` and is
+  mounted only when `ENABLE_PROOF_SURFACES=true`, so deployments with proof
+  surfaces off return 404. `sponsor_wallet_id` and
   `agent_wallet_id` are required and sent as query params, matching the server
   route. `ACPCheckoutRequest.spt_token` is declared `repr=False`, so the
   delegated payment credential does not surface in logs or tracebacks that

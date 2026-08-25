@@ -114,7 +114,9 @@ class X402Client:
 
         The server strictly validates the headers and returns a typed
         requirement dict with ``amount_usd``, ``pay_to``, ``network``, and
-        ``asset`` fields. Raises APIError on invalid/missing headers.
+        ``asset`` fields. Raises APIError on invalid/missing headers, and also
+        when a 2xx body does not carry those four fields as non-empty strings —
+        a malformed requirement must not reach settlement.
         """
         try:
             response = await self._client.post(
@@ -144,6 +146,19 @@ class X402Client:
             if response.status_code == 403:
                 raise AuthorizationError(detail, status_code=403, payload=payload)
             raise APIError(detail, status_code=response.status_code, payload=payload)
+        # A 2xx body still has to honour the documented contract: the server's
+        # X402RequirementResponse declares all four as required strings. Without
+        # this, a malformed body would reach settle_402() as an empty amount or
+        # pay_to, or raise KeyError in a caller reading the documented fields.
+        for required in ("amount_usd", "pay_to", "network", "asset"):
+            value = payload.get(required)
+            if not isinstance(value, str) or not value:
+                raise APIError(
+                    f"invalid_x402_parse_response: {required!r} must be a "
+                    "non-empty string",
+                    status_code=response.status_code,
+                    payload=payload,
+                )
         return payload
 
     async def settle_402(

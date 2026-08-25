@@ -829,6 +829,12 @@ class AgentMiddlewareClient:
         creates a permit, settles the payment via the Shared Payment Token,
         and returns the trust-plane evidence identifiers.
 
+        Dormant surface: ``/v1/billing/acp/checkout`` lives on the server's
+        ``billing.expansion_router``, which is mounted only when
+        ``ENABLE_PROOF_SURFACES=true``. A deployment with proof surfaces off —
+        the supported production default — returns 404 for this call. Treat
+        this client method as proof-only until that surface is unfrozen.
+
         Args:
             request: ACP checkout request with line items and SPT token
             sponsor_wallet_id: Sponsor wallet that issues the checkout permit
