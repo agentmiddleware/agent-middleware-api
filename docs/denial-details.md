@@ -35,6 +35,18 @@ The portable receipt signature authenticates `reason_code`, not the adjacent
 `details` object. Details remain API and audit context beside the receipt,
 never instead of it.
 
+### `verify` needs the action, not just the permit
+
+`POST /v1/permits/verify` decides an *action*: it answers "would this wallet,
+calling this tool, at this price, be admitted under this permit?" Send
+`wallet_id` and `tool` (and `estimated_credits` when the price matters) or the
+verdict is not about the call you meant. A request omitting either gets
+`valid: false` with reason `permit_verify_context_missing` and
+`details.missing` naming the absent fields — not a binding reason, which would
+read as "this permit is not yours" to the permit's own subject. Reasons that do
+not depend on the missing context (`permit_not_found`, `permit_expired`,
+`permit_revoked`) are still reported as themselves.
+
 ## Reason-code and remediation catalog
 
 This is the authoritative catalog for the `reason_code` values emitted by the

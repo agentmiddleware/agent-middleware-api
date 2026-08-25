@@ -11,6 +11,23 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔎 `permit verify` names missing action context, and the live loop proves it
+
+- **`POST /v1/permits/verify` asked without `wallet_id` or `tool` no longer
+  answers `permit_wallet_mismatch`.** The endpoint decides an action, so it
+  evaluated the absent fields as empty strings and landed on a binding reason
+  that reads as "this permit is not yours" — to the permit's own subject. It
+  now answers `permit_verify_context_missing` with `details.missing` naming the
+  fields that were left out. Reasons that do not depend on the missing context
+  (`permit_not_found`, `permit_expired`, `permit_revoked`) are unchanged, as is
+  the 403 that keeps an unrelated caller from reading a permit by id.
+- **`scripts/live_loop_proof.py` now covers permit verification.** The run adds
+  a `verify` stage before the invoke (the granted action must verify
+  `valid: true`) and a `verify-scope` check before the denial (the same
+  endpoint must refuse a *registered* tool the permit does not name, with
+  `permit_tool_not_allowed`). An unregistered tool name proves nothing here:
+  "no such tool" is not "your permit does not cover it".
+
 ### 🔒 Production refuses a SQLite `DATABASE_URL` at boot
 
 - **The premise behind eleven of the twelve audit findings no longer holds.**

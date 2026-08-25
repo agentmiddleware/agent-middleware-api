@@ -234,6 +234,36 @@ async def verify_permit(
     if permit is not None and not auth.is_bootstrap_admin:
         if auth.wallet_id not in {permit.issuer_wallet_id, permit.subject_wallet_id}:
             raise HTTPException(status_code=403, detail="permit_access_denied")
+    # ``verify`` answers "would this exact action be admitted?", so it needs
+    # the action: which wallet acts, and which tool it calls. Evaluated against
+    # an empty string, an omitted field produces a verdict about a call nobody
+    # meant to make — a binding reason that reads as "this permit is not yours"
+    # to the permit's own subject, or, for a permit with an empty allowlist and
+    # a matching empty-tool scope, an outright ``valid: true``. Neither is an
+    # answer, so name the missing context instead of returning one.
+    #
+    # Lifecycle reasons are exempt: a permit that is expired or no longer
+    # active is refused whatever action you name, so that verdict is real even
+    # from an incomplete request. ``permit_not_found`` (no permit at all) is
+    # likewise left to speak for itself below.
+    missing = [
+        field
+        for field, value in (
+            ("wallet_id", request.wallet_id),
+            ("tool", request.tool),
+        )
+        if not value
+    ]
+    lifecycle_denial = validation.reason == "permit_expired" or (
+        permit is not None and permit.status != "active"
+    )
+    if missing and permit is not None and not lifecycle_denial:
+        return PermitVerifyResponse(
+            valid=False,
+            reason="permit_verify_context_missing",
+            details={"missing": missing},
+            permit=permit_model_to_response(permit),
+        )
     return PermitVerifyResponse(
         valid=validation.allowed,
         reason=validation.reason,
