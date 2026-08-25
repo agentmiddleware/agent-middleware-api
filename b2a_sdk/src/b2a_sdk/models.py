@@ -260,7 +260,9 @@ class ACPCheckoutRequest:
 
     intent_id: str
     line_items: list[ACPLineItem]
-    spt_token: str
+    # Delegated payment credential: the server masks it and it is deliberately
+    # kept out of the audit trail, so it must never reach a repr or traceback.
+    spt_token: str = field(repr=False)
     merchant_domain: str
     client_total: int
 

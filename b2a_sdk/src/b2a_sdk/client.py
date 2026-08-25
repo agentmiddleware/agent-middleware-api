@@ -819,6 +819,8 @@ class AgentMiddlewareClient:
         self,
         request: ACPCheckoutRequest,
         *,
+        sponsor_wallet_id: str,
+        agent_wallet_id: str,
         idempotency_key: str,
     ) -> ACPCheckoutResponse:
         """Create an ACP (Agentic Commerce Protocol) checkout.
@@ -829,16 +831,24 @@ class AgentMiddlewareClient:
 
         Args:
             request: ACP checkout request with line items and SPT token
+            sponsor_wallet_id: Sponsor wallet that issues the checkout permit
+            agent_wallet_id: Agent wallet the permit is bound to
             idempotency_key: Caller-supplied idempotency key
 
         Returns:
             ACPCheckoutResponse with permit_id, receipt_id, and derived total
         """
         key = self._validate_idempotency_key(idempotency_key)
+        # Both wallet ids are required *query* params on the server route; a
+        # body-only request is refused with 422 before authorization.
         payload = await self._request_json(
             "POST",
             "/v1/billing/acp/checkout",
             headers={"Idempotency-Key": key},
+            params={
+                "sponsor_wallet_id": sponsor_wallet_id,
+                "agent_wallet_id": agent_wallet_id,
+            },
             json=request.to_payload(),
         )
         try:

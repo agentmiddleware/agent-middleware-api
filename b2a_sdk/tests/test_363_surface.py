@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from b2a_sdk import AgentMiddlewareClient, InsufficientFundsError
-from b2a_sdk.errors import APIError
+from b2a_sdk.errors import APIError, AuthenticationError
 from b2a_sdk.models import ACPCheckoutRequest, ACPCheckoutResponse, ACPLineItem
 from b2a_sdk.x402 import X402Client, parse_402_response
 
@@ -58,7 +58,10 @@ class TestACPCheckout:
         with patch.object(client._client, "request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             result = await client.acp_checkout(
-                request, idempotency_key="acp-checkout-001"
+                request,
+                sponsor_wallet_id="spn-wallet",
+                agent_wallet_id="agt-wallet",
+                idempotency_key="acp-checkout-001",
             )
 
             assert isinstance(result, ACPCheckoutResponse)
@@ -73,6 +76,102 @@ class TestACPCheckout:
             assert call_args[0][0] == "POST"
             assert call_args[0][1] == "/v1/billing/acp/checkout"
             assert call_args[1]["headers"]["Idempotency-Key"] == "acp-checkout-001"
+            # The server requires both wallet ids as query params.
+            assert call_args[1]["params"] == {
+                "sponsor_wallet_id": "spn-wallet",
+                "agent_wallet_id": "agt-wallet",
+            }
+
+    @staticmethod
+    def _request() -> ACPCheckoutRequest:
+        return ACPCheckoutRequest(
+            intent_id="int-abc",
+            line_items=[
+                ACPLineItem(
+                    name="Widget",
+                    sku="WDG-001",
+                    quantity=2,
+                    unit_amount=2125,
+                    currency="usd",
+                )
+            ],
+            spt_token="spt_test_token",
+            merchant_domain="example.com",
+            client_total=4250,
+        )
+
+    @pytest.mark.asyncio
+    async def test_acp_checkout_blank_idempotency_key_rejected(self, client):
+        """A blank idempotency key is refused before any request is sent."""
+        with patch.object(
+            client._client, "request", new_callable=AsyncMock
+        ) as mock_request:
+            with pytest.raises(ValueError):
+                await client.acp_checkout(
+                    self._request(),
+                    sponsor_wallet_id="spn-wallet",
+                    agent_wallet_id="agt-wallet",
+                    idempotency_key="   ",
+                )
+            mock_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_acp_checkout_unauthorized_raises(self, client):
+        """A 401 surfaces as AuthenticationError, not a generic APIError."""
+        bearer_client = AgentMiddlewareClient(
+            api_key="test-key", base_url="http://test", bearer_token="tok-abc"
+        )
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.is_error = True
+        mock_response.json.return_value = {"detail": "invalid_api_key"}
+
+        with patch.object(
+            bearer_client._client, "request", new_callable=AsyncMock
+        ) as mock_request:
+            mock_request.return_value = mock_response
+            with pytest.raises(AuthenticationError):
+                await bearer_client.acp_checkout(
+                    self._request(),
+                    sponsor_wallet_id="spn-wallet",
+                    agent_wallet_id="agt-wallet",
+                    idempotency_key="acp-checkout-401",
+                )
+
+    @pytest.mark.asyncio
+    async def test_acp_checkout_missing_field_raises_api_error(self, client):
+        """A 200 body missing a required ACP field is an APIError, not a crash."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.is_error = False
+        mock_response.json.return_value = {
+            "order_id": "ord-xyz",
+            "intent_id": "int-abc",
+            "permit_id": "pmt-123",
+            # receipt_id omitted: the trust-plane evidence is incomplete.
+            "audit_event_id": "aud-789",
+            "derived_total": "42.50",
+            "status": "settled",
+        }
+
+        with patch.object(
+            client._client, "request", new_callable=AsyncMock
+        ) as mock_request:
+            mock_request.return_value = mock_response
+            with pytest.raises(APIError):
+                await client.acp_checkout(
+                    self._request(),
+                    sponsor_wallet_id="spn-wallet",
+                    agent_wallet_id="agt-wallet",
+                    idempotency_key="acp-checkout-bad",
+                )
+
+    def test_acp_request_repr_redacts_spt_token(self):
+        """The delegated payment credential never reaches a repr or traceback."""
+        request = self._request()
+        assert "spt_test_token" not in repr(request)
+        # ...but it is still sent on the wire.
+        assert request.to_payload()["spt_token"] == "spt_test_token"
 
     @pytest.mark.asyncio
     async def test_acp_line_item_to_payload(self):
@@ -183,7 +282,8 @@ class TestX402Parse:
         result = parse_402_response(mock_response)
         assert result is not None
         assert result["amount_usd"] == "10.50"
-        assert "amount" not in result
+        # Legacy alias preserved for existing callers.
+        assert result["amount"] == "10.50"
         assert result["pay_to"] == "0x1234567890abcdef"
         assert result["network"] == "ethereum"
         assert result["asset"] == "USDC"

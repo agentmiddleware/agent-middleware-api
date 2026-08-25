@@ -49,7 +49,9 @@ def parse_402_response(response: Any) -> dict[str, Any] | None:
     ``/v1/x402`` endpoints are the strict validator.
 
     Returns a dict with ``amount_usd``, ``pay_to``, ``network``, and ``asset``
-    (when present), matching the server's parse endpoint.
+    (when present), matching the server's parse endpoint. The legacy ``amount``
+    key is returned alongside ``amount_usd`` with the same value, so existing
+    callers keep working; ``amount_usd`` is the name to read going forward.
     """
     if getattr(response, "status_code", None) != 402:
         return None
@@ -63,6 +65,8 @@ def parse_402_response(response: Any) -> dict[str, Any] | None:
     if amount is None or pay_to is None or network is None:
         return None
     result: dict[str, Any] = {
+        # Legacy alias kept for compatibility; same value as ``amount_usd``.
+        "amount": amount,
         "amount_usd": amount,
         "pay_to": pay_to,
         "network": network,

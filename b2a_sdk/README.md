@@ -93,12 +93,14 @@ signed, charged uncertainty receipt; the SDK never retries the dispatch.
 
 `LocalPermitValidator` and `GovernedEdgeSession` let framework integrations
 verify a permit's Ed25519 signature locally and mirror the server's per-call
-permit checks in-process (expiry, tool scope, budget, per-tool call caps) with
-no RPC. The local checks eliminate the server round trip only for calls the
-cached permit already provably denies; the server's `authorize_and_reserve`
+permit checks in-process (expiry, tool scope, per-tool call caps, and budget
+when `estimated_credits` is supplied) with no RPC. The local checks eliminate
+the server round trip only for calls the cached permit already provably denies; the server's `authorize_and_reserve`
 remains authoritative and can still deny a call the local mirror allowed.
 
 ```python
+from decimal import Decimal
+
 from b2a_sdk import AgentMiddlewareClient
 from b2a_sdk.edge_client import GovernedEdgeSession
 
@@ -114,6 +116,8 @@ async with AgentMiddlewareClient(api_key="...") as client:
         "partner.search",
         {"query": "quarterly risk"},
         idempotency_key="invoke-run-002",
+        # Without estimated_credits the local mirror skips the budget check.
+        estimated_credits=Decimal("2"),
     )
 ```
 

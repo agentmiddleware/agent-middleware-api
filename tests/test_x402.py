@@ -735,7 +735,10 @@ async def test_x402_settle_conflicting_replay_is_409(client, clean_database):
 def test_sdk_parse_402_response_stub():
     requirement = parse_402_response(_StubResponse(402, _x402_headers()))
     assert requirement == {
+        # "amount" is the legacy alias; "amount_usd" matches the server's
+        # parse endpoint. Both carry the same value.
         "amount": "1.50",
+        "amount_usd": "1.50",
         "pay_to": EVM_PAY_TO,
         "network": "base",
     }
