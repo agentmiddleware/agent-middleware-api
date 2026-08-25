@@ -193,16 +193,26 @@ class TestACPCheckout:
 
     @pytest.mark.asyncio
     async def test_acp_line_item_to_payload_no_sku(self):
-        """Test ACPLineItem.to_payload() with no SKU."""
+        """A line item with no SKU is built by omitting it entirely."""
         item = ACPLineItem(
             name="Widget",
-            sku=None,
             quantity=2,
             unit_amount=2125,
             currency="usd",
         )
+        assert item.sku is None
         payload = item.to_payload()
         assert "sku" not in payload
+
+        # Passing None explicitly stays equivalent.
+        explicit = ACPLineItem(
+            name="Widget",
+            quantity=2,
+            unit_amount=2125,
+            currency="usd",
+            sku=None,
+        )
+        assert explicit.to_payload() == payload
 
 
 class TestIGABearerToken:

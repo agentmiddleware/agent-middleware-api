@@ -237,10 +237,12 @@ class ACPLineItem:
     """One purchasable line of an ACP checkout, denominated in minor units."""
 
     name: str
-    sku: str | None
     quantity: int
     unit_amount: int
     currency: str
+    # Optional in the ACP payload, so optional in the constructor: a line item
+    # without a SKU is constructed by omitting it, not by passing None.
+    sku: str | None = None
 
     def to_payload(self) -> JsonObject:
         payload: JsonObject = {

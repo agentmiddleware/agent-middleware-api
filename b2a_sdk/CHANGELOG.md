@@ -17,7 +17,8 @@ not cut by this change — `python-sdk-v0.5.0` is still a release decision.
   The server mints the permit; this is not invoke_tool. Proof-only: the
   endpoint is on the server's dormant `billing.expansion_router` and is
   mounted only when `ENABLE_PROOF_SURFACES=true`, so deployments with proof
-  surfaces off return 404. `sponsor_wallet_id` and
+  surfaces off return 404. `ACPLineItem.sku` defaults to `None`, so a line
+  item without a SKU is built by omitting it. `sponsor_wallet_id` and
   `agent_wallet_id` are required and sent as query params, matching the server
   route. `ACPCheckoutRequest.spt_token` is declared `repr=False`, so the
   delegated payment credential does not surface in logs or tracebacks that
@@ -40,7 +41,10 @@ not cut by this change — `python-sdk-v0.5.0` is still a release decision.
   verify a permit's Ed25519 signature locally and mirror the server's per-call
   permit checks in-process (expiry, tool scope, per-tool call caps, and budget
   when `estimated_credits` is supplied) with no server round trip for
-  locally-denied calls.
+  locally-denied calls. Local signature verification needs the optional
+  `verify` extra (`pip install './b2a_sdk[verify]'`); without it,
+  `GovernedEdgeSession.open()` raises
+  `PermitDeniedError("permit_verification_unavailable")`.
 
 ### Fixed
 

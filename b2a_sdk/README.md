@@ -98,6 +98,15 @@ when `estimated_credits` is supplied) with no RPC. The local checks eliminate
 the server round trip only for calls the cached permit already provably denies; the server's `authorize_and_reserve`
 remains authoritative and can still deny a call the local mirror allowed.
 
+Local signature verification needs the Ed25519 verifier, which is an optional
+dependency kept out of the base install. Without it, `GovernedEdgeSession.open()`
+raises `PermitDeniedError("permit_verification_unavailable")` before the first
+governed call:
+
+```bash
+python -m pip install './b2a_sdk[verify]'
+```
+
 ```python
 from decimal import Decimal
 
