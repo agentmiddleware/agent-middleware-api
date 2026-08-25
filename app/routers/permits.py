@@ -235,35 +235,38 @@ async def verify_permit(
         if auth.wallet_id not in {permit.issuer_wallet_id, permit.subject_wallet_id}:
             raise HTTPException(status_code=403, detail="permit_access_denied")
     # ``verify`` answers "would this exact action be admitted?", so it needs
-    # the action: which wallet acts, and which tool it calls. A request that
-    # omits either is evaluated against an empty string, which lands on a
-    # binding reason (``permit_wallet_mismatch``) that reads as "your wallet is
-    # wrong" when the truth is "you never said which wallet". Name the missing
-    # context instead. This narrows nothing: the caller is still authorized for
-    # the permit above, and no binding value is disclosed.
-    # Only the reasons the empty context itself produces are rewritten; a
-    # real permit_not_found / permit_expired / permit_revoked still surfaces
-    # as itself, whatever the request left out.
-    reason = validation.reason
-    details = validation.details
-    caused_by_missing_context = (
-        not request.wallet_id and reason == "permit_wallet_mismatch"
-    ) or (not request.tool and reason == "permit_tool_not_allowed")
-    if caused_by_missing_context:
-        reason = "permit_verify_context_missing"
-        details = {
-            "missing": [
-                field
-                for field, value in (
-                    ("wallet_id", request.wallet_id),
-                    ("tool", request.tool),
-                )
-                if not value
-            ]
-        }
+    # the action: which wallet acts, and which tool it calls. Evaluated against
+    # an empty string, an omitted field produces a verdict about a call nobody
+    # meant to make — a binding reason that reads as "this permit is not yours"
+    # to the permit's own subject, or, for a permit with an empty allowlist and
+    # a matching empty-tool scope, an outright ``valid: true``. Neither is an
+    # answer, so name the missing context instead of returning one.
+    #
+    # Lifecycle reasons are exempt: a permit that is expired or no longer
+    # active is refused whatever action you name, so that verdict is real even
+    # from an incomplete request. ``permit_not_found`` (no permit at all) is
+    # likewise left to speak for itself below.
+    missing = [
+        field
+        for field, value in (
+            ("wallet_id", request.wallet_id),
+            ("tool", request.tool),
+        )
+        if not value
+    ]
+    lifecycle_denial = validation.reason == "permit_expired" or (
+        permit is not None and permit.status != "active"
+    )
+    if missing and permit is not None and not lifecycle_denial:
+        return PermitVerifyResponse(
+            valid=False,
+            reason="permit_verify_context_missing",
+            details={"missing": missing},
+            permit=permit_model_to_response(permit),
+        )
     return PermitVerifyResponse(
         valid=validation.allowed,
-        reason=reason,
-        details=details,
+        reason=validation.reason,
+        details=validation.details,
         permit=permit_model_to_response(permit) if permit else None,
     )

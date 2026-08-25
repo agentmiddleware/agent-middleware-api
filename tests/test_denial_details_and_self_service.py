@@ -309,6 +309,11 @@ async def test_verify_names_missing_action_context_instead_of_a_binding_reason(
     assert no_tool["reason"] == "permit_verify_context_missing"
     assert no_tool["details"] == {"missing": ["tool"]}
 
+    no_wallet = await verify({"tool": TOOL, "estimated_credits": 1})
+    assert no_wallet["valid"] is False
+    assert no_wallet["reason"] == "permit_verify_context_missing"
+    assert no_wallet["details"] == {"missing": ["wallet_id"]}
+
     # The complete question still answers normally...
     complete = await verify(
         {
@@ -330,6 +335,45 @@ async def test_verify_names_missing_action_context_instead_of_a_binding_reason(
     )
     assert out_of_scope["valid"] is False
     assert out_of_scope["reason"] == "permit_tool_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_verify_never_admits_an_action_it_was_not_told(client, clean_database):
+    """An empty allowlist must not turn an incomplete request into `valid: true`.
+
+    A permit may name no tools at all, and its scopes may include the scope an
+    empty tool name generates (``tool::invoke``). Asked without ``tool``, the
+    allowlist check has nothing to reject and the generated scope matches, so a
+    verdict derived from the empty string would admit a call the caller never
+    described. Missing context is decided before any of that.
+    """
+    agent = await provision_agent_wallet(client)
+    permit = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": agent["agent_wallet_id"],
+            "subject_wallet_id": agent["agent_wallet_id"],
+            "subject_key_id": agent["key_id"],
+            "allowed_tools": [],
+            "scopes": ["tool::invoke", "billing:charge"],
+            "max_credits": 50,
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "permit-empty-allowlist"},
+    )
+    assert permit.status_code == 201
+
+    resp = await client.post(
+        "/v1/permits/verify",
+        json={"permit_id": permit.json()["permit_id"]},
+        headers=agent["agent_headers"],
+    )
+    assert resp.status_code == 200
+    assert resp.json()["valid"] is False
+    assert resp.json()["reason"] == "permit_verify_context_missing"
+    assert resp.json()["details"] == {"missing": ["wallet_id", "tool"]}
 
 
 @pytest.mark.asyncio

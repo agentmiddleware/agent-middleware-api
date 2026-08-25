@@ -21,7 +21,7 @@ key, no pre-shared secret.
 
 ## How to reproduce
 
-```
+```bash
 make quickstart                        # terminal 1
 make live-loop-proof                   # terminal 2
 ```
