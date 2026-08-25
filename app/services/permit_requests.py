@@ -301,6 +301,7 @@ class PermitRequestService:
             requires_human_approval=requires_human_approval,
             justification=justification,
             request_hash=req_hash,
+            original_request_hash=req_hash,
             status=REQUEST_STATUS_PENDING,
             simulated=simulated,
             reserved_permit_id=f"permit-{uuid.uuid4().hex[:16]}",
@@ -558,6 +559,19 @@ class PermitRequestService:
         scopes = json.loads(model.scopes_json)
         allowed_tools = json.loads(model.allowed_tools_json)
 
+        # First integrity check: did the stored hash survive unchanged?
+        if model.request_hash != model.original_request_hash:
+            logger.error(
+                "permit_request_hash_anchor_mismatch request_id=%s original=%s current=%s",
+                model.request_id,
+                model.original_request_hash,
+                model.request_hash,
+            )
+            return await self._settle_failed(
+                model, "permit_request_hash_anchor_violation"
+            )
+
+        # Second integrity check: do the terms match the hash?
         verified_hash = permit_request_hash(
             issuer_wallet_id=model.issuer_wallet_id,
             subject_wallet_id=model.subject_wallet_id,
