@@ -84,6 +84,7 @@ class TestACPCheckout:
 
     @staticmethod
     def _request() -> ACPCheckoutRequest:
+        """Build a representative ACP checkout request for the tests below."""
         return ACPCheckoutRequest(
             intent_id="int-abc",
             line_items=[
@@ -374,3 +375,64 @@ class TestX402VsInsufficientFunds:
             # HTTP 402 in x402 context should raise APIError, not InsufficientFundsError
             assert not isinstance(exc_info.value, InsufficientFundsError)
             assert isinstance(exc_info.value, APIError)
+
+
+class TestSettleAmountPrecedence:
+    """settle_402() must settle the canonical amount, not the legacy alias."""
+
+    @pytest.fixture
+    def x402_client(self):
+        """An X402Client pointed at a stub base URL."""
+        return X402Client(api_key="test-key", base_url="http://test")
+
+    @staticmethod
+    def _settled_response():
+        """A minimal successful /v1/x402/settle response."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.is_error = False
+        mock_response.json.return_value = {
+            "settlement_id": "stl-1",
+            "receipt_id": "rct-1",
+        }
+        return mock_response
+
+    @pytest.mark.asyncio
+    async def test_amount_usd_wins_over_legacy_amount(self, x402_client):
+        """When both keys are present and differ, amount_usd is settled."""
+        with patch.object(
+            x402_client._client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._settled_response()
+            await x402_client.settle_402(
+                permit_id="pmt-1",
+                wallet_id="agt-1",
+                requirement={
+                    # A stale/mutated legacy alias must not decide the amount.
+                    "amount": "999.00",
+                    "amount_usd": "1.50",
+                    "pay_to": "0x1111111111111111111111111111111111111111",
+                    "network": "base",
+                },
+                idempotency_key="settle-precedence-1",
+            )
+            assert mock_post.call_args[1]["json"]["amount"] == "1.50"
+
+    @pytest.mark.asyncio
+    async def test_legacy_amount_used_when_amount_usd_absent(self, x402_client):
+        """An older requirement carrying only `amount` still settles."""
+        with patch.object(
+            x402_client._client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._settled_response()
+            await x402_client.settle_402(
+                permit_id="pmt-1",
+                wallet_id="agt-1",
+                requirement={
+                    "amount": "2.25",
+                    "pay_to": "0x1111111111111111111111111111111111111111",
+                    "network": "base",
+                },
+                idempotency_key="settle-precedence-2",
+            )
+            assert mock_post.call_args[1]["json"]["amount"] == "2.25"

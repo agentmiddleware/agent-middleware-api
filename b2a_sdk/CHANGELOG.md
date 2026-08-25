@@ -16,8 +16,10 @@ not cut by this change — `python-sdk-v0.5.0` is still a release decision.
   `AgentMiddlewareClient.acp_checkout()` method for POST /v1/billing/acp/checkout.
   The server mints the permit; this is not invoke_tool. `sponsor_wallet_id` and
   `agent_wallet_id` are required and sent as query params, matching the server
-  route. `ACPCheckoutRequest.spt_token` is kept out of the dataclass `repr` so
-  the delegated payment credential cannot leak into logs or tracebacks.
+  route. `ACPCheckoutRequest.spt_token` is declared `repr=False`, so the
+  delegated payment credential does not surface in logs or tracebacks that
+  render the request object. It is still sent on the wire by `to_payload()`,
+  which callers must not log.
 - **IGA bearer authentication**: `AgentMiddlewareClient.__init__()` accepts an
   optional `bearer_token` parameter. When set, the client sends
   `Authorization: Bearer <token>` alongside X-API-Key for IGA-governed flows
@@ -27,7 +29,9 @@ not cut by this change — `python-sdk-v0.5.0` is still a release decision.
   /v1/x402/parse, returning typed models with `amount_usd`, `pay_to`, `network`,
   and `asset` fields (not just `amount`). The client-side `parse_402_response()`
   helper now returns `amount_usd` to match, alongside the legacy `amount`
-  key (same value) so existing callers keep working.
+  key (same value) so existing callers keep working. `settle_402()` reads
+  `amount_usd` first and falls back to `amount` only when it is absent, so the
+  canonical field decides the settled amount.
 - **In-process permit validation**: Document `LocalPermitValidator` and
   `GovernedEdgeSession` in README. These classes, already shipped in 0.5.0,
   verify a permit's Ed25519 signature locally and mirror the server's per-call

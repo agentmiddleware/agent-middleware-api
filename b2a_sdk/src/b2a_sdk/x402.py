@@ -158,14 +158,22 @@ class X402Client:
         """POST the requirement to ``/v1/x402/settle`` and return the settlement.
 
         ``requirement`` is the dict from :func:`parse_402_response` (keys
-        ``amount_usd``/``pay_to``/``network``, optional ``asset``); ``payer`` is
+        ``amount_usd``/``pay_to``/``network``, optional ``asset``; the legacy
+        ``amount`` alias is accepted only when ``amount_usd`` is absent);
+        ``payer`` is
         the payer wallet's on-chain address — required by the server for EVM
         networks so the attested EIP-712 message binds the real ``from``. The
         server response includes the transfer authorization for the payer
         wallet to sign plus the settlement receipt id.
         """
         key = _validate_idempotency_key(idempotency_key)
-        amount = requirement.get("amount", requirement.get("amount_usd"))
+        # ``amount_usd`` is the canonical server field and wins; ``amount`` is
+        # only the legacy alias. parse_402_response() sets both to the same
+        # value, but a hand-built or mutated requirement can carry both with
+        # different values, and this is the amount that gets settled.
+        amount = requirement.get("amount_usd")
+        if amount is None:
+            amount = requirement.get("amount")
         body: dict[str, Any] = {
             "permit_id": permit_id,
             "wallet_id": wallet_id,

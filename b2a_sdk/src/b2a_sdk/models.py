@@ -260,8 +260,11 @@ class ACPCheckoutRequest:
 
     intent_id: str
     line_items: list[ACPLineItem]
-    # Delegated payment credential: the server masks it and it is deliberately
-    # kept out of the audit trail, so it must never reach a repr or traceback.
+    # Delegated payment credential: the server masks it and keeps it out of the
+    # audit trail. repr=False keeps it out of this dataclass's repr, so it does
+    # not surface in logs or tracebacks that render the request object. It is
+    # still returned by to_payload() and sent on the wire, so callers must not
+    # log that payload.
     spt_token: str = field(repr=False)
     merchant_domain: str
     client_total: int
