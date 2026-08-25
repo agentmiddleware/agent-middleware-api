@@ -583,3 +583,27 @@ class TestACPLineItemBounds:
             name="Widget", quantity=1, unit_amount=unit_amount, currency="usd"
         )
         assert item.to_payload()["unit_amount"] == unit_amount
+
+
+class TestBearerTokenValidation:
+    """A blank bearer must not become a malformed `Authorization: Bearer `."""
+
+    @pytest.mark.parametrize("blank", ["", "   ", "\t"])
+    def test_blank_bearer_token_rejected(self, blank):
+        """An unset env var fails here, not silently at the server."""
+        with pytest.raises(ValueError, match="bearer_token"):
+            AgentMiddlewareClient(
+                api_key="test-key", base_url="http://test", bearer_token=blank
+            )
+
+    def test_bearer_token_is_stripped(self):
+        """Surrounding whitespace never reaches the header value."""
+        client = AgentMiddlewareClient(
+            api_key="test-key", base_url="http://test", bearer_token="  tok-abc  "
+        )
+        assert client._client.headers["Authorization"] == "Bearer tok-abc"
+
+    def test_omitted_bearer_token_sends_no_header(self):
+        """Omitting it stays the way to send no Authorization header."""
+        client = AgentMiddlewareClient(api_key="test-key", base_url="http://test")
+        assert "Authorization" not in client._client.headers

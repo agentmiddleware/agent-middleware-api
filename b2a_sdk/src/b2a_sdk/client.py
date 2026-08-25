@@ -144,7 +144,13 @@ class AgentMiddlewareClient:
             base_url: Base URL of the middleware API
             timeout: Request timeout in seconds
             transport: Optional HTTPX transport, primarily for in-process tests
-            bearer_token: Optional Bearer token for IGA-governed flows
+            bearer_token: Optional Bearer token for IGA-governed flows. Omit it
+                to send no Authorization header; a blank string is rejected
+                rather than sent as a malformed ``Bearer `` header, so an unset
+                environment variable fails here instead of at the server.
+
+        Raises:
+            ValueError: if bearer_token is supplied but blank.
         """
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -154,7 +160,13 @@ class AgentMiddlewareClient:
             "User-Agent": "b2a-sdk/0.5.0",
         }
         if bearer_token is not None:
-            headers["Authorization"] = f"Bearer {bearer_token}"
+            token = bearer_token.strip()
+            if not token:
+                raise ValueError(
+                    "bearer_token must not be blank; omit it to send no "
+                    "Authorization header"
+                )
+            headers["Authorization"] = f"Bearer {token}"
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers=headers,
