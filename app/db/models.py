@@ -921,6 +921,10 @@ class PermitRequestModel(SQLModel, table=True):
     justification: str = Field(sa_column=Column(Text, nullable=False))
     # sha256 of the terms above — what the human actually reviewed.
     request_hash: str = Field(max_length=64)
+    # Immutable anchor of the original request_hash, set at create time.
+    # Minting verifies request_hash == original_request_hash to prevent an
+    # attacker from coherently tampering with both the terms and the hash.
+    original_request_hash: str = Field(max_length=64)
     # pending | minting | approved | rejected | expired | failed
     status: str = Field(default="pending", max_length=16, index=True)
     simulated: bool = Field(default=False)
