@@ -234,9 +234,36 @@ async def verify_permit(
     if permit is not None and not auth.is_bootstrap_admin:
         if auth.wallet_id not in {permit.issuer_wallet_id, permit.subject_wallet_id}:
             raise HTTPException(status_code=403, detail="permit_access_denied")
+    # ``verify`` answers "would this exact action be admitted?", so it needs
+    # the action: which wallet acts, and which tool it calls. A request that
+    # omits either is evaluated against an empty string, which lands on a
+    # binding reason (``permit_wallet_mismatch``) that reads as "your wallet is
+    # wrong" when the truth is "you never said which wallet". Name the missing
+    # context instead. This narrows nothing: the caller is still authorized for
+    # the permit above, and no binding value is disclosed.
+    # Only the reasons the empty context itself produces are rewritten; a
+    # real permit_not_found / permit_expired / permit_revoked still surfaces
+    # as itself, whatever the request left out.
+    reason = validation.reason
+    details = validation.details
+    caused_by_missing_context = (
+        not request.wallet_id and reason == "permit_wallet_mismatch"
+    ) or (not request.tool and reason == "permit_tool_not_allowed")
+    if caused_by_missing_context:
+        reason = "permit_verify_context_missing"
+        details = {
+            "missing": [
+                field
+                for field, value in (
+                    ("wallet_id", request.wallet_id),
+                    ("tool", request.tool),
+                )
+                if not value
+            ]
+        }
     return PermitVerifyResponse(
         valid=validation.allowed,
-        reason=validation.reason,
-        details=validation.details,
+        reason=reason,
+        details=details,
         permit=permit_model_to_response(permit) if permit else None,
     )

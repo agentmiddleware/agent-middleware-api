@@ -270,6 +270,85 @@ async def test_verify_reports_no_details_for_a_valid_permit(
 
 
 @pytest.mark.asyncio
+async def test_verify_names_missing_action_context_instead_of_a_binding_reason(
+    client, clean_database, registered_tool
+):
+    """An incomplete verify request must say what it left out.
+
+    ``verify`` decides an action, so it needs the action. Asked without a
+    wallet or a tool it used to be evaluated against empty strings and answer
+    ``permit_wallet_mismatch`` — which reads as "this permit is not yours" to
+    the permit's own subject, and sent at least one validation run chasing a
+    binding bug that did not exist.
+    """
+    agent = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=agent["agent_wallet_id"],
+        key_id=agent["key_id"],
+        tool_name=TOOL,
+        idem_key="permit-verify-context",
+    )
+
+    async def verify(body):
+        resp = await client.post(
+            "/v1/permits/verify",
+            json={"permit_id": permit["permit_id"], **body},
+            headers=agent["agent_headers"],
+        )
+        assert resp.status_code == 200
+        return resp.json()
+
+    both_missing = await verify({})
+    assert both_missing["valid"] is False
+    assert both_missing["reason"] == "permit_verify_context_missing"
+    assert both_missing["details"] == {"missing": ["wallet_id", "tool"]}
+
+    no_tool = await verify({"wallet_id": agent["agent_wallet_id"]})
+    assert no_tool["valid"] is False
+    assert no_tool["reason"] == "permit_verify_context_missing"
+    assert no_tool["details"] == {"missing": ["tool"]}
+
+    # The complete question still answers normally...
+    complete = await verify(
+        {
+            "wallet_id": agent["agent_wallet_id"],
+            "tool": TOOL,
+            "estimated_credits": 1,
+        }
+    )
+    assert complete["valid"] is True
+
+    # ...and a real denial is never rewritten as missing context: this permit
+    # exists and is bound correctly, the tool is simply not in scope.
+    out_of_scope = await verify(
+        {
+            "wallet_id": agent["agent_wallet_id"],
+            "tool": OTHER_TOOL,
+            "estimated_credits": 1,
+        }
+    )
+    assert out_of_scope["valid"] is False
+    assert out_of_scope["reason"] == "permit_tool_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_verify_still_reports_permit_not_found_without_context(
+    client, clean_database
+):
+    """A missing permit is reported as missing, whatever the request omitted."""
+    agent = await provision_agent_wallet(client)
+    resp = await client.post(
+        "/v1/permits/verify",
+        json={"permit_id": f"permit-{uuid.uuid4().hex[:16]}"},
+        headers=agent["agent_headers"],
+    )
+    assert resp.status_code == 200
+    assert resp.json()["valid"] is False
+    assert resp.json()["reason"] == "permit_not_found"
+
+
+@pytest.mark.asyncio
 async def test_jsonrpc_denial_carries_details_alongside_the_receipt(
     client, clean_database, registered_tool
 ):
