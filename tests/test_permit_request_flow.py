@@ -784,3 +784,61 @@ async def test_agent_cannot_escalate_via_poll_body_injection(
     assert permit["allowed_tools"] == TOOLS
     assert Decimal(str(permit["max_credits"])) == Decimal("20")
     assert "wire-transfer" not in permit["allowed_tools"]
+
+
+@pytest.mark.asyncio
+async def test_coherent_tampering_of_terms_and_hash_fails_anchor_check(
+    client, clean_database, monkeypatch, sentinel
+):
+    """An attacker who tampers with both terms AND request_hash cannot mint.
+    
+    Even if an attacker recomputes request_hash to match the tampered terms,
+    the original_request_hash anchor detects the coherent tampering and refuses
+    to mint.
+    """
+    _sentinel_env(monkeypatch, simulated=False)
+    agent = await provision_agent_wallet(client)
+    request_id = (await _request(client, agent)).json()["request_id"]
+
+    # Attacker escalates the terms AND updates request_hash to match.
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitRequestModel, request_id)
+        escalated_tools = [*TOOLS, "wire-transfer", "root-shell"]
+        escalated_credits = Decimal("9999")
+        model.allowed_tools_json = json.dumps(escalated_tools)
+        model.max_credits = escalated_credits
+        # Attacker recomputes the hash to match the new terms.
+        from app.services.permit_requests import permit_request_hash
+        model.request_hash = permit_request_hash(
+            issuer_wallet_id=model.issuer_wallet_id,
+            subject_wallet_id=model.subject_wallet_id,
+            allowed_tools=escalated_tools,
+            scopes=json.loads(model.scopes_json),
+            max_credits=escalated_credits,
+            permit_expires_at=model.permit_expires_at,
+            requires_human_approval=model.requires_human_approval,
+            justification=model.justification,
+        )
+        # Attacker leaves original_request_hash intact — it's the anchor.
+        session.add(model)
+        await session.commit()
+
+    sentinel.status = "approved"
+    resp = await client.get(
+        f"/v1/permit-requests/{request_id}", headers=agent["agent_headers"]
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # The anchor check must catch the coherent tampering.
+    assert body["status"] == "failed"
+    assert body["reason"] == "permit_request_hash_anchor_violation"
+    assert body["permit"] is None
+    assert body["permit_id"] is None
+
+    # No permit was minted.
+    async with factory() as session:
+        from sqlalchemy import select
+        from app.db.models import PermitModel
+        assert (await session.execute(select(PermitModel))).scalars().all() == []
+

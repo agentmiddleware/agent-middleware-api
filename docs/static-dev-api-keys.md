@@ -142,3 +142,8 @@ single-operator local instances and CI-style environments only.
 keys are out of scope there on purpose: the runbook's threat model (a leaked
 key is a full-control compromise) does not apply to a key class that no
 production deployment will ever accept.
+
+For the full agent workflow — self-provision, then prove the economic
+invariants (charge-once, replay, concurrency, scope denial, signature
+verification) with `scripts/agent_self_credential_proof.py` — see
+[`docs/agent-self-credentialing.md`](agent-self-credentialing.md).
