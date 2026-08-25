@@ -96,6 +96,7 @@ from .routers import (
     static,
     planner,
     policies,
+    x402,
 )
 
 settings = get_settings()
@@ -626,6 +627,11 @@ CORE_TRUST_ROUTERS = (
 #     production and /v1/discover already omits the capability without it.
 #   - planner: budget optimizer, adjacent to but outside the
 #     permit→invoke→receipt loop.
+#   - x402: settlement facilitation — a real trust surface (permit-governed
+#     402 payment authorization, shadow-ledger metering, signed receipts)
+#     with no active customer demand; the docs/settlement-rails.md freeze
+#     holds, so it never writes real ledger entries and stays unmounted in
+#     production.
 # Billing expansion surfaces (transfers, top-ups, child/swarm wallets,
 # dry-run sandbox, marketplace) gate the same way via
 # billing.expansion_router — see app/routers/billing.py.
@@ -633,6 +639,7 @@ DORMANT_TRUST_ROUTERS = (
     auth,
     kyc,
     planner,
+    x402,
 )
 
 

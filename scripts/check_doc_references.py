@@ -49,6 +49,9 @@ KNOWN_EXTERNAL = frozenset(
         "pythonpath",
         # MCP SDK class referenced when describing what the SDK transport does.
         "StreamableHTTPSessionManager",
+        # Ethereum wallet RPC method named when describing the EIP-712 typed
+        # data the x402 facilitator emits for the payer wallet to sign.
+        "eth_signTypedData_v4",
         # FastAPI / Starlette routing classes named when explaining why HEAD
         # needs middleware support (app/middleware/head_method.py).
         "APIRoute",

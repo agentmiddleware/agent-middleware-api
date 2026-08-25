@@ -71,7 +71,7 @@ def _annotation_to_json_schema(annotation: Any) -> dict[str, Any] | None:
         return schema
 
     if origin in (Union, UnionType):
-        variants = []
+        variants: list[dict[str, Any]] = []
         for argument in arguments:
             if argument is type(None):
                 variants.append({"type": "null"})

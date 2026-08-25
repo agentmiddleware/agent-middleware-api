@@ -977,6 +977,78 @@ class PermitService:
 
         await self._run_with_write_retry(_once)
 
+    async def release_tool_call(self, permit_id: str, tool_name: str) -> None:
+        """Give back one ``max_calls_per_tool`` use consumed by a reservation.
+
+        Compensation partner to :meth:`release_budget`: ``authorize_and_reserve``
+        increments the per-tool call counter atomically with the budget
+        reservation, so an action that fails after reserving must release both
+        or a capped permit's legitimate retry is denied
+        ``permit_max_calls_exceeded`` with no receipt behind the consumed use.
+        Uses the same optimistic CAS on ``tool_call_counts_json`` as the
+        reserve path so a concurrent reservation's increment is never lost to
+        this refund; clamped at zero; a missing permit, absent counter, or
+        persistently contended CAS is a no-op (the counter then stays
+        conservatively high — never low).
+        """
+        factory = get_session_factory()
+
+        async def _once() -> None:
+            for _ in range(5):
+                async with factory() as session:
+                    async with session.begin():
+                        model = await session.get(
+                            PermitModel, permit_id, with_for_update=True
+                        )
+                        if model is None:
+                            return
+                        original_counts_json = model.tool_call_counts_json
+                        counts = _loads_dict(original_counts_json or "{}")
+                        current = counts.get(tool_name, 0)
+                        # type() not isinstance(): bool subclasses int, and a
+                        # malformed stored counter of `true` must not be
+                        # coerced into a decrementable number (same rule the
+                        # reserve path applies to the configured limit).
+                        if type(current) is not int or current <= 0:
+                            return
+                        updated = dict(counts)
+                        updated[tool_name] = current - 1
+                        result = await session.execute(
+                            sa_update(PermitModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.permit_id == permit_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
+                                ),
+                            )
+                            .values(
+                                tool_call_counts_json=json.dumps(updated),
+                                updated_at=utc_now(),
+                            )
+                            .execution_options(synchronize_session=False)
+                        )
+                        if (cast(Any, result).rowcount or 0) == 1:
+                            return
+                # CAS miss: a concurrent reservation moved the counter between
+                # our read and write (only possible where the row lock above is
+                # a no-op, i.e. SQLite). Re-read and try again.
+            # Exhausted retries: the counter stays conservatively high, which
+            # can deny a legitimate retry with permit_max_calls_exceeded.
+            # Surface it the way reconcile_budgets surfaces its skips so a
+            # permit under sustained contention is visible to an operator.
+            logger.info(
+                "permit_tool_call_release_contended permit_id=%s tool=%s",
+                permit_id,
+                tool_name,
+            )
+
+        await self._run_with_write_retry(_once)
+
     async def release_dispatch_budget_once(self, attempt_id: str) -> bool:
         """Release one remote attempt's reservation exactly once.
 

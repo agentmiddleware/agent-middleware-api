@@ -17,6 +17,7 @@ from typing import Any, Optional, cast
 from uuid import uuid4
 
 import stripe
+from anyio import to_thread
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, update as sa_update
 from sqlalchemy.sql.elements import ColumnElement
@@ -32,6 +33,17 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+# Explicit HTTP timeout on the shared Stripe client (the SDK's RequestsClient
+# default, stated here so it is a contract rather than an accident). The ACP
+# bridge's stale-intent recovery depends on it: the only long-blocking step in
+# a live checkout is this client's call, so its timeout must stay well under
+# acp_bridge._INTENT_STALE_SECONDS (300s) for "idle past the threshold" to
+# imply "not a live attempt".
+STRIPE_HTTP_TIMEOUT_SECONDS = 80
+stripe.default_http_client = stripe.new_default_http_client(
+    timeout=STRIPE_HTTP_TIMEOUT_SECONDS
+)
 
 SUPPORTED_TOP_UP_CURRENCY = "usd"
 
@@ -126,15 +138,21 @@ class StripeIntegration:
             int(credits) if credits == credits.to_integral_value() else float(credits)
         )
 
-        intent = stripe.PaymentIntent.create(
-            amount=amount_cents,
-            currency=SUPPORTED_TOP_UP_CURRENCY,
-            metadata={
-                "wallet_id": wallet_id,
-                "credits": credits_metadata,
-                "idempotency_key": str(uuid4()),
-            },
-        )
+        def _create_top_up_payment_intent() -> Any:
+            return stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=SUPPORTED_TOP_UP_CURRENCY,
+                metadata={
+                    "wallet_id": wallet_id,
+                    "credits": credits_metadata,
+                    "idempotency_key": str(uuid4()),
+                },
+            )
+
+        # The Stripe SDK call is synchronous network I/O; run it on a worker
+        # thread so it never blocks the event loop (same offload pattern as
+        # charge_shared_payment_token).
+        intent = await to_thread.run_sync(_create_top_up_payment_intent)
 
         logger.info(
             f"Created PaymentIntent {intent.id} for wallet {wallet_id}: "
@@ -147,6 +165,104 @@ class StripeIntegration:
             "amount_credits": credits_response,
             "amount_fiat": float(amount_fiat),
             "currency": SUPPORTED_TOP_UP_CURRENCY.upper(),
+        }
+
+    async def charge_shared_payment_token(
+        self,
+        *,
+        spt_token: str,
+        amount_minor: int,
+        currency: str,
+        idempotency_key: str,
+    ) -> dict:
+        """Create and confirm a PaymentIntent from a Shared Payment Token.
+
+        Pure outbound-charge helper for the ACP commerce bridge: it never
+        touches wallets, the ledger, or ``_mint_credits`` — settlement
+        evidence is recorded by the caller (permit reservation, signed
+        receipt, audit chain), and no credits are ever minted from this path.
+        ``idempotency_key`` is passed through to Stripe so a retried checkout
+        with the same key cannot charge twice. The token itself is never
+        logged.
+        """
+        normalized_currency = currency.lower()
+        if normalized_currency != SUPPORTED_TOP_UP_CURRENCY:
+            raise ValueError("unsupported_acp_currency: only USD is supported")
+        if (
+            isinstance(amount_minor, bool)
+            or not isinstance(amount_minor, int)
+            or amount_minor <= 0
+        ):
+            raise ValueError("invalid_acp_charge_amount")
+        if not spt_token:
+            raise ValueError("missing_shared_payment_token")
+
+        def _create_payment_intent() -> Any:
+            return stripe.PaymentIntent.create(
+                amount=amount_minor,
+                currency=normalized_currency,
+                payment_method=spt_token,
+                confirm=True,
+                idempotency_key=idempotency_key,
+            )
+
+        # The Stripe SDK call is synchronous network I/O; run it on a worker
+        # thread so it never blocks the event loop mid-checkout.
+        intent = await to_thread.run_sync(_create_payment_intent)
+
+        intent_id = self._stripe_value(intent, "id")
+        logger.info(
+            "Confirmed shared-payment-token PaymentIntent %s for %s minor units",
+            intent_id,
+            amount_minor,
+        )
+
+        return {
+            "payment_intent_id": intent_id,
+            "status": self._stripe_value(intent, "status"),
+            "amount": self._stripe_value(intent, "amount"),
+            "currency": self._stripe_value(intent, "currency"),
+        }
+
+    async def cancel_payment_intent(
+        self,
+        payment_intent_id: str,
+        idempotency_key: str | None = None,
+    ) -> dict:
+        """Cancel a not-yet-settled PaymentIntent.
+
+        Used by the ACP commerce bridge when a Shared Payment Token charge
+        confirms but does not settle (e.g. "requires_action"): the refused
+        checkout is rolled back on our side, so the still-live PaymentIntent
+        must not be left able to settle later with no governance record.
+        Only cancelable statuses should reach this call (Stripe refuses to
+        cancel e.g. a "processing" intent); the caller treats failure as
+        best-effort evidence, never as a masking error. No wallet, ledger,
+        or minting logic is touched here.
+        """
+        if not payment_intent_id:
+            raise ValueError("missing_payment_intent_id")
+
+        def _cancel_payment_intent() -> Any:
+            kwargs: dict[str, Any] = {}
+            if idempotency_key is not None:
+                kwargs["idempotency_key"] = idempotency_key
+            return stripe.PaymentIntent.cancel(payment_intent_id, **kwargs)
+
+        # The Stripe SDK call is synchronous network I/O; run it on a worker
+        # thread so it never blocks the event loop (same offload pattern as
+        # charge_shared_payment_token).
+        intent = await to_thread.run_sync(_cancel_payment_intent)
+
+        logger.info(
+            "Canceled PaymentIntent %s (status=%s)",
+            self._stripe_value(intent, "id"),
+            self._stripe_value(intent, "status"),
+        )
+
+        return {
+            "payment_intent_id": self._stripe_value(intent, "id"),
+            "status": self._stripe_value(intent, "status"),
         }
 
     async def handle_webhook(

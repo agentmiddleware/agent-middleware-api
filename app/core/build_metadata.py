@@ -30,17 +30,17 @@ def get_build_commit_sha() -> str | None:
     candidates = [
         os.getenv("RAILWAY_GIT_COMMIT_SHA", ""),
     ]
-    
+
     # Read baked SHA file if it exists
     if _BUILD_SHA_FILE.exists():
         try:
             candidates.append(_BUILD_SHA_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-    
+
     # Do NOT read BUILD_COMMIT_SHA from env - it may be a stale service variable
     # If neither Railway env nor baked file is available, return None
-    
+
     for candidate in candidates:
         normalized = candidate.strip()
         if _GIT_SHA_RE.fullmatch(normalized):

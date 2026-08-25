@@ -31,6 +31,14 @@ from sqlalchemy.exc import IntegrityError
 from ..audit.lightweight import record_audit
 from ..core.config import get_settings
 from ..core.auth import AuthContext, get_auth_context
+from ..core.oidc_iga import (
+    EnterprisePrincipal,
+    IGAError,
+    enforce_tool_call,
+    is_iga_issuer_token,
+    parse_enterprise_token,
+    release_tool_use,
+)
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
 from ..services.dogfood_tool import sync_dogfood_tool_registration
@@ -531,6 +539,28 @@ async def _begin_governed_mcp_idempotency(
         raise
 
 
+def _verified_enterprise_principal(
+    enterprise_bearer_token: str | None,
+) -> EnterprisePrincipal | None:
+    """Return the verified enterprise (human) principal behind this call, if any.
+
+    ``enterprise_bearer_token`` is the Authorization bearer that
+    ``get_auth_context`` carried alongside the caller's X-API-Key — set only
+    when the token's unverified issuer names a pinned IGA issuer. Absent
+    bearers, internal JWTs, and a disabled IGA layer all yield None here and
+    the caller's behavior is unchanged. A bearer FROM a pinned enterprise
+    issuer is fully verified by ``parse_enterprise_token`` (pinned key,
+    algorithm allowlist, audience, issuer, expiry); verification failures
+    raise :class:`IGAError` and the governed pipeline denies with that reason
+    — a bad enterprise token never falls through to ungoverned execution.
+    """
+    if not enterprise_bearer_token:
+        return None
+    if not is_iga_issuer_token(enterprise_bearer_token):
+        return None
+    return parse_enterprise_token(enterprise_bearer_token)
+
+
 async def _execute_registered_tool(
     *,
     tool_name: str,
@@ -899,6 +929,98 @@ async def _execute_registered_tool(
                 receipt=receipt_payload,
                 details=permit_validation.details,
             )
+
+    # --- Enterprise IGA gate (app/core/oidc_iga) ---------------------------
+    # When the call rode in with an Authorization bearer whose issuer is a
+    # pinned enterprise IdP (Okta / Entra ID), the HUMAN principal behind the
+    # agent must hold a group/role that IGA_GROUP_POLICY_MAP grants for this
+    # tool. This is the single choke point every governed execution funnels
+    # through (JSON-RPC /mcp/messages, REST /mcp/tools/{id}/invoke, and the
+    # standard /mcp endpoint all reach _execute_registered_tool via the
+    # adapter seam), placed with the other pre-dispatch authorization gates:
+    # after permit validation so a denial carries the same signed denied
+    # receipt permit/policy denials produce, and before anything is charged
+    # or dispatched. With IGA unconfigured, no bearer present, or an internal
+    # JWT, auth.enterprise_bearer_token is None and this gate is inert.
+    iga_denial_reason: str | None = None
+    iga_denial_details: dict[str, Any] | None = None
+    # The exact grant an ALLOW consumed a use under, kept so a later
+    # pre-dispatch refusal that charges nothing can hand the use back.
+    iga_granted_use: tuple[EnterprisePrincipal, str, str] | None = None
+    try:
+        enterprise_principal = _verified_enterprise_principal(
+            auth.enterprise_bearer_token
+        )
+        if enterprise_principal is not None:
+            iga_decision = await enforce_tool_call(enterprise_principal, tool_name)
+            if not iga_decision.allowed:
+                iga_denial_reason = iga_decision.reason
+                iga_denial_details = {
+                    "reason_code": iga_decision.reason,
+                    **iga_decision.details,
+                }
+            elif iga_decision.group is not None and iga_decision.policy_id is not None:
+                iga_granted_use = (
+                    enterprise_principal,
+                    iga_decision.group,
+                    iga_decision.policy_id,
+                )
+    except IGAError as exc:
+        # Catches verification failures for bearers routed to the IGA layer
+        # (bad signature / audience / expiry / kid from a pinned enterprise
+        # issuer) and a malformed IGA_GROUP_POLICY_MAP surfaced by
+        # enforce_tool_call: fail closed with the reason, never fall through
+        # to ungoverned execution. A malformed IGA_TRUSTED_ISSUERS never
+        # reaches this handler — is_iga_issuer_token fails closed to the
+        # internal-JWT verifier (401 at auth time) and logs the config fault
+        # at error level.
+        iga_denial_reason = exc.reason
+    if iga_denial_reason is not None:
+        audit_event = await _audit_mcp_invocation(
+            decision=decision,
+            endpoint=endpoint,
+            transport=transport,
+            ok=False,
+            error=iga_denial_reason,
+            extra_metadata={
+                "permit_id": permit_id,
+                "idempotency_key": idempotency_key,
+                "request_hash": effective_request_hash,
+            },
+        )
+        receipt_payload = None
+        if governed_call and permit_model:
+            receipt_payload = await _finalize_governed_denial(
+                idem=idem,
+                permit_model=permit_model,
+                wallet_id=wallet_id,
+                key_id=auth.key_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                tool_name=tool_name,
+                request_payload=effective_request_payload,
+                arguments=arguments,
+                registered_cost=registered_cost,
+                audit_event_id=audit_event.event_id,
+                reason=iga_denial_reason,
+                reason_code=iga_denial_reason,
+                outcome="denied",
+                status_code=403,
+            )
+        else:
+            await _complete_governed_denial_idempotency(
+                idem=idem,
+                idem_started=idem_started,
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                reason=iga_denial_reason,
+            )
+        raise ToolPermissionDenied(
+            iga_denial_reason,
+            receipt=receipt_payload,
+            details=iga_denial_details,
+        )
 
     simulation = False
     try:
@@ -1290,6 +1412,24 @@ async def _execute_registered_tool(
         # the price it was promised.
         if quoted is not None and quote_id:
             await get_quote_service().release(quote_id)
+        # Likewise the IGA use recorded at the enterprise gate: this refusal
+        # charges nothing and dispatches nothing, so a max_uses / velocity
+        # budget must not burn down on it (a max_uses=1 principal would
+        # otherwise be locked out forever by one under-funded wallet).
+        # Best-effort — compensation must never mask the funds denial.
+        if iga_granted_use is not None:
+            try:
+                await release_tool_use(
+                    iga_granted_use[0],
+                    tool_name,
+                    group=iga_granted_use[1],
+                    policy_id=iga_granted_use[2],
+                )
+            except Exception:
+                logger.exception(
+                    "iga_use_release_failed",
+                    extra={"tool": tool_name},
+                )
         denial_reason = charge_result.error
         denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:

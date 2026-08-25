@@ -50,15 +50,26 @@ _LAZY_ATTRS = {
     "AgentMiddlewareClient": "client",
     "B2AClient": "client",
     "B2AEdgeClient": "edge_client",
+    "GovernedEdgeSession": "edge_client",
+    "LocalDecision": "edge_client",
+    "LocalPermitValidator": "edge_client",
+    "X402Client": "x402",
     "billable": "decorators",
     "combined": "decorators",
     "monitored": "decorators",
+    "parse_402_response": "x402",
 }
 
 if TYPE_CHECKING:  # let type checkers and IDEs resolve the lazy names statically
     from .client import AgentMiddlewareClient, B2AClient
     from .decorators import billable, combined, monitored
-    from .edge_client import B2AEdgeClient
+    from .edge_client import (
+        B2AEdgeClient,
+        GovernedEdgeSession,
+        LocalDecision,
+        LocalPermitValidator,
+    )
+    from .x402 import X402Client, parse_402_response
 
 
 def __getattr__(name: str) -> object:
@@ -87,9 +98,12 @@ __all__ = [
     "B2AEdgeClient",
     "DeliveryUncertainError",
     "EvidenceBundle",
+    "GovernedEdgeSession",
     "IdempotencyConflictError",
     "InsufficientFundsError",
     "InvocationResult",
+    "LocalDecision",
+    "LocalPermitValidator",
     "Permit",
     "PermitDeniedError",
     "PermitRequest",
@@ -100,9 +114,11 @@ __all__ = [
     "VerificationError",
     "VerificationResult",
     "VerificationStatus",
+    "X402Client",
     "billable",
     "combined",
     "monitored",
     "key_set_from_document",
+    "parse_402_response",
     "verify_bundle",
 ]

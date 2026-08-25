@@ -171,12 +171,74 @@ enforces, generalized.
     that live credits are backed by verified settlements. With one rail this is
     a latent gap; with several it becomes materially dangerous.
 
+## Facilitation surfaces under the freeze (x402, ACP)
+
+Two dormant surfaces have been built since this note was first written.
+Neither is a settlement rail in the sense above, and neither unfreezes
+anything: both are **facilitation only** — they never mint credits and never
+write real ledger entries. The durable money artifacts each produces are a
+permit budget reservation, a signed receipt, and a hash-chained audit event.
+If a reviewer reads either surface as "settlement is implemented", this
+section is the correction: the freeze holds, and the refusal copy stays
+untouched on every surface listed above.
+
+**x402** (`app/services/x402_engine.py`, `app/routers/x402.py`). Parses HTTP
+402 payment demands strictly (per-header failure reasons, network and asset
+allowlists, address-shape checks), authorizes the demand against a PermitV2
+budget via the atomic reserve path, and emits the transfer authorization the
+*payer wallet* must sign (EIP-712 `TransferWithAuthorization` for EVM USDC; a
+structured Ed25519-signable message for Solana) together with an Ed25519
+facilitator *attestation* — trust-plane evidence that the payment was
+permit-authorized and metered, never an on-chain signature. There is no
+keccak and no EVM key anywhere in this repository, by design. Metering goes
+to the shadow ledger only (an ephemeral dry-run session, never a committed
+charge), and the settlement record is a signed receipt whose
+`ledger_entry_id` is `None` — asserted under test. No on-chain execution, no
+custody, no minting.
+
+**ACP** (`app/services/acp_bridge.py`). Translates an Agentic Commerce
+Protocol checkout into PermitV2 bounds (a purpose-minted single-use permit
+with a merchant-domain recipient constraint and a budget equal to the derived
+total) and settles it through the **existing Stripe rail** via a Shared
+Payment Token charge — no second rail is introduced. The charged amount is
+derived server-side from the line items; the client-asserted total must equal
+it exactly or the checkout is refused; the currency passes a fail-closed
+allowlist at the schema boundary. Redelivery cannot double-charge: the intent
+id is a durable idempotency record on our side, and the Stripe PaymentIntent
+idempotency key is deterministic per (agent wallet, intent id) — scoped by
+wallet so two tenants reusing one client-chosen intent id never share a
+Stripe key. The order id is bound into the tamper-evident audit chain, and
+the signed receipt again carries `ledger_entry_id = None`.
+
+Against the checklist above, read the two surfaces this way:
+
+- **Items 3–5 (settlement validity):** ACP enforces all three at its
+  boundary — server-derived amount, exact client-total equality, currency
+  allowlist. x402 validates amount precision and bounds, network, asset, and
+  address shape before any budget moves.
+- **Items 6–8 (identity and idempotency):** both surfaces key on a durable
+  idempotency record (the intent id for ACP, the `Idempotency-Key` header
+  for x402); a replay returns the original result, and duplicate or crashed
+  redelivery is provably non-minting and non-double-charging under test.
+  Both also recover stale crashed records, so a wedged key cannot become a
+  permanent denial.
+- **Items 9–15:** **deliberately unanswered.** Those are the rail questions
+  — finality, reversal, denomination, reconciliation — and neither surface
+  is a rail: neither touches the ledger, so the checklist's gate ("before it
+  touches the ledger") is never reached. Promoting either to a real rail
+  means answering all fifteen items first, exactly as the sequence below
+  prescribes.
+
 ## On x402 and Payman specifically
 
-**This repository contains no basis for any claim about either.** Outside this
-note and its companion [`PRODUCT_STRATEGY.md`](PRODUCT_STRATEGY.md), the strings
-`x402`, `USDC`, `Payman`, and `stablecoin` appear zero times across the entire
-repository. There is no prior art, no design note, no dependency, and no TODO.
+**This repository contains no settlement basis for either.** When this note
+was first written, the strings `x402`, `USDC`, `Payman`, and `stablecoin`
+appeared zero times outside it and its companion
+[`PRODUCT_STRATEGY.md`](PRODUCT_STRATEGY.md). That has since changed for
+`x402` and `USDC` — but only in the facilitation sense documented in the
+section above, where the trust plane authorizes and evidences a payment
+demand without executing it. There is still no rail dependency, no custody,
+no on-chain execution, and nothing anywhere touches Payman.
 
 Two related things in the repo must not be misread as evidence of crypto
 direction:
@@ -186,9 +248,12 @@ direction:
   cryptocurrency-sense uses are in [`../GOVERNANCE.md`](../GOVERNANCE.md), which
   declines a crypto-thesis investor precisely because the project has no such
   thesis.
-- `blockchain` / `on-chain` appear only as an **optional, unimplemented**
-  proposal to anchor the audit chain's Merkle root, explicitly marked skippable.
-  That is about tamper-evidence for the audit log, not about moving money.
+- `blockchain` / `on-chain` appear as an **optional, unimplemented** proposal
+  to anchor the audit chain's Merkle root, explicitly marked skippable — and,
+  since the x402 facilitation surface landed, in that surface's own prose
+  describing what this repository deliberately does *not* do (the payer
+  wallet, never the trust plane, signs the on-chain authorization). Neither
+  use is about this repository moving money.
 
 Accordingly, this document asserts nothing about what x402 or Payman provide —
 their finality guarantees, callback signature schemes, idempotency primitives,
