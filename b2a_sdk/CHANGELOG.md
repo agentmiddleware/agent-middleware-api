@@ -9,6 +9,35 @@ materially different under a version already in the wild. A minor bump:
 everything here is additive and no published behaviour changes. The tag is
 not cut by this change — `python-sdk-v0.5.0` is still a release decision.
 
+### Added
+
+- **ACP (Agentic Commerce Protocol) checkout**: Add `ACPLineItem`,
+  `ACPCheckoutRequest`, `ACPCheckoutResponse` models and
+  `AgentMiddlewareClient.acp_checkout()` method for POST /v1/billing/acp/checkout.
+  The server mints the permit; this is not invoke_tool.
+- **IGA bearer authentication**: `AgentMiddlewareClient.__init__()` accepts an
+  optional `bearer_token` parameter. When set, the client sends
+  `Authorization: Bearer <token>` alongside X-API-Key for IGA-governed flows
+  (the governed invoke endpoint reads the bearer when `IGA_TRUSTED_ISSUERS` is
+  set). The client never mints tokens itself.
+- **x402 parse endpoint**: Add `X402Client.parse_402()` method for POST
+  /v1/x402/parse, returning typed models with `amount_usd`, `pay_to`, `network`,
+  and `asset` fields (not just `amount`). The client-side `parse_402_response()`
+  helper now returns `amount_usd` to match.
+- **In-process permit validation**: Document `LocalPermitValidator` and
+  `GovernedEdgeSession` in README. These classes, already shipped in 0.5.0,
+  verify a permit's Ed25519 signature locally and mirror the server's per-call
+  permit checks in-process (expiry, tool scope, budget, per-tool call caps)
+  with no server round trip for locally-denied calls.
+
+### Fixed
+
+- **x402 HTTP 402 handling**: The x402 module's `parse_402()` and `settle_402()`
+  methods do not collapse an HTTP 402 status into `InsufficientFundsError`. A
+  402 response with valid x402 headers is parsed as a payment requirement, not
+  a billing error. `InsufficientFundsError` is raised only when the response
+  body signals `insufficient_funds`.
+
 ### Deprecations
 
 - **Deprecated `B2AEdgeClient.call_mcp_tool()`**: This method bypasses the

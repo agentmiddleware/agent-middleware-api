@@ -89,6 +89,37 @@ If a remote tool was dispatched but its outcome could not be confirmed,
 `invoke_tool` raises `DeliveryUncertainError`. Its `receipt_id` identifies the
 signed, charged uncertainty receipt; the SDK never retries the dispatch.
 
+## In-process permit validation (0.5+)
+
+`LocalPermitValidator` and `GovernedEdgeSession` let framework integrations
+verify a permit's Ed25519 signature locally and mirror the server's per-call
+permit checks in-process (expiry, tool scope, budget, per-tool call caps) with
+no RPC. The local checks eliminate the server round trip only for calls the
+cached permit already provably denies; the server's `authorize_and_reserve`
+remains authoritative and can still deny a call the local mirror allowed.
+
+```python
+from b2a_sdk import AgentMiddlewareClient
+from b2a_sdk.edge_client import GovernedEdgeSession
+
+async with AgentMiddlewareClient(api_key="...") as client:
+    session = await GovernedEdgeSession.open(
+        client,
+        permit_id="pmt-xyz",
+        wallet_id="agt-wallet",
+    )
+    # Locally-denied calls raise PermitDeniedError immediately (no server
+    # round trip); allowed calls go through the governed invoke_tool loop.
+    result = await session.invoke(
+        "partner.search",
+        {"query": "quarterly risk"},
+        idempotency_key="invoke-run-002",
+    )
+```
+
+See `b2a_sdk/src/b2a_sdk/edge_client.py` for the full `LocalPermitValidator`
+and `GovernedEdgeSession` surface.
+
 ## Verifying a receipt offline
 
 `b2a_sdk.receipt_verifier` checks a receipt with no server, no database, and

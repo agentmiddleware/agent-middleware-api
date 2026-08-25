@@ -1,0 +1,276 @@
+"""
+Tests for the 363 surface additions:
+- ACP checkout
+- IGA bearer token support
+- x402 parse endpoint
+- x402 402 vs InsufficientFundsError distinction
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from b2a_sdk import AgentMiddlewareClient, InsufficientFundsError
+from b2a_sdk.errors import APIError
+from b2a_sdk.models import ACPCheckoutRequest, ACPCheckoutResponse, ACPLineItem
+from b2a_sdk.x402 import X402Client, parse_402_response
+
+
+class TestACPCheckout:
+    """Tests for ACP checkout surface."""
+
+    @pytest.fixture
+    def client(self):
+        return AgentMiddlewareClient(api_key="test-key", base_url="http://test")
+
+    @pytest.mark.asyncio
+    async def test_acp_checkout_success(self, client):
+        """Test successful ACP checkout."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.is_error = False
+        mock_response.json.return_value = {
+            "order_id": "ord-xyz",
+            "intent_id": "int-abc",
+            "permit_id": "pmt-123",
+            "receipt_id": "rct-456",
+            "audit_event_id": "aud-789",
+            "derived_total": "42.50",
+            "status": "settled",
+        }
+
+        request = ACPCheckoutRequest(
+            intent_id="int-abc",
+            line_items=[
+                ACPLineItem(
+                    name="Widget",
+                    sku="WDG-001",
+                    quantity=2,
+                    unit_amount=2125,
+                    currency="usd",
+                )
+            ],
+            spt_token="spt_test_token",
+            merchant_domain="example.com",
+            client_total=4250,
+        )
+
+        with patch.object(client._client, "request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = mock_response
+            result = await client.acp_checkout(
+                request, idempotency_key="acp-checkout-001"
+            )
+
+            assert isinstance(result, ACPCheckoutResponse)
+            assert result.order_id == "ord-xyz"
+            assert result.permit_id == "pmt-123"
+            assert result.receipt_id == "rct-456"
+            assert result.derived_total == "42.50"
+            assert result.status == "settled"
+
+            mock_request.assert_called_once()
+            call_args = mock_request.call_args
+            assert call_args[0][0] == "POST"
+            assert call_args[0][1] == "/v1/billing/acp/checkout"
+            assert call_args[1]["headers"]["Idempotency-Key"] == "acp-checkout-001"
+
+    @pytest.mark.asyncio
+    async def test_acp_line_item_to_payload(self):
+        """Test ACPLineItem.to_payload()."""
+        item = ACPLineItem(
+            name="Widget",
+            sku="WDG-001",
+            quantity=2,
+            unit_amount=2125,
+            currency="usd",
+        )
+        payload = item.to_payload()
+        assert payload["name"] == "Widget"
+        assert payload["sku"] == "WDG-001"
+        assert payload["quantity"] == 2
+        assert payload["unit_amount"] == 2125
+        assert payload["currency"] == "usd"
+
+    @pytest.mark.asyncio
+    async def test_acp_line_item_to_payload_no_sku(self):
+        """Test ACPLineItem.to_payload() with no SKU."""
+        item = ACPLineItem(
+            name="Widget",
+            sku=None,
+            quantity=2,
+            unit_amount=2125,
+            currency="usd",
+        )
+        payload = item.to_payload()
+        assert "sku" not in payload
+
+
+class TestIGABearerToken:
+    """Tests for IGA bearer token support."""
+
+    def test_client_with_bearer_token(self):
+        """Test that bearer_token is added to Authorization header."""
+        client = AgentMiddlewareClient(
+            api_key="test-key",
+            base_url="http://test",
+            bearer_token="eyJhbGc...",
+        )
+        assert "Authorization" in client._client.headers
+        assert client._client.headers["Authorization"] == "Bearer eyJhbGc..."
+
+    def test_client_without_bearer_token(self):
+        """Test that Authorization header is not set when bearer_token is None."""
+        client = AgentMiddlewareClient(
+            api_key="test-key",
+            base_url="http://test",
+        )
+        assert "Authorization" not in client._client.headers
+
+
+class TestX402Parse:
+    """Tests for x402 parse endpoint and field names."""
+
+    @pytest.fixture
+    def x402_client(self):
+        return X402Client(api_key="test-key", base_url="http://test")
+
+    @pytest.mark.asyncio
+    async def test_parse_402_success(self, x402_client):
+        """Test successful parse_402 call."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.is_error = False
+        mock_response.json.return_value = {
+            "amount_usd": "10.50",
+            "pay_to": "0x1234567890abcdef",
+            "network": "ethereum",
+            "asset": "USDC",
+        }
+
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            result = await x402_client.parse_402(
+                status_code=402,
+                headers={
+                    "X-402-Amount": "10.50",
+                    "X-402-Payto": "0x1234567890abcdef",
+                    "X-402-Network": "ethereum",
+                    "X-402-Asset": "USDC",
+                },
+            )
+
+            assert result["amount_usd"] == "10.50"
+            assert result["pay_to"] == "0x1234567890abcdef"
+            assert result["network"] == "ethereum"
+            assert result["asset"] == "USDC"
+
+            mock_post.assert_called_once()
+            call_args = mock_post.call_args
+            assert call_args[0][0] == "/v1/x402/parse"
+            assert call_args[1]["json"]["status_code"] == 402
+
+    def test_parse_402_response_with_amount_usd(self):
+        """Test parse_402_response returns amount_usd field."""
+        mock_response = MagicMock()
+        mock_response.status_code = 402
+        mock_response.headers = {
+            "X-402-Amount": "10.50",
+            "X-402-Payto": "0x1234567890abcdef",
+            "X-402-Network": "ethereum",
+            "X-402-Asset": "USDC",
+        }
+
+        result = parse_402_response(mock_response)
+        assert result is not None
+        assert result["amount_usd"] == "10.50"
+        assert "amount" not in result
+        assert result["pay_to"] == "0x1234567890abcdef"
+        assert result["network"] == "ethereum"
+        assert result["asset"] == "USDC"
+
+    def test_parse_402_response_no_asset(self):
+        """Test parse_402_response when asset header is absent."""
+        mock_response = MagicMock()
+        mock_response.status_code = 402
+        mock_response.headers = {
+            "X-402-Amount": "10.50",
+            "X-402-Payto": "0x1234567890abcdef",
+            "X-402-Network": "ethereum",
+        }
+
+        result = parse_402_response(mock_response)
+        assert result is not None
+        assert result["amount_usd"] == "10.50"
+        assert "asset" not in result
+
+    def test_parse_402_response_non_402(self):
+        """Test parse_402_response returns None for non-402 status."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {
+            "X-402-Amount": "10.50",
+            "X-402-Payto": "0x1234567890abcdef",
+            "X-402-Network": "ethereum",
+        }
+
+        result = parse_402_response(mock_response)
+        assert result is None
+
+
+class TestX402VsInsufficientFunds:
+    """Tests that HTTP 402 is not collapsed into InsufficientFundsError."""
+
+    @pytest.fixture
+    def x402_client(self):
+        return X402Client(api_key="test-key", base_url="http://test")
+
+    @pytest.mark.asyncio
+    async def test_parse_402_http_402_not_insufficient_funds(self, x402_client):
+        """Test that parse_402 does not raise InsufficientFundsError on HTTP 402."""
+        mock_response = MagicMock()
+        mock_response.status_code = 402
+        mock_response.is_error = True
+        mock_response.json.return_value = {
+            "detail": "x402_invalid_headers",
+        }
+
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            with pytest.raises(APIError) as exc_info:
+                await x402_client.parse_402(
+                    status_code=402,
+                    headers={},
+                )
+
+            # Should raise APIError, not InsufficientFundsError
+            assert not isinstance(exc_info.value, InsufficientFundsError)
+            assert isinstance(exc_info.value, APIError)
+
+    @pytest.mark.asyncio
+    async def test_settle_402_http_402_not_insufficient_funds(self, x402_client):
+        """Test that settle_402 does not raise InsufficientFundsError on HTTP 402."""
+        mock_response = MagicMock()
+        mock_response.status_code = 402
+        mock_response.is_error = True
+        mock_response.json.return_value = {
+            "detail": "x402_invalid_requirement",
+        }
+
+        with patch.object(x402_client._client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            with pytest.raises(APIError) as exc_info:
+                await x402_client.settle_402(
+                    permit_id="pmt-123",
+                    wallet_id="agt-wallet",
+                    requirement={
+                        "amount_usd": "10.50",
+                        "pay_to": "0x1234",
+                        "network": "ethereum",
+                        "asset": "USDC",
+                    },
+                    idempotency_key="settle-001",
+                )
+
+            # HTTP 402 in x402 context should raise APIError, not InsufficientFundsError
+            assert not isinstance(exc_info.value, InsufficientFundsError)
+            assert isinstance(exc_info.value, APIError)

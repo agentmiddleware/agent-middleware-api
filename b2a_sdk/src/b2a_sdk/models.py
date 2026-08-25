@@ -232,7 +232,79 @@ class EvidenceBundle:
     raw: JsonObject = field(repr=False)
 
 
+@dataclass(slots=True)
+class ACPLineItem:
+    """One purchasable line of an ACP checkout, denominated in minor units."""
+
+    name: str
+    sku: str | None
+    quantity: int
+    unit_amount: int
+    currency: str
+
+    def to_payload(self) -> JsonObject:
+        payload: JsonObject = {
+            "name": self.name,
+            "quantity": self.quantity,
+            "unit_amount": self.unit_amount,
+            "currency": self.currency,
+        }
+        if self.sku is not None:
+            payload["sku"] = self.sku
+        return payload
+
+
+@dataclass(slots=True)
+class ACPCheckoutRequest:
+    """An ACP checkout to translate into PermitV2 bounds and settle via SPT."""
+
+    intent_id: str
+    line_items: list[ACPLineItem]
+    spt_token: str
+    merchant_domain: str
+    client_total: int
+
+    def to_payload(self) -> JsonObject:
+        return {
+            "intent_id": self.intent_id,
+            "line_items": [item.to_payload() for item in self.line_items],
+            "spt_token": self.spt_token,
+            "merchant_domain": self.merchant_domain,
+            "client_total": self.client_total,
+        }
+
+
+@dataclass(slots=True)
+class ACPCheckoutResponse:
+    """The settled checkout, with its trust-plane evidence identifiers."""
+
+    order_id: str
+    intent_id: str
+    permit_id: str
+    receipt_id: str
+    audit_event_id: str
+    derived_total: str
+    status: str
+    raw: JsonObject = field(repr=False)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ACPCheckoutResponse:
+        return cls(
+            order_id=_required_string(data, "order_id"),
+            intent_id=_required_string(data, "intent_id"),
+            permit_id=_required_string(data, "permit_id"),
+            receipt_id=_required_string(data, "receipt_id"),
+            audit_event_id=_required_string(data, "audit_event_id"),
+            derived_total=_required_string(data, "derived_total"),
+            status=_required_string(data, "status"),
+            raw=dict(data),
+        )
+
+
 __all__ = [
+    "ACPCheckoutRequest",
+    "ACPCheckoutResponse",
+    "ACPLineItem",
     "EvidenceBundle",
     "InvocationResult",
     "JsonObject",

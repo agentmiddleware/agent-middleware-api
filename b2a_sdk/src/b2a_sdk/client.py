@@ -26,6 +26,8 @@ from .errors import (
     TransportError,
 )
 from .models import (
+    ACPCheckoutRequest,
+    ACPCheckoutResponse,
     EvidenceBundle,
     InvocationResult,
     Permit,
@@ -132,6 +134,7 @@ class AgentMiddlewareClient:
         timeout: float = 10.0,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        bearer_token: str | None = None,
     ) -> None:
         """
         Initialize the B2A client.
@@ -141,16 +144,20 @@ class AgentMiddlewareClient:
             base_url: Base URL of the middleware API
             timeout: Request timeout in seconds
             transport: Optional HTTPX transport, primarily for in-process tests
+            bearer_token: Optional Bearer token for IGA-governed flows
         """
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        headers = {
+            "X-API-Key": api_key,
+            "Content-Type": "application/json",
+            "User-Agent": "b2a-sdk/0.5.0",
+        }
+        if bearer_token is not None:
+            headers["Authorization"] = f"Bearer {bearer_token}"
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
-            headers={
-                "X-API-Key": api_key,
-                "Content-Type": "application/json",
-                "User-Agent": "b2a-sdk/0.5.0",
-            },
+            headers=headers,
             timeout=timeout,
             transport=transport,
             follow_redirects=False,
@@ -807,6 +814,37 @@ class AgentMiddlewareClient:
             units=units,
             session_id=None,
         )
+
+    async def acp_checkout(
+        self,
+        request: ACPCheckoutRequest,
+        *,
+        idempotency_key: str,
+    ) -> ACPCheckoutResponse:
+        """Create an ACP (Agentic Commerce Protocol) checkout.
+
+        The server mints the permit; this is not invoke_tool. The checkout
+        creates a permit, settles the payment via the Shared Payment Token,
+        and returns the trust-plane evidence identifiers.
+
+        Args:
+            request: ACP checkout request with line items and SPT token
+            idempotency_key: Caller-supplied idempotency key
+
+        Returns:
+            ACPCheckoutResponse with permit_id, receipt_id, and derived total
+        """
+        key = self._validate_idempotency_key(idempotency_key)
+        payload = await self._request_json(
+            "POST",
+            "/v1/billing/acp/checkout",
+            headers={"Idempotency-Key": key},
+            json=request.to_payload(),
+        )
+        try:
+            return ACPCheckoutResponse.from_dict(payload)
+        except ValueError as exc:
+            raise APIError(f"invalid_acp_checkout_response: {exc}", payload=payload) from exc
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""

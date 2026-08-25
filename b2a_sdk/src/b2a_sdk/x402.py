@@ -47,6 +47,9 @@ def parse_402_response(response: Any) -> dict[str, Any] | None:
     and for a 402 that does not carry the full ``X-402-*`` header set (not an
     x402 demand). Header values are returned as received — the middleware's
     ``/v1/x402`` endpoints are the strict validator.
+
+    Returns a dict with ``amount_usd``, ``pay_to``, ``network``, and ``asset``
+    (when present), matching the server's parse endpoint.
     """
     if getattr(response, "status_code", None) != 402:
         return None
@@ -59,7 +62,15 @@ def parse_402_response(response: Any) -> dict[str, Any] | None:
     network = lowered.get(_NETWORK_HEADER)
     if amount is None or pay_to is None or network is None:
         return None
-    return {"amount": amount, "pay_to": pay_to, "network": network}
+    result: dict[str, Any] = {
+        "amount_usd": amount,
+        "pay_to": pay_to,
+        "network": network,
+    }
+    asset = lowered.get("x-402-asset")
+    if asset is not None:
+        result["asset"] = asset
+    return result
 
 
 class X402Client:
@@ -90,6 +101,47 @@ class X402Client:
             follow_redirects=False,
         )
 
+    async def parse_402(
+        self,
+        status_code: int,
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """POST the observed response to /v1/x402/parse and return the requirement.
+
+        The server strictly validates the headers and returns a typed
+        requirement dict with ``amount_usd``, ``pay_to``, ``network``, and
+        ``asset`` fields. Raises APIError on invalid/missing headers.
+        """
+        try:
+            response = await self._client.post(
+                "/v1/x402/parse",
+                json={"status_code": status_code, "headers": headers},
+            )
+        except httpx.HTTPError as exc:
+            raise TransportError(f"POST /v1/x402/parse failed: {exc}") from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise APIError(
+                "invalid_json_response",
+                status_code=response.status_code,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise APIError(
+                "invalid_object_response",
+                status_code=response.status_code,
+            )
+        if response.is_error:
+            detail = _error_detail(payload, f"HTTP {response.status_code}")
+            if response.status_code == 401:
+                raise AuthenticationError(
+                    detail, status_code=401, payload=payload
+                )
+            if response.status_code == 403:
+                raise AuthorizationError(detail, status_code=403, payload=payload)
+            raise APIError(detail, status_code=response.status_code, payload=payload)
+        return payload
+
     async def settle_402(
         self,
         *,
@@ -102,7 +154,7 @@ class X402Client:
         """POST the requirement to ``/v1/x402/settle`` and return the settlement.
 
         ``requirement`` is the dict from :func:`parse_402_response` (keys
-        ``amount``/``pay_to``/``network``, optional ``asset``); ``payer`` is
+        ``amount_usd``/``pay_to``/``network``, optional ``asset``); ``payer`` is
         the payer wallet's on-chain address — required by the server for EVM
         networks so the attested EIP-712 message binds the real ``from``. The
         server response includes the transfer authorization for the payer
