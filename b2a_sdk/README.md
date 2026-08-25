@@ -89,6 +89,50 @@ If a remote tool was dispatched but its outcome could not be confirmed,
 `invoke_tool` raises `DeliveryUncertainError`. Its `receipt_id` identifies the
 signed, charged uncertainty receipt; the SDK never retries the dispatch.
 
+## In-process permit validation (0.5+)
+
+`LocalPermitValidator` and `GovernedEdgeSession` let framework integrations
+verify a permit's Ed25519 signature locally and mirror the server's per-call
+permit checks in-process (expiry, tool scope, per-tool call caps, and budget
+when `estimated_credits` is supplied) with no RPC. The local checks eliminate
+the server round trip only for calls the cached permit already provably denies; the server's `authorize_and_reserve`
+remains authoritative and can still deny a call the local mirror allowed.
+
+Local signature verification needs the Ed25519 verifier, which is an optional
+dependency kept out of the base install. Without it, `GovernedEdgeSession.open()`
+raises `PermitDeniedError("permit_verification_unavailable")` before the first
+governed call:
+
+```bash
+python -m pip install './b2a_sdk[verify]'
+```
+
+```python
+from decimal import Decimal
+
+from b2a_sdk import AgentMiddlewareClient
+from b2a_sdk.edge_client import GovernedEdgeSession
+
+async with AgentMiddlewareClient(api_key="...") as client:
+    session = await GovernedEdgeSession.open(
+        client,
+        permit_id="pmt-xyz",
+        wallet_id="agt-wallet",
+    )
+    # Locally-denied calls raise PermitDeniedError immediately (no server
+    # round trip); allowed calls go through the governed invoke_tool loop.
+    result = await session.invoke(
+        "partner.search",
+        {"query": "quarterly risk"},
+        idempotency_key="invoke-run-002",
+        # Without estimated_credits the local mirror skips the budget check.
+        estimated_credits=Decimal("2"),
+    )
+```
+
+See `b2a_sdk/src/b2a_sdk/edge_client.py` for the full `LocalPermitValidator`
+and `GovernedEdgeSession` surface.
+
 ## Verifying a receipt offline
 
 `b2a_sdk.receipt_verifier` checks a receipt with no server, no database, and

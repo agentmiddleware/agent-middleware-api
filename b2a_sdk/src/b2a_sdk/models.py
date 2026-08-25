@@ -232,7 +232,103 @@ class EvidenceBundle:
     raw: JsonObject = field(repr=False)
 
 
+@dataclass(slots=True)
+class ACPLineItem:
+    """One purchasable line of an ACP checkout, denominated in minor units."""
+
+    name: str
+    quantity: int
+    unit_amount: int
+    currency: str
+    # Optional in the ACP payload, so optional in the constructor: a line item
+    # without a SKU is constructed by omitting it, not by passing None.
+    sku: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject line items the server would refuse, before the SPT is sent.
+
+        Bounds mirror ``app/schemas/acp.py::ACPLineItem`` exactly. Catching
+        these here keeps a delegated payment credential off the wire on a
+        request that could only 422.
+        """
+        if not 0 < self.quantity <= 10_000:
+            raise ValueError(
+                f"quantity must be in 1..10000, got {self.quantity!r}"
+            )
+        if not 0 <= self.unit_amount <= 10_000_000:
+            raise ValueError(
+                "unit_amount must be in 0..10000000 minor units, got "
+                f"{self.unit_amount!r}"
+            )
+
+    def to_payload(self) -> JsonObject:
+        payload: JsonObject = {
+            "name": self.name,
+            "quantity": self.quantity,
+            "unit_amount": self.unit_amount,
+            "currency": self.currency,
+        }
+        if self.sku is not None:
+            payload["sku"] = self.sku
+        return payload
+
+
+@dataclass(slots=True)
+class ACPCheckoutRequest:
+    """An ACP checkout to translate into PermitV2 bounds and settle via SPT."""
+
+    intent_id: str
+    line_items: list[ACPLineItem]
+    # Delegated payment credential: the server masks it and keeps it out of the
+    # audit trail. repr=False keeps it out of this dataclass's repr, so it does
+    # not surface in logs or tracebacks that render the request object. It is
+    # still returned by to_payload() and sent on the wire, so callers must not
+    # log that payload.
+    spt_token: str = field(repr=False)
+    merchant_domain: str
+    client_total: int
+
+    def to_payload(self) -> JsonObject:
+        return {
+            "intent_id": self.intent_id,
+            "line_items": [item.to_payload() for item in self.line_items],
+            "spt_token": self.spt_token,
+            "merchant_domain": self.merchant_domain,
+            "client_total": self.client_total,
+        }
+
+
+@dataclass(slots=True)
+class ACPCheckoutResponse:
+    """The settled checkout, with its trust-plane evidence identifiers."""
+
+    order_id: str
+    intent_id: str
+    permit_id: str
+    receipt_id: str
+    audit_event_id: str
+    derived_total: str
+    status: str
+    raw: JsonObject = field(repr=False)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ACPCheckoutResponse:
+        return cls(
+            order_id=_required_string(data, "order_id"),
+            intent_id=_required_string(data, "intent_id"),
+            permit_id=_required_string(data, "permit_id"),
+            receipt_id=_required_string(data, "receipt_id"),
+            audit_event_id=_required_string(data, "audit_event_id"),
+            derived_total=_required_string(data, "derived_total"),
+            status=_required_string(data, "status"),
+            raw=dict(data),
+        )
+
+
 __all__ = [
+    "ACPCheckoutRequest",
+    "ACPCheckoutResponse",
+    "ACPLineItem",
     "EvidenceBundle",
     "InvocationResult",
     "JsonObject",

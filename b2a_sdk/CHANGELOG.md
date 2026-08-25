@@ -6,8 +6,58 @@
 tagged `python-sdk-v0.4.0`, and the entries below are new surface area on
 top of it, so leaving the source at `0.4.0` would have shipped something
 materially different under a version already in the wild. A minor bump:
-everything here is additive and no published behaviour changes. The tag is
-not cut by this change — `python-sdk-v0.5.0` is still a release decision.
+everything here is additive, with one bounded exception: `settle_402()` now
+prefers `amount_usd` over the legacy `amount` alias when a requirement carries
+both with different values (see below). `parse_402_response()` always sets the
+two equal, so the normal path is unchanged. The tag is not cut by this
+change — `python-sdk-v0.5.0` is still a release decision.
+
+### Added
+
+- **ACP (Agentic Commerce Protocol) checkout**: Add `ACPLineItem`,
+  `ACPCheckoutRequest`, `ACPCheckoutResponse` models and
+  `AgentMiddlewareClient.acp_checkout()` method for POST /v1/billing/acp/checkout.
+  The server mints the permit; this is not invoke_tool. Proof-only: the
+  endpoint is on the server's dormant `billing.expansion_router` and is
+  mounted only when `ENABLE_PROOF_SURFACES=true`, so deployments with proof
+  surfaces off return 404. `ACPLineItem.sku` defaults to `None`, so a line
+  item without a SKU is built by omitting it. `sponsor_wallet_id` and
+  `agent_wallet_id` are required and sent as query params, matching the server
+  route. `ACPCheckoutRequest.spt_token` is declared `repr=False`, so the
+  delegated payment credential does not surface in logs or tracebacks that
+  render the request object. It is still sent on the wire by `to_payload()`,
+  which callers must not log.
+- **IGA bearer authentication**: `AgentMiddlewareClient.__init__()` accepts an
+  optional `bearer_token` parameter. When set, the client sends
+  `Authorization: Bearer <token>` alongside X-API-Key for IGA-governed flows
+  (the governed invoke endpoint reads the bearer when `IGA_TRUSTED_ISSUERS` is
+  set). The client never mints tokens itself.
+- **x402 parse endpoint**: Add `X402Client.parse_402()` method for POST
+  /v1/x402/parse. It returns a validated requirement dict — not a typed model —
+  with `amount_usd`, `pay_to` and `network` required and `asset` optional; a 2xx
+  body missing a required field raises `APIError` rather than reaching
+  settlement. The client-side `parse_402_response()`
+  helper now returns `amount_usd` to match, alongside the legacy `amount`
+  key (same value) so existing callers keep working. `settle_402()` reads
+  `amount_usd` first and falls back to `amount` only when it is absent, so the
+  canonical field decides the settled amount.
+- **In-process permit validation**: Document `LocalPermitValidator` and
+  `GovernedEdgeSession` in README. These classes, already shipped in 0.5.0,
+  verify a permit's Ed25519 signature locally and mirror the server's per-call
+  permit checks in-process (expiry, tool scope, per-tool call caps, and budget
+  when `estimated_credits` is supplied) with no server round trip for
+  locally-denied calls. Local signature verification needs the optional
+  `verify` extra (`pip install './b2a_sdk[verify]'`); without it,
+  `GovernedEdgeSession.open()` raises
+  `PermitDeniedError("permit_verification_unavailable")`.
+
+### Fixed
+
+- **x402 HTTP 402 handling**: The x402 module's `parse_402()` and `settle_402()`
+  methods do not collapse an HTTP 402 status into `InsufficientFundsError`. A
+  402 response with valid x402 headers is parsed as a payment requirement, not
+  a billing error. `InsufficientFundsError` is raised only when the response
+  body signals `insufficient_funds`.
 
 ### Deprecations
 

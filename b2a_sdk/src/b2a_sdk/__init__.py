@@ -22,6 +22,9 @@ from .errors import (
     TransportError,
 )
 from .models import (
+    ACPCheckoutRequest,
+    ACPCheckoutResponse,
+    ACPLineItem,
     EvidenceBundle,
     InvocationResult,
     Permit,
@@ -89,6 +92,9 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "ACPCheckoutRequest",
+    "ACPCheckoutResponse",
+    "ACPLineItem",
     "APIError",
     "AgentMiddlewareClient",
     "AgentMiddlewareError",

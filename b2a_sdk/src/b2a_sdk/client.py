@@ -26,6 +26,8 @@ from .errors import (
     TransportError,
 )
 from .models import (
+    ACPCheckoutRequest,
+    ACPCheckoutResponse,
     EvidenceBundle,
     InvocationResult,
     Permit,
@@ -132,6 +134,7 @@ class AgentMiddlewareClient:
         timeout: float = 10.0,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        bearer_token: str | None = None,
     ) -> None:
         """
         Initialize the B2A client.
@@ -141,16 +144,32 @@ class AgentMiddlewareClient:
             base_url: Base URL of the middleware API
             timeout: Request timeout in seconds
             transport: Optional HTTPX transport, primarily for in-process tests
+            bearer_token: Optional Bearer token for IGA-governed flows. Omit it
+                to send no Authorization header; a blank string is rejected
+                rather than sent as a malformed ``Bearer `` header, so an unset
+                environment variable fails here instead of at the server.
+
+        Raises:
+            ValueError: if bearer_token is supplied but blank.
         """
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        headers = {
+            "X-API-Key": api_key,
+            "Content-Type": "application/json",
+            "User-Agent": "b2a-sdk/0.5.0",
+        }
+        if bearer_token is not None:
+            token = bearer_token.strip()
+            if not token:
+                raise ValueError(
+                    "bearer_token must not be blank; omit it to send no "
+                    "Authorization header"
+                )
+            headers["Authorization"] = f"Bearer {token}"
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
-            headers={
-                "X-API-Key": api_key,
-                "Content-Type": "application/json",
-                "User-Agent": "b2a-sdk/0.5.0",
-            },
+            headers=headers,
             timeout=timeout,
             transport=transport,
             follow_redirects=False,
@@ -807,6 +826,53 @@ class AgentMiddlewareClient:
             units=units,
             session_id=None,
         )
+
+    async def acp_checkout(
+        self,
+        request: ACPCheckoutRequest,
+        *,
+        sponsor_wallet_id: str,
+        agent_wallet_id: str,
+        idempotency_key: str,
+    ) -> ACPCheckoutResponse:
+        """Create an ACP (Agentic Commerce Protocol) checkout.
+
+        The server mints the permit; this is not invoke_tool. The checkout
+        creates a permit, settles the payment via the Shared Payment Token,
+        and returns the trust-plane evidence identifiers.
+
+        Dormant surface: ``/v1/billing/acp/checkout`` lives on the server's
+        ``billing.expansion_router``, which is mounted only when
+        ``ENABLE_PROOF_SURFACES=true``. A deployment with proof surfaces off —
+        the supported production default — returns 404 for this call. Treat
+        this client method as proof-only until that surface is unfrozen.
+
+        Args:
+            request: ACP checkout request with line items and SPT token
+            sponsor_wallet_id: Sponsor wallet that issues the checkout permit
+            agent_wallet_id: Agent wallet the permit is bound to
+            idempotency_key: Caller-supplied idempotency key
+
+        Returns:
+            ACPCheckoutResponse with permit_id, receipt_id, and derived total
+        """
+        key = self._validate_idempotency_key(idempotency_key)
+        # Both wallet ids are required *query* params on the server route; a
+        # body-only request is refused with 422 before authorization.
+        payload = await self._request_json(
+            "POST",
+            "/v1/billing/acp/checkout",
+            headers={"Idempotency-Key": key},
+            params={
+                "sponsor_wallet_id": sponsor_wallet_id,
+                "agent_wallet_id": agent_wallet_id,
+            },
+            json=request.to_payload(),
+        )
+        try:
+            return ACPCheckoutResponse.from_dict(payload)
+        except ValueError as exc:
+            raise APIError(f"invalid_acp_checkout_response: {exc}", payload=payload) from exc
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""

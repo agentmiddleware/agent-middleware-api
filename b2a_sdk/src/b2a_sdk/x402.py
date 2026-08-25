@@ -47,6 +47,11 @@ def parse_402_response(response: Any) -> dict[str, Any] | None:
     and for a 402 that does not carry the full ``X-402-*`` header set (not an
     x402 demand). Header values are returned as received — the middleware's
     ``/v1/x402`` endpoints are the strict validator.
+
+    Returns a dict with ``amount_usd``, ``pay_to``, ``network``, and ``asset``
+    (when present), matching the server's parse endpoint. The legacy ``amount``
+    key is returned alongside ``amount_usd`` with the same value, so existing
+    callers keep working; ``amount_usd`` is the name to read going forward.
     """
     if getattr(response, "status_code", None) != 402:
         return None
@@ -59,7 +64,17 @@ def parse_402_response(response: Any) -> dict[str, Any] | None:
     network = lowered.get(_NETWORK_HEADER)
     if amount is None or pay_to is None or network is None:
         return None
-    return {"amount": amount, "pay_to": pay_to, "network": network}
+    result: dict[str, Any] = {
+        # Legacy alias kept for compatibility; same value as ``amount_usd``.
+        "amount": amount,
+        "amount_usd": amount,
+        "pay_to": pay_to,
+        "network": network,
+    }
+    asset = lowered.get("x-402-asset")
+    if asset is not None:
+        result["asset"] = asset
+    return result
 
 
 class X402Client:
@@ -90,6 +105,75 @@ class X402Client:
             follow_redirects=False,
         )
 
+    async def parse_402(
+        self,
+        status_code: int,
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """POST the observed response to /v1/x402/parse and return the requirement.
+
+        The server strictly validates the headers and returns a requirement
+        dict with ``amount_usd``, ``pay_to``, ``network``, and an optional
+        ``asset``. Raises APIError on invalid/missing headers, and also when a
+        2xx body omits the three required fields or carries them as anything
+        other than non-empty strings — a malformed requirement must not reach
+        settlement. ``asset`` stays optional here, matching
+        :func:`parse_402_response` and :meth:`settle_402`; when present it is
+        still required to be a non-empty string.
+        """
+        try:
+            response = await self._client.post(
+                "/v1/x402/parse",
+                json={"status_code": status_code, "headers": headers},
+            )
+        except httpx.HTTPError as exc:
+            raise TransportError(f"POST /v1/x402/parse failed: {exc}") from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise APIError(
+                "invalid_json_response",
+                status_code=response.status_code,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise APIError(
+                "invalid_object_response",
+                status_code=response.status_code,
+            )
+        if response.is_error:
+            detail = _error_detail(payload, f"HTTP {response.status_code}")
+            if response.status_code == 401:
+                raise AuthenticationError(
+                    detail, status_code=401, payload=payload
+                )
+            if response.status_code == 403:
+                raise AuthorizationError(detail, status_code=403, payload=payload)
+            raise APIError(detail, status_code=response.status_code, payload=payload)
+        # A 2xx body still has to honour the documented contract. Without this,
+        # a malformed body would reach settle_402() as an empty amount or
+        # pay_to, or raise KeyError in a caller reading the documented fields.
+        # Only these three are required: parse_402_response() and settle_402()
+        # both treat `asset` as optional, so requiring it here would reject an
+        # asset-less requirement the rest of the SDK handles fine.
+        for required in ("amount_usd", "pay_to", "network"):
+            value = payload.get(required)
+            if not isinstance(value, str) or not value:
+                raise APIError(
+                    f"invalid_x402_parse_response: {required!r} must be a "
+                    "non-empty string",
+                    status_code=response.status_code,
+                    payload=payload,
+                )
+        asset = payload.get("asset")
+        if asset is not None and (not isinstance(asset, str) or not asset):
+            raise APIError(
+                "invalid_x402_parse_response: 'asset' must be a non-empty "
+                "string when present",
+                status_code=response.status_code,
+                payload=payload,
+            )
+        return payload
+
     async def settle_402(
         self,
         *,
@@ -102,14 +186,22 @@ class X402Client:
         """POST the requirement to ``/v1/x402/settle`` and return the settlement.
 
         ``requirement`` is the dict from :func:`parse_402_response` (keys
-        ``amount``/``pay_to``/``network``, optional ``asset``); ``payer`` is
+        ``amount_usd``/``pay_to``/``network``, optional ``asset``; the legacy
+        ``amount`` alias is accepted only when ``amount_usd`` is absent);
+        ``payer`` is
         the payer wallet's on-chain address — required by the server for EVM
         networks so the attested EIP-712 message binds the real ``from``. The
         server response includes the transfer authorization for the payer
         wallet to sign plus the settlement receipt id.
         """
         key = _validate_idempotency_key(idempotency_key)
-        amount = requirement.get("amount", requirement.get("amount_usd"))
+        # ``amount_usd`` is the canonical server field and wins; ``amount`` is
+        # only the legacy alias. parse_402_response() sets both to the same
+        # value, but a hand-built or mutated requirement can carry both with
+        # different values, and this is the amount that gets settled.
+        amount = requirement.get("amount_usd")
+        if amount is None:
+            amount = requirement.get("amount")
         body: dict[str, Any] = {
             "permit_id": permit_id,
             "wallet_id": wallet_id,
