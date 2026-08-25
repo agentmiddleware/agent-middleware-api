@@ -182,3 +182,20 @@ End every task with:
 - What was not tested
 - Remaining risks
 - Recommended next step
+
+## Cursor Cloud specific instructions
+
+The startup update script installs `uv` (to `~/.local/bin`, already on PATH) and
+prepares a `.venv` (gitignored) at the repo root with everything in
+`requirements.txt` plus `ruff`. So all dev tools are directly runnable without
+re-resolving: `.venv/bin/{pytest,ruff,mypy,uvicorn,alembic,python}`. Activate
+with `source .venv/bin/activate` or call binaries by path.
+
+- Runtime deps live in `requirements.txt`, NOT `pyproject.toml` `[project.dependencies]`. `ruff` is not pinned in `requirements.txt`; the update script installs it alongside.
+- Lint / type-check: `ruff check .` and `mypy app` (both must pass; CI runs them).
+- Tests: `.venv/bin/pytest tests/ -q -m "not proof"` for the fast product loop (equivalent to `make test`); `make test-all` runs the full suite including proof surfaces. Canonical `make` targets exist for everything (see `Makefile`).
+- Run the app (dev): `make quickstart` is the golden path — it boots the real strict-trust server on `http://127.0.0.1:8000` (loopback ONLY), auto-generates and persists an Ed25519 signing seed under `data/quickstart/`, enables self-serve key minting + one governed dogfood tool (`partner.notes.write`), and follows `docs/quickstart.md`. `QUICKSTART_ARGS="--reset"` wipes state.
+- Non-obvious boot requirement: the raw server (`uvicorn app.main:app`) refuses to start in default strict-trust mode without `TRUST_SIGNING_PRIVATE_KEY_B64` (base64 of 32 random bytes) — it fails with `SigningKeyError: trust_signing_private_key_required`. `make quickstart` handles this for you; only set it manually if launching uvicorn directly.
+- Local storage: SQLite is the intended local default for both the ORM DB (`DATABASE_URL=sqlite+aiosqlite://...`) and durable state (`STATE_BACKEND=sqlite`). No Postgres or Redis is needed for the core loop, tests, or `make quickstart`. Postgres is only required for the crash-recovery proof (`make prove-crash-recovery`).
+- Gotcha: `make quickstart`, `make test`, and the other `make`/proof targets invoke `uv run --with-requirements requirements.txt ...`, which builds an ephemeral uv environment and IGNORES the prepared `.venv`. That is fine and self-contained, but for fast iteration prefer the prebuilt `.venv` directly (e.g. `.venv/bin/pytest ...`, `.venv/bin/python scripts/quickstart.py`).
+- Do not ask for production secrets. For a governed caller against a local instance, use `POST /v1/dev-keys/self-provision` on the quickstart server (see "Local Credentials for Agents" above and `docs/quickstart.md`).
