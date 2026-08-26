@@ -443,7 +443,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-10"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-11"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -453,7 +453,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-10"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-11"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -1942,8 +1942,8 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
 
     # Negative paths for the ?arcade= entry point. pytest cannot execute the
     # renderer, so what is asserted here are the guards those paths depend on;
-    # the behaviour itself is exercised in a browser (all four cabinet ids open
-    # their cabinet, 1/true open the selector, an unknown id falls back to the
+    # the behaviour itself is exercised in a browser (every cabinet id opens
+    # its cabinet, 1/true open the selector, an unknown id falls back to the
     # selector rather than a blank stage, and an empty or absent value leaves
     # the arcade closed and the funnel untouched).
     arcade = (SITE / "arcade.js").read_text(encoding="utf-8")
@@ -1968,6 +1968,56 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
         assert "arcade" not in other, (
             f"{relative_path} loads the arcade; it belongs on the landing page only"
         )
+
+
+# The cabinets that should exist, by the ids the rest of the feature and the
+# ?arcade= parameter address them by. Shared by every roster test below so a
+# cabinet can only be added or removed in one place.
+ARCADE_CABINET_IDS = (
+    "blast-radius",
+    "hold-the-line",
+    "scope-creep",
+    "retry-storm",
+    "token-bucket",
+    "double-spend",
+    "backpressure",
+    "append-only",
+    "nonce-burn",
+    "key-rotation",
+    "tail-latency",
+    "race-condition",
+)
+
+# Everything the arcade's key map binds: the four arrows, their WASD aliases
+# and space. There is no fifth binding, and no pointer gesture beyond aim and
+# fire, so this set is the whole vocabulary a cabinet is allowed to promise.
+ARCADE_BOUND_KEYS = ("W", "A", "S", "D")
+
+
+def _arcade_cabinet_roster() -> list[dict[str, str]]:
+    """Parse the ``CABINETS`` array out of ``arcade.js`` as plain dicts.
+
+    pytest cannot execute the arcade, so the roster is read the only other way
+    it can be read: as text. The parse is deliberately literal — one entry per
+    brace pair, one field per line — because a roster that this cannot parse is
+    a roster a reviewer cannot skim either, and the tests below would rather
+    fail loudly on a reformat than silently stop checking anything.
+    """
+
+    arcade = (SITE / "arcade.js").read_text(encoding="utf-8")
+    block = re.search(r"var CABINETS = \[(.*?)\n  \];", arcade, re.DOTALL)
+    assert block, "arcade.js no longer declares a `var CABINETS = [ ... ];` array"
+
+    roster: list[dict[str, str]] = []
+    for entry in re.findall(r"\{([^{}]*)\}", block.group(1)):
+        fields: dict[str, str] = {}
+        for line in entry.splitlines():
+            field = re.match(r'\s*(\w+):\s*(.*?),?\s*$', line)
+            if field:
+                fields[field.group(1)] = field.group(2).strip('"')
+        if fields:
+            roster.append(fields)
+    return roster
 
 
 def test_arcade_cabinets_are_generic_and_unbranded() -> None:
@@ -2000,6 +2050,24 @@ def test_arcade_cabinets_are_generic_and_unbranded() -> None:
         "konami",
         "midway",
         "activision",
+        # The waiting room now ships first-person cabinets, so the brands a
+        # contributor is tempted to reach for are no longer only 1980s ones.
+        "doom",
+        "quake",
+        "wolfenstein",
+        "duke nukem",
+        "half-life",
+        "counter-strike",
+        "id software",
+        "bethesda",
+        "valve",
+        "blizzard",
+        "ubisoft",
+        "epic games",
+        "unreal",
+        "minecraft",
+        "fortnite",
+        "roblox",
     )
 
     for path in (SITE / "arcade.js", SITE / "arcade.css", SITE / "index.html"):
@@ -2009,11 +2077,153 @@ def test_arcade_cabinets_are_generic_and_unbranded() -> None:
                 f"{path.name} names {name!r}; the cabinets must stay generic"
             )
 
-    # The cabinets that should exist, by the ids the rest of the feature and
-    # the ?arcade= parameter address them by.
     arcade = (SITE / "arcade.js").read_text(encoding="utf-8")
-    for cabinet_id in ("scope-creep", "token-bucket", "append-only", "race-condition"):
+    for cabinet_id in ARCADE_CABINET_IDS:
         assert f'id: "{cabinet_id}"' in arcade, f"cabinet {cabinet_id} is missing"
+
+
+def test_arcade_cabinet_roster_is_coherent() -> None:
+    """Every tile on the select screen has to survive being clicked.
+
+    A cabinet is described in one place and implemented in another, and
+    nothing in a browser complains about the gap until a visitor presses the
+    tile: the select screen renders a name and a tagline for a cabinet whose
+    factory does not exist, and the run dies on start with the overlay already
+    open over the funnel. The same goes for a half-filled entry — a missing
+    ``controls`` line prints ``undefined`` under the name. So each id is
+    checked to exist exactly once, to carry all six fields, and to point at a
+    factory that is really defined in the file.
+    """
+
+    arcade = (SITE / "arcade.js").read_text(encoding="utf-8")
+    roster = _arcade_cabinet_roster()
+
+    ids = [cabinet.get("id", "") for cabinet in roster]
+    assert sorted(ids) == sorted(ARCADE_CABINET_IDS), (
+        f"the cabinet roster is {sorted(ids)}, which is not the twelve cabinets "
+        f"the arcade is supposed to ship: {sorted(ARCADE_CABINET_IDS)}"
+    )
+    duplicates = sorted({one for one in ids if ids.count(one) > 1})
+    assert not duplicates, (
+        f"cabinet ids {duplicates} appear more than once; ?arcade=<id> and the "
+        "select screen would disagree about which cabinet that is"
+    )
+
+    for cabinet in roster:
+        cabinet_id = cabinet.get("id", "<unnamed entry>")
+        missing = sorted(
+            {"id", "name", "genre", "tagline", "controls", "make"} - cabinet.keys()
+        )
+        assert not missing, (
+            f"cabinet {cabinet_id} is missing {missing}; the select screen "
+            "renders every one of those fields"
+        )
+        factory = cabinet["make"]
+        assert f"function {factory}(" in arcade, (
+            f"cabinet {cabinet_id} is wired to {factory}(), which is not defined "
+            "in arcade.js; the tile renders and then the run dies on click"
+        )
+
+
+def test_arcade_first_person_cabinets_say_they_turn_and_fire() -> None:
+    """A raycaster described as a side-scroller teaches the wrong hands.
+
+    The two first-person cabinets read the left and right keys as *rotation*,
+    not as lateral movement, and the select screen's controls line is the only
+    place a player is ever told which one they are getting. Left over from a
+    2D cabinet, the "move"/"strafe" wording sends the player pushing left to
+    dodge and spinning instead, which reads as a broken game rather than a
+    misread label. Firing is likewise the whole point of a shooter and has to
+    be named.
+    """
+
+    roster = _arcade_cabinet_roster()
+    first_person = {
+        cabinet["id"]: cabinet for cabinet in roster if cabinet.get("genre") == "FPS"
+    }
+
+    assert set(first_person) == {"blast-radius", "hold-the-line"}, (
+        f"the cabinets declaring genre FPS are {sorted(first_person)}; the two "
+        "raycaster cabinets are blast-radius and hold-the-line"
+    )
+
+    for cabinet_id, cabinet in first_person.items():
+        controls = cabinet["controls"].casefold()
+        assert "turn" in controls, (
+            f"cabinet {cabinet_id} is a raycaster but its controls read "
+            f"{cabinet['controls']!r}, which never says the player turns"
+        )
+        assert "fire" in controls, (
+            f"cabinet {cabinet_id} is a shooter but its controls read "
+            f"{cabinet['controls']!r}, which never says how to shoot"
+        )
+        assert "strafe" not in controls, (
+            f"cabinet {cabinet_id} promises strafing, which the raycaster does "
+            "not implement; left and right rotate the view"
+        )
+
+
+def test_arcade_controls_only_promise_keys_the_arcade_binds() -> None:
+    """A controls line may not name a key that does nothing.
+
+    The whole input surface is five keys — four arrows (aliased to WASD) and
+    space — plus a pointer that aims and fires. A cabinet whose controls line
+    mentions CTRL, SHIFT, ENTER or a mouse button is not a cosmetic error: the
+    player presses it, nothing happens, and the reasonable conclusion is that
+    the arcade is broken rather than that the label was wrong. The arcade
+    writes keys in upper case and actions in lower case (``← → shift`` is a
+    verb, ``SPACE fire`` is a key), so the check reads upper case only and
+    leaves the prose alone.
+    """
+
+    unbound = (
+        "CTRL",
+        "CONTROL",
+        "SHIFT",
+        "ALT",
+        "OPTION",
+        "CMD",
+        "COMMAND",
+        "META",
+        "ENTER",
+        "RETURN",
+        "ESC",
+        "ESCAPE",
+        "TAB",
+        "BACKSPACE",
+        "DELETE",
+        "FN",
+    )
+
+    for cabinet in _arcade_cabinet_roster():
+        controls = cabinet["controls"]
+        cabinet_id = cabinet["id"]
+
+        for key in unbound:
+            assert not re.search(rf"\b{key}\b", controls), (
+                f"cabinet {cabinet_id} promises {key}, which the arcade never "
+                f"binds: {controls!r}"
+            )
+
+        # Bare capitals are how a single-letter key is written, so any of them
+        # outside the WASD aliases names a binding that does not exist.
+        for letter in re.findall(r"\b[A-Z]\b", controls):
+            assert letter in ARCADE_BOUND_KEYS, (
+                f"cabinet {cabinet_id} promises the {letter} key, which is not "
+                f"one of the arrows, WASD or space: {controls!r}"
+            )
+
+        # The pointer aims and fires; it has no buttons, wheel or drag gesture
+        # the arcade listens for.
+        for gesture in ("mouse", "click", "drag", "scroll", "wheel", "right-click"):
+            assert gesture not in controls.casefold(), (
+                f"cabinet {cabinet_id} promises a {gesture} gesture the arcade "
+                f"does not handle: {controls!r}"
+            )
+
+        assert re.search(r"←|→|↑|↓|arrows|SPACE|\b[WASD]\b", controls), (
+            f"cabinet {cabinet_id} names no control at all: {controls!r}"
+        )
 
 
 def test_arcade_receipts_are_marked_simulated() -> None:

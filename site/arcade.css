@@ -1,10 +1,19 @@
 /* ==========================================================================
    THE HUMAN WAITING ROOM — overlay styling.
 
-   Loaded on the landing page only. The overlay itself is built by
-   /arcade.js; everything here is presentation for that structure, plus the
-   reduced-motion and high-contrast behaviour the accessibility widget drives
-   through data-a11y-* attributes on <html>.
+   Loaded on the landing page only, after styles.css, so the shape primitives
+   settled in that file's ARCADE CHROME section (square corners, --edge
+   borders, hard --shadow-ink offsets, the pixel focus ring) are already in
+   force and this file only has to stay inside them. The overlay itself is
+   built by /arcade.js; everything here is presentation for that structure,
+   plus the reduced-motion and high-contrast behaviour the accessibility
+   widget drives through data-a11y-* attributes on <html>.
+
+   Two rules from the design system decide most of what follows: there are
+   exactly two border weights (--edge for anything that reads as a plate, 2px
+   for rules and dividers) and no shadow is ever blurred. The display face
+   (Press Start 2P) is spent only on short strings — cabinet names, badges,
+   button labels. Taglines and body copy stay mono.
 
    Cache token: this file is referenced from index.html with the shared
    ?v=gateway-N token, so bump that token when this file changes.
@@ -20,14 +29,16 @@
   display: flex;
   /* flex-start plus margin:auto, not align-items:center — a centred flex item
      taller than its scroll container has its overflowing top clipped and
-     unreachable, which on a phone means the title scrolls away upward. */
+     unreachable, which on a phone means the title scrolls away upward. The
+     twelve-cabinet select screen is routinely taller than the viewport, so
+     this is load-bearing rather than defensive. */
   align-items: flex-start;
   justify-content: center;
   padding: clamp(0.75rem, 3vw, 2rem);
   overflow-y: auto;
   background:
     radial-gradient(120% 90% at 50% 0%, rgba(255, 194, 51, 0.09), transparent 60%),
-    #05040f;
+    var(--shadow-ink);
   color: var(--text);
   font-family: var(--font-mono);
 }
@@ -50,12 +61,16 @@
   );
 }
 
+/* Wider than the 880px this frame carried when the select screen was four
+   cabinets: at four tiles per row a narrower plate forces the grid down to
+   three and leaves a 3 + 3 + 3 + 3 shelf on a screen with room for more. */
 .arcade-frame {
   position: relative;
   margin: auto;
-  width: min(100%, 880px);
-  border: 1px solid var(--rule);
-  background: rgba(9, 13, 24, 0.92);
+  width: min(100%, 1120px);
+  border: var(--edge) solid var(--rule);
+  box-shadow: var(--shadow-hard);
+  background: var(--ink);
   padding: clamp(0.9rem, 2.5vw, 1.6rem);
   display: grid;
   gap: 1rem;
@@ -73,10 +88,13 @@
 .arcade-title {
   grid-column: 1;
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: clamp(0.95rem, 2.6vw, 1.25rem);
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(0.72rem, 2.2vw, 1rem);
+  /* A pixel face has no descender clearance to spare, and this title wraps to
+     two lines on a phone. */
+  line-height: 1.5;
+  letter-spacing: 0;
   color: var(--brass-bright);
 }
 
@@ -86,6 +104,8 @@
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   color: var(--text-dim);
+  /* Reserved height: the status line is written to at runtime, and without a
+     floor the whole header jumps a line the first time it fills. */
   min-height: 1.2em;
 }
 
@@ -94,12 +114,14 @@
   grid-row: 1 / span 2;
   align-self: start;
   background: none;
-  border: 1px solid var(--rule);
+  border: 2px solid var(--rule);
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
-  padding: 0.5rem 0.7rem;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.55rem;
+  letter-spacing: 0;
+  line-height: 1.6;
+  padding: 0.6rem 0.7rem;
   min-height: 44px;
   cursor: pointer;
 }
@@ -137,6 +159,44 @@
   display: none;
 }
 
+.arcade-select {
+  display: grid;
+  gap: 1rem;
+}
+
+.arcade-select-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  border-bottom: 2px solid var(--rule-soft);
+  padding-bottom: 0.65rem;
+}
+
+.arcade-select-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(0.62rem, 1.8vw, 0.82rem);
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--brass-bright);
+}
+
+/* The attract-screen credit line. Mono, because it is a sentence of running
+   text and a pixel face at that length is a legibility failure. */
+.arcade-credits {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+/* Retained for the older markup that titled the select screen with a single
+   heading element; the current markup uses .arcade-select-title inside
+   .arcade-select-head. Dropping it would leave that heading unstyled at the
+   first cached-JS/fresh-CSS mismatch. */
 .arcade-select-heading {
   margin: 0 0 0.75rem;
   font-size: 0.7rem;
@@ -144,56 +204,424 @@
   color: var(--text-dim);
 }
 
-/* Four cabinets, so two rows of two rather than whatever auto-fit lands on —
-   a 3 + 1 shelf reads as one cabinet having been left over. */
+/* ---- genre filters -------------------------------------------------------
+   Coin-slot toggles: a narrow plate with a slot milled across its face. The
+   pressed state inverts the plate AND thickens its border to --edge, because
+   a filter whose only "on" signal is a colour swap is invisible to a visitor
+   who cannot separate those colours. */
+
+.arcade-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.arcade-filter {
+  position: relative;
+  background: var(--panel);
+  border: 2px solid var(--rule);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.5rem;
+  letter-spacing: 0;
+  line-height: 1.6;
+  /* Extra left padding clears the slot drawn by ::before. */
+  padding: 0.7rem 0.8rem 0.7rem 1.5rem;
+  min-height: 44px;
+  cursor: pointer;
+  box-shadow: var(--shadow-hard-sm);
+  transition: transform 60ms steps(2), box-shadow 60ms steps(2),
+    border-color 60ms steps(2);
+}
+
+/* The slot itself: a hard 3x14 notch, not an icon font and not an image —
+   the page ships under img-src 'self' data: and a glyph would be one more
+   font to load for eight decorative marks. */
+.arcade-filter::before {
+  content: "";
+  position: absolute;
+  left: 0.6rem;
+  top: 50%;
+  margin-top: -7px;
+  width: 3px;
+  height: 14px;
+  /* Drawn as a filled block rather than as a bordered box: a hairline border
+     here would be a third border weight in a system that has exactly two. */
+  background: var(--shadow-ink);
+}
+
+.arcade-filter:hover {
+  border-color: var(--brass);
+  color: var(--brass-bright);
+}
+
+.arcade-filter:active {
+  /* Face lands exactly where its shadow was, so the plate reads as depressed
+     into the panel rather than as sliding across it. */
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--shadow-ink);
+}
+
+.arcade-filter[aria-pressed="true"] {
+  border-width: var(--edge);
+  border-color: var(--brass);
+  background: var(--brass);
+  color: var(--ink);
+  box-shadow: 0 0 0 var(--shadow-ink);
+  transform: translate(2px, 2px);
+}
+
+.arcade-filter[aria-pressed="true"]::before {
+  background: var(--ink);
+}
+
+/* ---- cabinet grid --------------------------------------------------------
+   One column on a narrow phone, two on a tablet, then three and four. Fixed
+   breakpoints rather than auto-fit: auto-fit with twelve tiles lands on a
+   5 + 5 + 2 shelf at some widths, and a row with two cabinets left over
+   reads as a rendering fault rather than as a lineup. */
+
 .arcade-cabinets {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.75rem;
 }
 
-@media (min-width: 560px) {
+@media (min-width: 520px) {
   .arcade-cabinets {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
+@media (min-width: 820px) {
+  .arcade-cabinets {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1040px) {
+  .arcade-cabinets {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Each genre resolves one custom property, which the corner badge and the
+   marquee art both read. Declared on the tile rather than on each child so a
+   genre is one edit in one place instead of two that can drift apart.
+   --genre-hue is decoration and reinforcement only: the badge always carries
+   its genre as text, so nothing is lost if the colour is not perceived. */
 .arcade-cabinet {
+  --genre-hue: var(--brass);
+  position: relative;
   display: grid;
-  gap: 0.35rem;
+  /* Marquee, name, tagline, controls, score strip. The tagline row takes the
+     1fr so the score strip pins to the bottom edge of every tile and a row of
+     cabinets shares one baseline for it however long the taglines run. */
+  grid-template-rows: auto auto 1fr auto auto;
+  gap: 0.4rem;
   text-align: left;
-  padding: 0.9rem;
-  min-height: 96px;
-  background: linear-gradient(180deg, rgba(255, 194, 51, 0.07), transparent 70%);
-  border: 1px solid var(--rule);
+  padding: 0.85rem;
+  background: var(--panel);
+  border: var(--edge) solid var(--rule);
+  box-shadow: var(--shadow-hard);
   color: var(--text);
   font-family: var(--font-mono);
   cursor: pointer;
-  transition: border-color 160ms ease, transform 160ms ease;
+  transition: transform 90ms steps(2), box-shadow 90ms steps(2),
+    border-color 90ms steps(2);
 }
 
-.arcade-cabinet:hover {
+/* Powering on: the border goes brass and the cabinet leans a pixel out of the
+   wall. Hover and focus are given the same treatment deliberately — a
+   keyboard visitor tabbing the lineup should see the same cabinet light up
+   that a pointer would. */
+.arcade-cabinet:hover,
+.arcade-cabinet:focus-visible {
   border-color: var(--brass);
-  transform: translateY(-2px);
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--shadow-ink);
+}
+
+.arcade-cabinet:active {
+  transform: translate(var(--px), var(--px));
+  box-shadow: 0 0 0 var(--shadow-ink);
+}
+
+/* ---- the marquee ---------------------------------------------------------
+   A decorative pixel marquee above each cabinet's name, built entirely from
+   gradients. No image is fetched: the site ships under a strict
+   img-src 'self' data: policy, and twelve marquees would otherwise be twelve
+   requests for pure decoration. Every gradient is hard-stopped (two stops at
+   the same position) so the bands stay square blocks instead of ramps. */
+.arcade-cabinet-art {
+  display: block;
+  height: 40px;
+  border: 2px solid var(--rule-soft);
+  background-color: var(--shadow-ink);
+  /* The default lineup marquee, also what the ARCADE genre keeps: alternating
+     trim bands, the house pattern of the cabinet row. */
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--genre-hue) 0 8px,
+    transparent 8px 16px
+  );
+  background-position: center;
+}
+
+.arcade-cabinet-genre {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  /* Square badge on the grid: the corner chip a cabinet's genre plate would
+     be silkscreened on. */
+  min-width: 28px;
+  padding: 0.3rem 0.35rem;
+  text-align: center;
+  background: var(--ink);
+  border: 2px solid var(--genre-hue);
+  color: var(--genre-hue);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.42rem;
+  line-height: 1.4;
+  letter-spacing: 0;
 }
 
 .arcade-cabinet-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.62rem;
+  line-height: 1.6;
+  letter-spacing: 0;
   color: var(--brass-bright);
+  /* Cabinet names are short but not uniformly so; without this a long one
+     overflows its own plate rather than wrapping inside it. */
+  overflow-wrap: anywhere;
 }
 
 .arcade-cabinet-tag {
-  font-size: 0.72rem;
-  line-height: 1.5;
+  font-size: 0.7rem;
+  line-height: 1.55;
   color: var(--text);
 }
 
 .arcade-cabinet-controls {
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   letter-spacing: 0.06em;
   color: var(--text-dim);
+}
+
+/* The high-score line, ruled off from the copy above it the way a cabinet's
+   score strip is a separate panel from its marquee. */
+.arcade-cabinet-best {
+  align-self: end;
+  border-top: 2px solid var(--rule-soft);
+  padding-top: 0.45rem;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.45rem;
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--verify);
+}
+
+/* ---- genre identity ------------------------------------------------------
+   Hue runs hot to cool by how twitchy the cabinet is: FPS and DUEL at the red
+   end, PUZZLE at the cyan end, ARCADE neutral in the middle as the house
+   default. Each genre also gets its own marquee pattern, so the lineup is
+   still legible as eight kinds of cabinet in greyscale or to a visitor who
+   does not separate these colours — and the badge text says the genre outright
+   in every case. */
+
+.arcade-cabinet[data-genre="FPS"] {
+  --genre-hue: var(--danger);
+}
+
+/* Crosshair: two hard bars crossing at the centre of the marquee. */
+.arcade-cabinet[data-genre="FPS"] .arcade-cabinet-art {
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - 2px),
+      var(--genre-hue) calc(50% - 2px) calc(50% + 2px),
+      transparent calc(50% + 2px)
+    ),
+    linear-gradient(
+      180deg,
+      transparent calc(50% - 2px),
+      var(--genre-hue) calc(50% - 2px) calc(50% + 2px),
+      transparent calc(50% + 2px)
+    );
+}
+
+.arcade-cabinet[data-genre="DUEL"] {
+  --genre-hue: var(--arcade-magenta);
+}
+
+/* Two blocks facing each other across an empty middle. */
+.arcade-cabinet[data-genre="DUEL"] .arcade-cabinet-art {
+  background-image: linear-gradient(
+    90deg,
+    var(--genre-hue) 0 12px,
+    transparent 12px calc(100% - 12px),
+    var(--genre-hue) calc(100% - 12px) 100%
+  );
+}
+
+.arcade-cabinet[data-genre="SHOOTER"] {
+  --genre-hue: var(--brass-bright);
+}
+
+/* Ranks: a column pattern crossed with a row pattern, so the marquee reads as
+   a formation advancing down the screen. */
+.arcade-cabinet[data-genre="SHOOTER"] .arcade-cabinet-art {
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      var(--genre-hue) 0 6px,
+      transparent 6px 14px
+    ),
+    repeating-linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0) 0 6px,
+      var(--shadow-ink) 6px 12px
+    );
+}
+
+.arcade-cabinet[data-genre="RUNNER"] {
+  --genre-hue: var(--brass);
+}
+
+/* Ground line with obstacles standing on it. */
+.arcade-cabinet[data-genre="RUNNER"] .arcade-cabinet-art {
+  background-image:
+    linear-gradient(
+      180deg,
+      transparent 0 calc(100% - 6px),
+      var(--genre-hue) calc(100% - 6px) 100%
+    ),
+    repeating-linear-gradient(
+      90deg,
+      var(--genre-hue) 0 4px,
+      transparent 4px 22px
+    );
+  background-size: 100% 100%, 100% 20px;
+  background-position: center, left calc(100% - 6px);
+  background-repeat: no-repeat, repeat-x;
+}
+
+.arcade-cabinet[data-genre="ARCADE"] {
+  --genre-hue: var(--text);
+}
+
+.arcade-cabinet[data-genre="MAZE"] {
+  --genre-hue: var(--text-dim);
+}
+
+/* Lattice: corridors crossing at right angles. */
+.arcade-cabinet[data-genre="MAZE"] .arcade-cabinet-art {
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      var(--genre-hue) 0 2px,
+      transparent 2px 14px
+    ),
+    repeating-linear-gradient(
+      180deg,
+      var(--genre-hue) 0 2px,
+      transparent 2px 14px
+    );
+}
+
+.arcade-cabinet[data-genre="REFLEX"] {
+  --genre-hue: var(--verify);
+}
+
+/* Hard diagonal chevrons — the one pattern in the set with no axis-aligned
+   edge, which is what a reflex cabinet's marquee should feel like. */
+.arcade-cabinet[data-genre="REFLEX"] .arcade-cabinet-art {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--genre-hue) 0 6px,
+    transparent 6px 16px
+  );
+}
+
+.arcade-cabinet[data-genre="PUZZLE"] {
+  --genre-hue: var(--arcade-cyan);
+}
+
+/* Checkerboard. repeating-conic-gradient draws it in one declaration; the
+   background-size is what makes the cells square rather than the tile's
+   aspect ratio. */
+.arcade-cabinet[data-genre="PUZZLE"] .arcade-cabinet-art {
+  background-image: repeating-conic-gradient(
+    var(--genre-hue) 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 16px 16px;
+}
+
+/* ---- attract strip -------------------------------------------------------
+   The demo that plays while nobody has dropped a coin. Letterboxed: the
+   canvas keeps its own aspect ratio and the strip pillarboxes it in
+   --shadow-ink, the way a 4:3 cabinet screen sits inside its bezel. */
+
+.arcade-attract {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: var(--edge) solid var(--rule);
+  background: var(--shadow-ink);
+  box-shadow: var(--shadow-hard);
+  overflow: hidden;
+}
+
+.arcade-attract-canvas {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  /* 4:3, matching the 320x240 backing store the cabinets actually render
+     into. A letterbox ratio here does not letterbox the picture — a canvas
+     stretches its buffer to whatever box it is given, so an 8:3 bezel
+     squashed every cabinet vertically and the demo played at the wrong
+     proportions. The bezel is the strip around it; the screen is 4:3. */
+  aspect-ratio: 4 / 3;
+  border: 2px solid var(--rule-soft);
+  background: var(--shadow-ink);
+  /* Authored small and scaled by whole numbers; smoothing would turn
+     deliberate blocks into mush. */
+  image-rendering: pixelated;
+}
+
+.arcade-attract-label {
+  margin: 0;
+  /* Above the scanline pseudo-element, which covers the whole strip. */
+  position: relative;
+  z-index: 1;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* Scanlines over the bezel. Decorative, pointer-transparent, and switched off
+   wholesale below rather than dimmed: a fine repeating band over a moving
+   canvas is exactly the pattern motion sensitivity reacts to, and under high
+   contrast it is a veil across content that has none to spare. */
+.arcade-attract::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.06) 0 1px,
+    transparent 1px 3px
+  );
 }
 
 /* ---- stage -------------------------------------------------------------- */
@@ -213,8 +641,12 @@
 }
 
 .arcade-hud-name {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.55rem;
+  line-height: 1.6;
+  letter-spacing: 0;
   color: var(--brass-bright);
-  font-weight: 600;
 }
 
 .arcade-canvas {
@@ -223,8 +655,8 @@
   max-width: 640px;
   margin: 0 auto;
   aspect-ratio: 4 / 3;
-  border: 1px solid var(--rule);
-  background: #05040f;
+  border: var(--edge) solid var(--rule);
+  background: var(--shadow-ink);
   /* The field is authored at 320x240 and scaled by whole numbers; smoothing
      would turn deliberate blocks into mush. */
   image-rendering: pixelated;
@@ -247,15 +679,25 @@
 
 .arcade-back,
 .arcade-again {
-  background: none;
-  border: 1px solid var(--rule);
+  background: var(--panel);
+  border: 2px solid var(--rule);
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.1em;
-  padding: 0.55rem 0.9rem;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.5rem;
+  letter-spacing: 0;
+  line-height: 1.6;
+  padding: 0.7rem 0.9rem;
   min-height: 44px;
   cursor: pointer;
+  box-shadow: var(--shadow-hard-sm);
+  transition: transform 60ms steps(2), box-shadow 60ms steps(2);
+}
+
+.arcade-back:active,
+.arcade-again:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--shadow-ink);
 }
 
 .arcade-again {
@@ -273,8 +715,11 @@
 
 .arcade-over-heading {
   margin: 0;
-  font-size: 0.95rem;
-  letter-spacing: 0.12em;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  letter-spacing: 0;
   color: var(--brass-bright);
 }
 
@@ -286,10 +731,12 @@
 
 /* Deliberately unlike the real receipt on /proof/: dashed, stamped, and
    captioned as theatre. A fake artifact that could be mistaken for the real
-   one would undercut the only claim this site actually makes. */
+   one would undercut the only claim this site actually makes. The dashed
+   border is the one place in the system that is allowed to break the two
+   border weights, because breaking them is the point. */
 .arcade-receipt {
   width: min(100%, 460px);
-  border: 1px dashed var(--rule);
+  border: 2px dashed var(--rule);
   background: rgba(248, 245, 236, 0.05);
   padding: 0.9rem 1rem;
   display: grid;
@@ -298,9 +745,11 @@
 
 .arcade-receipt-stamp {
   margin: 0;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.22em;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.5rem;
+  line-height: 1.6;
+  letter-spacing: 0;
   color: var(--danger);
 }
 
@@ -351,58 +800,122 @@
   border: 0;
 }
 
-/* ---- focus -------------------------------------------------------------- */
+/* ---- focus ---------------------------------------------------------------
+   Offset by --px rather than inset, so the ring never overlaps a tile's own
+   3px border and read as one ambiguous 6px edge. Named on the overlay rather
+   than inherited so the ring survives inside the modal's own stacking
+   context. */
 
 .arcade-overlay :focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 2px;
+  outline: var(--edge) solid var(--brass);
+  outline-offset: var(--px);
 }
 
-/* ---- reduced motion ----------------------------------------------------- */
+/* ---- reduced motion ------------------------------------------------------
+   Both mechanisms are honoured and neither substitutes for the other: the OS
+   `prefers-reduced-motion` query, and the `data-a11y-motion` attribute the
+   page's own accessibility widget sets for a visitor whose OS is not
+   configured.
+
+   The global rules in styles.css shorten every transition to 0.01ms under
+   both — but a shortened transition still arrives at the translated position.
+   It removes the animation, not the movement. Only `transform: none` removes
+   the movement, so every travelling state is pinned by name here. Missing one
+   means a cabinet that still jumps a pixel under hover for a visitor who
+   asked for stillness.
+
+   The scanline layers go with it: a fine repeating band over a scrolling
+   overlay is a motion trigger in its own right, animated or not. */
 
 @media (prefers-reduced-motion: reduce) {
-  .arcade-overlay::after {
+  .arcade-overlay::after,
+  .arcade-attract::after {
     display: none;
   }
 
-  .arcade-cabinet {
+  .arcade-cabinet,
+  .arcade-filter,
+  .arcade-back,
+  .arcade-again {
     transition: none;
   }
 
-  .arcade-cabinet:hover {
+  .arcade-cabinet:hover,
+  .arcade-cabinet:focus-visible,
+  .arcade-cabinet:active,
+  .arcade-filter:active,
+  .arcade-filter[aria-pressed="true"],
+  .arcade-back:active,
+  .arcade-again:active {
     transform: none;
   }
 }
 
-html[data-a11y-motion="reduce"] .arcade-overlay::after {
+html[data-a11y-motion="reduce"] .arcade-overlay::after,
+html[data-a11y-motion="reduce"] .arcade-attract::after {
   display: none;
 }
 
-html[data-a11y-motion="reduce"] .arcade-cabinet {
+html[data-a11y-motion="reduce"] .arcade-cabinet,
+html[data-a11y-motion="reduce"] .arcade-filter,
+html[data-a11y-motion="reduce"] .arcade-back,
+html[data-a11y-motion="reduce"] .arcade-again {
   transition: none;
 }
 
-html[data-a11y-motion="reduce"] .arcade-cabinet:hover {
+html[data-a11y-motion="reduce"] .arcade-cabinet:hover,
+html[data-a11y-motion="reduce"] .arcade-cabinet:focus-visible,
+html[data-a11y-motion="reduce"] .arcade-cabinet:active,
+html[data-a11y-motion="reduce"] .arcade-filter:active,
+html[data-a11y-motion="reduce"] .arcade-filter[aria-pressed="true"],
+html[data-a11y-motion="reduce"] .arcade-back:active,
+html[data-a11y-motion="reduce"] .arcade-again:active {
   transform: none;
 }
 
-/* ---- high contrast ------------------------------------------------------ */
+/* The pressed filter loses its travel above, so its depressed shadow would
+   read as an ordinary raised plate. Flattening the shadow keeps "pressed"
+   visible without moving anything. */
+html[data-a11y-motion="reduce"] .arcade-filter[aria-pressed="true"] {
+  box-shadow: 0 0 0 var(--shadow-ink);
+}
+
+/* ---- high contrast -------------------------------------------------------
+   Grounds go to flat black and every decorative wash comes off. The genre
+   marquees stay: they are gradients of a single token that high contrast has
+   already re-resolved to a brighter value, and they carry no meaning that the
+   badge text does not already state. */
 
 html[data-a11y-contrast="high"] .arcade-overlay {
   background: #000000;
 }
 
-html[data-a11y-contrast="high"] .arcade-overlay::after {
+html[data-a11y-contrast="high"] .arcade-overlay::after,
+html[data-a11y-contrast="high"] .arcade-attract::after {
   display: none;
 }
 
-html[data-a11y-contrast="high"] .arcade-frame {
+html[data-a11y-contrast="high"] .arcade-frame,
+html[data-a11y-contrast="high"] .arcade-attract {
   background: #000000;
   border-color: var(--rule);
 }
 
-html[data-a11y-contrast="high"] .arcade-cabinet {
-  background: none;
+html[data-a11y-contrast="high"] .arcade-cabinet,
+html[data-a11y-contrast="high"] .arcade-filter {
+  background: #000000;
+}
+
+/* Inversion is how a pressed filter reads when there is no colour budget left
+   to spend, so it keeps its filled face — with the thicker border still doing
+   the work for anyone reading shape rather than fill. */
+html[data-a11y-contrast="high"] .arcade-filter[aria-pressed="true"] {
+  background: var(--brass);
+  color: #000000;
+}
+
+html[data-a11y-contrast="high"] .arcade-cabinet-genre {
+  background: #000000;
 }
 
 /* ---- print --------------------------------------------------------------

@@ -45,7 +45,8 @@ Open `http://127.0.0.1:8765/`.
   Hovering a governed-loop card or the booking CTA fires a pulse through
   the field. Reduced motion renders one still frame per field state;
   high contrast hides the field entirely. The footer opens
-  [the waiting room](#the-waiting-room) (`/arcade.js`, `/arcade.css`)
+  [the waiting room](#the-waiting-room), a twelve-cabinet arcade
+  (`/arcade.js`, `/arcade.css`)
 - `/proof/` — portable receipt, matching key snapshot, and offline command
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
 - `/concept/` — unlisted landing-page design study (noindex, absent from the
@@ -103,7 +104,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-10`. When you
+query token**: every reference looks like `/styles.css?v=gateway-11`. When you
 change any of those files (including `/wave.js`, `/arcade.js`, and
 `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
@@ -131,9 +132,99 @@ the offline verifier.
 
 This product is built for agents. During the governed loop the human has
 nothing to do, so the landing page's footer offers a way to spend that time:
-`HUMANS: PRESS START` fades the page and opens a full-screen arcade with four
-cabinets — SCOPE CREEP, TOKEN BUCKET, APPEND-ONLY, and RACE CONDITION. The
-whole feature lives in `/arcade.js` and `/arcade.css`, loaded on `/` only.
+`HUMANS: PRESS START` fades the page and opens a full-screen arcade with twelve
+cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`, loaded on
+`/` only.
+
+The cabinets are declared in one `CABINETS` table, each with an `id`, a `name`,
+a `genre`, a tagline and a controls line, and each is a failure mode of this
+product's own domain played straight as a game:
+
+- `blast-radius` — BLAST RADIUS (FPS): walk the corridors of a permit boundary
+  and deny the unscoped calls wandering it before they reach the tool
+- `hold-the-line` — HOLD THE LINE (FPS): the inverse problem, standing on the
+  boundary itself while calls arrive down four corridors
+- `scope-creep` — SCOPE CREEP (SHOOTER): a descending grid of permission scopes
+  marching toward PRODUCTION
+- `retry-storm` — RETRY STORM (SHOOTER): shooting a duplicate splits it in two,
+  because a retry of a retry is two retries; only the smallest tier clears
+- `token-bucket` — TOKEN BUCKET (ARCADE): the bucket refills on a timer, so the
+  board can never be permanently cleared
+- `double-spend` — DOUBLE SPEND (ARCADE): cross the settlement lanes and get
+  charged exactly once
+- `backpressure` — BACKPRESSURE (PUZZLE): stack arriving work; a completed row
+  is a batch that drains, and reaching the top is your outage
+- `append-only` — APPEND-ONLY (PUZZLE): a ledger that grows and may never cross
+  itself, because crossing itself is rewriting history
+- `nonce-burn` — NONCE BURN (REFLEX): each nonce is good once and not for long;
+  burning a spent cell is a replay
+- `key-rotation` — KEY ROTATION (MAZE): collect the new signing key while the
+  revocation sweepers walk the old one out
+- `tail-latency` — TAIL LATENCY (RUNNER): p50 is the floor and it is fine; the
+  spikes are the tail, and the tail is what users get
+- `race-condition` — RACE CONDITION (DUEL): a rally against an agent that reads
+  your paddle from a stale replica
+
+The two first-person cabinets share one raycast engine — a grid map, a DDA per
+column, and billboarded sprites resolved against a per-column depth buffer, so
+an enemy behind a wall corner is clipped column by column rather than
+all-or-nothing. Firing is **hitscan**: at this resolution a travelling bullet
+is a single pixel nobody can see. Columns are drawn `COLUMN_W` (4px) wide
+rather than one pixel each, which is two things at once — a quarter of the fill
+calls, and the chunky vertical banding the rest of the design system is built
+out of. A one-pixel column on a 320-wide canvas renders a smooth wall, which
+would look wrong next to everything else on the page.
+
+Controls in both are **turn-and-walk, not mouselook**. The arcade binds arrows,
+WASD and space plus a single pointer; there is no strafe key and no pointer
+lock to take, so a mouselook camera would have nothing to read. A pointer drag
+steers instead, because the overlay is reachable on a phone.
+
+`makeCaster` names solid tiles explicitly — `#` wall, `=` boundary marker, `!`
+hot wall — and treats **every other character as open floor**. Do not invert
+that default. Defaulting to solid silently turns a level that uses any other
+character for floor into a block of stone, and the cabinet then reports the
+floor "cleared" on its first frame, because nothing can spawn in a map with no
+open cells. That is a real bug this engine already shipped once.
+
+The cabinet-select screen is an **attract screen**: a head (`.arcade-select-head`,
+carrying the title and a `CREDITS ∞ · FREE PLAY · ALSO METERED` line), a genre
+filter row, the tile grid, and an attract-mode strip beneath it. The filter
+chips are derived from `CABINETS` itself — `ALL` plus each distinct `genre` in
+roster order — so a cabinet introducing a new genre grows the row on its own
+rather than needing a second list kept in step by hand. Filtering sets `hidden`
+on a tile rather than toggling a CSS class, and that choice is load-bearing
+twice over: `hidden` removes the tile from the tab order as well as the
+layout, so a filtered-out cabinet cannot be reached by keyboard, and the
+stylesheet never has to know that filtering exists.
+
+Arrow keys walk the tile grid while the select screen is up; Space is
+deliberately left alone so it still activates the focused tile the way a button
+should. The vertical step is measured at runtime by counting the tiles sharing
+the first tile's `offsetTop`, not assumed from the desktop layout, because the
+grid reflows to a single column on a phone — a hard-coded row width would jump
+the focus ring three tiles at a time there.
+
+Per-cabinet bests live in `localStorage` under `amw-arcade-best`, next to the
+accessibility panel's own key, and are shown on each tile (`BEST n`, or
+`UNPLAYED`). Every read and write is wrapped in `try`/`catch`: a private
+window, a browser set to block site data, a full quota, and a corrupted value
+each throw or return junk here, and **none of those is a reason for the waiting
+room to fail to open** — a lost joke score costs nothing, a launcher that
+throws costs the whole feature. A run that beats the stored value says so on
+the run-complete screen, and says explicitly that it is stored in this browser
+only, because nothing about this is a leaderboard.
+
+**Attract mode** runs a real cabinet instance into a second canvas under the
+grid, driven by a demo hand whose inputs are re-rolled a few times a second, so
+it reads as somebody playing rather than as a scripted replay. It is a real
+cabinet rather than a recording because that is the one piece of arcade
+furniture CSS cannot fake. The demo cycles on death or after about fourteen
+seconds — some cabinets are survivable enough that a mediocre hand would sit on
+one board forever — and it draws only from the cabinets the active genre filter
+leaves visible. Under reduced motion it draws exactly one still frame and the
+loop never starts: an attract loop is precisely the unrequested motion that
+preference exists to suppress.
 
 Rules it is built to:
 
@@ -161,11 +252,13 @@ Rules it is built to:
   while gameplay motion stays, since entering is an explicit opt-in. High
   contrast switches the cabinet palette rather than hiding the feature.
 
-`?arcade=<cabinet-id>` opens straight into a cabinet, and
-`window.__amwArcade` exposes `open`/`close`/`start`/`step`/`state` so headless
-checks can advance the simulation deterministically instead of racing a frame
-budget. Cabinet ids are `scope-creep`, `token-bucket`, `append-only`, and
-`race-condition`.
+`?arcade=<cabinet-id>` opens straight into that cabinet — `?arcade=1` opens the
+select screen — and `window.__amwArcade` exposes
+`open`/`close`/`start`/`select`/`press`/`aim`/`step`/`state` so headless checks
+can advance the simulation deterministically instead of racing a frame budget.
+Use `aim()` rather than `press()` for the pointer: `pointerX`/`pointerY` hold a
+number or `null`, and coercing them to booleans pins a cabinet's player at the
+clamp floor. Cabinet ids are the twelve listed above.
 
 ## Typography
 

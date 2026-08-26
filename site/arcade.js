@@ -41,6 +41,13 @@
      scaled size and stays legible. */
   var W = 320;
   var H = 240;
+
+  /* Sprite labels for the first-person cabinets. Eight characters or fewer:
+     the label band is drawn at the sprite's own width and a longer string
+     overruns it into the corridor. */
+  var LOOSE_CALLS = [
+    "tools/*", "refund", "db:drop", "keys:rw", "admin:*", "payout", "prod:ssh", "iam:*"
+  ];
   var STEP = 1 / 60; // fixed simulation timestep
   var MAX_CATCHUP = 5; // never simulate more than this many steps per frame
 
@@ -52,7 +59,13 @@
     brass: "#ffc233",
     bright: "#ffe066",
     verify: "#4cf08a",
-    danger: "#ff6b5e"
+    danger: "#ff6b5e",
+    /* Four wall shades for the first-person cabinets, darkest last. A wall
+       painted in `ink` (near-white) reads as a light source rather than as
+       stone, which is what the corridors looked like before this ramp existed.
+       Four steps, not a gradient: a continuous ramp needs colours this palette
+       does not have, and banding is how depth was said at this vintage. */
+    wall: ["#8b7cd4", "#5f52a8", "#463a86", "#2e2663"]
   };
 
   var BOOT_LINES = [
@@ -64,7 +77,6 @@
     "AUDIT: human.entered_waiting_room  ACTOR: YOU",
     "AUDIO ........................ DENIED BY DEFAULT",
     "AGENTS ARE WORKING. YOU ARE NOT ON THE CRITICAL PATH.",
-    "FOUR CABINETS READY. NONE OF THEM ARE LOAD-BEARING."
   ];
 
   /* Rotating status ticker: the whole conceit is that real work is happening
@@ -907,36 +919,1651 @@
     return game;
   }
 
+  /* ======================================================================
+     RAYCAST ENGINE
+
+     Shared by the two first-person cabinets. A grid map, a DDA per column,
+     and billboarded sprites — the 1992 technique, which is the only one that
+     fits this canvas and this palette. Nothing here is 3D: every wall is an
+     axis-aligned unit square, so a column's height is one divide.
+
+     Columns are drawn COLUMN_W wide rather than one pixel each. That is two
+     things at once: a quarter of the fill calls, and the chunky vertical banding
+     the rest of the design system is built out of. A one-pixel column on a
+     320-wide canvas would render a smooth wall, which would look wrong here.
+     ====================================================================== */
+
+  var COLUMN_W = 4;
+  var FOV = 0.66; // camera plane half-width; ~60 degrees horizontal
+
+  function makeCaster(mapRows) {
+    /* Solids are named explicitly and everything else is open floor. The
+       inverse — defaulting to solid — silently turns a level that uses any
+       other character for floor into a block of stone, which the cabinet then
+       reports as "cleared" on its first frame because nothing can spawn in it.
+         #  wall
+         =  boundary marker (verify-tinted)
+         !  hot wall (danger-tinted)
+         anything else  open floor */
+    var map = mapRows.map(function (row) {
+      return row.split("").map(function (ch) {
+        return ch === "#" ? 1 : ch === "=" ? 2 : ch === "!" ? 3 : 0;
+      });
+    });
+    var MH = map.length;
+    var MW = map[0].length;
+
+    function solid(x, y) {
+      var cx = Math.floor(x);
+      var cy = Math.floor(y);
+      if (cx < 0 || cy < 0 || cx >= MW || cy >= MH) return 1;
+      return map[cy][cx];
+    }
+
+    /* Walls are stepped through in grid units (DDA) rather than sampled at a
+       fixed distance: sampling misses thin walls at grazing angles and costs
+       more the further the ray travels. Returns the perpendicular distance —
+       not the euclidean one, which would fisheye the view. */
+    function cast(px, py, rdx, rdy) {
+      var mapX = Math.floor(px);
+      var mapY = Math.floor(py);
+      var deltaX = rdx === 0 ? 1e30 : Math.abs(1 / rdx);
+      var deltaY = rdy === 0 ? 1e30 : Math.abs(1 / rdy);
+      var stepX, stepY, sideX, sideY;
+
+      if (rdx < 0) { stepX = -1; sideX = (px - mapX) * deltaX; }
+      else { stepX = 1; sideX = (mapX + 1 - px) * deltaX; }
+      if (rdy < 0) { stepY = -1; sideY = (py - mapY) * deltaY; }
+      else { stepY = 1; sideY = (mapY + 1 - py) * deltaY; }
+
+      var side = 0;
+      var tile = 0;
+      // Bounded rather than while(true): a ray that escapes the map through a
+      // gap would otherwise walk forever on a malformed level.
+      for (var guard = 0; guard < 64; guard += 1) {
+        if (sideX < sideY) { sideX += deltaX; mapX += stepX; side = 0; }
+        else { sideY += deltaY; mapY += stepY; side = 1; }
+        if (mapX < 0 || mapY < 0 || mapX >= MW || mapY >= MH) { tile = 1; break; }
+        tile = map[mapY][mapX];
+        if (tile) break;
+      }
+      var dist = side === 0
+        ? (mapX - px + (1 - stepX) / 2) / (rdx || 1e-30)
+        : (mapY - py + (1 - stepY) / 2) / (rdy || 1e-30);
+      return { dist: Math.max(0.0001, dist), side: side, tile: tile || 1 };
+    }
+
+    return { map: map, w: MW, h: MH, solid: solid, cast: cast };
+  }
+
+  /* Move with a wall slide: each axis is tested on its own so a player who
+     walks into a corner slides along it instead of sticking. Sticking in a
+     corridor shooter reads as a broken control, not as a wall. */
+  function casterMove(caster, ent, dx, dy) {
+    var pad = 0.18;
+    if (!caster.solid(ent.x + dx + (dx > 0 ? pad : -pad), ent.y)) ent.x += dx;
+    if (!caster.solid(ent.x, ent.y + dy + (dy > 0 ? pad : -pad))) ent.y += dy;
+  }
+
+  /* Renders walls into ctx and returns the per-column depth buffer, which the
+     sprite pass needs to avoid drawing enemies through walls. */
+  function casterDrawWalls(ctx, ink, caster, cam) {
+    var zbuf = [];
+    var planeX = -cam.dirY * FOV;
+    var planeY = cam.dirX * FOV;
+    var horizon = H / 2;
+
+    // Ceiling and floor as two flat bands. A textured floor would cost more
+    // than the whole rest of the frame and read as noise at this palette.
+    ctx.fillStyle = ink.bg;
+    ctx.fillRect(0, 0, W, horizon);
+    ctx.fillStyle = ink.grid;
+    ctx.fillRect(0, horizon, W, H - horizon);
+
+    for (var x = 0; x < W; x += COLUMN_W) {
+      var camX = 2 * (x + COLUMN_W / 2) / W - 1;
+      var hit = caster.cast(cam.x, cam.y, cam.dirX + planeX * camX, cam.dirY + planeY * camX);
+      var lineH = Math.floor(H / hit.dist);
+      var top = Math.floor(horizon - lineH / 2);
+
+      // Four depth bands instead of a continuous ramp: a smooth gradient needs
+      // colours this palette does not have, and banding is the period-correct
+      // way to say "further away".
+      var shade;
+      if (hit.tile === 2) shade = hit.side ? ink.verify : ink.bright;
+      else if (hit.tile === 3) shade = hit.side ? ink.danger : ink.brass;
+      else {
+        var band = hit.dist < 2.5 ? 0 : hit.dist < 5 ? 1 : hit.dist < 8 ? 2 : 3;
+        // A wall seen edge-on drops one band, which is what separates a
+        // corner from a flat run at this palette depth.
+        if (hit.side) band = Math.min(3, band + 1);
+        shade = ink.wall[band];
+      }
+
+      ctx.fillStyle = shade;
+      ctx.fillRect(x, Math.max(0, top), COLUMN_W, Math.min(H, lineH));
+      for (var c = 0; c < COLUMN_W; c += 1) zbuf[x + c] = hit.dist;
+    }
+    return zbuf;
+  }
+
+  /* Billboarded sprites: transform into camera space, reject anything behind
+     the plane, then draw as a stack of chunky columns so a sprite occluded by
+     a wall corner is clipped per column rather than all-or-nothing. */
+  function casterDrawSprites(ctx, ink, cam, sprites, zbuf) {
+    var planeX = -cam.dirY * FOV;
+    var planeY = cam.dirX * FOV;
+    var inv = 1 / (planeX * cam.dirY - cam.dirX * planeY);
+
+    sprites
+      .map(function (s) {
+        var relX = s.x - cam.x;
+        var relY = s.y - cam.y;
+        return {
+          s: s,
+          tx: inv * (cam.dirY * relX - cam.dirX * relY),
+          ty: inv * (-planeY * relX + planeX * relY)
+        };
+      })
+      .filter(function (p) { return p.ty > 0.25; })
+      .sort(function (a, b) { return b.ty - a.ty; })
+      .forEach(function (p) {
+        var screenX = Math.floor((W / 2) * (1 + p.tx / p.ty));
+        var size = Math.abs(Math.floor(H / p.ty)) * (p.s.scale || 0.7);
+        var top = Math.floor(H / 2 - size / 2 + (p.s.lift || 0) / p.ty);
+        var left = Math.floor(screenX - size / 2);
+
+        var visible = 0;
+        for (var x = left; x < left + size; x += COLUMN_W) {
+          if (x < 0 || x >= W) continue;
+          if (zbuf[x] != null && p.ty >= zbuf[x]) continue;
+          visible += 1;
+          ctx.fillStyle = p.s.color;
+          ctx.fillRect(x, Math.max(0, top), COLUMN_W, Math.min(H - Math.max(0, top), size));
+        }
+
+        // A label band, so the thing you are shooting says what it is. The
+        // whole point of these cabinets is the vocabulary.
+        //
+        // Gated on a column of the sprite actually having survived the depth
+        // test. The body columns are rejected against zbuf individually, but
+        // the label was painted unconditionally — so a call standing behind a
+        // wall announced itself through it, which both looks broken and gives
+        // away a target the corridor is supposed to be hiding.
+        if (visible > 0 && p.s.label && p.ty < 7 && size > 22) {
+          ctx.fillStyle = ink.bg;
+          ctx.fillRect(left, top - 9, size, 8);
+          ctx.fillStyle = p.s.color;
+          ctx.font = '7px "IBM Plex Mono", monospace';
+          ctx.textAlign = "center";
+          ctx.fillText(p.s.label, screenX, top - 2);
+          ctx.textAlign = "left";
+        }
+      });
+  }
+
+  /* The muzzle/weapon furniture both first-person cabinets share. */
+  function casterDrawWeapon(ctx, ink, kick, flash) {
+    var baseY = H - 6 + kick * 5;
+    ctx.fillStyle = ink.dim;
+    ctx.fillRect(W / 2 - 10, baseY - 26, 20, 26);
+    ctx.fillStyle = ink.ink;
+    ctx.fillRect(W / 2 - 6, baseY - 34, 12, 10);
+    if (flash > 0) {
+      ctx.fillStyle = ink.bright;
+      ctx.fillRect(W / 2 - 5, baseY - 42, 10, 9);
+      ctx.fillStyle = ink.brass;
+      ctx.fillRect(W / 2 - 9, baseY - 39, 18, 4);
+    }
+    // Reticle
+    ctx.fillStyle = ink.verify;
+    ctx.fillRect(W / 2 - 5, H / 2, 3, 1);
+    ctx.fillRect(W / 2 + 2, H / 2, 3, 1);
+    ctx.fillRect(W / 2, H / 2 - 5, 1, 3);
+    ctx.fillRect(W / 2, H / 2 + 2, 1, 3);
+  }
+
+  /* Hitscan: the nearest sprite within `spread` radians of the view axis and
+     in front of a wall. Hitscan rather than a projectile because a travelling
+     bullet at this resolution is a single pixel nobody can see. */
+  function casterHitscan(cam, sprites, caster) {
+    var best = null;
+    sprites.forEach(function (s) {
+      if (s.dead) return;
+      var relX = s.x - cam.x;
+      var relY = s.y - cam.y;
+      var dist = Math.sqrt(relX * relX + relY * relY);
+      if (dist < 0.01) return;
+      var along = (relX * cam.dirX + relY * cam.dirY) / dist;
+      if (along < 0.9) return; // outside a ~25 degree cone
+      var spread = Math.atan2(Math.abs(relX * cam.dirY - relY * cam.dirX), relX * cam.dirX + relY * cam.dirY);
+      if (spread > 0.16) return;
+      // A wall between us and it means the shot stops at the wall.
+      if (caster.cast(cam.x, cam.y, relX / dist, relY / dist).dist < dist - 0.2) return;
+      if (!best || dist < best.dist) best = { sprite: s, dist: dist };
+    });
+    return best;
+  }
+
+  /* ---- 5. BLAST RADIUS ---------------------------------------------------
+
+     First person, down the corridors of a permit boundary. Unscoped calls
+     wander the maze looking for the tool; you get there first. Clear the
+     floor and the next one has more of them, moving faster.
+
+     Controls are turn-and-walk rather than mouselook, which is both what this
+     input surface offers (five keys, no pointer lock) and what a cabinet of
+     this vintage would have had anyway. */
+  function cabinetBlastRadius(random) {
+    var MAP = [
+      "################",
+      "#....#.....#...#",
+      "#.##.#.###.#.#.#",
+      "#.#..#...#...#.#",
+      "#.#.###.###.##.#",
+      "#.#.....#....#.#",
+      "#.#####.#.####.#",
+      "#.......#......#",
+      "#.####.###.###.#",
+      "#.#..#.....#...#",
+      "#.#.###.##.#.#.#",
+      "#.#...#..#.#.#.#",
+      "#.###.##.#.#.#.#",
+      "#.....#....#...#",
+      "#.###.#.####.#.#",
+      "################"
+    ];
+    var caster = makeCaster(MAP);
+    var game = { id: "blast-radius", score: 0, lives: 3, over: false };
+    var cam, calls, floor, kick, flash, cooldown, hurt, message, messageAge, open;
+
+    /* Reachable open cells, flood-filled from the spawn. Spawning from the
+       raw map instead would eventually drop a call into a sealed pocket,
+       where it is unkillable and the floor can never be cleared. */
+    function reachable(sx, sy) {
+      var seen = {};
+      var out = [];
+      var queue = [[sx, sy]];
+      seen[sx + "," + sy] = true;
+      while (queue.length) {
+        var cell = queue.shift();
+        out.push(cell);
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+          var nx = cell[0] + d[0];
+          var ny = cell[1] + d[1];
+          var key = nx + "," + ny;
+          if (seen[key]) return;
+          if (nx < 0 || ny < 0 || nx >= caster.w || ny >= caster.h) return;
+          if (caster.map[ny][nx]) return;
+          seen[key] = true;
+          queue.push([nx, ny]);
+        });
+      }
+      return out;
+    }
+
+    function spawnFloor() {
+      calls = [];
+      var count = Math.min(3 + floor * 2, 12);
+      // Never adjacent to the player: a call spawned in your face is a retry
+      // lost to nothing you could have reacted to.
+      var far = open.filter(function (cell) {
+        var dx = cell[0] + 0.5 - cam.x;
+        var dy = cell[1] + 0.5 - cam.y;
+        return Math.sqrt(dx * dx + dy * dy) > 4;
+      });
+      for (var i = 0; i < count && far.length; i += 1) {
+        var pick = far[Math.floor(random() * far.length)];
+        calls.push({
+          x: pick[0] + 0.5,
+          y: pick[1] + 0.5,
+          color: "",
+          label: LOOSE_CALLS[Math.floor(random() * LOOSE_CALLS.length)],
+          scale: 0.62,
+          speed: 0.55 + floor * 0.14,
+          dead: false
+        });
+      }
+    }
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      floor = 1;
+      kick = 0;
+      flash = 0;
+      cooldown = 0;
+      hurt = 0;
+      message = "FLOOR 1";
+      messageAge = 0;
+      cam = { x: 1.5, y: 1.5, dirX: 1, dirY: 0, angle: 0 };
+      open = reachable(1, 1);
+      spawnFloor();
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+
+      var turn = 2.1 * dt;
+      // Turning reads only the direction flags. A drag sets those through the
+      // shell's swipe latch, so touch steers without this cabinet knowing
+      // anything about pointers — and, crucially, a hovering mouse does not
+      // steer at all. Treating pointerX as a turn RATE (which an earlier
+      // version did) spins the camera forever the moment the pointer rests
+      // anywhere off-centre, including on a desktop with no button held.
+      if (input.left) cam.angle -= turn;
+      if (input.right) cam.angle += turn;
+      cam.dirX = Math.cos(cam.angle);
+      cam.dirY = Math.sin(cam.angle);
+
+      var pace = 2.0 * dt;
+      if (input.up) casterMove(caster, cam, cam.dirX * pace, cam.dirY * pace);
+      if (input.down) casterMove(caster, cam, -cam.dirX * pace * 0.7, -cam.dirY * pace * 0.7);
+
+      cooldown -= dt;
+      kick = Math.max(0, kick - dt * 6);
+      flash = Math.max(0, flash - dt * 8);
+      hurt = Math.max(0, hurt - dt * 2);
+      messageAge += dt;
+
+      if (input.fire && cooldown <= 0) {
+        cooldown = 0.28;
+        kick = 1;
+        flash = 1;
+        var hit = casterHitscan(cam, calls, caster);
+        if (hit) {
+          hit.sprite.dead = true;
+          game.score += 25;
+          message = "DENIED " + hit.sprite.label;
+          messageAge = 0;
+        } else {
+          // Missing costs score, not a retry: the joke is the metering, and a
+          // shot that debits nothing would make firing blindly optimal.
+          game.score = Math.max(0, game.score - 5);
+        }
+      }
+
+      calls = calls.filter(function (c) { return !c.dead; });
+
+      calls.forEach(function (c) {
+        var dx = cam.x - c.x;
+        var dy = cam.y - c.y;
+        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        casterMove(caster, c, (dx / dist) * c.speed * dt, (dy / dist) * c.speed * dt);
+        if (dist < 0.55 && hurt <= 0) {
+          hurt = 1;
+          game.lives -= 1;
+          message = "REACHED THE TOOL";
+          messageAge = 0;
+          // Shoved back to the spawn rather than killed outright: losing the
+          // floor's progress to one bad corner would be the cheap version.
+          cam.x = 1.5;
+          cam.y = 1.5;
+          if (game.lives <= 0) game.over = true;
+        }
+      });
+
+      if (!calls.length && !game.over) {
+        floor += 1;
+        game.score += 100;
+        message = "FLOOR " + floor;
+        messageAge = 0;
+        spawnFloor();
+      }
+    };
+
+    game.draw = function (ctx, ink) {
+      calls.forEach(function (c) { c.color = ink.danger; });
+      var zbuf = casterDrawWalls(ctx, ink, caster, cam);
+      casterDrawSprites(ctx, ink, cam, calls, zbuf);
+      casterDrawWeapon(ctx, ink, kick, flash);
+
+      if (hurt > 0) {
+        // A full-screen red wash would be unreadable on this palette; a border
+        // says the same thing and leaves the corridor visible.
+        ctx.fillStyle = ink.danger;
+        ctx.fillRect(0, 0, W, 2);
+        ctx.fillRect(0, H - 2, W, 2);
+        ctx.fillRect(0, 0, 2, H);
+        ctx.fillRect(W - 2, 0, 2, H);
+      }
+
+      drawMinimap(ctx, ink, caster, cam, calls);
+
+      if (message && messageAge < 2) {
+        ctx.fillStyle = ink.bright;
+        ctx.font = '8px "IBM Plex Mono", monospace';
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, 32);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () {
+      return "FLOOR " + floor + " · " + calls.length + " LOOSE";
+    };
+
+    return game;
+  }
+
+  /* A corner minimap. Both first-person cabinets need one: turn-and-walk with
+     no strafe is disorienting without a plan view, and this is cheaper to read
+     than making the maze simpler. */
+  function drawMinimap(ctx, ink, caster, cam, sprites) {
+    var cell = 3;
+    var ox = W - caster.w * cell - 3;
+    var oy = 22;
+    ctx.fillStyle = ink.bg;
+    ctx.fillRect(ox - 1, oy - 1, caster.w * cell + 2, caster.h * cell + 2);
+    for (var y = 0; y < caster.h; y += 1) {
+      for (var x = 0; x < caster.w; x += 1) {
+        if (!caster.map[y][x]) continue;
+        ctx.fillStyle = ink.grid;
+        ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell);
+      }
+    }
+    sprites.forEach(function (s) {
+      ctx.fillStyle = ink.danger;
+      ctx.fillRect(ox + s.x * cell - 1, oy + s.y * cell - 1, 2, 2);
+    });
+    ctx.fillStyle = ink.verify;
+    ctx.fillRect(ox + cam.x * cell - 1, oy + cam.y * cell - 1, 2, 2);
+  }
+
+  /* ---- 6. HOLD THE LINE --------------------------------------------------
+
+     The other half of the first-person pair, and the inverse problem. You do
+     not advance: you stand on the boundary itself while calls arrive down four
+     corridors. Anything that reaches the post is a call that got through. */
+  function cabinetHoldTheLine(random) {
+    var MAP = [
+      "#####==#####",
+      "#####..#####",
+      "#####..#####",
+      "##.......###",
+      "##.......###",
+      "=..........=",
+      "=..........=",
+      "##.......###",
+      "##.......###",
+      "#####..#####",
+      "#####..#####",
+      "#####==#####"
+    ];
+    var caster = makeCaster(MAP);
+    var MOUTHS = [
+      { x: 6, y: 1.2 }, { x: 6, y: 10.8 }, { x: 1.2, y: 6 }, { x: 10.8, y: 6 }
+    ];
+
+    var game = { id: "hold-the-line", score: 0, lives: 3, over: false };
+    var cam, calls, wave, spawnTimer, remaining, kick, flash, cooldown, hurt, message, messageAge, post;
+
+    function startWave() {
+      remaining = 4 + wave * 2;
+      spawnTimer = 0.6;
+    }
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      wave = 1;
+      calls = [];
+      kick = 0;
+      flash = 0;
+      cooldown = 0;
+      hurt = 0;
+      message = "WAVE 1";
+      messageAge = 0;
+      post = { x: 6, y: 6 };
+      cam = { x: post.x, y: post.y, dirX: 0, dirY: -1, angle: -Math.PI / 2 };
+      startWave();
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+
+      var turn = 2.4 * dt;
+      // Direction flags only — see the note in BLAST RADIUS on why a pointer
+      // position must not drive a camera.
+      if (input.left) cam.angle -= turn;
+      if (input.right) cam.angle += turn;
+      cam.dirX = Math.cos(cam.angle);
+      cam.dirY = Math.sin(cam.angle);
+
+      // Step off the post only far enough to change an angle. Wandering is the
+      // other cabinet's game; here leaving the line is the failure.
+      var pace = 1.4 * dt;
+      if (input.up) casterMove(caster, cam, cam.dirX * pace, cam.dirY * pace);
+      if (input.down) casterMove(caster, cam, -cam.dirX * pace, -cam.dirY * pace);
+      var offX = cam.x - post.x;
+      var offY = cam.y - post.y;
+      var leash = Math.sqrt(offX * offX + offY * offY);
+      if (leash > 1.6) {
+        cam.x = post.x + (offX / leash) * 1.6;
+        cam.y = post.y + (offY / leash) * 1.6;
+      }
+
+      cooldown -= dt;
+      kick = Math.max(0, kick - dt * 6);
+      flash = Math.max(0, flash - dt * 8);
+      hurt = Math.max(0, hurt - dt * 2);
+      messageAge += dt;
+
+      if (input.fire && cooldown <= 0) {
+        cooldown = 0.24;
+        kick = 1;
+        flash = 1;
+        var hit = casterHitscan(cam, calls, caster);
+        if (hit) {
+          hit.sprite.dead = true;
+          game.score += 20;
+        } else {
+          game.score = Math.max(0, game.score - 4);
+        }
+      }
+
+      spawnTimer -= dt;
+      if (spawnTimer <= 0 && remaining > 0) {
+        remaining -= 1;
+        spawnTimer = Math.max(0.35, 1.5 - wave * 0.12);
+        var mouth = MOUTHS[Math.floor(random() * MOUTHS.length)];
+        calls.push({
+          x: mouth.x,
+          y: mouth.y,
+          color: "",
+          label: LOOSE_CALLS[Math.floor(random() * LOOSE_CALLS.length)],
+          scale: 0.6,
+          speed: 0.5 + wave * 0.1,
+          dead: false
+        });
+      }
+
+      calls = calls.filter(function (c) { return !c.dead; });
+      calls.forEach(function (c) {
+        var dx = post.x - c.x;
+        var dy = post.y - c.y;
+        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        casterMove(caster, c, (dx / dist) * c.speed * dt, (dy / dist) * c.speed * dt);
+        if (dist < 0.8) {
+          c.dead = true;
+          if (hurt <= 0) {
+            hurt = 1;
+            game.lives -= 1;
+            message = "GOT THROUGH";
+            messageAge = 0;
+            if (game.lives <= 0) game.over = true;
+          }
+        }
+      });
+
+      if (!calls.length && remaining <= 0 && !game.over) {
+        wave += 1;
+        game.score += 60;
+        message = "WAVE " + wave;
+        messageAge = 0;
+        startWave();
+      }
+    };
+
+    game.draw = function (ctx, ink) {
+      calls.forEach(function (c) { c.color = ink.danger; });
+      var zbuf = casterDrawWalls(ctx, ink, caster, cam);
+      casterDrawSprites(ctx, ink, cam, calls, zbuf);
+      casterDrawWeapon(ctx, ink, kick, flash);
+
+      if (hurt > 0) {
+        ctx.fillStyle = ink.danger;
+        ctx.fillRect(0, 0, W, 2);
+        ctx.fillRect(0, H - 2, W, 2);
+        ctx.fillRect(0, 0, 2, H);
+        ctx.fillRect(W - 2, 0, 2, H);
+      }
+
+      drawMinimap(ctx, ink, caster, cam, calls);
+
+      if (message && messageAge < 2) {
+        ctx.fillStyle = ink.bright;
+        ctx.font = '8px "IBM Plex Mono", monospace';
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, 32);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () {
+      return "WAVE " + wave + " · " + (calls.length + remaining) + " INBOUND";
+    };
+
+    return game;
+  }
+
+  /* ---- 7. RETRY STORM ----------------------------------------------------
+
+     Free-floating duplicate requests. Shooting one does not remove it — it
+     splits into two smaller ones, because a retry of a retry is two retries.
+     Only the smallest tier can actually be cleared, and only by ramming it
+     with the idempotency key you are carrying. */
+  function cabinetRetryStorm(random) {
+    var game = { id: "retry-storm", score: 0, lives: 3, over: false };
+    var ship, dupes, shots, wave, cooldown, invuln, message, messageAge;
+
+    function spawnWave() {
+      dupes = [];
+      for (var i = 0; i < 2 + wave; i += 1) {
+        var edge = random();
+        dupes.push({
+          x: edge < 0.5 ? 8 : W - 8,
+          y: random() * H,
+          vx: (random() - 0.5) * 34,
+          vy: (random() - 0.5) * 34,
+          tier: 3
+        });
+      }
+    }
+
+    function radius(tier) { return tier * 5; }
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      wave = 1;
+      shots = [];
+      cooldown = 0;
+      invuln = 1.5;
+      message = "";
+      messageAge = 0;
+      ship = { x: W / 2, y: H / 2, angle: -Math.PI / 2, vx: 0, vy: 0 };
+      spawnWave();
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+      messageAge += dt;
+      cooldown -= dt;
+      invuln = Math.max(0, invuln - dt);
+
+      if (input.left) ship.angle -= 3 * dt;
+      if (input.right) ship.angle += 3 * dt;
+      if (input.up) {
+        ship.vx += Math.cos(ship.angle) * 150 * dt;
+        ship.vy += Math.sin(ship.angle) * 150 * dt;
+      }
+      // Drag, so the ship is steerable at this screen size. Frictionless drift
+      // on a 320px board means one thrust and you are gone.
+      ship.vx *= 0.99;
+      ship.vy *= 0.99;
+      ship.x = (ship.x + ship.vx * dt + W) % W;
+      ship.y = (ship.y + ship.vy * dt + H) % H;
+
+      if (input.fire && cooldown <= 0) {
+        cooldown = 0.3;
+        shots.push({
+          x: ship.x, y: ship.y,
+          vx: Math.cos(ship.angle) * 210,
+          vy: Math.sin(ship.angle) * 210,
+          life: 1.1
+        });
+      }
+
+      shots.forEach(function (s) {
+        s.x = (s.x + s.vx * dt + W) % W;
+        s.y = (s.y + s.vy * dt + H) % H;
+        s.life -= dt;
+      });
+      shots = shots.filter(function (s) { return s.life > 0; });
+
+      dupes.forEach(function (d) {
+        d.x = (d.x + d.vx * dt + W) % W;
+        d.y = (d.y + d.vy * dt + H) % H;
+      });
+
+      // Shot hits: split rather than clear.
+      var spawned = [];
+      shots.forEach(function (s) {
+        dupes.forEach(function (d) {
+          if (d.hit) return;
+          if (Math.hypot(d.x - s.x, d.y - s.y) > radius(d.tier)) return;
+          d.hit = true;
+          s.life = 0;
+          if (d.tier > 1) {
+            game.score += 5;
+            for (var k = 0; k < 2; k += 1) {
+              spawned.push({
+                x: d.x, y: d.y,
+                vx: (random() - 0.5) * 70,
+                vy: (random() - 0.5) * 70,
+                tier: d.tier - 1
+              });
+            }
+            message = "RETRIED — NOW THERE ARE TWO";
+            messageAge = 0;
+          } else {
+            // A tier-1 shot is just noise; it neither clears nor splits.
+            d.hit = false;
+            s.life = 0;
+          }
+        });
+      });
+      dupes = dupes.filter(function (d) { return !d.hit; }).concat(spawned);
+      shots = shots.filter(function (s) { return s.life > 0; });
+
+      // Ramming: the idempotency key. Only tier 1 is absorbed; anything bigger
+      // is a collision and costs a retry.
+      dupes.forEach(function (d) {
+        if (Math.hypot(d.x - ship.x, d.y - ship.y) > radius(d.tier) + 4) return;
+        if (d.tier === 1) {
+          d.hit = true;
+          game.score += 30;
+          message = "KEYED — ABSORBED";
+          messageAge = 0;
+        } else if (invuln <= 0) {
+          invuln = 1.5;
+          game.lives -= 1;
+          ship.x = W / 2; ship.y = H / 2; ship.vx = 0; ship.vy = 0;
+          message = "COLLIDED";
+          messageAge = 0;
+          if (game.lives <= 0) game.over = true;
+        }
+      });
+      dupes = dupes.filter(function (d) { return !d.hit; });
+
+      if (!dupes.length && !game.over) {
+        wave += 1;
+        game.score += 80;
+        message = "STORM CLEARED";
+        messageAge = 0;
+        spawnWave();
+      }
+    };
+
+    game.draw = function (ctx, ink) {
+      dupes.forEach(function (d) {
+        ctx.fillStyle = d.tier === 1 ? ink.verify : ink.danger;
+        var r = radius(d.tier);
+        ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
+        ctx.fillStyle = ink.bg;
+        ctx.fillRect(d.x - r + 2, d.y - r + 2, r * 2 - 4, r * 2 - 4);
+      });
+
+      ctx.fillStyle = ink.brass;
+      shots.forEach(function (s) { ctx.fillRect(s.x - 1, s.y - 1, 2, 2); });
+
+      // Ship: a chunky arrow, blinking while the collision grace lasts.
+      if (invuln <= 0 || Math.floor(invuln * 12) % 2 === 0) {
+        ctx.save();
+        ctx.translate(ship.x, ship.y);
+        ctx.rotate(ship.angle);
+        ctx.fillStyle = ink.ink;
+        ctx.fillRect(-4, -3, 8, 6);
+        ctx.fillStyle = ink.verify;
+        ctx.fillRect(4, -1, 4, 2);
+        ctx.restore();
+      }
+
+      if (message && messageAge < 1.8) {
+        ctx.fillStyle = ink.bright;
+        ctx.font = '7px "IBM Plex Mono", monospace';
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, 32);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () { return "STORM " + wave + " · " + dupes.length + " DUPES"; };
+    return game;
+  }
+
+  /* ---- 8. DOUBLE SPEND ---------------------------------------------------
+
+     Cross the settlement lanes to the ledger and back. Each lane carries
+     charges moving at its own rate; touching one is the same request being
+     charged twice, which is the one thing this product exists to prevent. */
+  function cabinetDoubleSpend(random) {
+    var game = { id: "double-spend", score: 0, lives: 3, over: false };
+    var LANES = 6;
+    var LANE_H = 26;
+    var TOP = 44;
+    var player, lanes, round, message, messageAge, invuln;
+
+    function buildLanes() {
+      lanes = [];
+      for (var i = 0; i < LANES; i += 1) {
+        var dir = i % 2 === 0 ? 1 : -1;
+        var speed = (28 + random() * 26 + round * 7) * dir;
+        var charges = [];
+        var gap = 74 + random() * 34;
+        for (var x = 0; x < W + gap; x += gap) {
+          charges.push({ x: x, w: 22 + Math.floor(random() * 14) });
+        }
+        lanes.push({ y: TOP + i * LANE_H, speed: speed, charges: charges });
+      }
+    }
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      round = 1;
+      message = "";
+      messageAge = 0;
+      invuln = 0;
+      player = { x: W / 2, y: H - 12 };
+      buildLanes();
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+      messageAge += dt;
+      invuln = Math.max(0, invuln - dt);
+
+      // Stepped movement on a cooldown, not free gliding: the lanes are a
+      // timing puzzle and analogue movement turns them into a smear.
+      player.step = (player.step || 0) - dt;
+      if (player.step <= 0) {
+        var moved = false;
+        if (input.left) { player.x -= 18; moved = true; }
+        if (input.right) { player.x += 18; moved = true; }
+        if (input.up) { player.y -= LANE_H; moved = true; }
+        if (input.down) { player.y += LANE_H; moved = true; }
+        if (moved) player.step = 0.12;
+      }
+      player.x = clamp(player.x, 6, W - 6);
+      player.y = clamp(player.y, 6, H - 12);
+
+      lanes.forEach(function (lane) {
+        lane.charges.forEach(function (c) {
+          c.x += lane.speed * dt;
+          if (lane.speed > 0 && c.x > W + 30) c.x = -30;
+          if (lane.speed < 0 && c.x < -30) c.x = W + 30;
+        });
+      });
+
+      if (invuln <= 0) {
+        lanes.forEach(function (lane) {
+          if (Math.abs(player.y - lane.y) > 9) return;
+          lane.charges.forEach(function (c) {
+            if (player.x + 4 < c.x || player.x - 4 > c.x + c.w) return;
+            invuln = 1.2;
+            game.lives -= 1;
+            message = "CHARGED TWICE";
+            messageAge = 0;
+            player.x = W / 2;
+            player.y = H - 12;
+            if (game.lives <= 0) game.over = true;
+          });
+        });
+      }
+
+      if (player.y < TOP - 10 && !game.over) {
+        round += 1;
+        game.score += 50 + round * 10;
+        message = "SETTLED ONCE";
+        messageAge = 0;
+        player.x = W / 2;
+        player.y = H - 12;
+        buildLanes();
+      }
+    };
+
+    game.draw = function (ctx, ink) {
+      ctx.fillStyle = ink.verify;
+      ctx.fillRect(0, TOP - 14, W, 1);
+      ctx.font = '7px "IBM Plex Mono", monospace';
+      ctx.fillStyle = ink.dim;
+      ctx.fillText("LEDGER", 4, TOP - 17);
+
+      lanes.forEach(function (lane) {
+        ctx.fillStyle = ink.grid;
+        ctx.fillRect(0, lane.y + 10, W, 1);
+        lane.charges.forEach(function (c) {
+          ctx.fillStyle = ink.danger;
+          ctx.fillRect(c.x, lane.y - 7, c.w, 14);
+          ctx.fillStyle = ink.bg;
+          ctx.fillRect(c.x + 2, lane.y - 5, c.w - 4, 10);
+          ctx.fillStyle = ink.danger;
+          ctx.fillText("$", c.x + c.w / 2 - 2, lane.y + 3);
+        });
+      });
+
+      if (invuln <= 0 || Math.floor(invuln * 12) % 2 === 0) {
+        ctx.fillStyle = ink.verify;
+        ctx.fillRect(player.x - 4, player.y - 5, 8, 10);
+        ctx.fillStyle = ink.bg;
+        ctx.fillRect(player.x - 2, player.y - 3, 4, 3);
+      }
+
+      if (message && messageAge < 1.6) {
+        ctx.fillStyle = ink.bright;
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, 32);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () { return "CROSSING " + round; };
+    return game;
+  }
+
+  /* ---- 9. BACKPRESSURE ---------------------------------------------------
+
+     Work arrives faster than it drains. Stack it into the queue; a completed
+     row is a batch that drains. Reach the top and the queue has overflowed,
+     which downstream will experience as your outage. */
+  function cabinetBackpressure(random) {
+    var COLS = 10;
+    var ROWS = 15;
+    var CELL = 12;
+    var OX = (W - COLS * CELL) / 2;
+    var OY = H - ROWS * CELL - 4;
+
+    // Deliberately not the canonical seven: four shapes keep the piece table
+    // short enough to read and the well solvable at this speed.
+    var SHAPES = [
+      [[0, 0], [1, 0], [0, 1], [1, 1]],
+      [[0, 0], [1, 0], [2, 0], [3, 0]],
+      [[0, 0], [0, 1], [1, 1], [2, 1]],
+      [[0, 1], [1, 1], [1, 0], [2, 0]]
+    ];
+
+    var game = { id: "backpressure", score: 0, lives: 3, over: false };
+    var grid, piece, drop, dropRate, moveCd, batches, message, messageAge;
+
+    function newPiece() {
+      piece = {
+        cells: SHAPES[Math.floor(random() * SHAPES.length)].map(function (c) { return [c[0], c[1]]; }),
+        x: 3,
+        y: 0
+      };
+      if (collides(piece.cells, piece.x, piece.y)) {
+        game.lives = 0;
+        game.over = true;
+        message = "QUEUE OVERFLOW";
+        messageAge = 0;
+      }
+    }
+
+    function collides(cells, px, py) {
+      return cells.some(function (c) {
+        var x = px + c[0];
+        var y = py + c[1];
+        if (x < 0 || x >= COLS || y >= ROWS) return true;
+        if (y < 0) return false;
+        return !!grid[y][x];
+      });
+    }
+
+    function settle() {
+      piece.cells.forEach(function (c) {
+        var x = piece.x + c[0];
+        var y = piece.y + c[1];
+        if (y >= 0 && y < ROWS && x >= 0 && x < COLS) grid[y][x] = 1;
+      });
+      // Drain any full rows.
+      var drained = 0;
+      for (var y = ROWS - 1; y >= 0; y -= 1) {
+        var full = grid[y].every(function (v) { return v; });
+        if (!full) continue;
+        grid.splice(y, 1);
+        grid.unshift(new Array(COLS).fill(0));
+        drained += 1;
+        y += 1; // re-test the row that just shifted down into y
+      }
+      if (drained) {
+        batches += drained;
+        game.score += drained * drained * 40;
+        dropRate = Math.max(0.12, dropRate - 0.015 * drained);
+        message = drained > 1 ? "BATCH DRAINED ×" + drained : "BATCH DRAINED";
+        messageAge = 0;
+      }
+      newPiece();
+    }
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      grid = [];
+      for (var y = 0; y < ROWS; y += 1) grid.push(new Array(COLS).fill(0));
+      drop = 0;
+      dropRate = 0.55;
+      moveCd = 0;
+      batches = 0;
+      message = "";
+      messageAge = 0;
+      newPiece();
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+      messageAge += dt;
+      moveCd -= dt;
+
+      if (moveCd <= 0) {
+        if (input.left && !collides(piece.cells, piece.x - 1, piece.y)) { piece.x -= 1; moveCd = 0.11; }
+        else if (input.right && !collides(piece.cells, piece.x + 1, piece.y)) { piece.x += 1; moveCd = 0.11; }
+      }
+
+      if (input.fire && !piece.rotated) {
+        // Rotate about the piece's own bounding box, then reject the rotation
+        // outright if it would overlap: wall kicks are more machinery than
+        // this well needs.
+        var turned = piece.cells.map(function (c) { return [-c[1] + 1, c[0]]; });
+        if (!collides(turned, piece.x, piece.y)) piece.cells = turned;
+        piece.rotated = true;
+      }
+      if (!input.fire) piece.rotated = false;
+
+      drop -= dt * (input.down ? 8 : 1);
+      if (drop <= 0) {
+        drop = dropRate;
+        if (collides(piece.cells, piece.x, piece.y + 1)) settle();
+        else piece.y += 1;
+      }
+    };
+
+    game.draw = function (ctx, ink) {
+      ctx.fillStyle = ink.grid;
+      ctx.fillRect(OX - 2, OY - 2, COLS * CELL + 4, ROWS * CELL + 4);
+      ctx.fillStyle = ink.bg;
+      ctx.fillRect(OX, OY, COLS * CELL, ROWS * CELL);
+
+      for (var y = 0; y < ROWS; y += 1) {
+        for (var x = 0; x < COLS; x += 1) {
+          if (!grid[y][x]) continue;
+          ctx.fillStyle = ink.dim;
+          ctx.fillRect(OX + x * CELL, OY + y * CELL, CELL - 1, CELL - 1);
+        }
+      }
+      if (piece) {
+        ctx.fillStyle = ink.brass;
+        piece.cells.forEach(function (c) {
+          var x = piece.x + c[0];
+          var y = piece.y + c[1];
+          if (y < 0) return;
+          ctx.fillRect(OX + x * CELL, OY + y * CELL, CELL - 1, CELL - 1);
+        });
+      }
+
+      ctx.font = '7px "IBM Plex Mono", monospace';
+      ctx.fillStyle = ink.dim;
+      ctx.fillText("QUEUE DEPTH", 4, 34);
+      ctx.fillStyle = ink.danger;
+      ctx.fillText("OVERFLOW", 4, 44);
+      ctx.fillStyle = ink.grid;
+      ctx.fillRect(0, OY, OX - 4, 1);
+
+      if (message && messageAge < 1.6) {
+        ctx.fillStyle = ink.verify;
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, 30);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () { return "BATCHES " + batches; };
+    return game;
+  }
+
+  /* ---- 10. NONCE BURN ----------------------------------------------------
+
+     A grid of nonces, each good exactly once and only until it expires. Move
+     the cursor, burn the live ones. Burning a spent cell is a replay, and
+     replays are what the nonce exists to stop. */
+  function cabinetNonceBurn(random) {
+    var COLS = 5;
+    var ROWS = 4;
+    var CELL = 46;
+    var OX = (W - COLS * CELL) / 2;
+    var OY = 42;
+
+    var game = { id: "nonce-burn", score: 0, lives: 3, over: false };
+    var cells, cursor, moveCd, fireLatch, spawnTimer, round, message, messageAge;
+
+    function idx(cx, cy) { return cy * COLS + cx; }
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      cells = [];
+      for (var i = 0; i < COLS * ROWS; i += 1) cells.push({ live: false, ttl: 0, spent: false });
+      cursor = { x: 2, y: 1 };
+      moveCd = 0;
+      fireLatch = false;
+      spawnTimer = 0.4;
+      round = 1;
+      message = "";
+      messageAge = 0;
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+      messageAge += dt;
+      moveCd -= dt;
+
+      if (moveCd <= 0) {
+        var moved = false;
+        if (input.left) { cursor.x -= 1; moved = true; }
+        else if (input.right) { cursor.x += 1; moved = true; }
+        else if (input.up) { cursor.y -= 1; moved = true; }
+        else if (input.down) { cursor.y += 1; moved = true; }
+        if (moved) moveCd = 0.13;
+        cursor.x = clamp(cursor.x, 0, COLS - 1);
+        cursor.y = clamp(cursor.y, 0, ROWS - 1);
+      }
+
+      if (input.fire && !fireLatch) {
+        fireLatch = true;
+        var cell = cells[idx(cursor.x, cursor.y)];
+        if (cell.live) {
+          cell.live = false;
+          cell.spent = true;
+          cell.ttl = 0;
+          game.score += 15 + Math.floor(round * 2);
+          message = "BURNED";
+          messageAge = 0;
+        } else {
+          // Pressing an empty or spent cell is the replay.
+          game.lives -= 1;
+          message = cell.spent ? "REPLAY REJECTED" : "NO NONCE THERE";
+          messageAge = 0;
+          if (game.lives <= 0) game.over = true;
+        }
+      }
+      if (!input.fire) fireLatch = false;
+
+      spawnTimer -= dt;
+      if (spawnTimer <= 0) {
+        spawnTimer = Math.max(0.25, 1.1 - round * 0.05);
+        var free = [];
+        cells.forEach(function (c, i) { if (!c.live) free.push(i); });
+        if (free.length) {
+          var pick = free[Math.floor(random() * free.length)];
+          cells[pick].live = true;
+          cells[pick].spent = false;
+          cells[pick].ttl = Math.max(1.1, 2.6 - round * 0.08);
+          cells[pick].max = cells[pick].ttl;
+        }
+      }
+
+      cells.forEach(function (c) {
+        if (!c.live) return;
+        c.ttl -= dt;
+        if (c.ttl > 0) return;
+        // An expired nonce is not a life lost — it is just gone. Losing a
+        // retry to the clock would make the board unplayable at speed.
+        c.live = false;
+        c.spent = false;
+        game.score = Math.max(0, game.score - 3);
+      });
+
+      round += dt * 0.25;
+    };
+
+    game.draw = function (ctx, ink) {
+      ctx.font = '7px "IBM Plex Mono", monospace';
+      ctx.fillStyle = ink.dim;
+      ctx.fillText("BURN EACH NONCE ONCE — BEFORE IT EXPIRES", 6, 32);
+
+      for (var y = 0; y < ROWS; y += 1) {
+        for (var x = 0; x < COLS; x += 1) {
+          var c = cells[idx(x, y)];
+          var px = OX + x * CELL;
+          var py = OY + y * CELL;
+          ctx.fillStyle = ink.grid;
+          ctx.fillRect(px, py, CELL - 6, CELL - 6);
+          ctx.fillStyle = ink.bg;
+          ctx.fillRect(px + 2, py + 2, CELL - 10, CELL - 10);
+
+          if (c.live) {
+            ctx.fillStyle = ink.brass;
+            ctx.fillRect(px + 6, py + 6, CELL - 18, CELL - 18);
+            // TTL as a draining bar rather than a ring: an arc at this size is
+            // four grey pixels and reads as nothing.
+            var frac = clamp(c.ttl / (c.max || 1), 0, 1);
+            ctx.fillStyle = c.ttl < 0.6 ? ink.danger : ink.verify;
+            ctx.fillRect(px + 4, py + CELL - 12, Math.floor((CELL - 14) * frac), 3);
+          } else if (c.spent) {
+            ctx.fillStyle = ink.dim;
+            ctx.fillRect(px + 12, py + 16, CELL - 30, 3);
+          }
+        }
+      }
+
+      var cx = OX + cursor.x * CELL;
+      var cy = OY + cursor.y * CELL;
+      ctx.fillStyle = ink.verify;
+      ctx.fillRect(cx - 2, cy - 2, CELL - 2, 2);
+      ctx.fillRect(cx - 2, cy + CELL - 6, CELL - 2, 2);
+      ctx.fillRect(cx - 2, cy - 2, 2, CELL - 2);
+      ctx.fillRect(cx + CELL - 6, cy - 2, 2, CELL - 2);
+
+      if (message && messageAge < 1.2) {
+        ctx.fillStyle = ink.bright;
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, H - 8);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () { return "TIER " + Math.floor(round); };
+    return game;
+  }
+
+  /* ---- 11. KEY ROTATION --------------------------------------------------
+
+     Collect every shard of the new signing key while the revocation sweepers
+     walk the old one out of the maze. Touching a sweeper is being caught
+     holding a key that is no longer valid. */
+  function cabinetKeyRotation(random) {
+    var MAZE = [
+      "###############",
+      "#......#......#",
+      "#.####.#.####.#",
+      "#.#..........##",
+      "#.#.##.#.##.#.#",
+      "#......#......#",
+      "##.###.#.###.##",
+      "#......#......#",
+      "#.####.#.####.#",
+      "#.....       .#",
+      "#.###.##.##.#.#",
+      "#......#......#",
+      "###############"
+    ];
+    var CELL = 16;
+    var COLS = MAZE[0].length;
+    var ROWS = MAZE.length;
+    var OX = (W - COLS * CELL) / 2;
+    var OY = (H - ROWS * CELL) / 2 + 8;
+
+    var game = { id: "key-rotation", score: 0, lives: 3, over: false };
+    var walls, shards, player, sweepers, moveCd, rotation, message, messageAge, invuln;
+
+    function wall(x, y) {
+      if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return true;
+      return walls[y][x];
+    }
+
+    function layout() {
+      walls = MAZE.map(function (row) {
+        return row.split("").map(function (ch) { return ch === "#" ? 1 : 0; });
+      });
+      shards = [];
+      for (var y = 0; y < ROWS; y += 1) {
+        for (var x = 0; x < COLS; x += 1) {
+          if (walls[y][x]) continue;
+          if (x === 1 && y === 1) continue;
+          shards.push({ x: x, y: y });
+        }
+      }
+      player = { x: 1, y: 1 };
+      sweepers = [
+        { x: COLS - 2, y: ROWS - 2, dx: -1, dy: 0, step: 0 },
+        { x: COLS - 2, y: 1, dx: 0, dy: 1, step: 0 },
+        { x: 1, y: ROWS - 2, dx: 1, dy: 0, step: 0 }
+      ];
+    }
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      rotation = 1;
+      moveCd = 0;
+      invuln = 0;
+      message = "";
+      messageAge = 0;
+      layout();
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+      messageAge += dt;
+      moveCd -= dt;
+      invuln = Math.max(0, invuln - dt);
+
+      if (moveCd <= 0) {
+        var nx = player.x;
+        var ny = player.y;
+        if (input.left) nx -= 1;
+        else if (input.right) nx += 1;
+        else if (input.up) ny -= 1;
+        else if (input.down) ny += 1;
+        if ((nx !== player.x || ny !== player.y) && !wall(nx, ny)) {
+          player.x = nx;
+          player.y = ny;
+          moveCd = 0.11;
+        }
+      }
+
+      shards = shards.filter(function (s) {
+        if (s.x !== player.x || s.y !== player.y) return true;
+        game.score += 10;
+        return false;
+      });
+
+      sweepers.forEach(function (s) {
+        s.step -= dt;
+        if (s.step > 0) return;
+        s.step = Math.max(0.10, 0.24 - rotation * 0.02);
+        // Head toward the player when the way is open, otherwise take any
+        // turn that is not a reversal. Enough to be threatening; not enough
+        // to be unfair on a maze this size.
+        var options = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(function (d) {
+          return !wall(s.x + d[0], s.y + d[1]);
+        });
+        if (!options.length) return;
+        var forward = options.filter(function (d) {
+          return !(d[0] === -s.dx && d[1] === -s.dy);
+        });
+        var pool = forward.length ? forward : options;
+        pool.sort(function (a, b) {
+          var da = Math.abs(s.x + a[0] - player.x) + Math.abs(s.y + a[1] - player.y);
+          var db = Math.abs(s.x + b[0] - player.x) + Math.abs(s.y + b[1] - player.y);
+          return da - db;
+        });
+        var choice = random() < 0.72 ? pool[0] : pool[Math.floor(random() * pool.length)];
+        s.dx = choice[0];
+        s.dy = choice[1];
+        s.x += s.dx;
+        s.y += s.dy;
+      });
+
+      if (invuln <= 0) {
+        sweepers.forEach(function (s) {
+          if (s.x !== player.x || s.y !== player.y) return;
+          invuln = 1.4;
+          game.lives -= 1;
+          message = "REVOKED";
+          messageAge = 0;
+          player.x = 1;
+          player.y = 1;
+          if (game.lives <= 0) game.over = true;
+        });
+      }
+
+      if (!shards.length && !game.over) {
+        rotation += 1;
+        game.score += 120;
+        message = "KEY ROTATED";
+        messageAge = 0;
+        layout();
+      }
+    };
+
+    game.draw = function (ctx, ink) {
+      for (var y = 0; y < ROWS; y += 1) {
+        for (var x = 0; x < COLS; x += 1) {
+          if (!walls[y][x]) continue;
+          ctx.fillStyle = ink.grid;
+          ctx.fillRect(OX + x * CELL, OY + y * CELL, CELL - 1, CELL - 1);
+        }
+      }
+      ctx.fillStyle = ink.brass;
+      shards.forEach(function (s) {
+        ctx.fillRect(OX + s.x * CELL + 6, OY + s.y * CELL + 6, 4, 4);
+      });
+      ctx.fillStyle = ink.danger;
+      sweepers.forEach(function (s) {
+        ctx.fillRect(OX + s.x * CELL + 2, OY + s.y * CELL + 2, CELL - 5, CELL - 5);
+        ctx.fillStyle = ink.bg;
+        ctx.fillRect(OX + s.x * CELL + 5, OY + s.y * CELL + 5, 3, 3);
+        ctx.fillStyle = ink.danger;
+      });
+      if (invuln <= 0 || Math.floor(invuln * 12) % 2 === 0) {
+        ctx.fillStyle = ink.verify;
+        ctx.fillRect(OX + player.x * CELL + 3, OY + player.y * CELL + 3, CELL - 7, CELL - 7);
+      }
+
+      ctx.font = '7px "IBM Plex Mono", monospace';
+      if (message && messageAge < 1.5) {
+        ctx.fillStyle = ink.bright;
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, H - 3);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () { return "ROTATION " + rotation + " · " + shards.length + " LEFT"; };
+    return game;
+  }
+
+  /* ---- 12. TAIL LATENCY --------------------------------------------------
+
+     A runner along the latency chart. The floor is p50 and it is fine. The
+     spikes are the tail, and the tail is what your users actually experience,
+     so the tail is the part you have to clear. */
+  function cabinetTailLatency(random) {
+    var game = { id: "tail-latency", score: 0, lives: 3, over: false };
+    var GROUND = H - 40;
+    var runner, spikes, speed, spawnIn, distance, message, messageAge, invuln, trace;
+
+    game.reset = function () {
+      game.score = 0;
+      game.lives = 3;
+      game.over = false;
+      runner = { y: GROUND, vy: 0, onGround: true, duck: false };
+      spikes = [];
+      speed = 96;
+      spawnIn = 1.1;
+      distance = 0;
+      invuln = 0;
+      message = "";
+      messageAge = 0;
+      trace = [];
+      for (var i = 0; i < W; i += 4) trace.push(GROUND + 8 + Math.sin(i * 0.11) * 3);
+    };
+
+    game.update = function (dt, input) {
+      if (game.over) return;
+      messageAge += dt;
+      invuln = Math.max(0, invuln - dt);
+      distance += speed * dt;
+      speed = Math.min(230, 96 + distance * 0.012);
+      game.score = Math.floor(distance / 10);
+
+      if ((input.up || input.fire) && runner.onGround) {
+        runner.vy = -232;
+        runner.onGround = false;
+      }
+      runner.duck = !!input.down && runner.onGround;
+
+      runner.vy += 640 * dt;
+      runner.y += runner.vy * dt;
+      if (runner.y >= GROUND) {
+        runner.y = GROUND;
+        runner.vy = 0;
+        runner.onGround = true;
+      }
+
+      spawnIn -= dt;
+      if (spawnIn <= 0) {
+        spawnIn = Math.max(0.55, 1.35 - distance * 0.00035) + random() * 0.4;
+        var tall = random() < 0.35;
+        spikes.push({
+          x: W + 10,
+          h: tall ? 34 : 20,
+          w: 8 + Math.floor(random() * 8),
+          high: tall && random() < 0.5
+        });
+      }
+
+      spikes.forEach(function (s) { s.x -= speed * dt; });
+      spikes = spikes.filter(function (s) { return s.x > -20; });
+
+      var rh = runner.duck ? 8 : 16;
+      var ry = runner.y - rh;
+      spikes.forEach(function (s) {
+        if (invuln > 0) return;
+        // A "high" spike hangs from above: it is the one you duck rather than
+        // jump, so the two controls both have a reason to exist.
+        // A standing runner occupies GROUND-16..GROUND and a ducking one
+        // GROUND-8..GROUND, so a hanging spike has to reach below GROUND-16
+        // to threaten the first and stop above GROUND-8 to spare the second.
+        // At the original 26 it ended at GROUND-18 and cleared a standing
+        // runner entirely, which made ducking decorative.
+        var sy = s.high ? GROUND - 44 : GROUND - s.h;
+        var sh = s.high ? 32 : s.h;
+        if (s.x > 16 + 10 || s.x + s.w < 16 - 6) return;
+        if (ry + rh < sy || ry > sy + sh) return;
+        invuln = 1.2;
+        game.lives -= 1;
+        message = "TAIL EVENT";
+        messageAge = 0;
+        if (game.lives <= 0) game.over = true;
+      });
+
+      trace.push(GROUND + 8 + Math.sin(distance * 0.02) * 3 + random() * 2);
+      if (trace.length > W / 4) trace.shift();
+    };
+
+    game.draw = function (ctx, ink) {
+      ctx.fillStyle = ink.grid;
+      ctx.fillRect(0, GROUND + 2, W, 1);
+
+      // The p50 trace under the floor: flat, boring, and not the problem.
+      ctx.fillStyle = ink.grid;
+      trace.forEach(function (v, i) { ctx.fillRect(i * 4, v, 3, 1); });
+
+      ctx.font = '7px "IBM Plex Mono", monospace';
+      ctx.fillStyle = ink.dim;
+      ctx.fillText("p50", 4, GROUND + 22);
+      ctx.fillStyle = ink.danger;
+      ctx.fillText("p99", 4, 32);
+
+      spikes.forEach(function (s) {
+        ctx.fillStyle = ink.danger;
+        if (s.high) ctx.fillRect(s.x, GROUND - 44, s.w, 32);
+        else ctx.fillRect(s.x, GROUND - s.h, s.w, s.h);
+      });
+
+      if (invuln <= 0 || Math.floor(invuln * 12) % 2 === 0) {
+        var rh = runner.duck ? 8 : 16;
+        ctx.fillStyle = ink.verify;
+        ctx.fillRect(10, runner.y - rh, 12, rh);
+        ctx.fillStyle = ink.bg;
+        ctx.fillRect(13, runner.y - rh + 3, 3, 3);
+      }
+
+      if (message && messageAge < 1.4) {
+        ctx.fillStyle = ink.bright;
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, 30);
+        ctx.textAlign = "left";
+      }
+    };
+
+    game.hud = function () { return "p99 " + Math.floor(speed) + "ms"; };
+    return game;
+  }
+
   var CABINETS = [
+    {
+      id: "blast-radius",
+      name: "BLAST RADIUS",
+      genre: "FPS",
+      tagline: "Walk the permit boundary. Nothing unscoped reaches the tool.",
+      controls: "← → turn · ↑ ↓ walk · SPACE fire",
+      make: cabinetBlastRadius
+    },
+    {
+      id: "hold-the-line",
+      name: "HOLD THE LINE",
+      genre: "FPS",
+      tagline: "Four corridors. One post. Do not let a call through.",
+      controls: "← → turn · ↑ ↓ step · SPACE fire",
+      make: cabinetHoldTheLine
+    },
     {
       id: "scope-creep",
       name: "SCOPE CREEP",
+      genre: "SHOOTER",
       tagline: "Deny the permissions before they reach production.",
       controls: "← → move · SPACE deny",
       make: cabinetScopeCreep
     },
     {
+      id: "retry-storm",
+      name: "RETRY STORM",
+      genre: "SHOOTER",
+      tagline: "Shoot a duplicate and now there are two of them.",
+      controls: "← → turn · ↑ thrust · SPACE fire",
+      make: cabinetRetryStorm
+    },
+    {
       id: "token-bucket",
       name: "TOKEN BUCKET",
+      genre: "ARCADE",
       tagline: "Drain the burst. The bucket refills. Forever.",
       controls: "← → limiter · SPACE serve",
       make: cabinetTokenBucket
     },
     {
+      id: "double-spend",
+      name: "DOUBLE SPEND",
+      genre: "ARCADE",
+      tagline: "Cross the settlement lanes. Get charged exactly once.",
+      controls: "arrows step",
+      make: cabinetDoubleSpend
+    },
+    {
+      id: "backpressure",
+      name: "BACKPRESSURE",
+      genre: "PUZZLE",
+      tagline: "Work arrives faster than it drains. Stack it anyway.",
+      controls: "← → shift · SPACE rotate · ↓ drop",
+      make: cabinetBackpressure
+    },
+    {
       id: "append-only",
       name: "APPEND-ONLY",
+      genre: "PUZZLE",
       tagline: "The ledger grows. It may never cross itself.",
       controls: "arrows steer the write head",
       make: cabinetAppendOnly
     },
     {
+      id: "nonce-burn",
+      name: "NONCE BURN",
+      genre: "REFLEX",
+      tagline: "Each one is good once, and not for long.",
+      controls: "arrows move · SPACE burn",
+      make: cabinetNonceBurn
+    },
+    {
+      id: "key-rotation",
+      name: "KEY ROTATION",
+      genre: "MAZE",
+      tagline: "Collect the new key before the revocations reach you.",
+      controls: "arrows move",
+      make: cabinetKeyRotation
+    },
+    {
+      id: "tail-latency",
+      name: "TAIL LATENCY",
+      genre: "RUNNER",
+      tagline: "p50 is fine. p50 is not what your users get.",
+      controls: "↑ jump · ↓ duck",
+      make: cabinetTailLatency
+    },
+    {
       id: "race-condition",
       name: "RACE CONDITION",
+      genre: "DUEL",
       tagline: "Rally against an agent that does not blink.",
       controls: "↑ ↓ move · first to 7",
       make: cabinetRaceCondition
     }
   ];
+
+  // Appended rather than written into the literal above, which is declared
+  // before the roster exists. The line it replaces said "FOUR CABINETS READY"
+  // and had already started lying by the time there were twelve.
+  BOOT_LINES.push(CABINETS.length + " CABINETS READY. NONE OF THEM ARE LOAD-BEARING.");
 
   /* ======================================================================
      SHELL: overlay, focus management, boot, select, play loop
@@ -985,17 +2612,60 @@
     pointerY: null
   };
 
+  /* ---- best scores -------------------------------------------------------
+
+     Per-cabinet bests, in localStorage next to the accessibility panel's own
+     key. Every read and write is wrapped: a private window, a browser set to
+     block site data, or a corrupted value all throw or return junk here, and
+     none of those is a reason for the waiting room to fail to open. The score
+     is a joke about metering — losing it costs nothing. */
+
+  var BEST_KEY = "amw-arcade-best";
+
+  function loadBest() {
+    try {
+      var raw = window.localStorage.getItem(BEST_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  /* Returns "" for a run that did not beat the stored best, "stored" when the
+     new best was written, and "unstored" when it was a best but the write
+     failed. The three are distinct because the run-complete screen tells the
+     visitor their score was kept, and saying that after a quota error or in a
+     window with storage blocked is simply untrue — the reload that loses it
+     is coming either way, and the honest line costs nothing. */
+  function recordBest(id, score) {
+    var all = loadBest();
+    if (typeof all[id] === "number" && all[id] >= score) return "";
+    all[id] = score;
+    try {
+      window.localStorage.setItem(BEST_KEY, JSON.stringify(all));
+    } catch (error) {
+      return "unstored";
+    }
+    return "stored";
+  }
+
   function inkPalette() {
     if (!contrastHigh()) return PALETTE;
+    // Tracks the high-contrast block in styles.css. These had drifted: the
+    // values here were still the retired charcoal-and-ember palette, so a
+    // high-contrast visitor got a differently-coloured arcade to everyone
+    // else's.
     return {
       bg: "#000000",
-      grid: "#4a5468",
+      grid: "#5b53a0",
       ink: "#ffffff",
-      dim: "#d4dae8",
-      brass: "#ffc94d",
-      bright: "#ffd97a",
-      verify: "#5ce0a4",
-      danger: "#ff8f76"
+      dim: "#ddd9ff",
+      brass: "#ffd24d",
+      bright: "#ffe680",
+      verify: "#6cff9f",
+      danger: "#ff8f85",
+      wall: ["#ffffff", "#c9c4f0", "#8f86d6", "#413a7a"]
     };
   }
 
@@ -1029,22 +2699,75 @@
 
     nodes.select = el("div", "arcade-select");
     nodes.select.hidden = true;
-    var selectHeading = el("p", "arcade-select-heading", "SELECT A CABINET — ALL RUNS ARE FREE AND ALSO METERED");
-    nodes.select.appendChild(selectHeading);
-    var grid = el("div", "arcade-cabinets");
+
+    var selectHead = el("div", "arcade-select-head");
+    selectHead.appendChild(el("h2", "arcade-select-title", "SELECT A CABINET"));
+    selectHead.appendChild(
+      el("p", "arcade-credits", "CREDITS \u221e · FREE PLAY · ALSO METERED")
+    );
+    nodes.select.appendChild(selectHead);
+
+    /* Genre filters. The roster is the source of truth for which ones exist,
+       so adding a cabinet with a new genre grows this row on its own rather
+       than needing a second list kept in step by hand. */
+    var genres = ["ALL"];
+    CABINETS.forEach(function (cabinet) {
+      if (genres.indexOf(cabinet.genre) === -1) genres.push(cabinet.genre);
+    });
+    nodes.filters = el("div", "arcade-filters");
+    nodes.filters.setAttribute("role", "group");
+    nodes.filters.setAttribute("aria-label", "Filter cabinets by genre");
+    genres.forEach(function (genre) {
+      var chip = el("button", "arcade-filter", genre);
+      chip.type = "button";
+      chip.setAttribute("data-genre", genre);
+      chip.setAttribute("aria-pressed", genre === "ALL" ? "true" : "false");
+      chip.addEventListener("click", function () {
+        applyFilter(genre);
+      });
+      nodes.filters.appendChild(chip);
+    });
+    nodes.select.appendChild(nodes.filters);
+
+    nodes.grid = el("div", "arcade-cabinets");
     CABINETS.forEach(function (cabinet) {
       var button = el("button", "arcade-cabinet");
       button.type = "button";
       button.setAttribute("data-cabinet", cabinet.id);
+      button.setAttribute("data-genre", cabinet.genre);
+
+      // Decorative: the marquee is drawn by CSS off the genre, and a screen
+      // reader announcing "image" for a gradient helps nobody.
+      var art = el("span", "arcade-cabinet-art");
+      art.setAttribute("aria-hidden", "true");
+      button.appendChild(art);
+
+      button.appendChild(el("span", "arcade-cabinet-genre", cabinet.genre));
       button.appendChild(el("span", "arcade-cabinet-name", cabinet.name));
       button.appendChild(el("span", "arcade-cabinet-tag", cabinet.tagline));
       button.appendChild(el("span", "arcade-cabinet-controls", cabinet.controls));
+      button.appendChild(el("span", "arcade-cabinet-best", ""));
       button.addEventListener("click", function () {
         startGame(cabinet.id);
       });
-      grid.appendChild(button);
+      nodes.grid.appendChild(button);
     });
-    nodes.select.appendChild(grid);
+    nodes.select.appendChild(nodes.grid);
+
+    /* Attract mode. A cabinet plays itself under the grid, which is the one
+       piece of arcade furniture that cannot be faked with CSS: it has to be a
+       real cabinet running real frames, or it is a video of a game rather than
+       the game. Reduced motion gets a still frame instead. */
+    nodes.attract = el("div", "arcade-attract");
+    nodes.attractCanvas = el("canvas", "arcade-attract-canvas");
+    nodes.attractCanvas.width = W;
+    nodes.attractCanvas.height = H;
+    nodes.attractCanvas.setAttribute("aria-hidden", "true");
+    nodes.attract.appendChild(nodes.attractCanvas);
+    nodes.attractLabel = el("p", "arcade-attract-label", "");
+    nodes.attract.appendChild(nodes.attractLabel);
+    nodes.select.appendChild(nodes.attract);
+
     frame.appendChild(nodes.select);
 
     nodes.stage = el("div", "arcade-stage");
@@ -1166,6 +2889,15 @@
     swipeFrom = null;
     pointerHeld = false;
     if (!keyFire && pointerFireSteps <= 0) input.fire = false;
+    // Lifting the pointer ends the gesture, so both the aim and any direction
+    // the swipe latched have to go with it. Previously only pointerleave
+    // cleared the aim and nothing ever cleared the latch, which left a
+    // direction held down after the finger was gone — harmless on the
+    // cabinets that latch a heading of their own, but on a first-person
+    // cabinet it is a camera that never stops turning.
+    input.pointerX = null;
+    input.pointerY = null;
+    clearDirections();
   }
 
   /* Run once per simulation step, before the cabinet reads input, so a tap's
@@ -1318,7 +3050,149 @@
     bootIndex += 1;
   }
 
-  /* ---- select ------------------------------------------------------------ */
+  /* ---- select screen behaviour ------------------------------------------ */
+
+  var activeGenre = "ALL";
+
+  function applyFilter(genre) {
+    activeGenre = genre;
+    Array.prototype.forEach.call(
+      nodes.filters.querySelectorAll(".arcade-filter"),
+      function (chip) {
+        chip.setAttribute(
+          "aria-pressed",
+          chip.getAttribute("data-genre") === genre ? "true" : "false"
+        );
+      }
+    );
+    var shown = 0;
+    visibleCabinets().forEach(function (button) {
+      var match = genre === "ALL" || button.getAttribute("data-genre") === genre;
+      // `hidden` rather than display:none in CSS: a filtered-out tile must
+      // leave the tab order as well as the layout, and hidden does both
+      // without the stylesheet having to know about filtering at all.
+      button.hidden = !match;
+      if (match) shown += 1;
+    });
+    // Repick immediately rather than letting the running demo finish. It draws
+    // from the filtered pool, so leaving it alone shows a PUZZLE cabinet under
+    // an FPS-only filter until it happens to die — and under reduced motion,
+    // where no loop is running to cycle it, indefinitely.
+    pickAttract();
+    drawAttract();
+
+    announce(
+      shown + (shown === 1 ? " cabinet" : " cabinets") +
+      (genre === "ALL" ? " available." : " in " + genre + ".")
+    );
+  }
+
+  function visibleCabinets() {
+    return Array.prototype.slice.call(nodes.grid.querySelectorAll(".arcade-cabinet"));
+  }
+
+  function refreshBests() {
+    var best = loadBest();
+    visibleCabinets().forEach(function (button) {
+      var id = button.getAttribute("data-cabinet");
+      var score = best[id];
+      var label = button.querySelector(".arcade-cabinet-best");
+      if (label) label.textContent = typeof score === "number" ? "BEST " + score : "UNPLAYED";
+    });
+  }
+
+  /* Arrow keys walk the tile grid. The tiles are buttons, so Tab already
+     works; this is the control an actual cabinet select would have, and it
+     matters most on the twelve-tile grid where tabbing across three rows is
+     tedious. Columns are read from layout rather than assumed, because the
+     grid reflows to one column on a phone. */
+  function onGridKey(event, slot) {
+    if (screen !== "select") return;
+    // Keyed off the resolved slot, not event.key: WASD aliases the arrows
+    // everywhere else in the arcade, and reading the raw key here made this
+    // the one screen where the two sets disagreed — W and S silently did
+    // nothing, and the caller had already swallowed them.
+    var dir = { left: -1, right: 1, up: -1, down: 1 }[slot];
+    if (dir == null) return;
+    var tiles = visibleCabinets().filter(function (b) { return !b.hidden; });
+    var index = tiles.indexOf(doc.activeElement);
+    if (index === -1) return;
+    event.preventDefault();
+
+    var step = 1;
+    if (slot === "up" || slot === "down") {
+      var top = tiles[0].offsetTop;
+      var perRow = tiles.filter(function (b) { return b.offsetTop === top; }).length;
+      step = Math.max(1, perRow);
+    }
+    var next = index + dir * step;
+    if (next < 0 || next >= tiles.length) return;
+    tiles[next].focus();
+  }
+
+  /* ---- attract mode ------------------------------------------------------
+
+     A cabinet playing itself while nobody is at the controls. The demo hands
+     are deliberately mediocre: inputs are re-rolled a few times a second, so
+     it looks like someone is playing rather than like a scripted replay, and
+     it dies often enough to cycle through the roster. */
+
+  var attract = null;
+  var attractTimer = 0;
+  var attractInput = { left: false, right: false, up: false, down: false, fire: false, pointerX: null, pointerY: null };
+  var attractRoll = 0;
+
+  function pickAttract() {
+    var pool = CABINETS.filter(function (c) {
+      return activeGenre === "ALL" || c.genre === activeGenre;
+    });
+    if (!pool.length) pool = CABINETS;
+    var cabinet = pool[Math.floor(random() * pool.length)];
+    var instance = cabinet.make(random);
+    instance.reset();
+    attract = { cabinet: cabinet, game: instance };
+    attractTimer = 0;
+    if (nodes.attractLabel) {
+      nodes.attractLabel.textContent = "ATTRACT MODE — " + cabinet.name + " · " + cabinet.genre;
+    }
+  }
+
+  function drawAttract() {
+    if (!attract || !nodes.attractCtx) return;
+    var ctx = nodes.attractCtx;
+    var ink = inkPalette();
+    ctx.fillStyle = ink.bg;
+    ctx.fillRect(0, 0, W, H);
+    attract.game.draw(ctx, ink);
+    ctx.fillStyle = ink.dim;
+    ctx.font = '8px "IBM Plex Mono", monospace';
+    ctx.textAlign = "center";
+    ctx.fillText("DEMO", W / 2, H - 6);
+    ctx.textAlign = "left";
+  }
+
+  function tickAttract(dt) {
+    if (!attract) pickAttract();
+    if (!attract) return;
+
+    attractTimer += dt;
+    attractRoll -= dt;
+    if (attractRoll <= 0) {
+      attractRoll = 0.18 + random() * 0.3;
+      attractInput.left = random() < 0.3;
+      attractInput.right = !attractInput.left && random() < 0.35;
+      attractInput.up = random() < 0.45;
+      attractInput.down = !attractInput.up && random() < 0.12;
+      attractInput.fire = random() < 0.55;
+    }
+
+    if (!attract.game.over) attract.game.update(STEP, attractInput);
+    drawAttract();
+
+    // Cycle on death or on a timer, whichever comes first: some cabinets are
+    // survivable enough for a demo hand to sit on one board indefinitely.
+    if (attract.game.over || attractTimer > 14) pickAttract();
+  }
 
   function showSelect() {
     screen = "select";
@@ -1336,7 +3210,18 @@
     // strands keyboard and screen-reader focus in a hidden subtree — so test
     // whether focus is still on something visible rather than trusting either
     // behaviour.
-    var first = nodes.select.querySelector(".arcade-cabinet");
+    refreshBests();
+    if (nodes.attractCanvas && !nodes.attractCtx) {
+      nodes.attractCtx = nodes.attractCanvas.getContext("2d");
+    }
+    if (prefersStaticMotion()) {
+      // One still frame rather than a running demo: an attract loop is exactly
+      // the kind of unrequested motion this preference exists to stop.
+      if (!attract) pickAttract();
+      drawAttract();
+    }
+
+    var first = nodes.select.querySelector(".arcade-cabinet:not([hidden])");
     var active = doc.activeElement;
     var activeVisible =
       active &&
@@ -1344,7 +3229,10 @@
       overlay.contains(active) &&
       active.offsetParent !== null;
     if (first && isOpen && !activeVisible) first.focus();
-    announce("Cabinet select. Four cabinets available.");
+    announce(
+      "Cabinet select. " + CABINETS.length + " cabinets available." +
+      " Use arrow keys to move between cabinets."
+    );
   }
 
   /* ---- play -------------------------------------------------------------- */
@@ -1412,9 +3300,21 @@
 
     var heading = el("p", "arcade-over-heading", "RUN COMPLETE — " + current.name);
     nodes.over.appendChild(heading);
+    var bestState = recordBest(current.id, game.score);
     nodes.over.appendChild(
       el("p", "arcade-over-score", game.score + " RECEIPTS SCORED. NONE OF THEM COUNT.")
     );
+    if (bestState) {
+      nodes.over.appendChild(
+        el(
+          "p",
+          "arcade-over-best",
+          bestState === "stored"
+            ? "NEW BEST ON " + current.name + " — STORED IN THIS BROWSER ONLY"
+            : "NEW BEST ON " + current.name + " — NOT SAVED, STORAGE IS UNAVAILABLE"
+        )
+      );
+    }
     nodes.over.appendChild(buildReceipt(current, game.score, random));
 
     var actions = el("div", "arcade-over-actions");
@@ -1466,6 +3366,8 @@
 
     if (screen === "boot") {
       tickBoot(dt);
+    } else if (screen === "select") {
+      if (!prefersStaticMotion()) tickAttract(dt);
     } else if (screen === "play" && game) {
       if (!paused) {
         accumulator += dt;
@@ -1573,6 +3475,12 @@
     }
     var slot = KEYS[event.key];
     if (!slot) return;
+    // On the select screen the arrows walk the tile grid instead. Space is
+    // deliberately left alone here so it still activates the focused tile.
+    if (screen === "select" && slot !== "fire") {
+      onGridKey(event, slot);
+      return;
+    }
     // Only a running cabinet claims the game keys. On the menus they belong
     // to the browser, or Space could never choose a cabinet or press PLAY
     // AGAIN — both of which are buttons the keyboard has to be able to
