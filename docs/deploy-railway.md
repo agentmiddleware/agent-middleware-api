@@ -513,9 +513,9 @@ Qualify every customer stack with synthetic or redacted data before onboarding:
    values into the qualification record.
 5. Complete and record the provider-backup restore drill. Prefer a PITR-created
    sibling and re-run the trust loop there before removing it through the
-   approved Railway operator process. Do not treat an ordinary volume-backup
-   restore as disposable: it replaces the source service's mounted volume and
-   removes backups newer than the selected point.
+   [restore drill teardown](#restore-drill-teardown) below. Do not treat an
+   ordinary volume-backup restore as disposable: it replaces the source
+   service's mounted volume and removes backups newer than the selected point.
 
 Roll out first to an internal dedicated stack, then to one low-sensitivity
 design partner. Stop promotion if deployment provenance, schema parity,
@@ -530,6 +530,50 @@ externally anchored audit evidence, and approved subprocessor/data-flow review.
 Do not introduce shared SaaS until organization tenancy, PostgreSQL RLS,
 tenant-scoped administration, per-tenant keys/upstreams, and adversarial
 isolation tests exist.
+
+### Restore drill teardown
+
+A PITR drill leaves a sibling PostgreSQL service running in the customer's
+production project. The drill is not complete until that sibling is gone. An
+abandoned sibling keeps a second copy of the customer's database credentials
+and a live `WAL_RECOVER_FROM_*` recovery credential set inside the production
+project, and Railway will redeploy it on its own long after the drill ended.
+Tear it down in the same operator session that ran the drill.
+
+1. Verify the drill result before removing anything. The sibling must have
+   reached the intended recovery target and served the trust loop re-run from
+   qualification step 3. A sibling that never started — for example one whose
+   volume was never mounted at `/var/lib/postgresql/data` — is a failed drill,
+   not a passed one. Record the failure, delete it the same way, and re-run.
+2. Record the drill in the controlled operations record next to the customer
+   manifest, never in this checkout and never in the manifest itself: date,
+   source backup or recovery target, restore mode (PITR sibling or
+   volume-backup swap), verification result, and operator. Do not record
+   database URLs, passwords, recovery bucket credentials, connection strings,
+   or any row from the restored database.
+3. Confirm no customer data leaves with the operator. Close every session
+   against the sibling, and do not copy, dump, or export restored rows for
+   inspection outside it. Evidence that the drill passed is the trust-loop
+   result, not exported data.
+4. Confirm nothing depends on the sibling, then delete the service **and** its
+   volume in Railway. Check that no other service holds a reference variable
+   pointing at the sibling's private endpoint, then delete the service and
+   delete its volume explicitly. Railway does not remove a service's volume for
+   you, and a retained drill volume is an unmanaged copy of customer data.
+   Deleting the sibling does not remove backups: it holds only recovery-side
+   `WAL_RECOVER_FROM_*` settings, while the source keeps its own
+   `WAL_ARCHIVE_*` configuration and the backup repository is unchanged.
+5. Confirm the source PostgreSQL service is still online and archiving after
+   the teardown. Its own volume must still be mounted at
+   `/var/lib/postgresql/data`, its latest deployment must be healthy, and its
+   logs must show archive pushes completing with no failed or queued WAL. Treat
+   a stalled archive as a release-blocking failure, not drill cleanup noise.
+
+Never delete, rename, or reconfigure the source service as part of teardown.
+If the drill used the volume-backup mode instead, the source service is itself
+the restored service: there is no sibling to remove, and the teardown step is
+replaced by confirming the source's identity, schema revision, and archiving
+before the maintenance window closes.
 
 ### Dogfood is local-only
 
