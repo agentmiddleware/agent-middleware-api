@@ -1931,18 +1931,6 @@ html[data-a11y-motion="reduce"] body::before {
   border-color: var(--shadow-ink);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .button:hover,
-  .button:active {
-    transform: none;
-  }
-}
-
-html[data-a11y-motion="reduce"] .button:hover,
-html[data-a11y-motion="reduce"] .button:active {
-  transform: none;
-}
-
 /* ---- small chrome: kickers, badges, pills, seals -------------------------
    Everything short enough to carry the display face without costing
    legibility gets it, at the size a pixel face needs to stay on grid. */
@@ -2036,10 +2024,6 @@ a,
   box-shadow: 0 0 0 var(--shadow-ink);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .amw-a11y-toggle:active { transform: none; }
-}
-
 .amw-a11y-panel {
   border: var(--edge) solid var(--rule);
   box-shadow: var(--shadow-hard);
@@ -2068,8 +2052,48 @@ a,
   box-shadow: 0 0 0 var(--shadow-ink);
 }
 
+/* ---- reduced motion: every pressable travel, in one place ----------------
+   The cabinet's controls physically move on hover and press. That travel is
+   decoration, and it is exactly the kind a motion-sensitive visitor asks to
+   be spared.
+
+   Two mechanisms have to be honoured and neither substitutes for the other:
+   the OS-level `prefers-reduced-motion` query, and the `data-a11y-motion`
+   attribute the page's own accessibility widget sets for a visitor whose OS
+   is not configured. The global rules at the top of this file shorten every
+   transition to 0.01ms under both — but a shortened transition still lands
+   on the translated position. It removes the animation, not the movement.
+   Only `transform: none` removes the movement.
+
+   Listed together rather than beside each component so that adding a new
+   pressable control means adding one selector here, not remembering two
+   separate blocks in two separate places. .button-wave keeps its drop-shadow
+   swap: that is a colour change, not motion.
+
+   .button-primary:hover is listed even though it is also a .button, and so
+   would be pinned by the .button:hover entry winning on source order. An
+   accessibility guarantee should not rest on which rule happens to come last
+   in the file, so it is named outright. */
 @media (prefers-reduced-motion: reduce) {
-  .nav-links .nav-agent:active { transform: none; }
+  .button:hover,
+  .button:active,
+  .button-primary:hover,
+  .button-wave:hover,
+  .button-wave:active,
+  .nav-links .nav-agent:active,
+  .amw-a11y-toggle:active {
+    transform: none;
+  }
+}
+
+html[data-a11y-motion="reduce"] .button:hover,
+html[data-a11y-motion="reduce"] .button:active,
+html[data-a11y-motion="reduce"] .button-primary:hover,
+html[data-a11y-motion="reduce"] .button-wave:hover,
+html[data-a11y-motion="reduce"] .button-wave:active,
+html[data-a11y-motion="reduce"] .nav-links .nav-agent:active,
+html[data-a11y-motion="reduce"] .amw-a11y-toggle:active {
+  transform: none;
 }
 
 /* ==========================================================================

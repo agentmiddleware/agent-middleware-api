@@ -92,8 +92,17 @@
      data-pixel-width. No attribute, no cap. */
   var pixelWidth = Infinity;
   if (canvas && canvas.hasAttribute("data-pixel-width")) {
-    var declaredWidth = parseInt(canvas.getAttribute("data-pixel-width"), 10);
-    pixelWidth = declaredWidth > 0 ? declaredWidth : CONFIG.pixelWidth;
+    /* The whole attribute has to be a positive integer, not merely start with
+       one. parseInt would take "1.5" as 1 — a one-pixel-wide framebuffer, which
+       is a stranger failure than any fallback — and "320px" as 320, quietly
+       accepting a unit this attribute does not carry. Anything that is not a
+       run of digits falls back to the configured default rather than resizing
+       the field to whatever the string happened to begin with. */
+    var declaredWidth = canvas.getAttribute("data-pixel-width").trim();
+    pixelWidth =
+      /^[0-9]+$/.test(declaredWidth) && Number(declaredWidth) > 0
+        ? Number(declaredWidth)
+        : CONFIG.pixelWidth;
   }
   if (!canvas) return;
 
