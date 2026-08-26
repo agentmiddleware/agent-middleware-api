@@ -41,7 +41,7 @@ _LINE = "rgba(20, 18, 43, 0.17)"
 _BRASS_DARK = "#8a6414"
 _BUTTON_BRASS = "#ffc233"
 _BUTTON_INK = "#0d0b1f"
-_SIGNAL = "#b03a22"
+_SIGNAL = "#b0281a"
 # The display face is the mono stack, not the site's pixel face: mail clients
 # do not load webfonts, so "Press Start 2P" here would resolve to a fallback
 # on every client that matters and name a face the card never actually shows.

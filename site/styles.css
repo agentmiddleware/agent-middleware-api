@@ -1791,64 +1791,6 @@ html[data-a11y-motion="reduce"].arcade-open .site-footer {
   }
 }
 
-/* Print --------------------------------------------------------------------------------------- */
-
-@media print {
-  :root {
-    --ink: #ffffff;
-    --panel: #ffffff;
-    --rule: #999999;
-    --rule-soft: #bbbbbb;
-    --text: #000000;
-    --text-dim: #333333;
-    --brass: #000000;
-    --brass-bright: #000000;
-    --verify: #000000;
-    --paper: #ffffff;
-    --paper-shade: #dddddd;
-    --paper-ink: #000000;
-    --paper-dim: #333333;
-    /* Danger resolves to its paper value: #e2694f holds contrast only on
-       dark grounds, and print flattens every ground to white. */
-    --danger: #b03a22;
-  }
-
-  body {
-    background: #fff;
-    color: #000;
-  }
-
-  .site-nav,
-  .wave-canvas,
-  .wave-fallback,
-  .footer-arcade,
-  .amw-a11y-toggle,
-  .amw-a11y-panel {
-    display: none;
-  }
-
-  .hero {
-    background: #fff;
-    min-height: 0;
-  }
-
-  .hero::before,
-  .hero::after {
-    display: none;
-  }
-
-  .hero h1 {
-    text-shadow: none;
-  }
-
-  .pilot-card,
-  .proof-col {
-    border: 1px solid #999;
-    box-shadow: none;
-  }
-}
-
-
 /* ==========================================================================
    ARCADE CHROME
 
@@ -2128,4 +2070,92 @@ a,
 
 @media (prefers-reduced-motion: reduce) {
   .nav-links .nav-agent:active { transform: none; }
+}
+
+/* ==========================================================================
+   PRINT
+
+   Last in the file on purpose. ARCADE CHROME re-asserts the shape primitives
+   — borders, hard shadows, the CRT overlay — at the same specificity as the
+   components it is squaring off, so a print block placed above it would lose
+   every one of those declarations and the proof and receipt pages would print
+   with drop shadows and scanlines over them. Print is the final word, so it
+   goes last.
+   ========================================================================== */
+
+@media print {
+  :root {
+    --ink: #ffffff;
+    --panel: #ffffff;
+    --rule: #999999;
+    --rule-soft: #bbbbbb;
+    --text: #000000;
+    --text-dim: #333333;
+    --brass: #000000;
+    --brass-bright: #000000;
+    --verify: #000000;
+    --paper: #ffffff;
+    --paper-shade: #dddddd;
+    --paper-ink: #000000;
+    --paper-dim: #333333;
+    /* Danger resolves to its paper value: the dark-ground --danger holds
+       contrast only there, and print flattens every ground to white. */
+    --danger: #b0281a;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  .site-nav,
+  .wave-canvas,
+  .wave-fallback,
+  .footer-arcade,
+  .amw-a11y-toggle,
+  .amw-a11y-panel {
+    display: none;
+  }
+
+  .hero {
+    background: #fff;
+    min-height: 0;
+  }
+
+  .hero::before,
+  .hero::after {
+    display: none;
+  }
+
+  .hero h1 {
+    text-shadow: none;
+  }
+
+  /* The CRT layer is ink on paper, not atmosphere: scanlines and a corner
+     vignette over a printed receipt are a photocopier fault, not a texture. */
+  body::before {
+    display: none;
+  }
+
+  .pilot-card,
+  .proof-col {
+    border: 1px solid #999;
+    box-shadow: none;
+  }
+
+  /* Every hard shadow the cabinet stamps on. On paper an offset block of ink
+     behind a control is just a smudge, and it costs toner. */
+  .button,
+  .nav-links .nav-agent,
+  .receipt-seal,
+  .closing-cta,
+  .boundary-scroll,
+  .proof-col.replay,
+  .nav-brand::before {
+    box-shadow: none;
+  }
+
+  .button-wave {
+    filter: none;
+  }
 }
