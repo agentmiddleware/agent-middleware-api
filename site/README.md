@@ -103,7 +103,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-9`. When you
+query token**: every reference looks like `/styles.css?v=gateway-10`. When you
 change any of those files (including `/wave.js`, `/arcade.js`, and
 `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
@@ -190,13 +190,16 @@ Only `latin` and `latin-ext` are vendored, and each face keeps upstream's
 Libre Franklin and Public Sans are variable fonts: one file per subset serves
 every weight, which is why their filenames carry no weight.
 
-All four families are OFL 1.1, and `fonts/OFL.txt` carries the **full license
+All five families are OFL 1.1, and `fonts/OFL.txt` carries the **full license
 text**, not a link to it — plain text so the notice deploys alongside the fonts
 it covers. The bare-link shortcut the OFL FAQ tolerates applies to fonts
 embedded in a document or bundled inside a program; serving `/fonts/*.woff2` as
 standalone files is plain redistribution, so condition 2 applies in full. The
 copyright lines are verbatim from each family's upstream `OFL.txt` — including
-the Reserved Font Name on IBM Plex, which the other two do not reserve.
+the Reserved Font Names on IBM Plex and Press Start 2P, which the other three
+do not reserve. Adding a family to `FAMILIES` ships its woff2 files, so its
+notice has to land in `OFL.txt` in the same change: condition 2 is about the
+files actually served, not about the stylesheet that references them.
 
 Filenames carry a content hash, so `vercel.json` serves `/fonts/*.woff2`
 `immutable` for a year and a re-vendored font can never be served stale. The

@@ -63,12 +63,9 @@
     pointerStrength: 0.34, // world units of pointer swell
     staticTime: 7.3, // frozen phase for reduced-motion / ?t default
     dprCap: 2,
-    // Backing-store width, in device pixels, that the field is rendered at
-    // before CSS scales it up. 320 is a console-era framebuffer width, and it
-    // is what makes the wave read as part of the pixel system instead of as a
-    // photograph behind it: the upscale is done by the compositor with
-    // image-rendering:pixelated (see .wave-canvas in styles.css), so every
-    // rendered pixel lands on the grid as a hard square.
+    // Default backing-store width, in device pixels, for a page that opts into
+    // the low-resolution framebuffer (see pixelWidth below). 320 is a
+    // console-era framebuffer width.
     pixelWidth: 320,
     // Lattice sizes, densest first; the governor walks down this list.
     levels: [
@@ -83,6 +80,21 @@
 
   var canvas = document.getElementById("wave-canvas");
   var statsEl = document.getElementById("wave-stats");
+
+  /* Rendering the field into a narrow framebuffer and letting the compositor
+     upscale it is what makes the wave read as part of the pixel grid rather
+     than as a photograph behind it — but only on a page that also paints it
+     back with image-rendering:pixelated. This file is shared, and /concept/
+     has its own stylesheet and its own full-resolution treatment, where a
+     smoothly stretched 320px buffer would just be a blurred background.
+
+     So the cap is opt-in, declared by the page on the canvas itself:
+     data-pixel-width. No attribute, no cap. */
+  var pixelWidth = Infinity;
+  if (canvas && canvas.hasAttribute("data-pixel-width")) {
+    var declaredWidth = parseInt(canvas.getAttribute("data-pixel-width"), 10);
+    pixelWidth = declaredWidth > 0 ? declaredWidth : CONFIG.pixelWidth;
+  }
   if (!canvas) return;
 
   var params = new URLSearchParams(window.location.search);
@@ -551,7 +563,7 @@
     dpr = Math.min(
       window.devicePixelRatio || 1,
       CONFIG.dprCap,
-      CONFIG.pixelWidth / cssW
+      pixelWidth / cssW
     );
     var w = Math.max(1, Math.round(cssW * dpr));
     var h = Math.max(1, Math.round(cssH * dpr));
