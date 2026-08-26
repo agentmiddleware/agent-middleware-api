@@ -1,4 +1,4 @@
-# Wedge: Replay-safe MCP permits and receipts
+# Wedge: Replay-safe MCP permits and exactly-once debits
 
 Agent Middleware API should not initially sell itself as a full platform for
 autonomous economic actors. The credible wedge is narrower:
@@ -9,6 +9,15 @@ autonomous economic actors. The credible wedge is narrower:
 Or in one line:
 
 > Authorize one agent action. Charge it once. Prove what happened.
+
+**What "exactly-once" means here, precisely.** It is the distributed-systems
+term of art for the *deduplication* guarantee — no duplicate dispatch, no
+duplicate debit — not a promise that every accepted call results in a charge.
+Two paths produce no net debit at all: a crash before dispatch reconciles to a
+refund, and an out-of-scope or over-budget call is denied before money moves.
+The enforceable claim is **never a duplicate charge, not always a charge.**
+Every precise statement of the guarantee below says "at most one" for that
+reason. See [`docs/failure-semantics.md`](docs/failure-semantics.md).
 
 The core job is to put one enforceable **economic** boundary between autonomous
 agents and tools:
@@ -65,15 +74,45 @@ This does not change the wedge — it sharpens which half of it to lead with.
 The row no surveyed project is *documented* as occupying is the **economic**
 one:
 
-> One accepted idempotency key produces exactly one gateway dispatch, one
-> ledger debit, and one receipt, linked by a single persisted chain — and a
-> genuinely ambiguous post-dispatch outcome becomes a distinct receipted state
-> rather than a silent redispatch.
+> One accepted idempotency key produces **at most one** gateway dispatch **to
+> the configured upstream MCP tool** and **at most one** ledger debit, linked by
+> a single persisted chain, with a receipt on every path that finalizes or
+> reconciles — and, on that same upstream path, a genuinely ambiguous
+> post-dispatch outcome becomes a distinct receipted state rather than a silent
+> redispatch.
+
+Two qualifications that must travel with that sentence.
+
+**Scope it to the upstream path.** The dispatch state machine
+(`prepared → dispatched → {succeeded, returned_error, delivery_uncertain,
+response_rejected}`) covers the **configured upstream MCP tool**. Local governed
+tools have no attempt row and no ambiguous state; a crash there fails closed into
+manual review. Say "for the configured upstream tool" — `README.md` already does.
+
+**The signature adds the binding, not the evidence.** For the configured
+upstream tool, the receipt's Ed25519 signature covers the ledger entry, the
+idempotency record, and the dispatch attempt *together* (local governed tools
+have no dispatch-attempt row, so their receipts bind the first two only). That
+binding — not the fact of a signature — is the part no surveyed project
+documents.
 
 State that as scope, not as exclusivity: several projects enforce budgets and
 several dedupe replays, and whether any of them *binds* the two is an open
 verification question (`docs/market-research-2026-08.md` §7). Say "no project we
 surveyed documents this," never "nobody does."
+
+**Re-tested 2026-08-25** (`docs/market-research-2026-08.md` §9) and the row
+still holds — but the neighbourhood got more crowded, not less. Microsoft's
+`agent-governance-toolkit` now **ships** offline-verifiable receipts (Ed25519
+over RFC 8785 JCS, hash-chained), where §3 had recorded only a proposal;
+Pipelock ships mediator-signed receipts; and an independent survey
+(arXiv:2606.04193) compares the receipt protocols it names on receiver-side
+signing, encryption, transparency logs and discovery — and treats coupling to
+settlement as an open opportunity rather than a property any of them has. Useful
+receipt-layer context; it does not itself test the debit/idempotency binding.
+
+Treat signed offline receipts as fully commoditized from that date. This is a
+re-test on a date, not a permanent result.
 
 Lead with the debit. Cite the signature as supporting evidence, never as the
 differentiator, and never as a superlative — see **What Not To Claim Yet**.

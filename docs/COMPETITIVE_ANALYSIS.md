@@ -185,10 +185,14 @@ permit = {
 
 **No comparable system** offers per-invocation signed receipts with request/response hashes.
 
-> **Superseded (2026-08-15).** True against the incumbents compared above;
-> **false** against the MCP-native set — protect-mcp and jamjet both ship signed
-> per-call evidence. Left in place per this document's record-don't-rewrite
-> convention. Do not quote this sentence; see [§9](#9-mcp-native-competitive-set-added-2026-08-15).
+> **Superseded (2026-08-15; hardened 2026-08-25).** True against the incumbents
+> compared above; **false** against the MCP-native set — protect-mcp and jamjet
+> both ship signed per-call evidence, and as of the 2026-08-25 re-test so do
+> **Microsoft's `agent-governance-toolkit`** (Ed25519 over RFC 8785 JCS,
+> hash-chained) and **Pipelock**. Treat signed offline receipts as fully
+> commoditized. Left in place per this document's record-don't-rewrite
+> convention. Do not quote this sentence; see [§9](#9-mcp-native-competitive-set-added-2026-08-15)
+> and [`market-research-2026-08.md`](market-research-2026-08.md) §9.
 
 **Gap Analysis:**
 - Missing: receipt verification endpoint (consumer can verify signature offline)
@@ -391,7 +395,7 @@ Full analysis, with per-claim verification levels and market sizing:
 | [jamjet](https://github.com/jamjet-labs/jamjet) | Portable `policy.yaml` across adapters | Signed, hash-chained | ✅ caps | ✅ replay | Verified |
 | [latch](https://github.com/sangaraju1988/latch) | In-process Python library | ❌ none | ✅ guardrail | ✅ | Verified |
 | [TraceAgent](https://www.traceagent.dev/) | Audit layer for MCP calls | SHA-256 chained, compliance exports | ❌ | ❌ | Verified (vendor site) |
-| [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit) | Policy, identity, sandboxing | Proposed verifiable compliance receipts | — | — | Verified |
+| [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit) | Policy, identity, sandboxing | **Ships** offline-verifiable receipts (Ed25519 over RFC 8785 JCS, hash-chained) — updated 2026-08-25, was "proposed" | — | — | Verified |
 
 ### 9.2 What this does to §2.5 and §5.1
 
@@ -407,10 +411,11 @@ nothing else produces per-call cryptographic evidence.
 
 The moat that survives verification is narrower and sits one layer down:
 
-> One accepted idempotency key produces exactly one gateway dispatch, one
-> ledger debit, and one receipt, linked by a single persisted chain — and a
-> genuinely ambiguous post-dispatch outcome becomes a distinct receipted state
-> rather than a silent redispatch.
+> One accepted idempotency key produces **at most one** gateway dispatch and
+> **at most one** ledger debit, linked by a single persisted chain, with a
+> receipt on every path that finalizes or reconciles — and, **for the configured
+> upstream MCP tool**, a genuinely ambiguous post-dispatch outcome becomes a
+> distinct receipted state rather than a silent redispatch.
 
 No project in §9.1 is *documented* as binding a debit to an idempotency record
 — jamjet's budgets and replay are described as independent features and the
@@ -431,8 +436,9 @@ the debit, not with the signature — see [`../WEDGE.md`](../WEDGE.md).
    nothing binding a debit to an idempotency record, and its namespaced types
    plus commitment mode make emitting our receipts in its envelope
    structurally cheap. Detail: `market-research-2026-08.md` §8.1.)*
-2. **A large vendor is in the category.** `agent-governance-toolkit` has an open
-   proposal for independently verifiable compliance receipts.
+2. **A large vendor is in the category.** `agent-governance-toolkit` **ships**
+   offline-verifiable receipts as of 2026-08-25 (was an open proposal for
+   independently verifiable compliance receipts).
 3. **The build-vs-buy default is a free library.** latch is MIT and
    `pip install`-shaped. The counter-argument — an in-process decorator is not
    a boundary the agent cannot bypass, and a cache is not evidence — has to be

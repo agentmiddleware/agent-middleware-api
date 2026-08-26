@@ -96,10 +96,12 @@ competitive reality. The nearer competitors are MCP-native and recent.
 | [jamjet-labs/jamjet](https://github.com/jamjet-labs/jamjet) | Open-source safety layer: one `policy.yaml` across hooks, guardrails, MCP gateways, and SDKs; blocks unsafe calls, requires approval, enforces budgets, audits, replays. Signed receipts with a hash-chained `previousReceiptHash` and pre/post-execution signatures. | Policy portability + HITL approval + budget enforcement + chained signed receipts. Broader surface, many framework adapters. | **Verified** |
 | [sangaraju1988/latch](https://github.com/sangaraju1988/latch) | MIT Python **library** (decorators/wrappers, not a proxy): idempotency, circuit breaker, timeout, budget guardrail, saga/compensation. Redis backend for cross-process idempotency; OpenAI and LangChain adapters. | Idempotency + budget caps, in-process. **No signed receipts.** | **Verified** |
 | [TraceAgent](https://www.traceagent.dev/) | Append-only audit receipts with SHA-256 hash chains, authority trails linking actions to approving humans, one-click compliance exports mapped to EU AI Act / Colorado AI Act / ISO 42001. Zero-config for MCP tool calls. | Audit and compliance evidence. No metering or charge-once semantics. | **Verified** (from vendor site) that receipts are hash-chained. **Not verified**: whether they carry an issuer signature or can be verified offline without the vendor — a hash chain alone is neither. Do not classify TraceAgent as offline-verifiable without a primary source. |
-| [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit) | Policy enforcement, zero-trust identity, sandboxing, reliability engineering; an active proposal for independently verifiable compliance receipts. | A large vendor moving into verifiable receipts. Strategic risk more than a current competitor. | **Verified** |
+| [microsoft/agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit) | Policy enforcement, zero-trust identity, sandboxing, reliability engineering; ~~an active proposal for~~ **shipped** independently verifiable compliance receipts. | ~~A large vendor moving into verifiable receipts. Strategic risk more than a current competitor.~~ **SUPERSEDED 2026-08-25 — see [§9.1](#91-correction--microsoft-has-shipped-not-proposed). Ed25519 over RFC 8785 JCS, hash-chained, shipped and documented. No longer a future risk; the evidence layer has commoditized. Carries no ledger, spend, or idempotency construct.** | **Verified** (shipped state re-verified 2026-08-25) |
 | Tork Governance MCP Server | PII detection, policy enforcement, compliance receipts, kill switch, HITL. | Security-focused governance. | Unverified |
 | SecureAuth Agent Authority | Enterprise IAM for agents: OAuth 2.1, CIBA HITL, anomaly detection, revocation. | Identity, upstream of this product. Not a competitor. | Unverified |
 | AGA MCP Server, AgentMesh, Agent Receipts, MCPTotal, Pomerium, SGNL | Assorted MCP security gateways and receipt tools named in adoption guides. | Category noise; individually unassessed. | Unverified |
+| [Pipelock / PipeLab](https://github.com/luckyPipewrench/pipelock) | Open-source agent firewall; mediator-signed Ed25519 action receipts, hash-chained, offline-verifiable. | Boundary + offline receipts. Security/egress, **not economic**. Added 2026-08-25 — see [§9.2](#92-two-competitors-to-add-to-the-3-set). | **Verified** |
+| Signet | Bilateral co-signed action receipts; encryption key not separated from signing identity; no transparency log. | Receipt issuance/verification. Added 2026-08-25 — see [§9.2](#92-two-competitors-to-add-to-the-3-set). | **Single-source** — not in customer-facing copy |
 
 ---
 
@@ -120,16 +122,17 @@ What survives is narrower and, usefully, matches
 | Offline-verifiable signed receipts | ✅ | ✅ | ✅ | ❌ | ⚠️ hash-chained; issuer signature and offline key distribution **not verified** |
 | Hash-chained audit | ✅ (per-wallet) | ❌ | ✅ | ❌ | ✅ |
 | Budget enforcement | ✅ (wallet ledger) | ❌ | ✅ (caps) | ✅ (guardrail) | ❌ |
-| Idempotency / no duplicate execution | ✅ | ❌ | ✅ (replay) | ✅ | ❌ |
+| Idempotency / no duplicate **gateway dispatch** (effects inside an arbitrary upstream tool are *not* guaranteed — that needs the tool to honour the forwarded key) | ✅ | ❌ | ✅ (replay) | ✅ | ❌ |
 | **Debit bound to the idempotency record** | ✅ | ❌ | ❓ **not verified** — budgets and replay are documented as separate features, with no stated binding | ❌ | ❌ |
-| **Ambiguous post-dispatch outcome is a distinct, receipted state** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Ambiguous post-dispatch outcome is a distinct, receipted state** (configured upstream MCP tool only; a local-tool crash resolves to `needs_manual_review` with no receipt) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Human-in-the-loop approval | ✅ (permit requests) | ❌ | ✅ | ❌ | ✅ (authority trail) |
 | Compliance framework mapping | ❌ (deliberate) | ❌ | ❌ | ❌ | ✅ |
 
 Read down the bolded rows. Several projects have receipts; several have
-budgets; several have idempotency. The cell **no surveyed project is documented
-as occupying** is that *one accepted idempotency key produces exactly one ledger
-debit and one receipt, and the record linking them is a single persisted chain*
+budgets; several have idempotency. The cell **no other surveyed project is
+documented as occupying** (this system occupies it, which is the point) is that *one accepted idempotency key produces at most one ledger
+debit, with a receipt on every path that finalizes or reconciles, and the record
+linking them is a single persisted chain*
 — plus the refusal to silently redispatch when the outcome is genuinely unknown
 (`delivery_uncertain`, per `ELEVATOR_PITCH.md`).
 
@@ -181,9 +184,14 @@ Recorded rather than silently edited, matching the convention at the top of
    for its receipt format. A draft standard for receipts is the more serious
    threat: if the receipt format standardizes elsewhere, receipts become table
    stakes and only the ledger semantics differentiate.
-2. **Microsoft is in the category.** `agent-governance-toolkit` has an open
-   proposal for independently verifiable compliance receipts. Assume the
-   evidence layer commoditizes.
+2. **Microsoft is in the category.** `agent-governance-toolkit` **ships**
+   offline-verifiable decision receipts — Ed25519 over RFC 8785 JCS,
+   hash-chained (§9.1, re-tested 2026-08-25). *As first written this row said it
+   "has an open proposal for independently verifiable compliance receipts," and
+   the risk was stated as "assume the evidence layer commoditizes." It did, and
+   faster than this risk assumed; the proposal wording is kept here only as the
+   dated record of what was true in §3.* The forward-looking half of the risk is
+   spent: treat the evidence layer as commoditized rather than commoditizing.
 3. **latch wins the default build-vs-buy.** Free, MIT, `pip install`, no
    operational surface. The honest answer is that a library the agent can
    bypass is not a boundary, and an in-process cache is not evidence — but that
@@ -241,6 +249,26 @@ built from §3 and §4.
    [`partner-interview-script.md`](partner-interview-script.md), with a
    pre-committed decision rule so five interviews produce a verdict rather
    than an argument.
+7. **What is AFTA?** Reported 2026-08-25 as the closest *economic* competitor —
+   "no-charge guarantees on paid calls," but no permits, wallets, or crash
+   semantics. Two searches, including on that specific claim, found nothing.
+   It was described as occupying the exact cell [§4](#4-where-this-product-actually-sits)
+   claims, so this is the highest-value open question in this document: it can
+   neither be assessed nor dismissed without a primary source. See
+   [§9.5](#95-reported-but-not-found).
+8. Do **AgentLedger** and **NotaryOS** exist under those names? Reported in the
+   same sweep; not found. See [§9.5](#95-reported-but-not-found).
+9. Does any **agent payment network** — Skyfire, Nevermined, Payman — bind a
+   charge to an idempotency record, or define behaviour for an ambiguous
+   post-dispatch outcome? None was assessed on this, because §3 scoped the
+   survey to MCP governance products. If one does, it is a closer competitor to
+   the [§4](#4-where-this-product-actually-sits) rows than any gateway surveyed
+   here. See [§9.6](#96-a-gap-this-section-does-not-cover-agent-payment-networks).
+10. Now that the largest vendor in the category ships offline-verifiable receipts
+   ([§9.1](#91-correction--microsoft-has-shipped-not-proposed)), does the
+   *self-issued* nature of our own signature become the objection rather than the
+   asset? Pipelock's signer taxonomy — in-process / operator-mediator /
+   third-party witness — names the tier we occupy and the one above it.
 
 ---
 
@@ -332,3 +360,179 @@ thread's author fixed it with idempotency keys and moved on.
 *Compiled 2026-08-15; second pass appended the same day. Sources verified as
 marked; unverified rows are labeled and must not be promoted into
 customer-facing copy without a check.*
+
+---
+
+## 9. Third-Pass Findings (2026-08-25)
+
+A third pass, prompted by a competitive sweep reporting that the receipt layer
+had commoditized further. The direction of that report is correct and is already
+the position in [`../WEDGE.md`](../WEDGE.md) §"Signed receipts are table stakes
+now". What follows is the delta: one **correction to §3**, two new competitors,
+and a dated re-test of the §4 differentiating rows.
+
+### 9.1 Correction — Microsoft has shipped, not proposed
+
+`§3` describes `microsoft/agent-governance-toolkit` as carrying "an active
+proposal for independently verifiable compliance receipts." **That row is now
+stale.** The toolkit ships offline-verifiable decision receipts:
+
+- **Ed25519 signatures over RFC 8785 (JCS) canonical payloads** — the same
+  signature algorithm this repo uses. The canonicalization is *related but not
+  identical*: this repo's `awi-canonical-json/1` deliberately differs from JCS on
+  decimal normalization and datetime coercion (see `ip/06-ids-candidates.md`
+  item 7). Do not describe the signing inputs as interchangeable. Both rules are
+  pinned by fixtures in
+  [`tests/test_canonical_json_fixtures.py`](../tests/test_canonical_json_fixtures.py)
+  — RFC 8785 defines neither Python type, so a `Decimal` canonicalizes to a
+  quoted fixed-point string where the same value as a float stays a bare JSON
+  number. That is the divergence, and it is now testable rather than asserted.
+- **Hash-chained** via `previousReceiptHash`, for insertion/deletion detection.
+- Verified without access to operator infrastructure. A `covenantHash` binds the
+  receipt to the policy in force — note this field is defined in the toolkit's
+  [verifiable-compliance-receipts proposal](https://github.com/microsoft/agent-governance-toolkit/blob/86d98387d81db10082652df848741c3fc99a2a55/docs/proposals/verifiable-compliance-receipts.md),
+  not in Tutorial 33; cite the proposal for it.
+- Documented in [Tutorial 33](https://github.com/microsoft/agent-governance-toolkit/blob/86d98387d81db10082652df848741c3fc99a2a55/docs/tutorials/33-offline-verifiable-receipts.md),
+  tracked in [issue #1499](https://github.com/microsoft/agent-governance-toolkit/issues/1499).
+
+**Verification: Verified** — tutorial read directly, 2026-08-25.
+
+**Both links are pinned to commit `86d9838`**, the revision current when this row
+was written and the last to touch either file. A buyer-facing verification record
+has to be reproducible, and a `blob/main` link stops matching what was read the
+moment that branch moves. Re-pin, do not un-pin, if these are re-read later.
+
+`§6` risk 2 said "assume the evidence layer commoditizes." It has, faster than
+that risk assumed, and the party that did it is the largest vendor in the
+category. Treat signed offline receipts as fully commoditized from this date.
+
+**What it does not do.** The receipts bind *policy decisions* — allow/forbid
+under Cedar, chained for integrity. There is no ledger entry, no debit or spend
+amount, and no idempotency construct in the receipt. This matters for §9.3.
+
+### 9.2 Two competitors to add to the §3 set
+
+| Project | What it is | Nearest overlap | Verification |
+|---|---|---|---|
+| [Pipelock / PipeLab](https://github.com/luckyPipewrench/pipelock) | Open-source agent firewall for MCP security and agent egress. Scans mediated HTTP, MCP, A2A and WebSocket traffic for exfiltration, SSRF and prompt injection, and emits **mediator-signed** Ed25519 action receipts, hash-chained and offline-verifiable. Notably explicit about signer position: it distinguishes in-process signing (weakest), operator-deployed mediator signing (its shipping mode), and third-party witness signing (roadmap). | Boundary + offline-verifiable signed receipts, like protect-mcp. Security/egress centre of gravity, **not economic** — no wallet, budget, debit, or charge-once semantics. | **Verified** — repository read |
+| Signet | Bilateral co-signing of agent action receipts. Encryption key is not separated from the signing identity; no transparency-log integration; trust bundle is a hand-edited JSON file. | Receipt issuance and verification. No economic binding described. | **Single-source** — known only through the related-work table of the Sello paper (§9.4); no primary source read. Do not put in customer-facing copy. |
+
+**Pipelock's signer taxonomy is worth borrowing, and it cuts against us.** By its
+classification, this repo's receipts are *operator-deployed* signing — the
+gateway signs its own evidence. That is the same tier Pipelock ships and a tier
+below third-party witness signing. `site/llms.txt` already labels the published
+proof "self-issued"; the taxonomy gives that honesty a name, and it is the right
+answer to a buyer asking why they should trust our signature.
+
+### 9.3 Dated re-test of the §4 differentiating rows
+
+Re-tested against Microsoft (shipped), Pipelock, Signet, and the protocols
+surveyed in §9.4. **Both bolded §4 rows still hold as of 2026-08-25:**
+
+- **Debit bound to the idempotency record** — no system we reviewed *documents*
+  binding a debit to an idempotency record. Microsoft's receipts carry no spend
+  or ledger construct at all (§9.1); Pipelock is an egress firewall with no
+  ledger. **`jamjet` remains unresolved** (§7 question 3): it enforces budgets
+  and replays runs, and whether it binds the two is still an open question, so
+  this row is a scope statement rather than a negative result.
+  *Receipt-layer context only:* Sello's survey names payment coupling as future
+  work and "unimplemented" (its §8.4). That is receipt-to-settlement, a
+  different property from debit-to-idempotency — supporting context, not
+  evidence for this row.
+- **Ambiguous post-dispatch outcome is a distinct, receipted state** — untouched
+  by any of the new entrants.
+
+This is a **re-test on a date, not a permanent result**, and the standing
+discipline is unchanged: say "no project we surveyed documents this," never
+"nobody does." §7 question 3 (does `jamjet` bind budget enforcement to its replay
+records?) remains **open**, and it is still the single question that would settle
+the first row. Until it is answered, the row is a scope statement.
+
+### 9.4 A survey paper that maps the category
+
+[*Notarized Agents: Receiver-Attested Confidential Receipts for AI Agent
+Actions*](https://arxiv.org/html/2606.04193) ("Sello") proposes receiver-side
+signing — the service that receives an agent call signs what it observed, on the
+premise that "the actor is not a reliable narrator of its own actions" — with
+COSE_Sign1 over an HPKE-encrypted payload and public transparency logs.
+
+Its value here is less the proposal than its **related-work table**, which
+enumerates the receipt protocols named below and is the most complete map of
+this category
+found to date: Signet, Pipelock, Agent Passport System, `draft-farley-acta`
+(already tracked at §8.1), `draft-nivalto-agentroa`, Agent Receipts, and
+Attested Intelligence.
+
+Two consequences. First, the receipt category is materially larger than §3
+records — this doubles the known set. Second, and more useful: **an independent
+survey found none of the protocols it names binding receipts to settlement.** Sello's
+own claimed novelty is receiver-side signing plus transparency logs, not
+economics. That is useful independent context on the *receipt* layer — it is not
+evidence for the §4 debit/idempotency rows, which it does not test. Read it as a
+map of the category, not as support for our own
+sweep could produce.
+
+**Verification: Verified** — paper read directly, 2026-08-25. Note it is a
+preprint, not peer-reviewed; cite it as a survey, not as authority.
+
+### 9.5 Reported but not found
+
+Three names were reported in the same sweep and **could not be located** in any
+primary or secondary source. They are recorded in §7 as open questions rather
+than as §3 rows, per the provenance discipline at the top of this document:
+
+- **AFTA** — reported as the closest *economic* player, with "no-charge
+  guarantees on paid calls." Searched twice, including on that specific claim.
+  Nothing matching was found. This is the most consequential of the three: it was
+  described as occupying the exact cell §4 claims, so it can neither be assessed
+  nor dismissed without a pointer.
+- **AgentLedger** — not found.
+- **NotaryOS** — not found. (Note the Sello survey does name an "Agent Receipts"
+  project and an "Attested Intelligence"; neither matches this description.)
+
+### 9.6 A gap this section does not cover: agent payment networks
+
+Every project in §3 was selected as an *MCP governance* competitor. That framing
+has a blind spot, and chasing the §9.5 names surfaced it.
+
+[**Skyfire Systems, Inc.**](https://www.crunchbase.com/organization/skyfire-systems)
+runs a payment network for AI agents: programmable wallets, verified agent
+identity ("KYA"), the KYAPay protocol, and partnerships with F5 and Visa. It is
+not an MCP gateway and does not compete on permits or receipts — but wallets and
+agent spend are the *economic* half this document now leads with, and §3 does not
+track it. Nevermined and Payman occupy adjacent ground;
+[`settlement-rails.md`](settlement-rails.md) treats them as settlement rails to
+integrate rather than as competitors, which may still be right.
+
+**Verification: Verified** that the company and product exist — primary
+announcements read 2026-08-25:
+[launch, 2024-08-21](https://www.businesswire.com/news/home/20240821247203/en/Introducing-Skyfire-Payment-Rails-for-AI);
+[enterprise GA, 2025-03-06](https://www.businesswire.com/news/home/20250306938250/en/Skyfire-Exits-Beta-with-Enterprise-Ready-Payment-Network-for-AI-Agents);
+[KYAPay, 2025-06-26](https://www.businesswire.com/news/home/20250626772489/en/Skyfire-Launches-Open-KYAPay-Protocol-With-Agent-Checkout);
+[Visa demo, 2025-12-18](https://www.businesswire.com/news/home/20251218520399/en/Skyfire-Demonstrates-Secure-Agentic-Commerce-Purchase-Using-the-KYAPay-Protocol-and-Visa-Intelligent-Commerce).
+**Open, not concluded:** no assignee search has been run, so "no published
+filings" is *not searched*, not *not found*. **Not assessed:** whether any of
+these binds spend to an idempotency record or defines crash semantics — the
+question §4 actually turns on.
+
+Two reasons this belongs on the record rather than in a table row yet. First, it
+is genuinely a different category — payment rails, not a governance boundary —
+and forcing it into the §4 matrix would compare unlike things. Second, an
+acquisition-draft citation purporting to describe a Skyfire patent turned out to
+be fabricated (see [`ip/06-ids-candidates.md`](ip/06-ids-candidates.md) §C.1b),
+which had created a false impression that this lane was already assessed. It was
+not.
+
+**Open question, added to §7:** does any agent payment network — Skyfire,
+Nevermined, Payman — bind a charge to an idempotency record or define behaviour
+for an ambiguous post-dispatch outcome? If one does, it is a closer competitor to
+the §4 rows than any MCP gateway surveyed here.
+
+Absence of a search hit is not evidence of absence. These stay open until someone
+produces a source.
+
+---
+
+*Third pass compiled 2026-08-25. Sources verified as marked. §9.5 items are
+unverified reports and must not be promoted into customer-facing copy or into
+the competitive set without a primary source.*

@@ -135,16 +135,49 @@ live demo flow below when walking a partner through the product story.
 
 ## Talk Track
 
-- "The permit is the bounded authority: wallet, tool, scope, budget, expiry,
-  nonce, and signature."
-- "The MCP invocation is not just authenticated. It is checked against the
-  permit before the tool is allowed to run."
-- "A successful governed invoke charges the wallet once, emits a signed receipt,
-  and ties that receipt back to the ledger entry and audit event."
-- "Replaying the same request returns the same receipt instead of charging
-  again."
-- "Trying a different tool with the same permit is denied, which is the core
-  governance behavior partners need to see."
+Lead with the debit. Signed receipts ship in several competing products now, so
+a track that opens on the signature opens on the least differentiated thing in
+the demo. See [`WEDGE.md`](WEDGE.md) §"Signed receipts are table stakes now".
+
+- "One agent action, at most one debit — no matter how many times the agent
+  retries under the same accepted idempotency key. That is the whole product in one
+  sentence." (A retry that mints a *new* key is a new operation, evaluated under
+  its own permit, budget and crash outcome — it may be charged, denied, or
+  refunded like any other. The key is the unit of deduplication, not a promise
+  of a charge.)
+- "Watch the wallet. This call charges it exactly once, and the ledger entry is
+  keyed to the idempotency record, so a duplicate debit cannot be written even
+  under a race."
+- "Now I replay the identical request under the same key. Same receipt, no second
+  dispatch, no second debit — and the balance has not moved."
+- "The permit is the bounded authority that made the charge legitimate in the
+  first place: wallet, tool, scope, budget, expiry, nonce, and signature. It is
+  checked before the tool is allowed to run, not after."
+- "Trying a different tool with the same permit is denied, and the denial is
+  itself signed and moves no money."
+- "The receipt's signature covers the ledger entry and the idempotency record
+  together — and, **when the call goes to the configured upstream MCP tool**,
+  the dispatch attempt as well. Plenty of tools sign receipts; that binding
+  is what lets you check the relationship between authority, money and outcome
+  instead of taking three separate assertions on trust — and you can check the
+  signature offline, without us. What actually *prevents* the second charge is
+  one layer down: the ledger's `operation_key` uniqueness constraint and the
+  idempotency replay path. The signature is evidence, not enforcement."
+- **Do not overstate the local proof.** `trust-plane-echo` is the *local*
+  reference tool, so the receipt this demo produces has no `dispatch_attempt_id`
+  and binds two identifiers, not three. Demonstrate the three-way binding only
+  when running the partner's configured upstream tool. Claiming it off the local
+  proof is the exact overclaim a partner engineer will check first.
+- If asked about a crash on **this local demo tool**: "An incomplete idempotency
+  record stays in progress — the replay you just saw only returns a receipt once
+  the record is terminal. If a crash could have landed the side effect, the
+  record goes to operator review and is deliberately never retried. We would
+  rather block one call than fire it twice."
+- If asked about crashes **on the configured upstream tool**: "If we die after the
+  request leaves the gateway but before the acknowledgement arrives, that becomes
+  a durable `delivery_uncertain` state. The charge stands and we never redispatch,
+  because we can no longer prove the call did not land. We would rather be
+  honestly ambiguous than silently double-fire."
 
 ## Proof Artifacts
 
