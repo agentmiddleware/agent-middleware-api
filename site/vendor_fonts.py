@@ -47,6 +47,7 @@ USER_AGENT = (
 # Must stay in step with the font stacks in styles.css. Declaration order is the
 # order faces appear in the generated stylesheet.
 FAMILIES = {
+    "Press Start 2P": (400,),
     "IBM Plex Mono": (400, 500, 600),
     "Public Sans": (400, 500, 600),
     "Libre Franklin": (700, 800),
@@ -59,6 +60,7 @@ ALLOWED_FONT_HOSTS = frozenset({"fonts.gstatic.com"})
 #: Faces rendered in the first viewport of every page. ``latin`` only:
 #: latin-ext exists for characters most pages never show.
 PRELOAD = (
+    ("Press Start 2P", 400, "latin"),
     ("Libre Franklin", 800, "latin"),
     ("Instrument Serif", 400, "latin"),
     ("Public Sans", 400, "latin"),

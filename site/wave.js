@@ -63,6 +63,10 @@
     pointerStrength: 0.34, // world units of pointer swell
     staticTime: 7.3, // frozen phase for reduced-motion / ?t default
     dprCap: 2,
+    // Default backing-store width, in device pixels, for a page that opts into
+    // the low-resolution framebuffer (see pixelWidth below). 320 is a
+    // console-era framebuffer width.
+    pixelWidth: 320,
     // Lattice sizes, densest first; the governor walks down this list.
     levels: [
       [896, 640],
@@ -76,6 +80,30 @@
 
   var canvas = document.getElementById("wave-canvas");
   var statsEl = document.getElementById("wave-stats");
+
+  /* Rendering the field into a narrow framebuffer and letting the compositor
+     upscale it is what makes the wave read as part of the pixel grid rather
+     than as a photograph behind it — but only on a page that also paints it
+     back with image-rendering:pixelated. This file is shared, and /concept/
+     has its own stylesheet and its own full-resolution treatment, where a
+     smoothly stretched 320px buffer would just be a blurred background.
+
+     So the cap is opt-in, declared by the page on the canvas itself:
+     data-pixel-width. No attribute, no cap. */
+  var pixelWidth = Infinity;
+  if (canvas && canvas.hasAttribute("data-pixel-width")) {
+    /* The whole attribute has to be a positive integer, not merely start with
+       one. parseInt would take "1.5" as 1 — a one-pixel-wide framebuffer, which
+       is a stranger failure than any fallback — and "320px" as 320, quietly
+       accepting a unit this attribute does not carry. Anything that is not a
+       run of digits falls back to the configured default rather than resizing
+       the field to whatever the string happened to begin with. */
+    var declaredWidth = canvas.getAttribute("data-pixel-width").trim();
+    pixelWidth =
+      /^[0-9]+$/.test(declaredWidth) && Number(declaredWidth) > 0
+        ? Number(declaredWidth)
+        : CONFIG.pixelWidth;
+  }
   if (!canvas) return;
 
   var params = new URLSearchParams(window.location.search);
@@ -536,9 +564,18 @@
   var needResize = true;
 
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, CONFIG.dprCap);
-    var w = Math.max(1, Math.round(canvas.clientWidth * dpr));
-    var h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    var cssW = Math.max(1, canvas.clientWidth);
+    var cssH = Math.max(1, canvas.clientHeight);
+    // One scale for both axes, so the upscaled pixels stay square. Capping by
+    // width rather than by area keeps the pixel size stable as the viewport
+    // gets taller, which is what a fixed full-page layer does on scroll.
+    dpr = Math.min(
+      window.devicePixelRatio || 1,
+      CONFIG.dprCap,
+      pixelWidth / cssW
+    );
+    var w = Math.max(1, Math.round(cssW * dpr));
+    var h = Math.max(1, Math.round(cssH * dpr));
     if (w === viewW && h === viewH && !needResize) return;
     viewW = canvas.width = w;
     viewH = canvas.height = h;
@@ -668,7 +705,7 @@
     ember: { amp: 0.6, order: 0.25, flow: 0.1, crystal: 0.0, bright: 0.42, warmth: 0.35, ground: 1.0 },
   };
   var PRESET_KEYS = ["amp", "order", "flow", "crystal", "bright", "warmth", "ground"];
-  var GROUND_INK = [11 / 255, 17 / 255, 32 / 255]; // --ink #0b1120
+  var GROUND_INK = [13 / 255, 11 / 255, 31 / 255]; // --ink #0d0b1f
 
   var sections = []; // { center, preset } in document coordinates
   var pageHeight = 0;

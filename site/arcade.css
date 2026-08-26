@@ -26,8 +26,8 @@
   padding: clamp(0.75rem, 3vw, 2rem);
   overflow-y: auto;
   background:
-    radial-gradient(120% 90% at 50% 0%, rgba(216, 160, 62, 0.09), transparent 60%),
-    #05070d;
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 194, 51, 0.09), transparent 60%),
+    #05040f;
   color: var(--text);
   font-family: var(--font-mono);
 }
@@ -164,7 +164,7 @@
   text-align: left;
   padding: 0.9rem;
   min-height: 96px;
-  background: linear-gradient(180deg, rgba(216, 160, 62, 0.07), transparent 70%);
+  background: linear-gradient(180deg, rgba(255, 194, 51, 0.07), transparent 70%);
   border: 1px solid var(--rule);
   color: var(--text);
   font-family: var(--font-mono);
@@ -224,7 +224,7 @@
   margin: 0 auto;
   aspect-ratio: 4 / 3;
   border: 1px solid var(--rule);
-  background: #05070d;
+  background: #05040f;
   /* The field is authored at 320x240 and scaled by whole numbers; smoothing
      would turn deliberate blocks into mush. */
   image-rendering: pixelated;

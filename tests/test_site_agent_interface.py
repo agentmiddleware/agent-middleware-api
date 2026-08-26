@@ -443,7 +443,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-9"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-10"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -453,7 +453,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-9"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-10"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -2104,3 +2104,133 @@ def test_arcade_modal_contains_focus_and_input() -> None:
         "the frame loop reschedules without checking whether something else "
         "already did, which double-schedules requestAnimationFrame"
     )
+
+
+def test_pressable_chrome_holds_still_under_reduced_motion() -> None:
+    """Every cabinet control that travels must be pinned for reduced motion.
+
+    The arcade chrome makes buttons and the accessibility toggle physically
+    depress on hover and press. That travel is decoration, and it is the kind
+    a motion-sensitive visitor asks to be spared.
+
+    Two mechanisms have to be honoured and neither substitutes for the other:
+    the OS-level ``prefers-reduced-motion`` query, and the ``data-a11y-motion``
+    attribute the page's own widget sets for a visitor whose OS is not
+    configured. The global rules shorten every transition to 0.01ms under both,
+    but a shortened transition still lands on the translated position: it
+    removes the animation, not the movement. Only ``transform: none`` does
+    that, so this asserts the transform override for every travelling selector
+    under both mechanisms.
+    """
+
+    stylesheet = (SITE / "styles.css").read_text(encoding="utf-8")
+
+    travelling = {
+        ".button:hover",
+        ".button:active",
+        ".button-primary:hover",
+        ".button-wave:hover",
+        ".button-wave:active",
+        ".nav-links .nav-agent:active",
+        ".amw-a11y-toggle:active",
+    }
+
+    # Anything that translates on hover or press has to appear in both blocks.
+    # Pull the selector lists rather than scanning the file, so a rule that
+    # merely mentions the selector elsewhere cannot satisfy this.
+    media_block = re.search(
+        r"@media \(prefers-reduced-motion: reduce\) \{\s*"
+        r"((?:[^{}]*?,\s*)*[^{}]*?)\{\s*transform: none;",
+        stylesheet,
+    )
+    assert media_block, (
+        "styles.css has no prefers-reduced-motion rule zeroing transforms"
+    )
+    media_selectors = {s.strip() for s in media_block.group(1).split(",")}
+
+    attribute_block = re.search(
+        r"((?:html\[data-a11y-motion=\"reduce\"\][^{},]*,\s*)*"
+        r"html\[data-a11y-motion=\"reduce\"\][^{},]*)\{\s*transform: none;",
+        stylesheet,
+    )
+    assert attribute_block, (
+        "styles.css has no data-a11y-motion rule zeroing transforms"
+    )
+    attribute_selectors = {
+        s.strip().replace('html[data-a11y-motion="reduce"] ', "")
+        for s in attribute_block.group(1).split(",")
+    }
+
+    for selector in travelling:
+        assert selector in media_selectors, (
+            f"{selector} still travels under prefers-reduced-motion"
+        )
+        assert selector in attribute_selectors, (
+            f'{selector} still travels under html[data-a11y-motion="reduce"]'
+        )
+
+    # And nothing may reintroduce a translate without joining those blocks:
+    # every selector that transforms on hover/press is accounted for above.
+    translating = set(
+        re.findall(
+            r"^(\.[^\n{]*?:(?:hover|active))\s*\{[^}]*?transform: translate",
+            stylesheet,
+            re.MULTILINE | re.DOTALL,
+        )
+    )
+    unpinned = {s.strip() for s in translating} - travelling
+    assert not unpinned, (
+        "these travel on hover/press but are not pinned for reduced motion: "
+        f"{sorted(unpinned)}"
+    )
+
+
+def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
+    """``data-pixel-width`` must be a whole positive integer or fall back.
+
+    The attribute sets the wave's backing-store width. ``parseInt`` would read
+    "1.5" as 1 — a one-pixel-wide framebuffer, a stranger failure than any
+    fallback — and "320px" as 320, quietly accepting a unit the attribute does
+    not carry. The renderer validates the complete string instead, so this
+    pins that: a digit run is honoured, everything else uses the default.
+    """
+
+    wave_js = (SITE / "wave.js").read_text(encoding="utf-8")
+
+    # The guard is a whole-string digit match, not a prefix parse.
+    assert "parseInt(canvas.getAttribute" not in wave_js, (
+        "data-pixel-width is being prefix-parsed again; a decimal would "
+        "silently become a 1px framebuffer"
+    )
+    assert re.search(r"/\^\[0-9\]\+\$/\.test\(declaredWidth\)", wave_js), (
+        "wave.js no longer validates data-pixel-width as a whole integer"
+    )
+
+    # The opt-in default the guard falls back to still exists.
+    assert re.search(r"pixelWidth: \d+,", wave_js)
+
+    # Only pages that pair the cap with pixelated upscaling may opt in:
+    # /concept/ keeps its own stylesheet and its full-resolution field.
+    landing = (SITE / "index.html").read_text(encoding="utf-8")
+    concept = (SITE / "concept" / "index.html").read_text(encoding="utf-8")
+    declared = re.search(r'data-pixel-width="([^"]*)"', landing)
+    assert declared, "landing page no longer opts into the pixel framebuffer"
+    # ASCII digits only, mirroring the renderer's /^[0-9]+$/ exactly. Python's
+    # str.isdigit() is broader — it accepts Arabic-Indic "\u0663\u0662\u0660" and
+    # superscript "\u00b3\u00b2\u2070" — so using it here would let this test pass on
+    # markup the renderer would reject and silently fall back on.
+    assert re.fullmatch(r"[0-9]+", declared.group(1)) and int(
+        declared.group(1)
+    ) > 0, (
+        f"landing page declares a malformed data-pixel-width: "
+        f"{declared.group(1)!r}"
+    )
+    assert "data-pixel-width" not in concept, (
+        "/concept/ has no image-rendering: pixelated rule, so a capped "
+        "framebuffer would render as a blurred background there"
+    )
+
+    styles = (SITE / "styles.css").read_text(encoding="utf-8")
+    assert re.search(
+        r"\.wave-canvas \{\s*image-rendering: pixelated;", styles
+    ), "the capped framebuffer is no longer upscaled as hard pixels"
