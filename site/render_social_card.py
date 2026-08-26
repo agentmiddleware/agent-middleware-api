@@ -5,7 +5,7 @@ The Open Graph image is served as a PNG because link crawlers do not rasterize
 SVG. A hand-exported PNG drifts: it silently keeps whatever palette and font
 substitutions the exporting machine had. This script pins the pipeline —
 Chromium rasterizes the committed SVG with the vendored woff2 faces from
-``fonts/``, so the card's Instrument Serif headline and IBM Plex Mono labels
+``fonts/``, so the card's Press Start 2P headline and IBM Plex Mono labels
 are literally the site's typography, not a viewer's fallbacks.
 
 Stdlib only, like ``vendor_fonts.py``. Needs a Chromium binary:
@@ -41,7 +41,13 @@ CARD_SIZE = (1200, 630)
 # bottom row that never touches this color means the viewport fell short of
 # the card (full-UI Chromium reserves toolbar height inside --window-size)
 # and the screenshot was padded — the exact bug the probe exists to catch.
-INK_RGB = (0x0B, 0x11, 0x20)
+#
+# The card's scanline overlay darkens every third row, starting at y=0. The
+# card is 630 tall, so the bottom row is y=629 and 629 % 3 == 2: it falls
+# between bands and stays pure ink. Keep that in mind if the card height or
+# the 3px scanline period ever changes — the probe would start reading a
+# dimmed ground and fail for the wrong reason.
+INK_RGB = (0x0D, 0x0B, 0x1F)
 
 
 class RenderError(RuntimeError):

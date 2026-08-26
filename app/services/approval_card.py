@@ -32,19 +32,22 @@ from html import escape
 # muted = --paper-dim, accents = the on-paper brass link tone and the
 # .button-primary brass/ink pair, alert = --danger-on-paper (the plain
 # --danger terracotta falls below 4.5:1 on the paper card face).
-_PAPER = "#efe9da"
-_PAPER_LIGHT = "#f8f5ec"
-_INK = "#141925"
-_INK_MUTED = "#4d5468"
-_INK_FAINT = "#4d5468"
-_LINE = "rgba(20, 25, 37, 0.17)"
+_PAPER = "#e4dfc8"
+_PAPER_LIGHT = "#f4f1e0"
+_INK = "#14122b"
+_INK_MUTED = "#4a4670"
+_INK_FAINT = "#4a4670"
+_LINE = "rgba(20, 18, 43, 0.17)"
 _BRASS_DARK = "#8a6414"
-_BUTTON_BRASS = "#d8a03e"
-_BUTTON_INK = "#0b1120"
+_BUTTON_BRASS = "#ffc233"
+_BUTTON_INK = "#0d0b1f"
 _SIGNAL = "#b03a22"
+# The display face is the mono stack, not the site's pixel face: mail clients
+# do not load webfonts, so "Press Start 2P" here would resolve to a fallback
+# on every client that matters and name a face the card never actually shows.
 _MONO = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
-_BODY = '"Public Sans", "Segoe UI", system-ui, sans-serif'
-_DISPLAY = '"Libre Franklin", "Helvetica Neue", Arial, sans-serif'
+_BODY = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
+_DISPLAY = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
 
 
 @dataclass(frozen=True)

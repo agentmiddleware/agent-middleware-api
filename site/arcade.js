@@ -45,14 +45,14 @@
   var MAX_CATCHUP = 5; // never simulate more than this many steps per frame
 
   var PALETTE = {
-    bg: "#05070d",
-    grid: "#12203a",
-    ink: "#dee4f2",
-    dim: "#7e8794",
-    brass: "#d8a03e",
-    bright: "#ebb958",
-    verify: "#3fbf87",
-    danger: "#e2694f"
+    bg: "#05040f",
+    grid: "#2e2663",
+    ink: "#eceafd",
+    dim: "#a49ddb",
+    brass: "#ffc233",
+    bright: "#ffe066",
+    verify: "#4cf08a",
+    danger: "#ff6b5e"
   };
 
   var BOOT_LINES = [

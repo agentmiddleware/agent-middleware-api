@@ -38,7 +38,10 @@ Open `http://127.0.0.1:8765/`.
   with `data-wave="preset"` and scrolling lerps between them — sea →
   condense → order → stream → crystal → quiet → gridquiet → dark →
   ember — while the
-  composite's ground color lerps from pure black into the ledger ink.
+  composite's ground color lerps from pure black into the cabinet ink.
+  The field is rendered into a 320px-wide framebuffer (`CONFIG.pixelWidth`)
+  and upscaled by the compositor with `image-rendering: pixelated`, so it
+  arrives as part of the pixel grid rather than as a photograph behind it.
   Hovering a governed-loop card or the booking CTA fires a pulse through
   the field. Reduced motion renders one still frame per field state;
   high contrast hides the field entirely. The footer opens
@@ -187,7 +190,7 @@ Only `latin` and `latin-ext` are vendored, and each face keeps upstream's
 Libre Franklin and Public Sans are variable fonts: one file per subset serves
 every weight, which is why their filenames carry no weight.
 
-All three families are OFL 1.1, and `fonts/OFL.txt` carries the **full license
+All four families are OFL 1.1, and `fonts/OFL.txt` carries the **full license
 text**, not a link to it — plain text so the notice deploys alongside the fonts
 it covers. The bare-link shortcut the OFL FAQ tolerates applies to fonts
 embedded in a document or bundled inside a program; serving `/fonts/*.woff2` as
@@ -206,13 +209,15 @@ also means preloads cannot be hand-written: `vendor_fonts.py` emits
 page from it. Edit `PRELOAD` in `vendor_fonts.py` to change which faces are
 preloaded.
 
-Preloads cover every face in the first viewport. Public Sans and Libre Franklin
-are variable, so one file each is enough; IBM Plex Mono is static, so weights
-400 (nav links), 500 (section kickers) and 600 (nav brand) are three separate
-files and all three are preloaded. Instrument Serif renders the homepage
-hero headline, so its single 400 face is preloaded too — the manifest is
-shared by every page, so subpages pay its ~21KB once rather than letting
-the landing headline flash Georgia and reflow. A preload must carry `crossorigin` even
+Preloads cover every face in the first viewport. Press Start 2P is the display
+face — every heading, kicker, badge and button — so its single 400 face is
+preloaded first; a fallback flash there is not a font swap but a layout
+change, since no fallback is anywhere near its metrics. Public Sans and Libre
+Franklin are variable, so one file each is enough; IBM Plex Mono is static, so
+weights 400 (body and nav links), 500 (section kickers) and 600 are three
+separate files and all three are preloaded. Instrument Serif and the two sans
+families are no longer used by `styles.css` — they still dress `concept/`,
+which keeps its own stylesheet. A preload must carry `crossorigin` even
 same-origin, or the browser discards it and fetches the file twice. The `404`
 page preloads nothing on purpose — it is `noindex` and mostly serves scanners.
 
@@ -225,13 +230,16 @@ the launch gate rather than deploying a stylesheet whose every `src` 404s.
 
 `styles.css` is the palette's source of truth. `favicon.svg` and
 `social-card.svg` draw exclusively from its `:root` tokens — ink ground,
-text-light letterform and headline, brass seal marks (the rotated square is
-the same mark the nav brand carries).
+text-light letterform and headline, gold seal marks (the same mark the nav
+brand carries). Both are drawn on the design system's pixel grid: whole-pixel
+edges, `shape-rendering="crispEdges"`, and no rotated square — a 45° square is
+the one shape a pixel grid cannot render without antialiasing, which is why
+the seal is now an axis-aligned block.
 `test_brand_graphics_use_the_design_system_palette` fails if either file
 reintroduces an off-system color; that is exactly how the original graphics
 drifted, keeping a retired charcoal-and-ember palette long after the pages
-moved to ledger ink and brass, so tab icon and link preview advertised a
-different product than the page that loaded.
+moved on, so tab icon and link preview advertised a different product than the
+page that loaded.
 
 `social-card.png` — the 1200×630 raster the `og:image`/`twitter:image` tags
 serve, because link crawlers do not rasterize SVG — is **generated**:
@@ -243,7 +251,7 @@ python3 render_social_card.py    # rasterize social-card.svg → social-card.png
 
 The script (stdlib-only, like `vendor_fonts.py`) inlines the SVG into a shim
 page, loads the vendored woff2 faces from `fonts/`, and screenshots it with
-headless Chromium, so the card's Instrument Serif headline and IBM Plex Mono
+headless Chromium, so the card's Press Start 2P headline and IBM Plex Mono
 labels are the site's own typography rather than an exporting machine's
 substitutes. It prefers a Playwright `headless_shell` build (found under
 `$PLAYWRIGHT_BROWSERS_PATH`; or point `$CHROMIUM` at any binary), whose

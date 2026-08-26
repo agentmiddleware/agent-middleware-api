@@ -63,6 +63,13 @@
     pointerStrength: 0.34, // world units of pointer swell
     staticTime: 7.3, // frozen phase for reduced-motion / ?t default
     dprCap: 2,
+    // Backing-store width, in device pixels, that the field is rendered at
+    // before CSS scales it up. 320 is a console-era framebuffer width, and it
+    // is what makes the wave read as part of the pixel system instead of as a
+    // photograph behind it: the upscale is done by the compositor with
+    // image-rendering:pixelated (see .wave-canvas in styles.css), so every
+    // rendered pixel lands on the grid as a hard square.
+    pixelWidth: 320,
     // Lattice sizes, densest first; the governor walks down this list.
     levels: [
       [896, 640],
@@ -536,9 +543,18 @@
   var needResize = true;
 
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, CONFIG.dprCap);
-    var w = Math.max(1, Math.round(canvas.clientWidth * dpr));
-    var h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    var cssW = Math.max(1, canvas.clientWidth);
+    var cssH = Math.max(1, canvas.clientHeight);
+    // One scale for both axes, so the upscaled pixels stay square. Capping by
+    // width rather than by area keeps the pixel size stable as the viewport
+    // gets taller, which is what a fixed full-page layer does on scroll.
+    dpr = Math.min(
+      window.devicePixelRatio || 1,
+      CONFIG.dprCap,
+      CONFIG.pixelWidth / cssW
+    );
+    var w = Math.max(1, Math.round(cssW * dpr));
+    var h = Math.max(1, Math.round(cssH * dpr));
     if (w === viewW && h === viewH && !needResize) return;
     viewW = canvas.width = w;
     viewH = canvas.height = h;
@@ -668,7 +684,7 @@
     ember: { amp: 0.6, order: 0.25, flow: 0.1, crystal: 0.0, bright: 0.42, warmth: 0.35, ground: 1.0 },
   };
   var PRESET_KEYS = ["amp", "order", "flow", "crystal", "bright", "warmth", "ground"];
-  var GROUND_INK = [11 / 255, 17 / 255, 32 / 255]; // --ink #0b1120
+  var GROUND_INK = [13 / 255, 11 / 255, 31 / 255]; // --ink #0d0b1f
 
   var sections = []; // { center, preset } in document coordinates
   var pageHeight = 0;
