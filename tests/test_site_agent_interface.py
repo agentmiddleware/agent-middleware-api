@@ -2215,7 +2215,13 @@ def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
     concept = (SITE / "concept" / "index.html").read_text(encoding="utf-8")
     declared = re.search(r'data-pixel-width="([^"]*)"', landing)
     assert declared, "landing page no longer opts into the pixel framebuffer"
-    assert declared.group(1).isdigit() and int(declared.group(1)) > 0, (
+    # ASCII digits only, mirroring the renderer's /^[0-9]+$/ exactly. Python's
+    # str.isdigit() is broader — it accepts Arabic-Indic "\u0663\u0662\u0660" and
+    # superscript "\u00b3\u00b2\u2070" — so using it here would let this test pass on
+    # markup the renderer would reject and silently fall back on.
+    assert re.fullmatch(r"[0-9]+", declared.group(1)) and int(
+        declared.group(1)
+    ) > 0, (
         f"landing page declares a malformed data-pixel-width: "
         f"{declared.group(1)!r}"
     )
