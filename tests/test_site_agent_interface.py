@@ -90,11 +90,11 @@ class _VisibleFaqExtractor(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs) -> None:
         attributes = dict(attrs)
-        if tag == "dl" and "faq-list" in (attributes.get("class") or "").split():
+        if self._in_faq and tag == "dl":
+            self._nested_dl_depth += 1
+        elif tag == "dl" and "faq-list" in (attributes.get("class") or "").split():
             self._in_faq = True
             self._nested_dl_depth = 0
-        elif self._in_faq and tag == "dl":
-            self._nested_dl_depth += 1
         elif self._in_faq and tag in {"dt", "dd"} and self._nested_dl_depth == 0:
             self._collecting = tag
             self._parts = []
@@ -807,7 +807,7 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     nested_faq = _VisibleFaqExtractor()
     nested_faq.feed(
         '<dl class="faq-list"><dt>Top?</dt><dd>Outer '
-        "<dl><dt>Nested?</dt><dd>Hidden</dd></dl> tail.</dd></dl>"
+        '<dl class="faq-list"><dt>Nested?</dt><dd>Hidden</dd></dl> tail.</dd></dl>'
     )
     nested_faq.close()
     assert nested_faq.items == [("dt", "Top?"), ("dd", "Outer tail.")]
