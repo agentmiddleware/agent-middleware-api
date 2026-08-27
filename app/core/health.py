@@ -20,7 +20,7 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from .build_metadata import get_build_commit_sha
+from .build_metadata import get_build_commit_sha, get_build_provenance
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
 from .runtime_degradation import get_runtime_degradation
@@ -389,6 +389,11 @@ async def gather_dependency_report() -> dict[str, Any]:
         "status": overall,
         "version": settings.APP_VERSION,
         "commit_sha": get_build_commit_sha(),
+        # How that SHA was established. "stamped" is the only value an image
+        # built through the documented `railway up --build-arg COMMIT_SHA=...`
+        # path can produce; anything else means the running image was built by
+        # something other than the release procedure. See build_metadata.
+        "build_provenance": get_build_provenance(),
         "environment": settings.ENVIRONMENT,
         # Whether the production trust guardrails actually engage on this host.
         # ENVIRONMENT defaults to "local", so a deploy that never sets it runs
@@ -454,6 +459,7 @@ def build_public_dependency_report(full_report: dict[str, Any]) -> dict[str, Any
         "status": overall,
         "version": full_report["version"],
         "commit_sha": full_report["commit_sha"],
+        "build_provenance": full_report["build_provenance"],
         "environment": full_report["environment"],
         "production_like": full_report["production_like"],
         "dependencies": dependencies,

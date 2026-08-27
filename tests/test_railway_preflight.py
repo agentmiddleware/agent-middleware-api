@@ -876,9 +876,7 @@ def test_live_fails_when_dogfood_tool_exposed_in_discovery(monkeypatch):
 
     def get(url, **_kwargs):
         if url.endswith("/v1/discover"):
-            return _Response(
-                {"mcp_tools": [{"service_id": "partner.notes.write"}]}
-            )
+            return _Response({"mcp_tools": [{"service_id": "partner.notes.write"}]})
         return _Response(payload)
 
     monkeypatch.setattr(httpx, "get", get)
@@ -1050,11 +1048,7 @@ def test_live_fails_when_dogfood_name_hides_behind_benign_service_id(monkeypatch
     _patch_get_with_discovery(
         monkeypatch,
         payload,
-        {
-            "mcp_tools": [
-                {"service_id": "partner.echo", "name": "partner.notes.write"}
-            ]
-        },
+        {"mcp_tools": [{"service_id": "partner.echo", "name": "partner.notes.write"}]},
     )
 
     assert preflight.check_live("https://api.example.com") is False
@@ -1072,3 +1066,73 @@ def test_live_fails_on_non_string_tool_identifier(monkeypatch):
     )
 
     assert preflight.check_live("https://api.example.com") is False
+
+
+# ---------------------------------------------------------------------------
+# Build provenance gate.
+#
+# The reported SHA says which commit is live; provenance says whether the image
+# came through `railway up --build-arg COMMIT_SHA=...`. Only "stamped" can come
+# from that path, so every other value must fail the gate rather than pass on
+# an accurate-looking SHA.
+# ---------------------------------------------------------------------------
+
+
+def test_live_passes_on_stamped_provenance(monkeypatch, capsys):
+    _patch_get(monkeypatch, {**HEALTHY, "build_provenance": "stamped"})
+
+    assert preflight.check_live("https://api.example.com") is True
+    assert "build_provenance" not in capsys.readouterr().out
+
+
+def test_live_notes_absent_provenance_without_failing(monkeypatch, capsys):
+    """An older image predates the field. That is unverified, not bad - it must
+    be visible, but must not block deploying an image built before the field
+    existed."""
+    payload = {key: value for key, value in HEALTHY.items()}
+    payload.pop("build_provenance", None)
+    _patch_get(monkeypatch, payload)
+
+    assert preflight.check_live("https://api.example.com") is True
+    output = capsys.readouterr().out
+    assert "NOTE" in output
+    assert "build_provenance absent" in output
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    ["mismatch", "control_plane_only", "unstamped"],
+)
+def test_live_rejects_unstamped_provenance(monkeypatch, capsys, provenance):
+    _patch_get(monkeypatch, {**HEALTHY, "build_provenance": provenance})
+
+    assert preflight.check_live("https://api.example.com") is False
+
+    output = capsys.readouterr().out
+    assert "build_provenance" in output
+    assert provenance in output
+
+
+def test_live_rejects_unrecognized_provenance_value(monkeypatch):
+    """Fail closed on a value this gate does not know: a renamed or future
+    classification must not read as approval."""
+    _patch_get(monkeypatch, {**HEALTHY, "build_provenance": "something_new"})
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_rejects_explicit_null_provenance(monkeypatch, capsys):
+    """A published null is not an absent key.
+
+    `body.get()` would conflate the two and route an explicit null onto the
+    older-image note path, letting a build with no provenance value pass the
+    gate. The field is present and does not say "stamped", so it fails closed -
+    matching how the dogfood check treats a published null.
+    """
+    _patch_get(monkeypatch, {**HEALTHY, "build_provenance": None})
+
+    assert preflight.check_live("https://api.example.com") is False
+
+    output = capsys.readouterr().out
+    assert "build_provenance" in output
+    assert "NOTE" not in output

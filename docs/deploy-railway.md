@@ -281,6 +281,7 @@ railway variable set BUILD_COMMIT_SHA="$DEPLOY_SHA" \
   --environment "$ENVIRONMENT" --skip-deploys
 railway up --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" --ci \
+  --build-arg COMMIT_SHA="$DEPLOY_SHA" \
   --message "$RELEASE_MARKER"
 
 # Resolve and wait for the uniquely marked deployment just started above.
