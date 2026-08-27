@@ -24,4 +24,3 @@
 - Compatibility boundary: no HTTP, schema, auth-semantic, or proof-router behavior changes.
 - Test obligations: invalid target, unauthorized/same-prefix key, fail-closed verdict, rendered copy/JSON-LD, full product gate, and trust release gate.
 - Review gates: spec compliance, code quality, fresh coordinator verification, clean task commit, exact-SHA CI, then deployment.
-
