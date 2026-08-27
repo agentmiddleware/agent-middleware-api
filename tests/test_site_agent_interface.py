@@ -77,6 +77,47 @@ class _RunTogetherExtractor(_TextExtractor):
             self.parts.append(data)
 
 
+class _VisibleFaqExtractor(HTMLParser):
+    """Collect top-level FAQ terms and definitions in their visible order."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_faq = False
+        self._nested_dl_depth = 0
+        self._collecting: str | None = None
+        self._parts: list[str] = []
+        self.items: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attributes = dict(attrs)
+        if self._in_faq and tag == "dl":
+            self._nested_dl_depth += 1
+        elif tag == "dl" and "faq-list" in (attributes.get("class") or "").split():
+            self._in_faq = True
+            self._nested_dl_depth = 0
+        elif self._in_faq and tag in {"dt", "dd"} and self._nested_dl_depth == 0:
+            self._collecting = tag
+            self._parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._in_faq:
+            return
+        if tag == "dl":
+            if self._nested_dl_depth:
+                self._nested_dl_depth -= 1
+            else:
+                self._in_faq = False
+            return
+        if tag == self._collecting and self._nested_dl_depth == 0:
+            self.items.append((tag, " ".join("".join(self._parts).split())))
+            self._collecting = None
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._collecting is not None and self._nested_dl_depth == 0:
+            self._parts.append(data)
+
+
 def _visible_text(markup: str) -> str:
     parser = _RunTogetherExtractor()
     parser.feed(markup)
@@ -286,6 +327,7 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
 def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     llm_txt = (SITE / "llm.txt").read_text(encoding="utf-8")
     llms_txt = (SITE / "llms.txt").read_text(encoding="utf-8")
+    api_llm_txt = (ROOT / "static" / "llm.txt").read_text(encoding="utf-8")
 
     assert llm_txt == llms_txt
     assert "human design-partner site" in llm_txt
@@ -299,6 +341,17 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
         assert hostname not in llm_txt
     for suffix in PROVIDER_HOST_SUFFIXES:
         assert suffix not in llm_txt
+
+    assert (
+        "| 401 | Missing credentials, a malformed or too-short API key, or "
+        "invalid bearer authentication. |" in api_llm_txt
+    )
+    assert (
+        "| 403 | API key rejected, or an authenticated caller lacks required "
+        "wallet/tenant, administrator, policy, or ACL access. |" in api_llm_txt
+    )
+    assert "| 401 | Missing or invalid bearer authentication |" not in api_llm_txt
+    assert "Access denied (cross-tenant)" not in api_llm_txt
 
 
 def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> None:
@@ -748,6 +801,26 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
 
     questions = faq["mainEntity"]
     assert len(questions) >= 4, "the FAQ shrank without the structured data noticing"
+    visible_faq = _VisibleFaqExtractor()
+    visible_faq.feed(markup)
+    visible_faq.close()
+    nested_faq = _VisibleFaqExtractor()
+    nested_faq.feed(
+        '<dl class="faq-list"><dt>Top?</dt><dd>Outer '
+        '<dl class="faq-list"><dt>Nested?</dt><dd>Hidden</dd></dl> tail.</dd></dl>'
+    )
+    nested_faq.close()
+    assert nested_faq.items == [("dt", "Top?"), ("dd", "Outer tail.")]
+    expected_tags = [tag for _ in questions for tag in ("dt", "dd")]
+    assert [tag for tag, _ in visible_faq.items] == expected_tags
+    visible_pairs = [
+        (visible_faq.items[index][1], visible_faq.items[index + 1][1])
+        for index in range(0, len(visible_faq.items), 2)
+    ]
+    structured_pairs = [
+        (entry["name"], entry["acceptedAnswer"]["text"]) for entry in questions
+    ]
+    assert visible_pairs == structured_pairs
     for entry in questions:
         assert entry["@type"] == "Question"
         answer = entry["acceptedAnswer"]
@@ -757,6 +830,43 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
             f"FAQ answer does not match the visible copy for {entry['name']!r}"
         )
         assert "@@" not in answer["text"]
+
+    expected_production_answer = (
+        "Production beta, not production complete. The supported beta is "
+        "vendor-managed and dedicated per customer: each customer receives "
+        "separate API, PostgreSQL, Redis, signing material, and administrator "
+        "resources. It is not a shared multi-tenant SaaS, and optional "
+        "proof-surface routers are outside the supported production posture. "
+        "There are no replicas or consensus. Read the security limitations "
+        "before deciding."
+    )
+    production_answer = next(
+        entry["acceptedAnswer"]["text"]
+        for entry in questions
+        if entry["name"] == "Is this production-ready?"
+    )
+    assert expected_production_answer in text
+    assert production_answer == expected_production_answer
+    for stale_claim in (
+        "There is one server, one database, and one operator-held signing key",
+        "The supported posture is vendor-managed and single-tenant",
+    ):
+        assert stale_claim not in text
+        assert stale_claim not in production_answer
+
+    exactly_once_answer = next(
+        entry["acceptedAnswer"]["text"]
+        for entry in questions
+        if entry["name"] == "Does exactly-once hold all the way to my tool?"
+    )
+    canonical_boundary = (
+        "At our boundary: one accepted idempotency key maps to at most one "
+        "gateway dispatch and debit plus one terminal receipt."
+    )
+    assert canonical_boundary in text
+    assert canonical_boundary in exactly_once_answer
+    assert "produces one dispatch, one debit, one receipt" not in text
+    assert "produces one dispatch, one debit, one receipt" not in exactly_once_answer
 
 
 def test_every_indexable_page_is_canonical_localized_and_in_the_sitemap(

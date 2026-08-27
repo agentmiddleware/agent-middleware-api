@@ -2,14 +2,18 @@
 
 Usage:
     export AGENT_MIDDLEWARE_API_KEY=...        # required, never hardcode
-    export AGENT_MIDDLEWARE_API_URL=https://...  # optional, defaults to production
+    export AGENT_MIDDLEWARE_API_URL=https://...  # required unless --api-url is set
     python scripts/stress_test_live.py
 
-This script creates wallets, permits and receipts on whatever deployment it is
-pointed at. Point it at a staging deployment unless you intend to write test
-data to production.
+Pass ``--confirm-production`` when intentionally targeting the canonical
+production origin. Remote targets require HTTPS; loopback targets may use HTTP.
+
+This script creates persistent wallets, permits, and receipts on its target. It
+has no cleanup. Point it at staging unless you intend to retain its test data in
+production.
 """
 
+import argparse
 import asyncio
 import os
 import sys
@@ -19,18 +23,13 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-DEFAULT_API_URL = "https://api.thisisatest.tech"
+if __package__:
+    from .live_script_target import LiveTargetError, resolve_live_target
+else:
+    from live_script_target import LiveTargetError, resolve_live_target
 
-API_URL = os.environ.get("AGENT_MIDDLEWARE_API_URL", DEFAULT_API_URL)
-API_KEY = os.environ.get("AGENT_MIDDLEWARE_API_KEY", "")
-
-if not API_KEY:
-    sys.exit(
-        "AGENT_MIDDLEWARE_API_KEY is not set.\n"
-        "Export a key for the target deployment before running:\n"
-        "    export AGENT_MIDDLEWARE_API_KEY=...\n"
-        "Credentials must never be committed to this repository."
-    )
+API_URL = ""
+API_KEY = ""
 
 # Every idempotency key is namespaced with a fresh per-run prefix. Without this
 # a second run replays the first run's cached responses instead of re-testing,
@@ -556,7 +555,43 @@ async def test_health_under_load():
     print("  Health during 20 parallel discoveries: ✅")
 
 
-async def main():
+async def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run live trust-plane stress checks against an explicit target."
+    )
+    parser.add_argument(
+        "--api-url",
+        help="API origin; overrides AGENT_MIDDLEWARE_API_URL",
+    )
+    parser.add_argument(
+        "--confirm-production",
+        action="store_true",
+        help="confirm intentional use of https://api.thisisatest.tech",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        api_url = resolve_live_target(
+            args.api_url,
+            confirm_production=args.confirm_production,
+        )
+    except LiveTargetError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+
+    api_key = (os.environ.get("AGENT_MIDDLEWARE_API_KEY") or "").strip()
+    if not api_key:
+        print(
+            "AGENT_MIDDLEWARE_API_KEY is not set. Export a key for the target "
+            "deployment before running; credentials are never hardcoded.",
+            file=sys.stderr,
+        )
+        return 2
+
+    global API_KEY, API_URL
+    API_URL = api_url
+    API_KEY = api_key
+
     print("=" * 60)
     print("HYPER EDGE-CASE STRESS TEST")
     print(f"Target: {API_URL}")
@@ -586,7 +621,8 @@ async def main():
     print("\n" + "=" * 60)
     print("ALL STRESS TESTS PASSED ✅")
     print("=" * 60)
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

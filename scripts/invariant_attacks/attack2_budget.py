@@ -100,6 +100,7 @@ def main():
     print(json.dumps(evidence, indent=2, default=str))
     with open("evidence_attack2.json", "w") as fh:
         json.dump(evidence, fh, indent=2, default=str)
+    return A.verdict_exit_code(verdict)
 
 if __name__ == "__main__":
     sys.exit(main())

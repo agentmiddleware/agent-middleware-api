@@ -35,6 +35,11 @@ NOTES_PATH = os.environ.get(
 )
 
 
+def verdict_exit_code(verdict: str) -> int:
+    """Return success only when the invariant verdict is exactly HELD."""
+    return 0 if verdict == "HELD" else 1
+
+
 def redact(key: str | None) -> str:
     if not key:
         return "<none>"

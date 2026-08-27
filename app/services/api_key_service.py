@@ -12,6 +12,7 @@ Architecture:
 """
 
 import hashlib
+import hmac
 import json
 import secrets
 import logging
@@ -332,7 +333,7 @@ class APIKeyService:
             if not key:
                 return None
 
-            if key.key_hash != key_hash:
+            if not hmac.compare_digest(key.key_hash, key_hash):
                 return None
 
             now = utc_now()

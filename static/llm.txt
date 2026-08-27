@@ -181,8 +181,8 @@ No published TypeScript SDK. Use HTTP (`/mcp`, `/v1/permits`, `/v1/receipts`).
 
 | Code | Meaning |
 |------|---------|
-| 401 | Missing or invalid API key |
-| 403 | Access denied (cross-tenant) |
+| 401 | Missing credentials, a malformed or too-short API key, or invalid bearer authentication. |
+| 403 | API key rejected, or an authenticated caller lacks required wallet/tenant, administrator, policy, or ACL access. |
 | 402 | Insufficient credits |
 | 429 | Rate limit exceeded |
 | 500 | Internal error |
