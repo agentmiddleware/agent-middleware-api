@@ -214,6 +214,16 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  /* Stuck to the top of the scrolling frame. At a hundred tiles the grid is
+     many screens tall, and a filter row that scrolls away means scrolling all
+     the way back up to change shelves — which is most of the reason a long
+     grid feels unnavigable rather than merely long. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.5rem 0;
+  background: var(--ink);
+  box-shadow: 0 6px 0 var(--ink);
 }
 
 .arcade-filter {
@@ -426,20 +436,20 @@
   color: var(--verify);
 }
 
-/* ---- genre identity ------------------------------------------------------
-   Hue runs hot to cool by how twitchy the cabinet is: FPS and DUEL at the red
-   end, PUZZLE at the cyan end, ARCADE neutral in the middle as the house
-   default. Each genre also gets its own marquee pattern, so the lineup is
-   still legible as eight kinds of cabinet in greyscale or to a visitor who
-   does not separate these colours — and the badge text says the genre outright
-   in every case. */
+/* ---- family identity -----------------------------------------------------
+   Keyed off the cabinet's *family* rather than its genre. At a hundred
+   cabinets there are around ninety genres, and a hue per genre is both
+   impossible and useless; nine families is a number a visitor can actually
+   learn. Hue runs hot to cool by how twitchy the family is, each gets its own
+   marquee pattern so the lineup reads in greyscale too, and the badge on every
+   tile still says the specific genre outright. */
 
-.arcade-cabinet[data-genre="FPS"] {
+.arcade-cabinet[data-family="SHOOT"] {
   --genre-hue: var(--danger);
 }
 
 /* Crosshair: two hard bars crossing at the centre of the marquee. */
-.arcade-cabinet[data-genre="FPS"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="SHOOT"] .arcade-cabinet-art {
   background-image:
     linear-gradient(
       90deg,
@@ -455,12 +465,12 @@
     );
 }
 
-.arcade-cabinet[data-genre="DUEL"] {
+.arcade-cabinet[data-family="ACTION"] {
   --genre-hue: var(--arcade-magenta);
 }
 
 /* Two blocks facing each other across an empty middle. */
-.arcade-cabinet[data-genre="DUEL"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="ACTION"] .arcade-cabinet-art {
   background-image: linear-gradient(
     90deg,
     var(--genre-hue) 0 12px,
@@ -469,32 +479,12 @@
   );
 }
 
-.arcade-cabinet[data-genre="SHOOTER"] {
-  --genre-hue: var(--brass-bright);
-}
-
-/* Ranks: a column pattern crossed with a row pattern, so the marquee reads as
-   a formation advancing down the screen. */
-.arcade-cabinet[data-genre="SHOOTER"] .arcade-cabinet-art {
-  background-image:
-    repeating-linear-gradient(
-      90deg,
-      var(--genre-hue) 0 6px,
-      transparent 6px 14px
-    ),
-    repeating-linear-gradient(
-      180deg,
-      rgba(0, 0, 0, 0) 0 6px,
-      var(--shadow-ink) 6px 12px
-    );
-}
-
-.arcade-cabinet[data-genre="RUNNER"] {
+.arcade-cabinet[data-family="RUN"] {
   --genre-hue: var(--brass);
 }
 
 /* Ground line with obstacles standing on it. */
-.arcade-cabinet[data-genre="RUNNER"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="RUN"] .arcade-cabinet-art {
   background-image:
     linear-gradient(
       180deg,
@@ -511,51 +501,41 @@
   background-repeat: no-repeat, repeat-x;
 }
 
-.arcade-cabinet[data-genre="ARCADE"] {
-  --genre-hue: var(--text);
+.arcade-cabinet[data-family="TIMING"] {
+  --genre-hue: var(--brass-bright);
 }
 
-.arcade-cabinet[data-genre="MAZE"] {
-  --genre-hue: var(--text-dim);
-}
-
-/* Lattice: corridors crossing at right angles. */
-.arcade-cabinet[data-genre="MAZE"] .arcade-cabinet-art {
+/* An equaliser: bars of alternating height rising from the floor. The first
+   attempt was lanes with a line across them, which is closer to what these
+   cabinets draw — and read as RUN's ground-line marquee from any distance,
+   because both are a horizontal band plus verticals. Two shelves that look
+   alike are worse than one that is slightly off-theme. */
+.arcade-cabinet[data-family="TIMING"] .arcade-cabinet-art {
   background-image:
     repeating-linear-gradient(
       90deg,
-      var(--genre-hue) 0 2px,
-      transparent 2px 14px
+      var(--genre-hue) 0 6px,
+      transparent 6px 16px
     ),
     repeating-linear-gradient(
-      180deg,
-      var(--genre-hue) 0 2px,
-      transparent 2px 14px
+      90deg,
+      transparent 0 8px,
+      var(--genre-hue) 8px 14px,
+      transparent 14px 32px
     );
+  background-size: 100% 40%, 100% 78%;
+  background-position: left bottom, left bottom;
+  background-repeat: repeat-x, repeat-x;
 }
 
-.arcade-cabinet[data-genre="REFLEX"] {
-  --genre-hue: var(--verify);
-}
-
-/* Hard diagonal chevrons — the one pattern in the set with no axis-aligned
-   edge, which is what a reflex cabinet's marquee should feel like. */
-.arcade-cabinet[data-genre="REFLEX"] .arcade-cabinet-art {
-  background-image: repeating-linear-gradient(
-    45deg,
-    var(--genre-hue) 0 6px,
-    transparent 6px 16px
-  );
-}
-
-.arcade-cabinet[data-genre="PUZZLE"] {
+.arcade-cabinet[data-family="PUZZLE"] {
   --genre-hue: var(--arcade-cyan);
 }
 
 /* Checkerboard. repeating-conic-gradient draws it in one declaration; the
    background-size is what makes the cells square rather than the tile's
    aspect ratio. */
-.arcade-cabinet[data-genre="PUZZLE"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="PUZZLE"] .arcade-cabinet-art {
   background-image: repeating-conic-gradient(
     var(--genre-hue) 0% 25%,
     transparent 0% 50%
@@ -571,71 +551,28 @@
    Patterns only, in most cases — a fourth of these tiles is decoration and a
    fifth distinct colour would stop reading as one lineup. */
 
-.arcade-cabinet[data-genre="PLATFORM"] {
-  --genre-hue: var(--verify);
-}
-
-/* Steps: a stair of blocks climbing to the right. */
-.arcade-cabinet[data-genre="PLATFORM"] .arcade-cabinet-art {
-  background-image:
-    linear-gradient(180deg, transparent 0 66%, var(--genre-hue) 66% 78%, transparent 78%),
-    linear-gradient(180deg, transparent 0 44%, var(--genre-hue) 44% 56%, transparent 56%),
-    linear-gradient(180deg, transparent 0 22%, var(--genre-hue) 22% 34%, transparent 34%);
-  background-size: 34% 100%, 34% 100%, 34% 100%;
-  background-position: left, center, right;
-  background-repeat: no-repeat;
-}
-
-.arcade-cabinet[data-genre="ADVENTURE"] {
-  --genre-hue: var(--brass-bright);
+/* QUEST shares ACTION's hue: the palette carries eight, the roster needs nine,
+   and this is the pair whose marquees are furthest apart — a doorway against
+   two blocks facing each other across an empty middle. */
+.arcade-cabinet[data-family="QUEST"] {
+  --genre-hue: var(--arcade-magenta);
 }
 
 /* A doorway: two jambs and a lintel, which is the one shape every room in
    that cabinet is built out of. */
-.arcade-cabinet[data-genre="ADVENTURE"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="QUEST"] .arcade-cabinet-art {
   background-image:
     linear-gradient(180deg, var(--genre-hue) 0 5px, transparent 5px),
     linear-gradient(90deg, var(--genre-hue) 0 5px, transparent 5px),
     linear-gradient(270deg, var(--genre-hue) 0 5px, transparent 5px);
 }
 
-.arcade-cabinet[data-genre="RPG"] {
-  --genre-hue: var(--arcade-magenta);
-}
-
-/* A menu: three left-aligned bars, the way every battle screen in the genre
-   put its verbs. */
-.arcade-cabinet[data-genre="RPG"] .arcade-cabinet-art {
-  background-image: repeating-linear-gradient(
-    180deg,
-    var(--genre-hue) 0 3px,
-    transparent 3px 9px
-  );
-  background-size: 40% 100%;
-  background-position: left 8px center;
-  background-repeat: no-repeat;
-}
-
-.arcade-cabinet[data-genre="FIGHTING"] {
-  --genre-hue: var(--danger);
-}
-
-/* Two health bars draining toward each other from the ends. */
-.arcade-cabinet[data-genre="FIGHTING"] .arcade-cabinet-art {
-  background-image:
-    linear-gradient(90deg, var(--genre-hue) 0 40%, transparent 40%),
-    linear-gradient(270deg, var(--genre-hue) 0 40%, transparent 40%);
-  background-size: 100% 6px, 100% 6px;
-  background-position: top 6px left, bottom 6px left;
-  background-repeat: no-repeat;
-}
-
-.arcade-cabinet[data-genre="RACING"] {
-  --genre-hue: var(--brass);
+.arcade-cabinet[data-family="DRIVE"] {
+  --genre-hue: var(--text);
 }
 
 /* A road: two verges and a dashed centre line. */
-.arcade-cabinet[data-genre="RACING"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="DRIVE"] .arcade-cabinet-art {
   background-image:
     linear-gradient(90deg, var(--genre-hue) 0 4px, transparent 4px),
     linear-gradient(270deg, var(--genre-hue) 0 4px, transparent 4px),
@@ -645,85 +582,23 @@
   background-repeat: no-repeat, no-repeat, no-repeat;
 }
 
-.arcade-cabinet[data-genre="STEALTH"] {
+.arcade-cabinet[data-family="MANAGE"] {
   --genre-hue: var(--text-dim);
 }
 
-/* A cone of light widening from one corner. */
-.arcade-cabinet[data-genre="STEALTH"] .arcade-cabinet-art {
-  background-image: repeating-linear-gradient(
-    115deg,
-    var(--genre-hue) 0 2px,
-    transparent 2px 18px
-  );
-}
-
-.arcade-cabinet[data-genre="HORROR"] {
-  --genre-hue: var(--arcade-cyan);
-}
-
-/* A torch: one lit square with the rest of the plate dark. */
-.arcade-cabinet[data-genre="HORROR"] .arcade-cabinet-art {
-  background-image:
-    radial-gradient(circle at 50% 50%, var(--genre-hue) 0 14%, transparent 14%),
-    radial-gradient(circle at 50% 50%, var(--genre-hue) 0 26%, transparent 26%);
-  background-size: 100% 100%, 100% 100%;
-  opacity: 0.75;
-}
-
-.arcade-cabinet[data-genre="SANDBOX"] {
-  --genre-hue: var(--text);
-}
-
 /* Stacked blocks with mortar lines, offset row to row. */
-.arcade-cabinet[data-genre="SANDBOX"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="MANAGE"] .arcade-cabinet-art {
   background-image:
     repeating-linear-gradient(90deg, var(--genre-hue) 0 1px, transparent 1px 12px),
     repeating-linear-gradient(180deg, var(--genre-hue) 0 1px, transparent 1px 12px);
 }
 
-.arcade-cabinet[data-genre="ROYALE"] {
+.arcade-cabinet[data-family="SPORT"] {
   --genre-hue: var(--verify);
 }
 
-/* Two rings, the outer one closing on the inner. */
-.arcade-cabinet[data-genre="ROYALE"] .arcade-cabinet-art {
-  background-image:
-    radial-gradient(circle at 50% 50%, transparent 0 30%, var(--genre-hue) 30% 34%, transparent 34%),
-    radial-gradient(circle at 50% 50%, transparent 0 52%, var(--genre-hue) 52% 56%, transparent 56%);
-}
-
-.arcade-cabinet[data-genre="RHYTHM"] {
-  --genre-hue: var(--arcade-cyan);
-}
-
-/* Four lanes with a judgement line across them. */
-.arcade-cabinet[data-genre="RHYTHM"] .arcade-cabinet-art {
-  background-image:
-    linear-gradient(180deg, transparent 0 70%, var(--genre-hue) 70% 76%, transparent 76%),
-    repeating-linear-gradient(90deg, var(--genre-hue) 0 2px, transparent 2px 16px);
-}
-
-.arcade-cabinet[data-genre="BRAWLER"] {
-  --genre-hue: var(--arcade-magenta);
-}
-
-/* A belt: a floor line with figures standing along it at both ends. */
-.arcade-cabinet[data-genre="BRAWLER"] .arcade-cabinet-art {
-  background-image:
-    linear-gradient(180deg, transparent 0 calc(100% - 8px), var(--genre-hue) calc(100% - 8px) calc(100% - 6px), transparent calc(100% - 6px)),
-    repeating-linear-gradient(90deg, var(--genre-hue) 0 5px, transparent 5px 24px);
-  background-size: 100% 100%, 100% 18px;
-  background-position: center, left calc(100% - 24px);
-  background-repeat: no-repeat, repeat-x;
-}
-
-.arcade-cabinet[data-genre="COLLECT"] {
-  --genre-hue: var(--brass);
-}
-
 /* A register: rows of small filled cells, some of them still empty. */
-.arcade-cabinet[data-genre="COLLECT"] .arcade-cabinet-art {
+.arcade-cabinet[data-family="SPORT"] .arcade-cabinet-art {
   background-image: repeating-linear-gradient(
     90deg,
     var(--genre-hue) 0 6px,
@@ -831,6 +706,176 @@
      would turn deliberate blocks into mush. */
   image-rendering: pixelated;
   touch-action: none;
+}
+
+/* ---- touch controls ------------------------------------------------------
+   Mobile-first, not mobile-tolerant: on a phone this is the control surface
+   and the keyboard is the fallback, so the targets are thumb-sized (56px, well
+   over the 44px floor), the pad sits under the screen rather than over it, and
+   nothing here overlaps the picture the player is steering by.
+
+   `touch-action: none` on the pad and `user-select: none` on the keys are both
+   load-bearing: without the first, a held direction scrolls the page behind
+   the overlay; without the second, a firm press raises the text-selection
+   callout over the button. */
+
+.arcade-pad {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 640px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.arcade-pad[hidden] {
+  display: none;
+}
+
+.arcade-pad-left,
+.arcade-pad-right {
+  display: flex;
+  align-items: center;
+}
+
+.arcade-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 3.5rem);
+  grid-template-rows: repeat(2, 3.5rem);
+  gap: 0.25rem;
+}
+
+/* The four keys sit in a plus, so the thumb finds them without looking. A
+   horizontal-only cabinet collapses to the middle row rather than leaving two
+   dead squares where up and down used to be. */
+.arcade-pad-up { grid-area: 1 / 2; }
+.arcade-pad-left-key { grid-area: 2 / 1; }
+.arcade-pad-down { grid-area: 2 / 2; }
+.arcade-pad-right-key { grid-area: 2 / 3; }
+
+.arcade-dpad[data-axis="x"] {
+  grid-template-rows: 3.5rem;
+}
+
+.arcade-dpad[data-axis="x"] .arcade-pad-left-key { grid-area: 1 / 1; }
+.arcade-dpad[data-axis="x"] .arcade-pad-right-key { grid-area: 1 / 3; }
+
+.arcade-dpad[data-axis="y"] {
+  grid-template-columns: 3.5rem;
+  grid-template-rows: repeat(2, 3.5rem);
+}
+
+.arcade-dpad[data-axis="y"] .arcade-pad-up { grid-area: 1 / 1; }
+.arcade-dpad[data-axis="y"] .arcade-pad-down { grid-area: 2 / 1; }
+
+.arcade-lanes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.arcade-lanes[hidden] {
+  display: none;
+}
+
+.arcade-padkey {
+  min-width: 3.5rem;
+  min-height: 3.5rem;
+  display: grid;
+  place-items: center;
+  background: var(--panel);
+  border: 2px solid var(--rule);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-hard-sm);
+  transition: transform 60ms steps(2), background-color 60ms steps(2);
+}
+
+.arcade-padkey[hidden] {
+  display: none;
+}
+
+.arcade-pad-action {
+  min-width: 5rem;
+  min-height: 5rem;
+  border-color: var(--brass);
+  color: var(--brass-bright);
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+}
+
+/* Pressed state is a colour swap *and* a travel, because a finger covers the
+   button it is pressing and the only visible confirmation is at the edges. */
+.arcade-padkey.is-down,
+.arcade-padkey:active {
+  background: var(--brass);
+  color: var(--shadow-ink);
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.arcade-padtoggle {
+  background: none;
+  border: 2px solid var(--rule);
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 0.5rem;
+  letter-spacing: 0.08em;
+  min-height: 44px;
+  padding: 0 0.7rem;
+  cursor: pointer;
+}
+
+.arcade-padtoggle[aria-pressed="true"] {
+  border-color: var(--brass);
+  color: var(--brass-bright);
+}
+
+/* Portrait phones: the screen keeps the width, the pad keeps its targets, and
+   the whole stage still fits above the fold. `dvh` rather than `vh` so the
+   mobile browser chrome collapsing does not crop the pad off the bottom. */
+@media (max-width: 640px) {
+  .arcade-canvas {
+    max-height: 46dvh;
+    width: auto;
+    max-width: 100%;
+  }
+
+  .arcade-pad {
+    gap: 0.4rem;
+  }
+
+  .arcade-dpad {
+    grid-template-columns: repeat(3, 3.25rem);
+    grid-template-rows: repeat(2, 3.25rem);
+  }
+
+  .arcade-pad-action {
+    min-width: 4.5rem;
+    min-height: 4.5rem;
+  }
+}
+
+/* The travel is decoration and is pinned for anyone who asked for less of it,
+   the same way every other pressable in this file is. */
+@media (prefers-reduced-motion: reduce) {
+  .arcade-padkey.is-down,
+  .arcade-padkey:active {
+    transform: none;
+  }
+}
+
+html[data-a11y-motion="reduce"] .arcade-padkey.is-down,
+html[data-a11y-motion="reduce"] .arcade-padkey:active {
+  transform: none;
 }
 
 .arcade-stagefoot {

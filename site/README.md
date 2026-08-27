@@ -45,7 +45,7 @@ Open `http://127.0.0.1:8765/`.
   Hovering a governed-loop card or the booking CTA fires a pulse through
   the field. Reduced motion renders one still frame per field state;
   high contrast hides the field entirely. The footer opens
-  [the waiting room](#the-waiting-room), a twenty-five-cabinet arcade
+  [the waiting room](#the-waiting-room), a hundred-cabinet arcade
   (`/arcade.js`, `/arcade.css`)
 - `/proof/` — portable receipt, matching key snapshot, and offline command
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
@@ -104,7 +104,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-12`. When you
+query token**: every reference looks like `/styles.css?v=gateway-13`. When you
 change any of those files (including `/wave.js`, `/arcade.js`, and
 `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
@@ -132,71 +132,90 @@ the offline verifier.
 
 This product is built for agents. During the governed loop the human has
 nothing to do, so the landing page's footer offers a way to spend that time:
-`HUMANS: PRESS START` fades the page and opens a full-screen arcade with
-twenty-five cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`, loaded on
+`HUMANS: PRESS START` fades the page and opens a full-screen arcade with one
+hundred cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`, loaded on
 `/` only.
 
 The cabinets are declared in one `CABINETS` table, each with an `id`, a `name`,
-a `genre`, a tagline and a controls line, and each is a failure mode of this
-product's own domain played straight as a game:
+a `genre`, a `family`, a tagline, a controls line and a `pad` layout. Every one
+is a failure mode of this product's own domain played straight as a game, and
+none of them names anybody's franchise — `test_arcade_cabinets_are_generic_and_unbranded`
+fails the build if one ever does.
 
-- `blast-radius` — BLAST RADIUS (FPS): walk the corridors of a permit boundary
-  and deny the unscoped calls wandering it before they reach the tool
-- `hold-the-line` — HOLD THE LINE (FPS): the inverse problem, standing on the
-  boundary itself while calls arrive down four corridors
-- `scope-creep` — SCOPE CREEP (SHOOTER): a descending grid of permission scopes
-  marching toward PRODUCTION
-- `retry-storm` — RETRY STORM (SHOOTER): shooting a duplicate splits it in two,
-  because a retry of a retry is two retries; only the smallest tier clears
-- `token-bucket` — TOKEN BUCKET (ARCADE): the bucket refills on a timer, so the
-  board can never be permanently cleared
-- `double-spend` — DOUBLE SPEND (ARCADE): cross the settlement lanes and get
-  charged exactly once
-- `backpressure` — BACKPRESSURE (PUZZLE): stack arriving work; a completed row
-  is a batch that drains, and reaching the top is your outage
-- `append-only` — APPEND-ONLY (PUZZLE): a ledger that grows and may never cross
-  itself, because crossing itself is rewriting history
-- `nonce-burn` — NONCE BURN (REFLEX): each nonce is good once and not for long;
-  burning a spent cell is a replay
-- `key-rotation` — KEY ROTATION (MAZE): collect the new signing key while the
-  revocation sweepers walk the old one out
-- `tail-latency` — TAIL LATENCY (RUNNER): p50 is the floor and it is fine; the
-  spikes are the tail, and the tail is what users get
-- `race-condition` — RACE CONDITION (DUEL): a rally against an agent that reads
-  your paddle from a stale replica
+**Families, not genres, drive the filter row.** A hundred cabinets carry about
+ninety distinct genres between them; ninety chips would be a worse maze than
+the grid. Nine families shelve them, the stylesheet hangs each family's colour
+and marquee pattern off `data-family`, and the specific genre stays on the tile
+badge.
 
-Thirteen more cover the console genres of the last forty years, one cabinet
-per shape rather than one per franchise — same rule as the twelve above, so
-each is a riff on a genre wearing the vocabulary of this product's own domain:
+**SHOOT** (14) — `aim-drill` AIM DRILL, `artillery` ARTILLERY, `backstop` BACKSTOP, `blast-radius` BLAST RADIUS, `bullet-ledger` BULLET LEDGER, `chokepoint` CHOKEPOINT, `countersign` COUNTERSIGN, `depth-charge` DEPTH CHARGE, `hold-the-line` HOLD THE LINE, `intercept` INTERCEPT, `retry-storm` RETRY STORM, `scope-creep` SCOPE CREEP, `shard-field` SHARD FIELD, `siege-budget` SIEGE BUDGET
 
-- `countersign` — COUNTERSIGN (FPS): the round-based tactical shooter. A rogue
-  crew plants an *unsigned* action on one of two sites and the fuse is its
-  TTL; you either eliminate the crew before the plant lands or stand on the
-  thing and hold the key until it is void. The round is the unit, not the life
-- `happy-path` — HAPPY PATH (PLATFORM): run right along the path the demo
-  took; the gaps are the cases nobody wrote and the flag is a release
-- `least-privilege` — LEAST PRIVILEGE (ADVENTURE): nine rooms a screen at a
-  time, keys that are scoped permits, and a vault that wants two of them
-- `escalation` — ESCALATION (RPG): turn-based, four verbs, and an opponent
-  with more hit points every tier. Escalating works and the audit notices
-- `arbitration` — ARBITRATION (FIGHTING): two parties, one dispute, best of
-  three. Spacing is the subject; blocking chips rather than walls
-- `throughput` — THROUGHPUT (RACING): a circuit on one screen and a time
-  budget that gates extend. Off the road you are throttled, not crashed
-- `side-channel` — SIDE CHANNEL (STEALTH): observers sweep the aisles and one
-  observation is nothing; the suspicion meter is what a side channel really is
-- `cold-storage` — COLD STORAGE (HORROR): a torch-lit archive, replicas that
-  were never collected, and not enough rounds to shoot all of them
-- `block-store` — BLOCK STORE (SANDBOX): dig, carry, place. One key does both
-  verbs, and the wall you stack before dusk is the only policy that works
-- `last-quorum` — LAST QUORUM (ROYALE): the quorum shrinks and outside it you
-  are partitioned; everyone else in the match wants the same middle
-- `heartbeat` — HEARTBEAT (RHYTHM): four lanes of health checks answered on
-  the beat, silent by construction because the page never plays audio
-- `brute-force` — BRUTE FORCE (BRAWLER): a belt-scrolling credential-stuffing
-  run — no cleverness, just volume, and the answer is not being surrounded
-- `catalog` — CATALOG (COLLECT): the estate's unregistered tools, captured by
-  stopping a marker inside the scope that actually fits them
+**ACTION** (11) — `absorb` ABSORB, `arbitration` ARBITRATION, `brute-force` BRUTE FORCE, `cold-storage` COLD STORAGE, `growth` GROWTH, `key-rotation` KEY ROTATION, `last-quorum` LAST QUORUM, `pop-the-queue` POP THE QUEUE, `race-condition` RACE CONDITION, `side-channel` SIDE CHANNEL, `swarm` SWARM
+
+**RUN** (15) — `cavern` CAVERN, `cold-slope` COLD SLOPE, `cold-start` COLD START, `handoff` HANDOFF, `happy-path` HAPPY PATH, `invert` INVERT, `lane-hop` LANE HOP, `mine-cart` MINE CART, `rate-gate` RATE GATE, `scope-match` SCOPE MATCH, `tail-latency` TAIL LATENCY, `thrust-budget` THRUST BUDGET, `tunnel` TUNNEL, `uptime` UPTIME, `wall-jump` WALL JUMP
+
+**PUZZLE** (19) — `append-only` APPEND-ONLY, `backpressure` BACKPRESSURE, `blast-map` BLAST MAP, `bubble-queue` BUBBLE QUEUE, `circuit-route` CIRCUIT ROUTE, `cold-move` COLD MOVE, `grid-proof` GRID PROOF, `idempotency` IDEMPOTENCY, `match-policy` MATCH POLICY, `mate-in-one` MATE IN ONE, `merge-ledger` MERGE LEDGER, `patience` PATIENCE, `pipe-permit` PIPE PERMIT, `quorum-flip` QUORUM FLIP, `reorder` REORDER, `sort-keys` SORT KEYS, `tile-audit` TILE AUDIT, `untangle` UNTANGLE, `word-lock` WORD LOCK
+
+**TIMING** (10) — `cold-path` COLD PATH, `crossfade` CROSSFADE, `double-spend` DOUBLE SPEND, `handshake` HANDSHAKE, `heartbeat` HEARTBEAT, `nonce-burn` NONCE BURN, `replay-order` REPLAY ORDER, `slice-queue` SLICE QUEUE, `tap-order` TAP ORDER, `token-bucket` TOKEN BUCKET
+
+**MANAGE** (15) — `block-store` BLOCK STORE, `bridge-build` BRIDGE BUILD, `catalog` CATALOG, `drop-stack` DROP STACK, `factory-line` FACTORY LINE, `harvest-window` HARVEST WINDOW, `lift-sla` LIFT SLA, `long-poll` LONG POLL, `on-call` ON CALL, `pet-agent` PET AGENT, `route-table` ROUTE TABLE, `service-menu` SERVICE MENU, `spin-plates` SPIN PLATES, `tap-forge` TAP FORGE, `ticket-queue` TICKET QUEUE
+
+**SPORT** (9) — `bank-shot` BANK SHOT, `breaker` BREAKER, `checkout` CHECKOUT, `draw-weight` DRAW WEIGHT, `one-under` ONE UNDER, `spot-kick` SPOT KICK, `strike-quota` STRIKE QUOTA, `swish-rate` SWISH RATE, `tilt` TILT
+
+**DRIVE** (4) — `drift-queue` DRIFT QUEUE, `orbital` ORBITAL, `soft-landing` SOFT LANDING, `throughput` THROUGHPUT
+
+**QUEST** (3) — `deck-of-scopes` DECK OF SCOPES, `escalation` ESCALATION, `least-privilege` LEAST PRIVILEGE
+
+Each cabinet also declares the touch layout it wants. The layouts are named
+after the *inputs a cabinet reads* rather than its genre — `dpad+fire`,
+`lr+fire`, `ud+fire`, `dpad`, `lr`, `ud`, `lanes`, `tap` — so two cabinets that
+read the same keys always feel the same under a thumb.
+`test_arcade_pads_are_layouts_the_shell_can_build` checks each one against the
+layouts the shell can actually build, and cross-checks the pad against the
+controls line in both directions: a cabinet naming SPACE must have an action
+key, and one that never mentions the vertical arrows must not be given them.
+
+## The cabinet toolkit
+
+Twenty-five cabinets could each hand-roll their own `fillRect` calls; a hundred
+cannot. Four shared pieces carry the visuals, and every cabinet after the first
+twenty-five is built out of them:
+
+- **Sprites** are authored as rows of characters (`.` transparent, everything
+  else a palette index) and compiled once into horizontal runs. A 16x16 sprite
+  is about 40 fill calls instead of 256, which at twenty sprites a frame is the
+  difference between a cabinet and a slideshow. Palette entries name ink keys
+  rather than hex, so everything drawn through them follows the high-contrast
+  switch for free.
+- **Particles** come from one fixed pool per cabinet, reused round-robin. A
+  system that allocates per emit is the easiest way to make a fixed-timestep
+  canvas stutter every few seconds when the collector runs.
+- **`fx`** carries shake, colour flash, hitstop and floating numbers. All four
+  are suppressed under reduced motion — shake in particular is exactly the
+  involuntary movement that preference exists to stop.
+- **Backdrops**: starfield, parallax bands, horizon grid and a chunky vignette.
+  A cabinet drawn on flat `bg` reads as a prototype no matter how good its
+  sprites are.
+
+## Touch controls
+
+The arcade shipped keyboard-first with a pointer bolted on. On a phone the
+finger covers the thing it is steering, and a swipe latch cannot express "hold
+left while firing" — which most of this roster needs. There is now a real
+button pad under the screen:
+
+- Buttons are **held, not tapped**, with the pointer captured so a finger that
+  slides off a key still releases it. A stuck direction is the worst bug this
+  layer can have.
+- They are real `<button>`s, so a keyboard or switch user can reach them; a
+  click (no pointer sequence) pulses the slot for a few simulation steps the
+  way a canvas tap already does.
+- The pad defaults **on** for coarse pointers, remembers the choice in
+  `localStorage`, and can be toggled by anyone. Every cabinet stays fully
+  playable on the arrows and space.
+- Targets are 3.5rem (56px), well over the 44px floor, and the pad sits under
+  the screen rather than over it. Portrait phones cap the canvas at `46dvh` so
+  the whole stage fits without the mobile browser chrome cropping the pad.
 
 The three first-person cabinets share one raycast engine — a grid map, a DDA per
 column, and billboarded sprites resolved against a per-column depth buffer, so
@@ -291,7 +310,7 @@ select screen — and `window.__amwArcade` exposes
 can advance the simulation deterministically instead of racing a frame budget.
 Use `aim()` rather than `press()` for the pointer: `pointerX`/`pointerY` hold a
 number or `null`, and coercing them to booleans pins a cabinet's player at the
-clamp floor. Cabinet ids are the twenty-five listed above.
+clamp floor. Cabinet ids are the hundred listed above.
 
 ## Typography
 
