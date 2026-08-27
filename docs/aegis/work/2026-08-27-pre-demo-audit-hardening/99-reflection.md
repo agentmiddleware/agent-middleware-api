@@ -47,7 +47,7 @@ The highest defensible status at this checkpoint is `needs-verification`: local 
 ## Workspace Integrity
 
 - Work record: `docs/aegis/work/2026-08-27-pre-demo-audit-hardening/` contains intent, checkpoint, evidence, and reflection artifacts.
-- Target root: `/Users/sellers/Documents/GitHub/agent-middleware-api-pre-demo-hardening`.
+- Target root: task-owned checkout (absolute path omitted).
 - Structural result: manually inspected. No configured or installed `aegis-workspace.py` helper was found, so helper-backed bundle and structure checks were unavailable.
 - Boundary: these records are advisory continuity evidence; they do not prove semantic correctness, authorize release, or replace CI and production checks.
 

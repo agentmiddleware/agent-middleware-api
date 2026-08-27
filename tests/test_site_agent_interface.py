@@ -114,7 +114,7 @@ class _VisibleFaqExtractor(HTMLParser):
             self._parts = []
 
     def handle_data(self, data: str) -> None:
-        if self._collecting is not None:
+        if self._collecting is not None and self._nested_dl_depth == 0:
             self._parts.append(data)
 
 
@@ -342,12 +342,15 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     for suffix in PROVIDER_HOST_SUFFIXES:
         assert suffix not in llm_txt
 
-    assert "| 401 | Missing or invalid bearer authentication |" in api_llm_txt
+    assert (
+        "| 401 | Missing credentials, a malformed or too-short API key, or "
+        "invalid bearer authentication. |" in api_llm_txt
+    )
     assert (
         "| 403 | API key rejected, or an authenticated caller lacks required "
         "wallet/tenant, administrator, policy, or ACL access. |" in api_llm_txt
     )
-    assert "Missing or invalid API key" not in api_llm_txt
+    assert "| 401 | Missing or invalid bearer authentication |" not in api_llm_txt
     assert "Access denied (cross-tenant)" not in api_llm_txt
 
 
@@ -801,6 +804,13 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
     visible_faq = _VisibleFaqExtractor()
     visible_faq.feed(markup)
     visible_faq.close()
+    nested_faq = _VisibleFaqExtractor()
+    nested_faq.feed(
+        '<dl class="faq-list"><dt>Top?</dt><dd>Outer '
+        "<dl><dt>Nested?</dt><dd>Hidden</dd></dl> tail.</dd></dl>"
+    )
+    nested_faq.close()
+    assert nested_faq.items == [("dt", "Top?"), ("dd", "Outer tail.")]
     expected_tags = [tag for _ in questions for tag in ("dt", "dd")]
     assert [tag for tag, _ in visible_faq.items] == expected_tags
     visible_pairs = [
