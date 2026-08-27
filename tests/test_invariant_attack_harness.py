@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import io
 import sys
 import threading
@@ -14,11 +15,232 @@ import pytest
 ATTACK_DIR = Path(__file__).resolve().parents[1] / "scripts" / "invariant_attacks"
 sys.path.insert(0, str(ATTACK_DIR))
 
+from attacklib import verdict_exit_code  # noqa: E402
+
 import attack4_forgery as attack4  # noqa: E402
 import attack5_crash_sqlite as attack5  # noqa: E402
 import attack6_key_misuse as attack6  # noqa: E402
 import attack_combined as combined  # noqa: E402
 import redact_evidence as redactor  # noqa: E402
+
+
+def _nodes_without_nested_scopes(node: ast.AST) -> list[ast.AST]:
+    nodes = [node]
+    if isinstance(
+        node,
+        (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef),
+    ):
+        return nodes
+    for child in ast.iter_child_nodes(node):
+        nodes.extend(_nodes_without_nested_scopes(child))
+    return nodes
+
+
+def _is_namespaced_call(node: ast.AST | None, namespace: str, function: str) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == namespace
+        and node.func.attr == function
+    )
+
+
+def _printed_evidence(statement: ast.stmt) -> ast.AST | None:
+    if not (
+        isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+        and statement.value.func.id == "print"
+        and len(statement.value.args) == 1
+        and not statement.value.keywords
+    ):
+        return None
+    serialized = statement.value.args[0]
+    if not (_is_namespaced_call(serialized, "json", "dumps") and serialized.args):
+        return None
+    return serialized.args[0]
+
+
+def _written_evidence(statement: ast.stmt) -> ast.AST | None:
+    if not isinstance(statement, ast.With):
+        return None
+
+    matches: list[ast.AST] = []
+    for item in statement.items:
+        opened = item.context_expr
+        if not (
+            isinstance(opened, ast.Call)
+            and isinstance(opened.func, ast.Name)
+            and opened.func.id == "open"
+            and opened.args
+            and isinstance(item.optional_vars, ast.Name)
+        ):
+            continue
+        mode = (
+            opened.args[1]
+            if len(opened.args) > 1
+            else next(
+                (keyword.value for keyword in opened.keywords if keyword.arg == "mode"),
+                None,
+            )
+        )
+        if not (isinstance(mode, ast.Constant) and mode.value == "w"):
+            continue
+
+        for body_statement in statement.body:
+            if not (
+                isinstance(body_statement, ast.Expr)
+                and _is_namespaced_call(body_statement.value, "json", "dump")
+            ):
+                continue
+            dumped = body_statement.value
+            if not (
+                len(dumped.args) >= 2
+                and isinstance(dumped.args[1], ast.Name)
+                and dumped.args[1].id == item.optional_vars.id
+            ):
+                continue
+            matches.append(dumped.args[0])
+
+    return matches[0] if len(matches) == 1 else None
+
+
+def _is_main_guard(test: ast.AST) -> bool:
+    if not (
+        isinstance(test, ast.Compare)
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Eq)
+        and len(test.comparators) == 1
+    ):
+        return False
+    operands = (test.left, test.comparators[0])
+    return (
+        isinstance(operands[0], ast.Name)
+        and operands[0].id == "__name__"
+        and isinstance(operands[1], ast.Constant)
+        and operands[1].value == "__main__"
+    ) or (
+        isinstance(operands[1], ast.Name)
+        and operands[1].id == "__name__"
+        and isinstance(operands[0], ast.Constant)
+        and operands[0].value == "__main__"
+    )
+
+
+@pytest.mark.parametrize(
+    ("verdict", "expected"),
+    [
+        ("HELD", 0),
+        ("BROKE", 1),
+        ("PARTIAL", 1),
+        ("UNKNOWN", 1),
+        ("held", 1),
+        ("", 1),
+        (None, 1),
+    ],
+)
+def test_verdict_exit_code_fails_closed(verdict: str | None, expected: int) -> None:
+    assert verdict_exit_code(verdict) == expected  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "attack1_double_charge.py",
+        "attack2_budget.py",
+        "attack3_scope.py",
+        "attack4_forgery.py",
+    ],
+)
+def test_attack_main_returns_shared_verdict_exit_code(script_name: str) -> None:
+    tree = ast.parse((ATTACK_DIR / script_name).read_text(encoding="utf-8"))
+    main_candidates = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "main"
+    ]
+    assert len(main_candidates) == 1
+    main = main_candidates[0]
+    assert isinstance(main, ast.FunctionDef)
+
+    final_statement = main.body[-1]
+    assert isinstance(final_statement, ast.Return)
+    assert ast.dump(final_statement.value) == ast.dump(
+        ast.Call(
+            func=ast.Attribute(
+                value=ast.Name(id="A", ctx=ast.Load()),
+                attr="verdict_exit_code",
+                ctx=ast.Load(),
+            ),
+            args=[ast.Name(id="verdict", ctx=ast.Load())],
+            keywords=[],
+        )
+    )
+
+    main_scope = [
+        node
+        for statement in main.body
+        for node in _nodes_without_nested_scopes(statement)
+    ]
+    assert [node for node in main_scope if isinstance(node, ast.Return)] == [
+        final_statement
+    ]
+    assert not any(isinstance(node, (ast.Yield, ast.YieldFrom)) for node in main_scope)
+    assert not any(_is_namespaced_call(node, "sys", "exit") for node in main_scope)
+
+    printed = [
+        (index, payload)
+        for index, statement in enumerate(main.body[:-1])
+        if (payload := _printed_evidence(statement)) is not None
+    ]
+    written = [
+        (index, payload)
+        for index, statement in enumerate(main.body[:-1])
+        if (payload := _written_evidence(statement)) is not None
+    ]
+    assert len(printed) == 1
+    print_index, printed_payload = printed[0]
+    matching_writes = [
+        (index, payload)
+        for index, payload in written
+        if ast.dump(payload) == ast.dump(printed_payload)
+    ]
+    assert len(matching_writes) == 1
+    write_index, _written_payload = matching_writes[0]
+    assert print_index < write_index < len(main.body) - 1
+
+    guards = [
+        (index, node)
+        for index, node in enumerate(tree.body)
+        if isinstance(node, ast.If) and _is_main_guard(node.test)
+    ]
+    assert len(guards) == 1
+    guard_index, guard = guards[0]
+    assert guard_index == len(tree.body) - 1
+    assert guard_index > tree.body.index(main)
+    assert guard.orelse == []
+    assert len(guard.body) == 1
+    assert ast.dump(guard.body[0]) == ast.dump(
+        ast.Expr(
+            value=ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id="sys", ctx=ast.Load()),
+                    attr="exit",
+                    ctx=ast.Load(),
+                ),
+                args=[
+                    ast.Call(
+                        func=ast.Name(id="main", ctx=ast.Load()),
+                        args=[],
+                        keywords=[],
+                    )
+                ],
+                keywords=[],
+            )
+        )
+    )
 
 
 def test_combined_requires_every_storm_variant_to_start() -> None:

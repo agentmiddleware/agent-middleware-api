@@ -70,9 +70,10 @@ with a different payload fails closed.
 
 ## ASI03 — Agent Identity & Privilege Abuse
 
-**Posture: enforced for DB-backed wallet keys.** A DB-issued key (stored
-hashed, compared constant-time in `app/core/auth.py`) is scoped to exactly
-one wallet: cross-tenant reads and invokes return 403, and
+**Posture: enforced for DB-backed wallet keys.** A DB-issued key (stored as a
+SHA-256 hash, with fixed-length digests compared constant-time by
+`APIKeyService.validate_key` in `app/services/api_key_service.py`) is scoped to
+exactly one wallet: cross-tenant reads and invokes return 403, and
 rotation/replacement keys inherit their parents' bounds rather than
 escalating. Bootstrap-admin keys (`VALID_API_KEYS`, `STATIC_DEV_API_KEYS`)
 are the intentional exception: `AuthContext.require_wallet_access`

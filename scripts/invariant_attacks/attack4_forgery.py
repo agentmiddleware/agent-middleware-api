@@ -176,6 +176,7 @@ def main():
     print(json.dumps(ev, indent=2, default=str))
     with open("evidence_attack4.json", "w") as fh:
         json.dump(ev, fh, indent=2, default=str)
+    return A.verdict_exit_code(verdict)
 
 
 if __name__ == "__main__":

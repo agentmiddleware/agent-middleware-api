@@ -94,12 +94,14 @@ def main():
     ok_1b = (A.reason_of(conflict) == "idempotency_key_reused"
              and (notes2 - notes1) == 0
              and float(led2["period_debits_exact"]) == 2.0)
-    evidence["verdict"] = "HELD" if (ok_1a and ok_1b) else "BROKE"
+    verdict = "HELD" if (ok_1a and ok_1b) else "BROKE"
+    evidence["verdict"] = verdict
     evidence["checks"] = {"parallel_single_charge": ok_1a, "conflict_rejected_no_charge": ok_1b}
 
     print(json.dumps(evidence, indent=2, default=str))
     with open("evidence_attack1.json", "w") as fh:
         json.dump(evidence, fh, indent=2, default=str)
+    return A.verdict_exit_code(verdict)
 
 if __name__ == "__main__":
     sys.exit(main())
