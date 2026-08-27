@@ -447,12 +447,12 @@
           </dd>
           <dt>Does exactly-once hold all the way to my tool?</dt>
           <dd>
-            At our boundary, yes: one accepted idempotency key produces one
-            dispatch, one debit, one receipt. Whether your <em>upstream</em>
-            tool's own side effect happens exactly once depends on whether that
-            tool honors the forwarded key. When the outcome after dispatch is
-            genuinely unknowable, we mark it uncertain and route it to manual
-            review rather than guessing.
+            At our boundary: one accepted idempotency key maps to at most one
+            gateway dispatch and debit plus one terminal receipt. Whether your
+            <em>upstream</em> tool's own side effect happens exactly once depends
+            on whether that tool honors the forwarded key. When the outcome
+            after dispatch is genuinely unknowable, we mark it uncertain and
+            route it to manual review rather than guessing.
           </dd>
         </dl>
         <p class="machine-note">

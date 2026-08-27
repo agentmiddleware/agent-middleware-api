@@ -844,6 +844,20 @@ def test_faq_structured_data_is_generated_from_the_visible_answers(tmp_path) -> 
         assert stale_claim not in text
         assert stale_claim not in production_answer
 
+    exactly_once_answer = next(
+        entry["acceptedAnswer"]["text"]
+        for entry in questions
+        if entry["name"] == "Does exactly-once hold all the way to my tool?"
+    )
+    canonical_boundary = (
+        "At our boundary: one accepted idempotency key maps to at most one "
+        "gateway dispatch and debit plus one terminal receipt."
+    )
+    assert canonical_boundary in text
+    assert canonical_boundary in exactly_once_answer
+    assert "produces one dispatch, one debit, one receipt" not in text
+    assert "produces one dispatch, one debit, one receipt" not in exactly_once_answer
+
 
 def test_every_indexable_page_is_canonical_localized_and_in_the_sitemap(
     tmp_path,
