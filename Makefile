@@ -107,18 +107,21 @@ trust-coverage-gate:
 trust-release-gate:
 	scripts/trust_release_gate.sh
 
-# Live invariant suites. Both provision real rows on the target deployment,
-# so point them at staging unless you intend to write test data to production.
+# Live invariant suites target an operator-selected deployment. The conformance
+# suite provisions persistent test rows and has no cleanup, so use staging unless
+# you intend to retain that data on the selected target.
 #
 # trust-conformance-live asserts the invariants the product sells against a
 # running instance: golden path, sequential replay, 15-way identical concurrent
 # admission with safe in-progress responses, post-completion replay,
 # idempotency-key conflict on a changed payload, budget denial, expired and
 # forged permits, receipt and audit-chain verification, and tenant isolation.
-# Requires AGENT_MIDDLEWARE_API_KEY (a bootstrap/admin key). Set
-# AGENT_MIDDLEWARE_API_URL — it otherwise defaults to the production host.
+# Requires AGENT_MIDDLEWARE_API_KEY (a bootstrap/admin key) plus either an
+# explicit AGENT_MIDDLEWARE_API_URL or `TRUST_CONFORMANCE_ARGS="--api-url ..."`.
+# The canonical production origin also requires `--confirm-production` in
+# TRUST_CONFORMANCE_ARGS.
 trust-conformance-live:
-	uv run --with-requirements requirements.txt python scripts/trust_plane_conformance.py
+	uv run --with-requirements requirements.txt python scripts/trust_plane_conformance.py $(TRUST_CONFORMANCE_ARGS)
 
 # adversarial-battery-live probes a deployment you operate for wallet
 # isolation, invalid keys, forged receipts, permit key binding, expired

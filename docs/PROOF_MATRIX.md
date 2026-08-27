@@ -183,11 +183,16 @@ same five claims are reachable and checkable from the published docs alone.
 
 ## Live suites (against a deployment you operate)
 
-Both write real rows to the target. Point them at staging.
+`trust_plane_conformance.py` and `stress_test_live.py` write persistent test
+data to the selected target and have no cleanup. Point them at staging unless
+you intend to retain those wallets, permits, receipts, and keys. Neither script
+has a default target: pass `--api-url` or explicitly set
+`AGENT_MIDDLEWARE_API_URL`. The canonical production origin additionally
+requires `--confirm-production`.
 
 | Command | Proves | Requires |
 |---|---|---|
-| `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | `AGENT_MIDDLEWARE_API_KEY`; set `AGENT_MIDDLEWARE_API_URL` or it defaults to production |
+| `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | Environment-only `AGENT_MIDDLEWARE_API_KEY`; explicit `AGENT_MIDDLEWARE_API_URL` or `TRUST_CONFORMANCE_ARGS="--api-url https://..."`; add `--confirm-production` to the args for the canonical production origin |
 | `python scripts/constant_test_loop.py` | Scoped permit sized from the tool's advertised `creditsPerCall`; governed invoke; signed success receipt with a ledger entry; replay returning the same `receipt_id` with no second debit; an out-of-scope but genuinely registered tool refused with `permit_tool_not_allowed` and charged nothing | `CI_SMOKE_AGENT_KEY` holding a **wallet-scoped** key (self-provisions on loopback when absent); `--tool` and `--tool-args` required off loopback |
 | `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency; always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
 

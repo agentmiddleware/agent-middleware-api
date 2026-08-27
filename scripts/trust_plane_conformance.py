@@ -22,21 +22,26 @@ What it verifies
 
 Blast radius
 ------------
-Read-only plus creates-test-data (wallets, permits, receipts, one scoped API
-key), all tagged with a per-run id. It never mutates or deletes pre-existing
-data. Point it at staging unless you intend to write test data to production.
+Creates persistent test data (wallets, permits, receipts, and one scoped API
+key), all tagged with a per-run id. The suite has no cleanup and never deletes
+pre-existing data. Point it at staging unless you intend to retain its test
+data in production.
 
 Usage
 -----
     export AGENT_MIDDLEWARE_API_KEY=...          # a bootstrap/admin key
-    export AGENT_MIDDLEWARE_API_URL=https://...  # optional; defaults to prod
+    export AGENT_MIDDLEWARE_API_URL=https://...  # required unless --api-url is set
     python scripts/trust_plane_conformance.py
+
+Pass ``--confirm-production`` when intentionally targeting the canonical
+production origin. Remote targets require HTTPS; loopback targets may use HTTP.
 
 The key is never defaulted or hardcoded; the suite exits if it is missing.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import sys
@@ -46,9 +51,13 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-DEFAULT_API_URL = "https://api.thisisatest.tech"
-API_URL = os.environ.get("AGENT_MIDDLEWARE_API_URL", DEFAULT_API_URL)
-API_KEY = os.environ.get("AGENT_MIDDLEWARE_API_KEY", "")
+if __package__:
+    from .live_script_target import LiveTargetError, resolve_live_target
+else:
+    from live_script_target import LiveTargetError, resolve_live_target
+
+API_URL = ""
+API_KEY = ""
 
 # Per-run namespace so the suite is re-runnable: fixed Idempotency-Keys would
 # otherwise replay a previous run's cached responses instead of re-testing.
@@ -406,14 +415,42 @@ async def run(c: httpx.AsyncClient, s: Suite) -> None:
     )
 
 
-async def main() -> int:
-    if not API_KEY:
+async def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run live trust-plane conformance checks against an explicit target."
+    )
+    parser.add_argument(
+        "--api-url",
+        help="API origin; overrides AGENT_MIDDLEWARE_API_URL",
+    )
+    parser.add_argument(
+        "--confirm-production",
+        action="store_true",
+        help="confirm intentional use of https://api.thisisatest.tech",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        api_url = resolve_live_target(
+            args.api_url,
+            confirm_production=args.confirm_production,
+        )
+    except LiveTargetError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+
+    api_key = (os.environ.get("AGENT_MIDDLEWARE_API_KEY") or "").strip()
+    if not api_key:
         print(
             "AGENT_MIDDLEWARE_API_KEY is not set. Export a key for the target "
             "deployment before running; credentials are never hardcoded.",
             file=sys.stderr,
         )
         return 2
+
+    global API_KEY, API_URL
+    API_URL = api_url
+    API_KEY = api_key
 
     s = Suite()
     print("=" * 64)
