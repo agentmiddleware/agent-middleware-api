@@ -1563,9 +1563,10 @@ def test_social_card_renderer_refuses_unusable_chromium(
     with pytest.raises(render_error, match="could not start"):
         renderer["render"](str(garbage), tmp_path / "card.png")
 
-    # A renderer that exits nonzero without writing a screenshot is too.
+    # Python is guaranteed to be executable and rejects Chromium-only flags,
+    # exercising a nonzero renderer exit without relying on a platform path.
     with pytest.raises(render_error, match="screenshot failed"):
-        renderer["render"]("/bin/false", tmp_path / "card.png")
+        renderer["render"](sys.executable, tmp_path / "card.png")
 
 
 def _anchor_texts_and_hrefs(markup: str) -> list[tuple[str, str]]:
