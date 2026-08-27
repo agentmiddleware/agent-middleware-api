@@ -11,6 +11,21 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🧹 One supported production configuration path
+
+- **Retired `.env.production` and `docker-compose.prod.yml`.** The tracked
+  templates were not used by Railway and no longer satisfied the production
+  trust contract: they omitted signing material, migrations, exact build
+  provenance, and the supported private-service posture. Production now has
+  one documented source of truth: the repository Dockerfile deployed from an
+  exact SHA with configuration and secrets held in Railway service variables.
+- **Regression coverage keeps production-looking secret files out of the
+  repository.** The retired paths are ignored, the onboarding contract pins
+  their absence, and committed `railway.json` variables are restricted to the
+  three non-secret defaults required by the supported deployment path. The
+  remaining Compose file is explicitly local-development-only and no longer
+  advertises a commented production stack.
+
 ### 🔎 `permit verify` names missing action context, and the live loop proves it
 
 - **`POST /v1/permits/verify` asked without `wallet_id` or `tool` no longer

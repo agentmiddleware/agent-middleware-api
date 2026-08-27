@@ -1,5 +1,7 @@
 version: "3.9"
 
+# Local development only. This stack runs with debug hot reload; production
+# uses the exact-SHA Railway path in docs/deploy-railway.md.
 services:
   api:
     build: .
@@ -17,32 +19,3 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-  # --- Production additions (uncomment when ready) ---
-
-  # mqtt-broker:
-  #   image: eclipse-mosquitto:2
-  #   ports:
-  #     - "1883:1883"
-  #     - "9001:9001"
-  #   volumes:
-  #     - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-
-  # postgres:
-  #   image: postgres:16-alpine
-  #   environment:
-  #     POSTGRES_DB: middleware
-  #     POSTGRES_USER: middleware
-  #     POSTGRES_PASSWORD: changeme
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-
-# volumes:
-#   pgdata:

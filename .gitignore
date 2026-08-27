@@ -27,6 +27,7 @@ uv.lock
 .env
 .env.local
 .env.*.local
+/.env.production
 *.pem
 *.key
 
@@ -57,8 +58,8 @@ Thumbs.db
 # Docker
 *.log
 .vercel/
+/docker-compose.prod.yml
 
 # Agent tooling scratch: throwaway git worktrees used to run checks in
-# isolation. Full repo copies (including .env.production and coverage
-# artifacts) — never commit these.
+# isolation. Full repo copies and coverage artifacts — never commit these.
 .claude/worktrees/

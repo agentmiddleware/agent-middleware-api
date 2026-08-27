@@ -127,11 +127,18 @@ async def client():
 
 
 @pytest.mark.production_trust
-def test_railway_json_has_no_change_me_api_key_default():
+def test_railway_json_has_no_change_me_api_key_default() -> None:
+    """Committed Railway defaults must contain no secret-shaped settings."""
+
     raw = RAILWAY_JSON.read_text(encoding="utf-8")
     assert "change-me" not in raw.lower()
     data = json.loads(raw)
     variables = data.get("variables") or {}
+    assert set(variables) == {
+        "STATE_BACKEND",
+        "PUBLIC_URL",
+        "ENABLE_PROOF_SURFACES",
+    }, "committed Railway defaults must stay non-secret and minimal"
     assert "VALID_API_KEYS" not in variables
     assert variables.get("STATE_BACKEND") == "postgres"
     assert variables.get("PUBLIC_URL", "").startswith("https://")

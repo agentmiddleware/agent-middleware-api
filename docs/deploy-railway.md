@@ -79,6 +79,12 @@ and must fail the post-deploy parity gate.
 Railway uses `railway.json` → `build.builder = DOCKERFILE`. That is the only
 supported production image path for this project.
 
+The repository intentionally does not ship `.env.production` or
+`docker-compose.prod.yml`. `.env.example` is the local-development template
+and configuration reference, not a production credential file. Production
+values belong in Railway service variables or an external secret vault, and
+secret files must not be kept in the release checkout.
+
 The canonical public origin for the existing first-party instance is
 `https://api.thisisatest.tech`; a customer pilot uses its manifest's unique
 domain instead. Railway's

@@ -8,6 +8,7 @@ gates. These are cheap to re-break in a docs edit, so they are pinned.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -235,32 +236,35 @@ def test_repo_guardian_only_invokes_scripts_that_exist() -> None:
     )
 
 
-def test_production_env_template_is_production_like() -> None:
-    """`.env.production` must set ENVIRONMENT.
+def test_repo_does_not_ship_stale_production_config_paths() -> None:
+    """Railway variables plus the Dockerfile are the only production path.
 
-    `Settings.ENVIRONMENT` defaults to "local", which
-    `is_production_like_environment()` treats as NOT production-like — so
-    omitting it silently disables every production trust guardrail.
+    The retired files looked authoritative but could not satisfy the current
+    production trust contract. Keep them absent and ignored so operators do
+    not revive a second, unsafe source of production configuration.
     """
 
-    from app.core.trust_mode import is_production_like_environment
+    retired = (".env.production", "docker-compose.prod.yml")
+    for name in retired:
+        assert not (REPO_ROOT / name).exists(), f"retired artifact returned: {name}"
+        ignore_check = subprocess.run(
+            ["git", "check-ignore", "--no-index", "--quiet", name],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert ignore_check.returncode == 0, f"retired artifact is not ignored: {name}"
 
-    env_production = REPO_ROOT / ".env.production"
-    assert env_production.is_file()
+    deploy_sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
+    assert "does not ship `.env.production` or" in deploy_sop
+    assert "`docker-compose.prod.yml`" in deploy_sop
 
-    values = {}
-    for raw in env_production.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
-
-    assert "ENVIRONMENT" in values, ".env.production must set ENVIRONMENT explicitly"
-    assert is_production_like_environment(values["ENVIRONMENT"]), (
-        f"ENVIRONMENT={values['ENVIRONMENT']!r} is not production-like, so the "
-        "production trust guardrails would not engage"
-    )
+    local_compose = (REPO_ROOT / "docker-compose.yml").read_text()
+    assert "Local development only" in local_compose
+    assert "docs/deploy-railway.md" in local_compose
+    assert "Production additions" not in local_compose
+    assert "POSTGRES_PASSWORD: changeme" not in local_compose
 
 
 # --- Runnable examples -----------------------------------------------------
