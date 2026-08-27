@@ -437,10 +437,13 @@
           </dd>
           <dt>Is this production-ready?</dt>
           <dd>
-            Production beta, not production complete. There is one server, one
-            database, and one operator-held signing key — no replicas and no
-            consensus. The supported posture is vendor-managed and
-            single-tenant. Read the security limitations before deciding.
+            Production beta, not production complete. The supported beta is
+            vendor-managed and dedicated per customer: each customer receives
+            separate API, PostgreSQL, Redis, signing material, and administrator
+            resources. It is not a shared multi-tenant SaaS, and optional
+            proof-surface routers are outside the supported production posture.
+            There are no replicas or consensus. Read the security limitations
+            before deciding.
           </dd>
           <dt>Does exactly-once hold all the way to my tool?</dt>
           <dd>
