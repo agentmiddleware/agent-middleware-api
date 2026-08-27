@@ -45,7 +45,7 @@ Open `http://127.0.0.1:8765/`.
   Hovering a governed-loop card or the booking CTA fires a pulse through
   the field. Reduced motion renders one still frame per field state;
   high contrast hides the field entirely. The footer opens
-  [the waiting room](#the-waiting-room), a twelve-cabinet arcade
+  [the waiting room](#the-waiting-room), a twenty-five-cabinet arcade
   (`/arcade.js`, `/arcade.css`)
 - `/proof/` — portable receipt, matching key snapshot, and offline command
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
@@ -104,7 +104,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-11`. When you
+query token**: every reference looks like `/styles.css?v=gateway-12`. When you
 change any of those files (including `/wave.js`, `/arcade.js`, and
 `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
@@ -132,8 +132,8 @@ the offline verifier.
 
 This product is built for agents. During the governed loop the human has
 nothing to do, so the landing page's footer offers a way to spend that time:
-`HUMANS: PRESS START` fades the page and opens a full-screen arcade with twelve
-cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`, loaded on
+`HUMANS: PRESS START` fades the page and opens a full-screen arcade with
+twenty-five cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`, loaded on
 `/` only.
 
 The cabinets are declared in one `CABINETS` table, each with an `id`, a `name`,
@@ -165,7 +165,40 @@ product's own domain played straight as a game:
 - `race-condition` — RACE CONDITION (DUEL): a rally against an agent that reads
   your paddle from a stale replica
 
-The two first-person cabinets share one raycast engine — a grid map, a DDA per
+Thirteen more cover the console genres of the last forty years, one cabinet
+per shape rather than one per franchise — same rule as the twelve above, so
+each is a riff on a genre wearing the vocabulary of this product's own domain:
+
+- `countersign` — COUNTERSIGN (FPS): the round-based tactical shooter. A rogue
+  crew plants an *unsigned* action on one of two sites and the fuse is its
+  TTL; you either eliminate the crew before the plant lands or stand on the
+  thing and hold the key until it is void. The round is the unit, not the life
+- `happy-path` — HAPPY PATH (PLATFORM): run right along the path the demo
+  took; the gaps are the cases nobody wrote and the flag is a release
+- `least-privilege` — LEAST PRIVILEGE (ADVENTURE): nine rooms a screen at a
+  time, keys that are scoped permits, and a vault that wants two of them
+- `escalation` — ESCALATION (RPG): turn-based, four verbs, and an opponent
+  with more hit points every tier. Escalating works and the audit notices
+- `arbitration` — ARBITRATION (FIGHTING): two parties, one dispute, best of
+  three. Spacing is the subject; blocking chips rather than walls
+- `throughput` — THROUGHPUT (RACING): a circuit on one screen and a time
+  budget that gates extend. Off the road you are throttled, not crashed
+- `side-channel` — SIDE CHANNEL (STEALTH): observers sweep the aisles and one
+  observation is nothing; the suspicion meter is what a side channel really is
+- `cold-storage` — COLD STORAGE (HORROR): a torch-lit archive, replicas that
+  were never collected, and not enough rounds to shoot all of them
+- `block-store` — BLOCK STORE (SANDBOX): dig, carry, place. One key does both
+  verbs, and the wall you stack before dusk is the only policy that works
+- `last-quorum` — LAST QUORUM (ROYALE): the quorum shrinks and outside it you
+  are partitioned; everyone else in the match wants the same middle
+- `heartbeat` — HEARTBEAT (RHYTHM): four lanes of health checks answered on
+  the beat, silent by construction because the page never plays audio
+- `brute-force` — BRUTE FORCE (BRAWLER): a belt-scrolling credential-stuffing
+  run — no cleverness, just volume, and the answer is not being surrounded
+- `catalog` — CATALOG (COLLECT): the estate's unregistered tools, captured by
+  stopping a marker inside the scope that actually fits them
+
+The three first-person cabinets share one raycast engine — a grid map, a DDA per
 column, and billboarded sprites resolved against a per-column depth buffer, so
 an enemy behind a wall corner is clipped column by column rather than
 all-or-nothing. Firing is **hitscan**: at this resolution a travelling bullet
@@ -258,7 +291,7 @@ select screen — and `window.__amwArcade` exposes
 can advance the simulation deterministically instead of racing a frame budget.
 Use `aim()` rather than `press()` for the pointer: `pointerX`/`pointerY` hold a
 number or `null`, and coercing them to booleans pins a cabinet's player at the
-clamp floor. Cabinet ids are the twelve listed above.
+clamp floor. Cabinet ids are the twenty-five listed above.
 
 ## Typography
 
