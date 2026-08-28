@@ -85,6 +85,9 @@ async def test_initialize_negotiates_requested_protocol(client, standard_mcp_ena
     assert result["protocolVersion"] == "2025-03-26"
     assert result["capabilities"]["tools"] == {"listChanged": False}
     assert result["serverInfo"]["name"] == McpGenerator.MANIFEST_NAME
+    assert "Transaction-integrity boundary" in result["instructions"]
+    assert "delivery_uncertain" in result["instructions"]
+    assert "legacy compatibility identifier" in result["instructions"]
 
 
 @pytest.mark.anyio

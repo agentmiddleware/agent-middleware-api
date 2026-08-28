@@ -10,6 +10,10 @@ Endpoints:
 from fastapi import APIRouter
 
 from ..core.config import get_settings
+from ..core.product_positioning import (
+    LEGACY_PRODUCT_WEDGE,
+    get_product_positioning,
+)
 from .well_known import get_agent_first_metadata
 
 router = APIRouter(
@@ -26,13 +30,10 @@ _TRUST_PLANE_SECTIONS = [
     },
     {
         "id": "wedge",
-        "title": "Product wedge",
+        "title": "Transaction-integrity boundary",
         "path": "/WEDGE.md",
         "content_type": "text/markdown",
-        "summary": (
-            "At-most-one gateway dispatch and debit per accepted idempotency "
-            "key for a configured upstream MCP tool."
-        ),
+        "summary": "Transaction integrity for consequential autonomous actions.",
     },
     {
         "id": "security_limitations",
@@ -97,7 +98,7 @@ _TRUST_PLANE_SECTIONS = [
 _TRUST_PLANE_SERVICES = [
     {
         "id": "agent-billing",
-        "name": "Wallet metering",
+        "name": "Configured authority consumption",
         "base_path": "/v1/billing",
         "surface": "product",
         "capabilities": [
@@ -106,12 +107,14 @@ _TRUST_PLANE_SERVICES = [
             "per-action-micro-metering",
             "transaction-ledger",
             "daily-spend-limits",
+            "bounded-credit-and-call-allowance",
+            "at-most-one-debit-per-logical-action",
         ],
         "quickstart_endpoint": "POST /v1/billing/wallets/sponsor",
     },
     {
         "id": "mcp-trust-plane",
-        "name": "Governed MCP",
+        "name": "Consequential-action transaction integrity",
         "base_path": "/mcp/messages",
         "transport": "legacy_project_json_rpc",
         "transport_note": (
@@ -119,36 +122,54 @@ _TRUST_PLANE_SERVICES = [
             "standard MCP initialization lifecycle."
         ),
         "surface": "product",
+        "transaction_scope": "configured_upstream_mcp_tool_only",
         "capabilities": [
             "tools-discovery",
             "permit-gated-invoke",
             "idempotent-retries",
             "signed-receipts",
+            "logical-action-identity",
+            "at-most-one-gateway-dispatch",
+            "delivery-uncertain-no-automatic-redispatch",
+            "linked-gateway-evidence",
         ],
         "quickstart_endpoint": "POST /mcp/messages",
     },
     {
         "id": "permits",
-        "name": "Signed permits",
+        "name": "Bounded delegated authority",
         "base_path": "/v1/permits",
         "surface": "product",
-        "capabilities": ["scoped-permits", "revoke", "budget-binding"],
+        "capabilities": [
+            "scoped-permits",
+            "revoke",
+            "budget-binding",
+            "credit-and-call-allowance-binding",
+        ],
         "quickstart_endpoint": "POST /v1/permits",
     },
     {
         "id": "receipts",
-        "name": "Signed receipts",
+        "name": "Linked gateway evidence",
         "base_path": "/v1/receipts",
         "surface": "product",
-        "capabilities": ["receipt-verify", "evidence-bundle"],
+        "capabilities": [
+            "receipt-verify",
+            "evidence-bundle",
+            "gateway-state-not-downstream-effect-proof",
+        ],
         "quickstart_endpoint": "GET /v1/receipts",
     },
     {
         "id": "audit",
-        "name": "Wallet audit chain",
+        "name": "Gateway audit linkage",
         "base_path": "/v1/audit",
         "surface": "product",
-        "capabilities": ["tamper-evident-chain", "wallet-scoped-events"],
+        "capabilities": [
+            "tamper-evident-chain",
+            "wallet-scoped-events",
+            "logical-action-correlation",
+        ],
         "quickstart_endpoint": "GET /v1/audit/events",
     },
 ]
@@ -201,8 +222,8 @@ _PROOF_SURFACE_SERVICES = [
     "/docs/index",
     summary="Structured documentation index",
     description=(
-        "Returns a JSON index of documentation resources. Trust-plane sections "
-        "always; proof-surface service entries only when mounted."
+        "Returns a JSON index for the consequential-action transaction-integrity "
+        "boundary. Proof-surface service entries appear only when mounted."
     ),
 )
 async def get_doc_index():
@@ -219,7 +240,9 @@ async def get_doc_index():
         "agent_first": get_agent_first_metadata(),
         "version": "0.2.0",
         "format": "agent-native-docs/v1",
-        "product_wedge": "governed_mcp_trust_plane",
+        "positioning": get_product_positioning(),
+        # Compatibility-only v1 alias; ``positioning`` is canonical.
+        "product_wedge": LEGACY_PRODUCT_WEDGE,
         "sections": list(_TRUST_PLANE_SECTIONS),
         "services": services,
         "auth": {
@@ -228,7 +251,8 @@ async def get_doc_index():
             "docs": "/llm.txt#authentication",
         },
         "note": (
-            "Not a full agent middleware platform. Proof-surface services appear "
-            "only when ENABLE_PROOF_SURFACES=true."
+            "A durable gateway state machine, not distributed ACID or proof of "
+            "the downstream effect. Proof-surface services appear only when "
+            "ENABLE_PROOF_SURFACES=true."
         ),
     }

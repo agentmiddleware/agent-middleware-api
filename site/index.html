@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Middleware API | MCP gateway for agent tool authorization</title>
+    <title>Agent Middleware API | Transaction integrity for agent actions</title>
     <meta
       name="description"
-      content="MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts."
+      content="Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: at-most-one gateway dispatch and debit, explicit delivery uncertainty, and linked evidence."
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0d0b1f" />
@@ -26,11 +26,11 @@
     <meta property="og:site_name" content="Agent Middleware API" />
     <meta
       property="og:title"
-      content="Authorize one agent action. Charge it once. Prove what happened."
+      content="Make consequential agent actions transactional."
     />
     <meta
       property="og:description"
-      content="MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts."
+      content="On the configured upstream-MCP path: one logical action, bounded authority consumption, at-most-one dispatch and debit, and explicit delivery uncertainty."
     />
     <meta property="og:url" content="https://www.thisisatest.tech/" />
     <meta
@@ -41,16 +41,16 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Agent Middleware API: authorize, charge, and prove one agent action"
+      content="Agent Middleware API: make consequential agent actions transactional"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta
       name="twitter:title"
-      content="Authorize one agent action. Charge it once. Prove what happened."
+      content="Make consequential agent actions transactional."
     />
     <meta
       name="twitter:description"
-      content="MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts."
+      content="On the configured upstream-MCP path: one logical action, bounded authority consumption, at-most-one dispatch and debit, and explicit delivery uncertainty."
     />
     <meta
       name="twitter:image"
@@ -73,7 +73,7 @@
             "sameAs": [
               "https://github.com/PetrefiedThunder/agent-middleware-api"
             ],
-            "description": "A single accountable operator running a governed trust plane for agent-to-tool actions.",
+            "description": "A single accountable operator building transaction integrity for consequential autonomous actions.",
             "logo": {
               "@type": "ImageObject",
               "@id": "https://www.thisisatest.tech/#logo",
@@ -91,7 +91,7 @@
             "@id": "https://www.thisisatest.tech/#website",
             "name": "Agent Middleware API",
             "url": "https://www.thisisatest.tech/",
-            "description": "MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts.",
+            "description": "Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: one logical action, bounded authority consumption, explicit delivery uncertainty, and linked gateway evidence.",
             "inLanguage": "en",
             "publisher": { "@id": "https://www.thisisatest.tech/#organization" }
           },
@@ -100,19 +100,19 @@
             "@id": "https://www.thisisatest.tech/#software",
             "name": "Agent Middleware API",
             "applicationCategory": "DeveloperApplication",
-            "applicationSubCategory": "Agent authorization, metering, and receipt middleware",
+            "applicationSubCategory": "Transaction integrity for consequential autonomous actions",
             "operatingSystem": "Linux, macOS, Windows (Docker or Python 3.11+)",
             "url": "https://www.thisisatest.tech/",
-            "description": "A governed MCP gateway that scopes a configured agent tool, prevents duplicate gateway dispatch or wallet debit when retrying the same accepted idempotency key, and issues Ed25519-signed receipts.",
+            "description": "On the configured upstream-MCP path, a durable gateway state machine binds scoped authority and configured consumption to one logical action, permits at most one gateway dispatch and debit, and preserves ambiguous delivery for required external reconciliation.",
             "featureList": [
-              "Scoped permits that constrain a single agent action before it is dispatched",
-              "At most one gateway dispatch and wallet debit per accepted idempotency key, including on retry",
-              "Per-call metering bound to the authorization decision",
-              "Ed25519-signed receipts for allowed, denied, failed, and uncertain outcomes",
-              "Offline receipt verification against a published key snapshot",
-              "Append-only audit trail for the authorize-to-evidence loop"
+              "Stable logical-action identity bound to an immutable payload",
+              "Bounded delegated-authority consumption",
+              "At most one configured-upstream gateway dispatch and debit per accepted idempotency key",
+              "Durable delivery_uncertain with no automatic redispatch",
+              "Linked gateway receipt and audit evidence for reconciliation",
+              "Explicit boundary: no claim to prove the downstream effect"
             ],
-            "keywords": "MCP gateway, Model Context Protocol, agent authorization, delegated authority, tool-call metering, idempotency, replay protection, signed receipts, agent governance",
+            "keywords": "agent transaction integrity, consequential autonomous actions, Model Context Protocol, delegated authority, idempotency, delivery uncertainty, replay protection, gateway evidence",
             "publisher": { "@id": "https://www.thisisatest.tech/#organization" },
             "softwareHelp": {
               "@type": "CreativeWork",
@@ -124,8 +124,8 @@
             "@type": "WebPage",
             "@id": "https://www.thisisatest.tech/#webpage",
             "url": "https://www.thisisatest.tech/",
-            "name": "Authorize one agent action. Charge it once. Prove what happened.",
-            "description": "MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts.",
+            "name": "Make consequential agent actions transactional.",
+            "description": "Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: one logical action, at-most-one dispatch and debit, explicit delivery uncertainty, and linked evidence.",
             "inLanguage": "en",
             "isPartOf": { "@id": "https://www.thisisatest.tech/#website" },
             "about": { "@id": "https://www.thisisatest.tech/#software" },

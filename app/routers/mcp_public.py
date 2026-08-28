@@ -42,6 +42,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
 
 from app.core.config import get_settings, public_api_origin
+from app.core.product_positioning import (
+    POSITIONING_DESCRIPTION,
+    get_product_positioning,
+)
 from app.routers.mcp_standard import _SdkTransportResponse, _validate_origin
 from app.routers.well_known import _published_key
 from app.schemas.billing import ServiceCategory
@@ -102,14 +106,15 @@ _MAX_SIGNING_INPUT_BYTES = 256 * 1024
 
 _SERVER_INSTRUCTIONS = (
     "Read-only, unauthenticated verification surface for an Agent Middleware "
-    "trust plane. verify_receipt checks whether a portable receipt bundle is "
+    "transaction-integrity boundary. verify_receipt checks whether a portable "
+    "receipt bundle is "
     "authentic: 'verified' and 'invalid' are verdicts about the receipt; "
     "'mismatch' is a deterministic consistency rejection; "
     "'unknown_key', 'malformed', 'unsupported', and 'keys_unavailable' mean "
     "the verifier cannot tell and must never be reported as proof of "
-    "tampering. get_trust_plane_info returns the plane's identity and "
+    "tampering. get_trust_plane_info returns the boundary's identity and "
     "published Ed25519 signing keys; list_governed_tools shows what the "
-    "authenticated, metered plane can invoke. Nothing on this surface can "
+    "authenticated transaction boundary can invoke. Nothing on this surface can "
     "create signing authority, spend credits, mint permits, change governed "
     "tool registration, or invoke governed tools. Ingress rate-limit and "
     "observability bookkeeping still apply."
@@ -138,8 +143,9 @@ _TOOLS: list[mcp_types.Tool] = [
         title="Verify a portable receipt",
         description=(
             "Use this when the user provides a portable receipt bundle from "
-            "an Agent Middleware trust plane and wants to know whether it is "
-            "authentic and what it attests. Verifies the Ed25519 signature "
+            "an Agent Middleware transaction-integrity boundary and wants to "
+            "know whether it is authentic and what it attests. Verifies the "
+            "Ed25519 signature "
             "over the bundle's signing_input against this plane's published "
             "keys and reports the signed claims. A 'verified' result means "
             "the signature matches a key this deployment publishes; statuses "
@@ -216,9 +222,10 @@ _TOOLS: list[mcp_types.Tool] = [
         name="get_trust_plane_info",
         title="Get trust plane info",
         description=(
-            "Use this when the user asks what this trust plane is, which "
-            "Ed25519 keys it currently publishes for receipt verification, "
-            "or where its public discovery and verification endpoints live."
+            "Use this when the user asks about this consequential-action "
+            "transaction-integrity boundary, which Ed25519 keys it publishes "
+            "for receipt verification, or where its public discovery and "
+            "verification endpoints live. The tool name is a legacy alias."
         ),
         inputSchema={
             "type": "object",
@@ -230,6 +237,22 @@ _TOOLS: list[mcp_types.Tool] = [
             "properties": {
                 "name": {"type": "string"},
                 "description": {"type": "string"},
+                "positioning": {
+                    "type": "object",
+                    "properties": {
+                        "schema_version": {"type": "string"},
+                        "id": {"type": "string"},
+                        "scope": {"type": "object", "additionalProperties": True},
+                        "claim_boundary": {"type": "string"},
+                    },
+                    "required": [
+                        "schema_version",
+                        "id",
+                        "scope",
+                        "claim_boundary",
+                    ],
+                    "additionalProperties": True,
+                },
                 "issuer": {
                     "type": "string",
                     "description": (
@@ -257,7 +280,14 @@ _TOOLS: list[mcp_types.Tool] = [
                 },
                 "endpoints": {"type": "object", "additionalProperties": True},
             },
-            "required": ["name", "issuer", "alg", "keys_available", "keys"],
+            "required": [
+                "name",
+                "positioning",
+                "issuer",
+                "alg",
+                "keys_available",
+                "keys",
+            ],
         },
         annotations=_READ_ONLY,
     ),
@@ -265,9 +295,9 @@ _TOOLS: list[mcp_types.Tool] = [
         name="list_governed_tools",
         title="List governed tools",
         description=(
-            "Use this when the user wants to know which tools this trust "
-            "plane governs — what an authenticated, wallet-scoped agent "
-            "could invoke through the metered permit->invoke->receipt loop. "
+            "Use this when the user wants to know which tools this transaction-"
+            "integrity boundary governs — what an authenticated, wallet-scoped "
+            "agent could invoke through the logical-action transaction loop. "
             "Returns name, description, category, and per-call pricing; "
             "full input schemas live at GET /mcp/tools.json. This tool "
             "cannot invoke anything."
@@ -490,13 +520,8 @@ async def _tool_get_trust_plane_info(
 
     structured = {
         "name": PUBLIC_SERVER_NAME,
-        "description": (
-            "Governed MCP trust plane: agent tool calls are authorized by "
-            "signed, scoped permits, metered against wallet budgets, and "
-            "answered with signed receipts on a tamper-evident audit chain. "
-            "This public surface verifies that evidence; invocation "
-            "requires an authenticated wallet-scoped key."
-        ),
+        "description": POSITIONING_DESCRIPTION,
+        "positioning": get_product_positioning(),
         "issuer": public_api_origin(),
         "alg": "Ed25519",
         "canonicalization": RECEIPT_CANONICALIZATION,
@@ -512,7 +537,8 @@ async def _tool_get_trust_plane_info(
     }
     kid_list = ", ".join(k["kid"] for k in published) or "none published"
     text = (
-        f"Trust plane at {structured['issuer'] or '(PUBLIC_URL unset)'}; "
+        "Transaction-integrity boundary at "
+        f"{structured['issuer'] or '(PUBLIC_URL unset)'}; "
         f"published Ed25519 keys: {kid_list}."
     )
     return structured, text

@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.PetrefiedThunder/agent-middleware-api",
-  "title": "Agent Middleware API: Governed MCP Gateway",
-  "description": "Governed MCP gateway: scoped permits, at-most-one gateway dispatch and debit per accepted key, plus signed audit receipts.",
+  "title": "Agent Middleware API: Transaction Integrity",
+  "description": "Transaction integrity for consequential autonomous actions on the configured upstream-MCP path: one logical action, bounded authority consumption, explicit delivery uncertainty, and linked gateway evidence for required external reconciliation.",
   "version": "1.3.0",
   "websiteUrl": "https://www.thisisatest.tech/",
   "repository": {

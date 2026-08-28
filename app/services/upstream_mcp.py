@@ -54,7 +54,8 @@ _MAX_DISCOVERY_TOOLS = 1024
 _CREDITS_QUANTUM = Decimal("0.00000001")
 _MAX_NUMERIC_20_8 = Decimal("999999999999.99999999")
 _GATEWAY_TOOL_DESCRIPTION = (
-    "Governed remote MCP tool dispatched through the Agent Middleware trust plane."
+    "Configured remote MCP tool dispatched through the Agent Middleware "
+    "transaction-integrity boundary."
 )
 _METRICS_LOCK = threading.Lock()
 _CALL_OUTCOMES = (

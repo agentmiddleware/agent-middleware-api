@@ -10,7 +10,8 @@ from typing import Any, Optional
 
 from ..core.auth import verify_api_key
 from ..core.config import get_settings
-from .well_known import TRUST_PLANE_DESCRIPTION, get_agent_first_metadata
+from ..core.product_positioning import POSITIONING_DESCRIPTION
+from .well_known import get_agent_first_metadata
 
 router = APIRouter(
     prefix="/v1",
@@ -34,8 +35,8 @@ class ServiceCapability(BaseModel):
     surface: str = Field(
         default="product",
         description=(
-            "'product' = MCP trust-plane wedge; 'proof_surface' = labeled "
-            "demo/workload scaffolding (often simulated)."
+            "'product' = consequential-action transaction-integrity boundary; "
+            "'proof_surface' = labeled demo/workload scaffolding (often simulated)."
         ),
     )
     simulation_default: bool | None = Field(
@@ -145,7 +146,8 @@ def _build_capabilities() -> list[ServiceCapability]:
             name="billing",
             version="1.0",
             description=(
-                "Wallet metering with ledger charges used by governed MCP invokes"
+                "Configured credit/call allowance and at-most-one debit bound to "
+                "a logical action"
             ),
             category="financial",
             surface="product",
@@ -154,8 +156,9 @@ def _build_capabilities() -> list[ServiceCapability]:
             name="mcp",
             version="1.0",
             description=(
-                "Governed Model Context Protocol: permit validation, metering, "
-                "signed receipts, and audit"
+                "Configured-upstream consequential-action transaction integrity: "
+                "logical identity, one-shot gateway dispatch, explicit uncertainty, "
+                "and linked evidence"
             ),
             category="tooling",
             surface="product",
@@ -163,21 +166,27 @@ def _build_capabilities() -> list[ServiceCapability]:
         ServiceCapability(
             name="permits",
             version="1.0",
-            description="Scoped signed permits for tool, wallet, budget, and expiry",
+            description=(
+                "Bounded delegated authority scoped to tool, wallet, configured "
+                "allowance, and expiry"
+            ),
             category="authorization",
             surface="product",
         ),
         ServiceCapability(
             name="receipts",
             version="1.0",
-            description="Signed receipts for governed tool attempts",
+            description=(
+                "Signed gateway evidence linked to logical-action and dispatch state; "
+                "not proof of downstream effect"
+            ),
             category="evidence",
             surface="product",
         ),
         ServiceCapability(
             name="audit",
             version="1.0",
-            description="Wallet-scoped tamper-evident audit chain",
+            description="Wallet-scoped audit linkage for transaction reconciliation",
             category="governance",
             surface="product",
         ),
@@ -196,7 +205,7 @@ def _build_capabilities() -> list[ServiceCapability]:
             surface="product",
         ),
     ]
-    
+
     # KYC is a dormant trust surface: its router mounts only with
     # ENABLE_PROOF_SURFACES, and it is only *usable* with Stripe configured.
     # Advertise the capability only when both hold, so discovery never points
@@ -311,7 +320,7 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
     _ensure_local_mcp_tools_registered()
     registry = get_service_registry()
     tools = []
-    
+
     for service in registry._local_registry.values():
         tools.append(
             MCPToolInfo(
@@ -323,7 +332,7 @@ def _build_mcp_tools() -> list[MCPToolInfo]:
                 unit_name=service.get("unit_name", "call"),
             )
         )
-    
+
     return tools
 
 
@@ -431,9 +440,9 @@ def _build_pricing() -> list[PricingTier]:
             price_per_credit=0.0,
             minimum_purchase=0.0,
             features=[
-                "Scoped signed permits",
-                "Governed MCP invoke + metering",
-                "Signed receipts + wallet audit",
+                "Logical action + bounded delegated authority",
+                "Configured-upstream at-most-one dispatch/debit + delivery uncertainty",
+                "Linked gateway receipt/audit evidence for reconciliation",
             ],
         ),
         PricingTier(
@@ -441,7 +450,7 @@ def _build_pricing() -> list[PricingTier]:
             price_per_credit=0.0,
             minimum_purchase=0.0,
             features=[
-                "Same trust loop as self-hosted",
+                "Same transaction-integrity loop as self-hosted",
                 "One environment-configured upstream MCP tool",
                 "Operator-provisioned wallet, key, credits, and permit",
                 "No public SLA, pricing, compliance, or tenant-isolation claim",
@@ -508,13 +517,14 @@ async def get_discovery_manifest():
     """
     # Ensure local tools are registered (lazy registration, respects flags)
     from ..routers.mcp import _ensure_local_mcp_tools_registered
+
     _ensure_local_mcp_tools_registered()
-    
+
     return DiscoveryManifest(
         name=settings.APP_NAME,
         version=settings.APP_VERSION,
         description=(
-            TRUST_PLANE_DESCRIPTION
+            POSITIONING_DESCRIPTION
             + (
                 " Capabilities with surface=proof_surface are labeled scaffolding."
                 if get_settings().ENABLE_PROOF_SURFACES
@@ -545,8 +555,9 @@ async def list_mcp_tools(api_key: str = Depends(verify_api_key)):
     """
     # Ensure local tools are registered (lazy registration, respects flags)
     from ..routers.mcp import _ensure_local_mcp_tools_registered
+
     _ensure_local_mcp_tools_registered()
-    
+
     tools = _build_mcp_tools()
     result = {
         "tools": tools,
@@ -589,5 +600,7 @@ async def list_awi_endpoints(api_key: str = Depends(verify_api_key)):
         "endpoints": _build_awi_endpoints(),
         "vocabulary_endpoint": "/v1/awi/vocabulary",
         "reference": "/docs/awi-adoption-guide.md",
-        "note": "AWI is a labeled proof surface, not the product wedge.",
+        "note": (
+            "AWI is a labeled proof surface outside the transaction-integrity boundary."
+        ),
     }

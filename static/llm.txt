@@ -10,12 +10,14 @@
 
 ## What This API Does
 
-Agent Middleware API is a **governed MCP gateway** for autonomous agents.
-For the configured upstream MCP tool, scoped permits and an accepted
-idempotency key result in at most one gateway dispatch and wallet debit.
-Signed receipts and the wallet audit chain make the terminal gateway outcome
-independently checkable. An upstream tool's own side effect is exactly once
-only when it honors the forwarded idempotency key.
+Agent Middleware API is a **transaction-integrity boundary for consequential
+autonomous actions**. On the supported upstream-MCP path, one logical action
+binds scoped authority and configured consumption to at most one gateway
+dispatch and debit, explicit `delivery_uncertain`, and linked gateway evidence.
+
+This is a durable gateway state machine, not one distributed ACID transaction
+or proof of the downstream effect. IAM, budget controls, receipts, and audit
+chains are supporting mechanisms rather than separate product wedges.
 
 An accepted idempotency key binds one immutable invocation. Reusing that key
 with different tool input fails closed with an idempotency conflict; use a new
@@ -24,16 +26,20 @@ key for each new invocation.
 The product loop is:
 
 ```text
-discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+logical action -> authorize -> reserve allowance -> debit -> claim dispatch
+-> confirmed outcome | delivery_uncertain -> receipt/audit
+-> authoritative external reconciliation required
 ```
 
-Read `capabilities` on `GET /.well-known/agent.json` for the product wedge.
+Read `agent_first.positioning` on `GET /.well-known/agent.json` for the
+versioned product category, transaction semantics, and claim boundary.
 
-Core infrastructure:
-- **Identity & authority** — Wallet-scoped agents, API keys, and signing keys
-- **Discovery** — MCP tools, `.well-known/agent.json`, `llms.txt`, OpenAPI, `/v1/discover`
-- **Execution governance** — Permit-gated MCP invocation, receipts, audit chain
-- **Economics** — Wallet budgets, ledger charges, idempotent replay without double-charge
+Supporting infrastructure:
+- **Identity & authority** — Wallet-scoped agents, API keys, and scoped permits
+- **Logical action** — Accepted idempotency key plus payload binding
+- **Execution state** — One-shot gateway dispatch and explicit uncertainty
+- **Configured accounting** — Wallet credits/call allowance and replay without double debit
+- **Evidence** — Signed receipts and audit linkage for external reconciliation
 - **Readiness** — `/health/dependencies` (dependency truth for the selected tool)
 
 ---
@@ -140,8 +146,10 @@ Wallets are auto-frozen if spending exceeds:
 
 ## SDKs
 
-Prefer the HTTP trust loop above (permits → MCP invoke → receipts). Client
-libraries are optional and not required for the wedge.
+Prefer the configured-upstream HTTP transaction loop above (logical action →
+permit → MCP invoke → receipt/audit → authoritative external reconciliation).
+Client libraries are optional and not required for the transaction-integrity
+boundary.
 
 ### Python SDK (source checkout and release artifacts)
 

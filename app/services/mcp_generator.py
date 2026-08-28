@@ -18,9 +18,14 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-from ..services.service_registry import ServiceRegistry, get_service_registry
-from ..services.mcp_integration_truth import truth_for_category
+from ..core.product_positioning import (
+    LEGACY_MCP_SERVER_NAME,
+    POSITIONING_DESCRIPTION,
+    get_product_positioning,
+)
 from ..schemas.billing import ServiceCategory
+from ..services.mcp_integration_truth import truth_for_category
+from ..services.service_registry import ServiceRegistry, get_service_registry
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +74,11 @@ class McpGenerator:
     }
     """
 
-    MANIFEST_NAME = "Agent Middleware MCP Trust Plane"
+    # Stable protocol identity retained for existing MCP clients. Canonical
+    # category metadata lives in the versioned ``positioning`` object.
+    MANIFEST_NAME = LEGACY_MCP_SERVER_NAME
     MANIFEST_DESCRIPTION = (
-        "Governed MCP trust plane: scoped permits, metered tool invocation, "
-        "signed receipts, and wallet audit. Tools listed here are "
+        f"{POSITIONING_DESCRIPTION} Tools listed here are "
         "executable local, configured upstream, or dogfood endpoints — not a "
         "metadata-only service catalog."
     )
@@ -85,6 +91,7 @@ class McpGenerator:
             "version": MCP_TOOLS_JSON_VERSION,
             "name": self.MANIFEST_NAME,
             "description": self.MANIFEST_DESCRIPTION,
+            "positioning": get_product_positioning(),
             "tools": tools,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -210,10 +217,7 @@ class McpGenerator:
 
         settings = get_settings()
         governed = bool(
-            (
-                settings.TRUST_MODE_ENABLED
-                and not settings.ALLOW_LEGACY_UNPERMITTED_MCP
-            )
+            (settings.TRUST_MODE_ENABLED and not settings.ALLOW_LEGACY_UNPERMITTED_MCP)
             or service.get("require_permit")
         )
 

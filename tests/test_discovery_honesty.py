@@ -51,4 +51,9 @@ def test_manifest_builder_matches_live_endpoint_shape():
     built = _build_agent_manifest().model_dump(mode="json")
     assert built["capabilities"] == PRODUCT_CAPABILITIES
     assert "permits" in built["endpoints"]
+    assert built["agent_first"]["positioning"]["schema_version"] == "1.0"
+    assert built["agent_first"]["positioning"]["claim_boundary"] == (
+        "gateway_state_machine_not_distributed_acid_or_downstream_effect_proof"
+    )
+    # Compatibility-only v1 alias.
     assert built["agent_first"]["product_wedge"] == "governed_mcp_trust_plane"

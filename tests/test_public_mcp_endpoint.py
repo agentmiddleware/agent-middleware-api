@@ -384,6 +384,12 @@ async def test_tools_list_is_exactly_the_read_only_surface(client, public_mcp_en
         assert annotations["openWorldHint"] is False
         assert tool["inputSchema"]["type"] == "object"
         assert tool["outputSchema"]["type"] == "object"
+    info_schema = next(
+        tool["outputSchema"] for tool in tools if tool["name"] == "get_trust_plane_info"
+    )
+    assert "positioning" in info_schema["properties"]
+    assert "positioning" in info_schema["required"]
+    assert "scope" in info_schema["properties"]["positioning"]["properties"]
 
 
 @pytest.mark.anyio
@@ -867,12 +873,29 @@ async def test_governed_tools_are_not_callable_here(client, public_mcp_enabled):
 @pytest.mark.anyio
 async def test_get_trust_plane_info_reports_published_keys(client, public_mcp_enabled):
     await get_signing_key_service().ensure_active_key()
+    listed = await client.post(
+        PUBLIC_PATH, json=_rpc("tools/list"), headers=MCP_HEADERS
+    )
+    info_schema = next(
+        tool["outputSchema"]
+        for tool in listed.json()["result"]["tools"]
+        if tool["name"] == "get_trust_plane_info"
+    )
     resp = await client.post(
         PUBLIC_PATH, json=_call("get_trust_plane_info"), headers=MCP_HEADERS
     )
     structured = resp.json()["result"]["structuredContent"]
+    assert set(info_schema["required"]) <= structured.keys()
     assert structured["alg"] == "Ed25519"
     assert structured["keys_available"] is True
+    assert structured["positioning"]["schema_version"] == "1.0"
+    assert structured["positioning"]["id"] == (
+        "transaction_integrity_for_consequential_autonomous_actions"
+    )
+    assert structured["positioning"]["scope"]["transaction_state_machine"] == (
+        "configured_upstream_mcp_tool_only"
+    )
+    assert "delivery_uncertain" in structured["description"]
     assert structured["keys"], "a freshly deployed plane must publish a key"
     for key in structured["keys"]:
         assert key["kid"]

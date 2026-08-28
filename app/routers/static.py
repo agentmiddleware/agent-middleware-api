@@ -78,7 +78,7 @@ async def get_llm_txt():
 
 ## Quick Start
 
-1. GET /.well-known/agent.json — Bootstrap manifest (product wedge + labeled proof surfaces)
+1. GET /.well-known/agent.json — Bootstrap manifest (versioned positioning + labeled proof surfaces)
 2. GET /llms.txt — Full prose (if this fallback appears, static/llm.txt is missing on disk)
 3. GET /mcp/tools.json — MCP tools
 4. GET /openapi.json — API contract
@@ -104,8 +104,8 @@ GET /mcp/tools.json — List available tools
 
 @router.get(
     "/WEDGE.md",
-    summary="Product wedge",
-    description="Exactly-once MCP permits wedge definition.",
+    summary="Transaction-integrity boundary",
+    description="Compatibility path to the transaction-integrity boundary definition.",
     response_class=PlainTextResponse,
 )
 async def get_wedge_md():
@@ -125,7 +125,7 @@ async def get_security_limitations_md():
 @router.get(
     "/DESIGN_PARTNER_GUIDE.md",
     summary="Design partner guide",
-    description="Trust-plane demo and dogfood path for design partners.",
+    description="Transaction-integrity demo and dogfood path for design partners.",
     response_class=PlainTextResponse,
 )
 async def get_design_partner_guide_md():

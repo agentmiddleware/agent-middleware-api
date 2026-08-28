@@ -25,7 +25,7 @@ def _key_response(key) -> SigningKeyResponse:
 async def get_active_signing_key(
     auth: AuthContext = Depends(get_auth_context),
 ) -> SigningKeyResponse:
-    """Return public metadata for the active trust-plane signing key."""
+    """Return public metadata for the active transaction-evidence signing key."""
 
     key = await get_signing_key_service().get_active_key()
     return _key_response(key)
