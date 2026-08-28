@@ -22,9 +22,15 @@ content factory perform real external work when they are still simulated.
 
 **Do this:**
 
-- [ ] Call `GET /health/dependencies` and read `simulation_modes`. Any service
-      with value `true` is using **simulation** behavior for that domain (see
-      `app/core/runtime_mode.py`).
+- [ ] On a deployment with `ENABLE_PROOF_SURFACES=true`, call
+      `GET /health/dependencies` and read `simulation_modes`. Any service with
+      value `true` is using **simulation** behavior for that domain (see
+      `app/core/runtime_mode.py`). A local deployment does not expose this map
+      unless that flag is enabled.
+- [ ] On the supported production posture (`ENABLE_PROOF_SURFACES=false`), use
+      the startup log entry with `phase="runtime_posture"` and inspect the
+      deployed `SIMULATION_MODE_*` configuration. The public dependency report
+      intentionally omits proof-surface simulation flags.
 - [ ] Regenerate and skim [Simulation & MCP honesty inventory](simulations-inventory.md)
       (`python scripts/generate_sim_inventory.py`) for a pillar × MCP tool matrix.
 - [ ] Compare deployed configuration to `.env.example` (`SIMULATION_MODE_*`
@@ -91,8 +97,9 @@ capabilities that are simulated or undocumented.
 - [ ] Optionally compare with `GET /.well-known/mcp/tools.json` (separate route;
       may differ — if in doubt, treat `/mcp/tools.json` as the primary tool
       discovery path used in examples).
-- [ ] Cross-check risky capabilities against `/health/dependencies` and
-      `simulation_modes`.
+- [ ] Cross-check core capabilities against `/health/dependencies`. When proof
+      surfaces are mounted, also inspect its `simulation_modes`; otherwise use
+      the startup posture log and deployment configuration.
 
 **Automation:** Run `scripts/human_preflight.sh` against your base URL (see
 below).
@@ -137,10 +144,12 @@ export API_URL=http://127.0.0.1:8000   # or your deployed URL
 bash scripts/human_preflight.sh
 ```
 
-Optional: install `jq` for formatted `simulation_modes` output.
+Optional: install `jq` for formatted output. `simulation_modes` appears only
+when proof surfaces are mounted.
 
-The script checks liveness, dependency report (including simulation flags), and
-public discovery URLs. It does **not** perform authenticated wallet flows; use
+The script checks liveness, the public dependency report, and discovery URLs.
+It prints simulation flags when the selected deployment exposes the full
+proof-surface report. It does **not** perform authenticated wallet flows; use
 the golden path for that.
 
 ---
@@ -149,7 +158,7 @@ the golden path for that.
 
 | Question | Where to look |
 |----------|----------------|
-| What is simulated right now? | `GET /health/dependencies` → `simulation_modes` |
+| What is simulated right now? | Proof-surface deployment: `GET /health/dependencies` → `simulation_modes`; supported production: startup `runtime_posture` log + deployed configuration |
 | Can I trust sandbox isolation? | README + `docs/threat-model.md` |
 | End-to-end wallet + key + tool flow | `docs/golden-path.md` |
 | What “beta” still means | `docs/production-beta-roadmap.md` |

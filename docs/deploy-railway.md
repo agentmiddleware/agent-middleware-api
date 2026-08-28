@@ -8,12 +8,13 @@
 The supported enterprise pilot is vendor-managed single-tenant. Each customer
 gets a separate Railway Enterprise project containing exactly one API service,
 one PostgreSQL service, and one Redis service, plus a unique public domain,
-administrator set, Ed25519 signing seed and key id, Sentinel tenant/key, and
-upstream MCP bearer token. Do not reuse infrastructure, credentials, signing
-material, or administrators between customers. Shared SaaS and customer-VPC
-deployments are not part of this pilot. Provision through the manual
-`railway up` path below; do not add Kubernetes, Helm, Terraform, or other pilot
-orchestration infrastructure.
+administrator set, Ed25519 signing seed and key id, and upstream MCP bearer
+token. A customer also gets a dedicated Sentinel tenant/key when the optional
+Sentinel-backed human-approval integration is enabled. Do not reuse
+infrastructure, credentials, signing material, or administrators between
+customers. Shared SaaS and customer-VPC deployments are not part of this
+pilot. Provision through the manual `railway up` path below; do not add
+Kubernetes, Helm, Terraform, or other pilot orchestration infrastructure.
 
 Keep PostgreSQL and Redis on Railway private networking and expose only the
 FastAPI gateway. During qualification, verify in the Railway control plane
@@ -138,7 +139,7 @@ in committed defaults.
 | `VALID_API_KEYS` | operator-set secrets | Bootstrap/admin keys only; **never** `change-me` |
 | `MCP_UPSTREAM_URL` | one public HTTPS MCP origin | The pilot supports exactly one real upstream tool server |
 | `MCP_UPSTREAM_BEARER_TOKEN` | customer-specific secret | Never put it in the manifest or committed files |
-| `SENTINEL_API_URL` / `SENTINEL_API_KEY` | customer-specific Sentinel configuration | Send synthetic or redacted arguments only |
+| `SENTINEL_API_URL` / `SENTINEL_API_KEY` | Omit unless enabling Sentinel-backed human approval | Optional product integration, not an Agent Middleware release dependency. Approval-required operations fail closed unless both are configured. Send synthetic or redacted arguments only. |
 | `RUN_MIGRATIONS_ON_START` | `true` (recommended; set via `railway variables`) | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If the DB was previously bootstrapped with `create_all` and has no `alembic_version` row, run `alembic stamp head` once before enabling this flag. |
 
 `REDIS_URL` is required for the managed pilot's isolated Redis service. Outside
@@ -508,11 +509,13 @@ Qualify every customer stack with synthetic or redacted data before onboarding:
    live preflight checks.
 2. Confirm the API is the only public service, PostgreSQL and Redis have no
    public domain/TCP proxy, and the customer has unique database, Redis,
-   administrator, signing, Sentinel, and upstream credentials.
+   administrator, signing, and upstream credentials. If Sentinel-backed human
+   approval is enabled, also confirm a unique Sentinel tenant and credentials.
 3. Exercise the complete trust loop: provision → authenticate → permit → quote
-   → approve and deny → invoke → meter → receipt → audit → offline verification
-   → replay. Verify governed denials do not charge and portable evidence
-   verifies with the published customer key.
+   → invoke → meter → receipt → audit → offline verification → replay. If
+   Sentinel-backed human approval is enabled, additionally exercise approve
+   and deny with synthetic or redacted arguments. Verify governed denials do
+   not charge and portable evidence verifies with the published customer key.
 4. Test cross-customer isolation from both directions: a customer-A key must be
    rejected by customer B, a customer-B key must be rejected by customer A,
    each trust-key document must omit the other customer's key id, and the

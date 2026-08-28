@@ -78,17 +78,18 @@ async def test_full_payload_returns_when_proof_surfaces_enabled(client):
 
 
 @pytest.mark.anyio
-async def test_projection_recomputes_verdict_from_public_deps():
+@pytest.mark.parametrize("hidden_dependency", ["llm", "sentinel"])
+async def test_projection_recomputes_verdict_from_public_deps(hidden_dependency):
     """A hidden proof-surface dependency can never flip the public status."""
     full = await gather_dependency_report()
-    full["dependencies"]["llm"] = {"status": "down", "error": "boom"}
+    full["dependencies"][hidden_dependency] = {"status": "down", "error": "boom"}
     full["status"] = "degraded"
-    full["unhealthy"] = ["llm"]
+    full["unhealthy"] = [hidden_dependency]
 
     public = build_public_dependency_report(full)
     assert public["status"] == "healthy"
     assert public["unhealthy"] == []
-    assert "llm" not in public["dependencies"]
+    assert hidden_dependency not in public["dependencies"]
 
 
 @pytest.mark.anyio
@@ -125,6 +126,4 @@ async def test_ready_and_dependencies_agree_on_mqtt(client):
 
     full = await gather_dependency_report()
     assert full["dependencies"]["mqtt"]["status"] == "not_used"
-    assert (
-        ready["checks"]["mqtt"]["status"] == full["dependencies"]["mqtt"]["status"]
-    )
+    assert ready["checks"]["mqtt"]["status"] == full["dependencies"]["mqtt"]["status"]

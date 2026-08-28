@@ -457,16 +457,24 @@ def check_live(
     #
     # Key presence, not truthiness, for the same reason as the dogfood check
     # below: a genuinely absent key means the deployed image predates this
-    # field, which is reported and not silently passed but is deliberately not
-    # a hard failure — that would fail every deploy of an older image. A
+    # field. That earns a note only during a pre-mutation posture check with no
+    # release identity expectation; an exact-release check must prove stamped
+    # provenance. A
     # *published* null is a different thing entirely. The field exists and does
     # not say "stamped", so it must fail closed like any other non-stamped
     # value. Once a stamped release is out, the key is always present.
     if "build_provenance" not in body:
-        print(
-            "[preflight] NOTE build_provenance absent from /health/dependencies "
-            "— deployed image predates this field; provenance not verified"
-        )
+        if expected_commit_sha is not None:
+            failures.append(
+                "build_provenance is absent — exact releases must report "
+                "'stamped' provenance from the documented railway up path"
+            )
+        else:
+            print(
+                "[preflight] NOTE build_provenance absent from "
+                "/health/dependencies — deployed image predates this field; "
+                "provenance not verified"
+            )
     else:
         provenance = body["build_provenance"]
         if provenance != "stamped":

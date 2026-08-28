@@ -259,6 +259,7 @@ HEALTHY = {
     "production_like": True,
     "version": "1.3.0",
     "commit_sha": EXPECTED_COMMIT_SHA,
+    "build_provenance": "stamped",
     "unhealthy": [],
     "enable_proof_surfaces": False,
     "enable_dogfood_tool": False,
@@ -564,6 +565,24 @@ def test_manifest_supplies_live_url_commit_and_signing_key(
             EXPECTED_SIGNING_PUBLIC_KEY_SHA256,
         )
     ]
+
+
+def test_manifest_live_gate_rejects_absent_build_provenance(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    path = _write_manifest(tmp_path, _manifest_document())
+    payload = {**HEALTHY, "commit_sha": TREE_COMMIT_SHA}
+    payload.pop("build_provenance")
+    _patch_manifest_get(
+        monkeypatch,
+        dependencies_payload=payload,
+        liveness_payload=payload,
+    )
+
+    assert preflight.main(["--live", "--strict", "--manifest", str(path)]) == 1
+    assert "build_provenance is absent" in capsys.readouterr().out
 
 
 def test_manifest_only_validates_new_candidate_without_probing_old_release(
@@ -1097,6 +1116,23 @@ def test_live_notes_absent_provenance_without_failing(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "NOTE" in output
     assert "build_provenance absent" in output
+
+
+def test_live_rejects_absent_provenance_for_exact_release(monkeypatch, capsys):
+    payload = {key: value for key, value in HEALTHY.items()}
+    payload.pop("build_provenance")
+    _patch_get(monkeypatch, payload)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_commit_sha=EXPECTED_COMMIT_SHA,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "build_provenance is absent" in output
+    assert "NOTE build_provenance" not in output
 
 
 @pytest.mark.parametrize(

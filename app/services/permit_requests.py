@@ -70,6 +70,7 @@ from app.services.human_approval import (
     HumanApprovalUnavailableError,
     SentinelClient,
     human_approval_available,
+    sentinel_client_from_settings,
 )
 from app.services.permits import PermitError, get_permit_service
 from app.services.signing_keys import sha256_hex
@@ -169,11 +170,8 @@ class PermitRequestService:
     # --- infrastructure -------------------------------------------------
 
     def _sentinel(self) -> SentinelClient:
-        settings = get_settings()
         if self._client is None:
-            self._client = SentinelClient(
-                settings.SENTINEL_API_URL, settings.SENTINEL_API_KEY
-            )
+            self._client = sentinel_client_from_settings()
         return self._client
 
     @staticmethod
@@ -375,7 +373,9 @@ class PermitRequestService:
             entry.split(":", 1)[1] if entry.lower().startswith("mailto:") else entry
             for entry in self._approvers()
         ]
-        recipients = [entry for entry in recipients if "@" in entry and ":" not in entry]
+        recipients = [
+            entry for entry in recipients if "@" in entry and ":" not in entry
+        ]
         if not recipients:
             return
 
@@ -462,7 +462,9 @@ class PermitRequestService:
         UPDATE is the single serialization point, so concurrent pollers cannot
         both mint. A caller that loses the race reloads the winner's row.
         """
-        target = REQUEST_STATUS_MINTING if decision == REQUEST_STATUS_APPROVED else decision
+        target = (
+            REQUEST_STATUS_MINTING if decision == REQUEST_STATUS_APPROVED else decision
+        )
         decided_at = model.decided_at or utc_now()
         values: dict[str, Any] = {
             "status": target,
@@ -542,9 +544,7 @@ class PermitRequestService:
                 return reloaded or model
 
         model.mint_started_at = now
-        logger.warning(
-            "permit_request_mint_reclaimed request_id=%s", model.request_id
-        )
+        logger.warning("permit_request_mint_reclaimed request_id=%s", model.request_id)
         return await self._mint(model)
 
     async def _mint(self, model: PermitRequestModel) -> PermitRequestModel:
@@ -704,9 +704,7 @@ class PermitRequestService:
                 )
             total = (
                 await session.execute(
-                    select(func.count())
-                    .select_from(PermitRequestModel)
-                    .where(*filters)
+                    select(func.count()).select_from(PermitRequestModel).where(*filters)
                 )
             ).scalar_one()
             rows = (

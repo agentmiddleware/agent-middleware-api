@@ -50,6 +50,9 @@ def _restore_env():
         "LLM_PROVIDER",
         "SIMULATION_MODE_IOT_BRIDGE",
         "SIMULATION_MODE_TELEMETRY_PM",
+        "SIMULATION_MODE_HUMAN_APPROVAL",
+        "SENTINEL_API_URL",
+        "SENTINEL_API_KEY",
         "MCP_UPSTREAM_ENABLED",
         "MCP_UPSTREAM_PUBLIC_TOOL_ID",
         "MCP_UPSTREAM_BEARER_TOKEN",
@@ -150,6 +153,208 @@ async def test_report_default_shape():
     # Simulation modes are surfaced for operators.
     assert "simulation_modes" in report
     assert report["simulation_modes"]["iot_bridge"] is True
+
+
+# ---------------------------------------------------------------------------
+# Sentinel observability probe
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_sentinel_health_probe_is_single_and_unauthenticated(monkeypatch):
+    settings = get_settings()
+    settings.SENTINEL_API_URL = "https://SENTINEL.example:443/"
+    settings.SENTINEL_API_KEY = "never-send-this-key"
+    import httpx
+
+    calls = []
+    real_client = httpx.AsyncClient
+
+    async def handler(request):
+        calls.append(
+            (
+                request.method,
+                str(request.url),
+                request.headers.get("authorization"),
+            )
+        )
+        return httpx.Response(200)
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(
+            transport=httpx.MockTransport(handler),
+            **kwargs,
+        ),
+    )
+
+    result = await health_module._check_sentinel({"human_approval": False})
+
+    assert result == {"status": "up"}
+    assert calls == [("GET", "https://sentinel.example/health", None)]
+    assert "never-send-this-key" not in json.dumps(calls)
+
+
+@pytest.mark.anyio
+async def test_simulated_sentinel_does_not_create_a_client(monkeypatch):
+    settings = get_settings()
+    settings.SENTINEL_API_URL = "https://sentinel.example"
+    import httpx
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a simulated approval dependency must not create a client"
+        ),
+    )
+
+    result = await health_module._check_sentinel({"human_approval": True})
+
+    assert result == {
+        "status": "not_used",
+        "reason": "human_approval in simulation mode",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "sentinel_url",
+    [
+        "https://user:secret@sentinel.example",
+        "https://sentinel.example?tenant=private",
+        "https://sentinel.example#private",
+        "https://sentinel.example/api",
+        "http://169.254.169.254/latest/meta-data",
+        "ftp://sentinel.example",
+        "https://sentinel.example:",
+        "https://sentinel.example:0",
+        "https://[v1.sentinel.example]",
+        " https://sentinel.example",
+        "https://sentinel.example/\n",
+    ],
+    ids=[
+        "credentials",
+        "query",
+        "fragment",
+        "path",
+        "remote_cleartext",
+        "scheme",
+        "empty_port",
+        "zero_port",
+        "ipvfuture",
+        "leading_whitespace",
+        "control_character",
+    ],
+)
+async def test_invalid_sentinel_health_origin_fails_without_network(
+    monkeypatch,
+    sentinel_url,
+):
+    settings = get_settings()
+    settings.SENTINEL_API_URL = sentinel_url
+    settings.SENTINEL_API_KEY = "sk_test_safe"
+    import httpx
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda *_args, **_kwargs: pytest.fail(
+            "an invalid Sentinel origin must not create a client"
+        ),
+    )
+
+    result = await health_module._check_sentinel({"human_approval": False})
+
+    assert result == {
+        "status": "down",
+        "reason": "human_approval_unavailable",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("sentinel_url", "expected_health_url"),
+    [
+        ("http://127.0.0.1:8000/", "http://127.0.0.1:8000/health"),
+        ("http://[::1]:8000", "http://[::1]:8000/health"),
+    ],
+    ids=["ipv4_loopback", "ipv6_loopback"],
+)
+async def test_loopback_sentinel_health_origin_is_allowed(
+    monkeypatch,
+    sentinel_url,
+    expected_health_url,
+):
+    settings = get_settings()
+    settings.SENTINEL_API_URL = sentinel_url
+    settings.SENTINEL_API_KEY = "sk_test_safe"
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+    class Client:
+        def __init__(self, **kwargs):
+            assert kwargs["follow_redirects"] is False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url):
+            calls.append(url)
+            return Response()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+
+    result = await health_module._check_sentinel({"human_approval": False})
+
+    assert result == {"status": "up"}
+    assert calls == [expected_health_url]
+
+
+@pytest.mark.anyio
+async def test_sentinel_health_failure_is_sanitized_in_full_report(monkeypatch):
+    settings = get_settings()
+    private_url = "https://private-sentinel.example"
+    private_key = "sentinel-key-that-must-not-leak"
+    settings.SIMULATION_MODE_HUMAN_APPROVAL = False
+    settings.SENTINEL_API_URL = private_url
+    settings.SENTINEL_API_KEY = private_key
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            raise RuntimeError(f"cannot reach {private_url} with {private_key}")
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+
+    report = await gather_dependency_report()
+    sentinel = report["dependencies"]["sentinel"]
+    rendered = json.dumps(report)
+
+    assert sentinel["status"] == "down"
+    assert sentinel["reason"] == "human_approval_unavailable"
+    assert sentinel["error"] is None
+    assert private_url not in rendered
+    assert private_key not in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +566,7 @@ async def test_health_surfaces_report_validated_build_commit(client, monkeypatch
     assert dependencies.json()["commit_sha"] == (
         "abcdef0123456789abcdef0123456789abcdef01"
     )
-    
+
     get_settings.cache_clear()
 
 

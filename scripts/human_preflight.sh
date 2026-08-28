@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Human preflight: verify discovery URLs and /health/dependencies (simulation_modes).
+# Human preflight: verify discovery URLs and the public dependency report.
 # Usage: API_URL=http://localhost:8000 bash scripts/human_preflight.sh
 # Requires: curl, python3. Optional: jq for pretty JSON.
 
@@ -52,13 +52,38 @@ if [[ -z "$deps_json" ]]; then
   exit 1
 fi
 
+dependency_shape="$(echo "$deps_json" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+proof = d.get("enable_proof_surfaces")
+has_modes = isinstance(d.get("simulation_modes"), dict)
+if proof is True and has_modes:
+    print("full")
+elif proof is False and "simulation_modes" not in d:
+    print("public")
+else:
+    print("invalid")
+' 2>/dev/null || true)"
+if [[ "$dependency_shape" == "invalid" || -z "$dependency_shape" ]]; then
+  echo -e "${RED}FAIL${NC} dependency report proof-surface fields are inconsistent"
+  fail=1
+fi
+
 echo "Dependency report summary:"
 if command -v jq >/dev/null 2>&1; then
-  echo "$deps_json" | jq '{status, version, unhealthy, simulation_modes}'
+  echo "$deps_json" | jq '
+    {status, version, unhealthy}
+    + if .enable_proof_surfaces == true and has("simulation_modes")
+      then {simulation_modes}
+      elif .enable_proof_surfaces == false and (has("simulation_modes") | not)
+      then {simulation_modes: "omitted (enable_proof_surfaces=false)"}
+      else {simulation_modes: "inconsistent dependency response"}
+      end
+  '
 else
   echo "$deps_json"
   echo ""
-  echo -e "${YELLOW}Tip:${NC} install jq to print a compact summary (simulation_modes, unhealthy)."
+  echo -e "${YELLOW}Tip:${NC} install jq to print a compact dependency summary."
 fi
 
 overall="$(echo "$deps_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("status",""))' 2>/dev/null || true)"
@@ -106,7 +131,8 @@ fi
 echo ""
 echo "Next steps for humans:"
 echo "  - Read docs/human-onboarding.md"
-echo "  - If simulation_modes show true, those domains are simulated unless you wired real backends."
+echo "  - If simulation_modes are present and true, those domains are simulated unless you wired real backends."
+echo "  - With proof surfaces disabled, inspect the startup runtime_posture log and deployed SIMULATION_MODE_* values."
 echo "  - Run through docs/golden-path.md for wallet-scoped keys and billing rehearsal."
 
 exit "$fail"

@@ -24,6 +24,11 @@ from .build_metadata import get_build_commit_sha, get_build_provenance
 from .config import get_settings
 from .runtime_mode import get_simulation_modes
 from .runtime_degradation import get_runtime_degradation
+from .sentinel_target import (
+    SentinelTargetError,
+    sentinel_api_key_is_valid,
+    sentinel_health_url,
+)
 from .trust_mode import is_production_like_environment
 from ..services.signing_keys import (
     SigningKeyError,
@@ -320,15 +325,36 @@ async def _check_sentinel(simulation_modes: dict[str, bool]) -> dict[str, Any]:
         return {"status": "not_used", "reason": "human_approval in simulation mode"}
 
     settings = get_settings()
-    base_url = (settings.SENTINEL_API_URL or "").strip()
-    if not base_url:
+    raw_url = settings.SENTINEL_API_URL or ""
+    raw_key = settings.SENTINEL_API_KEY or ""
+    if not raw_url.strip() and not raw_key.strip():
         return {"status": "not_configured"}
+    if not sentinel_api_key_is_valid(raw_key):
+        return {"status": "down", "reason": "human_approval_unavailable"}
+
+    try:
+        health_url = sentinel_health_url(
+            raw_url,
+            allow_loopback=not is_production_like_environment(settings.ENVIRONMENT),
+        )
+    except SentinelTargetError:
+        return {"status": "down", "reason": "human_approval_unavailable"}
 
     import httpx
 
-    async with httpx.AsyncClient(timeout=CHECK_TIMEOUT_SECONDS) as http:
-        resp = await http.get(f"{base_url.rstrip('/')}/health")
-        resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(
+            timeout=CHECK_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as http:
+            # Deliberately unauthenticated and read-only. The health probe must
+            # never transmit the Sentinel API key.
+            resp = await http.get(health_url)
+            resp.raise_for_status()
+    except Exception:
+        # Do not let transport exceptions echo a configured origin or embedded
+        # credential into the full dependency report.
+        return {"status": "down", "reason": "human_approval_unavailable"}
     return {"status": "up"}
 
 
@@ -434,10 +460,10 @@ def build_public_dependency_report(full_report: dict[str, Any]) -> dict[str, Any
     list are recomputed from the projected set so a hidden proof-surface
     dependency can never flip the public status.
 
-    The full report — simulation modes included — remains available to
-    operators in the startup log (``phase="runtime_posture"``) and on
-    deployments that mount proof surfaces, where those flags describe live,
-    reachable routes.
+    Simulation posture remains available to operators in the startup log
+    (``phase="runtime_posture"``). The full report remains available on
+    deployments that mount proof surfaces, where those flags and probes
+    describe live, reachable routes.
     """
     dependencies = {
         name: result

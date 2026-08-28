@@ -46,6 +46,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.runtime_mode import is_simulation
+from app.core.sentinel_target import (
+    SentinelTargetError,
+    normalize_sentinel_origin,
+    sentinel_api_key_is_valid,
+)
 from app.core.time import utc_now
 from app.core.trust_mode import is_production_like_environment
 from app.db.database import get_session_factory
@@ -175,10 +180,16 @@ def approval_window_seconds() -> int:
 def human_approval_configured() -> bool:
     """Whether real-mode Sentinel calls are possible with current settings."""
     settings = get_settings()
-    return bool(
-        (settings.SENTINEL_API_URL or "").strip()
-        and (settings.SENTINEL_API_KEY or "").strip()
-    )
+    if not sentinel_api_key_is_valid(settings.SENTINEL_API_KEY or ""):
+        return False
+    try:
+        normalize_sentinel_origin(
+            settings.SENTINEL_API_URL or "",
+            allow_loopback=not is_production_like_environment(settings.ENVIRONMENT),
+        )
+    except SentinelTargetError:
+        return False
+    return True
 
 
 def human_approval_available() -> tuple[bool, str | None]:
@@ -221,8 +232,21 @@ def _decode_json(resp: httpx.Response) -> dict[str, Any]:
 class SentinelClient:
     """Thin async client for the Sentinel approvals API."""
 
-    def __init__(self, base_url: str, api_key: str) -> None:
-        self._base_url = base_url.rstrip("/")
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        *,
+        allow_loopback: bool = False,
+    ) -> None:
+        self._base_url = normalize_sentinel_origin(
+            base_url,
+            allow_loopback=allow_loopback,
+        )
+        if not sentinel_api_key_is_valid(api_key):
+            raise SentinelTargetError(
+                "SENTINEL_API_KEY must be non-empty without whitespace or control characters"
+            )
         self._api_key = api_key
         self._client: httpx.AsyncClient | None = None
 
@@ -233,6 +257,7 @@ class SentinelClient:
                 base_url=self._base_url,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 timeout=_HTTP_TIMEOUT_SECONDS,
+                follow_redirects=False,
             )
         return self._client
 
@@ -283,6 +308,21 @@ class SentinelClient:
         return _decode_json(resp)
 
 
+def sentinel_client_from_settings() -> SentinelClient:
+    """Build a credentialed client only from a currently safe configuration."""
+    settings = get_settings()
+    if not sentinel_api_key_is_valid(settings.SENTINEL_API_KEY or ""):
+        raise HumanApprovalUnavailableError()
+    try:
+        return SentinelClient(
+            settings.SENTINEL_API_URL or "",
+            settings.SENTINEL_API_KEY,
+            allow_loopback=not is_production_like_environment(settings.ENVIRONMENT),
+        )
+    except SentinelTargetError as exc:
+        raise HumanApprovalUnavailableError() from exc
+
+
 class HumanApprovalService:
     """Evaluate and persist the human-approval gate for governed invokes."""
 
@@ -290,11 +330,8 @@ class HumanApprovalService:
         self._client: SentinelClient | None = None
 
     def _sentinel(self) -> SentinelClient:
-        settings = get_settings()
         if self._client is None:
-            self._client = SentinelClient(
-                settings.SENTINEL_API_URL, settings.SENTINEL_API_KEY
-            )
+            self._client = sentinel_client_from_settings()
         return self._client
 
     @staticmethod

@@ -64,16 +64,27 @@ arrives after the window is not honored.
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `SIMULATION_MODE_HUMAN_APPROVAL` | `true` | See fail-closed rules below |
-| `SENTINEL_API_URL` | empty | e.g. `https://api.pauseapi.app` |
+| `SENTINEL_API_URL` | empty | Root HTTPS origin, e.g. `https://api.pauseapi.app`; HTTP loopback is local/test only. Credentials, paths, queries, fragments, private/reserved literals, and internal hostnames are rejected. |
 | `SENTINEL_API_KEY` | empty | Sentinel tenant key (`sk_live_…`) |
 | `SENTINEL_APPROVAL_TIMEOUT_SECONDS` | `300` | Local expiry; forwarded as Sentinel `timeout_seconds` (1..86400) |
 | `SENTINEL_WAIT_SECONDS` | `0` | >0: long-poll Sentinel on first invoke for an instant decision (max 300) |
 | `SENTINEL_APPROVERS` | empty | Comma-separated (`email`, `mailto:`, `sms:+E164`); empty defers to Sentinel tenant defaults |
 | `SENTINEL_RISK_LEVEL` | `high` | `low\|medium\|high\|critical` |
 
-`/health/dependencies` reports a `sentinel` entry: `not_used` while
-simulated, `not_configured` without a URL, else a live probe of Sentinel's
-`/health`.
+Use the canonical Sentinel origin unless a customer has a reviewed custom
+deployment. Application validation blocks unsafe URL shapes, internal names,
+and non-global address literals, but it does not pin DNS resolution. Custom
+hostnames therefore still require trusted DNS and network-level egress policy.
+
+The full dependency report returned when `ENABLE_PROOF_SURFACES=true` includes
+a `sentinel` entry: `not_used` while simulated, `not_configured` when
+simulation is disabled and both settings are absent, `down` for
+partial/unsafe/unreachable configuration, and `up` after a sanitized live probe
+of Sentinel's `/health`. The supported production public projection
+(`ENABLE_PROOF_SURFACES=false`) intentionally omits Sentinel; it is an optional
+approval integration, not an Agent Middleware release dependency.
+Approval-required permits and invokes still fail closed when the integration
+is unavailable, incomplete, or configured with an unsafe origin.
 
 ## Fail-closed rules
 
@@ -96,19 +107,20 @@ simulated, `not_configured` without a URL, else a live probe of Sentinel's
 
 ## Railway rollout
 
-After deploying a build that includes migration `023_human_approval_gate`:
+If this optional integration is enabled, configure it after applying migration
+`023_human_approval_gate`:
 
 ```bash
 railway variables set SENTINEL_API_URL=https://api.pauseapi.app
 railway variables set SENTINEL_API_KEY=sk_live_...   # from your Sentinel tenant
 railway variables set SIMULATION_MODE_HUMAN_APPROVAL=false
-railway up
-
-curl -sS "$API_URL/health/dependencies" | jq .dependencies.sentinel
-# expect: {"status": "up", ...}
 ```
 
-Then create a gated permit (note the extra field) and drive the loop from
+Deploy through the exact-SHA operator sequence in
+[`deploy-railway.md`](deploy-railway.md). Do not expect the production public
+dependency projection to attest Sentinel readiness. Validate the integration
+with a separate deliberate synthetic or redacted gated-approval flow, then
+create a gated permit (note the extra field) and drive the loop from
 [`deploy-railway.md`](deploy-railway.md)'s dogfood section — the first
 `/mcp/messages` call returns `human_approval_pending`, the approver gets the
 Sentinel email/SMS, and the retried call executes after approval.
