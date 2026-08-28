@@ -1,9 +1,9 @@
 """
-Test that stale COMMIT_SHA/BUILD_COMMIT_SHA service variables don't win.
+Test that stale BUILD_COMMIT_SHA service variables do not win.
 
 After PR #343, RAILWAY_GIT_COMMIT_SHA > BUILD_COMMIT_SHA, but when Railway
 doesn't set RAILWAY_GIT_COMMIT_SHA (e.g., on `railway up`), a stale
-COMMIT_SHA or BUILD_COMMIT_SHA service variable still wins.
+BUILD_COMMIT_SHA service variable must never become the deployed identity.
 
 This fix ensures:
 - Railway env always wins (when set)
@@ -75,12 +75,12 @@ def test_baked_file_wins_over_stale_service_env(monkeypatch, tmp_path):
 def test_returns_none_when_railway_unset_and_no_baked_file_and_stale_var(monkeypatch):
     """When Railway unset, no baked file, but stale var exists, must return None.
     
-    This prevents stale COMMIT_SHA/BUILD_COMMIT_SHA service variables from
-    winning after railway up without --build-arg.
+    This prevents a stale BUILD_COMMIT_SHA service variable from winning after
+    a deployment without a baked commit stamp.
     """
     stale_var = "a928fd6f00000000000000000000000000000000"
     
-    # Point to non-existent file (simulates railway up without --build-arg)
+    # Point to non-existent file (simulates a deployment without a baked stamp)
     monkeypatch.setattr(
         "app.core.build_metadata._BUILD_SHA_FILE",
         Path("/nonexistent/.build_commit_sha")
@@ -214,20 +214,20 @@ async def test_health_reports_railway_env_when_set(client, monkeypatch, tmp_path
 
 
 @pytest.mark.anyio
-async def test_railway_up_without_build_arg_reports_null_not_stale(
+async def test_deployment_without_baked_stamp_reports_null_not_stale(
     client, monkeypatch
 ):
-    """CTO requirement: railway up without --build-arg must report null, not a928fd6f.
+    """CTO requirement: an unstamped deployment reports null, not a928fd6f.
     
-    Scenario: railway up (no --build-arg), so no baked file exists.
-    Stale COMMIT_SHA/BUILD_COMMIT_SHA service variable exists.
+    Scenario: no immutable release context reached Docker, so no baked file
+    exists. A stale BUILD_COMMIT_SHA service variable exists.
     Railway doesn't set RAILWAY_GIT_COMMIT_SHA.
     
     Expected: health.commit_sha = null (not the stale a928fd6f)
     """
     stale_service_var = "a928fd6f00000000000000000000000000000000"
     
-    # No baked file (railway up without --build-arg)
+    # No baked file (the release context did not include a stamp)
     monkeypatch.setattr(
         "app.core.build_metadata._BUILD_SHA_FILE",
         Path("/nonexistent/.build_commit_sha")
@@ -257,14 +257,11 @@ async def test_railway_up_without_build_arg_reports_null_not_stale(
     get_settings.cache_clear()
 
 
-def test_dockerfile_creates_build_commit_sha_file():
-    """Dockerfile must create .build_commit_sha file from COMMIT_SHA arg."""
+def test_dockerfile_requires_staged_build_commit_sha_file():
+    """Dockerfile must reject a release upload that lacks the staged stamp."""
     # Use relative path from test file location to repo root
     repo_root = Path(__file__).parent.parent
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
     
-    assert "ARG COMMIT_SHA" in dockerfile
-    assert 'echo "$COMMIT_SHA" > /app/.build_commit_sha' in dockerfile or \
-           'echo "$COMMIT_SHA"' in dockerfile and '.build_commit_sha' in dockerfile, (
-        "Dockerfile must write COMMIT_SHA to .build_commit_sha file"
-    )
+    assert "COPY .build_commit_sha /app/.build_commit_sha" in dockerfile
+    assert "ARG COMMIT_SHA" not in dockerfile

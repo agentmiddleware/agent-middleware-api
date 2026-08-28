@@ -2,10 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-ARG COMMIT_SHA
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    BUILD_COMMIT_SHA=${COMMIT_SHA}
+    PYTHONDONTWRITEBYTECODE=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -19,10 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Bake the commit SHA into a file if provided via build arg
-RUN if [ -n "$COMMIT_SHA" ]; then \
-        echo "$COMMIT_SHA" > /app/.build_commit_sha; \
-    fi
+# Release contexts must carry a commit stamp generated from the exact Git tree.
+COPY .build_commit_sha /app/.build_commit_sha
 
 RUN chmod +x scripts/docker_entrypoint.sh \
     && groupadd --system app \

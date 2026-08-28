@@ -59,6 +59,7 @@ Thumbs.db
 *.log
 .vercel/
 /docker-compose.prod.yml
+/.build_commit_sha
 
 # Agent tooling scratch: throwaway git worktrees used to run checks in
 # isolation. Full repo copies and coverage artifacts — never commit these.

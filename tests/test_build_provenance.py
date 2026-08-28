@@ -2,8 +2,8 @@
 
 `get_build_commit_sha` answers which SHA is running; `get_build_provenance`
 answers where that answer came from. Only an operator build through
-`railway up --build-arg COMMIT_SHA=...` writes /app/.build_commit_sha, so the
-absence of that stamp — or its disagreement with Railway's control-plane
+the documented archive-stamped release context writes /app/.build_commit_sha,
+so the absence of that stamp — or its disagreement with Railway's control-plane
 metadata — identifies an image that did not come through the release path.
 
 These tests must not depend on a real /app/.build_commit_sha existing, so the
@@ -70,7 +70,7 @@ def test_mismatch_when_sources_disagree(baked, monkeypatch):
 
 def test_control_plane_only_without_baked_stamp(baked, monkeypatch):
     """The signature of the 2026-08-26 incident: Railway rebuilt from branch
-    HEAD on a variable write, so no --build-arg COMMIT_SHA was ever passed."""
+    HEAD without an immutable staged release context, so no baked stamp exists."""
     baked(None)
     monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", SHA_A)
     assert get_build_provenance() == "control_plane_only"

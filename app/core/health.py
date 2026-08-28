@@ -416,7 +416,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         "version": settings.APP_VERSION,
         "commit_sha": get_build_commit_sha(),
         # How that SHA was established. "stamped" is the only value an image
-        # built through the documented `railway up --build-arg COMMIT_SHA=...`
+        # built from the documented archive-stamped release context
         # path can produce; anything else means the running image was built by
         # something other than the release procedure. See build_metadata.
         "build_provenance": get_build_provenance(),

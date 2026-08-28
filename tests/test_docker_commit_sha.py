@@ -1,9 +1,4 @@
-"""
-Test that Docker builds stamp the git SHA into the image at build time.
-
-Verifies that `docker build --build-arg COMMIT_SHA=<sha>` results in
-/health/dependencies.commit_sha reporting that SHA.
-"""
+"""Test that Docker builds require a staged commit stamp."""
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -19,15 +14,26 @@ async def client():
         yield c
 
 
-def test_dockerfile_declares_commit_sha_arg_and_env():
-    """Dockerfile must declare ARG COMMIT_SHA and set BUILD_COMMIT_SHA from it."""
+def test_dockerfile_requires_staged_commit_sha():
+    """The image must fail to build when a release context lacks its stamp."""
     dockerfile = open("Dockerfile", encoding="utf-8").read()
-    assert "ARG COMMIT_SHA" in dockerfile, (
-        "Dockerfile must declare ARG COMMIT_SHA for build-time injection"
-    )
-    assert "BUILD_COMMIT_SHA=${COMMIT_SHA}" in dockerfile, (
-        "Dockerfile must set BUILD_COMMIT_SHA from the COMMIT_SHA build arg"
-    )
+    assert "COPY .build_commit_sha /app/.build_commit_sha" in dockerfile
+    assert "ARG COMMIT_SHA" not in dockerfile
+    assert "BUILD_COMMIT_SHA=${COMMIT_SHA}" not in dockerfile
+
+
+def test_local_compose_uses_the_unstamped_development_dockerfile():
+    compose = open("docker-compose.yml", encoding="utf-8").read()
+    development_dockerfile = open("Dockerfile.dev", encoding="utf-8").read()
+
+    assert "dockerfile: Dockerfile.dev" in compose
+    assert ".build_commit_sha" not in development_dockerfile
+
+
+def test_docker_publish_stages_the_checked_out_commit():
+    workflow = open(".github/workflows/docker-publish.yml", encoding="utf-8").read()
+
+    assert 'printf \'%s\\n\' "${{ github.sha }}" > .build_commit_sha' in workflow
 
 
 @pytest.mark.anyio

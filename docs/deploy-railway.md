@@ -60,9 +60,13 @@ releases are operator-run from a clean exact-SHA checkout.**
 
 ```bash
 # From repository root, linked to the Railway service:
+set -euo pipefail
 DEPLOY_SHA="$(git rev-parse HEAD)"
-railway up --service api-service --environment production \
-  --build-arg COMMIT_SHA="$DEPLOY_SHA"
+RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"
+test -d "$RELEASE_CONTEXT"
+test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"
+railway up "$RELEASE_CONTEXT" --path-as-root --no-gitignore \
+  --service api-service --environment production --ci
 ```
 
 That abbreviated command is appropriate only after the pre-deploy gates below.
@@ -71,11 +75,23 @@ For a stack that may hold customer data, follow the complete
 checklist. GitHub Actions validates the candidate release but deliberately does
 not deploy it or hold a Railway SSH key.
 
-The `--build-arg COMMIT_SHA` stamps the exact deployed git SHA into the Docker
-image at build time. The Dockerfile bakes this into `BUILD_COMMIT_SHA` so
-`/health/dependencies` reports the true source revision. Pass the SHA on
-**every** `railway up`; omitting it leaves the image with no commit provenance
-and must fail the post-deploy parity gate.
+`scripts/prepare_railway_release.py` creates a fresh temporary context from
+`git archive` at the exact release SHA, then writes that SHA to
+`.build_commit_sha`. The Dockerfile requires the staged file, so an unstamped
+upload fails during its build rather than after it reaches production.
+`/health/dependencies` reports the baked stamp as the true source revision.
+Do not set `COMMIT_SHA` or `BUILD_COMMIT_SHA` as Railway service variables:
+they are shared mutable configuration and can stamp a concurrent or later
+deployment with the wrong SHA.
+
+Local Docker development uses `Dockerfile.dev` through `docker-compose.yml`;
+only the production `Dockerfile` requires the immutable stamp. Do not use the
+development Dockerfile for a production upload.
+
+`--no-gitignore` is mandatory for the release upload because
+`.build_commit_sha` is ignored in normal checkouts. The generated context
+contains only the exact `git archive` tree plus that non-secret stamp; never
+use `--no-gitignore` against an ordinary working tree.
 
 Railway uses `railway.json` → `build.builder = DOCKERFILE`. That is the only
 supported production image path for this project.
@@ -115,7 +131,7 @@ deploy remains `railway up` from this Dockerfile.
 
 Mirror of fail-closed rules in `app.core.trust_mode` and
 [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md). Set these on the
-Railway service (dashboard or `railway variables set`); do **not** put secrets
+Railway service (dashboard or `railway variable set`); do **not** put secrets
 in committed defaults.
 
 | Variable | Required value | Notes |
@@ -132,7 +148,6 @@ in committed defaults.
 | `DATABASE_URL` | from Railway Postgres plugin | App normalizes `postgresql://` ↔ `postgresql+asyncpg://` |
 | `REDIS_URL` | from the customer's private Railway Redis service | Unique per customer; do not expose Redis publicly |
 | `PUBLIC_URL` | public HTTPS API origin | Customer manifest origin; `https://api.thisisatest.tech` only for the existing first-party instance |
-| `BUILD_COMMIT_SHA` | exact 40-character deployed Git SHA | The deploy workflow sets this without triggering a separate deploy before `railway up`. Manual deploys must do the same, as shown above. |
 | `PUBLIC_CONTACT_NAME` | accountable public person or entity | Launch-gated. Do not use the product name or a placeholder as the accountable identity. |
 | `PUBLIC_CONTACT_EMAIL` | monitored public email address | Launch-gated. This becomes the API/OpenAPI contact only when all public contact fields are valid. |
 | `PUBLIC_CONTACT_URL` | working public HTTPS booking URL | Launch-gated. Verify the booking flow manually; do not point this back to the product site. |
@@ -140,7 +155,7 @@ in committed defaults.
 | `MCP_UPSTREAM_URL` | one public HTTPS MCP origin | The pilot supports exactly one real upstream tool server |
 | `MCP_UPSTREAM_BEARER_TOKEN` | customer-specific secret | Never put it in the manifest or committed files |
 | `SENTINEL_API_URL` / `SENTINEL_API_KEY` | Omit unless enabling Sentinel-backed human approval | Optional product integration, not an Agent Middleware release dependency. Approval-required operations fail closed unless both are configured. Send synthetic or redacted arguments only. |
-| `RUN_MIGRATIONS_ON_START` | `true` (recommended; set via `railway variables`) | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If the DB was previously bootstrapped with `create_all` and has no `alembic_version` row, run `alembic stamp head` once before enabling this flag. |
+| `RUN_MIGRATIONS_ON_START` | `true` (recommended; set via `railway variable set`) | Entrypoint runs `alembic upgrade head` before uvicorn. App boot then **verifies** trust tables exist and **never** calls `create_all` in production-like envs. Flag + empty `DATABASE_URL` fails closed (container exits). If the DB was previously bootstrapped with `create_all` and has no `alembic_version` row, run `alembic stamp head` once before enabling this flag. |
 
 `REDIS_URL` is required for the managed pilot's isolated Redis service. Outside
 that pilot it remains optional when Redis rate limiting is unused; a
@@ -189,27 +204,27 @@ fails, so it works as a gate in a shell or in CI:
 
 ```bash
 # Both checks for a deployment whose database is reachable from this machine:
-railway run python scripts/railway_preflight.py
+railway run python3 scripts/railway_preflight.py
 
 # Schema parity only:
-DATABASE_URL=postgresql://… python scripts/railway_preflight.py --db
+DATABASE_URL=postgresql://… python3 scripts/railway_preflight.py --db
 
 # Legacy off-platform parity diagnostic. This requires a temporary public
 # database proxy and is not acceptable evidence for customer-data qualification:
 railway run --service Postgres --environment production -- \
-  python scripts/railway_preflight.py --db --public-db --strict
+  python3 scripts/railway_preflight.py --db --public-db --strict
 
 # Pre-deploy posture only, against the currently running release:
-python scripts/railway_preflight.py --live --url "$API_URL"
+python3 scripts/railway_preflight.py --live --url "$API_URL"
 
 # Post-deploy posture plus exact release identity:
-python scripts/railway_preflight.py --live --strict --url "$API_URL" \
+python3 scripts/railway_preflight.py --live --strict --url "$API_URL" \
   --expected-version "1.3.0" \
   --expected-commit-sha "$(git rev-parse HEAD)"
 
 # Managed single-tenant post-deploy gate; URL, commit, revision, and key id
 # come from the non-secret manifest:
-python scripts/railway_preflight.py --live --strict \
+python3 scripts/railway_preflight.py --live --strict \
   --manifest /path/to/example-customer.production.json
 
 # Managed single-tenant schema parity, run inside the deployed API container
@@ -237,10 +252,10 @@ cannot manage Railway SSH keys, while a workspace key reaches every service in
 the workspace. Keep the release operator-local and register one controlled key
 only for the maintenance window.
 
-Use Railway CLI 5.35.0 or newer. Earlier versions have known remote-command
-argument/execution bugs. The sentinel below is mandatory even on a newer CLI:
-an SSH command that returns zero without actually running must not approve a
-release.
+Use Railway CLI 5.43 or newer. This version does not accept
+`railway up --build-arg`; prepare the immutable release context instead. The
+sentinel below is mandatory even on a newer CLI: an SSH command that returns
+zero without actually running must not approve a release.
 
 From a clean detached checkout of the exact commit:
 
@@ -269,9 +284,9 @@ test "$ci_conclusion" = "success"
 # Bind the candidate manifest to this clean source checkout, but do not compare
 # its new SHA to the still-running old release. Check current service posture
 # separately without a candidate identity expectation.
-python scripts/railway_preflight.py --manifest-only \
+python3 scripts/railway_preflight.py --manifest-only \
   --manifest "$MANIFEST" --url "$API_URL"
-python scripts/railway_preflight.py --live --strict --url "$API_URL"
+python3 scripts/railway_preflight.py --live --strict --url "$API_URL"
 control_plane="$(railway status \
   --project "$PROJECT_ID" --environment "$ENVIRONMENT" --json)"
 test "$(jq -r '.id' <<<"$control_plane")" = "$PROJECT_ID"
@@ -283,12 +298,12 @@ test "$(jq -r --arg environment "$ENVIRONMENT" \
 # lets the operator identify this deployment even if another release starts.
 RELEASE_NONCE="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 RELEASE_MARKER="manual-exact-sha-$DEPLOY_SHA-$RELEASE_NONCE"
-railway variable set BUILD_COMMIT_SHA="$DEPLOY_SHA" \
+RELEASE_CONTEXT="$(python3 scripts/prepare_railway_release.py --ref "$DEPLOY_SHA")"
+test "$(cat "$RELEASE_CONTEXT/.build_commit_sha")" = "$DEPLOY_SHA"
+railway up "$RELEASE_CONTEXT" --path-as-root \
+  --no-gitignore \
   --project "$PROJECT_ID" --service "$SERVICE" \
-  --environment "$ENVIRONMENT" --skip-deploys
-railway up --project "$PROJECT_ID" --service "$SERVICE" \
   --environment "$ENVIRONMENT" --ci \
-  --build-arg COMMIT_SHA="$DEPLOY_SHA" \
   --message "$RELEASE_MARKER"
 
 # Resolve and wait for the uniquely marked deployment just started above.
@@ -368,7 +383,7 @@ test "$post_ready" = "true"
 
 # The public service must attest the manifest's origin, signing key, source SHA,
 # and this checkout's version.
-python scripts/railway_preflight.py --live --strict \
+python3 scripts/railway_preflight.py --live --strict \
   --manifest "$MANIFEST" --url "$API_URL" \
   --expected-version "$EXPECTED_VERSION"
 ```
@@ -419,9 +434,9 @@ values without Railway control-plane API access. The private operator release
 checklist therefore derives the project and environment selectors from this
 manifest and validates them through Railway before deployment. A `railway up`
 source build does not currently expose a stable runtime image
-digest to this application, so `BUILD_COMMIT_SHA` is the attested release
-identity and image digest is explicitly **not verified** for this pilot. Do not
-invent or record a guessed digest.
+digest to this application, so the baked `.build_commit_sha` from the immutable
+release context is the attested release identity and image digest is explicitly
+**not verified** for this pilot. Do not invent or record a guessed digest.
 
 Store a copy of the completed manifest with the deployment record and update
 the expected commit and revision before every release. The preflight fails
@@ -487,7 +502,7 @@ curl -sS "$API_URL/health"
 curl -sS "$API_URL/health/dependencies"   # fell_back_to_memory=false; postgres up
 curl -sS "$API_URL/.well-known/agent.json"  # proof_surfaces_enabled=false
 curl -sS "$API_URL/mcp/tools.json"        # no awi_* / marketplace stubs when proof off
-curl -sS "$API_URL/llm.txt"               # Base URL = PUBLIC_URL
+curl -sS "$API_URL/llms.txt"              # Base URL = PUBLIC_URL
 ```
 
 Expect:
