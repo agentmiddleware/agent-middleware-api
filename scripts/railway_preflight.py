@@ -26,6 +26,12 @@ Explicit ``--public-db`` mode is an exception and fails closed when absent:
     ``/health`` and ``/health/dependencies`` for the post-deploy gate; the
     commit expectation must be a full 40-character SHA.
 
+``--allow-legacy-missing-sentinel`` (requires ``--live --strict``)
+    One-release compatibility mode for the pre-mutation check against a
+    stamped production image that predates public Sentinel readiness. It may
+    not be combined with a manifest, database checks, or release-identity
+    expectations. Present or malformed Sentinel state still fails closed.
+
 ``--manifest`` (optional non-secret JSON)
     Bind the checks to one managed single-tenant deployment. The manifest
     supplies the public origin, expected commit, Alembic revision, and signing
@@ -58,6 +64,10 @@ Usage::
     python scripts/railway_preflight.py --live --url https://api.example.com \
       --expected-version 1.3.0 \
       --expected-commit-sha 0123456789abcdef0123456789abcdef01234567
+
+    # Pre-mutation check against the stamped pre-Sentinel production image:
+    python scripts/railway_preflight.py --live --strict \
+      --allow-legacy-missing-sentinel --url https://api.example.com
 
     # Managed single-tenant gate (URL and commit come from the manifest):
     python scripts/railway_preflight.py --live --strict \
@@ -410,8 +420,24 @@ def check_live(
     expected_commit_sha: str | None = None,
     expected_signing_key_id: str | None = None,
     expected_signing_public_key_sha256: str | None = None,
+    allow_legacy_missing_sentinel: bool = False,
 ) -> bool:
     import httpx
+
+    identity_expectations = (
+        expected_version,
+        expected_commit_sha,
+        expected_signing_key_id,
+        expected_signing_public_key_sha256,
+    )
+    if allow_legacy_missing_sentinel and any(
+        expectation is not None for expectation in identity_expectations
+    ):
+        print(
+            f"{BAD} legacy missing-Sentinel compatibility cannot be combined "
+            "with release or signing identity expectations"
+        )
+        return False
 
     base = url.rstrip("/")
     try:
@@ -449,6 +475,45 @@ def check_live(
     if body.get("enable_proof_surfaces"):
         failures.append("enable_proof_surfaces=true — must be false in production")
 
+    dependencies = body.get("dependencies")
+    if not isinstance(dependencies, dict):
+        failures.append(
+            "dependencies is not an object — cannot verify Sentinel readiness"
+        )
+    elif "sentinel" not in dependencies:
+        provenance_absent = "build_provenance" not in body
+        if expected_commit_sha is not None:
+            failures.append(
+                "sentinel readiness is absent — this exact-release check "
+                "requires dependencies.sentinel with status 'up'"
+            )
+        elif provenance_absent:
+            print(
+                "[preflight] NOTE dependencies.sentinel absent from "
+                "/health/dependencies — deployed image predates the Sentinel "
+                "release gate; current-release posture only"
+            )
+        elif (
+            allow_legacy_missing_sentinel and body.get("build_provenance") == "stamped"
+        ):
+            print(
+                "[preflight] NOTE dependencies.sentinel absent from the "
+                "stamped pre-Sentinel image — explicit pre-mutation "
+                "compatibility mode only"
+            )
+        else:
+            failures.append(
+                "sentinel readiness is absent — this stamped-release check "
+                "requires dependencies.sentinel with status 'up'"
+            )
+    else:
+        sentinel = dependencies["sentinel"]
+        if not isinstance(sentinel, dict) or sentinel.get("status") != "up":
+            failures.append(
+                "sentinel readiness is not 'up' — production human approval "
+                "must be real, completely configured, and reachable"
+            )
+
     # Build provenance: did this image come through the documented release
     # path? Only `railway up --build-arg COMMIT_SHA=...` bakes the stamp, so
     # anything other than "stamped" means the running image was built by
@@ -457,16 +522,23 @@ def check_live(
     #
     # Key presence, not truthiness, for the same reason as the dogfood check
     # below: a genuinely absent key means the deployed image predates this
-    # field, which is reported and not silently passed but is deliberately not
-    # a hard failure — that would fail every deploy of an older image. A
+    # field. That earns a note only during legacy discovery, when no exact SHA
+    # is requested; an exact-release check must prove stamped provenance. A
     # *published* null is a different thing entirely. The field exists and does
     # not say "stamped", so it must fail closed like any other non-stamped
     # value. Once a stamped release is out, the key is always present.
     if "build_provenance" not in body:
-        print(
-            "[preflight] NOTE build_provenance absent from /health/dependencies "
-            "— deployed image predates this field; provenance not verified"
-        )
+        if expected_commit_sha is not None:
+            failures.append(
+                "build_provenance is absent — exact releases must report "
+                "'stamped' provenance from the documented railway up path"
+            )
+        else:
+            print(
+                "[preflight] NOTE build_provenance absent from "
+                "/health/dependencies — deployed image predates this field; "
+                "provenance not verified"
+            )
     else:
         provenance = body["build_provenance"]
         if provenance != "stamped":
@@ -590,7 +662,6 @@ def check_live(
             )
 
         health_signing_key_id = body.get("signing_key_id")
-        dependencies = body.get("dependencies")
         if health_signing_key_id is None and isinstance(dependencies, dict):
             signing_key = dependencies.get("signing_key")
             if isinstance(signing_key, dict):
@@ -697,6 +768,14 @@ def main(argv: list[str] | None = None) -> int:
         help="full 40-character commit SHA required from --live",
     )
     parser.add_argument(
+        "--allow-legacy-missing-sentinel",
+        action="store_true",
+        help=(
+            "allow only the stamped pre-Sentinel production image to omit "
+            "dependencies.sentinel during a strict pre-mutation live check"
+        ),
+    )
+    parser.add_argument(
         "--manifest",
         default="",
         help=(
@@ -718,6 +797,23 @@ def main(argv: list[str] | None = None) -> int:
         help="treat a skipped check as a failure (for CI)",
     )
     args = parser.parse_args(argv)
+
+    if args.allow_legacy_missing_sentinel and (
+        not args.live
+        or not args.strict
+        or args.db
+        or args.public_db
+        or args.manifest
+        or args.manifest_only
+        or args.expected_version
+        or args.expected_commit_sha
+    ):
+        print(
+            f"{BAD} --allow-legacy-missing-sentinel requires --live --strict "
+            "and cannot be combined with database checks, --manifest, "
+            "--manifest-only, or release-identity expectations"
+        )
+        return 1
 
     if args.manifest_only and not args.manifest:
         print(f"{BAD} --manifest-only requires --manifest")
@@ -837,6 +933,7 @@ def main(argv: list[str] | None = None) -> int:
                     effective_url,
                     expected_version=args.expected_version or None,
                     expected_commit_sha=effective_commit_sha or None,
+                    allow_legacy_missing_sentinel=(args.allow_legacy_missing_sentinel),
                 )
             results.append(live_result)
         else:

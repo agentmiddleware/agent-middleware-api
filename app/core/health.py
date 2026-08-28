@@ -16,9 +16,13 @@ See issue #27.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import re
 import time
+import unicodedata
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlsplit
 
 from .build_metadata import get_build_commit_sha, get_build_provenance
 from .config import get_settings
@@ -34,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 
 CHECK_TIMEOUT_SECONDS: float = 2.0
+
+_DNS_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 # Statuses that do not degrade the overall health verdict.
 _OK_STATUSES = {"up", "not_configured", "not_used"}
@@ -313,23 +319,137 @@ async def check_mqtt_readiness() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _sentinel_health_url(value: str) -> str | None:
+    """Return a safe, normalized Sentinel health URL or fail closed."""
+    if (
+        not value
+        or value != value.strip()
+        or any(
+            character.isspace() or unicodedata.category(character).startswith("C")
+            for character in value
+        )
+    ):
+        return None
+
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc or parsed.hostname is None:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.netloc.endswith(":") or port == 0:
+        return None
+    if "?" in value or "#" in value or parsed.path not in {"", "/"}:
+        return None
+
+    hostname = parsed.hostname
+    if hostname.endswith("..") or "%" in hostname:
+        return None
+    host = hostname[:-1] if hostname.endswith(".") else hostname
+    host = host.lower()
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        # ``urlsplit`` accepts bracketed IPvFuture syntax and returns the
+        # bracket-free value as ``hostname``. Treating that value as DNS would
+        # silently probe a different authority than the operator configured.
+        if parsed.netloc.startswith("["):
+            return None
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
+        labels = host.split(".")
+        if len(host) > 253 or any(not _DNS_LABEL.fullmatch(label) for label in labels):
+            return None
+        is_loopback = host == "localhost"
+    else:
+        ipv4_mapped = getattr(address, "ipv4_mapped", None)
+        is_loopback = address.is_loopback or bool(
+            ipv4_mapped is not None and ipv4_mapped.is_loopback
+        )
+        host = str(address)
+
+    if scheme == "http" and not is_loopback:
+        return None
+
+    authority = f"[{host}]" if ":" in host else host
+    default_port = 443 if scheme == "https" else 80
+    if port is not None and port != default_port:
+        authority = f"{authority}:{port}"
+    return f"{scheme}://{authority}/health"
+
+
 async def _check_sentinel(simulation_modes: dict[str, bool]) -> dict[str, Any]:
-    # The human-approval gate is the sole Sentinel consumer. In sim mode the
-    # service is never called — don't probe and don't degrade health over it.
+    settings = get_settings()
+    production_like = is_production_like_environment(settings.ENVIRONMENT)
+
+    # Simulation is a legitimate local proof mode, but production refuses to
+    # honor simulated approval. Report that production posture as unavailable
+    # without probing an external service the runtime will not call.
     if simulation_modes.get("human_approval", True):
+        if production_like:
+            return {
+                "status": "down",
+                "reason": "human_approval_not_configured",
+            }
         return {"status": "not_used", "reason": "human_approval in simulation mode"}
 
-    settings = get_settings()
-    base_url = (settings.SENTINEL_API_URL or "").strip()
-    if not base_url:
+    # Keep health aligned with the authorization boundary: real approval needs
+    # both settings. Never publish which half is missing.
+    from ..services.human_approval import human_approval_configured
+
+    if not human_approval_configured():
+        if production_like:
+            return {
+                "status": "down",
+                "reason": "human_approval_not_configured",
+            }
         return {"status": "not_configured"}
+
+    health_url = _sentinel_health_url(settings.SENTINEL_API_URL or "")
+    if health_url is None:
+        return {"status": "down", "reason": "human_approval_unavailable"}
 
     import httpx
 
-    async with httpx.AsyncClient(timeout=CHECK_TIMEOUT_SECONDS) as http:
-        resp = await http.get(f"{base_url.rstrip('/')}/health")
-        resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=CHECK_TIMEOUT_SECONDS) as http:
+            # Deliberately unauthenticated and read-only. Key presence is the
+            # configuration signal; the health probe must never transmit it.
+            resp = await http.get(health_url)
+            resp.raise_for_status()
+    except Exception:
+        # _run_check normally exposes exception text. Sentinel is published in
+        # production health, so collapse transport/config failures to a stable
+        # code that cannot echo a private origin or credential.
+        return {"status": "down", "reason": "human_approval_unavailable"}
     return {"status": "up"}
+
+
+async def _run_sentinel_check(
+    simulation_modes: dict[str, bool],
+) -> dict[str, Any]:
+    """Run and sanitize Sentinel, including the outer timeout path."""
+    result = await _run_check(
+        "sentinel",
+        lambda: _check_sentinel(simulation_modes),
+    )
+    if result.get("status") == "down":
+        result["error"] = None
+        if result.get("reason") not in {
+            "human_approval_not_configured",
+            "human_approval_unavailable",
+        }:
+            result["reason"] = "human_approval_unavailable"
+    return result
 
 
 async def gather_dependency_report() -> dict[str, Any]:
@@ -360,7 +480,7 @@ async def gather_dependency_report() -> dict[str, Any]:
         _run_check("llm", lambda: _check_llm(sim_modes)),
         _run_check("upstream_mcp", _check_upstream_mcp),
         _run_check("signing_key", _check_signing_key),
-        _run_check("sentinel", lambda: _check_sentinel(sim_modes)),
+        _run_sentinel_check(sim_modes),
     )
 
     dependencies = {
@@ -411,9 +531,10 @@ async def gather_dependency_report() -> dict[str, Any]:
     }
 
 
-# Dependencies the trust-plane wedge actually runs on. Everything else in the
-# full report exists for proof-surface consumers (mqtt/iot, llm/telemetry_pm,
-# sentinel/human_approval) or gated expansion surfaces (stripe: top-up, KYC).
+# Dependencies every trust-plane deployment runs on. Production-like
+# deployments additionally publish sanitized Sentinel readiness because human
+# approval is a mounted core path there. Everything else in the full report
+# exists for proof-surface consumers or gated expansion surfaces.
 PUBLIC_DEPENDENCY_KEYS: frozenset[str] = frozenset(
     {"postgres", "redis", "signing_key", "upstream_mcp"}
 )
@@ -430,20 +551,39 @@ def build_public_dependency_report(full_report: dict[str, Any]) -> dict[str, Any
     those services are reachable, so their flags describe nothing a caller can
     exercise. This projection reports only what the wedge runs on: postgres,
     redis, the signing key, the upstream MCP tool, version + commit SHA, and
-    the resolved environment posture. The overall verdict and ``unhealthy``
-    list are recomputed from the projected set so a hidden proof-surface
-    dependency can never flip the public status.
+    the resolved environment posture. Production-like deployments also expose
+    a sanitized Sentinel readiness signal because human approval is a mounted
+    core path there. The overall verdict and ``unhealthy`` list are recomputed
+    from the projected set so a hidden proof-surface dependency can never flip
+    the public status.
 
     The full report — simulation modes included — remains available to
     operators in the startup log (``phase="runtime_posture"``) and on
     deployments that mount proof surfaces, where those flags describe live,
     reachable routes.
     """
+    production_like = full_report.get("production_like") is True
+    dependency_keys = set(PUBLIC_DEPENDENCY_KEYS)
+    if production_like:
+        dependency_keys.add("sentinel")
+
     dependencies = {
         name: result
         for name, result in full_report["dependencies"].items()
-        if name in PUBLIC_DEPENDENCY_KEYS
+        if name in dependency_keys
     }
+    if production_like:
+        sentinel = dependencies.get("sentinel")
+        if isinstance(sentinel, dict) and sentinel.get("status") == "up":
+            dependencies["sentinel"] = {"status": "up"}
+        else:
+            reason = sentinel.get("reason") if isinstance(sentinel, dict) else None
+            if reason not in {
+                "human_approval_not_configured",
+                "human_approval_unavailable",
+            }:
+                reason = "human_approval_unavailable"
+            dependencies["sentinel"] = {"status": "down", "reason": reason}
     unhealthy = [
         name for name, r in dependencies.items() if r.get("status") not in _OK_STATUSES
     ]

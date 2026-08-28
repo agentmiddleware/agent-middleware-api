@@ -48,7 +48,7 @@ Before assuming real side effects, check:
 GET /health/dependencies
 ```
 
-Inspect the JSON body: **HTTP 200 alone does not mean every dependency is ready**. Check `status`, the selected tool's dependencies, and `enable_proof_surfaces`. Instances that mount proof surfaces additionally report per-service `simulation_modes`; the production posture (`enable_proof_surfaces: false`) reports only the trust-plane wedge dependencies. Health never replaces authentication or permit checks.
+Inspect the JSON body: **HTTP 200 alone does not mean every dependency is ready**. Check `status`, the selected tool's dependencies, and `enable_proof_surfaces`. Instances that mount proof surfaces additionally report per-service `simulation_modes`; the production posture (`enable_proof_surfaces: false`) reports only the trust-plane wedge dependencies, including a sanitized Sentinel readiness entry in production-like mode. Sentinel `up` proves only that real approval is configured and its unauthenticated health endpoint is reachable; it does not validate the configured key. Health never replaces authentication or permit checks.
 
 ## Authentication
 
@@ -312,7 +312,7 @@ On startup, the gateway discovers the exact upstream tool and refuses readiness 
 | `POST /v1/audit/verify-chain` | Verify a wallet audit chain | Authorized wallet/admin |
 | `GET /v1/receipts/reconciliation/refunds` | Inspect failed-refund work items; a wallet key sees its own, an operator key sees all | Wallet key or bootstrap admin; the retry action stays bootstrap admin only |
 | `POST /v1/billing/top-up/prepare` | Create a Stripe PaymentIntent for a sponsor wallet | Authorized sponsor wallet; dormant expansion surface — mounts only with `ENABLE_PROOF_SURFACES=true`, never in production |
-| `GET /health/dependencies` | Wedge dependency truth (postgres, redis, signing key, upstream MCP, version + commit SHA); instances that mount proof surfaces also report simulation modes | Public operator check |
+| `GET /health/dependencies` | Wedge dependency truth (postgres, redis, signing key, upstream MCP, production Sentinel readiness, version + commit SHA); instances that mount proof surfaces also report simulation modes | Public operator check |
 
 The generated contract at `/openapi.json` is canonical. A checked-in copy lives at [docs/openapi.json](docs/openapi.json) and is held in sync by CI.
 

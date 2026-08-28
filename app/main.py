@@ -1148,10 +1148,12 @@ async def health_ready():
     summary="Dependency health check",
     description=(
         "Probes the dependencies this deployment runs on, in parallel with a "
-        "short timeout. Each entry reports status, latency_ms, and an error "
-        "message when unreachable. With proof surfaces unmounted (the "
+        "short timeout. Full dependency entries report status and probe "
+        "timing; the production Sentinel entry is intentionally reduced to "
+        "a sanitized status and generic reason. With proof surfaces unmounted (the "
         "production posture) the payload covers the trust-plane wedge only: "
-        "postgres, redis, signing key, upstream MCP, version + commit SHA. "
+        "postgres, redis, signing key, upstream MCP, production Sentinel "
+        "readiness, version + commit SHA. "
         "Instances that mount proof surfaces additionally report those "
         "surfaces' dependencies and per-service simulation modes; deps whose "
         "consumers are simulated return `not_used` so the verdict doesn't "

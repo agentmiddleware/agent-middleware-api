@@ -178,7 +178,14 @@ def test_release_workflow_validates_without_production_mutation() -> None:
     assert "deployment performed: **no**" in workflow
     assert 'git merge-base --is-ancestor "$sha" origin/main' in workflow
     assert 'select(.event == "push"' in workflow
-    assert "scripts/railway_preflight.py --live --strict" in workflow
+    assert "args=(--live --strict)" in workflow
+    assert 'python scripts/railway_preflight.py "${args[@]}"' in workflow
+    compat_input = workflow.index("allow_legacy_missing_sentinel:")
+    workflow_permissions = workflow.index("permissions:")
+    assert compat_input < workflow_permissions
+    assert "default: false" in workflow[compat_input:workflow_permissions]
+    assert 'if [ "$ALLOW_LEGACY_MISSING_SENTINEL" = "true" ]' in workflow
+    assert "args+=(--allow-legacy-missing-sentinel)" in workflow
     assert "railway up" not in workflow
     assert "railway variable set" not in workflow
     assert "railway run --service Postgres --environment production" not in workflow
@@ -214,14 +221,32 @@ def test_private_pilot_sop_runs_schema_check_inside_api_container() -> None:
     source_gate = private_release.index(
         "python scripts/railway_preflight.py --manifest-only"
     )
+    current_args = private_release.index(
+        'pre_mutation_args=(--live --strict --url "$API_URL")'
+    )
+    opt_in = private_release.index(
+        'if [ "${ALLOW_LEGACY_MISSING_SENTINEL:-false}" = "true" ]; then'
+    )
+    compat_append = private_release.index(
+        "pre_mutation_args+=(--allow-legacy-missing-sentinel)"
+    )
     current_gate = private_release.index(
-        'python scripts/railway_preflight.py --live --strict --url "$API_URL"'
+        'python scripts/railway_preflight.py "${pre_mutation_args[@]}"'
     )
     deploy = private_release.index('railway up --project "$PROJECT_ID"')
     post_gate = private_release.rindex(
         "python scripts/railway_preflight.py --live --strict"
     )
-    assert source_gate < current_gate < deploy < post_gate
+    assert (
+        source_gate
+        < current_args
+        < opt_in
+        < compat_append
+        < current_gate
+        < deploy
+        < post_gate
+    )
+    assert "--allow-legacy-missing-sentinel" not in private_release[deploy:]
     assert "`railway run` executes locally" in sop
 
 
@@ -259,6 +284,8 @@ HEALTHY = {
     "production_like": True,
     "version": "1.3.0",
     "commit_sha": EXPECTED_COMMIT_SHA,
+    "build_provenance": "stamped",
+    "dependencies": {"sentinel": {"status": "up"}},
     "unhealthy": [],
     "enable_proof_surfaces": False,
     "enable_dogfood_tool": False,
@@ -643,6 +670,215 @@ def test_live_passes_on_exact_expected_release_identity(monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    "sentinel",
+    [
+        {"status": "down"},
+        {"status": "not_configured"},
+        {"status": "not_used"},
+        {"status": "future"},
+        {},
+        None,
+        "up",
+    ],
+    ids=[
+        "down",
+        "not_configured",
+        "not_used",
+        "unknown",
+        "missing_status",
+        "null",
+        "non_object",
+    ],
+)
+def test_live_fails_closed_on_present_non_up_sentinel(monkeypatch, sentinel):
+    payload = {**HEALTHY, "dependencies": {"sentinel": sentinel}}
+    _patch_get(monkeypatch, payload)
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+@pytest.mark.parametrize("dependencies", [None, [], "not-an-object"])
+def test_live_rejects_malformed_dependencies_object(monkeypatch, dependencies):
+    _patch_get(monkeypatch, {**HEALTHY, "dependencies": dependencies})
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_allows_legacy_missing_sentinel_without_identity_or_stamp(
+    monkeypatch,
+    capsys,
+):
+    payload = {**HEALTHY, "dependencies": {}}
+    payload.pop("build_provenance")
+    _patch_get(monkeypatch, payload)
+
+    assert preflight.check_live("https://api.example.com") is True
+    output = capsys.readouterr().out
+    assert "NOTE" in output
+    assert "sentinel" in output.lower()
+
+
+def test_live_rejects_missing_sentinel_for_exact_release(monkeypatch, capsys):
+    payload = {**HEALTHY, "dependencies": {}}
+    payload.pop("build_provenance")
+    _patch_get(monkeypatch, payload)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_commit_sha=EXPECTED_COMMIT_SHA,
+        )
+        is False
+    )
+    assert "sentinel readiness is absent" in capsys.readouterr().out
+
+
+def test_live_rejects_missing_sentinel_for_stamped_release(monkeypatch):
+    _patch_get(monkeypatch, {**HEALTHY, "dependencies": {}})
+
+    assert preflight.check_live("https://api.example.com") is False
+
+
+def test_live_allows_stamped_pre_sentinel_release_only_with_explicit_mode(
+    monkeypatch,
+    capsys,
+):
+    _patch_get(monkeypatch, {**HEALTHY, "dependencies": {}})
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            allow_legacy_missing_sentinel=True,
+        )
+        is True
+    )
+    output = capsys.readouterr().out
+    assert "explicit pre-mutation compatibility mode only" in output
+
+
+@pytest.mark.parametrize(
+    "identity_expectation",
+    [
+        {"expected_version": "1.3.0"},
+        {"expected_commit_sha": EXPECTED_COMMIT_SHA},
+        {"expected_signing_key_id": EXPECTED_SIGNING_KEY_ID},
+        {"expected_signing_public_key_sha256": (EXPECTED_SIGNING_PUBLIC_KEY_SHA256)},
+    ],
+)
+def test_live_legacy_mode_rejects_identity_expectations_before_network(
+    monkeypatch,
+    identity_expectation,
+    capsys,
+):
+    import httpx
+
+    calls = []
+
+    def unexpected_get(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("network must not be reached")
+
+    monkeypatch.setattr(httpx, "get", unexpected_get)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            allow_legacy_missing_sentinel=True,
+            **identity_expectation,
+        )
+        is False
+    )
+    assert calls == []
+    assert "cannot be combined" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "dependencies",
+    [
+        {"sentinel": {"status": "down"}},
+        {"sentinel": "up"},
+        [],
+        None,
+    ],
+)
+def test_live_legacy_mode_does_not_accept_present_or_malformed_sentinel(
+    monkeypatch,
+    dependencies,
+):
+    _patch_get(monkeypatch, {**HEALTHY, "dependencies": dependencies})
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            allow_legacy_missing_sentinel=True,
+        )
+        is False
+    )
+
+
+def test_live_rejects_unstamped_missing_sentinel_without_legacy_note(
+    monkeypatch,
+    capsys,
+):
+    payload = {
+        **HEALTHY,
+        "build_provenance": "unstamped",
+        "dependencies": {},
+    }
+    _patch_get(monkeypatch, payload)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            allow_legacy_missing_sentinel=True,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "sentinel readiness is absent" in output
+    assert "NOTE dependencies.sentinel" not in output
+
+
+def test_live_sentinel_failure_output_never_echoes_payload(monkeypatch, capsys):
+    secret_url = "https://private-sentinel.example"
+    secret_key = "sentinel-key-that-must-not-leak"
+    payload = {
+        **HEALTHY,
+        "dependencies": {
+            "sentinel": {
+                "status": "down",
+                "reason": secret_url,
+                "error": secret_key,
+            }
+        },
+    }
+    _patch_get(monkeypatch, payload)
+
+    assert preflight.check_live("https://api.example.com") is False
+    output = capsys.readouterr().out
+    assert secret_url not in output
+    assert secret_key not in output
+
+
+def test_manifest_live_gate_requires_sentinel_field(tmp_path, monkeypatch, capsys):
+    manifest = _write_manifest(tmp_path, _manifest_document())
+    payload = {
+        **HEALTHY,
+        "commit_sha": TREE_COMMIT_SHA,
+        "dependencies": {},
+    }
+    payload.pop("build_provenance")
+    _patch_manifest_get(
+        monkeypatch,
+        dependencies_payload=payload,
+        liveness_payload=payload,
+    )
+
+    assert preflight.main(["--live", "--strict", "--manifest", str(manifest)]) == 1
+    assert "sentinel readiness is absent" in capsys.readouterr().out
+
+
 def test_live_uses_public_key_document_when_health_omits_signing_key_id(monkeypatch):
     _patch_manifest_get(monkeypatch)
 
@@ -993,8 +1229,21 @@ def test_live_rejects_abbreviated_expected_commit_sha(monkeypatch):
 def test_cli_forwards_expected_release_identity(monkeypatch):
     seen = []
 
-    def check_live(url, *, expected_version=None, expected_commit_sha=None):
-        seen.append((url, expected_version, expected_commit_sha))
+    def check_live(
+        url,
+        *,
+        expected_version=None,
+        expected_commit_sha=None,
+        allow_legacy_missing_sentinel=False,
+    ):
+        seen.append(
+            (
+                url,
+                expected_version,
+                expected_commit_sha,
+                allow_legacy_missing_sentinel,
+            )
+        )
         return True
 
     monkeypatch.setattr(preflight, "check_live", check_live)
@@ -1014,7 +1263,87 @@ def test_cli_forwards_expected_release_identity(monkeypatch):
         )
         == 0
     )
-    assert seen == [("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA)]
+    assert seen == [("https://api.example.com", "1.3.0", EXPECTED_COMMIT_SHA, False)]
+
+
+def test_cli_forwards_explicit_legacy_sentinel_mode(monkeypatch):
+    seen = []
+
+    def check_live(
+        url,
+        *,
+        expected_version=None,
+        expected_commit_sha=None,
+        allow_legacy_missing_sentinel=False,
+    ):
+        seen.append(
+            (
+                url,
+                expected_version,
+                expected_commit_sha,
+                allow_legacy_missing_sentinel,
+            )
+        )
+        return True
+
+    monkeypatch.setattr(preflight, "check_live", check_live)
+
+    assert (
+        preflight.main(
+            [
+                "--live",
+                "--strict",
+                "--allow-legacy-missing-sentinel",
+                "--url",
+                "https://api.example.com",
+            ]
+        )
+        == 0
+    )
+    assert seen == [("https://api.example.com", None, None, True)]
+
+
+def test_cli_explicit_legacy_mode_accepts_current_stamped_old_image(monkeypatch):
+    _patch_get(monkeypatch, {**HEALTHY, "dependencies": {}})
+
+    assert (
+        preflight.main(
+            [
+                "--live",
+                "--strict",
+                "--allow-legacy-missing-sentinel",
+                "--url",
+                "https://api.example.com",
+            ]
+        )
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--strict"],
+        ["--live"],
+        ["--live", "--strict", "--db"],
+        ["--live", "--strict", "--public-db"],
+        ["--live", "--strict", "--manifest", "missing.json"],
+        ["--live", "--strict", "--manifest-only", "--manifest", "missing.json"],
+        ["--live", "--strict", "--expected-version", "1.3.0"],
+        [
+            "--live",
+            "--strict",
+            "--expected-commit-sha",
+            EXPECTED_COMMIT_SHA,
+        ],
+    ],
+)
+def test_cli_rejects_legacy_sentinel_mode_outside_pre_mutation_check(
+    arguments,
+    capsys,
+):
+    assert preflight.main([*arguments, "--allow-legacy-missing-sentinel"]) == 1
+    assert "requires --live --strict" in capsys.readouterr().out
 
 
 def test_live_fails_when_unreachable(monkeypatch):
@@ -1097,6 +1426,23 @@ def test_live_notes_absent_provenance_without_failing(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "NOTE" in output
     assert "build_provenance absent" in output
+
+
+def test_live_rejects_absent_provenance_for_exact_release(monkeypatch, capsys):
+    payload = {key: value for key, value in HEALTHY.items()}
+    payload.pop("build_provenance", None)
+    _patch_get(monkeypatch, payload)
+
+    assert (
+        preflight.check_live(
+            "https://api.example.com",
+            expected_commit_sha=EXPECTED_COMMIT_SHA,
+        )
+        is False
+    )
+    output = capsys.readouterr().out
+    assert "build_provenance is absent" in output
+    assert "NOTE build_provenance" not in output
 
 
 @pytest.mark.parametrize(
