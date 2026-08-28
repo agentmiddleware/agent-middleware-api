@@ -1,10 +1,7 @@
-"""
-Agent Discovery Router — Phase 9
-================================
-Machine-readable discovery endpoints for autonomous agents.
+"""Machine-readable discovery endpoints for autonomous agents.
 
-Provides project-defined endpoints clients can use to discover capabilities,
-tools, pricing, and integration guidance.
+Provides project-defined endpoints clients can use to discover the governed MCP
+gateway, its currently available tools, pricing, and integration guidance.
 """
 
 from fastapi import APIRouter, Depends
@@ -13,7 +10,7 @@ from typing import Any, Optional
 
 from ..core.auth import verify_api_key
 from ..core.config import get_settings
-from .well_known import get_agent_first_metadata
+from .well_known import TRUST_PLANE_DESCRIPTION, get_agent_first_metadata
 
 router = APIRouter(
     prefix="/v1",
@@ -456,13 +453,21 @@ def _build_pricing() -> list[PricingTier]:
 def _build_integration_guides() -> dict[str, str]:
     """Trust-plane guides; AWI guide only when proof surfaces are mounted."""
     guides = {
-        "mcp_server": "/mcp",
+        "mcp_tools": "/mcp/tools.json",
+        "mcp_json_rpc": "/mcp/messages",
+        "mcp_json_rpc_status": "legacy_project_transport",
+        "mcp_json_rpc_note": (
+            "Project-specific JSON-RPC endpoint; it does not implement the "
+            "standard MCP initialization lifecycle."
+        ),
         "llm_txt": "/llm.txt",
         "llms_txt": "/llms.txt",
         "wedge": "/WEDGE.md",
         "partner_guide": "/DESIGN_PARTNER_GUIDE.md",
         "dogfood": "make dogfood-trust-plane (local partner.notes.write)",
     }
+    if get_settings().ENABLE_STANDARD_MCP_ENDPOINT:
+        guides["standard_mcp"] = "/mcp"
     if get_settings().ENABLE_PROOF_SURFACES:
         guides["awi_adoption"] = "/docs/awi-adoption-guide.md"
     return guides
@@ -509,8 +514,7 @@ async def get_discovery_manifest():
         name=settings.APP_NAME,
         version=settings.APP_VERSION,
         description=(
-            "Governed MCP trust plane for autonomous agents: scoped permits, "
-            "metered tool invocation, signed receipts, and wallet audit chains."
+            TRUST_PLANE_DESCRIPTION
             + (
                 " Capabilities with surface=proof_surface are labeled scaffolding."
                 if get_settings().ENABLE_PROOF_SURFACES
@@ -544,12 +548,15 @@ async def list_mcp_tools(api_key: str = Depends(verify_api_key)):
     _ensure_local_mcp_tools_registered()
     
     tools = _build_mcp_tools()
-    return {
+    result = {
         "tools": tools,
         "total": len(tools),
-        "mcp_endpoint": "/mcp",
         "mcp_tools_json": "/mcp/tools.json",
+        "mcp_json_rpc_endpoint": "/mcp/messages",
     }
+    if get_settings().ENABLE_STANDARD_MCP_ENDPOINT:
+        result["mcp_endpoint"] = "/mcp"
+    return result
 
 
 @router.get(

@@ -1,5 +1,10 @@
 # AgentMarket.cloud Submission
 
+> **Status: pre-publication draft — do not submit.** The listing requires a
+> monitored public contact and a live, enabled standard MCP endpoint that has
+> passed the registry preflight. See
+> [MCP Registry Submission](mcp-registry-submission.md).
+
 ## Listing Information
 
 **Service Name:** Agent Middleware API
@@ -11,17 +16,19 @@
 ```markdown
 # Agent Middleware API
 
-**Governed control point for autonomous agent tool calls.**
+**MCP authorization gateway for agent-to-tool actions.**
 
-Agent Middleware API authorizes, meters, dispatches, receipts, and audits one
-MCP tool call under a wallet-scoped permit.
+Agent Middleware API authorizes one configured upstream MCP tool under a
+wallet-scoped permit. One accepted idempotency key permits at most one gateway
+dispatch and wallet debit; signed receipts and audit evidence record the
+terminal gateway outcome.
 
-Canonical loop: `discover -> authenticate -> authorize -> meter -> dispatch -> receipt -> audit -> govern`.
+Canonical loop: `discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`.
 
 ## Capabilities
 
 - **Scoped authority** — signed permits bind wallet, key, tool, budget, and expiry
-- **Replay-safe metering** — one gateway debit and dispatch per idempotency key
+- **Replay-safe metering** — at most one gateway debit and dispatch per accepted idempotency key
 - **Remote MCP dispatch** — one operator-configured HTTPS Streamable HTTP tool
 - **Signed evidence** — receipts link permit, ledger, dispatch state, and audit
 - **Explicit uncertainty** — ambiguous post-dispatch failures are signed and not retried
@@ -63,8 +70,8 @@ pilot.
 - [API Reference](https://api.thisisatest.tech/docs)
 - [OpenAPI Spec](https://api.thisisatest.tech/openapi.json)
 - [LLM Docs](https://api.thisisatest.tech/llm.txt)
-- [Security limitations](https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/SECURITY_LIMITATIONS.md)
-- [Design-partner guide](https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/DESIGN_PARTNER_GUIDE.md)
+- [Security limitations](https://api.thisisatest.tech/SECURITY_LIMITATIONS.md)
+- [Design-partner guide](https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md)
 
 ## Repository
 
@@ -86,8 +93,9 @@ No public production demo or SLA is promised by this document.
 ## Tags
 
 ```
-mcp, authorization, idempotency, audit-logs, agent-governance,
-signed-receipts, autonomous-agents
+mcp, model-context-protocol, mcp-gateway, agent-authorization,
+idempotency, replay-protection, usage-metering, signed-receipts,
+agent-governance
 ```
 
 ## Contact
@@ -96,4 +104,3 @@ signed-receipts, autonomous-agents
 - Public operator email: intentionally omitted until a monitored address and
   accountable identity pass the launch contact gate. Do not submit this listing
   before those values are configured.
-```

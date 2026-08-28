@@ -1,12 +1,8 @@
-"""
-Agent Well-Known Router — Phase 9
-=================================
-Project agent discovery endpoints following common web conventions.
+"""Project agent discovery endpoints following common web conventions.
 
-Implements /.well-known/agent.json for agent directory registration.
-Product capabilities are the MCP trust-plane wedge; AWI and related
-workloads are labeled proof surfaces (often simulated) and must not be
-read as production-complete features.
+Implements ``/.well-known/agent.json`` for agent bootstrap. Product
+capabilities describe the governed MCP gateway; AWI and related workloads are
+labeled proof surfaces and must not be read as production-complete features.
 """
 
 import base64
@@ -48,6 +44,13 @@ PRODUCT_CAPABILITIES: list[str] = [
     "signing_keys",
     "api_keys",
 ]
+
+TRUST_PLANE_DESCRIPTION = (
+    "Governed MCP gateway for autonomous agents: scoped permits and an accepted "
+    "idempotency key yield at most one gateway dispatch and wallet debit for the "
+    "configured upstream MCP tool. Signed receipts and audit records make the "
+    "terminal gateway outcome independently checkable."
+)
 
 # Proof-surface catalog — served only while these workloads are mounted
 # (ENABLE_PROOF_SURFACES=true), for honesty about what is actually reachable.
@@ -237,7 +240,7 @@ def _local_try_it_manifest() -> dict[str, Any]:
     return {
         "mode": "local_self_hosted",
         "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
-        "repository_access": "private",
+        "repository_access": "public",
         "command": "make prove-trust-plane",
         "live_access": "operator_issued",
         "requires_live_credentials": False,
@@ -252,11 +255,57 @@ def _local_try_it_manifest() -> dict[str, Any]:
         "note": (
             "Runs the real FastAPI trust path against a throwaway local SQLite "
             "database. This is a reproducible proof, not a production or "
-            "settlement claim. The source repository is private during the "
-            "design-partner phase; request access from the operator listed on "
-            "the human site before cloning."
+            "settlement claim. The source repository is public; clone it and "
+            "run the proof locally before treating it as production evidence."
         ),
     }
+
+
+def _integration_manifest() -> dict[str, Any]:
+    """Expose only the MCP transports available in this deployment."""
+    standard_mcp_enabled = get_settings().ENABLE_STANDARD_MCP_ENDPOINT
+    integrations: dict[str, Any] = {
+        "python_sdk": {
+            "status": "release_artifact_only",
+            # The version an editable install of ``b2a_sdk/`` yields -- this
+            # field describes what ``install`` below produces, so it tracks the
+            # source, not the newest tag. The two are named separately because
+            # they differ whenever source has moved past the last release.
+            "version": "0.5.0",
+            "path": "b2a_sdk/",
+            "install": "pip install -e ./b2a_sdk",
+            "latest_release_tag": "python-sdk-v0.4.0",
+            "note": (
+                "Wheel and sdist are attached to python-sdk-v0.4.0 by the "
+                "release workflow; the source in b2a_sdk/ is 0.5.0 and is "
+                "ahead of that tag. Not published to PyPI."
+            ),
+        },
+        "typescript_sdk": {
+            "status": "not_published",
+            "note": (
+                "No published TypeScript SDK. Use /mcp/messages only with a "
+                "project-specific JSON-RPC client, plus /v1/permits and "
+                "/v1/receipts."
+            ),
+        },
+        "mcp": True,
+        "mcp_json_rpc": "/mcp/messages",
+        "mcp_json_rpc_status": "legacy_project_transport",
+        "mcp_json_rpc_note": (
+            "Project-specific JSON-RPC endpoint; it does not implement the "
+            "standard MCP initialization lifecycle."
+        ),
+        "mcp_tool_manifest": "/mcp/tools.json",
+        "langgraph": "in_repo_wrapper",
+        "crewai": "in_repo_wrapper",
+        "autogen": "in_repo_wrapper",
+        "llamaindex": "in_repo_wrapper",
+    }
+    if standard_mcp_enabled:
+        integrations["standard_mcp_streamable_http"] = "/mcp"
+        integrations["preferred_integration"] = "standard_mcp_streamable_http"
+    return integrations
 
 
 class AgentPluginManifest(BaseModel):
@@ -316,45 +365,7 @@ class AgentPluginManifest(BaseModel):
         }
     )
 
-    integrations: dict = Field(
-        default_factory=lambda: {
-            # Release artifacts are built from this repository; neither SDK is
-            # advertised as a package-registry install.
-            "python_sdk": {
-                "status": "release_artifact_only",
-                # The version an editable install of ``b2a_sdk/`` yields --
-                # this field describes what ``install`` below produces, so it
-                # tracks the source, not the newest tag. The two are named
-                # separately because they differ whenever source has moved
-                # past the last release, and collapsing them into one number
-                # is how a discovery surface starts lying about what a client
-                # will actually get. tests/test_wedge_honesty.py pins this
-                # against b2a_sdk/pyproject.toml so they cannot drift.
-                "version": "0.5.0",
-                "path": "b2a_sdk/",
-                "install": "pip install -e ./b2a_sdk",
-                "latest_release_tag": "python-sdk-v0.4.0",
-                "note": (
-                    "Wheel and sdist are attached to python-sdk-v0.4.0 by the "
-                    "release workflow; the source in b2a_sdk/ is 0.5.0 and is "
-                    "ahead of that tag. Not published to PyPI."
-                ),
-            },
-            "typescript_sdk": {
-                "status": "not_published",
-                "note": (
-                    "No published TypeScript SDK. Use HTTP "
-                    "(/mcp, /v1/permits, /v1/receipts)."
-                ),
-            },
-            "mcp": True,
-            "preferred_integration": "http_mcp",
-            "langgraph": "in_repo_wrapper",
-            "crewai": "in_repo_wrapper",
-            "autogen": "in_repo_wrapper",
-            "llamaindex": "in_repo_wrapper",
-        }
-    )
+    integrations: dict = Field(default_factory=_integration_manifest)
 
     documentation: dict = Field(
         default_factory=lambda: {
@@ -381,10 +392,11 @@ class AgentPluginManifest(BaseModel):
 
 
 def _product_endpoints() -> dict[str, str]:
-    return {
+    endpoints = {
         "api_base": "/v1",
         "discovery": "/v1/discover",
-        "mcp": "/mcp",
+        "mcp_tools": "/mcp/tools.json",
+        "mcp_json_rpc": "/mcp/messages",
         "billing": "/v1/billing",
         "permits": "/v1/permits",
         "receipts": "/v1/receipts",
@@ -404,6 +416,9 @@ def _product_endpoints() -> dict[str, str]:
         "llms_docs": "/llms.txt",
         "dependency_truth": "/health/dependencies",
     }
+    if get_settings().ENABLE_STANDARD_MCP_ENDPOINT:
+        endpoints["mcp"] = "/mcp"
+    return endpoints
 
 
 def _proof_surface_endpoints() -> dict[str, str]:
@@ -453,10 +468,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
         # bootstrap payload.
         proof_surfaces = []
 
-    description = (
-        "Governed MCP trust plane for autonomous agents: scoped permits, "
-        "metered tool invocation, signed receipts, and wallet audit chains."
-    )
+    description = TRUST_PLANE_DESCRIPTION
     if cfg.ENABLE_PROOF_SURFACES:
         description += (
             " Additional routers are labeled proof surfaces, not the product wedge."

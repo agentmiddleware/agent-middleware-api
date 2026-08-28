@@ -315,12 +315,13 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     ]
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
-    # The repository went private in 2026-08; the manifest must say so rather
-    # than sending agents to clone a URL that 404s anonymously.
-    assert manifest["try_it"]["repository_access"] == "private"
-    assert manifest["github_access"] == "private"
+    # The repository is public, so agents can follow the clone instructions
+    # without a misleading access-request detour.
+    assert manifest["try_it"]["repository_access"] == "public"
+    assert manifest["github_access"] == "public"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
+    assert "at-most-one gateway dispatch and debit" in manifest["description"]
     assert "awi_manifest" not in manifest["discovery"]
 
 
@@ -332,6 +333,9 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
     assert llm_txt == llms_txt
     assert "human design-partner site" in llm_txt
     assert "teams operating internal MCP tools are the buyers" in llm_txt
+    assert "governed MCP gateway" in llm_txt
+    assert "at most one gateway dispatch and wallet debit" in " ".join(llm_txt.split())
+    assert "The source repository is public." in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -380,15 +384,14 @@ def test_customer_facing_outputs_do_not_publish_provider_origins(tmp_path) -> No
 REPO_URL = "https://github.com/PetrefiedThunder/agent-middleware-api"
 
 
-def test_public_surfaces_disclose_private_repo_and_avoid_dead_deep_links(
+def test_public_surfaces_link_to_public_repo_without_stale_private_copy(
     tmp_path,
 ) -> None:
-    """The source repository went private in 2026-08, so anonymous fetches of
-    ``github.com/PetrefiedThunder/...`` return 404. Public surfaces may still
-    name the repository as the source of record, but only next to an explicit
-    private/request-access disclosure — and never via ``/blob/`` deep links,
-    whose targets have live replacements served from the API origin
-    (``/WEDGE.md``, ``/SECURITY_LIMITATIONS.md``, ``/DESIGN_PARTNER_GUIDE.md``).
+    """Public-facing copy must not leave agents expecting a private repository.
+
+    The repository became public on 2026-08-27. Its human and machine discovery
+    surfaces may link directly to the source of record, but cannot retain a
+    stale access-request warning.
     """
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
@@ -406,21 +409,32 @@ def test_public_surfaces_disclose_private_repo_and_avoid_dead_deep_links(
         ROOT / "static" / "llm.txt",
     )
     for path in public_paths:
-        content = path.read_text(encoding="utf-8")
-        assert f"{REPO_URL}/blob/" not in content, (
-            f"{path} deep-links into the private repository; anonymous fetches "
-            "404 — link the API-origin copy instead"
+        content = path.read_text(encoding="utf-8").casefold()
+        assert "source repository is private" not in content, (
+            f"{path} still marks the public repository as private"
         )
-        assert "raw.githubusercontent.com" not in content, (
-            f"{path} links raw.githubusercontent.com, which 404s on a private "
-            "repository"
+        assert "private —" not in content, (
+            f"{path} still marks the public repository as private"
         )
-        if REPO_URL in content:
-            lowered = content.casefold()
-            assert "private" in lowered and "request" in lowered, (
-                f"{path} names the private repository without disclosing that "
-                "access must be requested"
-            )
+        assert "source access on request" not in content, (
+            f"{path} still asks for access to the public repository"
+        )
+
+    source_reference_paths = (
+        output / "index.html",
+        output / "proof" / "index.html",
+        output / "compare" / "index.html",
+        output / "llm.txt",
+        output / "llms.txt",
+        output / "llms-full.txt",
+        output / ".well-known" / "agent.json",
+        ROOT / "static" / "llm.txt",
+    )
+    for path in source_reference_paths:
+        content = path.read_text(encoding="utf-8").casefold()
+        assert REPO_URL.casefold() in content, (
+            f"{path} does not link to the public source repository"
+        )
 
 
 def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
@@ -470,6 +484,11 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert '<link rel="canonical" href="https://www.thisisatest.tech/"' in page
     assert 'property="og:url" content="https://www.thisisatest.tech/"' in page
     assert 'name="twitter:card" content="summary_large_image"' in page
+    assert (
+        "<title>Agent Middleware API | MCP gateway for agent tool authorization</title>"
+        in page
+    )
+    assert "same accepted idempotency key" in page
     assert "https://www.thisisatest.tech/social-card.png" in page
     assert '<link rel="icon" href="/favicon.svg"' in page
     assert "/_vercel/insights/script.js" not in page
@@ -477,6 +496,12 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert "https://www.thisisatest.tech/proof/" in sitemap
     assert "https://www.thisisatest.tech/compare/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
+    organization = next(
+        node
+        for node in _json_ld_graph(page, "index.html")
+        if node["@type"] == "Organization"
+    )
+    assert organization["sameAs"] == [REPO_URL]
 
     for event_name in ("booking_click", "email_click", "proof_click"):
         assert event_name in analytics

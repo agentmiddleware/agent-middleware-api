@@ -7,8 +7,8 @@ Expires: @@SECURITY_TXT_EXPIRES@@
 Preferred-Languages: en
 Canonical: https://www.thisisatest.tech/.well-known/security.txt
 
-# The source repository is private, so the policy and limitations documents
-# are published from the API origin instead of GitHub.
+# The source repository is public. The canonical API also serves product
+# boundary and limitation documents at the URLs below.
 #
 # Scope
 #   www.thisisatest.tech  — this static marketing and proof site

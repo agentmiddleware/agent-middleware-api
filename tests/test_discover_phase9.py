@@ -40,7 +40,7 @@ class TestWellKnownAgentJson:
 
         assert "endpoints" in data
         assert data["endpoints"]["permits"] == "/v1/permits"
-        assert data["endpoints"]["mcp"] == "/mcp"
+        assert data["endpoints"]["mcp_json_rpc"] == "/mcp/messages"
         phase9_endpoints = ["awi_passkey", "awi_dom", "awi_rag"]
         for endpoint in phase9_endpoints:
             assert endpoint in data["endpoints"], (

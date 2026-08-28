@@ -246,9 +246,11 @@ async def get_tools_json(
     deprecated=True,
     description=(
         "Legacy project JSON-RPC endpoint, kept for existing clients and the "
-        "local proof scripts. New integrations should use the standard MCP "
-        "Streamable HTTP endpoint at POST /mcp (official MCP SDK transport); "
-        "both run the same governed permit→meter→receipt path."
+        "local proof scripts. It does not implement the standard MCP "
+        "initialization lifecycle. Check `/.well-known/agent.json` before "
+        "assuming the standard MCP Streamable HTTP endpoint at POST /mcp is "
+        "available; both transports run the same governed permit→meter→receipt "
+        "path when enabled."
     ),
 )
 async def handle_messages(

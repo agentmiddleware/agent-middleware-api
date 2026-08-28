@@ -4,11 +4,46 @@ title: "[Feature] "
 labels:
   - enhancement
 body:
+  - type: markdown
+    attributes:
+      value: |
+        New core capability requires evidence from a qualified prospective customer.
+        Do not include customer/company/person names, contact details, credentials,
+        contract terms, or payloads in this public issue. Use approved
+        non-identifying references; record named evidence in the private customer process.
   - type: textarea
     id: problem
     attributes:
       label: Problem statement
       description: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: prospective_customer
+    attributes:
+      label: Approved non-identifying prospect reference
+      description: Use a stable opaque reference such as prospect-123. Do not name the customer or person; record identifying evidence in the private customer process. Otherwise write N/A.
+    validations:
+      required: true
+  - type: textarea
+    id: consequential_tool
+    attributes:
+      label: Consequential tool and action
+      description: Describe the one tool and action generically. Do not include customer-specific system names, endpoints, credentials, or payloads. Otherwise write N/A.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow_blocker
+    attributes:
+      label: Current-workflow blocker
+      description: Explain the blocker, failure mode, or exposure generically without customer data. Otherwise write N/A.
+    validations:
+      required: true
+  - type: textarea
+    id: owner_and_date
+    attributes:
+      label: Validation owner role and next-action date
+      description: Use a team or role, not a person's name, plus the agreed next action/date. Record named ownership in the private customer process. Otherwise write N/A.
     validations:
       required: true
   - type: textarea

@@ -5,12 +5,13 @@ execute protected tools. Platform engineering, AI infrastructure, and security
 teams operating internal MCP tools are the buyers; autonomous clients consume
 the discovery contract below.
 
-The product is one thing with one name: a gateway between an agent and one
-consequential MCP (Model Context Protocol) tool, starting with metered
-calls. "Boundary", "control point", and "trust plane" describe what the
-gateway does; they are not separate products. The SDK ships as `b2a_sdk`
-and its verifier as `b2a-verify-receipt`, where `b2a` is short for
-business-to-agent.
+The product is one thing with one name: a governed MCP gateway between an
+agent and one consequential MCP (Model Context Protocol) tool. For a
+configured upstream tool, an accepted idempotency key permits at most one
+gateway dispatch and wallet debit. "Boundary", "control point", and "trust
+plane" describe what the gateway does; they are not separate products. The
+SDK ships as `b2a_sdk` and its verifier as `b2a-verify-receipt`, where
+`b2a` is short for business-to-agent.
 
 ## Governed loop
 
@@ -50,19 +51,17 @@ https://www.thisisatest.tech/proof/
 
 It labels the evidence as self-issued live gateway proof, not customer
 traction. The exact portable receipt and matching key snapshot can be checked
-offline with the repository SDK verifier. The receipt and key files are public;
-the verifier ships in the source repository, which requires access (below).
+offline with the repository SDK verifier. The receipt, key files, and verifier
+source are public.
 
 ## Try the complete loop locally
 
-No live credentials are required. The source repository is private during the
-design-partner phase: request access from the operator (security contact below)
-and the steps run as written. Two local paths, both self-contained:
+No live credentials are required. The source repository is public. Two local
+paths are self-contained:
 
 Drive it yourself (a real server, you hold the keys):
 
 1. Clone https://github.com/PetrefiedThunder/agent-middleware-api
-   (private — source access on request)
 2. Run `make quickstart` from the repository root.
 3. Follow docs/quickstart.md: mint your own wallet-scoped key, issue
    yourself a permit, invoke one governed tool, replay it, overspend it,
@@ -83,7 +82,7 @@ settlement or compliance claims.
 https://www.thisisatest.tech/
 https://www.thisisatest.tech/proof/ (download a receipt and verify it offline)
 https://www.thisisatest.tech/compare/ (named alternatives, including the rows this loses)
-https://github.com/PetrefiedThunder/agent-middleware-api (private — access on request)
+https://github.com/PetrefiedThunder/agent-middleware-api
 
 ## Longer machine brief
 

@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Middleware API | Replay-safe metered MCP calls</title>
+    <title>Agent Middleware API | MCP gateway for agent tool authorization</title>
     <meta
       name="description"
-      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+      content="MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts."
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0d0b1f" />
@@ -30,7 +30,7 @@
     />
     <meta
       property="og:description"
-      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+      content="MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts."
     />
     <meta property="og:url" content="https://www.thisisatest.tech/" />
     <meta
@@ -50,7 +50,7 @@
     />
     <meta
       name="twitter:description"
-      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+      content="MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts."
     />
     <meta
       name="twitter:image"
@@ -70,6 +70,9 @@
             "@id": "https://www.thisisatest.tech/#organization",
             "name": "Agent Middleware API",
             "url": "https://www.thisisatest.tech/",
+            "sameAs": [
+              "https://github.com/PetrefiedThunder/agent-middleware-api"
+            ],
             "description": "A single accountable operator running a governed trust plane for agent-to-tool actions.",
             "logo": {
               "@type": "ImageObject",
@@ -88,7 +91,7 @@
             "@id": "https://www.thisisatest.tech/#website",
             "name": "Agent Middleware API",
             "url": "https://www.thisisatest.tech/",
-            "description": "Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt.",
+            "description": "MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts.",
             "inLanguage": "en",
             "publisher": { "@id": "https://www.thisisatest.tech/#organization" }
           },
@@ -100,16 +103,16 @@
             "applicationSubCategory": "Agent authorization, metering, and receipt middleware",
             "operatingSystem": "Linux, macOS, Windows (Docker or Python 3.11+)",
             "url": "https://www.thisisatest.tech/",
-            "description": "Middleware that authorizes one agent action against a scoped permit, dispatches it once per idempotency key, meters the call, and issues an Ed25519-signed receipt anyone can verify offline.",
+            "description": "A governed MCP gateway that scopes a configured agent tool, prevents duplicate gateway dispatch or wallet debit when retrying the same accepted idempotency key, and issues Ed25519-signed receipts.",
             "featureList": [
               "Scoped permits that constrain a single agent action before it is dispatched",
-              "One dispatch and one debit per accepted idempotency key, including on retry",
+              "At most one gateway dispatch and wallet debit per accepted idempotency key, including on retry",
               "Per-call metering bound to the authorization decision",
               "Ed25519-signed receipts for allowed, denied, failed, and uncertain outcomes",
               "Offline receipt verification against a published key snapshot",
               "Append-only audit trail for the authorize-to-evidence loop"
             ],
-            "keywords": "MCP gateway, agent authorization, tool-call metering, signed receipts, idempotency, exactly-once dispatch, agent governance",
+            "keywords": "MCP gateway, Model Context Protocol, agent authorization, delegated authority, tool-call metering, idempotency, replay protection, signed receipts, agent governance",
             "publisher": { "@id": "https://www.thisisatest.tech/#organization" },
             "softwareHelp": {
               "@type": "CreativeWork",
@@ -122,7 +125,7 @@
             "@id": "https://www.thisisatest.tech/#webpage",
             "url": "https://www.thisisatest.tech/",
             "name": "Authorize one agent action. Charge it once. Prove what happened.",
-            "description": "Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt.",
+            "description": "MCP gateway for a configured tool: prevent duplicate dispatch or debit when retrying the same accepted idempotency key, and issue signed receipts.",
             "inLanguage": "en",
             "isPartOf": { "@id": "https://www.thisisatest.tech/#website" },
             "about": { "@id": "https://www.thisisatest.tech/#software" },
@@ -526,9 +529,8 @@
           </p>
           <p class="constraint-line">
             One tool · one operator · one action. The source repository is
-            private during the design-partner phase; request access, then run
-            <code>make prove-trust-plane</code> from a clone to assert the
-            whole loop locally. No API credentials, no signup.
+            public; run <code>make prove-trust-plane</code> from a clone to
+            assert the whole loop locally. No API credentials, no signup.
           </p>
           <div class="pilot-links">
             <a
@@ -637,10 +639,9 @@
             <h2 id="provenance-title">Built and run by one accountable operator.</h2>
             <p>
               Agent Middleware API is built and run by
-              @@PUBLIC_DISPLAY_NAME@@. The source repository is private during
-              the design-partner phase — the product boundary and the security
-              limitations are published from the API origin below, and source
-              access is shared with pilot partners on request.
+              @@PUBLIC_DISPLAY_NAME@@. The source repository is public; the
+              product boundary and security limitations are also published from
+              the API origin below.
             </p>
             <p>
               <a
@@ -657,8 +658,11 @@
                 >Security limitations</a
               >
               ·
-              <a href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
-                >Request source access</a
+              <a
+                href="https://github.com/PetrefiedThunder/agent-middleware-api"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Source repository</a
               >
             </p>
           </div>
@@ -728,7 +732,7 @@
           href="https://github.com/PetrefiedThunder/agent-middleware-api"
           target="_blank"
           rel="noopener noreferrer"
-          >Source repository (private — request access)</a
+          >Source repository</a
         >
         <a
           href="https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md"

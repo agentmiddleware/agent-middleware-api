@@ -10,8 +10,16 @@
 
 ## What This API Does
 
-Agent Middleware API is a **governed MCP trust plane** for autonomous agents:
-scoped permits, metered tool invocation, signed receipts, and wallet audit chains.
+Agent Middleware API is a **governed MCP gateway** for autonomous agents.
+For the configured upstream MCP tool, scoped permits and an accepted
+idempotency key result in at most one gateway dispatch and wallet debit.
+Signed receipts and the wallet audit chain make the terminal gateway outcome
+independently checkable. An upstream tool's own side effect is exactly once
+only when it honors the forwarded idempotency key.
+
+An accepted idempotency key binds one immutable invocation. Reusing that key
+with different tool input fails closed with an idempotency conflict; use a new
+key for each new invocation.
 
 The product loop is:
 
@@ -22,7 +30,7 @@ discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> 
 Read `capabilities` on `GET /.well-known/agent.json` for the product wedge.
 
 Core infrastructure:
-- **Identity & authority** — Wallet-scoped agents, API keys, signing keys, KYC hooks
+- **Identity & authority** — Wallet-scoped agents, API keys, and signing keys
 - **Discovery** — MCP tools, `.well-known/agent.json`, `llms.txt`, OpenAPI, `/v1/discover`
 - **Execution governance** — Permit-gated MCP invocation, receipts, audit chain
 - **Economics** — Wallet budgets, ledger charges, idempotent replay without double-charge
@@ -91,6 +99,12 @@ GET /v1/receipts/{receipt_id}/portable
 `ENABLE_DOGFOOD_TOOL=false`; do not use that fixture as evidence of a partner
 integration.
 
+The default available governed transport is `POST /mcp/messages`, a
+project-specific legacy JSON-RPC endpoint that does not implement standard MCP
+initialization. An operator may enable the standards-compliant Streamable HTTP
+transport at `POST /mcp`; do not assume that endpoint is available unless the
+deployment's discovery manifest lists it.
+
 ---
 
 ## MCP Tool Discovery
@@ -129,17 +143,15 @@ Wallets are auto-frozen if spending exceeds:
 Prefer the HTTP trust loop above (permits → MCP invoke → receipts). Client
 libraries are optional and not required for the wedge.
 
-### Python 0.5.0 source, 0.4.0 released (release artifact only)
+### Python SDK (source checkout and release artifacts)
 
-CI builds a wheel and sdist from the source in `b2a_sdk/`, currently 0.5.0,
-and attaches them to the matching GitHub release. The newest tag today is
-`python-sdk-v0.4.0`; a clone install gives you 0.5.0. It is **not** published to PyPI, and the
-repository (including its releases) is private — request source access from
-the operator. With access, install a downloaded wheel, or install from a
-clone for development:
+CI builds a wheel and sdist from `b2a_sdk/`. The agent manifest's
+`integrations.python_sdk` reports both the source version and the available
+release tag; do not infer a package-index install from this document. The SDK
+is **not** published to PyPI. The repository and its release assets are public;
+install from a clone:
 
 ```bash
-pip install ./b2a_sdk-0.4.0-py3-none-any.whl  # the released wheel
 pip install -e ./b2a_sdk
 ```
 
@@ -159,7 +171,9 @@ async with AgentMiddlewareClient(api_key="...", base_url="...") as client:
 
 ### TypeScript
 
-No published TypeScript SDK. Use HTTP (`/mcp`, `/v1/permits`, `/v1/receipts`).
+No published TypeScript SDK. Use `/mcp/messages` only with a project-specific
+JSON-RPC client, plus `/v1/permits` and `/v1/receipts`; standards-compliant MCP
+clients require `/mcp` after the operator enables the Streamable HTTP transport.
 
 ---
 
@@ -172,7 +186,8 @@ No published TypeScript SDK. Use HTTP (`/mcp`, `/v1/permits`, `/v1/receipts`).
 | Permits | `/v1/permits` | Required |
 | Receipts | `/v1/receipts` | Required |
 | Audit | `/v1/audit` | Required |
-| MCP | `/mcp` | Optional |
+| MCP discovery | `/mcp/tools.json` | Public |
+| Governed MCP invoke | `/mcp/messages` (`/mcp` only when enabled) | Required |
 | Health | `/health` | None |
 
 ---
@@ -195,4 +210,4 @@ No published TypeScript SDK. Use HTTP (`/mcp`, `/v1/permits`, `/v1/receipts`).
 - OpenAPI Spec: `/openapi.json`
 - Wedge: `/WEDGE.md`
 - Security limitations: `/SECURITY_LIMITATIONS.md`
-- GitHub: https://github.com/PetrefiedThunder/agent-middleware-api (private — source access on request)
+- GitHub: https://github.com/PetrefiedThunder/agent-middleware-api

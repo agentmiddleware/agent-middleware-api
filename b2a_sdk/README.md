@@ -10,27 +10,37 @@ published to PyPI.
 
 ## Installation
 
-`0.5.0` is the source version here; the newest cut release is
-`python-sdk-v0.4.0`. Install the released wheel:
+For the supported evaluation, integration, security, and pilot paths, start
+with the repository [documentation guide](../docs/README.md).
+
+### From a checkout (recommended)
+
+Install the version in this checkout:
+
+```bash
+python -m pip install -e ./b2a_sdk
+```
+
+Add offline receipt verification when you need it:
+
+```bash
+python -m pip install -e './b2a_sdk[verify]'
+```
+
+### Released artifact
+
+The source in this checkout is `0.5.0`; the currently released artifact is
+[`python-sdk-v0.4.0`](https://github.com/PetrefiedThunder/agent-middleware-api/releases/tag/python-sdk-v0.4.0).
+Download
+[`b2a_sdk-0.4.0-py3-none-any.whl`](https://github.com/PetrefiedThunder/agent-middleware-api/releases/download/python-sdk-v0.4.0/b2a_sdk-0.4.0-py3-none-any.whl)
+and install that downloaded file:
 
 ```bash
 python -m pip install ./b2a_sdk-0.4.0-py3-none-any.whl
 ```
 
-Once `python-sdk-v0.5.0` is tagged, the same command with `0.5.0` installs it.
-
-For repository development:
-
-```bash
-python -m pip install -e './b2a_sdk[dev]'
-```
-
 `httpx` is the only runtime dependency. Offline receipt verification
-additionally needs `cryptography`, kept behind an extra:
-
-```bash
-python -m pip install './b2a_sdk[verify]'
-```
+additionally needs `cryptography`, kept behind the `verify` extra.
 
 ## Governed tool call
 

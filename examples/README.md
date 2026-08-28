@@ -1,16 +1,30 @@
 # Examples
 
-These scripts demonstrate how to interact with the Agent Middleware API using the Python SDK (`b2a_sdk`).
+These scripts are source-level demonstrations for the Agent Middleware API and
+its Python SDK (`b2a_sdk`). Start with the [documentation guide](../docs/README.md)
+for the supported evaluation, integration, security, and pilot paths.
+
+## Start with the supported trust loop
+
+For a real local server, your own wallet-scoped key, one governed tool, a
+replay attempt, and offline receipt verification, run:
+
+```bash
+make quickstart
+```
+
+Then follow [docs/quickstart.md](../docs/quickstart.md). The scripts below are
+not the supported design-partner deployment path.
 
 ## Prerequisites
 
 - Python 3.11+
-- The API running locally (see [README.md](../README.md) "Run the API locally")
+- The API running locally (see [docs/quickstart.md](../docs/quickstart.md))
 - `b2a_sdk` installed: `python -m pip install -e './b2a_sdk[dev]'`
 
 ## Available Examples
 
-### `dry_run_example.py` — Billing Simulation
+### `dry_run_example.py` — Legacy Billing Simulation
 
 Demonstrates safe cost estimation without affecting real wallet balances.
 
@@ -20,14 +34,19 @@ Demonstrates safe cost estimation without affecting real wallet balances.
 - Comparing two workflow strategies side by side
 - Single-shot charge estimation
 
-**Run:**
+**Status:** proof-surface demonstration only. It is not a pilot or production
+integration path.
+
+**Run locally:**
 
 ```bash
-# The API must be running with proof surfaces enabled
-ENABLE_PROOF_SURFACES=true uvicorn app.main:app
+# Follow README.md "Run the API locally" first, then use local-only proof flags.
+export ENABLE_PROOF_SURFACES=true
+uv run --with-requirements requirements.txt uvicorn app.main:app \
+  --host 127.0.0.1 --port 8000
 
 # In another shell
-B2A_API_KEY= python examples/dry_run_example.py
+B2A_API_KEY=<wallet-scoped-local-key> python examples/dry_run_example.py
 ```
 
 **Note:** This example uses the **billing router**, which is a proof surface. Production-like deployments keep `ENABLE_PROOF_SURFACES=false`, so these endpoints return 404 unless explicitly enabled. See [docs/PROOF_SURFACES.md](../docs/PROOF_SURFACES.md).
@@ -37,6 +56,10 @@ B2A_API_KEY= python examples/dry_run_example.py
 ### `mcp_tool_example.py` — MCP Tool Registration & Invocation
 
 Demonstrates how to create, register, and invoke MCP-enabled tools.
+
+**Status:** source-level registration example. It does not configure the
+supported one-tool upstream gateway path; use the
+[partner first-tool runbook](../docs/partner-first-tool-runbook.md) for that.
 
 **What it shows:**
 - Defining billable tools with `@mcp_tool`

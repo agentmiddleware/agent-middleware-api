@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "name": "agent-middleware-api",
-  "description": "This marketing host points machines to the Agent Middleware API trust plane for scoped authority, metered MCP calls, signed receipts, and replay-safe accounting.",
+  "description": "This marketing host points machines to the Agent Middleware API governed MCP gateway for scoped authority, at-most-one gateway dispatch and debit per accepted key for configured upstream MCP tools, and signed receipts.",
   "primary_audience": "autonomous_agents",
   "buyer_audience": [
     "platform_engineering",
@@ -23,7 +23,7 @@
   "canonical_api": "https://api.thisisatest.tech",
   "human_site": "https://www.thisisatest.tech/",
   "github": "https://github.com/PetrefiedThunder/agent-middleware-api",
-  "github_access": "private",
+  "github_access": "public",
   "discovery": {
     "agent_manifest": "https://api.thisisatest.tech/.well-known/agent.json",
     "llm_txt": "https://api.thisisatest.tech/llm.txt",
@@ -43,7 +43,7 @@
   "try_it": {
     "mode": "local_self_hosted",
     "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
-    "repository_access": "private",
+    "repository_access": "public",
     "command": "make prove-trust-plane",
     "live_access": "operator_issued",
     "requires_live_credentials": false,
@@ -55,7 +55,7 @@
       "out_of_scope_denial",
       "offline_receipt_verification"
     ],
-    "note": "Runs the real FastAPI trust path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim. The source repository is private during the design-partner phase; request access from the operator listed on the human site before cloning."
+    "note": "Runs the real FastAPI trust path against a throwaway local SQLite database. This is a reproducible proof, not a production or settlement claim. The source repository is public; clone it and run the proof locally before treating it as production evidence."
   },
   "authentication": {
     "type": "api_key",

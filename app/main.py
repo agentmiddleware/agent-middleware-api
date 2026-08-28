@@ -1,14 +1,11 @@
 """
 Agent Middleware API
 ===========================
-Operational control plane for autonomous agents.
+Governed MCP gateway for agent-to-tool actions.
 
-Agent-facing capabilities center on identity, billing, discovery, policy,
-and execution governance for machine-native software tenants. Demo and
-integration surfaces such as AWI, content generation, IoT bridging, and
-sandboxes exercise that control plane.
-
-Zero GUI. Your customer is an autonomous agent.
+The core path scopes authority, dispatches a configured upstream MCP tool at
+most once per accepted idempotency key, meters the wallet debit, and issues
+auditable receipts. Other workloads are labeled proof surfaces.
 """
 
 import asyncio
@@ -52,7 +49,7 @@ from .services.signing_keys import (
     SigningKeyError,
     validate_signing_key_configuration,
 )
-from .routers.well_known import get_agent_first_metadata
+from .routers.well_known import TRUST_PLANE_DESCRIPTION, get_agent_first_metadata
 from .routers import (
     auth,
     iot,
@@ -678,7 +675,14 @@ PROOF_SURFACE_ROUTERS = (
 )
 
 for router_module in CORE_TRUST_ROUTERS:
-    app.include_router(router_module.router)
+    app.include_router(
+        router_module.router,
+        include_in_schema=(
+            settings.ENABLE_STANDARD_MCP_ENDPOINT
+            if router_module is mcp_standard
+            else True
+        ),
+    )
 
 # Self-serve dev keys: the handler is triple-gated at runtime (its own
 # ENABLE_DEV_KEY_SELF_PROVISION flag answers 404, production-like environments
@@ -743,11 +747,7 @@ async def root(request: Request):
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "agent_first": get_agent_first_metadata(),
-        "description": (
-            "Operational control plane for autonomous agents: identity, billing, "
-            "discovery, policy, and execution governance for machine-native "
-            "software tenants."
-        ),
+        "description": TRUST_PLANE_DESCRIPTION,
         "surface_boundaries": {
             "core_trust": [
                 "audit",
@@ -934,6 +934,11 @@ async def root(request: Request):
                     "GET /mcp/tools.json",
                     "GET /.well-known/mcp/tools.json",
                     "POST /mcp/messages",
+                    *(
+                        ["POST /mcp"]
+                        if get_settings().ENABLE_STANDARD_MCP_ENDPOINT
+                        else []
+                    ),
                     "GET /mcp/tools",
                     "GET /mcp/tools/{service_id}",
                     "POST /mcp/tools/{service_id}/invoke",

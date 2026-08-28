@@ -1,6 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import get_settings
 from app.main import app
 from app.services import mcp_phase9_tools
 from app.services.mcp_phase9_tools import MCP_PHASE9_TOOLS
@@ -55,7 +56,9 @@ async def test_agent_manifest_points_to_canonical_control_plane_surfaces(client)
     agent_first = data["agent_first"]
 
     assert endpoints["billing"] == "/v1/billing"
-    assert endpoints["mcp"] == "/mcp"
+    assert endpoints["mcp_json_rpc"] == "/mcp/messages"
+    assert endpoints["mcp_tools"] == "/mcp/tools.json"
+    assert "mcp" not in endpoints
     assert endpoints["permits"] == "/v1/permits"
     assert endpoints["receipts"] == "/v1/receipts"
     assert endpoints["health"] == "/health"
@@ -69,6 +72,49 @@ async def test_agent_manifest_points_to_canonical_control_plane_surfaces(client)
     assert "permits" in data["capabilities"]
     assert "passkey_auth" not in data["capabilities"]
     assert any(p["id"] == "passkey_auth" for p in data["proof_surfaces"])
+
+
+@pytest.mark.anyio
+async def test_standard_mcp_is_advertised_only_when_enabled(client, monkeypatch):
+    monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "false")
+    get_settings.cache_clear()
+    try:
+        disabled = (await client.get("/.well-known/agent.json")).json()
+        disabled_discovery = (await client.get("/v1/discover")).json()
+
+        assert "mcp" not in disabled["endpoints"]
+        assert disabled["integrations"]["mcp_json_rpc"] == "/mcp/messages"
+        assert (
+            disabled["integrations"]["mcp_json_rpc_status"]
+            == "legacy_project_transport"
+        )
+        assert "preferred_integration" not in disabled["integrations"]
+        assert "standard_mcp_streamable_http" not in disabled["integrations"]
+        assert (
+            disabled_discovery["integration_guides"]["mcp_json_rpc"]
+            == "/mcp/messages"
+        )
+        assert "standard_mcp" not in disabled_discovery["integration_guides"]
+        disabled_root = (await client.get("/")).json()
+        assert "POST /mcp" not in disabled_root["services"]["mcp_server"]["endpoints"]
+
+        monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "true")
+        get_settings.cache_clear()
+        enabled = (await client.get("/.well-known/agent.json")).json()
+        enabled_discovery = (await client.get("/v1/discover")).json()
+
+        assert enabled["endpoints"]["mcp"] == "/mcp"
+        assert enabled["integrations"]["standard_mcp_streamable_http"] == "/mcp"
+        assert (
+            enabled["integrations"]["preferred_integration"]
+            == "standard_mcp_streamable_http"
+        )
+        assert enabled_discovery["integration_guides"]["standard_mcp"] == "/mcp"
+        enabled_root = (await client.get("/")).json()
+        assert "POST /mcp" in enabled_root["services"]["mcp_server"]["endpoints"]
+    finally:
+        monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "false")
+        get_settings.cache_clear()
 
 
 @pytest.mark.anyio
@@ -124,6 +170,13 @@ async def test_openapi_contains_core_control_plane_routes(client):
     paths = response.json()["paths"]
     assert "/mcp/messages" in paths
     assert "/mcp/tools/{service_id}/invoke" in paths
+    assert "/mcp" not in paths
+    legacy_mcp_description = paths["/mcp/messages"]["post"]["description"]
+    assert "does not implement the standard MCP initialization lifecycle" in (
+        legacy_mcp_description
+    )
+    assert "New integrations should use" not in legacy_mcp_description
+    assert "/.well-known/agent.json" in legacy_mcp_description
     assert "/v1/billing/charge" in paths
     assert "/v1/audit/events" in paths
     assert "/v1/planner/optimize" in paths

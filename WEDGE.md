@@ -10,6 +10,9 @@ Or in one line:
 
 > Authorize one agent action. Charge it once. Prove what happened.
 
+Start with the [documentation guide](docs/README.md) for the supported
+evaluation, integration, SDK, security, and pilot paths.
+
 **What "exactly-once" means here, precisely.** It is the distributed-systems
 term of art for the *deduplication* guarantee — no duplicate dispatch, no
 duplicate debit — not a promise that every accepted call results in a charge.

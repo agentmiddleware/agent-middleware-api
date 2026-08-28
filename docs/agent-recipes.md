@@ -1,5 +1,10 @@
 # Agent Interaction Examples & Recipes
 
+> **Status: legacy proof-surface material.** These examples include APIs outside
+> the supported one-tool MCP pilot and may refer to unmounted or simulated
+> routes. Do not use this page for product evaluation or integration; start with
+> the [documentation guide](README.md).
+
 Practical examples for building autonomous agents with the Agent Middleware API.
 
 ## Table of Contents

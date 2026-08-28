@@ -1,4 +1,4 @@
-# Agent Middleware API
+# Agent Middleware API: Governed MCP Gateway
 
 [![CI](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PetrefiedThunder/agent-middleware-api/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-v1.3.0-blue)
@@ -10,16 +10,29 @@
 
 Your agent invokes a costly tool. The request times out. Was the call dispatched? Should the agent retry? Will the retry create another debit? Can you prove who authorized the action and what the gateway observed?
 
-Agent Middleware API is a replay-safe transaction boundary for metered MCP tool calls. A scoped permit and an idempotency key gate one governed call. Replaying the same request with the same accepted key returns the original result and signed receipt without another gateway dispatch or debit. A changed request under that key fails closed.
+Agent Middleware API is a governed MCP gateway and replay-safe transaction boundary for metered agent-to-tool actions. For a configured upstream MCP tool, one accepted idempotency key permits at most one gateway dispatch and at most one wallet debit. Replaying the same request under that key returns the original result and signed receipt; a changed request fails closed.
 
 ```text
 scoped permit → governed MCP invoke → wallet charge → signed receipt
 → replay without second debit → out-of-scope denial
 ```
 
+**Best fit:** platform engineering, AI infrastructure, and security teams governing one consequential internal MCP tool where a retry could create duplicate cost or an auditable side effect.
+
 The supported design-partner deployment is vendor-managed and single-tenant. This is **not a full agent middleware platform**, payment network, IAM replacement, or compliance platform.
 
-Try the failure yourself:
+## Start here
+
+| Goal | Start with |
+|---|---|
+| Decide whether this boundary fits your problem | [Product wedge](WEDGE.md) and [security limitations](SECURITY_LIMITATIONS.md) |
+| Run the complete local trust loop | [Quickstart](docs/quickstart.md) |
+| Put one real upstream MCP tool behind the gateway | [Partner first-tool runbook](docs/partner-first-tool-runbook.md) |
+| Use the typed Python client or offline verifier | [Python SDK](b2a_sdk/README.md) |
+| Review the security and accounting claims | [Security review kit](docs/security-review-kit.md) |
+| Browse the supported documentation paths | [Documentation guide](docs/README.md) |
+
+## Run the executable proof
 
 ```bash
 git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
@@ -29,9 +42,11 @@ make prove-trust-plane
 
 That one command boots a local instance, walks the complete loop — discover, authenticate, authorize, invoke, meter, receipt, replay, and govern — and asserts every invariant: the call charges once, the replay returns the same receipt with no second debit, the audit chain verifies, and the out-of-scope call is denied. It exits non-zero the moment any stage's invariant breaks. Follow [docs/quickstart.md](docs/quickstart.md) to drive the loop yourself with your own keys.
 
-## Canonical API
+## Product site and canonical API
 
-**https://api.thisisatest.tech**
+- **Product site:** <https://www.thisisatest.tech>
+- **Canonical API:** <https://api.thisisatest.tech>
+- **Agent bootstrap:** <https://api.thisisatest.tech/.well-known/agent.json>
 
 ## Agent bootstrap
 
@@ -458,7 +473,7 @@ Static test-count and coverage badges are intentionally avoided because they bec
 
 ### Python SDK 0.5.0
 
-HTTP and MCP are the canonical integration surfaces. CI builds and smoke-tests Python SDK 0.5.0 wheels and sdists on Python 3.10 through 3.12. Pushing the matching `python-sdk-v0.5.0` tag attaches those artifacts to a GitHub release; the package is not published to PyPI. The newest tag today is `python-sdk-v0.4.0` — the source here is ahead of it, and the wheel a release build produces carries the source version, not the tag's. The typed `AgentMiddlewareClient` covers tool discovery, permit creation, governed invocation, receipt verification, and evidence retrieval, and exposes idempotency conflicts and delivery uncertainty as explicit errors. For repository development (installs from this repo, not PyPI):
+HTTP and MCP are the canonical integration surfaces. CI builds and smoke-tests Python SDK 0.5.0 wheels and sdists on Python 3.10 through 3.12. A matching `python-sdk-v*` tag attaches those artifacts to a GitHub release; the package is not published to PyPI. The source version may be ahead of the latest release artifact. The typed `AgentMiddlewareClient` covers tool discovery, permit creation, governed invocation, receipt verification, and evidence retrieval, and exposes idempotency conflicts and delivery uncertainty as explicit errors. For repository development (installs from this repo, not PyPI):
 
 ```bash
 python -m pip install -e './b2a_sdk[dev]'
@@ -470,6 +485,7 @@ Offline receipt verification is deliberately dependency-minimal: the `b2a-verify
 
 ## Documentation
 
+- [docs/README.md](docs/README.md) — start here: evaluation, integration, SDK, security, and pilot documentation paths
 - [docs/30-day-customer-validation.md](docs/30-day-customer-validation.md) — active company milestone: customer interviews, partner-owned pilot, and day-30 decision gate
 - [WEDGE.md](WEDGE.md) — narrow product thesis and first design-partner motion
 - [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling

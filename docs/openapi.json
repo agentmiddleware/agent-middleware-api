@@ -3066,7 +3066,7 @@
           "MCP"
         ],
         "summary": "Mcp Json-Rpc Messages",
-        "description": "Legacy project JSON-RPC endpoint, kept for existing clients and the local proof scripts. New integrations should use the standard MCP Streamable HTTP endpoint at POST /mcp (official MCP SDK transport); both run the same governed permit→meter→receipt path.",
+        "description": "Legacy project JSON-RPC endpoint, kept for existing clients and the local proof scripts. It does not implement the standard MCP initialization lifecycle. Check `/.well-known/agent.json` before assuming the standard MCP Streamable HTTP endpoint at POST /mcp is available; both transports run the same governed permit→meter→receipt path when enabled.",
         "operationId": "MCP_JSON_RPC_Messages_mcp_messages_post",
         "deprecated": true,
         "security": [
@@ -3297,59 +3297,6 @@
                   "additionalProperties": true,
                   "title": "Response Get Mcp Tool Mcp Tools  Service Id  Get"
                 }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/mcp": {
-      "post": {
-        "tags": [
-          "MCP Standard Endpoint"
-        ],
-        "summary": "Standard MCP endpoint (official MCP SDK, stateless Streamable HTTP, JSON responses)",
-        "description": "Hand one standard MCP message to the official SDK's transport.\n\nAuthentication and origin validation happen here at the HTTP layer; the\nSDK owns the protocol. The governed ``tools/call`` handler reads the\nauthenticated caller back from ``request.state``.",
-        "operationId": "MCP_Streamable_HTTP_Endpoint_mcp_post",
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
               }
             }
           },

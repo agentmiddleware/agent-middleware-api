@@ -15,9 +15,9 @@ Do not treat the marketing origin as an API base URL.
 
 ## What the product is
 
-A gateway between an autonomous agent and one consequential MCP (Model
-Context Protocol) tool. It is not an agent runtime, not an LLM provider,
-not an IAM replacement, and not a marketplace.
+A governed MCP gateway between an autonomous agent and one consequential MCP
+(Model Context Protocol) tool. It is not an agent runtime, not an LLM
+provider, not an IAM replacement, and not a marketplace.
 
 The wedge is deliberately narrow: metered calls — one governed action, on
 one tool, for one operator, with portable evidence afterwards. The
@@ -65,9 +65,7 @@ trusted channel before relying on issuer identity.
 
 ## Run the whole loop yourself
 
-No live credentials required. The source repository is private during the
-design-partner phase; request access from the operator via the human site
-before cloning. From a clone of
+No live credentials required. The source repository is public. From a clone of
 https://github.com/PetrefiedThunder/agent-middleware-api:
 
 - `make quickstart` then docs/quickstart.md — mint a wallet-scoped key, issue a
@@ -113,5 +111,5 @@ Human site: https://www.thisisatest.tech/
 Offline receipt verification: https://www.thisisatest.tech/proof/
 Comparison with named alternatives, including the rows this loses:
 https://www.thisisatest.tech/compare/
-Source: https://github.com/PetrefiedThunder/agent-middleware-api (private — access on request)
+Source: https://github.com/PetrefiedThunder/agent-middleware-api
 Security contact: https://www.thisisatest.tech/.well-known/security.txt

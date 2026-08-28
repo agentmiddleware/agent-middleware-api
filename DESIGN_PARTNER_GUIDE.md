@@ -9,6 +9,9 @@ Use the interview funnel, commercial evidence gate, and partner-owned pilot
 acceptance test in
 [`docs/30-day-customer-validation.md`](docs/30-day-customer-validation.md).
 
+For the concise route through local evaluation, integration, SDK, security, and
+pilot material, use the [documentation guide](docs/README.md).
+
 ## Best-Fit Partner
 
 An AI platform, infrastructure, or security engineering team that already has

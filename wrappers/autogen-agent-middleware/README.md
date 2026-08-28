@@ -4,6 +4,10 @@ AutoGen integration for the Agent Middleware API via governed **permit → invok
 
 All tool invocations go through the trust plane: scoped permits, signed receipts, replay protection, and metered billing.
 
+**Status:** source-only integration example, not a published package. Start
+with the [documentation guide](../../docs/README.md) to evaluate the supported
+one-tool MCP path before adopting a framework wrapper.
+
 ## Installation
 
 This package is not published to PyPI. Install it from a checkout of
@@ -92,7 +96,11 @@ asyncio.run(main())
 
 Both `idempotency_key` and `permit_idempotency_key` are **required** and must be supplied by the caller. Do not auto-generate keys.
 
-Replaying with the same keys returns the original receipt without recharging:
+An identical replay with the same invocation key returns the original receipt
+without recharging. `idempotency_key` identifies one governed invocation, and
+the gateway rejects that key reused with changed invocation input with an
+idempotency conflict (HTTP 409). `permit_idempotency_key` makes permit creation
+repeatable; it does not make a changed invocation an idempotent replay.
 
 ```python
 async def main():
@@ -106,12 +114,12 @@ async def main():
         arguments={"query": "test"},
     )
 
-    # Replay: returns cached receipt, no additional charge
+    # Valid replay: same request returns the cached receipt, no additional charge
     result2 = await tool.call_mcp_tool(
         tool_name="partner.search",
         idempotency_key="search-abc-123",  # same invoke key
         permit_idempotency_key="permit-abc-123",  # same permit key
-        arguments={"query": "different"},  # different args ignored
+        arguments={"query": "test"},  # same arguments
     )
 ```
 

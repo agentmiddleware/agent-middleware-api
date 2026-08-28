@@ -5,18 +5,22 @@ build-backend = "hatchling.build"
 [project]
 name = "b2a-sdk"
 version = "0.5.0"
-description = "Python SDK for governed MCP permits, invocations, and receipts"
+description = "Python SDK for governed MCP permits, idempotent agent-tool calls, receipts, and audit evidence"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 keywords = [
-    "agent",
-    "ai",
-    "middleware",
-    "billing",
-    "telemetry",
+    "mcp",
+    "model-context-protocol",
+    "agent-authorization",
+    "delegated-authorization",
+    "permits",
+    "idempotency",
+    "replay-protection",
+    "signed-receipts",
+    "audit",
+    "agent-governance",
     "b2a",
-    "swarm",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -54,8 +58,9 @@ b2a-verify-receipt = "b2a_sdk.verify_cli:main"
 
 [project.urls]
 Homepage = "https://www.thisisatest.tech/"
-Documentation = "https://github.com/PetrefiedThunder/agent-middleware-api#readme"
+Documentation = "https://www.thisisatest.tech/"
 Repository = "https://github.com/PetrefiedThunder/agent-middleware-api"
+Issues = "https://github.com/PetrefiedThunder/agent-middleware-api/issues"
 Changelog = "https://github.com/PetrefiedThunder/agent-middleware-api/blob/main/b2a_sdk/CHANGELOG.md"
 
 [tool.ruff]

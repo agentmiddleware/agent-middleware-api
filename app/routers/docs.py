@@ -1,15 +1,10 @@
-"""
-LLM-Optimized Documentation Router
-------------------------------------
-Serves documentation in formats designed for agent consumption.
-This is the new SEO: if an LLM can't parse your docs, agents won't
-recommend your product.
+"""Agent-readable documentation routes for the governed MCP gateway.
 
 Endpoints:
 - /llms.txt — Canonical public path backed by ``static/llm.txt``
 - /llm.txt — Backward-compatible alias
 - /docs/index — Structured JSON doc index for agent navigation
-- /.well-known/agent.json — Project discovery manifest (``app/routers/well_known.py``)
+- /.well-known/agent.json — Project discovery manifest
 """
 
 from fastapi import APIRouter
@@ -35,8 +30,8 @@ _TRUST_PLANE_SECTIONS = [
         "path": "/WEDGE.md",
         "content_type": "text/markdown",
         "summary": (
-            "Exactly-once gateway debit, dispatch checkpoint, and receipt "
-            "finalization for metered MCP calls."
+            "At-most-one gateway dispatch and debit per accepted idempotency "
+            "key for a configured upstream MCP tool."
         ),
     },
     {
@@ -51,7 +46,7 @@ _TRUST_PLANE_SECTIONS = [
         "title": "Design partner guide",
         "path": "/DESIGN_PARTNER_GUIDE.md",
         "content_type": "text/markdown",
-        "summary": "Demo + dogfood path (partner.notes.write locally).",
+        "summary": "One-tool pilot path for a configured upstream MCP tool.",
     },
     {
         "id": "agent_accountability",
@@ -117,7 +112,12 @@ _TRUST_PLANE_SERVICES = [
     {
         "id": "mcp-trust-plane",
         "name": "Governed MCP",
-        "base_path": "/mcp",
+        "base_path": "/mcp/messages",
+        "transport": "legacy_project_json_rpc",
+        "transport_note": (
+            "Project-specific JSON-RPC endpoint; it does not implement the "
+            "standard MCP initialization lifecycle."
+        ),
         "surface": "product",
         "capabilities": [
             "tools-discovery",
@@ -125,7 +125,7 @@ _TRUST_PLANE_SERVICES = [
             "idempotent-retries",
             "signed-receipts",
         ],
-        "quickstart_endpoint": "GET /mcp/tools.json",
+        "quickstart_endpoint": "POST /mcp/messages",
     },
     {
         "id": "permits",
@@ -206,7 +206,12 @@ _PROOF_SURFACE_SERVICES = [
     ),
 )
 async def get_doc_index():
-    services = list(_TRUST_PLANE_SERVICES)
+    services = [dict(service) for service in _TRUST_PLANE_SERVICES]
+    if get_settings().ENABLE_STANDARD_MCP_ENDPOINT:
+        for service in services:
+            if service["id"] == "mcp-trust-plane":
+                service["standard_streamable_http_endpoint"] = "/mcp"
+                break
     if get_settings().ENABLE_PROOF_SURFACES:
         services.extend(_PROOF_SURFACE_SERVICES)
 
@@ -215,7 +220,6 @@ async def get_doc_index():
         "version": "0.2.0",
         "format": "agent-native-docs/v1",
         "product_wedge": "governed_mcp_trust_plane",
-        "last_updated": "2026-08-03",
         "sections": list(_TRUST_PLANE_SECTIONS),
         "services": services,
         "auth": {
