@@ -14,13 +14,6 @@ on:
         description: "Branch, tag, or SHA to validate for a manual deploy"
         required: true
         default: main
-      allow_legacy_missing_sentinel:
-        description: >-
-          One-time only: current stamped production image predates public
-          Sentinel readiness
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -82,14 +75,7 @@ jobs:
       - name: Preflight — current production posture
         env:
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}
-          ALLOW_LEGACY_MISSING_SENTINEL: >-
-            ${{ inputs.allow_legacy_missing_sentinel }}
-        run: |
-          args=(--live --strict)
-          if [ "$ALLOW_LEGACY_MISSING_SENTINEL" = "true" ]; then
-            args+=(--allow-legacy-missing-sentinel)
-          fi
-          python scripts/railway_preflight.py "${args[@]}"
+        run: python scripts/railway_preflight.py --live --strict
 
       - name: Confirm source checkout is clean
         run: |
@@ -106,7 +92,6 @@ jobs:
             echo "- version: \`${{ steps.release.outputs.version }}\`"
             echo "- exact-SHA CI: passed"
             echo "- current production posture: passed"
-            echo "- legacy Sentinel compatibility: \`${{ inputs.allow_legacy_missing_sentinel }}\`"
             echo "- deployment performed: **no**"
             echo ""
             echo "Deploy only through the private operator checklist in \`docs/deploy-railway.md\`."

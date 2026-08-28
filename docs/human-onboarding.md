@@ -16,12 +16,9 @@ content factory perform real external work when they are still simulated.
 
 **Do this:**
 
-- [ ] On a local or proof-surface deployment, call `GET /health/dependencies`
-      and read `simulation_modes`. Any service with value `true` is using
-      **simulation** behavior for that domain (see `app/core/runtime_mode.py`).
-      The supported production projection omits that map and instead requires
-      `dependencies.sentinel.status` to be `up` for its mounted human-approval
-      path.
+- [ ] Call `GET /health/dependencies` and read `simulation_modes`. Any service
+      with value `true` is using **simulation** behavior for that domain (see
+      `app/core/runtime_mode.py`).
 - [ ] Regenerate and skim [Simulation & MCP honesty inventory](simulations-inventory.md)
       (`python scripts/generate_sim_inventory.py`) for a pillar × MCP tool matrix.
 - [ ] Compare deployed configuration to `.env.example` (`SIMULATION_MODE_*`
@@ -88,8 +85,8 @@ capabilities that are simulated or undocumented.
 - [ ] Optionally compare with `GET /.well-known/mcp/tools.json` (separate route;
       may differ — if in doubt, treat `/mcp/tools.json` as the primary tool
       discovery path used in examples).
-- [ ] Cross-check risky capabilities against `/health/dependencies`; use its
-      `simulation_modes` map where the deployment exposes the full report.
+- [ ] Cross-check risky capabilities against `/health/dependencies` and
+      `simulation_modes`.
 
 **Automation:** Run `scripts/human_preflight.sh` against your base URL (see
 below).
@@ -146,7 +143,7 @@ the golden path for that.
 
 | Question | Where to look |
 |----------|----------------|
-| What is simulated right now? | Local/proof-surface `GET /health/dependencies` → `simulation_modes`; production publishes the supported wedge and Sentinel readiness |
+| What is simulated right now? | `GET /health/dependencies` → `simulation_modes` |
 | Can I trust sandbox isolation? | README + `docs/threat-model.md` |
 | End-to-end wallet + key + tool flow | `docs/golden-path.md` |
 | What “beta” still means | `docs/production-beta-roadmap.md` |

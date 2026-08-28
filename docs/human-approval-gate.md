@@ -71,20 +71,9 @@ arrives after the window is not honored.
 | `SENTINEL_APPROVERS` | empty | Comma-separated (`email`, `mailto:`, `sms:+E164`); empty defers to Sentinel tenant defaults |
 | `SENTINEL_RISK_LEVEL` | `high` | `low\|medium\|high\|critical` |
 
-`SENTINEL_API_URL` is a base origin, not an arbitrary URL: use HTTPS for a
-remote provider, with no credentials, query, fragment, or non-root path. HTTP
-is accepted only for an explicit loopback origin used in local testing.
-
-In local mode, the full dependency report retains the existing Sentinel states:
-`not_used` while simulated, `not_configured` unless both the URL and key are
-present, and `up` after a successful live probe. In production-like mode the
-public `/health/dependencies` projection always includes a sanitized `sentinel`
-entry. Simulation or incomplete configuration reports `down` with
-`human_approval_not_configured`; an unreachable provider reports `down` with
-`human_approval_unavailable`. A configured check makes exactly one read-only,
-unauthenticated `GET` to Sentinel's `/health` endpoint and publishes only
-`status: up` on success. That proves reachability and local key presence, not
-that Sentinel accepts the configured key.
+`/health/dependencies` reports a `sentinel` entry: `not_used` while
+simulated, `not_configured` without a URL, else a live probe of Sentinel's
+`/health`.
 
 ## Fail-closed rules
 
@@ -116,7 +105,7 @@ railway variables set SIMULATION_MODE_HUMAN_APPROVAL=false
 railway up
 
 curl -sS "$API_URL/health/dependencies" | jq .dependencies.sentinel
-# expect: {"status": "up"}
+# expect: {"status": "up", ...}
 ```
 
 Then create a gated permit (note the extra field) and drive the loop from
