@@ -68,9 +68,32 @@ async def test_doc_index(client):
     data = resp.json()
     assert "sections" in data
     assert "services" in data
+    assert data["positioning"] == data["agent_first"]["positioning"]
+    assert data["positioning"]["schema_version"] == "1.0"
+    # Compatibility-only v1 alias.
     assert data["product_wedge"] == "governed_mcp_trust_plane"
     assert data["agent_first"]["design_principle"] == "agent_first"
     assert data["sections"][0]["path"] == "/.well-known/agent.json"
+    services = {service["id"]: service for service in data["services"]}
+    assert {
+        "per-action-micro-metering",
+        "daily-spend-limits",
+        "bounded-credit-and-call-allowance",
+        "at-most-one-debit-per-logical-action",
+    } <= set(services["agent-billing"]["capabilities"])
+    assert {
+        "idempotent-retries",
+        "signed-receipts",
+        "logical-action-identity",
+        "delivery-uncertain-no-automatic-redispatch",
+    } <= set(services["mcp-trust-plane"]["capabilities"])
+    assert services["mcp-trust-plane"]["transaction_scope"] == (
+        "configured_upstream_mcp_tool_only"
+    )
+    assert {
+        "budget-binding",
+        "credit-and-call-allowance-binding",
+    } <= set(services["permits"]["capabilities"])
     assert any(s["path"] == "/WEDGE.md" for s in data["sections"])
     assert any(s["path"] == "/llms.txt" for s in data["sections"])
     # Trust-plane services always; proof surfaces only when mounted.
@@ -91,6 +114,10 @@ async def test_v1_discover_includes_agent_first(client):
     af = data["agent_first"]
     assert af.get("primary_audience") == "autonomous_agents"
     assert af.get("design_principle") == "agent_first"
+    assert (
+        af["positioning"]["id"]
+        == "transaction_integrity_for_consequential_autonomous_actions"
+    )
     assert af.get("simulation_and_dependency_truth") == "/health/dependencies"
 
 

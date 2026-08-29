@@ -68,6 +68,11 @@ async def test_agent_manifest_points_to_canonical_control_plane_surfaces(client)
     assert "/llms.txt" in agent_first["bootstrap_sequence"]
     assert "/mcp/tools.json" in agent_first["bootstrap_sequence"]
     assert agent_first["simulation_and_dependency_truth"] == "/health/dependencies"
+    assert agent_first["positioning"]["schema_version"] == "1.0"
+    assert agent_first["positioning"]["canonical_loop"][-1] == (
+        "authoritative_external_reconciliation_required"
+    )
+    # Compatibility-only v1 alias.
     assert agent_first["product_wedge"] == "governed_mcp_trust_plane"
     assert "permits" in data["capabilities"]
     assert "passkey_auth" not in data["capabilities"]
@@ -91,8 +96,7 @@ async def test_standard_mcp_is_advertised_only_when_enabled(client, monkeypatch)
         assert "preferred_integration" not in disabled["integrations"]
         assert "standard_mcp_streamable_http" not in disabled["integrations"]
         assert (
-            disabled_discovery["integration_guides"]["mcp_json_rpc"]
-            == "/mcp/messages"
+            disabled_discovery["integration_guides"]["mcp_json_rpc"] == "/mcp/messages"
         )
         assert "standard_mcp" not in disabled_discovery["integration_guides"]
         disabled_root = (await client.get("/")).json()

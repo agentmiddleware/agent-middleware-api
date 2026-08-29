@@ -4,9 +4,10 @@ The official python SDK's Streamable HTTP transport owns the whole protocol
 surface: ``initialize`` and capability negotiation, protocol-version
 validation, JSON-RPC framing and parse errors, notifications (202), ``ping``,
 and error envelopes. This module contributes only what the SDK cannot know —
-the trust plane. ``tools/list`` serves the governed manifest, and
-``tools/call`` runs the exact same permit -> meter -> exactly-once dispatch ->
-signed receipt pipeline as the governed endpoints.
+the transaction-integrity boundary. ``tools/list`` serves the governed
+manifest, and ``tools/call`` runs the logical-action -> permit -> meter ->
+evidence pipeline. Configured upstream tools additionally use the at-most-one
+gateway dispatch and explicit outcome/uncertainty state machine.
 
 Standard clients cannot supply the wallet/permit context the governed adapter
 requires, so ``tools/call`` mints a bounded, signed, single-tool, short-lived
@@ -105,11 +106,16 @@ _MAX_META_VALUE_LENGTH = 256
 _AUTO_PERMIT_ENDPOINT = "/mcp#auto-permit"
 
 _SERVER_INSTRUCTIONS = (
-    "Governed MCP trust plane. Every tools/call is authorized by a "
-    "server-minted, wallet-bounded permit, metered against the caller's "
-    "credit balance, and answered with a signed receipt. Authenticate with a "
-    "wallet-scoped API key; send an Idempotency-Key header to make retries "
-    "replay-safe."
+    "Transaction-integrity boundary for consequential MCP actions on the "
+    "configured upstream-MCP path. Every "
+    "tools/call is bound to one logical action, authorized by a server-minted "
+    "wallet-bounded permit, and metered against the caller's configured "
+    "allowance. For a configured upstream tool, an accepted Idempotency-Key "
+    "permits at most one gateway dispatch and debit; delivery_uncertain is "
+    "preserved rather than automatically redispatched. Authenticate with a "
+    "wallet-scoped API key."
+    " The serverInfo.name is a stable legacy compatibility identifier; the "
+    "instructions describe the current product category."
 )
 
 

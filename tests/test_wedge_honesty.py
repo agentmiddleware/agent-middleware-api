@@ -1,4 +1,4 @@
-"""Phase 5: docs / OpenAPI / discovery honesty for the MCP trust-plane wedge."""
+"""Docs / OpenAPI / discovery honesty for the transaction-integrity wedge."""
 
 from __future__ import annotations
 
@@ -42,14 +42,18 @@ def proof_surfaces_off(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_tools_json_envelope_is_trust_plane_not_marketplace(client):
+async def test_tools_json_envelope_has_versioned_transaction_positioning(client):
     resp = await client.get("/mcp/tools.json")
     assert resp.status_code == 200
     body = resp.json()
     assert body["name"] == McpGenerator.MANIFEST_NAME
     assert "B2A Service Marketplace" not in body["name"]
     assert "B2A" not in body["name"]
-    assert "trust plane" in body["description"].lower()
+    assert "transaction-integrity boundary" in body["description"].lower()
+    assert body["positioning"]["schema_version"] == "1.0"
+    assert body["positioning"]["id"] == (
+        "transaction_integrity_for_consequential_autonomous_actions"
+    )
     assert "executable" in body["description"].lower()
     assert "configured upstream" in body["description"].lower()
     assert "metadata-only" in body["description"].lower()
@@ -118,9 +122,7 @@ async def test_agent_json_sdk_integrations_are_honest(client):
     sdk_pyproject = (
         Path(__file__).resolve().parent.parent / "b2a_sdk" / "pyproject.toml"
     ).read_text(encoding="utf-8")
-    source_version = re.search(
-        r'^version\s*=\s*"([^"]+)"', sdk_pyproject, re.MULTILINE
-    )
+    source_version = re.search(r'^version\s*=\s*"([^"]+)"', sdk_pyproject, re.MULTILINE)
     assert source_version is not None, "b2a_sdk/pyproject.toml has no version"
     assert python_sdk["version"] == source_version.group(1)
     assert python_sdk["install"] == "pip install -e ./b2a_sdk"
@@ -139,9 +141,7 @@ async def test_agent_json_sdk_integrations_are_honest(client):
     # Normalize before comparing -- "0.5.0" and "python-sdk-v0.4.0" differ as
     # raw strings even when they name the same release, so a bare inequality
     # would hold no matter what and assert nothing at all.
-    assert python_sdk["latest_release_tag"] != (
-        f"python-sdk-v{python_sdk['version']}"
-    )
+    assert python_sdk["latest_release_tag"] != (f"python-sdk-v{python_sdk['version']}")
 
     typescript_sdk = integrations["typescript_sdk"]
     assert isinstance(typescript_sdk, dict)
@@ -163,7 +163,9 @@ async def test_llm_txt_does_not_advertise_unpublished_sdk_installs(client):
     assert "pip install b2a-sdk" not in text
     assert "npm install @b2a/sdk" not in text
     assert "pip install -e ./b2a_sdk" in text
-    assert "at most one gateway dispatch and wallet debit" in text
+    assert "transaction-integrity boundary" in text
+    assert "delivery_uncertain" in text
+    assert "at most one gateway" in " ".join(text.split())
     assert "different tool input fails closed with an idempotency conflict" in " ".join(
         text.split()
     )
@@ -171,9 +173,8 @@ async def test_llm_txt_does_not_advertise_unpublished_sdk_installs(client):
     assert "POST /mcp/messages" in text
     assert "legacy JSON-RPC endpoint" in text
     assert "does not implement standard MCP initialization" in " ".join(text.split())
-    assert (
-        "unless the deployment's discovery manifest lists it"
-        in " ".join(text.split())
+    assert "unless the deployment's discovery manifest lists it" in " ".join(
+        text.split()
     )
     assert (
         "not**" in text.lower()
@@ -184,13 +185,15 @@ async def test_llm_txt_does_not_advertise_unpublished_sdk_installs(client):
 
 
 @pytest.mark.anyio
-async def test_openapi_description_is_trust_plane_not_full_platform(client):
+async def test_openapi_description_is_transaction_integrity_not_full_platform(client):
     resp = await client.get("/openapi.json")
     assert resp.status_code == 200
     description = resp.json()["info"]["description"]
     assert "full agent middleware platform" in description.lower()
     assert "not a full agent middleware platform" in description.lower()
-    assert "exactly-once" in description.lower() or "trust plane" in description.lower()
+    assert "agent transaction integrity" in description.lower()
+    assert "delivery_uncertain" in description
+    assert "not proof of the downstream effect" in description.lower()
 
 
 @pytest.mark.anyio
@@ -198,6 +201,8 @@ async def test_docs_index_gates_proof_services(client, proof_surfaces_off):
     resp = await client.get("/docs/index")
     assert resp.status_code == 200
     data = resp.json()
+    assert data["positioning"] == data["agent_first"]["positioning"]
+    # Compatibility-only v1 alias.
     assert data["product_wedge"] == "governed_mcp_trust_plane"
     paths = {s["path"] for s in data["sections"]}
     assert "/WEDGE.md" in paths
@@ -217,9 +222,11 @@ def test_agentmarket_listing_is_wedge_honest():
 
 
 def test_feature_request_preserves_customer_identity_privacy():
-    text = Path(".github/ISSUE_TEMPLATE/feature_request.yml").read_text(
-        encoding="utf-8"
-    ).lower()
+    text = (
+        Path(".github/ISSUE_TEMPLATE/feature_request.yml")
+        .read_text(encoding="utf-8")
+        .lower()
+    )
 
     assert "approved non-identifying prospect reference" in text
     assert "do not include customer/company/person names" in text

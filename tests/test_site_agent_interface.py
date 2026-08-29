@@ -19,6 +19,7 @@ import runpy
 
 import pytest
 
+from app.core.product_positioning import get_product_positioning
 from app.routers.well_known import _local_try_it_manifest, get_agent_first_metadata
 
 
@@ -312,7 +313,11 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
         "platform_engineering",
         "ai_infrastructure",
         "security_teams_operating_internal_mcp_tools",
+        "teams_operating_consequential_autonomous_actions",
     ]
+    assert manifest["positioning"] == get_product_positioning()
+    # Compatibility-only v1 aliases remain while clients migrate.
+    assert manifest["product_wedge"] == "governed_mcp_trust_plane"
     assert manifest["product_loop"] == get_agent_first_metadata()["product_loop"]
     assert manifest["try_it"] == _local_try_it_manifest()
     # The repository is public, so agents can follow the clone instructions
@@ -321,7 +326,8 @@ def test_marketing_manifest_points_to_custom_origins_and_local_proof() -> None:
     assert manifest["github_access"] == "public"
     assert manifest["discovery"]["llms_txt"] == f"{CANONICAL_API}/llms.txt"
     assert f"{CANONICAL_API}/llms.txt" in manifest["bootstrap_sequence"]
-    assert "at-most-one gateway dispatch and debit" in manifest["description"]
+    assert "transaction-integrity boundary" in manifest["description"]
+    assert "explicit delivery uncertainty" in manifest["description"]
     assert "awi_manifest" not in manifest["discovery"]
 
 
@@ -332,9 +338,10 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
 
     assert llm_txt == llms_txt
     assert "human design-partner site" in llm_txt
-    assert "teams operating internal MCP tools are the buyers" in llm_txt
-    assert "governed MCP gateway" in llm_txt
-    assert "at most one gateway dispatch and wallet debit" in " ".join(llm_txt.split())
+    assert "teams operating consequential autonomous actions are the buyers" in llm_txt
+    assert "Transaction integrity" in llm_txt
+    assert "delivery_uncertain" in llm_txt
+    assert "at most one gateway dispatch and debit" in " ".join(llm_txt.split())
     assert "The source repository is public." in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
@@ -477,6 +484,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert result.returncode == 0, result.stderr
 
     page = (output / "index.html").read_text(encoding="utf-8")
+    compare_page = (output / "compare" / "index.html").read_text(encoding="utf-8")
     robots = (output / "robots.txt").read_text(encoding="utf-8")
     sitemap = (output / "sitemap.xml").read_text(encoding="utf-8")
     analytics = (output / "analytics.js").read_text(encoding="utf-8")
@@ -485,10 +493,10 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert 'property="og:url" content="https://www.thisisatest.tech/"' in page
     assert 'name="twitter:card" content="summary_large_image"' in page
     assert (
-        "<title>Agent Middleware API | MCP gateway for agent tool authorization</title>"
+        "<title>Agent Middleware API | Transaction integrity for agent actions</title>"
         in page
     )
-    assert "same accepted idempotency key" in page
+    assert "explicit delivery uncertainty" in page
     assert "https://www.thisisatest.tech/social-card.png" in page
     assert '<link rel="icon" href="/favicon.svg"' in page
     assert "/_vercel/insights/script.js" not in page
@@ -502,6 +510,21 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
         if node["@type"] == "Organization"
     )
     assert organization["sameAs"] == [REPO_URL]
+    software = next(
+        node
+        for node in _json_ld_graph(page, "index.html")
+        if node["@type"] == "SoftwareApplication"
+    )
+    assert software["applicationSubCategory"] == (
+        "Transaction integrity for consequential autonomous actions"
+    )
+    assert any(
+        "Durable delivery_uncertain" in feature for feature in software["featureList"]
+    )
+    assert "How agent transaction integrity compares" in compare_page
+    assert "at most one gateway dispatch and debit" in compare_page
+    assert "explicit delivery uncertainty" in compare_page
+    assert "produces exactly one debit" not in compare_page
 
     for event_name in ("booking_click", "email_click", "proof_click"):
         assert event_name in analytics
@@ -653,9 +676,13 @@ def test_cta_aria_labels_preserve_visible_text_and_booking_url(tmp_path) -> None
         collector = _LabeledLinkCollector()
         collector.feed((output / relative_path).read_text(encoding="utf-8"))
         collector.close()
-        assert collector.labeled_links, f"{relative_path} exposes no aria-labelled links"
+        assert collector.labeled_links, (
+            f"{relative_path} exposes no aria-labelled links"
+        )
         for visible, label, href in collector.labeled_links:
-            assert visible, f"{relative_path}: aria-label {label!r} on a link with no visible text"
+            assert visible, (
+                f"{relative_path}: aria-label {label!r} on a link with no visible text"
+            )
             assert visible in label, (
                 f"{relative_path}: aria-label {label!r} does not contain the "
                 f"visible link text {visible!r} (WCAG 2.1 Label-in-Name)"
@@ -1112,12 +1139,12 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
         r'(?:src|href)="(/[^"?]+\.(?:css|js))(\?[^"]*)?"'
     )
     for relative_path in (
-            "index.html",
-            "proof/index.html",
-            "compare/index.html",
-            "concept/index.html",
-            "404.html",
-        ):
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "concept/index.html",
+        "404.html",
+    ):
         page = (SITE / relative_path).read_text(encoding="utf-8")
         references = local_asset_reference.findall(page)
         assert references, f"{relative_path} references no local CSS or JS"
@@ -1129,9 +1156,7 @@ def test_static_assets_are_cached_and_html_is_not() -> None:
 
     # HTML gets no long-lived Cache-Control rule of its own.
     html_rules = [
-        entry
-        for entry in config["headers"]
-        if entry["source"].endswith((".html", "/"))
+        entry for entry in config["headers"] if entry["source"].endswith((".html", "/"))
     ]
     assert not html_rules
 
@@ -1163,8 +1188,7 @@ def test_trailing_slash_is_canonical_for_subpages() -> None:
         assert redirect["destination"] == f"/{directory}/"
         assert redirect["permanent"] is True
         assert (
-            f'rel="canonical" href="https://www.thisisatest.tech/{directory}/"'
-            in page
+            f'rel="canonical" href="https://www.thisisatest.tech/{directory}/"' in page
         )
 
     # Every dot-prefixed path the headers block configures must actually be
@@ -1225,9 +1249,7 @@ def test_security_txt_is_routable_and_unexpired(tmp_path) -> None:
     output = tmp_path / "site"
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
 
-    security_txt = (output / ".well-known" / "security.txt").read_text(
-        encoding="utf-8"
-    )
+    security_txt = (output / ".well-known" / "security.txt").read_text(encoding="utf-8")
     contact = VALID_TEST_CONTACTS["PUBLIC_CONTACT_EMAIL"]
     assert f"Contact: mailto:{contact}" in security_txt
     # A plain-text file must carry the raw address, never an HTML entity.
@@ -1297,8 +1319,7 @@ def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
     )
     for preset in declared:
         assert re.search(rf"\b{re.escape(preset)}: \{{", wave_js), (
-            f'index.html declares data-wave="{preset}" but wave.js has no '
-            "such preset"
+            f'index.html declares data-wave="{preset}" but wave.js has no such preset'
         )
 
     # The funnel's tested copy still leads the page: the wave is a treatment,
@@ -1485,9 +1506,7 @@ def _stylesheet_palette() -> tuple[set[str], set[tuple[int, int, int]]]:
             value = "#" + "".join(digit * 2 for digit in value[1:])
         if len(value) == 7:
             hexes.add(value.casefold())
-    triplets = {
-        tuple(int(value[i : i + 2], 16) for i in (1, 3, 5)) for value in hexes
-    }
+    triplets = {tuple(int(value[i : i + 2], 16) for i in (1, 3, 5)) for value in hexes}
     return hexes, triplets
 
 
@@ -1517,9 +1536,7 @@ def test_resolved_palette_surfaces_stay_within_the_stylesheet() -> None:
             assert value.casefold() in allowed_hex, (
                 f"{name} uses {value}, which styles.css does not"
             )
-        for triplet in re.findall(
-            r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", content
-        ):
+        for triplet in re.findall(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", content):
             rgb = tuple(int(channel) for channel in triplet)
             assert rgb in allowed_rgb, (
                 f"{name} uses rgba{rgb}, whose hue styles.css does not"
@@ -1545,8 +1562,15 @@ def test_palette_guards_reject_off_system_colors() -> None:
     }
     allowed_hex, allowed_rgb = _stylesheet_palette()
 
-    retired_hex = ("#151512", "#f2efe6", "#e24b2a", "#5f5a50", "#898277",
-                   "#6ec8ff", "#071018")
+    retired_hex = (
+        "#151512",
+        "#f2efe6",
+        "#e24b2a",
+        "#5f5a50",
+        "#898277",
+        "#6ec8ff",
+        "#071018",
+    )
     for value in retired_hex:
         assert value not in root_tokens, f"{value} crept back into :root"
         assert value not in allowed_hex, f"{value} crept back into styles.css"
@@ -1554,9 +1578,7 @@ def test_palette_guards_reject_off_system_colors() -> None:
     assert (41, 128, 185) not in allowed_rgb
 
 
-def test_social_card_renderer_refuses_unusable_chromium(
-    tmp_path, monkeypatch
-) -> None:
+def test_social_card_renderer_refuses_unusable_chromium(tmp_path, monkeypatch) -> None:
     """Broken renderer setups fail as launch errors, not tracebacks.
 
     ``main()`` turns ``RenderError`` into the documented exit 2; any other
@@ -1774,7 +1796,9 @@ def test_typography_is_self_hosted_with_no_third_party_request(tmp_path) -> None
 
     # The build must actually ship the files the stylesheet points at.
     assert (output / "fonts.css").is_file()
-    for face in re.findall(r'url\("(/fonts/[^"]+)"\)', (output / "fonts.css").read_text()):
+    for face in re.findall(
+        r'url\("(/fonts/[^"]+)"\)', (output / "fonts.css").read_text()
+    ):
         assert (output / face.lstrip("/")).is_file(), f"{face} not published"
 
 
@@ -1807,9 +1831,9 @@ def test_every_page_loads_the_accessibility_scripts(tmp_path) -> None:
         assert "defer" not in re.search(
             r"<script[^>]*a11y-preload[^>]*>", markup
         ).group(0), f"{relative_path} defers a11y-preload.js; it must block"
-        assert re.search(
-            r'<script defer src="/a11y\.js\?v=[^"]+"></script>', markup
-        ), f"{relative_path} does not load the accessibility controls"
+        assert re.search(r'<script defer src="/a11y\.js\?v=[^"]+"></script>', markup), (
+            f"{relative_path} does not load the accessibility controls"
+        )
 
 
 def test_font_stylesheet_and_files_agree() -> None:
@@ -1830,14 +1854,21 @@ def test_font_stylesheet_and_files_agree() -> None:
         f"only on disk: {sorted(committed - referenced)} — re-run vendor_fonts.py"
     )
     for name in committed:
-        assert (SITE / "fonts" / name).read_bytes()[:4] == b"wOF2", f"{name} is not woff2"
+        assert (SITE / "fonts" / name).read_bytes()[:4] == b"wOF2", (
+            f"{name} is not woff2"
+        )
 
     # Every family/weight the design system asks for must have a face, or the
     # browser silently synthesises one.
     for family, weight in (
-        ("IBM Plex Mono", 400), ("IBM Plex Mono", 500), ("IBM Plex Mono", 600),
-        ("Libre Franklin", 700), ("Libre Franklin", 800),
-        ("Public Sans", 400), ("Public Sans", 500), ("Public Sans", 600),
+        ("IBM Plex Mono", 400),
+        ("IBM Plex Mono", 500),
+        ("IBM Plex Mono", 600),
+        ("Libre Franklin", 700),
+        ("Libre Franklin", 800),
+        ("Public Sans", 400),
+        ("Public Sans", 500),
+        ("Public Sans", 600),
     ):
         block = re.search(
             rf'font-family: "{re.escape(family)}";\s*font-style: normal;\s*'
@@ -2083,7 +2114,7 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
     # selector rather than a blank stage, and an empty or absent value leaves
     # the arcade closed and the funnel untouched).
     arcade = (SITE / "arcade.js").read_text(encoding="utf-8")
-    assert 'if (!cabinet) return;' in arcade, (
+    assert "if (!cabinet) return;" in arcade, (
         "startGame does not guard an unknown cabinet id, so ?arcade=<typo> "
         "would strand the visitor on an empty stage"
     )
@@ -2236,7 +2267,7 @@ def _arcade_cabinet_roster() -> list[dict[str, str]]:
     for entry in re.findall(r"\{([^{}]*)\}", block.group(1)):
         fields: dict[str, str] = {}
         for line in entry.splitlines():
-            field = re.match(r'\s*(\w+):\s*(.*?),?\s*$', line)
+            field = re.match(r"\s*(\w+):\s*(.*?),?\s*$", line)
             if field:
                 fields[field.group(1)] = field.group(2).strip('"')
         if fields:
@@ -2487,7 +2518,16 @@ def test_arcade_controls_only_promise_keys_the_arcade_binds() -> None:
 # The layouts the touch pad knows how to build. A cabinet asking for anything
 # else silently falls back to the four-way pad, which is the wrong controls
 # under a player's thumb rather than a visible error.
-ARCADE_PAD_LAYOUTS = ("dpad+fire", "dpad", "lr+fire", "lr", "ud+fire", "ud", "lanes", "tap")
+ARCADE_PAD_LAYOUTS = (
+    "dpad+fire",
+    "dpad",
+    "lr+fire",
+    "lr",
+    "ud+fire",
+    "ud",
+    "lanes",
+    "tap",
+)
 
 # The families the filter row is built from. Nine shelves for a hundred
 # cabinets; the specific genre stays on the tile badge.
@@ -2591,9 +2631,7 @@ def test_arcade_families_shelve_every_cabinet() -> None:
             f"family {family!r} has {marquees.count(family)} marquee rules in "
             f"arcade.css; it needs exactly one, or the cascade picks for you"
         )
-        assert (
-            styles.count(f'.arcade-cabinet[data-family="{family}"] {{') == 1
-        ), (
+        assert styles.count(f'.arcade-cabinet[data-family="{family}"] {{') == 1, (
             f"family {family!r} declares its hue more than once in arcade.css; "
             f"the last one silently wins"
         )
@@ -2751,9 +2789,7 @@ def test_pressable_chrome_holds_still_under_reduced_motion() -> None:
         r"html\[data-a11y-motion=\"reduce\"\][^{},]*)\{\s*transform: none;",
         stylesheet,
     )
-    assert attribute_block, (
-        "styles.css has no data-a11y-motion rule zeroing transforms"
-    )
+    assert attribute_block, "styles.css has no data-a11y-motion rule zeroing transforms"
     attribute_selectors = {
         s.strip().replace('html[data-a11y-motion="reduce"] ', "")
         for s in attribute_block.group(1).split(",")
@@ -2817,11 +2853,8 @@ def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
     # str.isdigit() is broader — it accepts Arabic-Indic "\u0663\u0662\u0660" and
     # superscript "\u00b3\u00b2\u2070" — so using it here would let this test pass on
     # markup the renderer would reject and silently fall back on.
-    assert re.fullmatch(r"[0-9]+", declared.group(1)) and int(
-        declared.group(1)
-    ) > 0, (
-        f"landing page declares a malformed data-pixel-width: "
-        f"{declared.group(1)!r}"
+    assert re.fullmatch(r"[0-9]+", declared.group(1)) and int(declared.group(1)) > 0, (
+        f"landing page declares a malformed data-pixel-width: {declared.group(1)!r}"
     )
     assert "data-pixel-width" not in concept, (
         "/concept/ has no image-rendering: pixelated rule, so a capped "
@@ -2829,6 +2862,6 @@ def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
     )
 
     styles = (SITE / "styles.css").read_text(encoding="utf-8")
-    assert re.search(
-        r"\.wave-canvas \{\s*image-rendering: pixelated;", styles
-    ), "the capped framebuffer is no longer upscaled as hard pixels"
+    assert re.search(r"\.wave-canvas \{\s*image-rendering: pixelated;", styles), (
+        "the capped framebuffer is no longer upscaled as hard pixels"
+    )

@@ -1,7 +1,7 @@
 """
 Agent Middleware API
-===========================
-Governed MCP gateway for agent-to-tool actions.
+====================
+Transaction integrity for consequential autonomous agent-to-tool actions.
 
 The core path scopes authority, dispatches a configured upstream MCP tool at
 most once per accepted idempotency key, meters the wallet debit, and issues
@@ -33,6 +33,10 @@ from .core.health import (
     gather_dependency_report,
 )
 from .core.public_contact import validated_public_contact as _public_contact_metadata
+from .core.product_positioning import (
+    POSITIONING_DESCRIPTION,
+    POSITIONING_TAGLINE,
+)
 from .core.rate_limiter import RateLimitMiddleware
 from .core.runtime_mode import get_simulation_modes
 from .middleware.head_method import HeadMethodMiddleware
@@ -49,7 +53,7 @@ from .services.signing_keys import (
     SigningKeyError,
     validate_signing_key_configuration,
 )
-from .routers.well_known import TRUST_PLANE_DESCRIPTION, get_agent_first_metadata
+from .routers.well_known import get_agent_first_metadata
 from .routers import (
     auth,
     iot,
@@ -474,22 +478,24 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description=(
-        "## MCP Trust Plane\n\n"
-        "Agent Middleware API is a **governed MCP trust plane** for autonomous "
-        "agent tool calls — not a full agent middleware platform.\n\n"
-        "Credible wedge: exactly-once gateway authorization, debit, and receipt "
-        "finalization for metered MCP calls. Remote side effects require the "
-        "upstream to honor the forwarded idempotency key. See `/WEDGE.md` and "
-        "`/SECURITY_LIMITATIONS.md`.\n\n"
+        "## Agent Transaction Integrity\n\n"
+        f"**{POSITIONING_TAGLINE}**\n\n"
+        f"{POSITIONING_DESCRIPTION}\n\n"
+        "It is not a full agent middleware platform. This is a durable gateway "
+        "state machine, not one distributed ACID transaction and not proof of "
+        "the downstream effect. A remote side effect is exactly once only when "
+        "the upstream honors the forwarded idempotency key. See `/WEDGE.md` "
+        "and `/SECURITY_LIMITATIONS.md`.\n\n"
         "### Canonical Loop\n\n"
-        "`discover -> authenticate -> authorize -> invoke -> meter -> "
-        "receipt -> audit -> govern`\n\n"
+        "`logical action -> authorize -> reserve allowance -> debit -> claim "
+        "dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit "
+        "-> authoritative external reconciliation required`\n\n"
         "### Product Surface\n\n"
-        "- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n"
-        "- **Governed MCP invoke** — permit check, policy, idempotency, charge\n"
-        "- **Wallet metering** — ledger-backed credits with exact decimals\n"
-        "- **Signed receipts + evidence** — verifiable attempt outcomes\n"
-        "- **Wallet audit chain** — tamper-evident per-wallet events\n"
+        "- **Logical action identity** — accepted key bound to one payload\n"
+        "- **Bounded authority consumption** — scoped permit and configured allowance\n"
+        "- **One-shot gateway dispatch/debit** — at most once per accepted action\n"
+        "- **Explicit uncertainty** — `delivery_uncertain` is not auto-redispatched\n"
+        "- **Linked gateway evidence** — receipt and audit data for reconciliation\n"
         "- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, "
         "`/llms.txt`, `/v1/discover`\n\n"
         "### Proof Surfaces\n\n"
@@ -747,7 +753,7 @@ async def root(request: Request):
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "agent_first": get_agent_first_metadata(),
-        "description": TRUST_PLANE_DESCRIPTION,
+        "description": POSITIONING_DESCRIPTION,
         "surface_boundaries": {
             "core_trust": [
                 "audit",
@@ -1155,8 +1161,9 @@ async def health_ready():
         "Probes the dependencies this deployment runs on, in parallel with a "
         "short timeout. Each entry reports status, latency_ms, and an error "
         "message when unreachable. With proof surfaces unmounted (the "
-        "production posture) the payload covers the trust-plane wedge only: "
-        "postgres, redis, signing key, upstream MCP, version + commit SHA. "
+        "production posture) the payload covers the transaction-integrity "
+        "boundary only: postgres, redis, signing key, upstream MCP, version + "
+        "commit SHA. "
         "Instances that mount proof surfaces additionally report those "
         "surfaces' dependencies and per-service simulation modes; deps whose "
         "consumers are simulated return `not_used` so the verdict doesn't "

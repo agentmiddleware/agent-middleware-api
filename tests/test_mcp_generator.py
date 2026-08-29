@@ -228,6 +228,14 @@ class TestMcpGenerator:
         manifest = gen.generate_tools_json()
 
         assert manifest["version"] == "1.0"
+        assert manifest["positioning"]["schema_version"] == "1.0"
+        assert manifest["positioning"]["id"] == (
+            "transaction_integrity_for_consequential_autonomous_actions"
+        )
+        assert (
+            manifest["name"]
+            == manifest["positioning"]["legacy_protocol_identifiers"]["mcp_server_name"]
+        )
         assert "tools" in manifest
         assert len(manifest["tools"]) == 0
 

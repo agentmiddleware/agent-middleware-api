@@ -15,28 +15,32 @@ Do not treat the marketing origin as an API base URL.
 
 ## What the product is
 
-A governed MCP gateway between an autonomous agent and one consequential MCP
-(Model Context Protocol) tool. It is not an agent runtime, not an LLM
-provider, not an IAM replacement, and not a marketplace.
+A transaction-integrity boundary for one consequential, autonomous,
+retry-sensitive action on the configured upstream-MCP path. One logical action
+binds delegated authority and configured consumption to at most one gateway
+dispatch and debit, preserves `delivery_uncertain`, and links gateway evidence
+for required external reconciliation.
 
-The wedge is deliberately narrow: metered calls — one governed action, on
-one tool, for one operator, with portable evidence afterwards. The
-underlying primitive is bounded authority for machine actions.
+It is not an agent runtime, an LLM provider, an IAM replacement, a marketplace,
+one distributed ACID transaction, or proof of the downstream effect.
 
-## Governed loop
+Authentication uses operator-issued `X-API-Key`; there is no public self-serve mint.
 
-discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+## Transaction loop
 
-- discover: public manifests and tool lists; no credential required.
-- authenticate: X-API-Key. Operator-issued. There is no public self-serve mint.
-- authorize: a signed permit binds wallet, allowed tool, budget, expiry, nonce,
-  and idempotency. Absent or out-of-scope permits fail closed.
-- invoke: the gateway forwards one in-scope call to the configured upstream.
-- meter: the call is debited from the scoped wallet. The same accepted
-  idempotency key cannot create a second gateway dispatch or a second debit.
-- receipt: the terminal gateway outcome is signed with Ed25519.
-- audit: the charge and the decision land in the wallet audit chain.
-- govern: permits expire and can be revoked before the next call.
+logical action -> authorize -> reserve allowance -> debit -> claim dispatch
+-> confirmed outcome | delivery_uncertain -> receipt/audit
+-> authoritative external reconciliation required
+
+- logical action: an accepted idempotency key is bound to one immutable payload.
+- authorize: a signed permit binds wallet, tool, budget, expiry, and nonce.
+- reserve/debit: configured credit or call allowance is consumed at most once.
+- claim dispatch: the supported upstream path permits at most one gateway send.
+- outcome: confirmed results are recorded; ambiguous delivery becomes durable
+  `delivery_uncertain` and is not automatically redispatched.
+- evidence: receipt and audit linkage support external reconciliation.
+- reconcile: the partner's authoritative system determines downstream effect
+  truth; gateway evidence does not prove that effect.
 
 ## Vocabulary
 
@@ -46,8 +50,8 @@ discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> 
 - receipt: the signed record of a terminal gateway outcome.
 - b2a_sdk: the repository's client SDK package, short for business-to-agent.
   It ships the offline verifier, `b2a-verify-receipt`.
-- gateway: the product. "Boundary", "control point", and "trust plane" describe
-  what it does; they are not separate products.
+- transaction-integrity boundary: the product category. Legacy identifiers that
+  contain "trust plane" remain compatibility aliases, not current positioning.
 
 ## Published proof
 
@@ -77,7 +81,8 @@ https://github.com/PetrefiedThunder/agent-middleware-api:
   is denied with a concrete reason code and produces no ledger debit.
 
 Both use a throwaway local SQLite database and the real FastAPI routes. These
-are reproducible local proofs, not production or settlement claims.
+are reproducible local proofs, not a partner-owned consequential action,
+customer validation, production settlement, or compliance evidence.
 
 ## Runtime honesty
 
@@ -94,6 +99,8 @@ State these limits rather than inferring past them:
 - No customer traction or production adoption.
 - No production settlement or payment rails.
 - No compliance-grade ledger storage.
+- No proof that the downstream effect occurred or matched the authorized request;
+  that requires the partner's authoritative lookup or receiver-side evidence.
 - No exactly-once upstream side effects without upstream support. The
   idempotency guarantee is about gateway dispatch and debit, not about what an
   upstream tool does with a request it already received.
@@ -104,8 +111,9 @@ State these limits rather than inferring past them:
 ## Buyers and contact
 
 Buyers are platform engineering, AI infrastructure, and security teams that
-operate internal MCP tools. The engagement is one tool, one operator, one
-governed action, scoped privately. There is no self-serve rollout.
+operate consequential autonomous actions. The engagement is one tool, one
+operator, one retry-sensitive action, scoped privately. There is no self-serve
+rollout.
 
 Human site: https://www.thisisatest.tech/
 Offline receipt verification: https://www.thisisatest.tech/proof/

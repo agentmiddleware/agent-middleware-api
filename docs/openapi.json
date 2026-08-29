@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Middleware API",
-    "description": "## MCP Trust Plane\n\nAgent Middleware API is a **governed MCP trust plane** for autonomous agent tool calls — not a full agent middleware platform.\n\nCredible wedge: exactly-once gateway authorization, debit, and receipt finalization for metered MCP calls. Remote side effects require the upstream to honor the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`\n\n### Product Surface\n\n- **Scoped signed permits** — tool, wallet, budget, expiry, nonce\n- **Governed MCP invoke** — permit check, policy, idempotency, charge\n- **Wallet metering** — ledger-backed credits with exact decimals\n- **Signed receipts + evidence** — verifiable attempt outcomes\n- **Wallet audit chain** — tamper-evident per-wallet events\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAgentic-web, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
+    "description": "## Agent Transaction Integrity\n\n**Make consequential agent actions transactional.**\n\nTransaction-integrity boundary for consequential autonomous actions on the configured upstream-MCP path: one logical action binds scoped authority and configured consumption to at most one gateway dispatch and debit, records delivery_uncertain instead of automatically redispatching, and links gateway evidence for required external reconciliation.\n\nIt is not a full agent middleware platform. This is a durable gateway state machine, not one distributed ACID transaction and not proof of the downstream effect. A remote side effect is exactly once only when the upstream honors the forwarded idempotency key. See `/WEDGE.md` and `/SECURITY_LIMITATIONS.md`.\n\n### Canonical Loop\n\n`logical action -> authorize -> reserve allowance -> debit -> claim dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit -> authoritative external reconciliation required`\n\n### Product Surface\n\n- **Logical action identity** — accepted key bound to one payload\n- **Bounded authority consumption** — scoped permit and configured allowance\n- **One-shot gateway dispatch/debit** — at most once per accepted action\n- **Explicit uncertainty** — `delivery_uncertain` is not auto-redispatched\n- **Linked gateway evidence** — receipt and audit data for reconciliation\n- **Discovery** — `.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/v1/discover`\n\n### Proof Surfaces\n\nAgentic-web, browser, content, oracle, sandbox, media, IoT, red-team, and telemetry demos are labeled scaffolding. They mount only when `ENABLE_PROOF_SURFACES=true` and do not define the product.\n\n### Authentication\n\nProtected endpoints require an API key via the `X-API-Key` header.\n\n### For Agents\n\nStart at `/.well-known/agent.json`, then `/llms.txt` and `/mcp/tools.json`. Prefer `PUBLIC_URL` over any localhost server entry.",
     "license": {
       "name": "MIT"
     },
@@ -3786,7 +3786,7 @@
           "Trust Signing Keys"
         ],
         "summary": "Get Active Signing Key",
-        "description": "Return public metadata for the active trust-plane signing key.",
+        "description": "Return public metadata for the active transaction-evidence signing key.",
         "operationId": "get_active_signing_key_v1_signing_keys_active_get",
         "security": [
           {
@@ -4790,7 +4790,7 @@
           "Agent Discovery"
         ],
         "summary": "Agent Discovery Manifest",
-        "description": "Returns this project's agent bootstrap manifest for discovery clients. It is not an A2A Agent Card. Product capabilities are the MCP trust plane; proof_surfaces are labeled demo/workload scaffolding.",
+        "description": "Returns this project's agent bootstrap manifest for discovery clients. It is not an A2A Agent Card. Canonical category and claim boundaries live under agent_first.positioning; proof_surfaces are labeled demo/workload scaffolding.",
         "operationId": "get_agent_json__well_known_agent_json_get",
         "responses": {
           "200": {
@@ -4809,8 +4809,8 @@
         "tags": [
           "Agent Discovery"
         ],
-        "summary": "Trust-Plane Public Signing Keys",
-        "description": "Unauthenticated publication of the Ed25519 public keys this plane signs receipts, permits, and audit events with. Deliberately open: a receipt is only portable evidence if someone who holds no credential here can still check its signature. Retired keys stay listed so historical receipts remain verifiable; disabled keys are withheld because the plane itself refuses to verify against them.",
+        "summary": "Transaction-Evidence Public Signing Keys",
+        "description": "Unauthenticated publication of the Ed25519 public keys this gateway signs receipts, permits, and audit events with. Deliberately open: a receipt is only portable evidence if someone who holds no credential here can still check its signature. Retired keys stay listed so historical receipts remain verifiable; disabled keys are withheld because the gateway itself refuses to verify against them.",
         "operationId": "get_trust_keys_json__well_known_trust_keys_json_get",
         "responses": {
           "200": {
@@ -4829,7 +4829,7 @@
         "tags": [
           "Agent Discovery"
         ],
-        "summary": "Trust-Plane JWKS (JSON Web Key Set)",
+        "summary": "Transaction-Evidence JWKS (JSON Web Key Set)",
         "description": "Standard JWK Set (RFC 7517) view of the same Ed25519 public keys published at /.well-known/trust-keys.json, for verifiers that auto-discover keys in JWKS form. Unauthenticated by design: a receipt is only portable evidence if a party holding no credential here can still check its signature. Each key is OKP/Ed25519 (`alg: EdDSA`); match a receipt's `kid` to the JWK `kid`. trust-keys.json carries the same keys with issuance/retirement metadata a bare JWK Set omits.",
         "operationId": "get_jwks_json__well_known_jwks_json_get",
         "responses": {
@@ -4913,8 +4913,8 @@
         "tags": [
           "Static"
         ],
-        "summary": "Product wedge",
-        "description": "Exactly-once MCP permits wedge definition.",
+        "summary": "Transaction-integrity boundary",
+        "description": "Compatibility path to the transaction-integrity boundary definition.",
         "operationId": "get_wedge_md_WEDGE_md_get",
         "responses": {
           "200": {
@@ -4958,7 +4958,7 @@
           "Static"
         ],
         "summary": "Design partner guide",
-        "description": "Trust-plane demo and dogfood path for design partners.",
+        "description": "Transaction-integrity demo and dogfood path for design partners.",
         "operationId": "get_design_partner_guide_md_DESIGN_PARTNER_GUIDE_md_get",
         "responses": {
           "200": {
@@ -5049,7 +5049,7 @@
           "Documentation & Discovery"
         ],
         "summary": "Structured documentation index",
-        "description": "Returns a JSON index of documentation resources. Trust-plane sections always; proof-surface service entries only when mounted.",
+        "description": "Returns a JSON index for the consequential-action transaction-integrity boundary. Proof-surface service entries appear only when mounted.",
         "operationId": "get_doc_index_docs_index_get",
         "responses": {
           "200": {
@@ -5134,7 +5134,7 @@
           "Discovery"
         ],
         "summary": "Dependency health check",
-        "description": "Probes the dependencies this deployment runs on, in parallel with a short timeout. Each entry reports status, latency_ms, and an error message when unreachable. With proof surfaces unmounted (the production posture) the payload covers the trust-plane wedge only: postgres, redis, signing key, upstream MCP, version + commit SHA. Instances that mount proof surfaces additionally report those surfaces' dependencies and per-service simulation modes; deps whose consumers are simulated return `not_used` so the verdict doesn't degrade on mock-only deployments.",
+        "description": "Probes the dependencies this deployment runs on, in parallel with a short timeout. Each entry reports status, latency_ms, and an error message when unreachable. With proof surfaces unmounted (the production posture) the payload covers the transaction-integrity boundary only: postgres, redis, signing key, upstream MCP, version + commit SHA. Instances that mount proof surfaces additionally report those surfaces' dependencies and per-service simulation modes; deps whose consumers are simulated return `not_used` so the verdict doesn't degrade on mock-only deployments.",
         "operationId": "health_dependencies_health_dependencies_get",
         "responses": {
           "200": {
@@ -8952,7 +8952,7 @@
           "surface": {
             "type": "string",
             "title": "Surface",
-            "description": "'product' = MCP trust-plane wedge; 'proof_surface' = labeled demo/workload scaffolding (often simulated).",
+            "description": "'product' = consequential-action transaction-integrity boundary; 'proof_surface' = labeled demo/workload scaffolding (often simulated).",
             "default": "product"
           },
           "simulation_default": {

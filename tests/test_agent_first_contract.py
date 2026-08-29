@@ -59,7 +59,42 @@ async def test_simulation_truth_endpoint_has_simulation_modes(client):
 @pytest.mark.anyio
 async def test_agent_first_declares_product_wedge(client):
     meta = get_agent_first_metadata()
+    positioning = meta["positioning"]
+    assert positioning["schema_version"] == "1.0"
+    assert positioning["effective_date"] == "2026-08-28"
+    assert (
+        positioning["id"]
+        == "transaction_integrity_for_consequential_autonomous_actions"
+    )
+    assert positioning["label"] == (
+        "Transaction integrity for consequential autonomous actions"
+    )
+    assert positioning["scope"] == {
+        "transaction_state_machine": "configured_upstream_mcp_tool_only",
+        "local_and_dogfood_tools": ("not_covered_by_dispatch_uncertainty_semantics"),
+    }
+    assert positioning["supersedes"] == ["product_wedge", "product_loop"]
+    assert positioning["semantics"] == [
+        "logical_action_identity",
+        "bounded_authority_consumption",
+        "at_most_one_gateway_dispatch_and_debit",
+        "delivery_uncertain_no_automatic_redispatch",
+        "linked_gateway_evidence",
+        "authoritative_external_reconciliation_required",
+    ]
+    assert positioning["canonical_loop"][-1] == (
+        "authoritative_external_reconciliation_required"
+    )
+    assert positioning["legacy_protocol_identifiers"] == {
+        "mcp_server_name": "Agent Middleware MCP Trust Plane"
+    }
+    assert positioning["claim_boundary"] == (
+        "gateway_state_machine_not_distributed_acid_or_downstream_effect_proof"
+    )
+
+    # Deprecated v1 aliases remain for exact-match consumers during migration.
     assert meta["product_wedge"] == "governed_mcp_trust_plane"
+    assert meta["product_wedge"] in positioning["legacy_aliases"]
     assert meta["product_loop"][0] == "discover"
     assert "receipt" in meta["product_loop"]
     # The suite runs with proof surfaces unmounted, so the primary manifest

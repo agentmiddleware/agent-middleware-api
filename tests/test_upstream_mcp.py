@@ -805,7 +805,8 @@ async def test_discovery_initializes_and_caches_exact_tool_schema() -> None:
     assert session.events == ["initialize", "list_tools"]
     assert discovered.name == "partner.write"
     assert discovered.description == (
-        "Governed remote MCP tool dispatched through the Agent Middleware trust plane."
+        "Configured remote MCP tool dispatched through the Agent Middleware "
+        "transaction-integrity boundary."
     )
     assert "Write a partner note" not in discovered.description
     assert discovered.input_schema["required"] == ["note"]
@@ -1280,7 +1281,8 @@ async def test_real_streamable_http_lifecycle_forwards_auth_and_request_metadata
     await client.aclose()
 
     assert discovered.description == (
-        "Governed remote MCP tool dispatched through the Agent Middleware trust plane."
+        "Configured remote MCP tool dispatched through the Agent Middleware "
+        "transaction-integrity boundary."
     )
     assert result.is_error is False
     assert result.payload["structuredContent"] == {"echo": "hello over streamable HTTP"}

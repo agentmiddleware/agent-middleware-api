@@ -70,6 +70,14 @@ class TestWellKnownAgentJson:
         af = data["agent_first"]
         assert af.get("primary_audience") == "autonomous_agents"
         assert af.get("design_principle") == "agent_first"
+        assert af["positioning"]["id"] == (
+            "transaction_integrity_for_consequential_autonomous_actions"
+        )
+        assert (
+            "delivery_uncertain_no_automatic_redispatch"
+            in af["positioning"]["semantics"]
+        )
+        # Compatibility-only v1 aliases.
         assert af.get("product_wedge") == "governed_mcp_trust_plane"
         assert "invoke" in af.get("product_loop", [])
         assert "/.well-known/agent.json" in af.get("bootstrap_sequence", [])

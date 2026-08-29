@@ -16,6 +16,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..core.config import get_settings, public_api_origin
+from ..core.product_positioning import (
+    LEGACY_PRODUCT_LOOP,
+    LEGACY_PRODUCT_WEDGE,
+    POSITIONING_DESCRIPTION,
+    get_product_positioning,
+)
 from ..core.public_contact import validated_public_contact
 from ..core.trust_mode import is_production_like_environment
 from ..schemas.awi import AWIDiscoveryManifest, AWIRepresentationType
@@ -45,12 +51,9 @@ PRODUCT_CAPABILITIES: list[str] = [
     "api_keys",
 ]
 
-TRUST_PLANE_DESCRIPTION = (
-    "Governed MCP gateway for autonomous agents: scoped permits and an accepted "
-    "idempotency key yield at most one gateway dispatch and wallet debit for the "
-    "configured upstream MCP tool. Signed receipts and audit records make the "
-    "terminal gateway outcome independently checkable."
-)
+# Backward-compatible import alias for callers that used the old internal name.
+# The value is current positioning copy, not the retired category description.
+TRUST_PLANE_DESCRIPTION = POSITIONING_DESCRIPTION
 
 # Proof-surface catalog — served only while these workloads are mounted
 # (ENABLE_PROOF_SURFACES=true), for honesty about what is actually reachable.
@@ -141,17 +144,10 @@ def get_agent_first_metadata() -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "primary_audience": "autonomous_agents",
         "design_principle": "agent_first",
-        "product_wedge": "governed_mcp_trust_plane",
-        "product_loop": [
-            "discover",
-            "authenticate",
-            "authorize",
-            "invoke",
-            "meter",
-            "receipt",
-            "audit",
-            "govern",
-        ],
+        "positioning": get_product_positioning(),
+        # Compatibility-only v1 fields. ``positioning`` is canonical.
+        "product_wedge": LEGACY_PRODUCT_WEDGE,
+        "product_loop": list(LEGACY_PRODUCT_LOOP),
         "bootstrap_sequence": bootstrap,
         "simulation_and_dependency_truth": "/health/dependencies",
         "proof_surfaces_enabled": bool(cfg.ENABLE_PROOF_SURFACES),
@@ -236,7 +232,7 @@ def _authentication_manifest() -> dict[str, Any]:
 
 
 def _local_try_it_manifest() -> dict[str, Any]:
-    """Credential-free proof path for agents evaluating the trust loop."""
+    """Credential-free proof path for the logical-action transaction loop."""
     return {
         "mode": "local_self_hosted",
         "repository": "https://github.com/PetrefiedThunder/agent-middleware-api",
@@ -253,10 +249,11 @@ def _local_try_it_manifest() -> dict[str, Any]:
             "offline_receipt_verification",
         ],
         "note": (
-            "Runs the real FastAPI trust path against a throwaway local SQLite "
-            "database. This is a reproducible proof, not a production or "
-            "settlement claim. The source repository is public; clone it and "
-            "run the proof locally before treating it as production evidence."
+            "Runs the real FastAPI transaction-integrity path against a "
+            "throwaway local SQLite database. This is a reproducible proof, "
+            "not a production or settlement claim. The source repository is "
+            "public; clone it and run the proof locally before treating it as "
+            "production evidence."
         ),
     }
 
@@ -327,8 +324,8 @@ class AgentPluginManifest(BaseModel):
     capabilities: list[str] = Field(
         default_factory=lambda: list(PRODUCT_CAPABILITIES),
         description=(
-            "Trust-plane product capability identifiers (MCP permit→meter→"
-            "receipt→audit wedge). Proof surfaces are listed separately."
+            "Supporting capability identifiers for the consequential-action "
+            "transaction-integrity boundary. Proof surfaces are listed separately."
         ),
     )
 
@@ -352,7 +349,7 @@ class AgentPluginManifest(BaseModel):
         default_factory=_local_try_it_manifest,
         description=(
             "Credential-free local proof for autonomous clients evaluating "
-            "the governed permit-to-receipt loop."
+            "the logical-action transaction loop."
         ),
     )
 
@@ -386,7 +383,7 @@ class AgentPluginManifest(BaseModel):
         default_factory=get_agent_first_metadata,
         description=(
             "How autonomous clients should treat this service: discovery order, "
-            "authority for simulation vs real behavior, and product wedge scope."
+            "versioned positioning and claim boundary, plus simulation truth."
         ),
     )
 
@@ -468,10 +465,11 @@ def _build_agent_manifest() -> AgentPluginManifest:
         # bootstrap payload.
         proof_surfaces = []
 
-    description = TRUST_PLANE_DESCRIPTION
+    description = POSITIONING_DESCRIPTION
     if cfg.ENABLE_PROOF_SURFACES:
         description += (
-            " Additional routers are labeled proof surfaces, not the product wedge."
+            " Additional routers are labeled proof surfaces, outside the "
+            "transaction-integrity boundary."
         )
 
     return AgentPluginManifest(
@@ -506,9 +504,9 @@ def build_awi_manifest() -> dict[str, Any]:
             "mcp_manifest": "/.well-known/mcp/tools.json",
         },
         "description": (
-            "Proof-surface AWI semantics exposed beside the governed MCP "
-            "trust plane. Prefer MCP tools with permits for metered, "
-            "receipted automation."
+            "Proof-surface AWI semantics exposed beside the consequential-action "
+            "transaction-integrity boundary. Prefer MCP tools with permits for "
+            "bounded, receipted automation."
         ),
         "endpoints": {
             "sessions": "/v1/awi/sessions",
@@ -550,8 +548,9 @@ def build_awi_manifest() -> dict[str, Any]:
     summary="Agent Discovery Manifest",
     description=(
         "Returns this project's agent bootstrap manifest for discovery clients. "
-        "It is not an A2A Agent Card. Product capabilities are the MCP trust "
-        "plane; proof_surfaces are labeled demo/workload scaffolding."
+        "It is not an A2A Agent Card. Canonical category and claim boundaries "
+        "live under agent_first.positioning; proof_surfaces are labeled "
+        "demo/workload scaffolding."
     ),
     responses={
         200: {"description": "Project agent bootstrap manifest"},
@@ -578,7 +577,7 @@ async def get_agent_json(request: Request):
     description=(
         "Returns the draft AWI-over-MCP manifest with action vocabulary, "
         "representation types, endpoints, safety capabilities, and known limits. "
-        "Marked as a proof surface — not the product wedge."
+        "Marked as a proof surface outside the transaction-integrity boundary."
     ),
     # AWI is a gated proof surface; every other AWI route mounts only when
     # ENABLE_PROOF_SURFACES is true. This one lives in the always-mounted
@@ -596,7 +595,7 @@ async def get_awi_json():
                 "detail": (
                     "AWI is a proof surface and is not mounted "
                     "(ENABLE_PROOF_SURFACES=false). Use /.well-known/agent.json "
-                    "and /mcp/tools.json for the trust-plane wedge."
+                    "and /mcp/tools.json for the transaction-integrity boundary."
                 ),
             },
         )
@@ -661,14 +660,14 @@ def _trust_keys_unavailable() -> JSONResponse:
 
 @router.get(
     "/.well-known/trust-keys.json",
-    summary="Trust-Plane Public Signing Keys",
+    summary="Transaction-Evidence Public Signing Keys",
     description=(
-        "Unauthenticated publication of the Ed25519 public keys this plane "
+        "Unauthenticated publication of the Ed25519 public keys this gateway "
         "signs receipts, permits, and audit events with. Deliberately open: a "
         "receipt is only portable evidence if someone who holds no credential "
         "here can still check its signature. Retired keys stay listed so "
         "historical receipts remain verifiable; disabled keys are withheld "
-        "because the plane itself refuses to verify against them."
+        "because the gateway itself refuses to verify against them."
     ),
 )
 async def get_trust_keys_json():
@@ -712,7 +711,7 @@ async def get_trust_keys_json():
 
 @router.get(
     "/.well-known/jwks.json",
-    summary="Trust-Plane JWKS (JSON Web Key Set)",
+    summary="Transaction-Evidence JWKS (JSON Web Key Set)",
     description=(
         "Standard JWK Set (RFC 7517) view of the same Ed25519 public keys "
         "published at /.well-known/trust-keys.json, for verifiers that "
