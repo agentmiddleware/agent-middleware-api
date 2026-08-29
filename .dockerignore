@@ -4,6 +4,7 @@
 .claude
 .envrc
 .vercel
+.railway
 .venv
 **/.venv
 .pytest_cache

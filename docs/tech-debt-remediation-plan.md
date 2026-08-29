@@ -7,6 +7,12 @@
 
 ## How to use this plan
 
+> **Superseded deployment-config note (2026-08-28):** Historical
+> `railway.json` references below describe the implementation used when these
+> phases shipped. The current API-service configuration owner and activation
+> boundary are `.railway/railway.ts` and `docs/deploy-railway.md`; the original
+> phase record is intentionally unchanged.
+
 1. Work **one phase at a time**. Open a focused PR per phase (or per P0 item if large).
 2. Each phase has: goal, constraints, steps, files, tests, acceptance, stop conditions.
 3. Prefer vertical slices + negative-path tests in security-critical areas (auth, permits, receipts, billing, deploy).

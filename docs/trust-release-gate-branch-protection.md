@@ -8,15 +8,18 @@ reaches `main` until the release gate has run and passed against it.
 The gate itself is `scripts/trust_release_gate.sh` (`make trust-release-gate`).
 It runs, in order:
 
-1. the focused trust-plane pytest suite, including
+1. the offline Railway IaC contract check: install the lock-pinned SDK with
+   package lifecycle scripts disabled, then fail closed unless the evaluated
+   graph is the exact API-only service contract;
+2. the focused trust-plane pytest suite, including
    `tests/test_adversarial_five_claims.py` — the in-process adversarial pass
    over the five claims;
-2. the trust-core coverage gate (`scripts/trust_coverage_gate.sh`, an 80% floor
+3. the trust-core coverage gate (`scripts/trust_coverage_gate.sh`, an 80% floor
    across the named trust-plane control modules);
-3. the trust-plane demo proof (`scripts/demo_trust_plane.py --assert`);
-4. discovery-drift tests;
-5. committed-OpenAPI parity (`scripts/export_openapi.py --check`);
-6. simulation-inventory parity (`scripts/generate_sim_inventory.py --check`).
+4. the trust-plane demo proof (`scripts/demo_trust_plane.py --assert`);
+5. discovery-drift tests;
+6. committed-OpenAPI parity (`scripts/export_openapi.py --check`);
+7. simulation-inventory parity (`scripts/generate_sim_inventory.py --check`).
 
 CI runs the same script as a dedicated job named **`trust_release_gate`**
 (`.github/workflows/ci.yml`), so branch protection can require one check that
@@ -30,7 +33,7 @@ reports.
 
 | Check | Job | What a failure means |
 |---|---|---|
-| `trust_release_gate` | `trust_release_gate` | A trust claim, coverage floor, demo proof, discovery contract, OpenAPI parity, or sim-inventory parity regressed |
+| `trust_release_gate` | `trust_release_gate` | The Railway IaC package/install or fail-closed graph contract failed, or a trust claim, coverage floor, demo proof, discovery contract, OpenAPI parity, or sim-inventory parity regressed |
 | `test (3.11)`, `test (3.12)` | `test` | Unit/integration suite or trust-primitive invariants failed |
 | `python_sdk (3.10)`, `python_sdk (3.11)`, `python_sdk (3.12)` | `python_sdk` | The offline receipt verifier / SDK broke against a clean wheel |
 | `postgres_trust` | `postgres_trust` | Trust loop failed against real PostgreSQL/asyncpg |

@@ -61,6 +61,17 @@ Thumbs.db
 /docker-compose.prod.yml
 /.build_commit_sha
 
+# Railway IaC source is allowlisted; local link metadata and dependencies stay
+# untracked. Retired root Config as Code files must not return.
+/railway.json
+/railway.toml
+/.railway/*
+!/.railway/railway.ts
+!/.railway/package.json
+!/.railway/package-lock.json
+!/.railway/check.mjs
+!/.railway/README.md
+
 # Agent tooling scratch: throwaway git worktrees used to run checks in
 # isolation. Full repo copies and coverage artifacts — never commit these.
 .claude/worktrees/

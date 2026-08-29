@@ -91,9 +91,11 @@ repo; do not Redeploy from GitHub source).
 - Set `PUBLIC_URL` to the public HTTPS API origin (Railway host or custom
   domain). Agents and `/llm.txt` use it; do not leave production pointing at
   localhost.
-- Set `VALID_API_KEYS` only via host secrets / Railway variables. Never commit
-  real keys; never use the placeholder `change-me` in prod defaults
-  (`railway.json` must not ship API keys).
+- Set `VALID_API_KEYS` only via host secrets / Railway service variables. The
+  API-only [`.railway/railway.ts`](.railway/railway.ts) graph preserves the key
+  name without owning or exposing its value; every configured API key uses
+  `preserve()`. Never commit real keys or use the placeholder `change-me` in
+  production.
 - Disable or isolate proof surfaces that execute code, drive browsers, generate
   patches, crawl external URLs, or touch third-party systems.
 - When `REDIS_URL` is set, production-like environments fail closed on Redis

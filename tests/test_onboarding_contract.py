@@ -237,14 +237,19 @@ def test_repo_guardian_only_invokes_scripts_that_exist() -> None:
 
 
 def test_repo_does_not_ship_stale_production_config_paths() -> None:
-    """Railway variables plus the Dockerfile are the only production path.
+    """Railway IaC plus the exact-SHA Dockerfile are the production owners.
 
     The retired files looked authoritative but could not satisfy the current
     production trust contract. Keep them absent and ignored so operators do
     not revive a second, unsafe source of production configuration.
     """
 
-    retired = (".env.production", "docker-compose.prod.yml")
+    retired = (
+        ".env.production",
+        "docker-compose.prod.yml",
+        "railway.json",
+        "railway.toml",
+    )
     for name in retired:
         assert not (REPO_ROOT / name).exists(), f"retired artifact returned: {name}"
         ignore_check = subprocess.run(
@@ -255,6 +260,8 @@ def test_repo_does_not_ship_stale_production_config_paths() -> None:
             text=True,
         )
         assert ignore_check.returncode == 0, f"retired artifact is not ignored: {name}"
+
+    assert (REPO_ROOT / ".railway" / "railway.ts").is_file()
 
     deploy_sop = (REPO_ROOT / "docs" / "deploy-railway.md").read_text()
     assert "does not ship `.env.production` or" in deploy_sop

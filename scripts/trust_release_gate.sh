@@ -4,6 +4,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/python_env.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/python_env.sh"
 
+echo "[trust-gate] Railway IaC contract"
+make check-railway-iac
+
 TRUST_TESTS=(
   tests/test_golden_path.py
   tests/test_demo_trust_plane.py

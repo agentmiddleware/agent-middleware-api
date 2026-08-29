@@ -1,4 +1,4 @@
-# Railway deploy SOP (single path)
+# Railway IaC and deploy SOP
 
 **Audience:** operators deploying the trust-plane API.  
 **Product lens:** [`WEDGE.md`](../WEDGE.md) + [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md).
@@ -53,6 +53,130 @@ verification result, and operator without putting data or credentials in the
 record. Make no SLA, RTO, or RPO claim until the corresponding behavior has
 been measured and contractually approved.
 
+## Railway configuration and application releases
+
+Railway configuration and application code have separate owners and separate
+commands:
+
+- [`.railway/railway.ts`](../.railway/railway.ts) is the project-level IaC
+  owner for selected repository-controlled settings on the existing
+  `api-service`. Its stable
+  `partial = "api-service"` export deliberately excludes PostgreSQL, Redis,
+  `partner-mcp-pilot`, volumes, and the PITR bucket.
+- `railway config plan` previews the IaC difference. `railway config apply`
+  changes Railway configuration after an explicit operator review.
+- `railway up` uploads and deploys an application release. It does **not**
+  read or apply `.railway/railway.ts`; a successful `railway up` therefore says
+  nothing about IaC drift.
+
+Install the pinned SDK without package lifecycle scripts and run the offline
+graph check before contacting Railway:
+
+```bash
+npm ci --prefix .railway --ignore-scripts
+npm test --prefix .railway
+```
+
+The tracked graph names every current API environment key as `preserve()`.
+Railway still owns each value, including secrets and references to private data
+services; the repository owns only the key's continued presence. Add a new live
+API key to the IaC file before any plan/apply review. Omitting a live key can
+propose its deletion. Never replace `preserve()` with a committed value, and
+never use `--show-values` in a plan, terminal capture, CI job, or support log.
+
+Restart policy is deliberately provider-owned: Railway's documented effective
+defaults are `ON_FAILURE` with 10 retries. Railway CLI `5.43.3` does not
+converge when those defaults are explicit because its current graph omits the
+fields. Omitting them removes that known explicit-field false drift and is the
+candidate convergent representation. The repaired graph still requires a fresh
+disposable plan/apply/second-plan proof before activation; repeat that
+validation after any CLI or SDK upgrade before reintroducing either field.
+This omission does not authorize an effective restart change; any such plan
+delta remains an abort.
+
+### Read-only plan and later activation
+
+An authorized operator may inspect the already-linked project/environment and
+request a value-redacted plan:
+
+```bash
+railway status --json
+railway config plan
+```
+
+Do not automate `railway config apply` or `railway config migrate --apply`.
+The current production service is still owned by legacy Config as Code, so a
+complete production IaC plan remains blocked until an operator clears that
+setting. The live service's stale GitHub source metadata is intentionally not
+copied into IaC; disconnecting it is an expected but separately reviewed
+activation change, not an incidental migration side effect.
+
+#### Disposable rehearsal
+
+Do not apply the tracked production `.railway/railway.ts` to a disposable
+project. It pins the production project name and the
+`api.thisisatest.tech` custom domain. Leave that tracked file unchanged and
+create an ignored local scratch copy instead:
+
+```bash
+cp .railway/railway.ts .railway/rehearsal.ts
+```
+
+The `.gitignore` allowlist keeps `.railway/rehearsal.ts` ignored; never force-add
+or commit it. In the scratch file, change the project identity to the
+disposable project and remove the production custom domain or replace it with
+a disposable-only domain. The scratch file must not contain
+`api.thisisatest.tech`. Populate only the disposable environment with
+synthetic variable values; no production secret, private-service reference, or
+customer data may be copied into the rehearsal.
+
+Use a checkout linked only to that disposable project/environment. Inspect
+`railway status --json` and stop unless it explicitly identifies the intended
+disposable target. Then plan the scratch file by name:
+
+```bash
+railway config plan --file .railway/rehearsal.ts
+```
+
+Apply the scratch file only after reviewing that plan, re-confirming the linked
+disposable project/environment, and confirming that every configured value is
+synthetic:
+
+```bash
+railway config apply --file .railway/rehearsal.ts
+```
+
+Immediately run the second plan against the same scratch graph:
+
+```bash
+railway config plan --file .railway/rehearsal.ts --detailed-exit-code
+```
+
+Only exit `0` with zero proposed changes counts as a successful rehearsal.
+Any proposed change, including any restart-field delta, or any nonzero exit
+means the rehearsal failed and blocks production activation. Do not apply
+again to accommodate drift.
+
+After a successful disposable rehearsal, a later production activation still
+requires an approved maintenance window. Record the current legacy config-file
+path plus the previous green application SHA, clear the legacy config-file
+setting, and immediately run the production read-only plan above. Abort on any
+variable/resource deletion, service creation or service rename, unexpected
+domain/placement/restart/build change, unexpected source change, or change to
+an unrelated resource. The separately reviewed removal of the stale GitHub
+source binding is the only expected production source delta. Before apply,
+abort by restoring the recorded legacy config-file setting and stop without
+deploying.
+
+Apply only after a named operator approves the complete redacted plan and the
+intentional source disconnect. Re-run the plan afterward and require no
+unexpected changes. Then deploy the approved exact SHA through the application
+release checklist below. After apply, configuration rollback is a separately
+reviewed inverse IaC plan; application rollback deploys the previous green SHA
+through the same immutable `railway up` sequence. Do not reattach automatic
+GitHub deployment as a shortcut, regenerate IaC from live state, or reverse
+database migrations as an IaC rollback.
+
 ## Canonical deploy path
 
 **Build and ship from this repo with the in-repo Dockerfile. Production
@@ -93,8 +217,9 @@ development Dockerfile for a production upload.
 contains only the exact `git archive` tree plus that non-secret stamp; never
 use `--no-gitignore` against an ordinary working tree.
 
-Railway uses `railway.json` → `build.builder = DOCKERFILE`. That is the only
-supported production image path for this project.
+Railway IaC pins `build.builder = DOCKERFILE` and
+`dockerfilePath = Dockerfile`. The command below remains the only supported
+production image path for this project, and does not apply IaC.
 
 The repository intentionally does not ship `.env.production` or
 `docker-compose.prod.yml`. `.env.example` is the local-development template
@@ -117,8 +242,9 @@ Do **not**:
   `.github/workflows/docker-publish.yml` workflow publishes optional tags
   (`sha`, branch, semver, `latest` on default branch) for inspection and
   offline use — **not** as the live Railway ship path.
-- Commit secrets (`VALID_API_KEYS`, signing keys, Stripe keys) into
-  `railway.json` or the git tree.
+- Commit secret values (`VALID_API_KEYS`, signing keys, Stripe keys) into
+  `.railway/railway.ts` or the git tree. Those names appear only as
+  `preserve()` entries in IaC.
 - Keep secret files anywhere in the release checkout merely because Git
   ignores them. The Railway upload context is not a credential store; keep
   customer credentials in Railway variables or an external vault only.
@@ -162,10 +288,11 @@ that pilot it remains optional when Redis rate limiting is unused; a
 production-like service fails closed on Redis outage whenever it is set.
 `CORS_ORIGINS` should be locked to known frontends.
 
-Committed `railway.json` may list **non-secret** defaults only
-(`STATE_BACKEND`, `PUBLIC_URL`, `ENABLE_PROOF_SURFACES`). It must not contain
-`VALID_API_KEYS` or signing material. Set `RUN_MIGRATIONS_ON_START` via
-Railway variables (not committed) after confirming Alembic stamp state.
+Committed `.railway/railway.ts` contains the complete API variable-name set but
+no values: every name, including `VALID_API_KEYS`, signing material, and
+`RUN_MIGRATIONS_ON_START`, must map to `preserve()`. Set or rotate values only
+in Railway or the approved external vault. Enable migration-on-start only after
+confirming Alembic stamp state.
 
 ## Preflight — before you ship
 

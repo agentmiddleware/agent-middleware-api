@@ -1,4 +1,4 @@
-"""Phase 3: production-like deploy posture + railway.json hygiene.
+"""Production-like trust posture and public-surface guards.
 
 Default conftest stays permissive for unit speed. This module (and the CI
 ``production_trust`` job) explicitly engages production trust flags.
@@ -32,7 +32,6 @@ from app.services.mcp_phase9_tools import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RAILWAY_JSON = REPO_ROOT / "railway.json"
 
 # Deterministic non-secret 32-byte material so production-like validation can
 # exercise the real Ed25519 key shape without loading a production secret.
@@ -124,26 +123,6 @@ async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
-
-
-@pytest.mark.production_trust
-def test_railway_json_has_no_change_me_api_key_default() -> None:
-    """Committed Railway defaults must contain no secret-shaped settings."""
-
-    raw = RAILWAY_JSON.read_text(encoding="utf-8")
-    assert "change-me" not in raw.lower()
-    data = json.loads(raw)
-    variables = data.get("variables") or {}
-    assert set(variables) == {
-        "STATE_BACKEND",
-        "PUBLIC_URL",
-        "ENABLE_PROOF_SURFACES",
-    }, "committed Railway defaults must stay non-secret and minimal"
-    assert "VALID_API_KEYS" not in variables
-    assert variables.get("STATE_BACKEND") == "postgres"
-    assert variables.get("PUBLIC_URL", "").startswith("https://")
-    assert str(variables.get("ENABLE_PROOF_SURFACES", "")).lower() == "false"
-    assert data.get("build", {}).get("builder") == "DOCKERFILE"
 
 
 @pytest.mark.production_trust

@@ -112,7 +112,7 @@ The end-to-end governed MCP path lives in [`app/routers/mcp.py`](app/routers/mcp
 4. **Signed offline-verifiable receipts.** Receipts are Ed25519-signed and verifiable without credentials or network access to the issuing server. Export a receipt with `GET /v1/receipts/{receipt_id}/portable`, fetch the public key set from `/.well-known/trust-keys.json` or `/.well-known/jwks.json`, and verify with the SDK verifier or any off-the-shelf JOSE tooling.
 5. **Authority-before-money denial.** A request outside the permit scope, with no permit, or with an expired/revoked/tampered permit is denied with a concrete reason code before any wallet charge. When the trust plane refuses the call, a signed denial receipt proves *that* refusal.
 
-Adversarial coverage of all five claims, enforced gate-first, lives in [`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py). CI runs the full release gate as one dedicated check (`trust_release_gate`) so a claim cannot regress into `main` unproven.
+Adversarial coverage of all five claims, enforced gate-first, lives in [`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py). CI runs the full release gate as one dedicated check (`trust_release_gate`), starting with the offline Railway IaC package and fail-closed graph contract, so configuration or trust claims cannot regress into `main` unproven.
 
 ## What this is not
 
@@ -424,9 +424,10 @@ make coverage
 # Focused trust modules; enforces at least 80% coverage
 make trust-coverage-gate
 
-# Trust tests (including the adversarial five-claims pass) + coverage +
-# demo + discovery/OpenAPI/inventory drift. CI runs this same script as the
-# required `trust_release_gate` check.
+# Offline Railway IaC package/graph contract first, then trust tests (including
+# the adversarial five-claims pass), coverage, demo, and
+# discovery/OpenAPI/inventory drift. CI runs this same script as the required
+# `trust_release_gate` check.
 make trust-release-gate
 
 # Two-process crash-consistency proof; needs a dedicated, empty PostgreSQL
@@ -436,13 +437,15 @@ make prove-crash-recovery
 
 `make test`, `make test-all`, and `make coverage` provision requirements through `uv`. The focused coverage and release-gate targets resolve their interpreter through a shared helper (`scripts/lib/python_env.sh`): when `uv` is available they provision the pinned requirements automatically, exactly like the test targets; without `uv` they fall back to the first of `python3.12`/`python3`/`python` that already has the requirements installed (or an explicit `PYTHON=/path/to/python` override).
 
+The release gate's first step installs the lock-pinned Railway SDK with package lifecycle scripts disabled and evaluates `.railway/railway.ts` offline. It fails closed if package installation fails or the graph drifts from the exact API-only service contract.
+
 [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) maps every proof command to the invariant it asserts — and, just as importantly, to what it does not prove. Two live suites (`make trust-conformance-live`, `make adversarial-battery-live`) run the same class of invariants against a deployment you operate; both write test data, so point them at staging. A local red-team pass (`make red-team-trust-plane-check`) attacks the trust loop against a throwaway SQLite database. The otherwise stdlib-only [`scripts/invariant_attacks/`](scripts/invariant_attacks/) harness (its receipt-forgery attack and combined crash storm shell out to the offline SDK verifier, which needs `cryptography`) runs a hostile, concurrency-aware campaign against a live `make quickstart` instance — parallel double-charge, budget over-spend, scope escape, receipt forgery, crash consistency, and credential misuse — each with a HELD/BROKE/PARTIAL verdict backed by the exact request and observed response ([docs/invariant-attack-report.md](docs/invariant-attack-report.md)).
 
 The repository is intended to run **gate-first, execute-second**: CI exposes the release gate as one dedicated check named `trust_release_gate`, and [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) specifies the exact branch-protection settings that make it (and the other required checks) block `main`. The automated batteries prove the five claims from inside; the human usability milestone is the [stranger test](docs/stranger-test.md) — a person who has never seen the repository drives the whole governed loop and verifies the same claims from the published docs alone, asking zero questions. That test does not prove customer demand. The active business milestone is the partner-owned pilot in [the 30-day customer-validation sprint](docs/30-day-customer-validation.md).
 
 The CI workflows also run:
 
-- The full trust release gate as a single required check (`trust_release_gate`), exactly as `make trust-release-gate` runs it locally.
+- The full trust release gate as a single required check (`trust_release_gate`), with the offline Railway IaC package/graph contract first, exactly as `make trust-release-gate` runs it locally.
 - Python 3.11, 3.12, and 3.13 suites (the 3.13 leg is experimental and non-blocking).
 - Python SDK wheel/sdist builds, clean-install smoke tests, typed-client tests, Ruff, and mypy on Python 3.10 through 3.12.
 - Ruff and mypy.
