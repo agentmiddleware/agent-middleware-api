@@ -18,12 +18,19 @@ from typing import Any
 
 from fastapi import Header, HTTPException, Query, status
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models import McpDispatchAttemptModel
 from app.main import app
 from app.routers import mcp as mcp_router
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import AgentMoney
+from app.services.human_approval import HumanApprovalService
 from app.services.idempotency import IdempotencyService, get_idempotency_service
+from app.services.mcp_dispatch_attempts import McpDispatchAttemptService
+from app.services.mcp_dispatch_reconciliation import (
+    get_mcp_dispatch_reconciliation_service,
+)
 from app.services.permits import PermitService, get_permit_service
 from app.services.receipts import ReceiptService
 from app.services.service_registry import get_service_registry
@@ -76,13 +83,37 @@ def _fault(point: str, **context: Any) -> None:
 
 
 def _install_fault_wrappers() -> None:
+    original_flush = AsyncSession.flush
     original_begin_with_record = IdempotencyService.begin_with_record
     original_complete = IdempotencyService.complete
     original_mark_charged = IdempotencyService.mark_charged
+    original_ensure_approval = HumanApprovalService.ensure_approval
+    original_claim_dispatch = McpDispatchAttemptService.claim_dispatch
+    original_complete_dispatch = McpDispatchAttemptService.complete
     original_authorize_and_reserve = PermitService.authorize_and_reserve
     original_charge = AgentMoney.charge
     original_create_receipt = ReceiptService.create_receipt
     original_audit = mcp_router._audit_mcp_invocation
+
+    async def flush(self: AsyncSession, objects: Any = None) -> None:
+        approval_attempt = next(
+            (
+                row
+                for row in self.new
+                if isinstance(row, McpDispatchAttemptModel)
+                and row.approval_id is not None
+            ),
+            None,
+        )
+        await original_flush(self, objects)
+        if approval_attempt is not None:
+            # Approval UPDATE, permit UPDATE, and attempt INSERT have all
+            # reached PostgreSQL in this still-uncommitted transaction.
+            _fault(
+                "after_approval_budget_attempt_flush_before_commit",
+                approval_id=approval_attempt.approval_id,
+                attempt_id=approval_attempt.attempt_id,
+            )
 
     async def begin_with_record(
         self: IdempotencyService, *args: Any, **kwargs: Any
@@ -111,6 +142,40 @@ def _install_fault_wrappers() -> None:
             ledger_entry_id=kwargs.get("ledger_entry_id"),
         )
         return result
+
+    async def ensure_approval(
+        self: HumanApprovalService, *args: Any, **kwargs: Any
+    ) -> Any:
+        result = await original_ensure_approval(self, *args, **kwargs)
+        if (
+            kwargs.get("consume_immediately") is False
+            and getattr(result, "status", None) == "approved"
+        ):
+            _fault(
+                "after_approval_before_prepare",
+                approval_id=getattr(result, "approval_id", None),
+            )
+        return result
+
+    async def claim_dispatch(
+        self: McpDispatchAttemptService, *args: Any, **kwargs: Any
+    ) -> Any:
+        result = await original_claim_dispatch(self, *args, **kwargs)
+        _fault(
+            "after_dispatch_claim",
+            attempt_id=getattr(result, "attempt_id", None),
+        )
+        return result
+
+    async def complete_dispatch(
+        self: McpDispatchAttemptService, *args: Any, **kwargs: Any
+    ) -> Any:
+        if kwargs.get("state") == "succeeded":
+            _fault(
+                "after_upstream_ack_before_terminal",
+                attempt_id=kwargs.get("attempt_id"),
+            )
+        return await original_complete_dispatch(self, *args, **kwargs)
 
     async def authorize_and_reserve(
         self: PermitService, *args: Any, **kwargs: Any
@@ -155,10 +220,14 @@ def _install_fault_wrappers() -> None:
     IdempotencyService.begin_with_record = begin_with_record
     IdempotencyService.complete = complete
     IdempotencyService.mark_charged = mark_charged
+    HumanApprovalService.ensure_approval = ensure_approval
+    McpDispatchAttemptService.claim_dispatch = claim_dispatch
+    McpDispatchAttemptService.complete = complete_dispatch
     PermitService.authorize_and_reserve = authorize_and_reserve
     AgentMoney.charge = charge
     ReceiptService.create_receipt = create_receipt
     mcp_router._audit_mcp_invocation = audit
+    AsyncSession.flush = flush
 
 
 async def _stress_tool(
@@ -264,6 +333,9 @@ async def stress_reconcile(
     ),
 ) -> dict[str, Any]:
     _authorize_control_request(control_token)
+    dispatch = await get_mcp_dispatch_reconciliation_service().reconcile(
+        idle_seconds=idle_seconds
+    )
     repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
         idle_seconds=idle_seconds
     )
@@ -271,6 +343,11 @@ async def stress_reconcile(
         idle_seconds=idle_seconds
     )
     return {
+        "dispatch_prepared_finalized": dispatch.prepared_finalized,
+        "dispatch_uncertain": dispatch.dispatched_uncertain,
+        "dispatch_terminal_recovered": dispatch.terminal_recovered,
+        "dispatch_idempotency_recovered": dispatch.idempotency_recovered,
+        "dispatch_failed_attempt_ids": list(dispatch.failed_attempt_ids),
         "idempotency_repaired": repaired,
         "idempotency_needs_review": needs_review,
         "permit_budgets_corrected": permits_corrected,

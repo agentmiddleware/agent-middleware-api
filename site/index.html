@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Middleware API | Replay-safe metered MCP calls</title>
+    <title>Agent Middleware API | Transaction integrity for agent actions</title>
     <meta
       name="description"
-      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+      content="Transaction integrity for consequential autonomous actions: one logical action, at most one gateway dispatch and debit, explicit delivery uncertainty, and linked evidence."
     />
     <meta name="robots" content="index, follow" />
     <meta name="theme-color" content="#0b1120" />
@@ -19,18 +19,18 @@
         "@id": "https://www.thisisatest.tech/#website",
         "name": "Agent Middleware API",
         "url": "https://www.thisisatest.tech/",
-        "description": "A control layer for scoped, replay-safe, metered MCP tool calls with signed receipts."
+        "description": "Transaction integrity for consequential autonomous actions."
       }
     </script>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Agent Middleware API" />
     <meta
       property="og:title"
-      content="Authorize one agent action. Charge it once. Prove what happened."
+      content="Make consequential agent actions transactional."
     />
     <meta
       property="og:description"
-      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+      content="One logical action, bounded authority consumption, at most one gateway dispatch and debit, and explicit delivery uncertainty."
     />
     <meta property="og:url" content="https://www.thisisatest.tech/" />
     <meta
@@ -41,16 +41,16 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Agent Middleware API: authorize, charge, and prove one agent action"
+      content="Agent Middleware API: make consequential agent actions transactional"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta
       name="twitter:title"
-      content="Authorize one agent action. Charge it once. Prove what happened."
+      content="Make consequential agent actions transactional."
     />
     <meta
       name="twitter:description"
-      content="Constrain one agent action, prevent a duplicate gateway dispatch and debit on retry, and verify the signed receipt."
+      content="One logical action, bounded authority consumption, at most one gateway dispatch and debit, and explicit delivery uncertainty."
     />
     <meta
       name="twitter:image"
@@ -128,16 +128,17 @@
               >For platform engineering, AI infrastructure, and security teams</span
             >
           </p>
-          <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
+          <h1>Make consequential agent actions transactional.</h1>
           <p class="hero-body hero-body-lead">
-            Your agent invokes a costly tool. The request times out. Was it
-            dispatched? Should the agent retry? Will the retry create another
-            debit?
+            A consequential tool commits the action, but its response
+            disappears. Did the effect land? Is retry safe? Which authority was
+            consumed?
           </p>
           <p class="hero-body">
-            Put one scoped, budgeted boundary in front of the call. The same
-            accepted idempotency key cannot create a second gateway dispatch or
-            debit, and the terminal gateway outcome gets a signed receipt.
+            Bind delegated authority to a stable logical identity and bounded
+            authority consumption. Permit at most one gateway dispatch and
+            debit, preserve explicit uncertain-delivery state, and return
+            portable evidence of the resulting transaction.
           </p>
           <div class="cta-row">
             <a
@@ -171,24 +172,24 @@
           <div class="agent-entry-head">
             <div>
               <p class="panel-kicker">The one-tool offer</p>
-              <h2 id="pilot-card-title">Bring one real MCP tool.</h2>
+              <h2 id="pilot-card-title">Bring one consequential staging action.</h2>
             </div>
             <span class="public-badge"
               ><span aria-hidden="true"></span> design partner</span
             >
           </div>
           <p class="agent-entry-copy">
-            We map one governed action end to end: delegated authority before
-            execution, one debit for identical same-key replays, and portable
-            evidence after.
+            It must be autonomous and retry-sensitive. We map its authority,
+            logical identity, one-shot dispatch, uncertainty, and evidence end
+            to end.
           </p>
           <ol class="pilot-steps">
-            <li><span>01</span><strong>Scope the action and budget</strong></li>
-            <li><span>02</span><strong>Invoke through the gateway</strong></li>
-            <li><span>03</span><strong>Replay, deny, and verify offline</strong></li>
+            <li><span>01</span><strong>Qualify the action and authority</strong></li>
+            <li><span>02</span><strong>Invoke, replay, and fail closed</strong></li>
+            <li><span>03</span><strong>Force ambiguity and reconcile</strong></li>
           </ol>
           <div class="agent-entry-foot">
-            <span>Built for operators of internal MCP tools</span>
+            <span>Built for consequential autonomous actions</span>
             <a
               href="@@PUBLIC_BOOKING_URL@@"
               data-analytics-event="booking_click"
@@ -201,35 +202,35 @@
       <section class="section thesis-section" aria-labelledby="thesis-title">
         <p class="section-kicker">00 / Operational problem</p>
         <div class="thesis-layout">
-          <h2 id="thesis-title">Agent intent is not authority—or evidence.</h2>
+          <h2 id="thesis-title">Authorization alone does not make retries safe.</h2>
           <div class="thesis-copy">
             <p>
-              An agent can be correct and still exceed its mandate, retry an
-              expensive call, or leave an operator unable to prove what ran.
-              The middleware puts a narrow control point between the agent and
-              one tool.
+              A valid call can still commit its effect and lose the response.
+              Blind retry may duplicate the action; a log cannot decide whether
+              the downstream effect occurred.
             </p>
             <p>
-              The result is inspectable before, during, and after execution
-              without asking you to replace your agent framework.
+              The middleware preserves one gateway transaction identity and an
+              honest uncertainty state without replacing your agent framework
+              or downstream source of truth.
             </p>
           </div>
         </div>
         <ol class="thesis-signals">
           <li>
             <span>Before</span>
-            <strong>Bound the authority</strong>
-            <p>Tool, wallet, budget, expiry, and operator-defined scope.</p>
+            <strong>Bind the action</strong>
+            <p>Tool, wallet, configured allowance, payload, key, and scope.</p>
           </li>
           <li>
             <span>During</span>
-            <strong>Charge the call once</strong>
-            <p>The same accepted request key cannot become a second debit.</p>
+            <strong>Claim dispatch once</strong>
+            <p>The same logical action cannot become another gateway dispatch or debit.</p>
           </li>
           <li>
             <span>After</span>
-            <strong>Return portable proof</strong>
-            <p>A signed receipt links the governed call to auditable evidence.</p>
+            <strong>Preserve uncertainty</strong>
+            <p><code>delivery_uncertain</code> is linked to evidence and external reconciliation.</p>
           </li>
         </ol>
       </section>
@@ -237,21 +238,20 @@
       <section class="protocol-section" aria-labelledby="protocol-title">
         <div class="section protocol-heading">
           <p class="section-kicker section-kicker-inverse">01 / Governed path</p>
-          <h2 id="protocol-title">One control loop from intent to evidence.</h2>
+          <h2 id="protocol-title">One transaction state machine from authority to evidence.</h2>
           <p>
-            Start with the smallest action where permission, cost, or audit
-            evidence matters.
+            Start with a consequential, autonomous, retry-sensitive mutation.
           </p>
         </div>
-        <ol class="loop-track" aria-label="Governed agent-to-tool action loop">
-          <li><span>01</span><strong>Discover</strong></li>
-          <li><span>02</span><strong>Authenticate</strong></li>
-          <li><span>03</span><strong>Authorize</strong></li>
-          <li><span>04</span><strong>Invoke</strong></li>
-          <li><span>05</span><strong>Meter</strong></li>
-          <li><span>06</span><strong>Receipt</strong></li>
-          <li><span>07</span><strong>Audit</strong></li>
-          <li><span>08</span><strong>Govern</strong></li>
+        <ol class="loop-track" aria-label="Consequential action transaction loop">
+          <li><span>01</span><strong>Bind identity</strong></li>
+          <li><span>02</span><strong>Authorize</strong></li>
+          <li><span>03</span><strong>Reserve</strong></li>
+          <li><span>04</span><strong>Debit</strong></li>
+          <li><span>05</span><strong>Claim dispatch</strong></li>
+          <li><span>06</span><strong>Classify</strong></li>
+          <li><span>07</span><strong>Receipt / audit</strong></li>
+          <li><span>08</span><strong>Reconcile</strong></li>
         </ol>
       </section>
 
@@ -309,14 +309,14 @@
       <section class="section pilot-section" id="pilot" aria-labelledby="pilot-title">
         <div>
           <p class="section-kicker">03 / Design-partner pilot</p>
-          <h2 id="pilot-title">Start with one tool, not a platform migration.</h2>
+          <h2 id="pilot-title">Start with one consequential action, not a platform migration.</h2>
         </div>
         <div class="pilot-copy">
           <p>
-            Bring one internal MCP tool with a real operator, permission
-            boundary, and retry or audit concern. We qualify fit, define the
-            one action, and walk permit → invoke → charge → receipt → replay →
-            deny before discussing any broader rollout.
+            Bring one partner-owned staging mutation with a real operator and
+            authoritative effect lookup. We test normal execution, exact replay,
+            changed-input conflict, denial, and a controlled effect-then-response-loss
+            case before discussing any broader rollout.
           </p>
           <div class="pilot-links">
             <a
@@ -374,6 +374,8 @@
             <li>Production settlement or payment rails</li>
             <li>Compliance-grade ledger storage</li>
             <li>Exactly-once upstream side effects without upstream support</li>
+            <li>Proof that the actual downstream effect occurred</li>
+            <li>An independently witnessed or transparency-logged receipt</li>
             <li>Universal governance across every agent framework</li>
           </ul>
         </div>
@@ -383,7 +385,7 @@
     <footer class="site-footer">
       <div class="footer-branding">
         <div class="footer-brand">Agent Middleware API</div>
-        <p>Authorize the action. Meter it once. Keep the evidence.</p>
+        <p>Preserve the action identity. Refuse unsafe retries. Keep the evidence.</p>
       </div>
       <div class="footer-directory">
         <p>Human contact</p>

@@ -10,7 +10,12 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, WalletModel
+from app.db.models import (
+    IdempotencyRecordModel,
+    LedgerEntryModel,
+    PermitCallReservationModel,
+    WalletModel,
+)
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.idempotency import (
@@ -670,8 +675,10 @@ async def test_governed_policy_denial_returns_receipt(client, clean_database):
 async def test_governed_tool_failure_returns_refunded_receipt(client, clean_database):
     provisioned = await provision_agent_wallet(client)
     registry = get_service_registry()
+    calls = {"count": 0}
 
     def failing_tool() -> dict:
+        calls["count"] += 1
         raise RuntimeError("tool exploded")
 
     registry.register_local(
@@ -689,21 +696,38 @@ async def test_governed_tool_failure_returns_refunded_receipt(client, clean_data
         key_id=provisioned["key_id"],
         tool_name="failing-trust-tool",
         idem_key="failing-trust-permit-create-1",
+        max_calls_per_tool={"failing-trust-tool": 1},
     )
+    body = {
+        "jsonrpc": "2.0",
+        "id": "failing-trust-call",
+        "method": "tools/call",
+        "params": {
+            "name": "failing-trust-tool",
+            "arguments": {},
+            "mcpContext": {
+                "wallet_id": provisioned["agent_wallet_id"],
+                "permit_id": permit["permit_id"],
+                "idempotency_key": "failing-trust-invoke-1",
+            },
+        },
+    }
     try:
         resp = await client.post(
             "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        retry_with_new_key = await client.post(
+            "/mcp/messages",
             json={
-                "jsonrpc": "2.0",
-                "id": "failing-trust-call",
-                "method": "tools/call",
+                **body,
+                "id": "failing-trust-call-2",
                 "params": {
-                    "name": "failing-trust-tool",
-                    "arguments": {},
+                    **body["params"],
                     "mcpContext": {
-                        "wallet_id": provisioned["agent_wallet_id"],
-                        "permit_id": permit["permit_id"],
-                        "idempotency_key": "failing-trust-invoke-1",
+                        **body["params"]["mcpContext"],
+                        "idempotency_key": "failing-trust-invoke-2",
                     },
                 },
             },
@@ -719,6 +743,10 @@ async def test_governed_tool_failure_returns_refunded_receipt(client, clean_data
     assert receipt["outcome"] == "failed_refunded"
     assert receipt["ledger_entry_id"]
     assert receipt["credits_charged"] == "0"
+    assert retry_with_new_key.json()["error"]["message"] == (
+        "permit_max_calls_exceeded"
+    )
+    assert calls["count"] == 1
     stored_permit = await get_permit_service().get_permit(permit["permit_id"])
     assert stored_permit is not None
     assert stored_permit.spent_credits == 0
@@ -852,6 +880,118 @@ async def _age_idempotency_record(wallet_id: str, idempotency_key: str) -> None:
         record.created_at = datetime.now(timezone.utc) - timedelta(hours=1)
         session.add(record)
         await session.commit()
+
+
+@pytest.mark.anyio
+async def test_local_charge_survives_crash_before_legacy_checkpoint_call(
+    client,
+    clean_database,
+):
+    """The debit transaction itself must persist the reconciliation checkpoint."""
+    provisioned = await provision_agent_wallet(client)
+    registry = get_service_registry()
+    execution_count = 0
+
+    def should_not_execute() -> dict:
+        nonlocal execution_count
+        execution_count += 1
+        return {"ok": True}
+
+    registry.register_local(
+        service_id="crash-after-local-debit-tool",
+        name="Crash After Local Debit Tool",
+        description="Proves the debit and checkpoint share one commit",
+        category=ServiceCategory.AGENT_COMMS,
+        func=should_not_execute,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+
+    async def crash_before_legacy_checkpoint(*_args, **_kwargs):
+        raise RuntimeError("process died after debit commit")
+
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name="crash-after-local-debit-tool",
+            idem_key="crash-after-local-debit-permit",
+        )
+        idempotency_key = "crash-after-local-debit-invoke"
+        body = {
+            "jsonrpc": "2.0",
+            "id": "crash-after-local-debit-call",
+            "method": "tools/call",
+            "params": {
+                "name": "crash-after-local-debit-tool",
+                "arguments": {},
+                "mcpContext": {
+                    "wallet_id": provisioned["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": idempotency_key,
+                },
+            },
+        }
+        idem = get_idempotency_service()
+        with patch.object(
+            type(idem),
+            "mark_charged",
+            crash_before_legacy_checkpoint,
+        ):
+            response = await client.post(
+                "/mcp/messages",
+                json=body,
+                headers=provisioned["agent_headers"],
+            )
+
+        assert response.status_code == 200
+        assert response.json()["error"]["code"] == -32603
+        assert execution_count == 0
+
+        factory = get_session_factory()
+        async with factory() as session:
+            record = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id
+                        == provisioned["agent_wallet_id"],
+                        IdempotencyRecordModel.endpoint
+                        == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            assert record.ledger_entry_id is not None
+            debit = await session.get(LedgerEntryModel, record.ledger_entry_id)
+        assert debit is not None
+        assert debit.operation_key == record.record_id
+
+        # Historical workers could commit this same debit without the pointer.
+        # The reconciler repairs only the exact wallet/operation-key match.
+        async with factory() as session:
+            async with session.begin():
+                historical = await session.get(
+                    IdempotencyRecordModel,
+                    record.record_id,
+                )
+                assert historical is not None
+                historical.ledger_entry_id = None
+                session.add(historical)
+
+        await _age_idempotency_record(
+            provisioned["agent_wallet_id"],
+            idempotency_key,
+        )
+        repaired, needs_review = await idem.reconcile_stuck_records(idle_seconds=900)
+        assert repaired == 0
+        assert needs_review == 1
+        async with factory() as session:
+            historical = await session.get(IdempotencyRecordModel, record.record_id)
+        assert historical is not None
+        assert historical.ledger_entry_id == debit.entry_id
+    finally:
+        registry.unregister_local("crash-after-local-debit-tool")
 
 
 @pytest.mark.anyio
@@ -1258,6 +1398,7 @@ async def test_insufficient_funds_returns_receipt_and_replays_without_charge(
             key_id=provisioned["key_id"],
             tool_name="broke-guard-tool",
             idem_key="broke-guard-permit-create-1",
+            max_calls_per_tool={"broke-guard-tool": 1},
         )
 
         factory = get_session_factory()
@@ -1325,5 +1466,135 @@ async def test_insufficient_funds_returns_receipt_and_replays_without_charge(
             ).scalar_one()
             assert wallet.balance == balance_before
             assert wallet.lifetime_debits == lifetime_debits_before
+            wallet.balance = Decimal("10")
+            session.add(wallet)
+            await session.commit()
+
+        fresh_body = {
+            **body,
+            "id": "broke-guard-call-2",
+            "params": {
+                **body["params"],
+                "mcpContext": {
+                    **body["params"]["mcpContext"],
+                    "idempotency_key": "broke-guard-invoke-2",
+                },
+            },
+        }
+        after_top_up = await client.post(
+            "/mcp/messages",
+            json=fresh_body,
+            headers=provisioned["agent_headers"],
+        )
+        assert after_top_up.status_code == 200
+        assert "result" in after_top_up.json()
+        assert calls["count"] == 1
+
+        async with factory() as session:
+            reservations = (
+                (
+                    await session.execute(
+                        select(PermitCallReservationModel).where(
+                            PermitCallReservationModel.permit_id == permit["permit_id"]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert sorted(item.state for item in reservations) == ["consumed", "released"]
     finally:
         registry.unregister_local("broke-guard-tool")
+
+
+@pytest.mark.anyio
+async def test_lost_local_consume_commit_ack_never_enters_callable(
+    client,
+    clean_database,
+    monkeypatch,
+):
+    """An adopted consumed checkpoint is ambiguity, not execution authority."""
+    provisioned = await provision_agent_wallet(client)
+    registry = get_service_registry()
+    calls = {"count": 0}
+
+    def guarded_tool() -> dict:
+        calls["count"] += 1
+        return {"ran": True}
+
+    tool_name = "local-consume-lost-ack-tool"
+    registry.register_local(
+        service_id=tool_name,
+        name="Local Consume Lost Ack Tool",
+        description="Must not run after an ambiguous consume checkpoint",
+        category=ServiceCategory.AGENT_COMMS,
+        func=guarded_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="local-consume-lost-ack-permit",
+            max_calls_per_tool={tool_name: 1},
+        )
+        permit_service = get_permit_service()
+        consume = permit_service.consume_local_call
+
+        async def consume_then_lose_ack(idempotency_record_id: str) -> bool:
+            assert await consume(idempotency_record_id) is True
+            return False
+
+        monkeypatch.setattr(
+            permit_service,
+            "consume_local_call",
+            consume_then_lose_ack,
+        )
+        body = {
+            "jsonrpc": "2.0",
+            "id": "local-consume-lost-ack-call",
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": {},
+                "mcpContext": {
+                    "wallet_id": provisioned["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "local-consume-lost-ack-invoke",
+                },
+            },
+        }
+
+        first = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert first.status_code == 200
+        assert first.json()["error"]["message"] == "idempotency_in_progress"
+        assert replay.status_code == 200
+        assert replay.json()["error"]["message"] == "idempotency_in_progress"
+        assert calls["count"] == 0
+
+        factory = get_session_factory()
+        async with factory() as session:
+            reservation = (
+                await session.execute(
+                    select(PermitCallReservationModel).where(
+                        PermitCallReservationModel.permit_id == permit["permit_id"]
+                    )
+                )
+            ).scalar_one()
+        assert reservation.state == "consumed"
+        assert reservation.execution_started_at is not None
+    finally:
+        registry.unregister_local(tool_name)

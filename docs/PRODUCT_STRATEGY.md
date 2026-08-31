@@ -1,5 +1,11 @@
 # Product Strategy: Assessment of Five Recommendations
 
+> **Historical and superseded as of 2026-08-28.** This records earlier strategy
+> work; none of its roadmap recommendations are active. The active thesis is
+> transaction integrity for consequential autonomous actions in
+> [`../WEDGE.md`](../WEDGE.md), governed by the customer-evidence gate in
+> [`30-day-customer-validation.md`](30-day-customer-validation.md).
+
 This document works through five strategy recommendations, checks each against
 what the repository actually contains, and records what was done about it.
 

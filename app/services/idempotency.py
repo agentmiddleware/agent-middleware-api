@@ -6,6 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import or_, select
@@ -18,7 +19,10 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     IdempotencyRecordModel,
+    LedgerEntryModel,
     McpDispatchAttemptModel,
+    PermitCallReservationModel,
+    PermitModel,
     ReceiptModel,
 )
 from app.services.signing_keys import sha256_hex
@@ -412,8 +416,10 @@ class IdempotencyService:
 
         Effect-free canonical MCP rows that never reached the atomic prepared
         checkpoint are deleted so the same key can safely retry. A governed
-        invoke that did debit calls mark_charged() before finalization. For
-        each such record idle for at least ``idle_seconds`` (so live in-flight
+        invoke's debit transaction checkpoints its ledger entry before
+        finalization. Historical local rows missing that pointer are repaired
+        from the exact ``(wallet_id, operation_key)`` debit identity. For each
+        charged record idle for at least ``idle_seconds`` (so live in-flight
         requests are never touched):
         if a receipt already exists for its ledger_entry_id (finalization got
         as far as writing the receipt but not completing this record), the
@@ -436,6 +442,162 @@ class IdempotencyService:
         needs_review = 0
         async with factory() as session:
             async with session.begin():
+                # Before BillingEngine wrote the checkpoint atomically, a
+                # process could commit a local operation-keyed debit and die
+                # before mark_charged() linked it. The ledger's unique
+                # (wallet_id, operation_key) identity is sufficient to repair
+                # only that exact historical local row; never infer across
+                # wallets or attach a credit/refund entry.
+                legacy_local = (
+                    (
+                        await session.execute(
+                            select(IdempotencyRecordModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.endpoint
+                                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.operation_kind == "local",
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, IdempotencyRecordModel.response_json).is_(
+                                        None
+                                    ),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(
+                                        Any, IdempotencyRecordModel.ledger_entry_id
+                                    ).is_(None),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.created_at < cutoff,
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for record in legacy_local:
+                    debit_entry_id = await session.scalar(
+                        select(cast(Any, LedgerEntryModel.entry_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == record.wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.operation_key == record.record_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == "debit",
+                            ),
+                        )
+                    )
+                    if debit_entry_id is not None:
+                        record.ledger_entry_id = str(debit_entry_id)
+                        session.add(record)
+                        continue
+
+                    # Current local workers pair permit budget with a durable
+                    # call reservation before charging. Once this identity is
+                    # idle, the identity row lock fences any late governed
+                    # charge: BillingEngine must acquire the same lock before
+                    # inserting an operation-keyed debit. Release only when
+                    # both the exact debit and any receipt are absent. Deleting
+                    # the effect-free identity then lets the same logical key
+                    # retry without adopting a released reservation.
+                    reservation_ref = await session.get(
+                        PermitCallReservationModel,
+                        record.record_id,
+                    )
+                    if (
+                        reservation_ref is None
+                        or reservation_ref.state != "reserved"
+                        or reservation_ref.execution_started_at is not None
+                    ):
+                        continue
+                    receipt_id = await session.scalar(
+                        select(cast(Any, ReceiptModel.receipt_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                ReceiptModel.idempotency_record_id == record.record_id,
+                            )
+                        )
+                    )
+                    if receipt_id is not None:
+                        continue
+                    permit = await session.get(
+                        PermitModel,
+                        reservation_ref.permit_id,
+                        with_for_update=True,
+                    )
+                    if permit is None:
+                        continue
+                    reservation = (
+                        await session.execute(
+                            select(PermitCallReservationModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitCallReservationModel.idempotency_record_id
+                                    == record.record_id,
+                                )
+                            )
+                            .with_for_update()
+                            .execution_options(populate_existing=True)
+                        )
+                    ).scalar_one_or_none()
+                    if (
+                        reservation is None
+                        or reservation.state != "reserved"
+                        or reservation.execution_started_at is not None
+                    ):
+                        continue
+                    # Re-read at the final boundary. Service writers are fenced
+                    # by the identity lock; this second check also fails closed
+                    # if an out-of-band writer appeared while locks were taken.
+                    debit_entry_id = await session.scalar(
+                        select(cast(Any, LedgerEntryModel.entry_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == record.wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.operation_key == record.record_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == "debit",
+                            ),
+                        )
+                    )
+                    if debit_entry_id is not None:
+                        record.ledger_entry_id = str(debit_entry_id)
+                        session.add(record)
+                        continue
+                    now = utc_now()
+                    permit.spent_credits = max(
+                        Decimal("0"),
+                        permit.spent_credits - reservation.credits_authorized,
+                    )
+                    permit.updated_at = now
+                    session.add(permit)
+                    await session.delete(reservation)
+                    await session.flush()
+                    await session.delete(record)
+                    repaired += 1
+                await session.flush()
+
                 # The upstream pipeline creates its idempotency row before the
                 # atomic permit-reservation/prepared-attempt transaction. A
                 # crash in that narrow, effect-free gap leaves no budget,

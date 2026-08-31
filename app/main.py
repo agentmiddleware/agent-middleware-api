@@ -228,6 +228,7 @@ async def lifespan(app: FastAPI):
                 if settings.DATABASE_URL:
                     from .services.idempotency import get_idempotency_service
                     from .services.mcp_dispatch_attempts import (
+                        dispatch_reconciliation_idle_seconds,
                         get_mcp_dispatch_attempt_service,
                     )
                     from .services.mcp_dispatch_reconciliation import (
@@ -235,9 +236,17 @@ async def lifespan(app: FastAPI):
                     )
                     from .services.permits import get_permit_service
 
+                    dispatch_idle_seconds = dispatch_reconciliation_idle_seconds(
+                        connect_timeout_seconds=(
+                            settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS
+                        ),
+                        call_timeout_seconds=(
+                            settings.MCP_UPSTREAM_CALL_TIMEOUT_SECONDS
+                        ),
+                    )
                     dispatch_result = (
                         await get_mcp_dispatch_reconciliation_service().reconcile(
-                            idle_seconds=300
+                            idle_seconds=dispatch_idle_seconds
                         )
                     )
                     if dispatch_result.repaired:
@@ -264,7 +273,7 @@ async def lifespan(app: FastAPI):
 
                     dispatch_metrics = (
                         await get_mcp_dispatch_attempt_service().summarize(
-                            idle_seconds=300
+                            idle_seconds=dispatch_idle_seconds
                         )
                     )
                     uncertainty_count = dispatch_metrics.state_counts.get(

@@ -294,7 +294,9 @@ async def create_agent_wallet(
             agent_id=request.agent_id,
             budget_credits=Decimal(str(request.budget_credits)),
             daily_limit=(
-                Decimal(str(request.daily_limit)) if request.daily_limit else None
+                Decimal(str(request.daily_limit))
+                if request.daily_limit is not None
+                else None
             ),
             auto_refill=request.auto_refill,
             auto_refill_threshold=Decimal(str(request.auto_refill_threshold)),

@@ -1,0 +1,109 @@
+{
+  "validated_at_utc": "2026-08-31T22:37:28.925507+00:00",
+  "status": "passed_research_package_with_expected_current_source_drift",
+  "scope": "Research artifacts and retained frozen engineering evidence; no application, database, production, partner, or commercial execution by this validation.",
+  "checks": {
+    "ruff_check": "passed",
+    "ruff_format_check": "18 files already formatted",
+    "mypy": "passed: 3 research Python files",
+    "git_diff_check": "passed for research directory",
+    "json_parse": {
+      "baseline-manifest.json": "passed",
+      "economics_results.json": "passed",
+      "mechanism-model-results.json": "passed",
+      "technical-evidence.json": "passed"
+    },
+    "local_links_checked": 407,
+    "missing_links": [],
+    "line_targets_out_of_range": [],
+    "economics_model": "passed: 24 workload and 8 tenant/contract scenarios",
+    "mechanism_model": "passed: 340 states and 1,526 transitions",
+    "strict_source_check": "expected exit 1 because current checkout differs from frozen acceptance",
+    "allow_drift_audit": "passed and recorded exact drift",
+    "automation_reallocation": "amw-operational-validation-management is PAUSED"
+  },
+  "quantum_cutoff_utc": "2026-08-31T08:27:37.808Z",
+  "frozen_engineering_acceptance": {
+    "status": "accepted_bounded_local_snapshot",
+    "manifest_entries": 572,
+    "manifest_sha256": "f0c7d4236ffc785ca98e002bc4ea3f1759c9d0cc30e972798f37c2a021b5c289",
+    "tested_roots_matching": 4,
+    "ten_commands_exit_zero": true,
+    "historical_pool_starvation_failure_preserved": true,
+    "not_accepted": [
+      "current working tree",
+      "production deployment",
+      "pre-application request-size rejection",
+      "partner-owned G6",
+      "commercial demand"
+    ]
+  },
+  "current_source": {
+    "status": "needs_verification",
+    "matching_manifest_paths": 554,
+    "missing_manifest_paths": [],
+    "mismatched_manifest_paths": [
+      "app/services/human_approval.py",
+      "app/services/quotes.py",
+      "app/services/receipts.py",
+      "app/services/refund_reconciliation.py",
+      "tests/support/mcp_remote_partner_app.py",
+      "tests/test_accounting_input_validation.py",
+      "tests/test_human_approval_gate.py",
+      "tests/test_late_debit_reconciliation.py",
+      "tests/test_mcp_dispatch_reconciliation.py",
+      "tests/test_mcp_idempotency_validation.py",
+      "tests/test_mcp_postgres_multiprocess.py",
+      "tests/test_mcp_upstream_governed.py",
+      "tests/test_permit_verification_sessions.py",
+      "tests/test_refund_amount_evidence.py",
+      "tests/test_security_fuzz_battery.py",
+      "tests/test_signed_quotes.py",
+      "tests/test_site_agent_interface.py",
+      "tests/test_wedge_honesty.py"
+    ]
+  },
+  "external_evidence": {
+    "public_documentation_and_price_references": "obtained",
+    "distribution_channel_confirmation": "secondary private-task report; original messages not independently verified",
+    "partner_owned_comparison": "not obtained",
+    "commercial_commitment_or_payment": "not obtained"
+  },
+  "research_models": {
+    "economics_deterministic": true,
+    "mechanism_states": 340,
+    "mechanism_transitions": 1526
+  },
+  "application_tests_rerun_by_this_research_validation": false,
+  "limitations": [
+    "Frozen local acceptance does not transfer to 18 changed current paths.",
+    "Local links prove file presence, not claim truth.",
+    "Public vendor documents were not runtime benchmarks.",
+    "No partner system, production system, buyer decision, payment, or ingress 413 was observed.",
+    "Temporary /tmp evidence retention is not guaranteed."
+  ],
+  "artifact_sha256": {
+    "README.md": "f59774e4a85bd06d625a31fdfb9544ff01dc8c09159b160f9df14ea6fbe58471",
+    "baseline-manifest.json": "7e477c9f0ddfc32a89bcbb6aed99f6add3e0d1d40ba79ae04b77f1e7d5617e58",
+    "customer-product.md": "54890adfc8f959e25ee01a0c5d7299d5df1e908807a42c0931ee87ba789acf24",
+    "decision-ledger.md": "5cbd17299f6616f6c1476391da06707653089ef331e95eb1abaa67a96c74411c",
+    "economics.md": "b8e5ad7a2c495d1aaae3535bec983e70ac4156c402ea798a8524d4129598940d",
+    "economics_model.py": "3c4e35b8a5e156c1e50598b0d4e68fb8adf157680729cb6fc106a20c3f00d90e",
+    "economics_results.json": "4fe5e67603a4fb94a4d317c7a664296615821bce3d17fd01dba7809d12e7d632",
+    "engineering-acceptance-update.md": "4fb124f2f46e993d868db7224e8a2d73d591868d36239cf683fc911fcc49bca9",
+    "hypothesis-delta.md": "0d19e54b39082fc8f4b936b61e3ec08f3864477f8ddc3946a4abcd447007f1f9",
+    "independent-review.md": "aad63625467492f26053b6d762ffe26c81ca87fea68d43ba6f0c00a3c9fa0bc8",
+    "kill-list.md": "d9894c6e2c108637bee8e1acf7465e666979e0ae52293f99b5a95030a759bb8c",
+    "market.md": "245dda1953d42f95d1d154573e33101d718e9ae6d23a42a9cd0fb1eedf3db2d9",
+    "mechanism-model-results.json": "d4f1134d7db78df0e139251d30a0ed8db42e9a8802f64747512f7529ca89ff85",
+    "mechanism.md": "e332723454c07bdd316d14a0bba62997776922491d683b62ef7300420e975276",
+    "mechanism_model.py": "1a8af6e9cdcee1b64b53bc53b483ce499a2e8c60cbd934462d42813595e30e00",
+    "next-cycle.md": "f35c4e217d47a0b0a3b8ffcb4bc79f5479e34383b26be40ae39ab0f05564628a",
+    "partner-comparison-packet.md": "2b317ce4a8036c1cf06575c3e7f8661b36ba7ba20b98798d5aac38a838427924",
+    "quantum-baseline.md": "d6fd3c1f7ab233826658a9ba35703aed2b82420aae551a5935c459a39841421f",
+    "shipped-delta.md": "00494938f4012e1a8ce694a4ff5689919da6355ce2ca061f064ad9121d5c2528",
+    "technical-evidence.json": "0c5c6b79e99800b212509d087ccc2ab7d13a339ae7c0f8f2a9744e6e23800861",
+    "technical.md": "090b71fc22c16ba40133c38ee6287a60c2e152ba31d6437a30c8ddae33e0477c",
+    "verify_evidence.py": "b4f7bd80001b64845323a992ec0efdae50976879363a567c0370de133d4670b6"
+  }
+}

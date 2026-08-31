@@ -5,9 +5,14 @@
 > real MCP tool to a design-partner pilot. Do not resume self-serve onboarding,
 > public pricing, settlement, new proof surfaces, KMS/transparency-log work,
 > broad dashboard work, framework expansion, or package renaming until that
-> pilot validates the narrower authorization/metering/receipt wedge. The active
+> pilot validates the narrower transaction-integrity wedge for consequential
+> autonomous actions. The active
 > decision gate, interview funnel, and partner-owned acceptance test are in
 > [`docs/30-day-customer-validation.md`](30-day-customer-validation.md).
+
+> The broad control-plane goal and acceptance criteria below are retained as
+> historical planning context. They are not the current product strategy or an
+> active build list.
 
 This roadmap defines the minimum product shape for a credible production beta:
 an operational control plane for autonomous agents. The product is identity,

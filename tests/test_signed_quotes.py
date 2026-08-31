@@ -27,7 +27,7 @@ from app.db.database import get_session_factory
 from app.db.models import QuoteModel, WalletModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
-from app.services.quotes import get_quote_service
+from app.services.quotes import QuoteError, get_quote_service
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
@@ -307,9 +307,9 @@ async def test_expired_quote_denies_rather_than_repricing(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(QuoteModel, quote["quote_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 
@@ -345,9 +345,7 @@ async def test_quote_for_another_wallet_or_tool_is_refused(
         idem_key="permit-quote-mismatch",
     )
     stranger_quote = (
-        await _quote(
-            client, stranger["agent_headers"], stranger["agent_wallet_id"]
-        )
+        await _quote(client, stranger["agent_headers"], stranger["agent_wallet_id"])
     ).json()
 
     wrong_wallet = await _invoke(
@@ -501,9 +499,7 @@ async def test_quoting_someone_elses_wallet_or_an_unknown_tool_is_refused(
     agent = await provision_agent_wallet(client)
     stranger = await provision_agent_wallet(client)
 
-    foreign = await _quote(
-        client, agent["agent_headers"], stranger["agent_wallet_id"]
-    )
+    foreign = await _quote(client, agent["agent_headers"], stranger["agent_wallet_id"])
     assert foreign.status_code == 403
 
     unknown = await _quote(
@@ -541,9 +537,62 @@ async def test_concurrent_consume_spends_a_quote_once(
 
 
 @pytest.mark.asyncio
-async def test_wallet_can_list_its_own_quotes(
+async def test_invocation_quote_release_is_exact_and_fails_closed_on_ambiguity(
     client, clean_database, registered_tool
 ):
+    agent = await provision_agent_wallet(client)
+    service = get_quote_service()
+    first = (
+        await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    ).json()
+    assert await service.consume(first["quote_id"], idempotency_key="invoke-a")
+
+    assert (
+        await service.release_for_invocation(
+            wallet_id="wallet-wrong",
+            tool_name=TOOL,
+            idempotency_key="invoke-a",
+        )
+        is False
+    )
+    assert (
+        await service.release_for_invocation(
+            wallet_id=agent["agent_wallet_id"],
+            tool_name="tool-wrong",
+            idempotency_key="invoke-a",
+        )
+        is False
+    )
+    assert (
+        await service.release_for_invocation(
+            wallet_id=agent["agent_wallet_id"],
+            tool_name=TOOL,
+            idempotency_key="key-wrong",
+        )
+        is False
+    )
+
+    second = (
+        await _quote(client, agent["agent_headers"], agent["agent_wallet_id"])
+    ).json()
+    assert await service.consume(second["quote_id"], idempotency_key="invoke-a")
+    with pytest.raises(QuoteError, match="quote_invocation_linkage_ambiguous"):
+        await service.release_for_invocation(
+            wallet_id=agent["agent_wallet_id"],
+            tool_name=TOOL,
+            idempotency_key="invoke-a",
+        )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        first_model = await session.get(QuoteModel, first["quote_id"])
+        second_model = await session.get(QuoteModel, second["quote_id"])
+    assert first_model is not None and first_model.status == "consumed"
+    assert second_model is not None and second_model.status == "consumed"
+
+
+@pytest.mark.asyncio
+async def test_wallet_can_list_its_own_quotes(client, clean_database, registered_tool):
     agent = await provision_agent_wallet(client)
     stranger = await provision_agent_wallet(client)
     spendable = (
@@ -574,9 +623,9 @@ async def test_wallet_can_list_its_own_quotes(
     factory = get_session_factory()
     async with factory() as session:
         model = await session.get(QuoteModel, spendable["quote_id"])
-        model.expires_at = datetime.now(timezone.utc).replace(
-            tzinfo=None
-        ) - timedelta(seconds=1)
+        model.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
         session.add(model)
         await session.commit()
 

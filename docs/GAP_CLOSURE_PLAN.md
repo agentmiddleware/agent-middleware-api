@@ -1,5 +1,10 @@
 # Trust Plane Gap Closure Plan
 
+> **Historical and frozen as of 2026-08-28.** No task in this document is
+> active. It predates the transaction-integrity wedge and the current
+> customer-validation gate. Use [`../WEDGE.md`](../WEDGE.md) and
+> [`30-day-customer-validation.md`](30-day-customer-validation.md).
+
 **Target:** Close P0-P1 gaps identified in competitive analysis
 **Timeline:** 6 weeks to production-ready enterprise trust plane
 **Owner:** Agent-Middleware-API maintainers

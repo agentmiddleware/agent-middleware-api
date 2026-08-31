@@ -185,6 +185,7 @@ async def clean_database():
         # PRAGMA foreign_keys=ON (Postgres-parity for SQLite tests).
         await session.execute(text("DELETE FROM receipts"))
         await session.execute(text("DELETE FROM mcp_dispatch_attempts"))
+        await session.execute(text("DELETE FROM permit_call_reservations"))
         await session.execute(text("DELETE FROM human_approvals"))
         await session.execute(text("DELETE FROM permit_requests"))
         await session.execute(text("DELETE FROM quotes"))

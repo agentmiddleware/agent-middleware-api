@@ -167,8 +167,9 @@ class Settings(BaseSettings):
     SENTINEL_API_URL: str = ""
     SENTINEL_API_KEY: str = ""
     # Forwarded to Sentinel as timeout_seconds (its magic-link expiry, 1..86400)
-    # and enforced locally as the approval's expiry — Sentinel itself never
-    # expires a pending approval.
+    # and enforced locally as the pending decision deadline. An approval
+    # observed before this deadline becomes durable, exact-request-bound,
+    # single-use authority; Sentinel itself never expires a pending approval.
     SENTINEL_APPROVAL_TIMEOUT_SECONDS: int = 300
     # >0: on first invoke, long-poll Sentinel this many seconds for an instant
     # decision before returning human_approval_pending (max 300).

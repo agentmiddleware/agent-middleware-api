@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)", "Bash(gh:*)", "Bash(pytest:*)", "Bash(npm:*)",
+      "Bash(uv:*)", "Bash(python:*)", "Bash(pre-commit:*)",
+      "Bash(overmind:*)", "Bash(railway:*)", "Bash(vercel:*)"
+    ]
+  },
+  "enabledPlugins": {
+    "vercel-plugin@vercel-vercel-plugin": false,
+    "vercel@claude-plugins-official": false
+  }
+}

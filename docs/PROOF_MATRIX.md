@@ -19,7 +19,7 @@ the claims the project deliberately does not make, see
 | `make prove-trust-plane` | The full trust loop plus replay and tamper detection — see the breakdown below | Throwaway SQLite |
 | `make prove-trust-plane-postgres` | **Migrations only** — see the defect note below | Throwaway SQLite, after migrating PostgreSQL |
 | `make red-team-trust-plane` | Ten distinct attacks are each denied with a specific reason code and none produces a debit | Throwaway SQLite |
-| `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |
+| `make dogfood-trust-plane` | Completed exact replay does not repeat this local fixture's **real durable side effect** (a file on disk) | Throwaway SQLite |
 | `make agent-ops-war-room` | The operator narrative: discovery, provisioning, invoke, replay, self-inspection, denial | Temp SQLite |
 
 ### Known defect: `prove-trust-plane-postgres` does not prove PostgreSQL
@@ -38,7 +38,7 @@ on SQLite.
 The same defect makes CI's `postgres_trust` job a SQLite run.
 
 Real PostgreSQL coverage in this repository comes from `make
-prove-crash-recovery` (the two-process harness fails closed unless the URL is
+prove-crash-recovery` (the multi-process harness fails closed unless the URL is
 PostgreSQL) and from the CI suites parameterized by `TEST_POSTGRES_URL`, not
 from the demo script. **Fixing this means having `configure_environment()`
 respect a caller-supplied `DATABASE_URL` instead of overwriting it** — a small
@@ -83,12 +83,16 @@ once, and that the audit chain remains valid throughout.
 
 ```bash
 export DATABASE_URL=postgresql+asyncpg://...   # dedicated, EMPTY database
+export STATE_BACKEND=postgres
+export ENVIRONMENT=test
+export MCP_STRESS_DB_ISOLATED=1
+export MCP_STRESS_EXPECTED_DATABASE_NAME=agent_middleware_stress_test
 make prove-crash-recovery
 ```
 
-This starts two independent Uvicorn worker processes against one shared
-PostgreSQL database and injects faults at durable commit boundaries. It proves
-three things:
+This starts independent Uvicorn gateway workers against one shared PostgreSQL
+database plus a separate FastMCP partner process with its own durable effect
+store. It injects faults at durable commit boundaries and proves seven things:
 
 1. **Concurrent invokes serialize.** While worker A is paused mid-side-effect,
    an identical invoke on worker B receives `idempotency_in_progress`. After
@@ -103,24 +107,56 @@ three things:
    untouched and reports it in its `needs_review` count rather than repairing
    it, replay stays `idempotency_in_progress`, and nothing is redispatched
    automatically.
+4. **An approval survives a pre-prepare crash.** The gateway is killed after
+   approval but before preparation. The approval remains `approved`, no budget,
+   debit, attempt, or partner effect exists, and the same invocation succeeds
+   once effect-free reconciliation releases its stale idempotency row. This is
+   an upstream-MCP proof; the local callable backend remains out of scope, and
+   the separate in-transaction kill is point 5.
+5. **Approval preparation is one PostgreSQL transaction.** A worker is paused
+   after approval UPDATE, permit UPDATE, and attempt INSERT have all flushed
+   but before COMMIT, then killed. Other readers see `approved`, zero spend,
+   and no attempt; after rollback and stale-identity repair, one retry produces
+   one consumption, reservation, attempt, debit, receipt, and partner effect.
+6. **A committed dispatch claim is never reacquired.** The gateway is killed
+   after the PostgreSQL claim commit but before the MCP request. The partner
+   observes zero calls; reconciliation returns a signed `delivery_uncertain`
+   receipt and no restarted worker dispatches it.
+7. **A lost acknowledged response never causes redispatch.** The independent
+   partner commits one effect and returns, then the gateway is killed before
+   terminal-state commit. Reconciliation records `delivery_uncertain`, the
+   debit remains singular, and the partner still observes exactly one call.
 
-Note that (3) is deliberately *not* a recovery. The correct behavior for an
-ambiguous post-side-effect crash is fail-closed manual review, because the
-gateway cannot know whether the remote effect landed. Describing this proof as
-"crash recovery" without that qualifier overstates it; the accurate framing is
-**crash consistency with reconciliation, and fail-closed review for ambiguous
-outcomes**.
+The required PostgreSQL concurrency job separately runs
+`test_approval_consumption_and_remote_prepare_are_atomic_in_postgres`: two
+independent database sessions converge on one consumed approval, one permit
+reservation, and one prepared attempt. It also verifies that a late decision
+cannot forge a timely `decided_at` using a detached worker timestamp.
 
-The harness refuses to run unless it is safe: it fails closed on a
-non-PostgreSQL URL, a production-like `ENVIRONMENT`, a stale Alembic revision,
-or any application table that already holds rows, and it takes an advisory lock
-so two runs cannot overlap. Without the opt-in environment variables it skips,
-so it never interferes with `make test`.
+Note that (3) and (7) deliberately do not reconstruct a successful result. The
+correct behavior without a downstream evidence lookup is fail-closed ambiguity,
+because the gateway cannot know whether the remote effect landed. Describing
+this proof as "crash recovery" without that qualifier overstates it; the
+accurate framing is **crash consistency with reconciliation, and fail-closed
+review for ambiguous outcomes**.
 
-CI runs the same three tests in the `postgres_permit_concurrency` job. That job
-installs dependencies with `pip` rather than `uv`, so its step is spelled
-inline; the Make target is the operator-facing equivalent, not a literal
-copy of the CI step.
+The Make target runs a read-only database/isolation preflight before Alembic.
+The preflight requires `ENVIRONMENT=test` (or `testing`) and compares
+`MCP_STRESS_EXPECTED_DATABASE_NAME` to PostgreSQL's selected database before it
+inspects any tables. The harness also fails closed on a non-PostgreSQL URL, a
+stale Alembic revision, or any application table that already holds rows. It
+takes an advisory lock so two proof runs cannot overlap. Without the explicit
+isolation environment variables it skips under ordinary pytest and the Make
+preflight fails, so it never interferes with `make test` or migrates an
+unacknowledged database.
+
+The PostgreSQL database is disposable and single-run by design. Application
+proof rows are retained for inspection after the test; drop and recreate the
+database before running the harness again.
+
+CI invokes the same `make prove-crash-recovery` target for seven process
+scenarios (six process-kill boundaries plus concurrent serialization), along
+with its database-identity guard, in the `postgres_permit_concurrency` job.
 
 ## Release gates
 
@@ -171,9 +207,10 @@ Being explicit about the boundary is what makes the proofs worth anything.
     issuing origin, so an attacker controlling that origin can serve a key set
     that validates forged receipts. Out-of-band key pinning is not
     implemented.
-  - **No transparency log.** Receipts prove what happened, never what did not.
-    A plane can issue a receipt to one party and omit it from another's
-    listing, and no verifier can detect that.
+  - **No transparency log.** A valid signature proves what the gateway signed
+    and linked, not the downstream effect or the absence of omitted actions. A
+    plane can issue a receipt to one party and omit it from another's listing,
+    and no verifier can detect that.
   - **`/v1/audit/verify-chain` and the evidence bundle remain first-party.**
     Those are computed by the operator over the operator's database; only the
     receipt signature travels.
@@ -189,8 +226,8 @@ Being explicit about the boundary is what makes the proofs worth anything.
 - **The crash proof covers instrumented boundaries, not arbitrary failure.**
   Faults are injected at specific durable commit points. It does not prove
   survival of a kill at an arbitrary instruction, database crash or failover,
-  or multi-node high availability. The harness exposes more fault points than
-  the three CI-run scenarios currently exercise.
+  or multi-node high availability. The harness exposes additional fault points
+  beyond the seven process scenarios that CI currently exercises.
 - **`make prove-trust-plane` runs on SQLite with a hardcoded demo signing
   seed.** It proves the logic, not the production posture. No target re-runs
   these assertions against PostgreSQL — see the defect note above. PostgreSQL

@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Optional, cast
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.time import to_naive_utc, utc_now
@@ -79,6 +80,8 @@ class VelocityMonitor:
         self,
         wallet_id: str,
         charge_amount: Decimal,
+        *,
+        session: AsyncSession | None = None,
     ) -> VelocityCheckResult:
         """
         Check if a charge is within velocity limits and record it.
@@ -89,70 +92,73 @@ class VelocityMonitor:
         Raises:
             WalletFrozenError: If wallet should be frozen
         """
+        # Governed billing owns the transaction and defers notifications until
+        # its debit/checkpoint commit succeeds. Never commit its session here.
+        if session is not None:
+            return await self._record_charge(session, wallet_id, charge_amount)
+
+        async with self._session_factory()() as owned_session:
+            async with owned_session.begin():
+                velocity_result = await self._record_charge(
+                    owned_session, wallet_id, charge_amount
+                )
+        if velocity_result.should_freeze:
+            await self.notify_committed_freeze(wallet_id)
+        return velocity_result
+
+    async def _record_charge(
+        self,
+        session: AsyncSession,
+        wallet_id: str,
+        charge_amount: Decimal,
+    ) -> VelocityCheckResult:
+        result = await session.execute(
+            select(WalletModel)
+            .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
+            .with_for_update()
+        )
+        wallet = result.scalar_one_or_none()
+        if not wallet:
+            return VelocityCheckResult(allowed=True, reason="Wallet not found")
+
+        now = utc_now()
+        self._reset_if_needed(wallet, now)
+        hourly_limit = wallet.hourly_limit or self._default_hourly_limit
+        daily_limit = (
+            wallet.daily_limit
+            if wallet.daily_limit is not None
+            else self._default_daily_limit
+        )
+        wallet.hourly_spent += charge_amount
+        wallet.daily_spent += charge_amount
+        wallet.last_charge_at = now
+
+        velocity_result = self._check_limits(
+            wallet=wallet,
+            hourly_limit=hourly_limit,
+            daily_limit=daily_limit,
+            charge_amount=charge_amount,
+        )
+        if velocity_result.should_freeze:
+            wallet.status = "frozen"
+            wallet.velocity_alerts_triggered += 1
+            return VelocityCheckResult(
+                allowed=False,
+                reason="Wallet frozen due to anomalous spend velocity",
+                alert_triggered=True,
+                should_freeze=True,
+            )
+        if velocity_result.alert_triggered:
+            wallet.velocity_alerts_triggered += 1
+        return velocity_result
+
+    async def notify_committed_freeze(self, wallet_id: str) -> None:
+        """Notify only after the transaction that froze the wallet committed."""
         async with self._session_factory()() as session:
-            async with session.begin():
-                result = await session.execute(
-                    select(WalletModel)
-                    .where(
-                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
-                    )
-                    .with_for_update()
-                )
-                wallet = result.scalar_one_or_none()
-
-                if not wallet:
-                    return VelocityCheckResult(
-                        allowed=True,
-                        reason="Wallet not found",
-                    )
-
-                now = utc_now()
-
-                self._reset_if_needed(wallet, now)
-
-                hourly_limit = wallet.hourly_limit or self._default_hourly_limit
-                daily_limit = wallet.daily_limit or self._default_daily_limit
-
-                wallet.hourly_spent += charge_amount
-                wallet.daily_spent += charge_amount
-                wallet.last_charge_at = now
-
-                velocity_result = self._check_limits(
-                    wallet=wallet,
-                    hourly_limit=hourly_limit,
-                    daily_limit=daily_limit,
-                    charge_amount=charge_amount,
-                )
-
-                if velocity_result.should_freeze:
-                    wallet.status = "frozen"
-                    wallet.velocity_alerts_triggered += 1
-                    velocity_result = VelocityCheckResult(
-                        allowed=False,
-                        reason="Wallet frozen due to anomalous spend velocity",
-                        alert_triggered=True,
-                        should_freeze=True,
-                    )
-
-                    logger.warning(
-                        f"Auto-freezing wallet {wallet_id}: "
-                        f"hourly_spent={wallet.hourly_spent}, "
-                        f"limit={hourly_limit}, "
-                        f"alerts={wallet.velocity_alerts_triggered}"
-                    )
-
-                    await session.commit()
-
-                    await self._notify_freeze(wallet)
-
-                    return velocity_result
-
-                if velocity_result.alert_triggered:
-                    wallet.velocity_alerts_triggered += 1
-
-                await session.commit()
-
-                return velocity_result
+            wallet = await session.get(WalletModel, wallet_id)
+        if wallet is not None and wallet.status == "frozen":
+            logger.warning("Auto-froze wallet %s due to spend velocity", wallet_id)
+            await self._notify_freeze(wallet)
 
     def _reset_if_needed(self, wallet: WalletModel, now: datetime) -> None:
         """Reset hourly/daily counters if period has elapsed."""
@@ -245,7 +251,11 @@ class VelocityMonitor:
             self._reset_if_needed(wallet, now)
 
             hourly_limit = wallet.hourly_limit or self._default_hourly_limit
-            daily_limit = wallet.daily_limit or self._default_daily_limit
+            daily_limit = (
+                wallet.daily_limit
+                if wallet.daily_limit is not None
+                else self._default_daily_limit
+            )
 
             return {
                 "wallet_id": wallet_id,

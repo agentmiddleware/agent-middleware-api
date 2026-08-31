@@ -9889,7 +9889,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,21}0*$)\\d{0,12}\\.\\d{0,8}0*$)"
               }
             ],
             "title": "Max Credits"
@@ -9929,7 +9929,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,21}0*$)\\d{0,12}\\.\\d{0,8}0*$)"
               },
               {
                 "type": "null"
@@ -10045,7 +10045,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,21}0*$)\\d{0,12}\\.\\d{0,8}0*$)"
               }
             ],
             "title": "Max Credits"
@@ -12558,7 +12558,7 @@
               }
             ],
             "title": "Scopes",
-            "description": "Requested scopes (default: billing:charge tool:invoke)"
+            "description": "Fixed supported profile: billing:charge tool:invoke. Omit for the default; narrower or additional JWT scopes are rejected."
           }
         },
         "type": "object",

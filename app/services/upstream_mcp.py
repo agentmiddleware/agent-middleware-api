@@ -108,6 +108,13 @@ class UpstreamMcpPreDispatchError(UpstreamMcpError):
         super().__init__(code, dispatch_started=False)
 
 
+class UpstreamMcpDispatchClaimUnavailableError(UpstreamMcpError):
+    """Another activation already owns the durable right to send."""
+
+    def __init__(self) -> None:
+        super().__init__("idempotency_in_progress", dispatch_started=False)
+
+
 class UpstreamMcpConfigurationError(UpstreamMcpPreDispatchError):
     """Unsafe or incomplete operator configuration."""
 
@@ -908,6 +915,9 @@ class UpstreamMcpAdapter:
             raise UpstreamMcpPreDispatchError("upstream_invocation_context_missing")
 
         dispatch_started = False
+        dispatch_claim_unavailable: UpstreamMcpDispatchClaimUnavailableError | None = (
+            None
+        )
         canonical_result: UpstreamMcpResult | None = None
         response_rejected: UpstreamMcpResponseRejectedError | None = None
         response_guard = _ResponseGuardState()
@@ -919,6 +929,9 @@ class UpstreamMcpAdapter:
                 )
                 try:
                     await before_dispatch()
+                except UpstreamMcpDispatchClaimUnavailableError as exc:
+                    dispatch_claim_unavailable = exc
+                    raise
                 except Exception:
                     raise UpstreamMcpPreDispatchError(
                         "upstream_dispatch_checkpoint_failed"
@@ -944,6 +957,11 @@ class UpstreamMcpAdapter:
                 except UpstreamMcpResponseRejectedError as exc:
                     response_rejected = exc
         except UpstreamMcpError:
+            if dispatch_claim_unavailable is not None:
+                # A context-manager cleanup failure can itself use one of our
+                # typed errors. The saved claim contention still takes
+                # precedence so the router cannot enter a refund path.
+                raise dispatch_claim_unavailable
             raise
         except (ValidationError, json.JSONDecodeError):
             if response_guard.rejection_code is not None:
@@ -960,6 +978,18 @@ class UpstreamMcpAdapter:
                 ) from None
             raise UpstreamMcpPreDispatchError() from None
         except Exception:
+            if dispatch_claim_unavailable is not None:
+                # Session cleanup must never erase expected claim contention:
+                # doing so would misclassify the loser as refundable and let it
+                # mutate the winning activation's shared financial state.
+                logger.warning(
+                    "upstream_mcp_session_cleanup_failed_after_claim_contention",
+                    extra={
+                        "public_tool_id": self.configuration.public_tool_id,
+                        "upstream_origin": self.configuration.origin,
+                    },
+                )
+                raise dispatch_claim_unavailable
             if response_guard.rejection_code is not None:
                 if dispatch_started:
                     raise UpstreamMcpResponseRejectedError(

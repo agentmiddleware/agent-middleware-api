@@ -2,12 +2,24 @@
 
 This origin is the human design-partner site. It does not mint credentials or
 execute protected tools. Platform engineering, AI infrastructure, and security
-teams operating internal MCP tools are the buyers; autonomous clients consume
-the discovery contract below.
+teams operating consequential autonomous actions are the buyers; autonomous
+clients consume the discovery contract below.
+
+## Product wedge
+
+Transaction integrity for one consequential, autonomous, retry-sensitive
+action: bind delegated authority and configured consumption to one logical
+action, permit at most one gateway dispatch and debit, preserve
+`delivery_uncertain`, and link gateway evidence for reconciliation.
+
+This is not one distributed ACID transaction, proof of the downstream effect,
+an IAM replacement, production settlement, or an independently witnessed
+receipt system.
 
 ## Governed loop
 
-discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+logical action -> authorize -> reserve allowance -> debit -> claim dispatch
+-> confirmed outcome | delivery_uncertain -> receipt/audit -> reconcile
 
 ## Canonical API
 
@@ -64,8 +76,9 @@ Watch it prove itself (no server, one command):
 
 Both use a throwaway local SQLite database and real FastAPI routes. They
 demonstrate permit -> invoke -> charge -> signed receipt -> replay without a
-second charge -> out-of-scope denial. These are local proofs, not production
-settlement or compliance claims.
+second charge -> out-of-scope denial. These are local proofs, not a partner-owned
+consequential action, customer validation, production settlement, or compliance
+evidence.
 
 ## Humans and operators
 

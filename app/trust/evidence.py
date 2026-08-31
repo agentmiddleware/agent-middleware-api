@@ -344,11 +344,11 @@ def _dispatch_evidence(
     )
 
 
-async def _refund_exists(
+async def _get_refund_entry_model(
     *,
     wallet_id: str,
     ledger_entry_id: str,
-) -> bool:
+) -> LedgerEntryModel | None:
     factory = get_session_factory()
     async with factory() as session:
         result = await session.execute(
@@ -364,7 +364,7 @@ async def _refund_exists(
                 ),
             )
         )
-        return result.scalar_one_or_none() is not None
+        return result.scalar_one_or_none()
 
 
 async def authorize_receipt_access(
@@ -578,17 +578,32 @@ async def build_receipt_evidence(
                 ledger_failures.append("ledger_wallet_mismatch")
             if ledger_entry.action != LedgerAction.DEBIT.value:
                 ledger_failures.append("ledger_action_not_debit")
-            if receipt.credits_charged > Decimal("0"):
-                expected_amount = -receipt.credits_charged
-                if ledger_entry.amount != expected_amount:
+            if receipt.outcome == "failed_refunded":
+                if receipt.credits_charged != Decimal("0"):
+                    ledger_failures.append("refund_net_charge_mismatch")
+                debit_amount_valid = (
+                    ledger_entry.amount.is_finite()
+                    and ledger_entry.amount < Decimal("0")
+                )
+                if not debit_amount_valid:
                     ledger_failures.append("ledger_amount_mismatch")
-            elif receipt.outcome == "failed_refunded":
-                refund_found = await _refund_exists(
+                refund_entry = await _get_refund_entry_model(
                     wallet_id=receipt.wallet_id,
                     ledger_entry_id=receipt.ledger_entry_id,
                 )
-                if not refund_found:
+                if refund_entry is None:
                     ledger_failures.append("refund_entry_not_found")
+                elif (
+                    not refund_entry.amount.is_finite()
+                    or refund_entry.amount <= Decimal("0")
+                    or not debit_amount_valid
+                    or refund_entry.amount != -ledger_entry.amount
+                ):
+                    ledger_failures.append("refund_amount_mismatch")
+            elif receipt.credits_charged > Decimal("0"):
+                expected_amount = -receipt.credits_charged
+                if ledger_entry.amount != expected_amount:
+                    ledger_failures.append("ledger_amount_mismatch")
             checks.append(
                 _check(
                     "ledger_linkage",

@@ -7,19 +7,29 @@ Do not treat it as a generic agent app backend.
 
 The strongest thesis:
 
-> A control layer for agent-to-tool actions where every autonomous action is scoped, authorized, metered, signed, receipted, auditable, and governable.
+> Transaction integrity for consequential autonomous tool actions. For one
+> logical action, the supported gateway path binds delegated authority and
+> configured consumption, permits at most one gateway dispatch and debit,
+> preserves uncertain delivery as durable state, and links the resulting
+> gateway evidence.
 
 The weaker thesis to avoid:
 
-> An agent backend with lots of features.
+> A broad agent backend, governance platform, or bundle of IAM, policy,
+> budget, logging, and receipt features.
 
 ## Core Loop
 
 Judge the product against this loop:
 
-discover → authenticate → authorize → invoke → meter → receipt → audit → govern
+logical action identity → authorize → reserve configured allowance → debit →
+claim one gateway dispatch → classify outcome or uncertainty → receipt/audit →
+reconcile
 
-Every major feature should support this loop. If a feature does not support this loop, question whether it should be frozen, deleted, or moved out of the main wedge.
+"Transaction" means a durable linked state machine at the gateway boundary,
+not one distributed ACID transaction with the upstream tool. Every major
+feature should support this loop. If a feature does not support it, question
+whether it should be frozen, deleted, or moved out of the main wedge.
 
 ## Current Company Phase: Customer Validation
 
@@ -44,40 +54,42 @@ date, and the smallest vertical slice that clears the blocker. Demo enthusiasm,
 generic competitor parity, and speculative roadmap requests are not evidence.
 
 Judge external validation against the partner-owned milestone: one partner
-agent, one partner staging tool, one partner engineer, and one receipt that
-engineer verifies independently. Do not count local demos, self-issued public
-proof, or the stranger test as customer validation.
+agent, one consequential retry-sensitive staging mutation, and one partner
+engineer. The partner must run a controlled effect-then-response-loss case,
+observe charged `delivery_uncertain` and no second gateway dispatch/debit on
+exact replay, reconcile the actual effect from its authoritative system, and
+verify the linked gateway receipt offline. Do not count local demos,
+self-issued public proof, or the stranger test as customer validation.
 
-## Product Wedge Candidates
+## Product Wedge
 
-When making product or architecture recommendations, evaluate these wedges:
+The active wedge is transaction integrity for consequential autonomous
+actions: mutations whose duplicate, incorrect, or uncertain execution can
+cause material harm and whose retry safety matters.
 
-- agent authorization gateway
-- signed receipt ledger for agent actions
-- usage metering layer for agent tools
-- MCP governance proxy
-- secure delegated tool execution API
-- agent audit log platform
-
-Do not recommend "full agent middleware platform" unless the narrower wedges are already credible.
+IAM, generic tool authorization, payment rails, budget controls, receipts,
+logging, and governance are integrations or supporting mechanisms—not
+standalone differentiation. Do not recommend a "full agent middleware
+platform" unless this narrower wedge is first credible with customers.
 
 ## Engineering Priorities
 
 Prioritize:
 
-- delegated authority
-- permit lifecycle
-- scoped authorization
-- signed receipts
-- usage metering
-- replay protection
-- idempotency
+- logical-action identity and payload binding
+- bounded permit, approval, credit, and call-allowance consumption
+- one-shot gateway dispatch
+- explicit `delivery_uncertain`
+- safe non-redispatch and reconciliation
+- upstream idempotency propagation
+- linked execution-time evidence
+- delegated authority and permit lifecycle
+- scoped authorization and revocation
+- replay protection and idempotency
+- billing/accounting integrity
 - tenant isolation
 - tool execution safety
-- auditability
-- revocation
-- governance policy
-- billing/accounting integrity
+- signed receipts and auditability
 - developer SDK/demo path
 
 ## Security-Critical Areas

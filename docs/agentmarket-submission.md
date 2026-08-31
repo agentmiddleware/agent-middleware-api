@@ -1,9 +1,13 @@
 # AgentMarket.cloud Submission
 
+> **Status: paused during customer validation.** This draft must not be
+> submitted until one named partner-owned consequential action passes the
+> acceptance test in [`30-day-customer-validation.md`](30-day-customer-validation.md).
+
 ## Listing Information
 
 **Service Name:** Agent Middleware API
-**Category:** MCP authorization and metering infrastructure
+**Category:** Transaction integrity for consequential autonomous actions
 **Pricing:** Design-partner pilot; no public SLA or commercial tier is committed
 
 ## Listing Content
@@ -11,20 +15,24 @@
 ```markdown
 # Agent Middleware API
 
-**Governed control point for autonomous agent tool calls.**
+**Make consequential agent actions transactional.**
 
-Agent Middleware API authorizes, meters, dispatches, receipts, and audits one
-MCP tool call under a wallet-scoped permit.
+Agent Middleware API binds one consequential, retry-sensitive MCP action to
+scoped authority, configured consumption, at most one gateway dispatch and
+debit, explicit delivery uncertainty, and linked gateway evidence.
 
-Canonical loop: `discover -> authenticate -> authorize -> meter -> dispatch -> receipt -> audit -> govern`.
+Canonical loop: `logical action -> authorize -> reserve allowance -> debit -> claim dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit -> reconcile`.
 
 ## Capabilities
 
-- **Scoped authority** — signed permits bind wallet, key, tool, budget, and expiry
-- **Replay-safe metering** — one gateway debit and dispatch per idempotency key
+- **Scoped authority** — signed permits bind wallet, key, tool, configured credits, and expiry
+- **Logical action** — accepted key binds the payload; changed input fails closed
+- **One-shot dispatch** — at most one gateway dispatch and debit per logical action
 - **Remote MCP dispatch** — one operator-configured HTTPS Streamable HTTP tool
-- **Signed evidence** — receipts link permit, ledger, dispatch state, and audit
-- **Explicit uncertainty** — ambiguous post-dispatch failures are signed and not retried
+- **Explicit uncertainty** — ambiguous post-dispatch failures are charged,
+  signed as `delivery_uncertain`, and never automatically redispatched
+- **Linked evidence** — receipts link permit, ledger, dispatch state, and audit
+  where applicable; they do not prove the downstream effect
 
 AWI, browser, RAG, sandbox, telemetry, and orchestration code in the repository
 is disabled proof-surface scaffolding, not part of this listing.
@@ -86,8 +94,8 @@ No public production demo or SLA is promised by this document.
 ## Tags
 
 ```
-mcp, authorization, idempotency, audit-logs, agent-governance,
-signed-receipts, autonomous-agents
+transaction-integrity, consequential-actions, delivery-uncertainty,
+idempotency, mcp, autonomous-agents
 ```
 
 ## Contact

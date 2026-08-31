@@ -1,69 +1,64 @@
-# Wedge: Replay-safe MCP permits and receipts
+# Wedge: Transaction integrity for consequential autonomous actions
 
-Agent Middleware API should not initially sell itself as a full platform for
-autonomous economic actors. The credible wedge is narrower:
+> **Make consequential agent actions transactional.**
 
-> Exactly-once gateway authorization, debit, and receipt finalization for
-> metered MCP calls.
-
-Or in one line:
-
-> Authorize one agent action. Charge it once. Prove what happened.
-
-The core job is to put one enforceable **economic** boundary between autonomous
-agents and tools:
+On the supported governed upstream-MCP path, one logical action is bound to a
+scoped permit and configured credit or call allowance, debited at most once when
+admitted, given at most one gateway dispatch claim, and durably classified as
+confirmed or uncertain. If delivery becomes uncertain, the gateway records
+`delivery_uncertain` and never automatically redispatches.
 
 ```text
-scoped signed permit -> governed MCP invoke -> wallet charge -> signed receipt
--> ledger -> audit chain -> replay no double charge -> out-of-scope denial
+delegated authority → logical action identity → reserve configured allowance
+→ debit → claim one gateway dispatch → confirmed outcome | delivery_uncertain
+→ linked receipt/audit → reconcile
 ```
 
-The loop now has a front door. Two questions an agent has to answer *before*
-it can act — "may I?" and "what will it cost?" — are answered in the same
-signed, checkable way as the action itself:
+The claim ends at the gateway boundary. This is a durable transaction state
+machine, not distributed ACID, and it does not prove an arbitrary upstream side
+effect occurred exactly once. A remote side effect is exactly once only when
+the upstream tool also honors the forwarded idempotency key.
 
-```text
-permit request -> human approves -> minted permit
-signed quote   -> price locked   -> charge honors it
-```
+An action belongs in this wedge only when it is:
 
-Both feed the same loop rather than sitting beside it: the human's decision
-mints an ordinary signed permit, and the quote is honored by the ordinary
-metered charge. Neither adds a second way to authorize or to spend.
-
-Category language (“MCP trust plane,” “governance gateway”) is occupied. The
-differentiating primitive is exactly-once economic authorization at the
-gateway boundary: one idempotency key returns the original receipt without a
-second gateway dispatch or debit. A remote tool's own side effect is exactly
-once only when that tool also honors the forwarded idempotency key.
+- **Consequential:** a duplicate, incorrect, or uncertain mutation can cause
+  material economic, operational, security, safety, or user harm.
+- **Autonomous:** it is intended for agent execution under pre-delegated bounded
+  authority, even if the current workflow remains read-only or human-gated
+  until safe delegation is established.
+- **Retry-sensitive:** repeating it after an unknown result can create a second
+  or otherwise harmful effect.
 
 ## Positioning vs nearby products
 
-Stay a **closed-loop credit and delegated-authority** system for internal AI
-platform teams—not a general MCP gateway and not merchant settlement.
+Keep the surrounding systems. Enterprise IAM answers who may call. Gateways and
+policy engines route, filter, and observe. Payment rails settle. Downstream
+effect records remain the source of truth. This layer governs the transition
+between bounded authority consumption and consequential execution.
 
-| Nearby | Their center of gravity | Our difference |
-|--------|-------------------------|----------------|
-| MCP “trust” gateways (e.g. signed receipts + replay) | Policy / evidence | Wallet debit + economic idempotency |
-| MCP monetization / pay-per-tool | Payments rails | Internal budgets; no settlement claim |
-| Enterprise authz for MCP | Who may call | Meter + receipt + charge-once |
+| Nearby category | Keep it for | This layer adds |
+|---|---|---|
+| IAM / MCP authorization | Identity and allow/deny | Action-bound consumption and execution state |
+| MCP gateways / policy / observability | Routing, policy, and traces | One-shot dispatch and explicit uncertainty |
+| Payment rails / budget controls | Settlement and limits | Gateway-side configured accounting linkage |
+| Receipt and log protocols | Evidence formats and observation | Runtime semantics that make the gateway record true |
 
 Do not pitch as production payments, compliance-grade ledger, or IAM
 replacement (see [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
 
 ## Core User
 
-Platform engineering or AI infrastructure teams that already run internal
-agents against MCP-style tools and need a control point before those tools are
-invoked.
+Platform engineering, AI infrastructure, or security teams that keep
+consequential writes read-only or human-gated because their current stack cannot
+establish retry safety after an ambiguous dispatch.
 
 ## First Paid Use Case
 
-Govern and meter internal agent tool calls with wallet budgets, scoped permits,
-idempotent retries, signed receipts, and auditable denial.
+One partner-owned, retry-sensitive staging mutation currently kept read-only or
+human-gated because duplicate or ambiguous execution would matter.
 
-The first design-partner motion should be one real internal tool behind the
-proxy, not a broad migration of every agent workflow.
+The first design-partner motion should be that one real action behind the proxy,
+not a broad migration of every agent workflow.
 
 ## Design Partner First Tool
 
@@ -79,12 +74,23 @@ Partner motion:
 2. Configure **one** internal Streamable HTTP MCP tool through the upstream
    environment variables (do not mount AWI/media/etc.).
 3. Issue a wallet-scoped permit for that tool only.
-4. Walk permit → invoke → charge → receipt → replay → out-of-scope deny.
-5. Stop. Do not expand surface until that loop is trusted in their stack.
+4. Walk permit → invoke → charge → receipt → exact replay → changed-payload
+   conflict → out-of-scope deny.
+5. Let the partner tool commit one staging effect while its response is lost.
+   Observe charged `delivery_uncertain`; replay the same logical action and
+   prove there is no second gateway dispatch.
+6. Have the partner engineer reconcile the actual effect from the partner's
+   authoritative system and verify the gateway receipt offline.
+7. Stop. Do not expand surface until that loop is trusted in their stack.
 
 ## What Is Core
 
-- Wallet-scoped API keys.
+- Logical action identity with changed-payload conflict.
+- A persisted, one-shot gateway dispatch claim.
+- Explicit `delivery_uncertain` with no automatic redispatch.
+- Atomic permit-credit or call-allowance reservation where the supported
+  backend provides it.
+- Wallet-scoped API keys as a supporting identity mechanism.
 - MCP discovery and invocation.
 - Signed permits for tool scope, wallet binding, key binding, budget, expiry,
   and nonce.
@@ -94,9 +100,9 @@ Partner motion:
 - Signed, single-use price quotes that the metered charge honors, so an agent
   can know a call's cost before committing to it.
 - Idempotency keys for permit issuance and governed invokes.
-- Ledger-backed wallet charging.
-- Signed receipts for governed tool attempts.
-- Tamper-evident wallet audit chains.
+- Ledger-backed wallet charging as configured accounting support.
+- Signed receipts for governed tool attempts as linked gateway evidence.
+- Tamper-evident wallet audit chains as supporting evidence.
 - Explicit denial reasons for out-of-scope or invalid governed attempts.
 - A persisted remote-dispatch state that distinguishes confirmed outcomes from
   delivery uncertainty.
@@ -112,6 +118,9 @@ Partner motion:
 - The audit chain can be verified after the fact.
 - Replaying the same governed invoke can return the same receipt without a
   duplicate gateway dispatch or debit.
+- A committed upstream dispatch claim cannot be reacquired.
+- A post-claim timeout becomes charged `delivery_uncertain` and is not
+  automatically redispatched.
 - A request outside the permit scope can be denied with a concrete reason.
 - An agent with no authority can ask a human for a scoped, budgeted permit, and
   the permit that gets minted carries exactly the terms the human reviewed.
@@ -135,7 +144,9 @@ agent rules.
 - New proof-surface features and ungated HTTP demos (see
   [`docs/PROOF_SURFACES.md`](docs/PROOF_SURFACES.md)).
 - Broad multi-tool migrations before one partner tool is live.
-- KMS, settlement, transparency logs, and non-MCP adapters (see
+- General-purpose IAM, policy engines, payment products, receipt standards,
+  external witnessing, effect attestation, export connectors, KMS, settlement,
+  transparency logs, and non-MCP adapters (see
   [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
 
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
@@ -152,6 +163,11 @@ Agent-executable remediation of known spine/discovery/deploy debt:
 - Full autonomous economic actor infrastructure.
 - Universal policy enforcement across every agent framework.
 - Distributed exactly-once side effects in arbitrary upstream MCP servers.
+- One atomic transaction with an upstream system.
+- Proof that the downstream effect occurred.
+- Generalized authority units beyond the configured credits, call allowance,
+  and approval semantics the current path models.
+- Unique ownership of signed receipts or generic agent governance.
 - Quotes as a pricing or settlement product. A quote fixes what this gateway
   will debit from an internal wallet for one call; it is not a market price, a
   vendor commitment, or an invoice.

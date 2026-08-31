@@ -26,6 +26,7 @@ from app.schemas.trust import RefundReconciliationItem
 from app.schemas.trust import ReceiptResponse
 from app.services.permits import get_permit_service
 from app.services.receipts import get_receipt_service
+from app.services.signing_keys import get_signing_key_service
 
 
 RECONCILIATION_KIND = "mcp_failed_refund"
@@ -139,52 +140,59 @@ class RefundReconciliationService:
         response_hash_override: str | None = None,
     ) -> tuple[ReceiptResponse, dict[str, Any]]:
         """Atomically insert the signed receipt and durable pending work item."""
+
+        async def validated_checkpoint(
+            session: AsyncSession, *, lock: bool = False
+        ) -> IdempotencyRecordModel:
+            query = select(IdempotencyRecordModel).where(
+                cast(
+                    ColumnElement[bool], IdempotencyRecordModel.wallet_id == wallet_id
+                ),
+                cast(ColumnElement[bool], IdempotencyRecordModel.endpoint == endpoint),
+                cast(
+                    ColumnElement[bool],
+                    IdempotencyRecordModel.idempotency_key == idempotency_key,
+                ),
+            )
+            if lock:
+                query = query.with_for_update()
+            record = (await session.execute(query)).scalar_one_or_none()
+            if (
+                record is None
+                or record.ledger_entry_id != ledger_entry_id
+                or record.response_json is not None
+                or record.response_reference is not None
+            ):
+                raise RefundReconciliationError(
+                    "refund_reconciliation_checkpoint_invalid"
+                )
+            permit = await session.get(PermitModel, permit_id)
+            if permit is None:
+                raise RefundReconciliationError(
+                    "refund_reconciliation_checkpoint_invalid"
+                )
+            await self._assert_approval_binding(
+                session,
+                record=record,
+                permit=permit,
+                approval_id=approval_id,
+                wallet_id=wallet_id,
+                tool_name=tool_name,
+            )
+            return record
+
         factory = get_session_factory()
+        # Preserve checkpoint/approval refusal before provisioning or reactivating
+        # a key. This advisory read releases its connection before key preparation;
+        # the complete validation repeats under the identity lock below.
+        async with factory() as preflight_session:
+            await validated_checkpoint(preflight_session)
+        # Key provisioning and its mapping/disabled checks must finish before
+        # the work-item transaction occupies a connection or locks its identity.
+        signing_key = await get_signing_key_service().ensure_active_key()
         async with factory() as session:
             async with session.begin():
-                record = (
-                    await session.execute(
-                        select(IdempotencyRecordModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                IdempotencyRecordModel.wallet_id == wallet_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                IdempotencyRecordModel.endpoint == endpoint,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                IdempotencyRecordModel.idempotency_key
-                                == idempotency_key,
-                            ),
-                        )
-                        .with_for_update()
-                    )
-                ).scalar_one_or_none()
-                if (
-                    record is None
-                    or record.ledger_entry_id != ledger_entry_id
-                    or record.response_json is not None
-                    or record.response_reference is not None
-                ):
-                    raise RefundReconciliationError(
-                        "refund_reconciliation_checkpoint_invalid"
-                    )
-                permit = await session.get(PermitModel, permit_id)
-                if permit is None:
-                    raise RefundReconciliationError(
-                        "refund_reconciliation_checkpoint_invalid"
-                    )
-                await self._assert_approval_binding(
-                    session,
-                    record=record,
-                    permit=permit,
-                    approval_id=approval_id,
-                    wallet_id=wallet_id,
-                    tool_name=tool_name,
-                )
+                record = await validated_checkpoint(session, lock=True)
 
                 receipt = await get_receipt_service().create_receipt(
                     permit_id=permit_id,
@@ -204,6 +212,7 @@ class RefundReconciliationService:
                     approval_id=approval_id,
                     response_hash_override=response_hash_override,
                     session=session,
+                    prepared_signing_key_id=signing_key.key_id,
                 )
                 reconciliation = build_pending_refund_reconciliation(
                     receipt_id=receipt.receipt_id,
@@ -441,7 +450,7 @@ class RefundReconciliationService:
         receipt = await session.get(ReceiptModel, item.receipt_id)
         if receipt is None:
             raise RefundReconciliationError("refund_reconciliation_linkage_invalid")
-        if not await get_receipt_service().verify_model(receipt):
+        if not await get_receipt_service().verify_model(receipt, session=session):
             raise RefundReconciliationError("refund_reconciliation_receipt_invalid")
 
         correlated_refunds = (
@@ -539,7 +548,9 @@ class RefundReconciliationService:
                     receipt=receipt,
                     payload=payload,
                 )
-                if not await get_receipt_service().verify_model(receipt):
+                if not await get_receipt_service().verify_model(
+                    receipt, session=session
+                ):
                     raise RefundReconciliationError(
                         "refund_reconciliation_receipt_invalid"
                     )
@@ -570,7 +581,9 @@ class RefundReconciliationService:
                     raise RefundReconciliationError(
                         "refund_reconciliation_linkage_invalid"
                     )
-                if not await get_permit_service().verify_signature(permit):
+                if not await get_permit_service().verify_signature(
+                    permit, session=session
+                ):
                     raise RefundReconciliationError(
                         "refund_reconciliation_permit_invalid"
                     )

@@ -1,12 +1,14 @@
 # Agent Middleware API design-partner site
 
-Static, human-buyer-first marketing and proof surface for the governed MCP
-trust-plane wedge. The public site is `https://www.thisisatest.tech/`; the
-canonical API is `https://api.thisisatest.tech/`.
+Static, human-buyer-first marketing and proof surface for the transaction-
+integrity wedge for consequential autonomous actions. The public site is
+`https://www.thisisatest.tech/`; the canonical API is
+`https://api.thisisatest.tech/`.
 
 The intended buyer is a platform engineering, AI infrastructure, or security
-team operating internal MCP tools. Machine discovery remains available below
-the one-tool pilot funnel and through the static pointer files.
+team operating a consequential, autonomous, retry-sensitive MCP action. Machine
+discovery remains available below the one-tool pilot funnel and through the
+static pointer files.
 
 ## Launch gate
 

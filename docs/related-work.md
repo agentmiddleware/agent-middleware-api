@@ -3,26 +3,57 @@
 This document maps external literature to the repo's narrow product wedge:
 
 ```text
-discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+logical action -> authorize -> reserve configured allowance -> debit
+-> claim one gateway dispatch -> confirmed outcome | delivery_uncertain
+-> linked receipt/audit -> reconcile
 ```
 
 The sources below are context for design and positioning. They do not by
-themselves prove production readiness, compliance, settlement safety, or
-enterprise suitability. Repo claims still need code, tests, docs, or executable
-demo evidence.
+themselves prove production readiness, compliance, settlement safety,
+enterprise suitability, market absence, or customer demand. Repo claims still
+need code, tests, docs, or executable evidence. Product-need claims require the
+named-prospect evidence in
+[`30-day-customer-validation.md`](30-day-customer-validation.md).
 
 ## Product Boundary
 
-Verified from repo:
+Verified from the current repository workspace:
 
-- The current wedge is a governed trust plane for scoped, metered MCP tool calls
-  in `WEDGE.md`.
-- The current proof path is signed permit, governed MCP invoke, wallet charge,
-  signed receipt, ledger entry, audit chain verification, replay safety, and
-  out-of-scope denial in `DEMO_SCRIPT.md`.
+- The active wedge is transaction integrity for consequential autonomous
+  actions in `WEDGE.md`.
+- The supported upstream path binds one logical action to delegated authority,
+  configured credit or call allowance, one-shot gateway dispatch/debit state,
+  explicit `delivery_uncertain`, and gateway evidence.
+- Current accounting models fixed per-call credits and call allowance. It is
+  not a generalized ledger of deployments, deletions, refunds, or records
+  modified.
+- Receipts are operator-signed gateway evidence. They do not prove the actual
+  downstream effect and are not independently witnessed.
 - AWI, browser automation, content generation, oracle crawls, media utilities,
   IoT bridges, red-team services, RTaaS, telemetry auto-PR, and sandbox demos
   are proof surfaces, not the initial product boundary, in `WEDGE.md`.
+
+## 2026 Competitive Boundary
+
+This table records what primary sources show, not a claim that any competitor
+is complete, adopted, secure, or commercially sufficient.
+
+| Nearby category | Primary-source evidence | Positioning consequence |
+| --- | --- | --- |
+| Agent identity and lifecycle | [Microsoft Entra Agent ID](https://learn.microsoft.com/en-us/entra/agent-id/) documents agent identities, owners/sponsors, lifecycle governance, access packages, Conditional Access, protection, and OAuth integration. | Integrate enterprise IAM; do not present identity as the wedge. |
+| Tool policy at the gateway | [Amazon Bedrock AgentCore Policy](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-getting-started.html) places Cedar allow/deny evaluation at a gateway and demonstrates parameter-aware refund limits. | Generic tool authorization and policy are supporting controls, not standalone differentiation. |
+| MCP identity-aware access | [Aembit MCP Identity Gateway](https://docs.aembit.io/ai-guide/mcp/identity-gateway/) proxies MCP, evaluates identity-aware access policy, exchanges downstream credentials, and exposes activity visibility. | Do not compete on credential brokering or access policy alone. |
+| Broad agent gateway | [Portkey Agent Gateway](https://portkey.ai/blog/agent-gateway/) advertises per-agent/team/user access, budget and usage limits, traces, guardrails, load balancing, and automatic fallbacks. | Broad gateway, observability, and generic reliability are crowded. For consequential writes, the wedge hypothesis is the opposite failure rule: preserve post-dispatch uncertainty and refuse unsafe automatic redispatch. |
+| Continuous governance evidence | [Vanta AI Governance](https://www.vanta.com/resources/introducing-ai-governance-from-vanta) describes continuous policy evidence and labels the AI-governance layer early access. | Treat GRC evidence as an adjacent integration surface, not an uncontested product category or a validated buyer request. |
+| Signed execution-receipt format | [XAIP Receipts](https://datatracker.ietf.org/doc/draft-xkumakichi-xaip-receipts/) defines an individual Internet-Draft for signed agent tool-call records and explicitly says it has no IETF endorsement or formal standards standing. | Never claim that portable signed agent receipts are unique, standardized, or adopted merely because a draft exists. |
+| Open receipt tooling | [Obsigna / Agent Receipts](https://github.com/agent-receipts/obsigna) publishes an open receipt protocol, Go/TypeScript/Python SDKs, signing daemon, and MCP proxy. | Receipt format and signing alone are not the wedge. Repository existence is not adoption or independent validation. |
+
+The market-gap statement remains a hypothesis: these sources prominently cover
+identity, authorization, budgets, gateways, observability, governance evidence,
+and receipt formats. They do not prove that ambiguity-safe execution is absent
+from every product. Customer discovery must establish whether integrated
+logical-action, non-redispatch, and reconciliation semantics solve a problem
+buyers will pay to keep inline.
 
 ## Source Map
 
@@ -47,13 +78,18 @@ Verified from repo:
 
 | Public claim | Repo evidence | Reality level |
 | --- | --- | --- |
-| The product wedge is an MCP trust plane, not a broad agent platform. | `WEDGE.md` defines the wedge and lists non-core proof surfaces. | Verified. |
+| The product wedge is transaction integrity for consequential autonomous actions, not a broad agent platform. | `WEDGE.md` defines the wedge, qualification test, and non-core proof surfaces. | Verified as repo positioning; customer need not verified. |
 | Agents can discover machine-readable interfaces. | `README.md` points agents to `/.well-known/agent.json`, `/llm.txt`, `/mcp/tools.json`, and `/openapi.json`; discovery drift tests exist in `tests/test_discovery_drift.py`. | Verified. |
 | Signed permits bind wallet, key, tool, scope, budget, expiry, and nonce. | `app/services/permits.py` creates signed permits and validates wallet, key, tool, scope, budget, expiry, and signature; `tests/test_permits.py` covers valid and invalid cases. | Verified. |
 | Governed MCP requires permits and idempotency in strict trust mode. | `app/routers/mcp.py` enforces permit and idempotency checks for governed calls; `tests/test_mcp_trust_mode.py` covers missing permit, missing idempotency, wrong key, wrong wallet, and wrong tool. | Verified. |
+| One accepted logical action rejects changed payload and does not reacquire a committed gateway dispatch claim. | `app/routers/mcp.py` raises `idempotency_key_reused`; `McpDispatchAttemptService.claim_dispatch` in `app/services/mcp_dispatch_attempts.py` owns the claim; `tests/test_idempotency.py` and `tests/test_mcp_upstream_governed.py` cover replay, payload conflict, losing claims, and non-redispatch. | Verified on covered paths. |
+| A post-claim ambiguous result becomes charged `delivery_uncertain` and is replayed without redispatch. | `app/services/mcp_dispatch_reconciliation.py` terminalizes dispatched ambiguity; `tests/test_mcp_dispatch_reconciliation.py` covers timeout/crash cases and `tests/test_mcp_upstream_governed.py` covers ambiguous response replay. | Verified on covered paths; downstream effect remains unknown. |
 | Successful governed invokes charge the wallet and emit signed receipts. | `app/routers/mcp.py` charges through `AgentMoney`, records audit, and creates receipts; `tests/test_demo_trust_plane.py` and `tests/test_agent_ops_war_room_demo.py` assert success receipts and replay behavior. | Verified. |
 | Denied governed attempts are auditable and can produce denial receipts when a permit record exists. | `app/routers/mcp.py` creates denial receipts for invalid scoped attempts with an existing permit; strict-mode tests assert denial audit events. | Verified. |
 | Receipts are signature-verifiable. | `app/services/receipts.py` signs and verifies receipt payloads; `tests/test_receipts.py` detects receipt tampering. | Verified. |
+| A valid receipt proves the actual downstream effect. | `CONTEXT.md`, `WEDGE.md`, and receipt portability tests limit the claim to operator-signed gateway evidence. | Contradicted if claimed. |
+| Receipt evidence is independently witnessed. | The service executes, signs, and publishes its own key material; no external witness or transparency log is in the supported path. | Not implemented. |
+| Authority consumption is generalized across arbitrary action units. | Current permits reserve configured credits or call allowance; no general deployment/deletion/refund/effect-unit model exists. | Contradicted if claimed. |
 | Wallet audit events are signed and hash-linked. | `app/services/audit_chain.py` signs audit events and verifies payload hash, previous hash, signature, and chain hash; `tests/test_audit_chain.py` detects tampering. | Verified. |
 | Wallet keys can inspect only their own trust ledger records. | `app/routers/me.py`, `app/routers/receipts.py`, and `app/routers/audit.py` enforce wallet-scoped access; `tests/test_me_trust_ledger.py` covers cross-wallet exclusion. | Verified. |
 | Payment settlement is production-ready. | `WEDGE.md` explicitly says not to claim production-ready payments or settlement. | Contradicted if claimed. |
@@ -64,12 +100,12 @@ Verified from repo:
 
 - Use AWI sources to explain proof surfaces, not the core wedge.
 - Use MCP sources to justify why this repo sits at the tool boundary.
-- Use wallet/payment sources to explain bounded authority and spend controls,
-  while avoiding production settlement claims.
+- Use wallet/payment sources to explain configured spend controls, while
+  avoiding production settlement or generalized authority-unit claims.
 - Use Macaroons and token literature to explain the authorization lineage of
   scoped permits without claiming compatibility.
-- Use audit/evidence sources to justify signed receipts and hash-linked audit
-  chains, while keeping regulated-compliance claims out of product copy.
+- Use audit/evidence sources to explain an adjacent ecosystem, not to claim
+  receipt-format ownership, independent witnessing, or customer demand.
 - Use threat-model sources to keep prompt injection, protocol exploit, replay,
   confused deputy, unsafe tool execution, and cross-tenant leakage in scope.
 - Use NIST as governance vocabulary, not as proof of certification or
@@ -82,5 +118,5 @@ Verified from repo:
 > Given a receipt ID, can I verify the receipt signature, permit signature,
 > audit-chain linkage, ledger linkage, and wallet-scoped access in one call?
 
-This strengthens the signed receipt ledger wedge without expanding the product
-surface.
+This strengthens transaction-linked gateway evidence without proving the
+downstream effect or turning the receipt format into the product wedge.

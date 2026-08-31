@@ -5,11 +5,12 @@ tool.
 
 ## Goal
 
-Prove this loop for **one** partner tool — nothing else:
+Prove this transaction-integrity loop for **one** partner-owned consequential
+staging mutation — nothing else:
 
 ```text
-permit → governed MCP invoke → wallet charge → signed receipt
-→ audit → replay (no double charge) → out-of-scope deny
+permit → logical action → bounded configured consumption → one gateway dispatch
+→ confirmed outcome | delivery_uncertain → linked receipt/audit → reconcile
 ```
 
 Reference demo tool: `trust-plane-echo` (`make prove-trust-plane`).
@@ -20,11 +21,24 @@ Fill these before the walkthrough:
 
 | Placeholder | Example | Partner value |
 |-------------|---------|---------------|
-| `YOUR_TOOL_ID` | `internal.crm.search` | |
-| `UPSTREAM_TOOL_NAME` | `crm_search` | |
+| `YOUR_TOOL_ID` | `staging.refunds.create` | |
+| `UPSTREAM_TOOL_NAME` | `refund_create` | |
 | `UPSTREAM_MCP_URL` | `https://mcp.partner.example/mcp` | |
 | `CREDITS_PER_CALL` | `3.0` | |
 | `MAX_CREDITS` | `50` | |
+| `EFFECT_LOOKUP_COMMAND` | Exact partner query by invocation/idempotency ID | |
+| `AMBIGUITY_ARM_COMMAND` | One-shot: commit synthetic effect, then withhold response | |
+| `AMBIGUITY_RESET_COMMAND` | Disarm the staging fault and clean synthetic state | |
+
+The example is illustrative, not customer evidence. The selected action
+qualifies only when a named partner owns it, a duplicate would have a concrete
+consequence, the staging effect is synthetic or redacted, and the partner
+engineer can authoritatively query whether the effect was applied.
+
+The partner-value cells for the three operational controls above must contain
+exact commands or queries, expected output, and the responsible operator. A
+description such as “check the database” is not enough for an independently
+repeatable pilot.
 
 ## Environment
 
@@ -48,20 +62,11 @@ Do not mount AWI/media/oracle for this session.
 
 ## Rolling deployment safety
 
-Apply Alembic through the current head (`028_revoke_unbound_refresh`)
-before current workers take traffic. Revision `027_governed_mcp_identity` adds
-a rolling-compatible unique index that serializes pre-026 physical MCP endpoint
-keys with the current `/mcp/invoke` identity. Revision 028 revokes historical
-refresh tokens that cannot be safely bound to their originating API key.
-
-Revision 027 stops with only an aggregate conflict count if historical rows
-already reuse one wallet/key across MCP endpoint generations. Do not pick or
-delete one automatically; adjudicate those operations from their receipts,
-ledger entries, and audit evidence, then rerun the migration.
-
-For an emergency code rollback, keep migration 027 in place. Old workers remain
-compatible and fail closed if they collide with a canonical row. Dropping the
-index after canonical rows exist reopens the duplicate debit/dispatch race.
+From the exact release checkout, require `alembic heads` to report one head, run
+`alembic upgrade head`, and require the customer manifest and target
+`alembic_version` to match that value. Do not copy a revision literal from this
+runbook. Follow [`docs/deploy-railway.md`](deploy-railway.md) for
+revision-specific drain and rollback rules.
 
 ## Configure the partner tool
 
@@ -73,6 +78,13 @@ required.
 
 Keep a second tool id out of the permit (e.g. `YOUR_TOOL_ID.admin`) for the
 out-of-scope denial step.
+
+The partner tool must expose an authoritative effect identifier or lookup keyed
+to the forwarded invocation/idempotency metadata. It must also provide a
+partner-controlled staging fault that persists the synthetic effect first and
+then closes or withholds the MCP response beyond
+`MCP_UPSTREAM_CALL_TIMEOUT_SECONDS`. A delay before the effect is not the
+ambiguity test.
 
 ### Operator-controlled live smoke server
 
@@ -97,27 +109,46 @@ exactly-once side effects.
 
 ## Live checklist
 
-1. `GET /.well-known/agent.json` and `GET /mcp/tools.json` — confirm `YOUR_TOOL_ID` and `requirePermit`.
-2. Create sponsor wallet → agent wallet → agent API key.
-3. Create permit:
+1. `GET /.well-known/agent.json` and `GET /mcp/tools.json` — confirm
+   `YOUR_TOOL_ID` and `requirePermit`.
+2. Before invocation, record the partner effect count or state for the test
+   operation.
+3. Create sponsor wallet → agent wallet → agent API key.
+4. Create permit:
    - `allowed_tools: ["YOUR_TOOL_ID"]`
    - `scopes: ["tool:YOUR_TOOL_ID:invoke", "billing:charge"]`
    - `max_credits: MAX_CREDITS`
    - `Idempotency-Key` on permit create
-4. Governed invoke via `POST /mcp/messages` with `mcpContext.wallet_id`, `permit_id`, `idempotency_key`.
-5. Show ledger debit + `GET /v1/receipts/verify`.
-6. Replay same idempotency key → same `receipt_id`, no second gateway dispatch
-   or debit.
-7. Call the out-of-scope tool under the same permit → deny (`permit_tool_not_allowed`).
-8. Call `YOUR_TOOL_ID` with no permit → deny (`permit_required`).
-9. Force a post-dispatch timeout → signed `delivery_uncertain`, charge retained,
-   and no automatic retry.
+5. Governed invoke via `POST /mcp/messages` with `mcpContext.wallet_id`,
+   `permit_id`, and `idempotency_key`.
+6. Show ledger debit + `GET /v1/receipts/verify`; have the partner engineer
+   confirm exactly one partner-side effect and record its effect ID.
+7. Replay the same idempotency key → same `receipt_id`, no second gateway
+   dispatch or debit, and partner effect count still one.
+8. Reuse the same key with changed input → `idempotency_key_reused`, with no new
+   effect.
+9. Call the out-of-scope tool under the same permit → deny
+   (`permit_tool_not_allowed`).
+10. Call `YOUR_TOOL_ID` with no permit → deny (`permit_required`).
+11. Arm the partner-controlled ambiguity fault for one fresh idempotency key.
+    Require the tool to persist the effect, then lose the response.
+12. Require signed `delivery_uncertain`, retained charge, and no automatic
+    redispatch. Replay the exact same payload and idempotency key → same
+    uncertain receipt while the partner still reports one effect.
+13. The partner engineer reconciles the effect as `applied`, `not_applied`, or
+    `unknown` using its authoritative system and records operator, time, effect
+    ID, invocation/idempotency IDs, and remediation decision. This record
+    supplements the immutable gateway receipt; it must not rewrite it, refund
+    automatically, or reuse the ambiguous key.
+14. Run `AMBIGUITY_RESET_COMMAND` and record that the one-shot fault is disarmed
+    before any other staging action proceeds.
 
 ## Pass / fail
 
 **Technical pass:** the partner-owned agent and staging tool complete the loop,
-the partner engineer verifies the receipt in the partner environment, and the
-measured integration burden is recorded.
+the partner engineer verifies the receipt and completes downstream effect
+reconciliation in the partner environment, and the measured integration burden
+is recorded.
 
 **Commercial signal:** the partner says what unacceptable risk would return if
 the boundary were removed and commits an owner, next action, and decision date.
@@ -125,19 +156,25 @@ A follow-up meeting or "cool demo" response alone is not validation. Apply the
 full gate in
 [`docs/30-day-customer-validation.md`](30-day-customer-validation.md).
 
-**Fail / stop:** partner asks for settlement, KMS, multi-framework policy, or
-broad migration before the single-tool loop is trusted. Point to
-`SECURITY_LIMITATIONS.md` and freeze proof surfaces.
+**Scope guard:** keep settlement, KMS, multi-framework policy, and broad
+migration frozen while the single-tool loop is untrusted. Expand only if a
+named prospect documents one concrete blocker, owner, date, and smallest slice
+that passes the unfreeze gate in
+[`30-day-customer-validation.md`](30-day-customer-validation.md). Otherwise stop
+scope expansion and point to `SECURITY_LIMITATIONS.md`.
 
 ## Talk track
 
-- Permit = bounded authority (wallet, tool, budget, expiry, signature).
-- MCP invoke is authorized, not only authenticated.
-- Receipt is the durable proof of charge + outcome.
-- Replay and out-of-scope deny are the product, not edge cases.
-- The gateway guarantees one dispatch/debit for an idempotency key. The remote
-  side effect is exactly once only if the partner tool honors the forwarded
-  idempotency metadata.
+- Permit = bounded configured authority (wallet, tool, credits/calls, expiry,
+  signature).
+- The durable action/dispatch/uncertainty state machine is the product.
+- Receipt and audit data are linked gateway evidence, not proof of the
+  downstream effect.
+- Replay, changed-input conflict, and out-of-scope denial are transaction
+  semantics, not edge cases.
+- The gateway guarantees at most one gateway dispatch/debit for one accepted
+  idempotency key. The remote side effect is exactly once only when the upstream
+  honors the forwarded idempotency key.
 
 ## Commands
 

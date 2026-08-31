@@ -27,16 +27,21 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import get_settings
+from app.core.jwt import get_jwt_service
 from app.core.time import utc_now
 from app.db.database import get_engine, get_session_factory
 from app.db.models import (
     BillingAlertModel,
     ControlPlaneAuditEventModel,
+    HumanApprovalModel,
     IdempotencyRecordModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
+    PermitCallReservationModel,
     PermitModel,
     ReceiptModel,
+    RefreshTokenModel,
     SigningKeyModel,
     WalletModel,
 )
@@ -47,7 +52,12 @@ from app.services.idempotency import (
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
     get_idempotency_service,
 )
-from app.services.mcp_dispatch_attempts import get_mcp_dispatch_attempt_service
+from app.services.human_approval import HumanApprovalService, invoke_request_hash
+from app.services.mcp_dispatch_attempts import (
+    DispatchClaimUnavailableError,
+    McpDispatchAttemptService,
+    get_mcp_dispatch_attempt_service,
+)
 from app.services.mcp_dispatch_reconciliation import (
     McpDispatchReconciliationService,
 )
@@ -61,6 +71,9 @@ from app.services.service_registry import get_service_registry
 from app.services.signing_keys import canonical_json, sha256_hex
 from app.services.upstream_mcp import UpstreamMcpResult
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+
+
+TEST_JWT_SIGNING_KEY = "dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU="
 
 
 @dataclass(frozen=True)
@@ -746,7 +759,7 @@ async def test_concurrent_refund_reconciliation_is_exactly_once_in_postgres(
     release_first_worker = asyncio.Event()
     verification_calls = 0
 
-    async def pause_first_worker(receipt: ReceiptModel) -> bool:
+    async def pause_first_worker(receipt: ReceiptModel, **kwargs: Any) -> bool:
         nonlocal verification_calls
         verification_calls += 1
         if verification_calls == 1:
@@ -754,7 +767,7 @@ async def test_concurrent_refund_reconciliation_is_exactly_once_in_postgres(
             await release_first_worker.wait()
         else:
             second_worker_reached_verification.set()
-        return await original_verify(receipt)
+        return await original_verify(receipt, **kwargs)
 
     monkeypatch.setattr(receipt_service, "verify_model", pause_first_worker)
     first_service = RefundReconciliationService()
@@ -1194,6 +1207,679 @@ async def test_concurrent_identical_upstream_requests_share_one_result_in_postgr
 
 
 @pytest.mark.asyncio(loop_scope="session")
+@pytest.mark.parametrize(
+    ("max_calls", "aggregate_cap", "expected_reason"),
+    [
+        (1, None, "permit_max_calls_exceeded"),
+        (None, 2, "permit_aggregate_value_cap_exceeded"),
+    ],
+)
+async def test_distinct_upstream_requests_cannot_exceed_reserved_permit_authority(
+    max_calls: int | None,
+    aggregate_cap: int | None,
+    expected_reason: str,
+) -> None:
+    """A receipt-lag window cannot admit a second distinct remote effect."""
+    _require_opted_in_postgres()
+    suffix = uuid.uuid4().hex[:12]
+    tool_name = f"partner-upstream-pg-authority-{suffix}"
+    first_key = f"partner-upstream-pg-authority-first-{suffix}"
+    second_key = f"partner-upstream-pg-authority-second-{suffix}"
+    executor = PausedUpstreamExecutor()
+    _register_paused_upstream(tool_name, executor)
+    first_task: asyncio.Task[Any] | None = None
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            provisioned = await provision_agent_wallet(client)
+            permit = await create_tool_permit(
+                client,
+                wallet_id=provisioned["agent_wallet_id"],
+                key_id=provisioned["key_id"],
+                tool_name=tool_name,
+                max_credits=20,
+                idem_key=f"permit-authority-{suffix}",
+                max_calls_per_tool=(
+                    {tool_name: max_calls} if max_calls is not None else None
+                ),
+                aggregate_value_cap=aggregate_cap,
+            )
+            first_task = asyncio.create_task(
+                client.post(
+                    "/mcp/messages",
+                    json=_upstream_call_body(
+                        tool_name=tool_name,
+                        wallet_id=provisioned["agent_wallet_id"],
+                        permit_id=permit["permit_id"],
+                        idempotency_key=first_key,
+                        message="first",
+                    ),
+                    headers=provisioned["agent_headers"],
+                )
+            )
+            await asyncio.wait_for(executor.dispatched.wait(), timeout=5)
+
+            denied = await asyncio.wait_for(
+                client.post(
+                    "/mcp/messages",
+                    json=_upstream_call_body(
+                        tool_name=tool_name,
+                        wallet_id=provisioned["agent_wallet_id"],
+                        permit_id=permit["permit_id"],
+                        idempotency_key=second_key,
+                        message="second",
+                    ),
+                    headers=provisioned["agent_headers"],
+                ),
+                timeout=5,
+            )
+            executor.release.set()
+            first = await asyncio.wait_for(first_task, timeout=10)
+
+        assert first.status_code == 200
+        assert "result" in first.json()
+        assert denied.status_code == 200
+        assert "error" in denied.json()
+        assert expected_reason in denied.json()["error"]["message"]
+        assert executor.dispatch_count == 1
+        assert len(executor.calls) == 1
+
+        factory = get_session_factory()
+        async with factory() as session:
+            attempts = (
+                (
+                    await session.execute(
+                        select(McpDispatchAttemptModel).where(
+                            McpDispatchAttemptModel.permit_id == permit["permit_id"]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+        assert len(attempts) == 1
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("2")
+    finally:
+        executor.release.set()
+        if first_task is not None and not first_task.done():
+            await asyncio.gather(first_task, return_exceptions=True)
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_distinct_local_requests_cannot_exceed_call_limit_before_receipt() -> (
+    None
+):
+    """A paused local effect occupies its call slot before a receipt exists."""
+    _require_opted_in_postgres()
+    suffix = uuid.uuid4().hex[:12]
+    tool_name = f"partner-local-pg-authority-{suffix}"
+    first_key = f"partner-local-pg-authority-first-{suffix}"
+    second_key = f"partner-local-pg-authority-second-{suffix}"
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    calls: list[str] = []
+
+    async def controlled_local_tool(message: str) -> dict[str, str]:
+        calls.append(message)
+        if message == "first":
+            first_entered.set()
+            await release_first.wait()
+        return {"message": message}
+
+    get_service_registry().register_local(
+        service_id=tool_name,
+        name="PostgreSQL Local Concurrency Tool",
+        description="Controlled local MCP concurrency test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=controlled_local_tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    first_task: asyncio.Task[Any] | None = None
+    second_task: asyncio.Task[Any] | None = None
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            provisioned = await provision_agent_wallet(client)
+            permit = await create_tool_permit(
+                client,
+                wallet_id=provisioned["agent_wallet_id"],
+                key_id=provisioned["key_id"],
+                tool_name=tool_name,
+                max_credits=20,
+                idem_key=f"permit-local-authority-{suffix}",
+                max_calls_per_tool={tool_name: 1},
+            )
+            first_body = _upstream_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key=first_key,
+                message="first",
+            )
+            first_task = asyncio.create_task(
+                client.post(
+                    "/mcp/messages",
+                    json=first_body,
+                    headers=provisioned["agent_headers"],
+                )
+            )
+            await asyncio.wait_for(first_entered.wait(), timeout=5)
+            assert first_task.done() is False
+
+            second_task = asyncio.create_task(
+                client.post(
+                    "/mcp/messages",
+                    json=_upstream_call_body(
+                        tool_name=tool_name,
+                        wallet_id=provisioned["agent_wallet_id"],
+                        permit_id=permit["permit_id"],
+                        idempotency_key=second_key,
+                        message="second",
+                    ),
+                    headers=provisioned["agent_headers"],
+                )
+            )
+            denied = await asyncio.wait_for(asyncio.shield(second_task), timeout=5)
+            factory = get_session_factory()
+            async with factory() as session:
+                in_flight_reservations = (
+                    (
+                        await session.execute(
+                            select(PermitCallReservationModel).where(
+                                PermitCallReservationModel.permit_id
+                                == permit["permit_id"]
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            assert len(in_flight_reservations) == 1
+            assert in_flight_reservations[0].state == "consumed"
+            assert in_flight_reservations[0].execution_started_at is not None
+            release_first.set()
+            first = await asyncio.wait_for(first_task, timeout=10)
+            replay = await asyncio.wait_for(
+                client.post(
+                    "/mcp/messages",
+                    json=first_body,
+                    headers=provisioned["agent_headers"],
+                ),
+                timeout=5,
+            )
+
+        assert first.status_code == 200
+        assert "result" in first.json()
+        assert denied.status_code == 200
+        assert calls == ["first"]
+        assert "error" in denied.json(), denied.json()
+        assert denied.json()["error"]["message"] == "permit_max_calls_exceeded"
+        assert replay.status_code == 200
+        assert (
+            replay.json()["result"]["receipt"]["receipt_id"]
+            == (first.json()["result"]["receipt"]["receipt_id"])
+        )
+        assert calls == ["first"]
+        async with factory() as session:
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            reservations = (
+                (
+                    await session.execute(
+                        select(PermitCallReservationModel).where(
+                            PermitCallReservationModel.permit_id == permit["permit_id"]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("2")
+        assert len(reservations) == 1
+        assert reservations[0].state == "consumed"
+    finally:
+        release_first.set()
+        pending = [
+            task
+            for task in (first_task, second_task)
+            if task is not None and not task.done()
+        ]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_concurrent_refresh_rotation_creates_one_child_in_postgres(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The parent-token compare-and-swap admits exactly one rotation winner."""
+    _require_opted_in_postgres()
+    monkeypatch.setenv("TRUST_SIGNING_PRIVATE_KEY_B64", TEST_JWT_SIGNING_KEY)
+    get_settings.cache_clear()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            provisioned = await provision_agent_wallet(client)
+            minted = await client.post(
+                "/v1/auth/token",
+                json={"api_key": provisioned["agent_headers"]["X-API-Key"]},
+            )
+            assert minted.status_code == 200, minted.text
+            parent_token = minted.json()["refresh_token"]
+            parent = get_jwt_service().verify_refresh_token(parent_token)
+
+            responses = await asyncio.gather(
+                *(
+                    client.post(
+                        "/v1/auth/refresh",
+                        json={"refresh_token": parent_token},
+                    )
+                    for _ in range(16)
+                )
+            )
+
+            winners = [
+                response for response in responses if response.status_code == 200
+            ]
+            losers = [response for response in responses if response.status_code == 401]
+            assert len(winners) == 1
+            assert len(losers) == 15
+            assert {response.json()["detail"]["error"] for response in losers} == {
+                "revoked_refresh_token"
+            }
+
+            child_token = winners[0].json()["refresh_token"]
+            child = get_jwt_service().verify_refresh_token(child_token)
+            factory = get_session_factory()
+            async with factory() as session:
+                records = (
+                    (
+                        await session.execute(
+                            select(RefreshTokenModel).where(
+                                RefreshTokenModel.wallet_id
+                                == provisioned["agent_wallet_id"]
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            assert {record.jti for record in records} == {parent.jti, child.jti}
+            assert next(
+                record for record in records if record.jti == parent.jti
+            ).revoked
+            assert not next(
+                record for record in records if record.jti == child.jti
+            ).revoked
+
+            redeem_child = await client.post(
+                "/v1/auth/refresh", json={"refresh_token": child_token}
+            )
+            assert redeem_child.status_code == 200, redeem_child.text
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_dispatch_claim_cas_is_exclusive_in_postgres() -> None:
+    _require_opted_in_postgres()
+    suffix = uuid.uuid4().hex[:12]
+    tool_name = f"partner-dispatch-claim-pg-{suffix}"
+    idempotency_key = f"partner-dispatch-claim-pg-{suffix}"
+    credits = Decimal("1.5")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        provisioned = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key=f"permit-dispatch-claim-{suffix}",
+        )
+
+    request_payload = {
+        "tool_name": tool_name,
+        "arguments": {"message": suffix},
+        "wallet_id": provisioned["agent_wallet_id"],
+        "permit_id": permit["permit_id"],
+    }
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+        operation_kind="upstream_mcp",
+    )
+    dispatch = get_mcp_dispatch_attempt_service()
+    validation, attempt = await dispatch.authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=credits,
+    )
+    assert validation.allowed is True
+    assert attempt is not None
+    charge = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        operation_key=begun.record_id,
+    )
+    assert hasattr(charge, "entry_id")
+    await dispatch.attach_charge(
+        attempt_id=attempt.attempt_id,
+        ledger_entry_id=charge.entry_id,
+        credits_charged=credits,
+    )
+
+    first, second = await asyncio.gather(
+        McpDispatchAttemptService().claim_dispatch(attempt.attempt_id),
+        McpDispatchAttemptService().claim_dispatch(attempt.attempt_id),
+        return_exceptions=True,
+    )
+
+    outcomes = (first, second)
+    winners = [row for row in outcomes if isinstance(row, McpDispatchAttemptModel)]
+    losers = [row for row in outcomes if isinstance(row, Exception)]
+    assert len(winners) == 1
+    assert len(losers) == 1
+    assert isinstance(losers[0], DispatchClaimUnavailableError)
+    assert str(losers[0]) == "dispatch_claim_unavailable"
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stored = await session.get(McpDispatchAttemptModel, attempt.attempt_id)
+        permit_model = await session.get(PermitModel, permit["permit_id"])
+        ledger_rows = list(
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.wallet_id == provisioned["agent_wallet_id"],
+                        LedgerEntryModel.operation_key == begun.record_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        receipt_rows = list(
+            (
+                await session.execute(
+                    select(ReceiptModel).where(
+                        ReceiptModel.idempotency_record_id == begun.record_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert stored is not None
+    assert stored.state == "dispatch_claimed"
+    assert stored.dispatch_claim_hash is not None
+    assert stored.debit_refunded_at is None
+    assert stored.budget_released_at is None
+    assert permit_model is not None and permit_model.spent_credits == credits
+    assert [row.action for row in ledger_rows] == ["debit"]
+    assert receipt_rows == []
+
+    # The same database predicate must also make claim and pre-dispatch
+    # compensation mutually exclusive. Exactly one transition may win.
+    race_key = f"partner-dispatch-compensation-pg-{suffix}"
+    race_payload = {**request_payload, "arguments": {"message": f"race-{suffix}"}}
+    race_begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key=race_key,
+        request_payload=race_payload,
+        operation_kind="upstream_mcp",
+    )
+    race_validation, race_attempt = await dispatch.authorize_reserve_and_prepare(
+        idempotency_record_id=race_begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+        request_hash=race_begun.request_hash,
+        credits_authorized=credits,
+    )
+    assert race_validation.allowed is True
+    assert race_attempt is not None
+    race_charge = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        operation_key=race_begun.record_id,
+    )
+    assert hasattr(race_charge, "entry_id")
+    race_attempt = await dispatch.attach_charge(
+        attempt_id=race_attempt.attempt_id,
+        ledger_entry_id=race_charge.entry_id,
+        credits_charged=credits,
+    )
+
+    claim_result, compensation_result = await asyncio.gather(
+        McpDispatchAttemptService().claim_dispatch(race_attempt.attempt_id),
+        McpDispatchAttemptService().complete_pre_dispatch_failure(
+            attempt_id=race_attempt.attempt_id,
+            expected_updated_at=race_attempt.updated_at,
+            ledger_entry_id=race_charge.entry_id,
+            credits_charged=credits,
+            result_payload={"error": "failed_refunded"},
+            error_code="reconciled_stale_prepared",
+            max_result_bytes=4096,
+        ),
+        return_exceptions=True,
+    )
+
+    race_outcomes = (claim_result, compensation_result)
+    race_winners = [
+        row for row in race_outcomes if isinstance(row, McpDispatchAttemptModel)
+    ]
+    race_losers = [row for row in race_outcomes if isinstance(row, Exception)]
+    assert len(race_winners) == 1
+    assert len(race_losers) == 1
+    assert isinstance(race_losers[0], DispatchClaimUnavailableError)
+
+    async with factory() as session:
+        raced = await session.get(
+            McpDispatchAttemptModel,
+            race_attempt.attempt_id,
+        )
+        raced_ledger = list(
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.operation_key == race_begun.record_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert raced is not None
+    assert raced.state in {"dispatch_claimed", "returned_error"}
+    assert raced.debit_refunded_at is None
+    assert raced.budget_released_at is None
+    assert [row.action for row in raced_ledger] == ["debit"]
+    if raced.state == "dispatch_claimed":
+        assert raced.dispatch_claim_hash is not None
+        assert raced.completed_at is None
+    else:
+        assert raced.dispatch_claim_hash is None
+        assert raced.dispatched_at is None
+        assert raced.completed_at is not None
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_approval_consumption_and_remote_prepare_are_atomic_in_postgres() -> None:
+    _require_opted_in_postgres()
+    suffix = uuid.uuid4().hex[:12]
+    tool_name = f"partner-approval-atomic-pg-{suffix}"
+    idempotency_key = f"partner-approval-atomic-pg-{suffix}"
+    approval_id = f"approval-atomic-pg-{suffix}"
+    credits = Decimal("1.5")
+    arguments = {"message": suffix}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        provisioned = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key=f"permit-approval-atomic-{suffix}",
+            requires_human_approval=True,
+        )
+
+    request_payload = {
+        "tool_name": tool_name,
+        "arguments": arguments,
+        "wallet_id": provisioned["agent_wallet_id"],
+        "permit_id": permit["permit_id"],
+    }
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key=idempotency_key,
+        request_payload=request_payload,
+        operation_kind="upstream_mcp",
+    )
+    approval_time = utc_now()
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            session.add(
+                HumanApprovalModel(
+                    approval_id=approval_id,
+                    wallet_id=provisioned["agent_wallet_id"],
+                    permit_id=permit["permit_id"],
+                    tool=tool_name,
+                    idempotency_key=idempotency_key,
+                    request_hash=invoke_request_hash(
+                        tool_name,
+                        arguments,
+                        credits,
+                    ),
+                    status="approved",
+                    simulated=True,
+                    requested_at=approval_time,
+                    expires_at=approval_time + timedelta(minutes=5),
+                    decided_at=approval_time,
+                )
+            )
+
+    kwargs = {
+        "idempotency_record_id": begun.record_id,
+        "wallet_id": provisioned["agent_wallet_id"],
+        "permit_id": permit["permit_id"],
+        "approval_id": approval_id,
+        "key_id": provisioned["key_id"],
+        "public_tool_id": tool_name,
+        "upstream_tool_name": "partner.write",
+        "upstream_origin": "https://partner.example",
+        "request_hash": begun.request_hash,
+        "credits_authorized": credits,
+        "arguments": arguments,
+    }
+    first, second = await asyncio.gather(
+        McpDispatchAttemptService().authorize_reserve_and_prepare(**kwargs),
+        McpDispatchAttemptService().authorize_reserve_and_prepare(**kwargs),
+    )
+
+    assert first[0].allowed is True
+    assert second[0].allowed is True
+    assert first[1] is not None and second[1] is not None
+    assert first[1].attempt_id == second[1].attempt_id
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+        attempts = (
+            (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id == begun.record_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert approval is not None and approval.status == "consumed"
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == credits
+    assert len(attempts) == 1
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_late_approval_cannot_forge_timely_evidence_in_postgres() -> None:
+    _require_opted_in_postgres()
+    suffix = uuid.uuid4().hex[:12]
+    tool_name = f"partner-approval-clock-pg-{suffix}"
+    idempotency_key = f"partner-approval-clock-pg-{suffix}"
+    approval_id = f"approval-clock-pg-{suffix}"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        provisioned = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key=f"permit-approval-clock-{suffix}",
+            requires_human_approval=True,
+        )
+
+    now = utc_now()
+    approval = HumanApprovalModel(
+        approval_id=approval_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool=tool_name,
+        idempotency_key=idempotency_key,
+        request_hash=invoke_request_hash(tool_name, {}, Decimal("1.5")),
+        status="pending",
+        simulated=False,
+        requested_at=now - timedelta(minutes=10),
+        expires_at=now - timedelta(minutes=5),
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            session.add(approval)
+
+    # This detached timestamp would have passed the former worker-authored
+    # predicate even though PostgreSQL's clock is already past the deadline.
+    approval.status = "approved"
+    approval.decided_at = now - timedelta(minutes=9)
+    approval.decided_by = "late-reviewer"
+    service = HumanApprovalService()
+
+    assert await service._persist_decision(approval) is False
+    assert await service._consume(approval_id) is False
+    async with factory() as session:
+        stored = await session.get(HumanApprovalModel, approval_id)
+    assert stored is not None
+    assert stored.status == "expired"
+    assert stored.decided_at is not None
+    assert stored.decided_at >= stored.expires_at
+
+
+@pytest.mark.asyncio(loop_scope="session")
 async def test_concurrent_dispatch_reconcilers_create_one_signed_audit_in_postgres(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1254,7 +1940,7 @@ async def test_concurrent_dispatch_reconcilers_create_one_signed_audit_in_postgr
         ledger_entry_id=charge.entry_id,
         credits_charged=credits,
     )
-    await dispatch.mark_dispatched(attempt.attempt_id)
+    await dispatch.claim_dispatch(attempt.attempt_id)
     terminal = await dispatch.complete(
         attempt_id=attempt.attempt_id,
         state="succeeded",

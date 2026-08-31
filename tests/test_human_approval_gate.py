@@ -135,12 +135,16 @@ class DedupSentinel:
     def __init__(self) -> None:
         self.by_key: dict[str, str] = {}
         self.creates: list[tuple[str, dict]] = []
+        self.status = "pending"
 
     async def create_approval(self, **kwargs):
         key = kwargs["idempotency_key"]
         self.creates.append((key, kwargs["arguments"]))
         action = self.by_key.setdefault(key, f"act_{len(self.by_key)}")
-        return {"action_id": action, "status": "pending"}
+        payload = {"action_id": action, "status": self.status}
+        if self.status in {"approved", "rejected"}:
+            payload["decided_by"] = "reviewer@example.com"
+        return payload
 
     async def get_approval(self, action_id):
         return {"action_id": action_id, "status": "pending"}
@@ -411,6 +415,11 @@ async def test_pending_then_approved_full_loop(
     assert receipt["approval_id"] == error["data"]["approval_id"]
     assert receipt["ledger_entry_id"]
     assert await _ledger_debits(client, provisioned["agent_wallet_id"]) == 1
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, receipt["approval_id"])
+    assert approval is not None
+    assert approval.decided_at is not None
 
     # The receipt (with approval_id in its signed payload) verifies.
     verify = await client.post(
@@ -498,7 +507,15 @@ async def test_locally_expired_approval_denies(
         await session.commit()
 
     # Even though Sentinel would now say "approved", local expiry wins —
-    # the check runs before any remote poll.
+    # the database check runs before any remote poll. Simulate a worker clock
+    # stuck before the deadline; it must not be able to author timely-looking
+    # approval evidence after the database deadline.
+    monkeypatch.setattr(
+        human_approval_module,
+        "utc_now",
+        lambda: datetime(1999, 1, 1),
+        raising=False,
+    )
     fake.status = "approved"
     denied = await client.post(
         "/mcp/messages", json=body, headers=provisioned["agent_headers"]
@@ -612,6 +629,146 @@ async def test_tampering_with_receipt_approval_id_invalidates_signature(
 # ---------------------------------------------------------------------------
 # Service-level unit coverage
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_service_can_defer_approval_consumption_for_atomic_dispatch_prepare(
+    clean_database, fresh_service, monkeypatch, client
+):
+    _sentinel_env(monkeypatch, simulated=True)
+    provisioned = await provision_agent_wallet(client)
+    permit = await _approval_permit(client, provisioned, idem_key="defer-permit-1")
+
+    check = await fresh_service.ensure_approval(
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=TOOL,
+        idempotency_key="defer-invoke-1",
+        arguments={},
+        estimated_credits=Decimal("2"),
+        consume_immediately=False,
+    )
+
+    assert check.status == "approved"
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, check.approval_id)
+    assert approval is not None and approval.status == "approved"
+
+
+@pytest.mark.anyio
+async def test_observed_approval_remains_durable_after_decision_deadline(
+    clean_database, fresh_service, monkeypatch, client
+):
+    _sentinel_env(monkeypatch, simulated=True)
+    provisioned = await provision_agent_wallet(client)
+    permit = await _approval_permit(
+        client,
+        provisioned,
+        idem_key="approval-execution-lease-permit",
+    )
+
+    check = await fresh_service.ensure_approval(
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=TOOL,
+        idempotency_key="approval-execution-lease-invoke",
+        arguments={},
+        estimated_credits=Decimal("2"),
+        consume_immediately=False,
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, check.approval_id)
+    assert approval is not None
+    assert approval.decided_at is not None
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    approval.requested_at = now - timedelta(minutes=4)
+    approval.decided_at = now - timedelta(minutes=3)
+    approval.expires_at = now - timedelta(minutes=2)
+    await fresh_service._persist(approval)
+
+    reloaded = await fresh_service.ensure_approval(
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=TOOL,
+        idempotency_key="approval-execution-lease-invoke",
+        arguments={},
+        estimated_credits=Decimal("2"),
+        consume_immediately=False,
+    )
+    assert reloaded.status == "approved"
+
+
+def test_decision_parser_does_not_author_timestamp():
+    approval = HumanApprovalModel(
+        approval_id="appr-late-decision",
+        wallet_id="agt-late-decision",
+        permit_id="permit-late-decision",
+        tool=TOOL,
+        idempotency_key="late-decision-invoke",
+        request_hash="a" * 64,
+        status="pending",
+        simulated=False,
+        requested_at=datetime(1999, 1, 1),
+        expires_at=datetime(2000, 1, 1),
+    )
+
+    HumanApprovalService._apply_decision(
+        approval,
+        {"status": "approved", "decided_by": "late-reviewer"},
+    )
+
+    assert approval.status == "approved"
+    assert approval.decided_by == "late-reviewer"
+    assert approval.decided_at is None
+
+
+@pytest.mark.anyio
+async def test_first_create_long_poll_uses_database_clock(
+    clean_database,
+    fresh_service,
+    monkeypatch,
+    client,
+):
+    settings = _sentinel_env(monkeypatch, simulated=False)
+    monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 1.0)
+    fake = FakeSentinel(status="approved")
+    monkeypatch.setattr(fresh_service, "_sentinel", lambda: fake)
+    # This was the former authority clock. A first-create long-poll decision
+    # must still be bounded and stamped by the database's current UTC time.
+    monkeypatch.setattr(
+        human_approval_module,
+        "utc_now",
+        lambda: datetime(1999, 1, 1),
+        raising=False,
+    )
+
+    provisioned = await provision_agent_wallet(client)
+    permit = await _approval_permit(
+        client,
+        provisioned,
+        idem_key="db-clock-long-poll-permit",
+    )
+    check = await fresh_service.ensure_approval(
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=TOOL,
+        idempotency_key="db-clock-long-poll-invoke",
+        arguments={},
+        estimated_credits=Decimal("2"),
+        consume_immediately=False,
+    )
+
+    assert check.status == "approved"
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, check.approval_id)
+    assert approval is not None
+    assert approval.decided_at is not None
+    assert datetime(2020, 1, 1) < approval.requested_at
+    assert approval.requested_at <= approval.decided_at < approval.expires_at
 
 
 @pytest.mark.anyio
@@ -980,11 +1137,10 @@ async def test_sentinel_idempotency_key_is_deterministic_per_invoke(
 
 
 @pytest.mark.anyio
-async def test_consume_is_single_winner(
+async def test_consume_is_single_winner_after_decision_deadline(
     clean_database, fresh_service, monkeypatch, client
 ):
-    """Unit: an approved, unexpired approval consumes exactly once; an expired
-    one never consumes."""
+    """A timely approved authority stays consumable, but only once."""
     from datetime import datetime
 
     from app.db.models import HumanApprovalModel
@@ -1007,6 +1163,7 @@ async def test_consume_is_single_winner(
                 request_hash="x",
                 requested_at=datetime(2026, 1, 1),
                 expires_at=datetime(2999, 1, 1),
+                decided_at=datetime(2026, 1, 2),
             )
         )
         session.add(
@@ -1020,13 +1177,75 @@ async def test_consume_is_single_winner(
                 request_hash="x",
                 requested_at=datetime(2000, 1, 1),
                 expires_at=datetime(2000, 1, 2),
+                decided_at=datetime(2000, 1, 1, 12),
             )
         )
+        for approval_id, requested_at, expires_at, decided_at in (
+            (
+                "appr-consume-missing-decision",
+                datetime(2026, 1, 1),
+                datetime(2026, 1, 2),
+                None,
+            ),
+            (
+                "appr-consume-before-request",
+                datetime(2026, 1, 2),
+                datetime(2026, 1, 3),
+                datetime(2026, 1, 1),
+            ),
+            (
+                "appr-consume-at-deadline",
+                datetime(2026, 1, 1),
+                datetime(2026, 1, 2),
+                datetime(2026, 1, 2),
+            ),
+            (
+                "appr-consume-after-deadline",
+                datetime(2026, 1, 1),
+                datetime(2026, 1, 2),
+                datetime(2026, 1, 3),
+            ),
+        ):
+            session.add(
+                HumanApprovalModel(
+                    approval_id=approval_id,
+                    wallet_id=provisioned["agent_wallet_id"],
+                    permit_id=permit["permit_id"],
+                    tool=TOOL,
+                    idempotency_key=approval_id,
+                    status=APPROVAL_STATUS_APPROVED,
+                    request_hash="x",
+                    requested_at=requested_at,
+                    expires_at=expires_at,
+                    decided_at=decided_at,
+                )
+            )
         await session.commit()
 
     assert await fresh_service._consume("appr-consume-live") is True
     assert await fresh_service._consume("appr-consume-live") is False  # already spent
-    assert await fresh_service._consume("appr-consume-expired") is False  # window gone
+    assert await fresh_service._consume("appr-consume-expired") is True
+    assert await fresh_service._consume("appr-consume-expired") is False
+    for approval_id in (
+        "appr-consume-missing-decision",
+        "appr-consume-before-request",
+        "appr-consume-at-deadline",
+        "appr-consume-after-deadline",
+    ):
+        assert await fresh_service._consume(approval_id) is False
+
+    async with factory() as session:
+        invalid_statuses = []
+        for approval_id in (
+            "appr-consume-missing-decision",
+            "appr-consume-before-request",
+            "appr-consume-at-deadline",
+            "appr-consume-after-deadline",
+        ):
+            approval = await session.get(HumanApprovalModel, approval_id)
+            assert approval is not None
+            invalid_statuses.append(approval.status)
+    assert invalid_statuses == [APPROVAL_STATUS_APPROVED] * 4
 
 
 @pytest.mark.anyio
@@ -1059,6 +1278,7 @@ async def test_refresh_decision_does_not_revive_consumed_approval(
         sentinel_action_id="act_revive",
         requested_at=datetime(2026, 1, 1),
         expires_at=datetime(2999, 1, 1),
+        decided_at=datetime(2026, 1, 2),
     )
 
     factory = get_session_factory()
@@ -1085,14 +1305,10 @@ async def test_refresh_decision_does_not_revive_consumed_approval(
 
 
 @pytest.mark.anyio
-async def test_transient_create_with_different_args_gets_separate_approval(
+async def test_transient_create_cannot_rebind_different_args(
     client, clean_database, registered_tool, fresh_service, monkeypatch
 ):
-    """Codex P1: if Sentinel commits a create but the response is lost before
-    the local binding is persisted, a retry with the SAME idempotency key but
-    DIFFERENT arguments must not dedup onto the human's original approval. The
-    request hash is part of the provider key, so the differing-args retry gets
-    its own approval — the human never reviews args they didn't approve."""
+    """A provider commit before action binding cannot reset request identity."""
 
     from app.services.human_approval import invoke_request_hash
 
@@ -1103,19 +1319,18 @@ async def test_transient_create_with_different_args_gets_separate_approval(
     dedup = DedupSentinel()
     monkeypatch.setattr(fresh_service, "_sentinel", lambda: dedup)
 
-    # Attempt 1 (args X): Sentinel commits the create, then the local persist
-    # fails — the lost-response / crash-before-binding window. No binding row is
-    # written, and the gate catch-all fails closed and releases the key.
+    # The request/deadline row is durable before Sentinel is called. Simulate
+    # Sentinel committing and then action binding failing locally.
     calls = {"n": 0}
-    real_persist = fresh_service._persist
+    real_bind = fresh_service._persist_sentinel_action
 
-    async def flaky_persist(model):
+    async def flaky_bind(model, action_id):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("lost response after sentinel create")
-        return await real_persist(model)
+        return await real_bind(model, action_id)
 
-    monkeypatch.setattr(fresh_service, "_persist", flaky_persist)
+    monkeypatch.setattr(fresh_service, "_persist_sentinel_action", flaky_bind)
 
     body_x = _invoke_body(provisioned, permit, "transient-1")
     body_x["params"]["arguments"] = {"text": "X the human reviews"}
@@ -1124,29 +1339,178 @@ async def test_transient_create_with_different_args_gets_separate_approval(
     )
     assert r1.json()["error"]["code"] == -32005
 
-    # Attempt 2: SAME idempotency key, args Y. Persist now succeeds.
+    # The same invocation key with different arguments is rejected from the
+    # durable X binding before another provider request can be sent.
     body_y = _invoke_body(provisioned, permit, "transient-1")
     body_y["params"]["arguments"] = {"text": "Y never reviewed"}
     r2 = await client.post(
         "/mcp/messages", json=body_y, headers=provisioned["agent_headers"]
     )
-    assert r2.json()["error"]["message"] == "human_approval_pending"
+    assert r2.json()["error"]["message"] == "human_approval_request_mismatch"
 
-    # The two attempts sent DIFFERENT provider keys and got DIFFERENT approvals,
-    # so Y is never bound to X's human decision.
+    # Y is never sent to Sentinel or bound to X's human decision.
     keys = {k for k, _ in dedup.creates}
-    assert len(keys) == 2, dedup.creates
+    assert len(keys) == 1, dedup.creates
     x_hash = invoke_request_hash(TOOL, {"text": "X the human reviews"}, Decimal("2"))
     y_hash = invoke_request_hash(TOOL, {"text": "Y never reviewed"}, Decimal("2"))
     assert x_hash != y_hash
 
 
 @pytest.mark.anyio
-async def test_transient_create_with_different_price_gets_separate_approval(
+async def test_provider_commit_retry_binds_same_action_without_resetting_deadline(
+    client,
+    clean_database,
+    fresh_service,
+    monkeypatch,
+):
+    _sentinel_env(monkeypatch, simulated=False)
+    provisioned = await provision_agent_wallet(client)
+    permit = await _approval_permit(
+        client,
+        provisioned,
+        idem_key="provider-bind-retry-permit",
+    )
+    dedup = DedupSentinel()
+    monkeypatch.setattr(fresh_service, "_sentinel", lambda: dedup)
+    real_bind = fresh_service._persist_sentinel_action
+    binding_failed = False
+
+    async def fail_first_bind(model, action_id):
+        nonlocal binding_failed
+        if not binding_failed:
+            binding_failed = True
+            raise RuntimeError("crash_after_provider_commit")
+        return await real_bind(model, action_id)
+
+    monkeypatch.setattr(
+        fresh_service,
+        "_persist_sentinel_action",
+        fail_first_bind,
+    )
+    kwargs = {
+        "wallet_id": provisioned["agent_wallet_id"],
+        "permit_id": permit["permit_id"],
+        "tool_name": TOOL,
+        "idempotency_key": "provider-bind-retry-invoke",
+        "arguments": {},
+        "estimated_credits": Decimal("2"),
+        "consume_immediately": False,
+    }
+
+    with pytest.raises(RuntimeError, match="crash_after_provider_commit"):
+        await fresh_service.ensure_approval(**kwargs)
+    pending = await fresh_service._load(
+        wallet_id=kwargs["wallet_id"],
+        permit_id=kwargs["permit_id"],
+        tool_name=TOOL,
+        idempotency_key=kwargs["idempotency_key"],
+    )
+    assert pending is not None
+    original_window = (pending.requested_at, pending.expires_at)
+
+    check = await fresh_service.ensure_approval(**kwargs)
+
+    assert check.status == "pending"
+    assert len(dedup.creates) == 2
+    assert dedup.creates[0][0] == dedup.creates[1][0]
+    rebound = await fresh_service._load(
+        wallet_id=kwargs["wallet_id"],
+        permit_id=kwargs["permit_id"],
+        tool_name=TOOL,
+        idempotency_key=kwargs["idempotency_key"],
+    )
+    assert rebound is not None
+    assert rebound.sentinel_action_id == "act_0"
+    assert (rebound.requested_at, rebound.expires_at) == original_window
+
+
+@pytest.mark.anyio
+async def test_provider_commit_retry_cannot_reset_original_deadline(
+    client,
+    clean_database,
+    fresh_service,
+    monkeypatch,
+):
+    _sentinel_env(monkeypatch, simulated=False)
+    provisioned = await provision_agent_wallet(client)
+    permit = await _approval_permit(
+        client,
+        provisioned,
+        idem_key="provider-commit-deadline-permit",
+    )
+    dedup = DedupSentinel()
+    monkeypatch.setattr(fresh_service, "_sentinel", lambda: dedup)
+    real_bind = fresh_service._persist_sentinel_action
+    binding_failed = False
+
+    async def fail_first_bind(model, action_id):
+        nonlocal binding_failed
+        if not binding_failed:
+            binding_failed = True
+            raise RuntimeError("crash_after_provider_commit")
+        return await real_bind(model, action_id)
+
+    monkeypatch.setattr(
+        fresh_service,
+        "_persist_sentinel_action",
+        fail_first_bind,
+    )
+    kwargs = {
+        "wallet_id": provisioned["agent_wallet_id"],
+        "permit_id": permit["permit_id"],
+        "tool_name": TOOL,
+        "idempotency_key": "provider-commit-deadline-invoke",
+        "arguments": {},
+        "estimated_credits": Decimal("2"),
+        "consume_immediately": False,
+    }
+
+    with pytest.raises(RuntimeError, match="crash_after_provider_commit"):
+        await fresh_service.ensure_approval(**kwargs)
+
+    pending = await fresh_service._load(
+        wallet_id=kwargs["wallet_id"],
+        permit_id=kwargs["permit_id"],
+        tool_name=TOOL,
+        idempotency_key=kwargs["idempotency_key"],
+    )
+    assert pending is not None
+    assert pending.status == "pending"
+    assert pending.sentinel_action_id is None
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    original_requested_at = now - timedelta(minutes=10)
+    original_expires_at = now - timedelta(minutes=1)
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            stored = await session.get(HumanApprovalModel, pending.approval_id)
+            assert stored is not None
+            stored.requested_at = original_requested_at
+            stored.expires_at = original_expires_at
+            session.add(stored)
+
+    dedup.status = "approved"
+    check = await fresh_service.ensure_approval(**kwargs)
+
+    assert check.status == "expired"
+    assert len(dedup.creates) == 1
+    async with factory() as session:
+        expired = await session.get(HumanApprovalModel, pending.approval_id)
+    assert expired is not None
+    assert expired.status == "expired"
+    assert expired.sentinel_action_id is None
+    assert expired.requested_at == original_requested_at
+    assert expired.expires_at == original_expires_at
+    assert expired.decided_at is not None
+    assert expired.decided_at >= expired.expires_at
+    assert await fresh_service._consume(expired.approval_id) is False
+
+
+@pytest.mark.anyio
+async def test_transient_create_cannot_rebind_different_price(
     client, clean_database, registered_tool, fresh_service, monkeypatch
 ):
-    """If Sentinel commits a create before local persistence fails, a retry
-    at a different price must use a distinct provider key and approval."""
+    """A price change cannot reset a durable pre-provider request binding."""
     _sentinel_env(monkeypatch, simulated=False)
     provisioned = await provision_agent_wallet(client)
     permit = await _approval_permit(
@@ -1157,15 +1521,15 @@ async def test_transient_create_with_different_price_gets_separate_approval(
     monkeypatch.setattr(fresh_service, "_sentinel", lambda: dedup)
 
     calls = {"n": 0}
-    real_persist = fresh_service._persist
+    real_bind = fresh_service._persist_sentinel_action
 
-    async def flaky_persist(model):
+    async def flaky_bind(model, action_id):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("lost response after sentinel create")
-        return await real_persist(model)
+        return await real_bind(model, action_id)
 
-    monkeypatch.setattr(fresh_service, "_persist", flaky_persist)
+    monkeypatch.setattr(fresh_service, "_persist_sentinel_action", flaky_bind)
 
     body = _invoke_body(provisioned, permit, "transient-price-1")
     first = await client.post(
@@ -1180,10 +1544,9 @@ async def test_transient_create_with_different_price_gets_separate_approval(
     second = await client.post(
         "/mcp/messages", json=body, headers=provisioned["agent_headers"]
     )
-    assert second.json()["error"]["message"] == "human_approval_pending"
+    assert second.json()["error"]["message"] == "human_approval_request_mismatch"
 
     assert [created[1]["estimated_credits"] for created in dedup.creates] == [
         "2.0",
-        "20.0",
     ]
-    assert len({created[0] for created in dedup.creates}) == 2, dedup.creates
+    assert len({created[0] for created in dedup.creates}) == 1, dedup.creates

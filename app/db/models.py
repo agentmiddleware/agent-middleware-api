@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Column, Index, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Column, Index, Text, UniqueConstraint, text
 from sqlmodel import SQLModel, Field
 
 from app.core.time import utc_now
@@ -847,7 +847,9 @@ class HumanApprovalModel(SQLModel, table=True):
     names the invoke attempt, so retries with the same key re-check the same
     approval instead of paging a human again. Sentinel never expires an
     approval server-side (a timed-out approval stays "pending" there), so
-    ``expires_at`` is enforced here.
+    ``expires_at`` is enforced here as the decision-observation deadline. A
+    timely recorded approval remains single-use authority until the exact
+    invocation consumes it or its permit fails revalidation.
     """
 
     __tablename__ = "human_approvals"
@@ -1028,6 +1030,55 @@ class IdempotencyRecordModel(SQLModel, table=True):
     ledger_entry_id: Optional[str] = Field(default=None, max_length=64, index=True)
 
 
+class PermitCallReservationModel(SQLModel, table=True):
+    """Durable call-slot reservation for one governed local invocation."""
+
+    __tablename__ = "permit_call_reservations"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('reserved', 'consumed', 'released')",
+            name="ck_permit_call_reservations_state",
+        ),
+        CheckConstraint(
+            "(state = 'reserved' AND execution_started_at IS NULL "
+            "AND released_at IS NULL) OR "
+            "(state = 'consumed' AND execution_started_at IS NOT NULL "
+            "AND released_at IS NULL) OR "
+            "(state = 'released' AND execution_started_at IS NULL "
+            "AND released_at IS NOT NULL)",
+            name="ck_permit_call_reservations_lifecycle",
+        ),
+        Index(
+            "ix_permit_call_reservations_permit_tool_state",
+            "permit_id",
+            "tool",
+            "state",
+        ),
+    )
+
+    # One reservation exists for one logical invocation. Using the durable
+    # idempotency identity as the primary key makes duplicate reservation
+    # creation a database-level conflict rather than an application convention.
+    idempotency_record_id: str = Field(
+        primary_key=True,
+        max_length=64,
+        foreign_key="idempotency_records.record_id",
+    )
+    wallet_id: str = Field(max_length=50, foreign_key="wallets.wallet_id")
+    permit_id: str = Field(max_length=64, foreign_key="permits.permit_id")
+    tool: str = Field(max_length=128)
+    request_hash: str = Field(max_length=64)
+    credits_authorized: Decimal = Field(max_digits=20, decimal_places=8)
+    # reserved | consumed | released
+    state: str = Field(default="reserved", max_length=16)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    execution_started_at: Optional[datetime] = Field(default=None)
+    released_at: Optional[datetime] = Field(default=None)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
 class McpDispatchAttemptModel(SQLModel, table=True):
     """Durable state for one governed dispatch to an upstream MCP server."""
 
@@ -1069,6 +1120,10 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     credits_authorized: Decimal = Field(decimal_places=8)
     credits_charged: Decimal = Field(default=Decimal("0"), decimal_places=8)
     state: str = Field(default="prepared", max_length=32, index=True)
+    # Hash of an ephemeral, process-local dispatch claim. The raw claim is
+    # never persisted or accepted from callers; losing it makes the dispatch
+    # authority permanently non-reacquirable.
+    dispatch_claim_hash: Optional[str] = Field(default=None, max_length=64)
     # Canonical JSON is capped by McpDispatchAttemptService before persistence.
     result_json: Optional[str] = Field(
         default=None,

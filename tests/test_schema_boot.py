@@ -77,6 +77,7 @@ async def test_init_db_sqlite_non_prod_uses_create_all(tmp_path, monkeypatch):
     assert "permits" in tables
     assert "receipts" in tables
     assert "idempotency_records" in tables
+    assert "permit_call_reservations" in tables
     # create_all does not create alembic_version
     assert "alembic_version" not in tables
 

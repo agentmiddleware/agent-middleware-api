@@ -2,12 +2,45 @@
 
 import asyncio
 import os
+from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
+
+
+def test_crash_proof_preflights_database_before_running_migrations():
+    recipe = (
+        Path("Makefile")
+        .read_text(encoding="utf-8")
+        .split("prove-crash-recovery:", 1)[1]
+        .split("\ndemo-trust-plane:", 1)[0]
+    )
+
+    preflight = "python -m tests.support.mcp_stress_preflight"
+    assert preflight in recipe
+    assert recipe.index(preflight) < recipe.index("alembic upgrade head")
+    assert "MCP_STRESS_DB_ISOLATED=1" not in recipe
+    assert "MCP_STRESS_EXPECTED_DATABASE_NAME=" not in recipe
+    assert "STATE_BACKEND=postgres" not in recipe
+    assert "ENVIRONMENT=test" not in recipe
+
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    ci_recipe = workflow.split("  postgres_permit_concurrency:", 1)[1].split(
+        "\n  secret_scan:",
+        1,
+    )[0]
+    uv_install = "pip install pytest pytest-asyncio uv"
+    crash_proof = "run: make prove-crash-recovery"
+    concurrency_proof = "pytest tests/test_permit_postgres_concurrency.py"
+    assert ci_recipe.index(uv_install) < ci_recipe.index(crash_proof)
+    assert ci_recipe.index(crash_proof) < ci_recipe.index(concurrency_proof)
+    assert "MCP_STRESS_EXPECTED_DATABASE_NAME: agent_middleware_permit_test" in (
+        ci_recipe
+    )
+    assert "alembic upgrade head" not in ci_recipe
 
 
 def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
@@ -34,6 +67,7 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         "permits",
         "receipts",
         "idempotency_records",
+        "permit_call_reservations",
         "mcp_dispatch_attempts",
         "human_approvals",
     } <= tables
@@ -60,6 +94,7 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         "approval_id",
         "ledger_entry_id",
         "state",
+        "dispatch_claim_hash",
         "result_json",
         "result_size_bytes",
         "response_hash",
@@ -76,6 +111,84 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         and index["column_names"] == ["approval_id"]
         for index in dispatch_indexes
     )
+
+    reservation_columns = {
+        col["name"] for col in inspector.get_columns("permit_call_reservations")
+    }
+    assert {
+        "idempotency_record_id",
+        "wallet_id",
+        "permit_id",
+        "tool",
+        "request_hash",
+        "credits_authorized",
+        "state",
+        "created_at",
+        "updated_at",
+        "execution_started_at",
+        "released_at",
+    } == reservation_columns
+    reservation_primary_key = inspector.get_pk_constraint("permit_call_reservations")
+    assert reservation_primary_key["constrained_columns"] == ["idempotency_record_id"]
+    reservation_foreign_keys = inspector.get_foreign_keys("permit_call_reservations")
+    assert {
+        (tuple(foreign_key["constrained_columns"]), foreign_key["referred_table"])
+        for foreign_key in reservation_foreign_keys
+    } == {
+        (("idempotency_record_id",), "idempotency_records"),
+        (("wallet_id",), "wallets"),
+        (("permit_id",), "permits"),
+    }
+    reservation_indexes = inspector.get_indexes("permit_call_reservations")
+    assert any(
+        index["name"] == "ix_permit_call_reservations_permit_tool_state"
+        and index["column_names"] == ["permit_id", "tool", "state"]
+        and not index["unique"]
+        for index in reservation_indexes
+    )
+    reservation_checks = inspector.get_check_constraints("permit_call_reservations")
+    state_check = next(
+        check
+        for check in reservation_checks
+        if check["name"] == "ck_permit_call_reservations_state"
+    )
+    assert all(
+        state in state_check["sqltext"]
+        for state in ("reserved", "consumed", "released")
+    )
+    lifecycle_check = next(
+        check
+        for check in reservation_checks
+        if check["name"] == "ck_permit_call_reservations_lifecycle"
+    )
+    assert "execution_started_at IS NOT NULL" in lifecycle_check["sqltext"]
+    assert "released_at IS NOT NULL" in lifecycle_check["sqltext"]
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO permit_call_reservations (
+                        idempotency_record_id,
+                        wallet_id,
+                        permit_id,
+                        tool,
+                        request_hash,
+                        credits_authorized,
+                        state
+                    ) VALUES (
+                        'idm-invalid-reservation-state',
+                        'wallet-invalid-reservation-state',
+                        'permit-invalid-reservation-state',
+                        'invalid-reservation-tool',
+                        :request_hash,
+                        1,
+                        'unknown'
+                    )
+                    """
+                ),
+                {"request_hash": "a" * 64},
+            )
 
     wallet_columns = {col["name"] for col in inspector.get_columns("wallets")}
     assert {
@@ -106,6 +219,190 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
 
     engine.dispose()
     os.remove(db_path)
+
+
+def test_dispatch_claim_fence_preserves_legacy_rows_and_downgrades(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "dispatch-claim-fence.db"
+    async_url = f"sqlite+aiosqlite:///{db_path}"
+    sync_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    config = Config("alembic.ini")
+    command.upgrade(config, "032_receipt_reason_code")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+    engine = create_engine(sync_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO mcp_dispatch_attempts (
+                    attempt_id, idempotency_record_id, wallet_id, permit_id,
+                    public_tool_id, upstream_tool_name, upstream_origin,
+                    request_hash, ledger_entry_id, credits_authorized,
+                    credits_charged, state, dispatched_at
+                ) VALUES (
+                    'dsp-legacy-claim', 'idm-legacy-claim', 'agt-legacy-claim',
+                    'permit-legacy-claim', 'partner.legacy', 'partner_legacy',
+                    'https://partner.example', :request_hash,
+                    'led-legacy-claim', 1, 1, 'dispatched', CURRENT_TIMESTAMP
+                )
+                """
+            ),
+            {"request_hash": "a" * 64},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO human_approvals (
+                    approval_id, wallet_id, permit_id, tool, idempotency_key,
+                    status, simulated, requested_at, expires_at, decided_at,
+                    request_hash, reason
+                ) VALUES (
+                    'appr-expired-before-033', 'agt-expired-before-033',
+                    'permit-expired-before-033', 'partner.expired',
+                    'invoke-expired-before-033', 'approved', 0,
+                    '1999-01-01 00:00:00', '2000-01-01 00:00:00',
+                    '1999-01-02 00:00:00', :request_hash, 'old-approved'
+                ), (
+                    'appr-live-before-033', 'agt-live-before-033',
+                    'permit-live-before-033', 'partner.live',
+                    'invoke-live-before-033', 'approved', 0,
+                    CURRENT_TIMESTAMP, '2999-01-01 00:00:00',
+                    CURRENT_TIMESTAMP, :request_hash, 'old-approved'
+                ), (
+                    'appr-pending-before-033', 'agt-pending-before-033',
+                    'permit-pending-before-033', 'partner.pending',
+                    'invoke-pending-before-033', 'pending', 0,
+                    CURRENT_TIMESTAMP, '2999-01-01 00:00:00',
+                    NULL, :request_hash, 'pending_reason'
+                ), (
+                    'appr-rejected-before-033', 'agt-rejected-before-033',
+                    'permit-rejected-before-033', 'partner.rejected',
+                    'invoke-rejected-before-033', 'rejected', 0,
+                    '1999-01-01 00:00:00', '2000-01-01 00:00:00',
+                    '1999-01-02 00:00:00', :request_hash, 'rejected_reason'
+                ), (
+                    'appr-consumed-before-033', 'agt-consumed-before-033',
+                    'permit-consumed-before-033', 'partner.consumed',
+                    'invoke-consumed-before-033', 'consumed', 0,
+                    '1999-01-01 00:00:00', '2000-01-01 00:00:00',
+                    '1999-01-02 00:00:00', :request_hash, 'consumed_reason'
+                )
+                """
+            ),
+            {"request_hash": "c" * 64},
+        )
+    engine.dispose()
+
+    command.upgrade(config, "033_mcp_dispatch_claim_fence")
+    engine = create_engine(sync_url)
+    columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("mcp_dispatch_attempts")
+    }
+    assert columns["dispatch_claim_hash"]["nullable"] is True
+    with engine.begin() as connection:
+        # A pre-fence worker can still write its old column shape after the
+        # migration. Semantic overlap is fenced by the new ``dispatch_claimed``
+        # state, not by making this additive column mandatory.
+        connection.execute(
+            text(
+                """
+                INSERT INTO mcp_dispatch_attempts (
+                    attempt_id, idempotency_record_id, wallet_id, permit_id,
+                    public_tool_id, upstream_tool_name, upstream_origin,
+                    request_hash, credits_authorized, credits_charged, state
+                ) VALUES (
+                    'dsp-old-worker', 'idm-old-worker', 'agt-old-worker',
+                    'permit-old-worker', 'partner.old', 'partner_old',
+                    'https://partner.example', :request_hash,
+                    1, 0, 'prepared'
+                )
+                """
+            ),
+            {"request_hash": "b" * 64},
+        )
+        legacy_hash = connection.execute(
+            text(
+                """
+                SELECT dispatch_claim_hash
+                FROM mcp_dispatch_attempts
+                WHERE attempt_id = 'dsp-legacy-claim'
+                """
+            )
+        ).scalar_one()
+        old_worker_hash = connection.execute(
+            text(
+                """
+                SELECT dispatch_claim_hash
+                FROM mcp_dispatch_attempts
+                WHERE attempt_id = 'dsp-old-worker'
+                """
+            )
+        ).scalar_one()
+        approval_statuses = connection.execute(
+            text(
+                """
+                SELECT approval_id, status, reason
+                FROM human_approvals
+                WHERE approval_id LIKE 'appr-%-before-033'
+                ORDER BY approval_id
+                """
+            )
+        ).all()
+    assert legacy_hash is None
+    assert old_worker_hash is None
+    assert approval_statuses == [
+        (
+            "appr-consumed-before-033",
+            "consumed",
+            "consumed_reason",
+        ),
+        (
+            "appr-expired-before-033",
+            "expired",
+            "approval_protocol_upgrade",
+        ),
+        (
+            "appr-live-before-033",
+            "expired",
+            "approval_protocol_upgrade",
+        ),
+        (
+            "appr-pending-before-033",
+            "expired",
+            "approval_protocol_upgrade",
+        ),
+        (
+            "appr-rejected-before-033",
+            "rejected",
+            "rejected_reason",
+        ),
+    ]
+    engine.dispose()
+
+    command.downgrade(config, "032_receipt_reason_code")
+    engine = create_engine(sync_url)
+    assert "dispatch_claim_hash" not in {
+        column["name"]
+        for column in inspect(engine).get_columns("mcp_dispatch_attempts")
+    }
+    with engine.begin() as connection:
+        downgraded_approval_statuses = connection.execute(
+            text(
+                """
+                SELECT approval_id, status, reason
+                FROM human_approvals
+                WHERE approval_id LIKE 'appr-%-before-033'
+                ORDER BY approval_id
+                """
+            )
+        ).all()
+    assert downgraded_approval_statuses == approval_statuses
+    engine.dispose()
 
 
 def test_governed_persistence_migration_backfills_only_unambiguous_receipts(

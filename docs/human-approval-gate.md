@@ -51,13 +51,26 @@ One approval is created per `(wallet, permit, tool, idempotency_key)` — kept
 in the `human_approvals` table — so retries re-check the existing approval
 instead of paging a human again.
 
+The crash-safe approval→budget→attempt transition is currently proved only
+for the governed **upstream MCP** backend. The local callable backend still
+consumes approval and reserves permit budget in separate transactions; a
+worker death between them can strand consumed authority. Do not use
+approval-gated local callables for consequential pilots until local execution
+has its own durable invocation/claim state.
+
 ## Expiry is enforced here, not in Sentinel
 
 Sentinel's `timeout_seconds` only expires its magic-link tokens; a timed-out
-approval stays `"pending"` in its API forever. The middleware stamps
-`expires_at = requested_at + SENTINEL_APPROVAL_TIMEOUT_SECONDS` on each
-approval and checks it **before** polling Sentinel, so a decision that
-arrives after the window is not honored.
+approval stays `"pending"` in its API forever. The middleware samples the
+database UTC clock, stamps
+`expires_at = requested_at + SENTINEL_APPROVAL_TIMEOUT_SECONDS`, and performs
+the pending→approved transition only when that same database clock is still
+inside the window. The database also authors `decided_at`; worker clock skew
+cannot forge a timely decision. Once observed before the deadline, `approved`
+is durable until its exact request consumes it. The authority remains
+single-use, bound to tool + arguments + price, and the permit, key, policy,
+and budget are revalidated when execution resumes. This removes
+background-cleanup timing from crash-recovery correctness.
 
 ## Configuration
 
@@ -66,7 +79,7 @@ arrives after the window is not honored.
 | `SIMULATION_MODE_HUMAN_APPROVAL` | `true` | See fail-closed rules below |
 | `SENTINEL_API_URL` | empty | e.g. `https://api.pauseapi.app` |
 | `SENTINEL_API_KEY` | empty | Sentinel tenant key (`sk_live_…`) |
-| `SENTINEL_APPROVAL_TIMEOUT_SECONDS` | `300` | Local expiry; forwarded as Sentinel `timeout_seconds` (1..86400) |
+| `SENTINEL_APPROVAL_TIMEOUT_SECONDS` | `300` | Decision-observation deadline; forwarded as Sentinel `timeout_seconds` (1..86400) |
 | `SENTINEL_WAIT_SECONDS` | `0` | >0: long-poll Sentinel on first invoke for an instant decision (max 300) |
 | `SENTINEL_APPROVERS` | empty | Comma-separated (`email`, `mailto:`, `sms:+E164`); empty defers to Sentinel tenant defaults |
 | `SENTINEL_RISK_LEVEL` | `high` | `low\|medium\|high\|critical` |
@@ -96,7 +109,16 @@ simulated, `not_configured` without a URL, else a live probe of Sentinel's
 
 ## Railway rollout
 
-After deploying a build that includes migration `023_human_approval_gate`:
+Initial Sentinel configuration was introduced by migration
+`023_human_approval_gate`. Builds containing migration
+`033_mcp_dispatch_claim_fence` also change approval execution semantics and
+must use the pause/drain/orphan-check sequence in
+[`deploy-railway.md`](deploy-railway.md); mixed old/new workers are not safe
+for approval-gated upstream calls. The migration retires all pre-release
+`pending` and `approved` rows because their deadlines were authored under the
+older clock/expiry contract.
+
+After the applicable migration and drain sequence:
 
 ```bash
 railway variables set SENTINEL_API_URL=https://api.pauseapi.app

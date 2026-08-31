@@ -240,6 +240,51 @@ async def test_public_mcp_has_a_separate_global_backstop(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_bearer_rate_bucket_ignores_concurrent_api_key_header():
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    starlette_app = Starlette(routes=[Route("/v1/ping", ok)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        responses = [
+            await http.get(
+                "/v1/ping",
+                headers={
+                    "Authorization": "Bearer stable-signed-token",
+                    "X-API-Key": f"attacker-chosen-{index}",
+                },
+            )
+            for index in range(3)
+        ]
+
+    assert [response.status_code for response in responses] == [200, 200, 429]
+    assert len(limited._requests) == 1
+    assert all("stable-signed-token" not in key for key in limited._requests)
+
+
+@pytest.mark.anyio
+async def test_in_memory_rate_bucket_count_is_bounded_and_reclaims_expired():
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    limited = RateLimitMiddleware(
+        Starlette(routes=[Route("/v1/ping", ok)]),
+        requests_per_minute=10,
+        max_memory_buckets=3,
+    )
+    for index in range(6):
+        await limited._check_limit_in_memory(f"attacker-{index}", now=0)
+
+    assert len(limited._requests) == 3
+
+    await limited._check_limit_in_memory("legitimate-after-window", now=61)
+
+    assert list(limited._requests) == ["legitimate-after-window"]
+
+
+@pytest.mark.anyio
 async def test_test_key_bypass_is_disabled_in_production_like_environments(
     monkeypatch,
 ):

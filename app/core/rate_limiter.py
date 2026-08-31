@@ -6,11 +6,11 @@ Returns standard rate limit headers on every response.
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import logging
 import os
 import time
-from collections import defaultdict
 
 import redis.asyncio as redis
 from fastapi import Request, Response
@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 _PUBLIC_MCP_PATH = "/mcp/public"
 _PUBLIC_MCP_BUCKET_PREFIX = "route:mcp-public"
 _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER = 10
+_PRIVATE_BUCKET_PREFIX = "route:authenticated"
+_DEFAULT_MAX_MEMORY_BUCKETS = 10_000
 
 
 def _public_mcp_client_id(request: Request) -> str:
@@ -55,6 +57,19 @@ def _public_mcp_client_id(request: Request) -> str:
         return peer_host
 
 
+def _private_credential_bucket(request: Request) -> str:
+    """Hash the credential selected by the authentication precedence rules."""
+    authorization = request.headers.get("authorization")
+    if authorization is not None:
+        credential = f"authorization:{authorization}"
+    else:
+        api_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
+        credential = f"api-key:{api_key}"
+    digest = hashlib.sha256(credential.encode("utf-8")).hexdigest()
+    namespace = f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
+    return f"{namespace}:{_PRIVATE_BUCKET_PREFIX}:credential:{digest}"
+
+
 class RateLimiterUnavailable(RuntimeError):
     """Raised when Redis rate limiting is required but unavailable."""
 
@@ -69,7 +84,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     - X-RateLimit-Reset: seconds until the window resets
     """
 
-    def __init__(self, app, requests_per_minute: int | None = None):
+    def __init__(
+        self,
+        app,
+        requests_per_minute: int | None = None,
+        max_memory_buckets: int = _DEFAULT_MAX_MEMORY_BUCKETS,
+    ):
         super().__init__(app)
         self.limit = requests_per_minute or settings.RATE_LIMIT_PER_MINUTE
         self.window = 60.0  # seconds
@@ -78,8 +98,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._redis_lock = asyncio.Lock()
         self._redis_warned = False
 
-        # key -> list of timestamps
-        self._requests: dict[str, list[float]] = defaultdict(list)
+        # key -> list of timestamps. Invalid credentials reach this middleware
+        # before authentication, so the map must remain bounded even when a
+        # caller rotates a fresh bogus value on every request.
+        self._requests: dict[str, list[float]] = {}
+        self._overflow_requests: list[float] = []
+        self._max_memory_buckets = max(1, max_memory_buckets)
         self._lock = asyncio.Lock()
 
     def _fail_closed_on_redis_outage(self) -> bool:
@@ -170,24 +194,40 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window_start = now - self.window
 
         async with self._lock:
-            self._requests[bucket_key] = [
-                ts for ts in self._requests[bucket_key] if ts > window_start
-            ]
+            if (
+                bucket_key not in self._requests
+                and len(self._requests) >= self._max_memory_buckets
+            ):
+                expired = [
+                    key
+                    for key, timestamps in self._requests.items()
+                    if not any(ts > window_start for ts in timestamps)
+                ]
+                for key in expired:
+                    del self._requests[key]
 
-            current_count = len(self._requests[bucket_key])
+            overflow = (
+                bucket_key not in self._requests
+                and len(self._requests) >= self._max_memory_buckets
+            )
+            if overflow:
+                timestamps = [ts for ts in self._overflow_requests if ts > window_start]
+                self._overflow_requests = timestamps
+            else:
+                timestamps = [
+                    ts for ts in self._requests.get(bucket_key, []) if ts > window_start
+                ]
+                self._requests[bucket_key] = timestamps
+
+            current_count = len(timestamps)
             if current_count >= effective_limit:
-                oldest = (
-                    self._requests[bucket_key][0] if self._requests[bucket_key] else now
-                )
+                oldest = timestamps[0] if timestamps else now
                 reset_in = max(1, int(oldest + self.window - now) + 1)
                 return True, 0, reset_in
 
-            self._requests[bucket_key].append(now)
-            remaining = max(
-                0,
-                effective_limit - len(self._requests[bucket_key]),
-            )
-            oldest = self._requests[bucket_key][0]
+            timestamps.append(now)
+            remaining = max(0, effective_limit - len(timestamps))
+            oldest = timestamps[0]
             reset_in = max(1, int(oldest + self.window - now) + 1)
             return False, remaining, reset_in
 
@@ -216,7 +256,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 ),
             ]
         else:
-            bucket_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
+            bucket_key = _private_credential_bucket(request)
             bucket_limits = [(bucket_key, self.limit)]
 
         # Skip rate limiting for docs, health, and test clients
@@ -243,7 +283,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # so that large test suites don't self-throttle.
         if (
             not public_mcp_request
-            and bucket_key == "test-key"
+            and request.headers.get("authorization") is None
+            and request.headers.get(settings.API_KEY_HEADER) == "test-key"
             and not is_production_like_environment(settings.ENVIRONMENT)
         ):
             response = await call_next(request)

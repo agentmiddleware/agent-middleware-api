@@ -10,24 +10,32 @@
 
 ## What This API Does
 
-Agent Middleware API is a **governed MCP trust plane** for autonomous agents:
-scoped permits, metered tool invocation, signed receipts, and wallet audit chains.
+Agent Middleware API is a **transaction-integrity boundary for consequential
+autonomous actions**. On the supported upstream-MCP path, one logical action
+binds scoped authority and configured consumption to at most one gateway
+dispatch and debit, explicit `delivery_uncertain`, and linked gateway evidence.
+
+This is a durable gateway state machine, not one distributed ACID transaction
+or proof of the downstream effect. IAM, budget controls, receipts, and audit
+chains are supporting mechanisms rather than separate product wedges.
 
 The product loop is:
 
 ```text
-discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+logical action -> authorize -> reserve allowance -> debit -> claim dispatch
+-> confirmed outcome | delivery_uncertain -> receipt/audit -> reconcile
 ```
 
 Read `capabilities` on `GET /.well-known/agent.json` for the product wedge.
 Entries under `proof_surfaces` are labeled scaffolding — often simulated, and not
 mounted when `enable_proof_surfaces` is false.
 
-Core infrastructure:
-- **Identity & authority** — Wallet-scoped agents, API keys, signing keys, KYC hooks
-- **Discovery** — MCP tools, `.well-known/agent.json`, `llms.txt`, OpenAPI, `/v1/discover`
-- **Execution governance** — Permit-gated MCP invocation, receipts, audit chain
-- **Economics** — Wallet budgets, ledger charges, idempotent replay without double-charge
+Supporting infrastructure:
+- **Identity & authority** — Wallet-scoped agents, API keys, and scoped permits
+- **Logical action** — Accepted idempotency key plus payload binding
+- **Execution state** — One-shot gateway dispatch and explicit uncertainty
+- **Configured accounting** — Wallet credits/call allowance and replay without double debit
+- **Evidence** — Signed receipts and audit linkage for external reconciliation
 - **Readiness** — `/health/dependencies` (`simulation_modes`, `enable_proof_surfaces`)
 
 ---

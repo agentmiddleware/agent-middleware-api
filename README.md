@@ -7,23 +7,24 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 > **Production beta, not production complete.** Agent Middleware API is a
-> replay-safe transaction boundary for metered MCP tool calls. The supported
-> design-partner deployment is vendor-managed and single-tenant. It is
+> transaction-integrity boundary for consequential autonomous MCP actions. The
+> supported design-partner deployment is vendor-managed and single-tenant. It is
 > **not a full agent middleware platform**, payment network, IAM replacement, or
 > compliance platform.
 
-Your agent invokes a costly tool. The request times out. Was the call
-dispatched? Should the agent retry? Will the retry create another debit? Can
-you prove who authorized the action and what the gateway observed?
+Your agent dispatches a consequential mutation. The tool commits the effect,
+but the response disappears. Did the effect land? Is retry safe? Which
+authority was consumed, and what can the gateway prove?
 
-Agent Middleware accepts a scoped permit and an idempotency key before one
-governed call. Replaying the same request with the same accepted key returns
-the original result and signed receipt without another gateway dispatch or
-debit. A changed request under that key fails closed.
+Agent Middleware binds a scoped permit and configured credit or call allowance
+to one logical action. The same accepted idempotency key cannot create another
+gateway dispatch or debit, changed input fails closed, and a missing
+post-dispatch result becomes `delivery_uncertain` instead of triggering an
+automatic redispatch.
 
-> **Authorize one agent action. Charge it once. Prove what happened.**
+> **Make consequential agent actions transactional.**
 
-Try the failure yourself:
+Try the replay boundary yourself:
 
 ```bash
 git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
@@ -32,23 +33,26 @@ make quickstart
 ```
 
 Follow [the 15-minute walkthrough](docs/quickstart.md) to execute a real local
-side effect, deliberately retry it, confirm one debit and one receipt, exceed
-the permit budget, and verify the receipt offline. The walkthrough is exercised
-in CI.
+side effect, replay the completed action, confirm one debit and one receipt,
+exceed the permit budget, and verify the receipt offline. The walkthrough is
+exercised in CI. It does not simulate post-dispatch delivery uncertainty; use
+`make prove-crash-recovery` for gateway crash semantics and the partner runbook
+for the upstream effect-then-response-loss acceptance test.
 
-Agent Middleware API puts a control boundary between autonomous agents and
-registered local tools or one operator-configured upstream MCP tool. Agents
-discover tools, authenticate with wallet-scoped keys, receive bounded permits,
-invoke through an HTTP/JSON-RPC MCP gateway, consume a credit budget, and get
-signed receipts plus a tamper-evident audit trail.
+Agent Middleware API puts a durable transaction boundary between autonomous
+agents and one operator-configured upstream MCP tool. Wallet-scoped keys,
+bounded permits, configured accounting, signed receipts, and audit trails
+support the state machine; they are not separate product wedges.
 
 ```text
-discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern
+logical action -> authorize -> reserve allowance -> debit -> claim dispatch
+-> confirmed outcome | delivery_uncertain -> receipt/audit -> reconcile
 ```
 
-The initial product wedge is deliberately narrow: **replay-safe economic
-authorization for metered MCP calls**. Gateway replay safety does not make a
-remote tool's side effect exactly once unless that tool also honors the
+The initial product wedge is deliberately narrow: **transaction integrity for
+consequential autonomous actions**. This is a durable gateway state machine,
+not one distributed ACID transaction. It does not prove the downstream effect,
+and a remote side effect is exactly once only when the upstream honors the
 forwarded idempotency key. See [WEDGE.md](WEDGE.md) for the product thesis and
 [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) for the claims the project
 does not make yet.
@@ -64,7 +68,7 @@ does not make yet.
 | Quote | Signed, single-use price commitments the metered charge honors, so a call's cost is known before it is committed to | `/v1/quotes` |
 | Invoke | The governed HTTP/JSON-RPC MCP subset requires a permit and idempotency key and can dispatch one configured Streamable HTTP partner tool | `/mcp/messages`, `/mcp/tools/{service_id}/invoke` |
 | Meter | Decimal wallet balances, row-locked debits, limits, ledger linkage, and replay-safe charging | `/v1/billing`, `/v1/me/*` |
-| Receipt | Signed post-permit success, denial, and failure receipts linked to permits, idempotency records, remote dispatch attempts, ledger entries, and audit events | `/v1/receipts`, `/v1/evidence/{receipt_id}` |
+| Receipt | Signed post-permit success, denial, and failure receipts linked where applicable to permits, idempotency records, remote dispatch attempts, ledger entries, and audit events | `/v1/receipts`, `/v1/evidence/{receipt_id}` |
 | Audit | Per-wallet signed hash chains with concurrent append protection and verification | `/v1/audit`, `/v1/audit/verify-chain` |
 | Govern | Policy decisions, revocation, spend boundaries, signing-key metadata, and operator repair paths | `/v1/policies`, permit revocation, `/v1/signing-keys`, refund reconciliation |
 
@@ -79,19 +83,19 @@ JSON-RPC `tools/list` method; `/mcp/tools.json` is a convenient public mirror.
 
 ## Product boundary
 
-The agent-action transaction boundary is the product. The broader agent
+The agent-action transaction-integrity boundary is the product. The broader agent
 features in this repository are retained as proof surfaces and are frozen
-unless a specific product decision brings one through the same permit,
-metering, receipt, and audit loop.
+unless a specific product decision brings one through the same logical-action,
+authority-consumption, dispatch/debit, uncertainty, and evidence loop.
 
-| Core transaction boundary | Frozen proof surfaces |
+| Core transaction-integrity boundary | Frozen proof surfaces |
 |---|---|
-| Wallet-scoped API keys and tenant checks | AWI, browser, DOM, passkey, and RAG demos |
-| Signed permits and revocation | Content, media, IoT, oracle, and comms demos |
-| Governed MCP invocation and idempotency | Red-team, RTaaS, sandbox, telemetry, and auto-PR demos |
-| Wallet metering and ledger | Simulated or partial external integrations |
-| Signed receipts and evidence | Framework examples not yet shipped as packages |
-| Signed wallet audit chains | Marketing/demo workloads |
+| Logical-action identity and payload binding | AWI, browser, DOM, passkey, and RAG demos |
+| Scoped delegated authority and configured credit/call allowance | Content, media, IoT, oracle, and comms demos |
+| One-shot upstream gateway dispatch claim | Red-team, RTaaS, sandbox, telemetry, and auto-PR demos |
+| At-most-one gateway debit plus explicit `delivery_uncertain` | Simulated or partial external integrations |
+| Exact replay without redispatch; changed input fails closed | Framework examples not yet shipped as packages |
+| Linked receipt/audit evidence plus external effect reconciliation | Marketing/demo workloads |
 
 Production-like deployments must set `ENABLE_PROOF_SURFACES=false`; startup
 refuses a production configuration that enables them. Locally mounted proof
@@ -155,6 +159,11 @@ Recent work substantially tightened the trust and accounting boundary:
   API-key binding. Wallet API keys are stored as SHA-256 hashes, while the
   trust-signing private key is injected at runtime and only public signing
   metadata is persisted.
+- **Honest JWT authority.** API-key exchange issues one fixed JWT profile
+  (`billing:charge` plus `tool:invoke`) and rejects unsupported attenuation;
+  signed permits remain the per-action scope boundary. Refresh tokens carry
+  that profile and their originating key, and rotation consumes a parent and
+  stores its sole child in one transaction.
 - **Signing-key lifecycle checks.** Reusing a key ID with different material is
   rejected, disabled keys stay disabled, and retired public metadata remains
   available for historical verification.
@@ -451,9 +460,14 @@ silent in-memory fallback when durable state was configured for production.
 Use `alembic upgrade head` for schema changes; production startup verifies the
 schema instead of relying on `create_all`.
 
-Apply the current migration head before mixed old/current workers take traffic.
-Migration 027 serializes the legacy JSON-RPC and REST governed-MCP endpoint
-identities behind one wallet/idempotency-key uniqueness boundary.
+Apply the current migration head before traffic reaches the new workers.
+Revision 034 additionally requires pausing governed local traffic, draining and
+stopping every prior worker, migrating, and then starting only current workers;
+it is not a mixed-version rolling migration because old workers do not write
+local call-reservation rows. The exact forward/rollback checklist is in
+[docs/deploy-railway.md](docs/deploy-railway.md). Migration 027 serializes the
+legacy JSON-RPC and REST governed-MCP endpoint identities behind one
+wallet/idempotency-key uniqueness boundary.
 
 The supported API deployment path is the repository Dockerfile on Railway:
 [docs/deploy-railway.md](docs/deploy-railway.md). The static agent-first site in
@@ -659,7 +673,7 @@ No TypeScript package is published. Do not advertise PyPI or npm installation.
   day-30 decision gate
 - [WEDGE.md](WEDGE.md) — narrow product thesis and first design-partner motion
 - [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling
-- [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
+- [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — superseded strategy history; not an active roadmap
 - [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
 - [docs/stranger-test.md](docs/stranger-test.md) — the human milestone: a stranger drives the governed loop and checks the five claims from the public docs alone
 - [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) — gate-first branch protection: the exact required checks for `main`

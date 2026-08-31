@@ -10,13 +10,16 @@ from typing import Any, cast
 
 from sqlalchemy import case, func, or_, select, update as sa_update
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     BillingAlertModel,
+    IdempotencyRecordModel,
     McpDispatchAttemptModel,
+    PermitCallReservationModel,
     PermitModel,
     ReceiptModel,
     WalletModel,
@@ -106,7 +109,9 @@ def permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
     if max_calls:
         ce["max_calls_per_tool"] = max_calls
     if permit_model.aggregate_value_cap is not None:
-        ce["aggregate_value_cap"] = format(permit_model.aggregate_value_cap.normalize(), "f")
+        ce["aggregate_value_cap"] = format(
+            permit_model.aggregate_value_cap.normalize(), "f"
+        )
     forbidden = _loads_list(permit_model.forbidden_fields_json or "[]")
     if forbidden:
         ce["forbidden_fields"] = forbidden
@@ -344,9 +349,13 @@ class PermitService:
             signature=signature,
             key_id=key_id,
             issued_at=now,
-            max_calls_per_tool_json=json.dumps(request.max_calls_per_tool) if request.max_calls_per_tool else None,
+            max_calls_per_tool_json=json.dumps(request.max_calls_per_tool)
+            if request.max_calls_per_tool
+            else None,
             aggregate_value_cap=request.aggregate_value_cap,
-            forbidden_fields_json=json.dumps(request.forbidden_fields) if request.forbidden_fields else None,
+            forbidden_fields_json=json.dumps(request.forbidden_fields)
+            if request.forbidden_fields
+            else None,
             recipient_domain=request.recipient_domain,
         )
         async with factory() as session:
@@ -384,6 +393,7 @@ class PermitService:
             if not model:
                 return PermitValidation(False, "permit_not_found", None)
             return await self._validate_model_for_action(
+                session=session,
                 model=model,
                 wallet_id=wallet_id,
                 tool_name=tool_name,
@@ -415,13 +425,29 @@ class PermitService:
             model = await session.get(PermitModel, permit_id)
             if model is None:
                 return PermitValidation(False, "permit_not_found", None)
-            if model.subject_wallet_id != wallet_id:
-                return PermitValidation(False, "permit_wallet_mismatch", model)
-            if model.subject_key_id and model.subject_key_id != key_id:
-                return PermitValidation(False, "permit_key_mismatch", model)
-            if not await self.verify_signature(model):
-                return PermitValidation(False, "permit_signature_invalid", model)
-            return PermitValidation(True, None, model)
+            return await self._validate_replay_model_access(
+                session=session,
+                model=model,
+                wallet_id=wallet_id,
+                key_id=key_id,
+            )
+
+    async def _validate_replay_model_access(
+        self,
+        *,
+        session: AsyncSession | None = None,
+        model: PermitModel,
+        wallet_id: str,
+        key_id: str | None,
+    ) -> PermitValidation:
+        """Check only stable permit identity for an existing reservation."""
+        if model.subject_wallet_id != wallet_id:
+            return PermitValidation(False, "permit_wallet_mismatch", model)
+        if model.subject_key_id and model.subject_key_id != key_id:
+            return PermitValidation(False, "permit_key_mismatch", model)
+        if not await self.verify_signature(model, session=session):
+            return PermitValidation(False, "permit_signature_invalid", model)
+        return PermitValidation(True, None, model)
 
     async def authorize_and_reserve(
         self,
@@ -432,25 +458,82 @@ class PermitService:
         estimated_credits: Decimal,
         key_id: str | None = None,
         arguments: dict[str, Any] | None = None,
+        idempotency_record_id: str | None = None,
+        request_hash: str | None = None,
     ) -> PermitValidation:
         """Atomically authorize an action and reserve its permit budget.
 
-        The permit row remains locked from the final authorization checks
-        through the ``spent_credits`` update. A revocation, expiry, scope
-        change, key mismatch, signature failure, or concurrent reservation
-        therefore cannot slip between a stale read and the budget mutation.
+        For a governed local invocation, ``idempotency_record_id`` and
+        ``request_hash`` bind the budget mutation to a durable call-slot row in
+        the same transaction. An exact retry adopts that row before mutable
+        constraints are re-evaluated and never reserves twice.
         """
+        if (idempotency_record_id is None) != (request_hash is None):
+            raise PermitError("permit_call_identity_incomplete")
         factory = get_session_factory()
 
         async def _once() -> PermitValidation:
             async with factory() as session:
                 async with session.begin():
+                    identity: IdempotencyRecordModel | None = None
+                    if idempotency_record_id is not None:
+                        identity = await session.get(
+                            IdempotencyRecordModel,
+                            idempotency_record_id,
+                            with_for_update=True,
+                        )
+                        if (
+                            identity is None
+                            or identity.wallet_id != wallet_id
+                            or identity.operation_kind != "local"
+                            or identity.request_hash != request_hash
+                            or identity.response_json is not None
+                        ):
+                            raise PermitError("permit_call_identity_invalid")
+
                     model = await session.get(
                         PermitModel, permit_id, with_for_update=True
                     )
                     if not model:
                         return PermitValidation(False, "permit_not_found", None)
+
+                    if idempotency_record_id is not None:
+                        existing = await session.get(
+                            PermitCallReservationModel,
+                            idempotency_record_id,
+                            with_for_update=True,
+                        )
+                        if existing is not None:
+                            if (
+                                existing.wallet_id != wallet_id
+                                or existing.permit_id != permit_id
+                                or existing.tool != tool_name
+                                or existing.request_hash != request_hash
+                                or existing.credits_authorized != estimated_credits
+                            ):
+                                raise PermitError("permit_call_reservation_conflict")
+                            replay_access = await self._validate_replay_model_access(
+                                session=session,
+                                model=model,
+                                wallet_id=wallet_id,
+                                key_id=key_id,
+                            )
+                            if not replay_access.allowed:
+                                return replay_access
+                            if existing.state == "released":
+                                return PermitValidation(
+                                    False,
+                                    "permit_call_reservation_released",
+                                    model,
+                                )
+                            if existing.state not in {"reserved", "consumed"}:
+                                raise PermitError(
+                                    "permit_call_reservation_state_invalid"
+                                )
+                            return PermitValidation(True, None, model)
+
                     validation = await self._validate_model_for_action(
+                        session=session,
                         model=model,
                         wallet_id=wallet_id,
                         tool_name=tool_name,
@@ -482,10 +565,22 @@ class PermitService:
                                 PermitModel.spent_credits + estimated_credits
                                 <= PermitModel.max_credits,
                             ),
+                            or_(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, PermitModel.aggregate_value_cap).is_(
+                                        None
+                                    ),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.spent_credits + estimated_credits
+                                    <= cast(Any, PermitModel.aggregate_value_cap),
+                                ),
+                            ),
                         )
                         .values(
-                            spent_credits=PermitModel.spent_credits
-                            + estimated_credits,
+                            spent_credits=PermitModel.spent_credits + estimated_credits,
                             updated_at=now,
                         )
                         .execution_options(synchronize_session=False)
@@ -506,6 +601,26 @@ class PermitService:
                                     "revoked_at": _stamp(model.revoked_at),
                                 },
                             )
+                        if (
+                            model.aggregate_value_cap is not None
+                            and model.spent_credits + estimated_credits
+                            > model.aggregate_value_cap
+                        ):
+                            return PermitValidation(
+                                False,
+                                "permit_aggregate_value_cap_exceeded",
+                                model,
+                                {
+                                    "required_credits": _num(estimated_credits),
+                                    "charged_to_date": _num(model.spent_credits),
+                                    "reserved_or_charged_to_date": _num(
+                                        model.spent_credits
+                                    ),
+                                    "aggregate_value_cap": _num(
+                                        model.aggregate_value_cap
+                                    ),
+                                },
+                            )
                         return PermitValidation(
                             False,
                             "permit_budget_exceeded",
@@ -521,7 +636,174 @@ class PermitService:
                         )
                     # Reflect the committed reservation on the returned model.
                     await session.refresh(model)
+                    if identity is not None:
+                        now = utc_now()
+                        session.add(
+                            PermitCallReservationModel(
+                                idempotency_record_id=identity.record_id,
+                                wallet_id=wallet_id,
+                                permit_id=permit_id,
+                                tool=tool_name,
+                                request_hash=identity.request_hash,
+                                credits_authorized=estimated_credits,
+                                state="reserved",
+                                created_at=now,
+                                updated_at=now,
+                            )
+                        )
+                        # Force unique/FK/check constraints before commit so a
+                        # failure rolls the paired budget increment back.
+                        await session.flush()
                 return validation
+
+        return await self._run_with_write_retry(_once)
+
+    async def consume_local_call(self, idempotency_record_id: str) -> bool:
+        """Durably cross the local execution boundary exactly once.
+
+        The commit completes before the callable is entered. A consumed row is
+        never released or automatically re-executed after a crash because the
+        downstream effect may already have occurred.
+        """
+        factory = get_session_factory()
+
+        async def _once() -> bool:
+            async with factory() as session:
+                async with session.begin():
+                    now = utc_now()
+                    consumed = await session.execute(
+                        sa_update(PermitCallReservationModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.idempotency_record_id
+                                == idempotency_record_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.state == "reserved",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                cast(
+                                    Any,
+                                    PermitCallReservationModel.execution_started_at,
+                                ).is_(None),
+                            ),
+                        )
+                        .values(
+                            state="consumed",
+                            execution_started_at=now,
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, consumed).rowcount or 0) == 1:
+                        return True
+                    reservation = await session.get(
+                        PermitCallReservationModel,
+                        idempotency_record_id,
+                    )
+                    if reservation is None:
+                        raise PermitError("permit_call_reservation_not_found")
+                    if reservation.state == "consumed":
+                        return False
+                    raise PermitError("permit_call_reservation_state_invalid")
+
+        return await self._run_with_write_retry(_once)
+
+    async def release_local_call_reservation_once(
+        self,
+        idempotency_record_id: str,
+    ) -> bool:
+        """Release a proven pre-execution local reservation exactly once.
+
+        Reservation state and permit budget move in one transaction. The lock
+        order matches authorization: idempotency, permit, reservation.
+        """
+        factory = get_session_factory()
+
+        async def _once() -> bool:
+            async with factory() as session:
+                async with session.begin():
+                    identity = await session.get(
+                        IdempotencyRecordModel,
+                        idempotency_record_id,
+                        with_for_update=True,
+                    )
+                    if identity is None:
+                        raise PermitError("permit_call_identity_invalid")
+                    permit_id = await session.scalar(
+                        select(cast(Any, PermitCallReservationModel.permit_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.idempotency_record_id
+                                == idempotency_record_id,
+                            )
+                        )
+                    )
+                    if permit_id is None:
+                        raise PermitError("permit_call_reservation_not_found")
+                    model = await session.get(
+                        PermitModel,
+                        permit_id,
+                        with_for_update=True,
+                    )
+                    if model is None:
+                        raise PermitError("permit_not_found")
+                    reservation = await session.scalar(
+                        select(PermitCallReservationModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.idempotency_record_id
+                                == idempotency_record_id,
+                            )
+                        )
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                    if reservation is None:
+                        raise PermitError("permit_call_reservation_not_found")
+                    if reservation.state == "released":
+                        return False
+                    if (
+                        reservation.state != "reserved"
+                        or reservation.execution_started_at is not None
+                    ):
+                        raise PermitError("permit_call_reservation_state_invalid")
+                    now = utc_now()
+                    await session.execute(
+                        sa_update(PermitModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.permit_id == reservation.permit_id,
+                            )
+                        )
+                        .values(
+                            spent_credits=case(
+                                (
+                                    cast(
+                                        ColumnElement[bool],
+                                        PermitModel.spent_credits
+                                        - reservation.credits_authorized
+                                        < Decimal("0"),
+                                    ),
+                                    Decimal("0"),
+                                ),
+                                else_=PermitModel.spent_credits
+                                - reservation.credits_authorized,
+                            ),
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    reservation.state = "released"
+                    reservation.released_at = now
+                    reservation.updated_at = now
+                    session.add(reservation)
+                return True
 
         return await self._run_with_write_retry(_once)
 
@@ -544,6 +826,7 @@ class PermitService:
     async def _validate_model_for_action(
         self,
         *,
+        session: AsyncSession | None = None,
         model: PermitModel,
         wallet_id: str,
         tool_name: str,
@@ -578,7 +861,10 @@ class PermitService:
         # would answer a question it has not earned.
         if model.subject_wallet_id != wallet_id:
             return PermitValidation(
-                False, "permit_wallet_mismatch", model, {"bound_to": "subject_wallet_id"}
+                False,
+                "permit_wallet_mismatch",
+                model,
+                {"bound_to": "subject_wallet_id"},
             )
         if model.subject_key_id and model.subject_key_id != key_id:
             return PermitValidation(
@@ -634,7 +920,11 @@ class PermitService:
                     model,
                     {"tool": tool_name, "limit": "malformed"},
                 )
-            call_count = await self._count_tool_calls(model.permit_id, tool_name)
+            call_count = await self._count_tool_calls(
+                model.permit_id,
+                tool_name,
+                session=session,
+            )
             if call_count >= limit:
                 return PermitValidation(
                     False,
@@ -645,15 +935,16 @@ class PermitService:
 
         # 2. aggregate_value_cap
         if model.aggregate_value_cap is not None:
-            total_charged = await self._sum_permit_charges(model.permit_id)
-            if total_charged + estimated_credits > model.aggregate_value_cap:
+            reserved_or_charged = model.spent_credits
+            if reserved_or_charged + estimated_credits > model.aggregate_value_cap:
                 return PermitValidation(
                     False,
                     "permit_aggregate_value_cap_exceeded",
                     model,
                     {
                         "required_credits": _num(estimated_credits),
-                        "charged_to_date": _num(total_charged),
+                        "charged_to_date": _num(reserved_or_charged),
+                        "reserved_or_charged_to_date": _num(reserved_or_charged),
                         "aggregate_value_cap": _num(model.aggregate_value_cap),
                     },
                 )
@@ -672,7 +963,7 @@ class PermitService:
                     {"field": hit, "forbidden_fields": forbidden},
                 )
 
-        if not await self.verify_signature(model):
+        if not await self.verify_signature(model, session=session):
             return PermitValidation(
                 False,
                 "permit_signature_invalid",
@@ -681,30 +972,111 @@ class PermitService:
             )
         return PermitValidation(True, None, model)
 
-    async def _count_tool_calls(self, permit_id: str, tool_name: str) -> int:
-        """Count successful receipts for (permit_id, tool_name)."""
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(func.count()).select_from(ReceiptModel).where(
+    async def _count_tool_calls(
+        self,
+        permit_id: str,
+        tool_name: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> int:
+        """Count reserved or possibly executed calls for one permit/tool."""
+
+        async def count(current: AsyncSession) -> int:
+            attempts = await current.scalar(
+                select(func.count())
+                .select_from(McpDispatchAttemptModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        McpDispatchAttemptModel.permit_id == permit_id,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        McpDispatchAttemptModel.public_tool_id == tool_name,
+                    ),
+                    or_(
+                        cast(
+                            ColumnElement[bool],
+                            McpDispatchAttemptModel.state != "returned_error",
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            cast(
+                                Any,
+                                McpDispatchAttemptModel.dispatched_at,
+                            ).is_not(None),
+                        ),
+                    ),
+                )
+            )
+            local_reservations = await current.scalar(
+                select(func.count())
+                .select_from(PermitCallReservationModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.permit_id == permit_id,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.tool == tool_name,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.state != "released",
+                    ),
+                )
+            )
+            unlinked_receipts = await current.scalar(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .outerjoin(
+                    PermitCallReservationModel,
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.idempotency_record_id
+                        == ReceiptModel.idempotency_record_id,
+                    ),
+                )
+                .where(
                     cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
                     cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
-                    cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, ReceiptModel.outcome).in_(
+                            [
+                                "success",
+                                "delivery_uncertain",
+                                "response_rejected",
+                                "failed_refunded",
+                                "failed_unrefunded",
+                            ]
+                        ),
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, ReceiptModel.dispatch_attempt_id).is_(None),
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(
+                            Any,
+                            PermitCallReservationModel.idempotency_record_id,
+                        ).is_(None),
+                    ),
                 )
             )
-            return int(result.scalar() or 0)
+            return (
+                int(attempts or 0)
+                + int(local_reservations or 0)
+                + int(unlinked_receipts or 0)
+            )
 
-    async def _sum_permit_charges(self, permit_id: str) -> Decimal:
-        """Sum credits_charged across all receipts for this permit."""
+        if session is not None:
+            return await count(session)
         factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(func.sum(ReceiptModel.credits_charged)).where(
-                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
-                )
-            )
-            total = result.scalar()
-            return Decimal(str(total)) if total is not None else Decimal("0")
+        async with factory() as owned_session:
+            return await count(owned_session)
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
         factory = get_session_factory()
@@ -1108,7 +1480,9 @@ class PermitService:
             await session.commit()
         return corrected
 
-    async def verify_signature(self, model: PermitModel) -> bool:
+    async def verify_signature(
+        self, model: PermitModel, *, session: AsyncSession | None = None
+    ) -> bool:
         payload: dict[str, Any] = {
             "permit_id": model.permit_id,
             "issuer_wallet_id": model.issuer_wallet_id,
@@ -1147,6 +1521,7 @@ class PermitService:
             payload,
             signature=model.signature,
             key_id=model.key_id,
+            session=session,
         )
 
 

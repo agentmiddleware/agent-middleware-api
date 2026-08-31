@@ -81,7 +81,7 @@ async def _seed_dispatch_receipt(
         ledger_entry_id=charge.entry_id,
         credits_charged=Decimal("1.5"),
     )
-    await dispatch_service.mark_dispatched(attempt.attempt_id)
+    await dispatch_service.claim_dispatch(attempt.attempt_id)
     response_payload = {
         "content": [{"type": "text", "text": "TOP_SECRET_RESULT"}],
         "structuredContent": {"password": "do-not-expose"},
@@ -281,9 +281,9 @@ async def test_dispatch_evidence_does_not_expose_cross_wallet_attempt(
         request_hash=other_begun.request_hash,
         credits_authorized=Decimal("1.5"),
     )
-    other_attempt = await dispatch_service.complete(
+    other_attempt = await dispatch_service.complete_pre_dispatch_failure(
         attempt_id=other_attempt.attempt_id,
-        state="returned_error",
+        expected_updated_at=other_attempt.updated_at,
         result_payload={"content": [{"text": "OTHER_WALLET_SECRET"}]},
         error_code="connect_failed",
         max_result_bytes=4096,

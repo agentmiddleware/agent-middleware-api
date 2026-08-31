@@ -133,15 +133,16 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
 
     page = (output / "index.html").read_text(encoding="utf-8")
     text = _page_text(page)
-    headline = "Authorize one agent action. Charge it once. Prove what happened."
+    headline = "Make consequential agent actions transactional."
     failure = (
-        "Your agent invokes a costly tool. The request times out. Was it dispatched? "
-        "Should the agent retry? Will the retry create another debit?"
+        "A consequential tool commits the action, but its response disappears. "
+        "Did the effect land? Is retry safe? Which authority was consumed?"
     )
     boundary = (
-        "Put one scoped, budgeted boundary in front of the call. The same accepted "
-        "idempotency key cannot create a second gateway dispatch or debit, and the "
-        "terminal gateway outcome gets a signed receipt."
+        "Bind delegated authority to a stable logical identity and bounded authority "
+        "consumption. Permit at most one gateway dispatch and debit, preserve explicit "
+        "uncertain-delivery state, and return portable evidence of the resulting "
+        "transaction."
     )
 
     assert headline in text
@@ -227,7 +228,8 @@ def test_machine_pointer_copies_match_and_state_live_access_boundary() -> None:
 
     assert llm_txt == llms_txt
     assert "human design-partner site" in llm_txt
-    assert "teams operating internal MCP tools are the buyers" in llm_txt
+    assert "teams operating consequential autonomous actions are the buyers" in llm_txt
+    assert "delivery_uncertain" in llm_txt
     assert "make prove-trust-plane" in llm_txt
     assert "operator-issued" in llm_txt
     assert "no public self-serve key mint" in llm_txt
@@ -317,10 +319,7 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
         "@id": "https://www.thisisatest.tech/#website",
         "name": "Agent Middleware API",
         "url": "https://www.thisisatest.tech/",
-        "description": (
-            "A control layer for scoped, replay-safe, metered MCP tool calls "
-            "with signed receipts."
-        ),
+        "description": "Transaction integrity for consequential autonomous actions.",
     }
 
     assert '<link rel="canonical" href="https://www.thisisatest.tech/"' in page
