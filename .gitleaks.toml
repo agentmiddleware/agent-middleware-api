@@ -43,6 +43,13 @@ paths = [
   '''^b2a_sdk/tests/''',
   # Demo transcripts and copy-paste docs use placeholder keys.
   '''^docs/demo-.*\.md$''',
+  # Generated path -> SHA-256 evidence map. Filenames containing words such as
+  # "api_key" make the default generic rule mistake their adjacent checksums
+  # for credentials; verify_evidence.py validates that every value is a hash.
+  '''^docs/research/2026-08-31-deep-market-lab/baseline-manifest\.json$''',
+  # Generated mechanism output contains the same path -> SHA-256 evidence
+  # shape under `inspected_source_sha256_at_model_run`.
+  '''^docs/research/2026-08-31-deep-market-lab/mechanism-model-results\.json$''',
 ]
 
 regexes = [
