@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import timedelta
+import json
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -16,6 +17,8 @@ from app.db.models import (
     IdempotencyRecordModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
+    PermitCallReservationModel,
+    PermitModel,
     ReceiptModel,
     WalletModel,
 )
@@ -23,14 +26,25 @@ from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import get_agent_money
 from app.services.billing_engine import LedgerOperationConflictError
-from app.services.idempotency import IdempotencyBegin, get_idempotency_service
+from app.services.idempotency import (
+    GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    IdempotencyBegin,
+    IdempotencyInProgressError,
+    get_idempotency_service,
+)
+from app.services.human_approval import invoke_request_hash
 from app.services.mcp_dispatch_attempts import (
     DispatchAttemptConflictError,
     DispatchAttemptError,
+    DispatchClaimUnavailableError,
+    DispatchPrepareCommitUncertainError,
+    DispatchPrepareRolledBackError,
     DispatchResultTooLargeError,
+    McpDispatchAttemptService,
+    dispatch_reconciliation_idle_seconds,
     get_mcp_dispatch_attempt_service,
 )
-from app.services.permits import get_permit_service
+from app.services.permits import PermitError, PermitValidation, get_permit_service
 from app.services.receipts import ReceiptError, get_receipt_service
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
@@ -69,6 +83,103 @@ async def _seed_governed_identity(
     return provisioned, permit, request_payload, begun
 
 
+async def _create_constrained_permit(
+    client: AsyncClient,
+    *,
+    suffix: str,
+    max_calls: int | None = None,
+    aggregate_value_cap: Decimal | None = None,
+) -> tuple[dict, dict, str]:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = f"constrained-partner-{suffix}"
+    payload: dict[str, object] = {
+        "issuer_wallet_id": provisioned["agent_wallet_id"],
+        "subject_wallet_id": provisioned["agent_wallet_id"],
+        "subject_key_id": provisioned["key_id"],
+        "allowed_tools": [tool_name],
+        "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+        "max_credits": "10",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+    }
+    if max_calls is not None:
+        payload["max_calls_per_tool"] = {tool_name: max_calls}
+    if aggregate_value_cap is not None:
+        payload["aggregate_value_cap"] = str(aggregate_value_cap)
+    response = await client.post(
+        "/v1/permits",
+        json=payload,
+        headers={"X-API-Key": "test-key", "Idempotency-Key": f"permit-{suffix}"},
+    )
+    assert response.status_code == 201
+    return provisioned, response.json(), tool_name
+
+
+async def _prepare_constrained_attempt(
+    *,
+    suffix: str,
+    provisioned: dict,
+    permit: dict,
+    tool_name: str,
+) -> tuple[IdempotencyBegin, PermitValidation, McpDispatchAttemptModel | None]:
+    arguments = {"value": suffix}
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint="/mcp/invoke",
+        idempotency_key=f"invoke-{suffix}",
+        request_payload={
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "wallet_id": provisioned["agent_wallet_id"],
+            "permit_id": permit["permit_id"],
+        },
+        operation_kind="upstream_mcp",
+    )
+    (
+        validation,
+        attempt,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="partner_lookup",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("1"),
+        arguments=arguments,
+    )
+    return begun, validation, attempt
+
+
+async def _reserve_constrained_local_call(
+    *,
+    suffix: str,
+    provisioned: dict,
+    permit: dict,
+    tool_name: str,
+) -> tuple[IdempotencyBegin, PermitValidation]:
+    arguments = {"value": suffix}
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key=f"invoke-{suffix}",
+        request_payload={"tool": tool_name, "arguments": arguments},
+        operation_kind="local",
+    )
+    validation = await get_permit_service().authorize_and_reserve(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        tool_name=tool_name,
+        estimated_credits=Decimal("1"),
+        key_id=provisioned["key_id"],
+        arguments=arguments,
+        idempotency_record_id=begun.record_id,
+        request_hash=begun.request_hash,
+    )
+    return begun, validation
+
+
 async def _store_human_approval(
     *,
     approval_id: str,
@@ -77,7 +188,9 @@ async def _store_human_approval(
     tool_name: str,
     idempotency_key: str,
     status: str = "consumed",
+    request_hash: str = "a" * 64,
 ) -> None:
+    now = utc_now()
     factory = get_session_factory()
     async with factory() as session:
         session.add(
@@ -87,10 +200,12 @@ async def _store_human_approval(
                 permit_id=permit_id,
                 tool=tool_name,
                 idempotency_key=idempotency_key,
-                request_hash="a" * 64,
+                request_hash=request_hash,
                 status=status,
                 simulated=True,
-                expires_at=utc_now() + timedelta(minutes=30),
+                requested_at=now,
+                expires_at=now + timedelta(minutes=30),
+                decided_at=(now if status in {"approved", "consumed"} else None),
             )
         )
         await session.commit()
@@ -204,6 +319,60 @@ async def test_governed_mcp_identity_is_unique_across_endpoint_generations(
     assert [row.endpoint for row in rows] == [first_endpoint]
 
 
+async def _seed_charged_dispatch_attempt(
+    client: AsyncClient,
+    *,
+    suffix: str,
+) -> tuple[McpDispatchAttemptService, McpDispatchAttemptModel]:
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix=suffix,
+    )
+    service = get_mcp_dispatch_attempt_service()
+    attempt = await service.prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=f"partner-tool-{suffix}",
+        upstream_tool_name="remote_tool",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("1.5"),
+    )
+    charge = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/mcp/messages",
+        operation_key=begun.record_id,
+    )
+    assert hasattr(charge, "entry_id")
+    attached = await service.attach_charge(
+        attempt_id=attempt.attempt_id,
+        ledger_entry_id=charge.entry_id,
+        credits_charged=Decimal("1.5"),
+    )
+    return service, attached
+
+
+def test_dispatch_reconciliation_idle_window_covers_configured_live_call() -> None:
+    assert (
+        dispatch_reconciliation_idle_seconds(
+            connect_timeout_seconds=5,
+            call_timeout_seconds=30,
+        )
+        == 300
+    )
+    assert (
+        dispatch_reconciliation_idle_seconds(
+            connect_timeout_seconds=5,
+            call_timeout_seconds=600,
+        )
+        == 1835
+    )
+
+
 @pytest.mark.anyio
 async def test_operation_key_replays_one_debit_without_recounting_velocity(
     client: AsyncClient,
@@ -255,6 +424,890 @@ async def test_operation_key_replays_one_debit_without_recounting_velocity(
 
 
 @pytest.mark.anyio
+async def test_operation_key_charge_atomically_checkpoints_idempotency_record(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, _permit, _payload, begun = await _seed_governed_identity(
+        client,
+        suffix="atomic-debit-checkpoint",
+    )
+
+    charge = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/mcp/messages",
+        operation_key=begun.record_id,
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        record = await session.get(IdempotencyRecordModel, begun.record_id)
+    assert record is not None
+    assert record.ledger_entry_id == charge.entry_id  # type: ignore[union-attr]
+
+    # A legacy/partially restored row may have the operation debit but not its
+    # checkpoint. Re-adoption repairs the link without charging again.
+    async with factory() as session:
+        async with session.begin():
+            record = await session.get(IdempotencyRecordModel, begun.record_id)
+            assert record is not None
+            record.ledger_entry_id = None
+            session.add(record)
+
+    replay = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/mcp/messages",
+        operation_key=begun.record_id,
+    )
+    assert replay.entry_id == charge.entry_id  # type: ignore[union-attr]
+    async with factory() as session:
+        record = await session.get(IdempotencyRecordModel, begun.record_id)
+    assert record is not None
+    assert record.ledger_entry_id == charge.entry_id  # type: ignore[union-attr]
+
+
+@pytest.mark.anyio
+async def test_legacy_checkpoint_repair_rejects_cross_wallet_and_credit_entries(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    owner = await provision_agent_wallet(client)
+    other = await provision_agent_wallet(client)
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=owner["agent_wallet_id"],
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key="legacy-checkpoint-negative",
+        request_payload={"tool": "local-test", "arguments": {}},
+        operation_kind="local",
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            record = await session.get(IdempotencyRecordModel, begun.record_id)
+            assert record is not None
+            record.created_at = utc_now() - timedelta(hours=1)
+            session.add(record)
+            session.add(
+                LedgerEntryModel(
+                    entry_id="credit-same-wallet-operation",
+                    wallet_id=owner["agent_wallet_id"],
+                    action="credit",
+                    amount=Decimal("1"),
+                    balance_after=Decimal("1001"),
+                    operation_key=begun.record_id,
+                )
+            )
+            session.add(
+                LedgerEntryModel(
+                    entry_id="debit-other-wallet-operation",
+                    wallet_id=other["agent_wallet_id"],
+                    action="debit",
+                    amount=Decimal("-1"),
+                    balance_after=Decimal("999"),
+                    operation_key=begun.record_id,
+                )
+            )
+
+    repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
+        idle_seconds=900
+    )
+
+    assert repaired == 0
+    assert needs_review == 0
+    async with factory() as session:
+        record = await session.get(IdempotencyRecordModel, begun.record_id)
+    assert record is not None
+    assert record.ledger_entry_id is None
+
+
+@pytest.mark.anyio
+async def test_upstream_call_limit_counts_prepared_attempt_before_receipt(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="active-call-limit",
+        max_calls=1,
+    )
+    _first_record, first_validation, first_attempt = await _prepare_constrained_attempt(
+        suffix="active-call-limit-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert first_validation.allowed is True
+    assert first_attempt is not None
+
+    (
+        _second_record,
+        second_validation,
+        second_attempt,
+    ) = await _prepare_constrained_attempt(
+        suffix="active-call-limit-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert second_validation.allowed is False
+    assert second_validation.reason == "permit_max_calls_exceeded"
+    assert second_attempt is None
+
+    (
+        retry_validation,
+        retry_attempt,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=first_attempt.idempotency_record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="partner_lookup",
+        upstream_origin="https://partner.example",
+        request_hash=first_attempt.request_hash,
+        credits_authorized=Decimal("1"),
+        arguments={"value": "active-call-limit-a"},
+    )
+    assert retry_validation.allowed is True
+    assert retry_attempt is not None
+    assert retry_attempt.attempt_id == first_attempt.attempt_id
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+        attempt_count = await session.scalar(
+            select(func.count())
+            .select_from(McpDispatchAttemptModel)
+            .where(McpDispatchAttemptModel.permit_id == permit["permit_id"])
+        )
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1")
+    assert json.loads(stored_permit.tool_call_counts_json or "{}") == {tool_name: 1}
+    assert attempt_count == 1
+    assert first_attempt.call_slot_reserved is True
+
+
+@pytest.mark.anyio
+async def test_upstream_delivery_uncertain_consumes_call_limit_without_receipt(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="uncertain-call-limit",
+        max_calls=1,
+    )
+    record, validation, prepared = await _prepare_constrained_attempt(
+        suffix="uncertain-call-limit-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert validation.allowed is True
+    assert prepared is not None
+    charge = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.PLATFORM_FEE,
+        units=Decimal("10"),
+        request_path="/mcp/invoke",
+        operation_key=record.record_id,
+    )
+    prepared = await get_mcp_dispatch_attempt_service().attach_charge(
+        attempt_id=prepared.attempt_id,
+        ledger_entry_id=charge.entry_id,  # type: ignore[union-attr]
+        credits_charged=Decimal("1"),
+    )
+    claimed = await get_mcp_dispatch_attempt_service().claim_dispatch(
+        prepared.attempt_id
+    )
+    terminal = await get_mcp_dispatch_attempt_service().complete(
+        attempt_id=claimed.attempt_id,
+        state="delivery_uncertain",
+        result_payload={"error": "delivery_uncertain"},
+        error_code="delivery_uncertain",
+        max_result_bytes=4096,
+    )
+    assert terminal.dispatched_at is not None
+
+    (
+        _blocked_record,
+        blocked_validation,
+        blocked_attempt,
+    ) = await _prepare_constrained_attempt(
+        suffix="uncertain-call-limit-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert blocked_validation.allowed is False
+    assert blocked_validation.reason == "permit_max_calls_exceeded"
+    assert blocked_attempt is None
+
+
+@pytest.mark.anyio
+async def test_upstream_returned_error_refunds_budget_but_keeps_call_slot(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A claimed dispatch is not a proven pre-dispatch compensation."""
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="returned-error-call-limit",
+        max_calls=1,
+    )
+    record, validation, prepared = await _prepare_constrained_attempt(
+        suffix="returned-error-call-limit-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert validation.allowed is True
+    assert prepared is not None
+    charge = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.PLATFORM_FEE,
+        units=Decimal("10"),
+        request_path="/mcp/invoke",
+        operation_key=record.record_id,
+    )
+    prepared = await get_mcp_dispatch_attempt_service().attach_charge(
+        attempt_id=prepared.attempt_id,
+        ledger_entry_id=charge.entry_id,  # type: ignore[union-attr]
+        credits_charged=Decimal("1"),
+    )
+    claimed = await get_mcp_dispatch_attempt_service().claim_dispatch(
+        prepared.attempt_id
+    )
+    terminal = await get_mcp_dispatch_attempt_service().complete(
+        attempt_id=claimed.attempt_id,
+        state="returned_error",
+        result_payload={"error": "upstream_returned_error"},
+        error_code="upstream_returned_error",
+        max_result_bytes=4096,
+    )
+    assert terminal.dispatched_at is not None
+    assert await get_permit_service().release_dispatch_budget_once(terminal.attempt_id)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stored_attempt = await session.get(
+            McpDispatchAttemptModel,
+            terminal.attempt_id,
+        )
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+    assert stored_attempt is not None
+    assert stored_attempt.call_slot_reserved is True
+    assert stored_attempt.budget_released_at is not None
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    assert json.loads(stored_permit.tool_call_counts_json or "{}") == {tool_name: 1}
+
+    (
+        _blocked_record,
+        blocked_validation,
+        blocked_attempt,
+    ) = await _prepare_constrained_attempt(
+        suffix="returned-error-call-limit-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert blocked_validation.allowed is False
+    assert blocked_validation.reason == "permit_max_calls_exceeded"
+    assert blocked_attempt is None
+
+
+@pytest.mark.anyio
+async def test_upstream_proven_pre_dispatch_failure_releases_call_limit(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="released-call-limit",
+        max_calls=1,
+    )
+    _record, validation, prepared = await _prepare_constrained_attempt(
+        suffix="released-call-limit-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert validation.allowed is True
+    assert prepared is not None
+    terminal = await get_mcp_dispatch_attempt_service().complete_pre_dispatch_failure(
+        attempt_id=prepared.attempt_id,
+        expected_updated_at=prepared.updated_at,
+        result_payload={"error": "pre_dispatch_failed"},
+        error_code="pre_dispatch_failed",
+        max_result_bytes=4096,
+    )
+    assert terminal.dispatched_at is None
+    assert await get_permit_service().release_dispatch_budget_once(prepared.attempt_id)
+    assert (
+        await get_permit_service().release_dispatch_budget_once(prepared.attempt_id)
+        is False
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        released_attempt = await session.get(
+            McpDispatchAttemptModel,
+            prepared.attempt_id,
+        )
+        released_permit = await session.get(PermitModel, permit["permit_id"])
+    assert released_attempt is not None
+    assert released_attempt.call_slot_reserved is False
+    assert released_permit is not None
+    assert released_permit.spent_credits == Decimal("0")
+    assert json.loads(released_permit.tool_call_counts_json or "{}") == {tool_name: 0}
+
+    (
+        _replacement_record,
+        replacement_validation,
+        replacement_attempt,
+    ) = await _prepare_constrained_attempt(
+        suffix="released-call-limit-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert replacement_validation.allowed is True
+    assert replacement_attempt is not None
+    assert replacement_attempt.call_slot_reserved is True
+
+
+@pytest.mark.anyio
+async def test_remote_release_rolls_back_slot_marker_on_budget_mismatch(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="remote-release-mismatch",
+        max_calls=1,
+    )
+    _record, validation, prepared = await _prepare_constrained_attempt(
+        suffix="remote-release-mismatch-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert validation.allowed is True
+    assert prepared is not None
+    await get_mcp_dispatch_attempt_service().complete_pre_dispatch_failure(
+        attempt_id=prepared.attempt_id,
+        expected_updated_at=prepared.updated_at,
+        result_payload={"error": "pre_dispatch_failed"},
+        error_code="pre_dispatch_failed",
+        max_result_bytes=4096,
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            assert stored_permit is not None
+            stored_permit.spent_credits = Decimal("0")
+            session.add(stored_permit)
+
+    with pytest.raises(PermitError, match="permit_budget_release_invalid"):
+        await get_permit_service().release_dispatch_budget_once(prepared.attempt_id)
+
+    async with factory() as session:
+        stored_attempt = await session.get(
+            McpDispatchAttemptModel,
+            prepared.attempt_id,
+        )
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+    assert stored_attempt is not None
+    assert stored_attempt.budget_released_at is None
+    assert stored_attempt.call_slot_reserved is True
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    assert json.loads(stored_permit.tool_call_counts_json or "{}") == {tool_name: 1}
+
+
+@pytest.mark.anyio
+async def test_legacy_remote_compensation_cannot_release_a_newer_call_slot(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """The migration's false marker keeps old attempts from undercounting."""
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="legacy-slot-release",
+        max_calls=2,
+    )
+    (
+        _legacy_record,
+        legacy_validation,
+        legacy_attempt,
+    ) = await _prepare_constrained_attempt(
+        suffix="legacy-slot-release-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert legacy_validation.allowed is True
+    assert legacy_attempt is not None
+
+    # Shape this row as an attempt created before remote slot reservation was
+    # introduced: its budget moved, but its marker and counter did not.
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            stored_legacy = await session.get(
+                McpDispatchAttemptModel,
+                legacy_attempt.attempt_id,
+            )
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            assert stored_legacy is not None
+            assert stored_permit is not None
+            stored_legacy.call_slot_reserved = False
+            stored_permit.tool_call_counts_json = json.dumps({tool_name: 0})
+            session.add(stored_legacy)
+            session.add(stored_permit)
+
+    _new_record, new_validation, new_attempt = await _prepare_constrained_attempt(
+        suffix="legacy-slot-release-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert new_validation.allowed is True
+    assert new_attempt is not None
+    assert new_attempt.call_slot_reserved is True
+
+    terminal = await get_mcp_dispatch_attempt_service().complete_pre_dispatch_failure(
+        attempt_id=legacy_attempt.attempt_id,
+        expected_updated_at=legacy_attempt.updated_at,
+        result_payload={"error": "legacy_pre_dispatch_failed"},
+        error_code="legacy_pre_dispatch_failed",
+        max_result_bytes=4096,
+    )
+    assert terminal.dispatched_at is None
+    assert await get_permit_service().release_dispatch_budget_once(
+        legacy_attempt.attempt_id
+    )
+
+    async with factory() as session:
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+        stored_new = await session.get(McpDispatchAttemptModel, new_attempt.attempt_id)
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1")
+    assert json.loads(stored_permit.tool_call_counts_json or "{}") == {tool_name: 1}
+    assert stored_new is not None
+    assert stored_new.call_slot_reserved is True
+
+
+@pytest.mark.anyio
+async def test_upstream_aggregate_cap_counts_and_releases_pre_dispatch_reservation(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="active-aggregate-cap",
+        aggregate_value_cap=Decimal("1"),
+    )
+    _first_record, first_validation, first_attempt = await _prepare_constrained_attempt(
+        suffix="active-aggregate-cap-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert first_validation.allowed is True
+    assert first_attempt is not None
+
+    (
+        _blocked_record,
+        blocked_validation,
+        blocked_attempt,
+    ) = await _prepare_constrained_attempt(
+        suffix="active-aggregate-cap-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert blocked_validation.allowed is False
+    assert blocked_validation.reason == "permit_aggregate_value_cap_exceeded"
+    assert blocked_attempt is None
+
+    terminal = await get_mcp_dispatch_attempt_service().complete_pre_dispatch_failure(
+        attempt_id=first_attempt.attempt_id,
+        expected_updated_at=first_attempt.updated_at,
+        result_payload={"error": "pre_dispatch_failed"},
+        error_code="pre_dispatch_failed",
+        max_result_bytes=4096,
+    )
+    assert terminal.dispatched_at is None
+    assert await get_permit_service().release_dispatch_budget_once(
+        first_attempt.attempt_id
+    )
+
+    (
+        _replacement_record,
+        replacement_validation,
+        replacement_attempt,
+    ) = await _prepare_constrained_attempt(
+        suffix="active-aggregate-cap-c",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert replacement_validation.allowed is True
+    assert replacement_attempt is not None
+
+
+@pytest.mark.anyio
+async def test_local_call_reservation_is_adopted_and_counts_before_receipt(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="local-call-limit",
+        max_calls=1,
+    )
+    first, first_validation = await _reserve_constrained_local_call(
+        suffix="local-call-limit-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert first_validation.allowed is True
+
+    replay_validation = await get_permit_service().authorize_and_reserve(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        tool_name=tool_name,
+        estimated_credits=Decimal("1"),
+        key_id=provisioned["key_id"],
+        arguments={"value": "local-call-limit-a"},
+        idempotency_record_id=first.record_id,
+        request_hash=first.request_hash,
+    )
+    assert replay_validation.allowed is True
+    with pytest.raises(PermitError, match="permit_call_reservation_conflict"):
+        await get_permit_service().authorize_and_reserve(
+            permit_id=permit["permit_id"],
+            wallet_id=provisioned["agent_wallet_id"],
+            tool_name=tool_name,
+            estimated_credits=Decimal("2"),
+            key_id=provisioned["key_id"],
+            arguments={"value": "local-call-limit-a"},
+            idempotency_record_id=first.record_id,
+            request_hash=first.request_hash,
+        )
+
+    _second, second_validation = await _reserve_constrained_local_call(
+        suffix="local-call-limit-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert second_validation.allowed is False
+    assert second_validation.reason == "permit_max_calls_exceeded"
+
+    service = get_permit_service()
+    assert await service.consume_local_call(first.record_id) is True
+    assert await service.consume_local_call(first.record_id) is False
+    with pytest.raises(
+        PermitError,
+        match="permit_call_reservation_state_invalid",
+    ):
+        await service.release_local_call_reservation_once(first.record_id)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+        reservations = (
+            (
+                await session.execute(
+                    select(PermitCallReservationModel).where(
+                        PermitCallReservationModel.permit_id == permit["permit_id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1")
+    assert len(reservations) == 1
+    assert reservations[0].idempotency_record_id == first.record_id
+    assert reservations[0].state == "consumed"
+    assert reservations[0].execution_started_at is not None
+
+
+@pytest.mark.anyio
+async def test_local_pre_execution_release_is_atomic_and_frees_call_slot(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="local-release",
+        max_calls=1,
+    )
+    first, first_validation = await _reserve_constrained_local_call(
+        suffix="local-release-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert first_validation.allowed is True
+
+    service = get_permit_service()
+    assert await service.release_local_call_reservation_once(first.record_id) is True
+    assert await service.release_local_call_reservation_once(first.record_id) is False
+
+    second, second_validation = await _reserve_constrained_local_call(
+        suffix="local-release-b",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert second_validation.allowed is True
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+        first_reservation = await session.get(
+            PermitCallReservationModel,
+            first.record_id,
+        )
+        second_reservation = await session.get(
+            PermitCallReservationModel,
+            second.record_id,
+        )
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1")
+    assert json.loads(stored_permit.tool_call_counts_json or "{}") == {tool_name: 1}
+    assert first_reservation is not None
+    assert first_reservation.state == "released"
+    assert first_reservation.call_slot_reserved is False
+    assert first_reservation.released_at is not None
+    assert second_reservation is not None
+    assert second_reservation.state == "reserved"
+    assert second_reservation.call_slot_reserved is True
+
+
+@pytest.mark.anyio
+async def test_local_release_rolls_back_slot_marker_on_budget_mismatch(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="local-release-mismatch",
+        max_calls=1,
+    )
+    first, validation = await _reserve_constrained_local_call(
+        suffix="local-release-mismatch-a",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert validation.allowed is True
+
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            assert stored_permit is not None
+            stored_permit.spent_credits = Decimal("0")
+            session.add(stored_permit)
+
+    with pytest.raises(PermitError, match="permit_budget_release_invalid"):
+        await get_permit_service().release_local_call_reservation_once(first.record_id)
+
+    async with factory() as session:
+        stored_reservation = await session.get(
+            PermitCallReservationModel,
+            first.record_id,
+        )
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+    assert stored_reservation is not None
+    assert stored_reservation.state == "reserved"
+    assert stored_reservation.released_at is None
+    assert stored_reservation.call_slot_reserved is True
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    assert json.loads(stored_permit.tool_call_counts_json or "{}") == {tool_name: 1}
+
+
+@pytest.mark.anyio
+async def test_stale_uncharged_local_reservation_stays_held_for_manual_review(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="local-stale-release",
+        max_calls=1,
+    )
+    first, first_validation = await _reserve_constrained_local_call(
+        suffix="local-stale-release-call",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert first_validation.allowed is True
+
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            record = await session.get(IdempotencyRecordModel, first.record_id)
+            assert record is not None
+            record.created_at = utc_now() - timedelta(hours=1)
+            session.add(record)
+
+    repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
+        idle_seconds=900
+    )
+    assert (repaired, needs_review) == (0, 1)
+
+    async with factory() as session:
+        stale_identity = await session.get(IdempotencyRecordModel, first.record_id)
+        stale_reservation = await session.get(
+            PermitCallReservationModel,
+            first.record_id,
+        )
+    assert stale_identity is not None
+    assert stale_identity.response_json is None
+    assert stale_identity.ledger_entry_id is None
+    assert stale_reservation is not None
+    assert stale_reservation.state == "reserved"
+    assert stale_reservation.execution_started_at is None
+    assert stale_reservation.call_slot_reserved is True
+    async with factory() as session:
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1")
+    assert json.loads(stored_permit.tool_call_counts_json or "{}") == {tool_name: 1}
+
+    # Age alone cannot distinguish a dead owner from a live worker paused just
+    # before consume_local_call(). Exact replay therefore remains in progress.
+    with pytest.raises(IdempotencyInProgressError, match="idempotency_in_progress"):
+        await _reserve_constrained_local_call(
+            suffix="local-stale-release-call",
+            provisioned=provisioned,
+            permit=permit,
+            tool_name=tool_name,
+        )
+
+
+@pytest.mark.anyio
+async def test_stale_charged_local_reservation_remains_counted_for_review(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="local-stale-charged",
+        max_calls=1,
+    )
+    first, first_validation = await _reserve_constrained_local_call(
+        suffix="local-stale-charged-call",
+        provisioned=provisioned,
+        permit=permit,
+        tool_name=tool_name,
+    )
+    assert first_validation.allowed is True
+    charge = await get_agent_money().charge(
+        wallet_id=provisioned["agent_wallet_id"],
+        service_category=ServiceCategory.PLATFORM_FEE,
+        units=Decimal("10"),
+        request_path="/mcp/invoke",
+        operation_key=first.record_id,
+    )
+    assert charge.entry_id
+
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            record = await session.get(IdempotencyRecordModel, first.record_id)
+            assert record is not None
+            record.created_at = utc_now() - timedelta(hours=1)
+            session.add(record)
+
+    repaired, needs_review = await get_idempotency_service().reconcile_stuck_records(
+        idle_seconds=900
+    )
+    assert (repaired, needs_review) == (0, 1)
+
+    async with factory() as session:
+        identity = await session.get(IdempotencyRecordModel, first.record_id)
+        reservation = await session.get(PermitCallReservationModel, first.record_id)
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+    assert identity is not None
+    assert identity.ledger_entry_id == charge.entry_id
+    assert reservation is not None
+    assert reservation.state == "reserved"
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1")
+
+
+@pytest.mark.anyio
+async def test_local_reservation_rejects_mismatched_idempotency_identity(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, permit, tool_name = await _create_constrained_permit(
+        client,
+        suffix="local-identity",
+        max_calls=1,
+    )
+    arguments = {"value": "local-identity"}
+    begun = await get_idempotency_service().begin_with_record(
+        wallet_id=provisioned["agent_wallet_id"],
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key="invoke-local-identity",
+        request_payload={"tool": tool_name, "arguments": arguments},
+        operation_kind="local",
+    )
+
+    with pytest.raises(PermitError, match="permit_call_identity_invalid"):
+        await get_permit_service().authorize_and_reserve(
+            permit_id=permit["permit_id"],
+            wallet_id=provisioned["agent_wallet_id"],
+            tool_name=tool_name,
+            estimated_credits=Decimal("1"),
+            key_id=provisioned["key_id"],
+            arguments=arguments,
+            idempotency_record_id=begun.record_id,
+            request_hash="f" * 64,
+        )
+
+    attacker = await provision_agent_wallet(client)
+    with pytest.raises(PermitError, match="permit_call_identity_invalid"):
+        await get_permit_service().authorize_and_reserve(
+            permit_id=permit["permit_id"],
+            wallet_id=attacker["agent_wallet_id"],
+            tool_name=tool_name,
+            estimated_credits=Decimal("1"),
+            key_id=attacker["key_id"],
+            arguments=arguments,
+            idempotency_record_id=begun.record_id,
+            request_hash=begun.request_hash,
+        )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stored_permit = await session.get(PermitModel, permit["permit_id"])
+        reservation = await session.get(PermitCallReservationModel, begun.record_id)
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    assert reservation is None
+
+
+@pytest.mark.anyio
 async def test_operation_key_rejects_changed_debit_and_cross_wallet_identity(
     client: AsyncClient,
     clean_database,
@@ -296,6 +1349,46 @@ async def test_operation_key_rejects_changed_debit_and_cross_wallet_identity(
     assert other_wallet is not None
     assert other_wallet.balance == Decimal("1000")
     assert other_wallet.hourly_spent == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_operation_key_rejects_tampered_idempotency_checkpoint(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    provisioned, _permit, _payload, begun = await _seed_governed_identity(
+        client,
+        suffix="debit-checkpoint-conflict",
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            record = await session.get(IdempotencyRecordModel, begun.record_id)
+            assert record is not None
+            record.ledger_entry_id = "tampered-ledger-entry"
+            session.add(record)
+
+    with pytest.raises(
+        LedgerOperationConflictError,
+        match="ledger_operation_checkpoint_conflict",
+    ):
+        await get_agent_money().charge(
+            wallet_id=provisioned["agent_wallet_id"],
+            service_category=ServiceCategory.AGENT_COMMS,
+            units=Decimal("1"),
+            request_path="/mcp/messages",
+            operation_key=begun.record_id,
+        )
+
+    async with factory() as session:
+        wallet = await session.get(WalletModel, provisioned["agent_wallet_id"])
+        debit_count = await session.scalar(
+            select(func.count())
+            .select_from(LedgerEntryModel)
+            .where(LedgerEntryModel.operation_key == begun.record_id)
+        )
+    assert wallet is not None and wallet.balance == Decimal("1000")
+    assert debit_count == 0
 
 
 @pytest.mark.anyio
@@ -629,8 +1722,15 @@ async def test_dispatch_attempt_state_machine_and_bounded_result(
         credits_charged=Decimal("1.5"),
     )
     assert attached.ledger_entry_id == charge.entry_id  # type: ignore[union-attr]
-    dispatched = await service.mark_dispatched(prepared.attempt_id)
-    assert dispatched.state == "dispatched"
+    dispatched = await service.claim_dispatch(prepared.attempt_id)
+    assert dispatched.state == "dispatch_claimed"
+    assert dispatched.dispatch_claim_hash is not None
+    assert len(dispatched.dispatch_claim_hash) == 64
+    with pytest.raises(
+        DispatchClaimUnavailableError,
+        match="dispatch_claim_unavailable",
+    ):
+        await service.claim_dispatch(prepared.attempt_id)
 
     with pytest.raises(DispatchResultTooLargeError):
         await service.complete(
@@ -642,7 +1742,7 @@ async def test_dispatch_attempt_state_machine_and_bounded_result(
         )
     context = await service.get_context(prepared.attempt_id)
     assert context is not None
-    assert context.attempt.state == "dispatched"
+    assert context.attempt.state == "dispatch_claimed"
     assert context.endpoint == "/mcp/messages"
     assert context.idempotency_key == "invoke-dispatch-state"
 
@@ -659,7 +1759,7 @@ async def test_dispatch_attempt_state_machine_and_bounded_result(
         DispatchAttemptConflictError,
         match="dispatch_transition_terminal",
     ):
-        await service.mark_dispatched(prepared.attempt_id)
+        await service.claim_dispatch(prepared.attempt_id)
     with pytest.raises(DispatchAttemptConflictError):
         await service.complete(
             attempt_id=prepared.attempt_id,
@@ -668,6 +1768,127 @@ async def test_dispatch_attempt_state_machine_and_bounded_result(
             error_code="timeout",
             max_result_bytes=1024,
         )
+
+
+@pytest.mark.anyio
+async def test_dispatch_claim_recovers_lost_commit_ack_but_cannot_be_reacquired(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, attempt = await _seed_charged_dispatch_attempt(
+        client,
+        suffix="dispatch-claim-lost-ack",
+    )
+    original_exit = AsyncSessionTransaction.__aexit__
+    acknowledgement_lost = False
+
+    async def lose_commit_ack(self, exc_type, exc, tb):  # noqa: ANN001
+        nonlocal acknowledgement_lost
+        result = await original_exit(self, exc_type, exc, tb)
+        if exc_type is None and not acknowledgement_lost:
+            acknowledgement_lost = True
+            raise RuntimeError("simulated_dispatch_claim_commit_ack_loss")
+        return result
+
+    monkeypatch.setattr(AsyncSessionTransaction, "__aexit__", lose_commit_ack)
+
+    claimed = await service.claim_dispatch(attempt.attempt_id)
+
+    assert acknowledgement_lost is True
+    assert claimed.state == "dispatch_claimed"
+    assert claimed.dispatch_claim_hash is not None
+    with pytest.raises(
+        DispatchClaimUnavailableError,
+        match="dispatch_claim_unavailable",
+    ):
+        await service.claim_dispatch(attempt.attempt_id)
+
+
+@pytest.mark.anyio
+async def test_legacy_dispatched_attempt_without_claim_fails_closed(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    service, attempt = await _seed_charged_dispatch_attempt(
+        client,
+        suffix="dispatch-claim-legacy",
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            stored = await session.get(
+                McpDispatchAttemptModel,
+                attempt.attempt_id,
+                with_for_update=True,
+            )
+            assert stored is not None
+            stored.state = "dispatched"
+            stored.dispatched_at = utc_now()
+            stored.dispatch_claim_hash = None
+            session.add(stored)
+
+    with pytest.raises(
+        DispatchClaimUnavailableError,
+        match="dispatch_claim_unavailable",
+    ):
+        await service.claim_dispatch(attempt.attempt_id)
+
+    context = await service.get_context(attempt.attempt_id)
+    assert context is not None
+    assert context.attempt.state == "dispatched"
+    assert context.attempt.dispatch_claim_hash is None
+
+
+@pytest.mark.anyio
+async def test_prepared_attempt_with_dispatch_evidence_fails_closed(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    service, attempt = await _seed_charged_dispatch_attempt(
+        client,
+        suffix="dispatch-evidence-corrupt",
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            stored = await session.get(
+                McpDispatchAttemptModel,
+                attempt.attempt_id,
+                with_for_update=True,
+            )
+            assert stored is not None
+            stored.dispatched_at = utc_now()
+            stored.updated_at = utc_now()
+            session.add(stored)
+
+    corrupted = await service.get_context(attempt.attempt_id)
+    assert corrupted is not None
+    with pytest.raises(
+        DispatchClaimUnavailableError,
+        match="dispatch_claim_unavailable",
+    ):
+        await service.claim_dispatch(attempt.attempt_id)
+    with pytest.raises(
+        DispatchClaimUnavailableError,
+        match="dispatch_claim_unavailable",
+    ):
+        await service.complete_pre_dispatch_failure(
+            attempt_id=attempt.attempt_id,
+            expected_updated_at=corrupted.attempt.updated_at,
+            ledger_entry_id=corrupted.attempt.ledger_entry_id,
+            credits_charged=corrupted.attempt.credits_charged,
+            result_payload={"error": "failed_refunded"},
+            error_code="upstream_pre_dispatch_failed",
+            max_result_bytes=1024,
+        )
+
+    after = await service.get_context(attempt.attempt_id)
+    assert after is not None
+    assert after.attempt.state == "prepared"
+    assert after.attempt.completed_at is None
+    assert after.attempt.debit_refunded_at is None
+    assert after.attempt.budget_released_at is None
 
 
 @pytest.mark.anyio
@@ -745,11 +1966,17 @@ async def test_remote_prepare_rejects_missing_required_human_approval(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("case", "approval_status", "wrong_tool"),
+    ("case", "approval_status", "wrong_tool", "wrong_wallet"),
     [
-        ("missing-row", None, False),
-        ("wrong-binding", "consumed", True),
-        ("unconsumed", "approved", False),
+        ("missing-row", None, False, False),
+        ("wrong-tool", "approved", True, False),
+        ("wrong-request", "approved", False, False),
+        ("cross-wallet", "approved", False, True),
+        ("rejected", "rejected", False, False),
+        ("missing-decision", "approved", False, False),
+        ("decision-before-request", "approved", False, False),
+        ("decision-at-deadline", "approved", False, False),
+        ("decision-after-deadline", "approved", False, False),
     ],
 )
 async def test_remote_prepare_rejects_invalid_human_approval_binding(
@@ -758,11 +1985,12 @@ async def test_remote_prepare_rejects_invalid_human_approval_binding(
     case: str,
     approval_status: str | None,
     wrong_tool: bool,
+    wrong_wallet: bool,
 ) -> None:
     suffix = f"approval-{case}"
     tool_name = f"partner-tool-{suffix}"
     idempotency_key = f"invoke-{suffix}"
-    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+    provisioned, permit, request_payload, begun = await _seed_governed_identity(
         client,
         suffix=suffix,
         requires_human_approval=True,
@@ -771,11 +1999,123 @@ async def test_remote_prepare_rejects_invalid_human_approval_binding(
     if approval_status is not None:
         await _store_human_approval(
             approval_id=approval_id,
-            wallet_id=provisioned["agent_wallet_id"],
+            wallet_id=(
+                provisioned["sponsor_wallet_id"]
+                if wrong_wallet
+                else provisioned["agent_wallet_id"]
+            ),
             permit_id=permit["permit_id"],
             tool_name="wrong-tool" if wrong_tool else tool_name,
             idempotency_key=idempotency_key,
             status=approval_status,
+            request_hash=(
+                "a" * 64
+                if case == "wrong-request"
+                else invoke_request_hash(
+                    tool_name,
+                    request_payload["arguments"],
+                    Decimal("1.5"),
+                )
+            ),
+        )
+        if case.startswith("decision-") or case == "missing-decision":
+            factory = get_session_factory()
+            async with factory() as session:
+                async with session.begin():
+                    approval = await session.get(HumanApprovalModel, approval_id)
+                    assert approval is not None
+                    if case == "missing-decision":
+                        approval.decided_at = None
+                    elif case == "decision-before-request":
+                        approval.decided_at = approval.requested_at - timedelta(
+                            seconds=1
+                        )
+                    elif case == "decision-at-deadline":
+                        approval.decided_at = approval.expires_at
+                    else:
+                        approval.decided_at = approval.expires_at + timedelta(seconds=1)
+                    session.add(approval)
+
+    with pytest.raises(
+        DispatchAttemptConflictError,
+        match="dispatch_approval_linkage_invalid",
+    ):
+        await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+            idempotency_record_id=begun.record_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            approval_id=approval_id,
+            key_id=provisioned["key_id"],
+            public_tool_id=tool_name,
+            upstream_tool_name="remote_tool",
+            upstream_origin="https://partner.example",
+            request_hash=begun.request_hash,
+            credits_authorized=Decimal("1.5"),
+            arguments=request_payload["arguments"],
+        )
+
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = (
+            await session.get(HumanApprovalModel, approval_id)
+            if approval_status is not None
+            else None
+        )
+        attempt_count = await session.scalar(
+            select(func.count())
+            .select_from(McpDispatchAttemptModel)
+            .where(McpDispatchAttemptModel.idempotency_record_id == begun.record_id)
+        )
+    if approval_status == "approved":
+        assert approval is not None and approval.status == "approved"
+    assert int(attempt_count or 0) == 0
+
+
+@pytest.mark.anyio
+async def test_remote_prepare_rejects_consumed_approval_without_attempt(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    suffix = "approval-consumed"
+    tool_name = f"partner-tool-{suffix}"
+    idempotency_key = f"invoke-{suffix}"
+    provisioned, permit, request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix=suffix,
+        requires_human_approval=True,
+    )
+    approval_id = "appr-valid-consumed"
+    await _store_human_approval(
+        approval_id=approval_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=tool_name,
+        idempotency_key=idempotency_key,
+        request_hash=invoke_request_hash(
+            tool_name,
+            request_payload["arguments"],
+            Decimal("1.5"),
+        ),
+    )
+
+    with pytest.raises(
+        DispatchAttemptConflictError,
+        match="dispatch_approval_atomic_prepare_required",
+    ):
+        await get_mcp_dispatch_attempt_service().prepare(
+            idempotency_record_id=begun.record_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            approval_id=approval_id,
+            key_id=provisioned["key_id"],
+            public_tool_id=tool_name,
+            upstream_tool_name="remote_tool",
+            upstream_origin="https://partner.example",
+            request_hash=begun.request_hash,
+            credits_authorized=Decimal("1.5"),
         )
 
     with pytest.raises(
@@ -793,6 +2133,7 @@ async def test_remote_prepare_rejects_invalid_human_approval_binding(
             upstream_origin="https://partner.example",
             request_hash=begun.request_hash,
             credits_authorized=Decimal("1.5"),
+            arguments=request_payload["arguments"],
         )
 
     stored_permit = await get_permit_service().get_permit(permit["permit_id"])
@@ -800,20 +2141,22 @@ async def test_remote_prepare_rejects_invalid_human_approval_binding(
     assert stored_permit.spent_credits == Decimal("0")
     factory = get_session_factory()
     async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
         attempt_count = await session.scalar(
             select(func.count())
             .select_from(McpDispatchAttemptModel)
             .where(McpDispatchAttemptModel.idempotency_record_id == begun.record_id)
         )
+    assert approval is not None and approval.status == "consumed"
     assert int(attempt_count or 0) == 0
 
 
 @pytest.mark.anyio
-async def test_remote_prepare_persists_valid_consumed_human_approval(
+async def test_remote_prepare_atomically_consumes_approved_human_approval(
     client: AsyncClient,
     clean_database,
 ) -> None:
-    suffix = "approval-consumed"
+    suffix = "approval-atomic-consume"
     tool_name = f"partner-tool-{suffix}"
     idempotency_key = f"invoke-{suffix}"
     provisioned, permit, _request_payload, begun = await _seed_governed_identity(
@@ -821,13 +2164,19 @@ async def test_remote_prepare_persists_valid_consumed_human_approval(
         suffix=suffix,
         requires_human_approval=True,
     )
-    approval_id = "appr-valid-consumed"
+    approval_id = "appr-atomic-consume"
     await _store_human_approval(
         approval_id=approval_id,
         wallet_id=provisioned["agent_wallet_id"],
         permit_id=permit["permit_id"],
         tool_name=tool_name,
         idempotency_key=idempotency_key,
+        status="approved",
+        request_hash=invoke_request_hash(
+            tool_name,
+            {"value": suffix},
+            Decimal("1.5"),
+        ),
     )
 
     (
@@ -844,17 +2193,245 @@ async def test_remote_prepare_persists_valid_consumed_human_approval(
         upstream_origin="https://partner.example",
         request_hash=begun.request_hash,
         credits_authorized=Decimal("1.5"),
+        arguments={"value": suffix},
     )
 
     assert validation.allowed is True
-    assert attempt is not None
-    assert attempt.approval_id == approval_id
-    context = await get_mcp_dispatch_attempt_service().get_context(attempt.attempt_id)
-    assert context is not None
-    assert context.attempt.approval_id == approval_id
+    assert attempt is not None and attempt.approval_id == approval_id
+    (
+        replay_validation,
+        replayed,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        approval_id=approval_id,
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="remote_tool",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("1.5"),
+        arguments={"value": suffix},
+    )
+    assert replay_validation.allowed is True
+    assert replayed is not None and replayed.attempt_id == attempt.attempt_id
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
+    assert approval is not None and approval.status == "consumed"
     stored_permit = await get_permit_service().get_permit(permit["permit_id"])
     assert stored_permit is not None
     assert stored_permit.spent_credits == Decimal("1.5")
+
+
+@pytest.mark.anyio
+async def test_remote_prepare_failure_rolls_back_human_approval_consumption(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suffix = "approval-atomic-rollback"
+    tool_name = f"partner-tool-{suffix}"
+    idempotency_key = f"invoke-{suffix}"
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix=suffix,
+        requires_human_approval=True,
+    )
+    approval_id = "appr-atomic-rollback"
+    await _store_human_approval(
+        approval_id=approval_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=tool_name,
+        idempotency_key=idempotency_key,
+        status="approved",
+        request_hash=invoke_request_hash(
+            tool_name,
+            {"value": suffix},
+            Decimal("1.5"),
+        ),
+    )
+    original_flush = AsyncSession.flush
+
+    async def fail_attempt_flush(self, objects=None):  # noqa: ANN001
+        if any(isinstance(row, McpDispatchAttemptModel) for row in self.new):
+            raise RuntimeError("simulated_prepare_write_failure")
+        return await original_flush(self, objects)
+
+    monkeypatch.setattr(AsyncSession, "flush", fail_attempt_flush)
+    with pytest.raises(
+        DispatchPrepareRolledBackError,
+        match="dispatch_prepare_rolled_back",
+    ):
+        await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+            idempotency_record_id=begun.record_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            approval_id=approval_id,
+            key_id=provisioned["key_id"],
+            public_tool_id=tool_name,
+            upstream_tool_name="remote_tool",
+            upstream_origin="https://partner.example",
+            request_hash=begun.request_hash,
+            credits_authorized=Decimal("1.5"),
+            arguments={"value": suffix},
+        )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
+        attempt_count = await session.scalar(
+            select(func.count())
+            .select_from(McpDispatchAttemptModel)
+            .where(McpDispatchAttemptModel.idempotency_record_id == begun.record_id)
+        )
+    assert approval is not None and approval.status == "approved"
+    assert int(attempt_count or 0) == 0
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_remote_prepare_consumes_predeadline_approval_after_deadline(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    suffix = "approval-expired-before-prepare"
+    tool_name = f"partner-tool-{suffix}"
+    idempotency_key = f"invoke-{suffix}"
+    credits = Decimal("1.5")
+    arguments = {"value": suffix}
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix=suffix,
+        requires_human_approval=True,
+    )
+    approval_id = "appr-expired-before-prepare"
+    await _store_human_approval(
+        approval_id=approval_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=tool_name,
+        idempotency_key=idempotency_key,
+        status="approved",
+        request_hash=invoke_request_hash(tool_name, arguments, credits),
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            approval = await session.get(HumanApprovalModel, approval_id)
+            assert approval is not None
+            now = utc_now()
+            approval.requested_at = now - timedelta(seconds=10)
+            approval.decided_at = now - timedelta(seconds=8)
+            approval.expires_at = now - timedelta(seconds=1)
+            session.add(approval)
+
+    (
+        validation,
+        attempt,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        approval_id=approval_id,
+        key_id=provisioned["key_id"],
+        public_tool_id=tool_name,
+        upstream_tool_name="remote_tool",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=credits,
+        arguments=arguments,
+    )
+
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
+        attempts = (
+            (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id == begun.record_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert validation.allowed is True
+    assert attempt is not None
+    assert approval is not None and approval.status == "consumed"
+    assert [stored.attempt_id for stored in attempts] == [attempt.attempt_id]
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == credits
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("denial_case", ["budget", "wrong-key", "revoked"])
+async def test_remote_permit_denial_does_not_consume_human_approval(
+    client: AsyncClient,
+    clean_database,
+    denial_case: str,
+) -> None:
+    suffix = f"approval-permit-denied-{denial_case}"
+    tool_name = f"partner-tool-{suffix}"
+    idempotency_key = f"invoke-{suffix}"
+    credits = Decimal("1000000") if denial_case == "budget" else Decimal("1.5")
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix=suffix,
+        requires_human_approval=True,
+    )
+    approval_id = "appr-permit-denied"
+    await _store_human_approval(
+        approval_id=approval_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name=tool_name,
+        idempotency_key=idempotency_key,
+        status="approved",
+        request_hash=invoke_request_hash(
+            tool_name,
+            {"value": suffix},
+            credits,
+        ),
+    )
+    if denial_case == "revoked":
+        await get_permit_service().revoke_permit(permit["permit_id"])
+
+    (
+        validation,
+        attempt,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        approval_id=approval_id,
+        key_id=(
+            "key-not-bound-to-permit"
+            if denial_case == "wrong-key"
+            else provisioned["key_id"]
+        ),
+        public_tool_id=tool_name,
+        upstream_tool_name="remote_tool",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=credits,
+        arguments={"value": suffix},
+    )
+
+    assert validation.allowed is False
+    assert attempt is None
+    factory = get_session_factory()
+    async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
+    assert approval is not None and approval.status == "approved"
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
 
 
 @pytest.mark.anyio
@@ -876,7 +2453,10 @@ async def test_remote_prepare_failure_rolls_back_budget_and_attempt(
 
     monkeypatch.setattr(AsyncSession, "flush", fail_attempt_flush)
     service = get_mcp_dispatch_attempt_service()
-    with pytest.raises(RuntimeError, match="simulated_prepare_write_failure"):
+    with pytest.raises(
+        DispatchPrepareRolledBackError,
+        match="dispatch_prepare_rolled_back",
+    ):
         await service.authorize_reserve_and_prepare(
             idempotency_record_id=begun.record_id,
             wallet_id=provisioned["agent_wallet_id"],
@@ -903,6 +2483,66 @@ async def test_remote_prepare_failure_rolls_back_budget_and_attempt(
 
 
 @pytest.mark.anyio
+async def test_remote_prepare_recovery_read_failure_is_commit_uncertain(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provisioned, permit, _request_payload, begun = await _seed_governed_identity(
+        client,
+        suffix="atomic-prepare-recovery-unavailable",
+    )
+    original_flush = AsyncSession.flush
+    service = get_mcp_dispatch_attempt_service()
+    original_lookup = service._get_by_idempotency_record
+    lookup_count = 0
+
+    async def fail_attempt_flush(self, objects=None):  # noqa: ANN001
+        if any(isinstance(row, McpDispatchAttemptModel) for row in self.new):
+            raise RuntimeError("simulated_prepare_write_failure")
+        return await original_flush(self, objects)
+
+    async def fail_recovery_lookup(session, record_id):  # noqa: ANN001
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 1:
+            return await original_lookup(session, record_id)
+        raise RuntimeError("simulated_recovery_read_failure")
+
+    monkeypatch.setattr(AsyncSession, "flush", fail_attempt_flush)
+    monkeypatch.setattr(service, "_get_by_idempotency_record", fail_recovery_lookup)
+
+    with pytest.raises(
+        DispatchPrepareCommitUncertainError,
+        match="dispatch_prepare_commit_uncertain",
+    ):
+        await service.authorize_reserve_and_prepare(
+            idempotency_record_id=begun.record_id,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            key_id=provisioned["key_id"],
+            public_tool_id="partner-tool-atomic-prepare-recovery-unavailable",
+            upstream_tool_name="remote_tool",
+            upstream_origin="https://partner.example",
+            request_hash=begun.request_hash,
+            credits_authorized=Decimal("1.5"),
+        )
+
+    assert lookup_count == 2
+    stored_permit = await get_permit_service().get_permit(permit["permit_id"])
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+    factory = get_session_factory()
+    async with factory() as session:
+        attempt_count = await session.scalar(
+            select(func.count())
+            .select_from(McpDispatchAttemptModel)
+            .where(McpDispatchAttemptModel.idempotency_record_id == begun.record_id)
+        )
+    assert int(attempt_count or 0) == 0
+
+
+@pytest.mark.anyio
 async def test_remote_prepare_recovers_lost_commit_ack_without_double_reserving(
     client: AsyncClient,
     clean_database,
@@ -911,6 +2551,22 @@ async def test_remote_prepare_recovers_lost_commit_ack_without_double_reserving(
     provisioned, permit, _request_payload, begun = await _seed_governed_identity(
         client,
         suffix="atomic-prepare-lost-ack",
+        requires_human_approval=True,
+    )
+    approval_id = "appr-atomic-prepare-lost-ack"
+    arguments = {"value": "atomic-prepare-lost-ack"}
+    await _store_human_approval(
+        approval_id=approval_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        tool_name="partner-tool-atomic-prepare-lost-ack",
+        idempotency_key="invoke-atomic-prepare-lost-ack",
+        status="approved",
+        request_hash=invoke_request_hash(
+            "partner-tool-atomic-prepare-lost-ack",
+            arguments,
+            Decimal("1.5"),
+        ),
     )
     original_exit = AsyncSessionTransaction.__aexit__
     acknowledgement_lost = False
@@ -931,27 +2587,50 @@ async def test_remote_prepare_recovers_lost_commit_ack_without_double_reserving(
         idempotency_record_id=begun.record_id,
         wallet_id=provisioned["agent_wallet_id"],
         permit_id=permit["permit_id"],
+        approval_id=approval_id,
         key_id=provisioned["key_id"],
         public_tool_id="partner-tool-atomic-prepare-lost-ack",
         upstream_tool_name="remote_tool",
         upstream_origin="https://partner.example",
         request_hash=begun.request_hash,
         credits_authorized=Decimal("1.5"),
+        arguments=arguments,
     )
 
     assert acknowledgement_lost is True
     assert validation.allowed is True
     assert attempt is not None and attempt.state == "prepared"
+    assert attempt.approval_id == approval_id
+    (
+        replay_validation,
+        replayed,
+    ) = await get_mcp_dispatch_attempt_service().authorize_reserve_and_prepare(
+        idempotency_record_id=begun.record_id,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        approval_id=approval_id,
+        key_id=provisioned["key_id"],
+        public_tool_id="partner-tool-atomic-prepare-lost-ack",
+        upstream_tool_name="remote_tool",
+        upstream_origin="https://partner.example",
+        request_hash=begun.request_hash,
+        credits_authorized=Decimal("1.5"),
+        arguments=arguments,
+    )
+    assert replay_validation.allowed is True
+    assert replayed is not None and replayed.attempt_id == attempt.attempt_id
     stored_permit = await get_permit_service().get_permit(permit["permit_id"])
     assert stored_permit is not None
     assert stored_permit.spent_credits == Decimal("1.5")
     factory = get_session_factory()
     async with factory() as session:
+        approval = await session.get(HumanApprovalModel, approval_id)
         attempt_count = await session.scalar(
             select(func.count())
             .select_from(McpDispatchAttemptModel)
             .where(McpDispatchAttemptModel.idempotency_record_id == begun.record_id)
         )
+    assert approval is not None and approval.status == "consumed"
     assert int(attempt_count or 0) == 1
 
 
@@ -985,8 +2664,15 @@ async def test_dispatch_attempt_rejects_unsafe_origin_and_invalid_transition(
         **kwargs,
         upstream_origin="https://partner.example",
     )
-    with pytest.raises(DispatchAttemptConflictError):
-        await service.mark_dispatched(prepared.attempt_id)
+    with pytest.raises(
+        DispatchAttemptConflictError,
+        match="dispatch_transition_invalid",
+    ):
+        await service.claim_dispatch(prepared.attempt_id)
+    unclaimed = await service.get_context(prepared.attempt_id)
+    assert unclaimed is not None
+    assert unclaimed.attempt.state == "prepared"
+    assert unclaimed.attempt.dispatch_claim_hash is None
     with pytest.raises(DispatchAttemptConflictError):
         await service.complete(
             attempt_id=prepared.attempt_id,
@@ -996,9 +2682,9 @@ async def test_dispatch_attempt_rejects_unsafe_origin_and_invalid_transition(
             max_result_bytes=1024,
         )
 
-    failed = await service.complete(
+    failed = await service.complete_pre_dispatch_failure(
         attempt_id=prepared.attempt_id,
-        state="returned_error",
+        expected_updated_at=unclaimed.attempt.updated_at,
         result_payload=None,
         error_code="connect_failed",
         max_result_bytes=1024,
@@ -1038,9 +2724,9 @@ async def test_dispatch_reconciliation_queries_active_and_unfinalized_terminal(
     stale = await service.list_stale_contexts(idle_seconds=300)
     assert [item.attempt.attempt_id for item in stale] == [prepared.attempt_id]
 
-    terminal = await service.complete(
+    terminal = await service.complete_pre_dispatch_failure(
         attempt_id=prepared.attempt_id,
-        state="returned_error",
+        expected_updated_at=stale[0].attempt.updated_at,
         result_payload=None,
         error_code="connect_failed",
         max_result_bytes=1024,

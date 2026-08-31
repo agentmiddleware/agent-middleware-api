@@ -284,7 +284,7 @@ def _parse_bearer_authorization(authorization: str) -> str:
 
 async def _auth_from_jwt(token: str) -> AuthContext:
     """Verify JWT and return AuthContext."""
-    from .jwt import get_jwt_service, JWTError
+    from .jwt import JWTError, get_jwt_service, has_jwt_authority_scope_profile
 
     jwt_svc = get_jwt_service()
     try:
@@ -306,6 +306,18 @@ async def _auth_from_jwt(token: str) -> AuthContext:
                 "message": (
                     "This access token is not bound to an API key; authenticate "
                     "with an active API key."
+                ),
+            },
+        )
+
+    if not has_jwt_authority_scope_profile(payload.scopes):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "invalid_token",
+                "message": (
+                    "This access token does not carry the supported JWT "
+                    "authority profile; authenticate with an active API key."
                 ),
             },
         )

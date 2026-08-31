@@ -211,7 +211,7 @@ def interleaving_factory(real_factory, hook, state, *, fire_on: int = 1):
         async def __aexit__(self, *exc):
             return await self._cm.__aexit__(*exc)
 
-    return lambda: (lambda: _CM(real_factory()))
+    return lambda: lambda: _CM(real_factory())
 
 
 def running_on_sqlite() -> bool:
@@ -356,6 +356,7 @@ async def clean_database():
         # PRAGMA foreign_keys=ON (Postgres-parity for SQLite tests).
         await session.execute(text("DELETE FROM receipts"))
         await session.execute(text("DELETE FROM mcp_dispatch_attempts"))
+        await session.execute(text("DELETE FROM permit_call_reservations"))
         await session.execute(text("DELETE FROM human_approvals"))
         await session.execute(text("DELETE FROM permit_requests"))
         await session.execute(text("DELETE FROM quotes"))

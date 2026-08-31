@@ -31,10 +31,13 @@ Usage
 -----
     export AGENT_MIDDLEWARE_API_KEY=...          # a bootstrap/admin key
     export AGENT_MIDDLEWARE_API_URL=https://...  # required unless --api-url is set
+    export AGENT_MIDDLEWARE_API_URL_ACK=https://...  # normalized target, exactly
     python scripts/trust_plane_conformance.py
 
-Pass ``--confirm-production`` when intentionally targeting the canonical
-production origin. Remote targets require HTTPS; loopback targets may use HTTP.
+``--api-url`` may replace ``AGENT_MIDDLEWARE_API_URL``, but the target-bound
+acknowledgement is always required. Pass ``--confirm-production`` when
+intentionally targeting the canonical production origin. Remote targets require
+HTTPS; loopback targets may use HTTP.
 
 The key is never defaulted or hardcoded; the suite exits if it is missing.
 """
@@ -58,6 +61,7 @@ else:
 
 API_URL = ""
 API_KEY = ""
+API_URL_ACK_ENV_VAR = "AGENT_MIDDLEWARE_API_URL_ACK"
 
 # Per-run namespace so the suite is re-runnable: fixed Idempotency-Keys would
 # otherwise replay a previous run's cached responses instead of re-testing.
@@ -68,6 +72,31 @@ TAG = f"conf-{RUN}"
 # budget/no-double-charge checks; kept in one place so a pricing change is a
 # one-line update here rather than scattered magic numbers.
 COST_PER_CALL = 2
+
+
+def _resolve_acknowledged_target(
+    api_url: str | None,
+    *,
+    confirm_production: bool,
+) -> str:
+    """Resolve the target and require an exact acknowledgement of its origin."""
+
+    normalized_target = resolve_live_target(
+        api_url,
+        confirm_production=confirm_production,
+    )
+    acknowledged_target = os.environ.get(API_URL_ACK_ENV_VAR)
+    if not acknowledged_target:
+        raise LiveTargetError(
+            f"{API_URL_ACK_ENV_VAR} is required and must exactly equal the "
+            f"normalized target {normalized_target!r}"
+        )
+    if acknowledged_target != normalized_target:
+        raise LiveTargetError(
+            f"{API_URL_ACK_ENV_VAR} must exactly equal the normalized target "
+            f"{normalized_target!r}"
+        )
+    return normalized_target
 
 
 @dataclass
@@ -430,8 +459,12 @@ async def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    global API_KEY, API_URL
+    API_URL = ""
+    API_KEY = ""
+
     try:
-        api_url = resolve_live_target(
+        api_url = _resolve_acknowledged_target(
             args.api_url,
             confirm_production=args.confirm_production,
         )
@@ -448,7 +481,6 @@ async def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    global API_KEY, API_URL
     API_URL = api_url
     API_KEY = api_key
 

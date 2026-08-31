@@ -65,7 +65,7 @@ revocation case.
 | Reason code | Details | Remediation |
 |-------------|---------|-------------|
 | `permit_budget_exceeded` | `required_credits`, `remaining_credits`, `spent_credits`, `max_credits` | Request a permit with enough remaining credits, then retry with a new idempotency key. |
-| `permit_aggregate_value_cap_exceeded` | `required_credits`, `charged_to_date`, `aggregate_value_cap` | Request a higher aggregate cap or a replacement permit. |
+| `permit_aggregate_value_cap_exceeded` | `required_credits`, `charged_to_date`, `reserved_or_charged_to_date`, `aggregate_value_cap` | Request a higher aggregate cap or a replacement permit. |
 | `permit_max_calls_exceeded` | `tool`, `limit`, `calls_made` | Request a replacement permit with a higher per-tool call limit. |
 | `permit_tool_not_allowed` | `requested_tool`, `allowed_tools` | Use an allowed tool or request a permit that names the requested tool. |
 | `permit_scope_missing` | `required_scopes`, `missing_scopes` | Request a permit containing every listed missing scope. |

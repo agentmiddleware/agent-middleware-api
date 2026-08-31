@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" shape-rendering="crispEdges" role="img" aria-labelledby="title desc">
   <title id="title">Agent Middleware API</title>
-  <desc id="desc">Authorize one agent action. Charge it once. Prove what happened.</desc>
+  <desc id="desc">Make consequential agent actions transactional.</desc>
   <!-- Source for social-card.png. Every color is a styles.css token (ink,
        rule, text, text-dim, brass); the typefaces are the site's own —
        Press Start 2P for the hero line, IBM Plex Mono for the labels.
@@ -28,25 +28,23 @@
   <!-- Hero. Hard drop shadow one pixel-step down and right, no blur. -->
   <g font-family="'Press Start 2P', 'Courier New', monospace" font-size="40" font-weight="400">
     <g fill="#05040f">
-      <text x="68" y="206">AUTHORIZE ONE</text>
-      <text x="68" y="286">AGENT ACTION.</text>
-      <text x="68" y="366">CHARGE IT ONCE.</text>
-      <text x="68" y="446">PROVE WHAT HAPPENED.</text>
+      <text x="68" y="226">MAKE CONSEQUENTIAL</text>
+      <text x="68" y="326">AGENT ACTIONS</text>
+      <text x="68" y="426">TRANSACTIONAL.</text>
     </g>
     <g fill="#eceafd">
-      <text x="64" y="202">AUTHORIZE ONE</text>
-      <text x="64" y="282">AGENT ACTION.</text>
-      <text x="64" y="362">CHARGE IT ONCE.</text>
-      <text x="64" y="442">PROVE WHAT HAPPENED.</text>
+      <text x="64" y="222">MAKE CONSEQUENTIAL</text>
+      <text x="64" y="322">AGENT ACTIONS</text>
+      <text x="64" y="422">TRANSACTIONAL.</text>
     </g>
   </g>
 
   <rect x="64" y="504" width="1072" height="3" fill="#4a3d8f"/>
 
   <g font-family="'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace" font-size="18" font-weight="600" fill="#eceafd">
-    <text x="64" y="556">SCOPED AUTHORITY</text>
-    <text x="391" y="556">IDEMPOTENT METERING</text>
-    <text x="782" y="556">SIGNED RECEIPTS</text>
+    <text x="64" y="556">LOGICAL ACTION</text>
+    <text x="391" y="556">ONE-SHOT DISPATCH</text>
+    <text x="782" y="556">HONEST UNCERTAINTY</text>
   </g>
   <!-- Separators: axis-aligned pixel blocks, not rotated squares. A 45deg
        square is the one shape a pixel grid cannot render cleanly. -->

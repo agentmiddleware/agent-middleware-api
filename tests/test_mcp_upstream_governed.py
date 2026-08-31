@@ -12,6 +12,7 @@ from typing import Any, Literal
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.routers import mcp as mcp_router
 from app.core.time import utc_now
@@ -38,7 +39,12 @@ from app.services.mcp_dispatch_reconciliation import (
     McpDispatchReconciliationService,
     get_mcp_dispatch_reconciliation_service,
 )
+from app.services.mcp_dispatch_attempts import (
+    DispatchPrepareCommitUncertainError,
+    McpDispatchAttemptService,
+)
 from app.services.permits import get_permit_service
+from app.services.quotes import QuoteService
 from app.services.receipts import ReceiptService, get_receipt_service
 from app.services.service_registry import get_service_registry
 from app.services.signing_keys import sha256_hex
@@ -214,8 +220,9 @@ def _rest_call_body(
     permit_id: str,
     idempotency_key: str,
     message: str = "hello",
+    quote_id: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    body = {
         "name": tool_name,
         "arguments": {"message": message},
         "mcp_context": {
@@ -224,6 +231,9 @@ def _rest_call_body(
             "idempotency_key": idempotency_key,
         },
     }
+    if quote_id is not None:
+        body["mcp_context"]["quote_id"] = quote_id
+    return body
 
 
 def _legacy_transport_identity(
@@ -452,6 +462,877 @@ async def test_governed_upstream_success_replays_without_second_debit_or_dispatc
         assert result["receipt"]["dispatch_attempt_id"] == (
             persisted.attempt.attempt_id
         )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_quoted_upstream_success_replays_before_quote_revalidation(
+    client: AsyncClient,
+    clean_database: None,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-quoted-replay"
+    idempotency_key = "partner-upstream-quoted-replay-1"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-quoted-replay-permit",
+        )
+        quote_response = await client.post(
+            "/v1/quotes",
+            json={
+                "wallet_id": provisioned["agent_wallet_id"],
+                "tool": tool_name,
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert quote_response.status_code == 201, quote_response.text
+        quote_id = quote_response.json()["quote_id"]
+        body = _rest_call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+            quote_id=quote_id,
+        )
+
+        first = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert first.status_code == 200, first.text
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == first.json()
+        assert executor.dispatch_count == 1
+        persisted = await _load_persisted_invocation(
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        _assert_linked_terminal_state(
+            persisted,
+            state="succeeded",
+            outcome="success",
+            charged=Decimal("2"),
+            refunded=False,
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_concurrent_quoted_retry_rechecks_identity_after_both_probes_miss(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-quoted-concurrent-replay"
+    idempotency_key = "partner-upstream-quoted-concurrent-replay-1"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-quoted-concurrent-replay-permit",
+        )
+        quote_response = await client.post(
+            "/v1/quotes",
+            json={
+                "wallet_id": provisioned["agent_wallet_id"],
+                "tool": tool_name,
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert quote_response.status_code == 201, quote_response.text
+        body = _rest_call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+            quote_id=quote_response.json()["quote_id"],
+        )
+
+        # Pause request A after its initial probe has observed no identity.
+        # Request B then also misses that probe and completes, consuming the
+        # quote. Resuming A reproduces the exact probe/validation TOCTOU.
+        idem = get_idempotency_service()
+        real_probe = idem.get_governed_mcp_record
+        first_probe_missed = asyncio.Event()
+        release_first_probe = asyncio.Event()
+        probe_count = 0
+
+        async def synchronized_probe(
+            *,
+            wallet_id: str,
+            idempotency_key: str,
+        ) -> IdempotencyRecordModel | None:
+            nonlocal probe_count
+            result = await real_probe(
+                wallet_id=wallet_id,
+                idempotency_key=idempotency_key,
+            )
+            probe_count += 1
+            if probe_count == 1:
+                assert result is None
+                first_probe_missed.set()
+                await release_first_probe.wait()
+            return result
+
+        monkeypatch.setattr(idem, "get_governed_mcp_record", synchronized_probe)
+
+        delayed_task = asyncio.create_task(
+            client.post(
+                f"/mcp/tools/{tool_name}/invoke",
+                json=body,
+                headers=provisioned["agent_headers"],
+            ),
+        )
+        await asyncio.wait_for(first_probe_missed.wait(), timeout=5)
+        try:
+            winner = await asyncio.wait_for(
+                client.post(
+                    f"/mcp/tools/{tool_name}/invoke",
+                    json=body,
+                    headers=provisioned["agent_headers"],
+                ),
+                timeout=10,
+            )
+        finally:
+            release_first_probe.set()
+        delayed = await asyncio.wait_for(delayed_task, timeout=10)
+
+        assert probe_count >= 3
+        assert winner.status_code == 200, winner.text
+        assert delayed.status_code == 200, delayed.text
+        assert delayed.json() == winner.json()
+        assert executor.dispatch_count == 1
+        persisted = await _load_persisted_invocation(
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        _assert_linked_terminal_state(
+            persisted,
+            state="succeeded",
+            outcome="success",
+            charged=Decimal("2"),
+            refunded=False,
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_quote_race_loser_cannot_release_permit_budget_twice(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-quote-race"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+
+    async def lose_quote_claim(
+        _self: QuoteService,
+        _quote_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> bool:
+        assert idempotency_key == "partner-upstream-quote-race-loser"
+        return False
+
+    monkeypatch.setattr(QuoteService, "consume", lose_quote_claim)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            max_credits=10,
+            idem_key="partner-upstream-quote-race-permit",
+        )
+        quote_response = await client.post(
+            "/v1/quotes",
+            json={
+                "wallet_id": provisioned["agent_wallet_id"],
+                "tool": tool_name,
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert quote_response.status_code == 201, quote_response.text
+
+        loser = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=_rest_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key="partner-upstream-quote-race-loser",
+                quote_id=quote_response.json()["quote_id"],
+            ),
+            headers=provisioned["agent_headers"],
+        )
+        assert loser.status_code == 403, loser.text
+
+        winner = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=_rest_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key="partner-upstream-quote-race-winner",
+            ),
+            headers=provisioned["agent_headers"],
+        )
+        assert winner.status_code == 200, winner.text
+        assert executor.dispatch_count == 1
+
+        await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=0)
+
+        factory = get_session_factory()
+        async with factory() as session:
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            loser_record = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id
+                        == provisioned["agent_wallet_id"],
+                        IdempotencyRecordModel.idempotency_key
+                        == "partner-upstream-quote-race-loser",
+                    )
+                )
+            ).scalar_one()
+            loser_attempt = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id
+                        == loser_record.record_id
+                    )
+                )
+            ).scalar_one()
+
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("2")
+        assert loser_attempt.state == "returned_error"
+        assert loser_attempt.budget_released_at is not None
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_precharge_crash_releases_consumed_quote_during_reconciliation(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-quote-precharge-crash"
+    idempotency_key = "partner-upstream-quote-precharge-crash-1"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-quote-precharge-crash-permit",
+        )
+        quote_response = await client.post(
+            "/v1/quotes",
+            json={
+                "wallet_id": provisioned["agent_wallet_id"],
+                "tool": tool_name,
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert quote_response.status_code == 201, quote_response.text
+        quote_id = quote_response.json()["quote_id"]
+
+        async def crash_before_debit(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("simulated_precharge_crash")
+
+        class InterruptedReconciler:
+            async def reconcile_attempt(self, *_args: Any, **_kwargs: Any) -> None:
+                raise RuntimeError("simulated_worker_death_before_reconciliation")
+
+        real_reconciler_getter = mcp_router.get_mcp_dispatch_reconciliation_service
+        monkeypatch.setattr(get_agent_money(), "charge", crash_before_debit)
+        monkeypatch.setattr(
+            mcp_router,
+            "get_mcp_dispatch_reconciliation_service",
+            lambda: InterruptedReconciler(),
+        )
+        failed = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=_rest_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key=idempotency_key,
+                quote_id=quote_id,
+            ),
+            headers=provisioned["agent_headers"],
+        )
+
+        assert failed.status_code == 200, failed.text
+        assert failed.json()["isError"] is True
+        assert "simulated_precharge_crash" in failed.text
+        assert executor.dispatch_count == 0
+        quote_before = await client.get(
+            f"/v1/quotes/{quote_id}",
+            headers=provisioned["agent_headers"],
+        )
+        assert quote_before.status_code == 200
+        assert quote_before.json()["status"] == "consumed"
+
+        factory = get_session_factory()
+        async with factory() as session:
+            stored_permit_before = await session.get(PermitModel, permit["permit_id"])
+            debit_count = await session.scalar(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(
+                    LedgerEntryModel.wallet_id == provisioned["agent_wallet_id"],
+                    LedgerEntryModel.action == "debit",
+                )
+            )
+            attempt_before = (
+                await session.execute(
+                    select(McpDispatchAttemptModel)
+                    .join(
+                        IdempotencyRecordModel,
+                        IdempotencyRecordModel.record_id
+                        == McpDispatchAttemptModel.idempotency_record_id,
+                    )
+                    .where(
+                        IdempotencyRecordModel.wallet_id
+                        == provisioned["agent_wallet_id"],
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+        assert stored_permit_before is not None
+        assert stored_permit_before.spent_credits == Decimal("2")
+        assert attempt_before.state == "prepared"
+        assert int(debit_count or 0) == 0
+
+        monkeypatch.setattr(
+            mcp_router,
+            "get_mcp_dispatch_reconciliation_service",
+            real_reconciler_getter,
+        )
+        await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=0)
+
+        quote_after = await client.get(
+            f"/v1/quotes/{quote_id}",
+            headers=provisioned["agent_headers"],
+        )
+        assert quote_after.status_code == 200
+        assert quote_after.json()["status"] == "active"
+        assert quote_after.json()["consumed_at"] is None
+        async with factory() as session:
+            stored_permit_after = await session.get(PermitModel, permit["permit_id"])
+        assert stored_permit_after is not None
+        assert stored_permit_after.spent_credits == Decimal("0")
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_refunded_predispatch_debit_does_not_reactivate_quote(
+    client: AsyncClient,
+    clean_database: None,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-quote-refunded-debit"
+    idempotency_key = "partner-upstream-quote-refunded-debit-1"
+    executor = FakeUpstreamExecutor("pre_dispatch_failure")
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-quote-refunded-debit-permit",
+        )
+        quote_response = await client.post(
+            "/v1/quotes",
+            json={
+                "wallet_id": provisioned["agent_wallet_id"],
+                "tool": tool_name,
+            },
+            headers=provisioned["agent_headers"],
+        )
+        assert quote_response.status_code == 201, quote_response.text
+        quote_id = quote_response.json()["quote_id"]
+
+        failed = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=_rest_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key=idempotency_key,
+                quote_id=quote_id,
+            ),
+            headers=provisioned["agent_headers"],
+        )
+
+        assert failed.status_code == 502, failed.text
+        assert failed.json()["detail"]["error"] == "upstream_pre_dispatch_failed"
+        assert failed.json()["detail"]["receipt"]["outcome"] == "failed_refunded"
+        assert executor.dispatch_count == 0
+        quote = await client.get(
+            f"/v1/quotes/{quote_id}",
+            headers=provisioned["agent_headers"],
+        )
+        assert quote.status_code == 200
+        assert quote.json()["status"] == "consumed"
+
+        persisted = await _load_persisted_invocation(
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        _assert_linked_terminal_state(
+            persisted,
+            state="returned_error",
+            outcome="failed_refunded",
+            charged=Decimal("0"),
+            refunded=True,
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_losing_dispatch_claim_does_not_compensate_and_never_redispatches(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-dispatch-claim-loser"
+    idempotency_key = "partner-upstream-dispatch-claim-loser-1"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+    original_claim = McpDispatchAttemptService.claim_dispatch
+    winner_claimed = False
+
+    async def force_losing_claim(
+        self: McpDispatchAttemptService,
+        attempt_id: str,
+    ) -> McpDispatchAttemptModel:
+        nonlocal winner_claimed
+        if not winner_claimed:
+            winner_claimed = True
+            await original_claim(self, attempt_id)
+        return await original_claim(self, attempt_id)
+
+    monkeypatch.setattr(
+        McpDispatchAttemptService,
+        "claim_dispatch",
+        force_losing_claim,
+    )
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-dispatch-claim-loser-permit",
+        )
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+
+        loser = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert loser.status_code == 200
+        assert loser.json()["error"] == {
+            "code": -32003,
+            "message": "idempotency_in_progress",
+        }
+        assert winner_claimed is True
+        assert executor.dispatch_count == 0
+        assert len(executor.calls) == 1
+
+        factory = get_session_factory()
+        async with factory() as session:
+            record = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id
+                        == provisioned["agent_wallet_id"],
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            attempt = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.idempotency_record_id
+                        == record.record_id
+                    )
+                )
+            ).scalar_one()
+            ledger_rows = list(
+                (
+                    await session.execute(
+                        select(LedgerEntryModel).where(
+                            LedgerEntryModel.wallet_id
+                            == provisioned["agent_wallet_id"],
+                            LedgerEntryModel.operation_key == record.record_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            receipt_count = await session.scalar(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(ReceiptModel.idempotency_record_id == record.record_id)
+            )
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            wallet = await session.get(
+                WalletModel,
+                provisioned["agent_wallet_id"],
+            )
+
+        assert record.response_json is None
+        assert record.response_reference is None
+        assert attempt.state == "dispatch_claimed"
+        assert attempt.dispatch_claim_hash is not None
+        assert attempt.completed_at is None
+        assert attempt.debit_refunded_at is None
+        assert attempt.budget_released_at is None
+        assert [row.action for row in ledger_rows] == ["debit"]
+        assert int(receipt_count or 0) == 0
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("2")
+        assert wallet is not None
+        assert wallet.balance == Decimal("998")
+
+        # Simulate the claim owner dying before send. Only the stale sweep may
+        # turn a claimed row ambiguous; targeted pre-dispatch repair yields to
+        # a fresh owner.
+        reconciled = await get_mcp_dispatch_reconciliation_service().reconcile(
+            idle_seconds=0
+        )
+        assert reconciled.dispatched_uncertain == 1
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        assert replay.json()["error"]["message"] == "delivery_uncertain"
+        assert "dispatch_claim_hash" not in json.dumps(replay.json())
+        assert executor.dispatch_count == 0
+        assert len(executor.calls) == 1
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_approval_prepare_rollback_releases_identity_for_exact_retry(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_router.settings,
+        "SIMULATION_MODE_HUMAN_APPROVAL",
+        True,
+    )
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-approval-prepare-rollback"
+    idempotency_key = "partner-upstream-approval-prepare-rollback-1"
+    executor = FakeUpstreamExecutor("success")
+    original_flush = AsyncSession.flush
+    failed_once = False
+
+    async def fail_attempt_flush(self, objects=None):  # noqa: ANN001
+        nonlocal failed_once
+        if not failed_once and any(
+            isinstance(row, McpDispatchAttemptModel) for row in self.new
+        ):
+            failed_once = True
+            raise RuntimeError("simulated_prepare_write_failure")
+        return await original_flush(self, objects)
+
+    monkeypatch.setattr(AsyncSession, "flush", fail_attempt_flush)
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-approval-prepare-rollback-permit",
+            requires_human_approval=True,
+        )
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+
+        rolled_back = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert failed_once is True
+        assert rolled_back.status_code == 200
+        assert rolled_back.json()["error"] == {
+            "code": -32005,
+            "message": "upstream_prepare_retryable",
+        }
+        assert executor.dispatch_count == 0
+        factory = get_session_factory()
+        async with factory() as session:
+            approval = (
+                await session.execute(
+                    select(HumanApprovalModel).where(
+                        HumanApprovalModel.wallet_id == provisioned["agent_wallet_id"],
+                        HumanApprovalModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            record_count = await session.scalar(
+                select(func.count())
+                .select_from(IdempotencyRecordModel)
+                .where(
+                    IdempotencyRecordModel.wallet_id == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.idempotency_key == idempotency_key,
+                )
+            )
+            attempt_count = await session.scalar(
+                select(func.count()).select_from(McpDispatchAttemptModel)
+            )
+            debit_count = await session.scalar(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(
+                    LedgerEntryModel.wallet_id == provisioned["agent_wallet_id"],
+                    LedgerEntryModel.action == "debit",
+                )
+            )
+            receipt_count = await session.scalar(
+                select(func.count()).select_from(ReceiptModel)
+            )
+        assert approval.status == "approved"
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("0")
+        assert int(record_count or 0) == 0
+        assert int(attempt_count or 0) == 0
+        assert int(debit_count or 0) == 0
+        assert int(receipt_count or 0) == 0
+
+        monkeypatch.setattr(AsyncSession, "flush", original_flush)
+        succeeded = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert succeeded.status_code == 200
+        assert replay.json() == succeeded.json()
+        assert executor.dispatch_count == 1
+        persisted = await _load_persisted_invocation(
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+        assert persisted.attempt.approval_id == approval.approval_id
+        _assert_linked_terminal_state(
+            persisted,
+            state="succeeded",
+            outcome="success",
+            charged=Decimal("2"),
+            refunded=False,
+        )
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_prepare_commit_uncertain_never_writes_competing_receipt(
+    client: AsyncClient,
+    clean_database: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_router.settings,
+        "SIMULATION_MODE_HUMAN_APPROVAL",
+        True,
+    )
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-approval-prepare-uncertain"
+    idempotency_key = "partner-upstream-approval-prepare-uncertain-1"
+    executor = FakeUpstreamExecutor("success")
+    original_prepare = McpDispatchAttemptService.authorize_reserve_and_prepare
+    committed_attempt_id: str | None = None
+
+    async def commit_then_report_uncertain(
+        self: McpDispatchAttemptService,
+        **kwargs: Any,
+    ) -> None:
+        nonlocal committed_attempt_id
+        _validation, attempt = await original_prepare(self, **kwargs)
+        assert attempt is not None
+        committed_attempt_id = attempt.attempt_id
+        raise DispatchPrepareCommitUncertainError("dispatch_prepare_commit_uncertain")
+
+    monkeypatch.setattr(
+        McpDispatchAttemptService,
+        "authorize_reserve_and_prepare",
+        commit_then_report_uncertain,
+    )
+    _register_upstream(tool_name, executor)
+    try:
+        permit = await create_tool_permit(
+            client,
+            wallet_id=provisioned["agent_wallet_id"],
+            key_id=provisioned["key_id"],
+            tool_name=tool_name,
+            idem_key="partner-upstream-approval-prepare-uncertain-permit",
+            requires_human_approval=True,
+        )
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=provisioned["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key=idempotency_key,
+        )
+
+        uncertain = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert uncertain.status_code == 200
+        assert uncertain.json()["error"] == {
+            "code": -32005,
+            "message": "idempotency_in_progress",
+        }
+        assert committed_attempt_id is not None
+        assert executor.dispatch_count == 0
+        factory = get_session_factory()
+        async with factory() as session:
+            attempt = await session.get(
+                McpDispatchAttemptModel,
+                committed_attempt_id,
+            )
+            assert attempt is not None
+            record = await session.get(
+                IdempotencyRecordModel,
+                attempt.idempotency_record_id,
+            )
+            approval = await session.get(HumanApprovalModel, attempt.approval_id)
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            receipt_count = await session.scalar(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(
+                    ReceiptModel.idempotency_record_id == attempt.idempotency_record_id
+                )
+            )
+            ledger_count = await session.scalar(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(LedgerEntryModel.operation_key == attempt.idempotency_record_id)
+            )
+        assert attempt.state == "prepared"
+        assert approval is not None and approval.status == "consumed"
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("2")
+        assert record is not None and record.response_json is None
+        assert int(receipt_count or 0) == 0
+        assert int(ledger_count or 0) == 0
+
+        await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+            committed_attempt_id
+        )
+        replay = await client.post(
+            "/mcp/messages",
+            json=body,
+            headers=provisioned["agent_headers"],
+        )
+
+        assert replay.status_code == 200
+        assert replay.json()["error"]["message"] == "upstream_pre_dispatch_failed"
+        assert (
+            replay.json()["error"]["data"]["receipt"]["dispatch_attempt_id"]
+            == committed_attempt_id
+        )
+        assert executor.dispatch_count == 0
+        async with factory() as session:
+            repaired_attempt = await session.get(
+                McpDispatchAttemptModel,
+                committed_attempt_id,
+            )
+            repaired_permit = await session.get(PermitModel, permit["permit_id"])
+            repaired_receipts = (
+                (
+                    await session.execute(
+                        select(ReceiptModel).where(
+                            ReceiptModel.dispatch_attempt_id == committed_attempt_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert repaired_attempt is not None
+        assert repaired_attempt.state == "returned_error"
+        assert repaired_attempt.budget_released_at is not None
+        assert repaired_permit is not None
+        assert repaired_permit.spent_credits == Decimal("0")
+        assert len(repaired_receipts) == 1
+        assert repaired_receipts[0].outcome == "failed_refunded"
+        assert repaired_receipts[0].approval_id == approval.approval_id
+        valid, reason, _ = await get_receipt_service().verify_receipt(
+            repaired_receipts[0].receipt_id
+        )
+        assert (valid, reason) == (True, None)
     finally:
         get_service_registry().unregister_local(tool_name)
 

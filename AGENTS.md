@@ -7,19 +7,29 @@ Do not treat it as a generic agent app backend.
 
 The strongest thesis:
 
-> A control layer for agent-to-tool actions where every autonomous action is scoped, authorized, metered, signed, receipted, auditable, and governable.
+> Transaction integrity for consequential autonomous tool actions. For one
+> logical action, the supported gateway path binds delegated authority and
+> configured consumption, permits at most one gateway dispatch and debit,
+> preserves uncertain delivery as durable state, and links the resulting
+> gateway evidence.
 
 The weaker thesis to avoid:
 
-> An agent backend with lots of features.
+> A broad agent backend, governance platform, or bundle of IAM, policy,
+> budget, logging, and receipt features.
 
 ## Core Loop
 
 Judge the product against this loop:
 
-discover → authenticate → authorize → invoke → meter → receipt → audit → govern
+logical action identity → authorize → reserve configured allowance → debit →
+claim one gateway dispatch → classify outcome or uncertainty → receipt/audit →
+reconcile
 
-Every major feature should support this loop. If a feature does not support this loop, question whether it should be frozen, deleted, or moved out of the main wedge.
+"Transaction" means a durable linked state machine at the gateway boundary,
+not one distributed ACID transaction with the upstream tool. Every major
+feature should support this loop. If a feature does not support it, question
+whether it should be frozen, deleted, or moved out of the main wedge.
 
 ## Current Company Phase: Customer Validation
 
@@ -44,60 +54,61 @@ date, and the smallest vertical slice that clears the blocker. Demo enthusiasm,
 generic competitor parity, and speculative roadmap requests are not evidence.
 
 Judge external validation against the partner-owned milestone: one partner
-agent, one partner staging tool, one partner engineer, and one receipt that
-engineer verifies independently. Do not count local demos, self-issued public
-proof, or the stranger test as customer validation.
+agent, one consequential retry-sensitive staging mutation, and one partner
+engineer. The partner must run a controlled effect-then-response-loss case,
+observe charged `delivery_uncertain` and no second gateway dispatch/debit on
+exact replay, reconcile the actual effect from its authoritative system, and
+verify the linked gateway receipt offline. Do not count local demos,
+self-issued public proof, or the stranger test as customer validation.
 
-## Product Wedge Candidates
+## Product Wedge
 
-When making product or architecture recommendations, evaluate these wedges.
-**They are not peers — the ordering is the point.** The 2026-08 competitive
-sweep ([`docs/market-research-2026-08.md`](docs/market-research-2026-08.md), and
+The active wedge is transaction integrity for consequential autonomous
+actions: mutations whose duplicate, incorrect, or uncertain execution can
+cause material harm and whose retry safety matters.
+
+IAM, generic tool authorization, payment rails, budget controls, receipts,
+logging, and governance are integrations or supporting mechanisms—not
+standalone differentiation. Do not recommend a "full agent middleware
+platform" unless this narrower wedge is first credible with customers.
+
+### Competitive Positioning and Scope
+
+The 2026-08 competitive sweep
+([`docs/market-research-2026-08.md`](docs/market-research-2026-08.md), including
 §9 for the 2026-08-25 re-test) established that signed, offline-verifiable
-receipts are **table stakes**, not a wedge: they ship in Microsoft's
-`agent-governance-toolkit`, Pipelock, and protect-mcp/ScopeBlind. Lead with the
-debit, cite the signature as supporting evidence, never as the differentiator.
-See [`WEDGE.md`](WEDGE.md) §"Signed receipts are table stakes now".
+receipts are table stakes: they ship in Microsoft's `agent-governance-toolkit`,
+Pipelock, and protect-mcp/ScopeBlind. Lead with the debit and uncertainty
+semantics, cite the signature as supporting evidence, and never present signed
+receipts or generic audit logs as the differentiator. See [`WEDGE.md`](WEDGE.md)
+§"Signed receipts are table stakes now".
 
-1. **exactly-once economic authorization at the gateway boundary** — one
-   accepted idempotency key yields at most one gateway dispatch **to the
-   configured upstream MCP tool** and at most one ledger debit, linked by a
-   single persisted chain, with a receipt on every path that finalizes or
-   reconciles. (Local governed tools have no dispatch state machine.) This is the wedge. ("Exactly-once" is the
-   deduplication term of art: never a duplicate charge, not always a charge.)
-2. **crash-semantics accounting** — **for the configured upstream MCP tool**, a
-   genuinely ambiguous post-dispatch outcome becomes a distinct receipted state
-   rather than a silent redispatch. Local governed tools fail closed into manual
-   review; they have no dispatch state machine.
-3. agent authorization gateway
-4. usage metering layer for agent tools
-5. MCP governance proxy
-6. secure delegated tool execution API
-7. **signed receipt ledger for agent actions — demoted 2026-08.** Real here and
-   worth saying, but no longer differentiating. Do not build or pitch around it
-   as the wedge.
-8. **agent audit log platform — demoted 2026-08**, same reason.
-
-Do not recommend "full agent middleware platform" unless the narrower wedges are already credible.
+The one-shot gateway dispatch and `delivery_uncertain` state machine apply to
+the configured upstream MCP tool. Local governed tools have no dispatch state
+machine and fail closed into manual review. "Exactly once" is the
+deduplication term of art: one accepted logical-action key permits at most one
+gateway dispatch and debit; it does not promise that every accepted action is
+charged or that the downstream effect occurs exactly once without upstream
+idempotency support.
 
 ## Engineering Priorities
 
 Prioritize:
 
-- delegated authority
-- permit lifecycle
-- scoped authorization
-- idempotency
-- replay protection
-- billing/accounting integrity under crash
-- usage metering
-- signed receipts
+- logical-action identity and payload binding
+- bounded permit, approval, credit, and call-allowance consumption
+- one-shot gateway dispatch
+- explicit `delivery_uncertain`
+- safe non-redispatch and reconciliation
+- upstream idempotency propagation
+- linked execution-time evidence
+- delegated authority and permit lifecycle
+- scoped authorization and revocation
+- replay protection and idempotency
+- billing/accounting integrity
 - tenant isolation
 - tool execution safety
-- auditability
-- revocation
-- governance policy
-- billing/accounting integrity
+- signed receipts and auditability
 - developer SDK/demo path
 
 ## Security-Critical Areas

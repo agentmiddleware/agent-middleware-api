@@ -11,9 +11,14 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.jwt import JWT_AUTHORITY_SCOPES, get_jwt_service
+from app.db.database import get_session_factory
+from app.db.models import RefreshTokenModel
 from app.main import app
+from app.routers.auth import _exp_to_datetime
 from app.services.api_key_service import get_api_key_service
 from tests.test_trust_helpers import provision_agent_wallet
 
@@ -45,6 +50,105 @@ async def _mint_tokens(client, api_key: str) -> dict:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        [],
+        ["tool:invoke"],
+        ["billing:charge"],
+        ["billing:read"],
+        [*JWT_AUTHORITY_SCOPES, "api-keys:manage"],
+        ["billing:charge", "billing:charge", "tool:invoke"],
+    ],
+)
+async def test_token_exchange_rejects_non_authoritative_scope_profiles(
+    client,
+    clean_database,
+    signing_key,
+    scopes,
+):
+    provisioned = await provision_agent_wallet(client)
+
+    response = await client.post(
+        "/v1/auth/token",
+        json={
+            "api_key": provisioned["agent_headers"]["X-API-Key"],
+            "scopes": scopes,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"] == "unsupported_jwt_scope_profile"
+
+
+@pytest.mark.anyio
+async def test_new_refresh_token_carries_key_and_authority_profile(
+    client,
+    clean_database,
+    signing_key,
+):
+    provisioned = await provision_agent_wallet(client)
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
+
+    payload = get_jwt_service().verify_refresh_token(tokens["refresh_token"])
+
+    assert payload.key_id == provisioned["key_id"]
+    assert payload.scopes == list(JWT_AUTHORITY_SCOPES)
+
+
+@pytest.mark.anyio
+async def test_token_exchange_accepts_exact_authority_profile(
+    client,
+    clean_database,
+    signing_key,
+):
+    provisioned = await provision_agent_wallet(client)
+
+    response = await client.post(
+        "/v1/auth/token",
+        json={
+            "api_key": provisioned["agent_headers"]["X-API-Key"],
+            "scopes": list(reversed(JWT_AUTHORITY_SCOPES)),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["scope"] == " ".join(JWT_AUTHORITY_SCOPES)
+
+
+@pytest.mark.anyio
+async def test_legacy_scope_less_refresh_token_fails_closed(
+    client,
+    clean_database,
+    signing_key,
+):
+    provisioned = await provision_agent_wallet(client)
+    legacy = get_jwt_service().create_refresh_token(
+        wallet_id=provisioned["agent_wallet_id"]
+    )
+    payload = get_jwt_service().verify_refresh_token(legacy)
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            RefreshTokenModel(
+                jti=payload.jti,
+                wallet_id=payload.sub,
+                key_id=provisioned["key_id"],
+                expires_at=_exp_to_datetime(payload.exp),
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/v1/auth/refresh",
+        json={"refresh_token": legacy},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["error"] == "invalid_refresh_token"
+
+
+@pytest.mark.anyio
 async def test_refresh_works_while_the_key_is_active(
     client, clean_database, signing_key
 ):
@@ -57,6 +161,53 @@ async def test_refresh_works_while_the_key_is_active(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["access_token"]
+
+
+@pytest.mark.anyio
+async def test_refresh_parent_can_create_only_one_live_child(
+    client, clean_database, signing_key
+):
+    provisioned = await provision_agent_wallet(client)
+    tokens = await _mint_tokens(client, provisioned["agent_headers"]["X-API-Key"])
+    parent = get_jwt_service().verify_refresh_token(tokens["refresh_token"])
+
+    winner = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    loser = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+
+    assert winner.status_code == 200, winner.text
+    assert loser.status_code == 401
+    assert loser.json()["detail"]["error"] == "revoked_refresh_token"
+
+    child_token = winner.json()["refresh_token"]
+    child = get_jwt_service().verify_refresh_token(child_token)
+    assert child.key_id == provisioned["key_id"]
+    assert child.scopes == list(JWT_AUTHORITY_SCOPES)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        records = (
+            (
+                await session.execute(
+                    select(RefreshTokenModel).where(
+                        RefreshTokenModel.wallet_id == provisioned["agent_wallet_id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert {record.jti for record in records} == {parent.jti, child.jti}
+    assert next(record for record in records if record.jti == parent.jti).revoked
+    assert not next(record for record in records if record.jti == child.jti).revoked
+
+    redeem_child = await client.post(
+        "/v1/auth/refresh", json={"refresh_token": child_token}
+    )
+    assert redeem_child.status_code == 200, redeem_child.text
 
 
 @pytest.mark.anyio
@@ -225,6 +376,13 @@ async def test_rotation_carries_the_key_binding_forward(
     )
     assert rotated.status_code == 200
     rotated_refresh = rotated.json()["refresh_token"]
+    jwt_svc = get_jwt_service()
+    assert jwt_svc.verify_access_token(rotated.json()["access_token"]).scopes == list(
+        JWT_AUTHORITY_SCOPES
+    )
+    assert jwt_svc.verify_refresh_token(rotated_refresh).scopes == list(
+        JWT_AUTHORITY_SCOPES
+    )
 
     # Revoke the originating key; a second key keeps the wallet "live", so only
     # a preserved binding can deny the rotated token.

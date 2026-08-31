@@ -55,21 +55,29 @@ prove-trust-plane-postgres:
 	alembic upgrade head
 	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert
 
-# Two-process crash-consistency proof. Starts independent Uvicorn workers
-# against one shared PostgreSQL database and kills a worker at durable commit
-# boundaries, proving one side effect / debit / receipt, receipt-commit
-# recovery, and fail-closed manual review after an ambiguous side effect
-# (never an automatic redispatch).
+# Multi-process crash-consistency proof. Starts independent gateway workers
+# against one shared PostgreSQL database plus a separate FastMCP partner, then
+# kills a gateway at durable commit boundaries. Proves one side effect / debit /
+# receipt, receipt-commit recovery, remote ambiguity without redispatch, and
+# fail-closed manual review for a local side effect with no persisted response.
 #
 # Requires DATABASE_URL=postgresql+asyncpg://... pointing at a DEDICATED,
-# EMPTY database. The harness refuses to run otherwise: it fails closed on a
-# non-PostgreSQL URL, a production-like ENVIRONMENT, a stale Alembic revision,
+# EMPTY, DISPOSABLE database. Proof rows are retained; drop/recreate it before
+# another run. The harness refuses to run otherwise: it fails closed on a
+# non-PostgreSQL URL, a non-test ENVIRONMENT, a database name that does not
+# exactly match MCP_STRESS_EXPECTED_DATABASE_NAME, a stale Alembic revision,
 # or any application table that already holds rows, and it takes an advisory
 # lock so two runs cannot overlap. This is the same proof CI runs.
+# The operator must explicitly export MCP_STRESS_DB_ISOLATED=1,
+# MCP_STRESS_EXPECTED_DATABASE_NAME, STATE_BACKEND=postgres, and
+# ENVIRONMENT=test. The target deliberately does not override those safety
+# signals.
 prove-crash-recovery:
+	RUN_MCP_MULTIPROCESS_TESTS=1 \
+	uv run --with-requirements requirements.txt \
+	  python -m tests.support.mcp_stress_preflight
 	alembic upgrade head
-	RUN_MCP_MULTIPROCESS_TESTS=1 MCP_STRESS_DB_ISOLATED=1 \
-	STATE_BACKEND=postgres ENVIRONMENT=test \
+	RUN_MCP_MULTIPROCESS_TESTS=1 \
 	uv run --with-requirements requirements.txt \
 	  pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
 
@@ -122,6 +130,7 @@ trust-release-gate:
 # forged permits, receipt and audit-chain verification, and tenant isolation.
 # Requires AGENT_MIDDLEWARE_API_KEY (a bootstrap/admin key) plus either an
 # explicit AGENT_MIDDLEWARE_API_URL or `TRUST_CONFORMANCE_ARGS="--api-url ..."`.
+# AGENT_MIDDLEWARE_API_URL_ACK must exactly equal the normalized selected target.
 # The canonical production origin also requires `--confirm-production` in
 # TRUST_CONFORMANCE_ARGS.
 trust-conformance-live:

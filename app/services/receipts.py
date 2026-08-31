@@ -114,30 +114,38 @@ class ReceiptService:
     @staticmethod
     async def _has_unambiguous_historical_idempotency_link(
         model: ReceiptModel,
+        *,
+        session: AsyncSession | None = None,
     ) -> bool:
         """Corroborate the only linkage migration was allowed to backfill."""
         if model.idempotency_record_id is None or model.dispatch_attempt_id is not None:
             return False
 
-        factory = get_session_factory()
-        async with factory() as session:
-            records = (
-                (
-                    await session.execute(
-                        select(IdempotencyRecordModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                IdempotencyRecordModel.response_reference
-                                == model.receipt_id,
-                            )
-                        )
-                        .limit(2)
+        if session is None:
+            factory = get_session_factory()
+            async with factory() as owned_session:
+                return (
+                    await ReceiptService._has_unambiguous_historical_idempotency_link(
+                        model, session=owned_session
                     )
                 )
-                .scalars()
-                .all()
+        records = (
+            (
+                await session.execute(
+                    select(IdempotencyRecordModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            IdempotencyRecordModel.response_reference
+                            == model.receipt_id,
+                        )
+                    )
+                    .limit(2)
+                )
             )
+            .scalars()
+            .all()
+        )
         if len(records) != 1:
             return False
         record = records[0]
@@ -227,6 +235,7 @@ class ReceiptService:
         session: AsyncSession | None = None,
         approval_id: str | None = None,
         constraints_evaluated: dict[str, Any] | None = None,
+        prepared_signing_key_id: str | None = None,
     ) -> ReceiptResponse:
         if reason_code is not None:
             if outcome == "success" or not _REASON_CODE_PATTERN.fullmatch(reason_code):
@@ -338,9 +347,15 @@ class ReceiptService:
             payload["approval_id"] = approval_id
         if constraints_evaluated:
             payload["constraints_evaluated"] = constraints_evaluated
-        signature, signature_key_id, _ = await get_signing_key_service().sign_payload(
-            payload
-        )
+        signing_keys = get_signing_key_service()
+        if prepared_signing_key_id is None:
+            signature, signature_key_id, _ = await signing_keys.sign_payload(payload)
+        else:
+            # The caller freshly ensured this key before taking its transaction
+            # locks. Sign with that selection without a nested DB checkout.
+            signature, signature_key_id, _ = signing_keys.sign_payload_with_key_id(
+                payload, prepared_signing_key_id
+            )
         model = ReceiptModel(
             receipt_id=receipt_id,
             idempotency_record_id=idempotency_record_id,
@@ -510,14 +525,16 @@ class ReceiptService:
             model = await session.get(ReceiptModel, receipt_id)
             if not model:
                 return False, "receipt_not_found", None
-            ok = await self.verify_model(model)
+            ok = await self.verify_model(model, session=session)
             return (
                 ok,
                 None if ok else "receipt_signature_invalid",
                 receipt_model_to_response(model),
             )
 
-    async def signing_input_for_model(self, model: ReceiptModel) -> str | None:
+    async def signing_input_for_model(
+        self, model: ReceiptModel, *, session: AsyncSession | None = None
+    ) -> str | None:
         """Return the exact canonical bytes this receipt's signature covers.
 
         Mirrors :meth:`verify_model` branch for branch, so the exported bytes
@@ -532,16 +549,20 @@ class ReceiptService:
             current_payload,
             signature=model.signature,
             key_id=model.signature_key_id,
+            session=session,
         ):
             return canonical_json(current_payload)
 
-        if not await self._has_unambiguous_historical_idempotency_link(model):
+        if not await self._has_unambiguous_historical_idempotency_link(
+            model, session=session
+        ):
             return None
         legacy_payload = self._verification_payload(model, include_linkage=False)
         if await signing_keys.verify_payload(
             legacy_payload,
             signature=model.signature,
             key_id=model.signature_key_id,
+            session=session,
         ):
             return canonical_json(legacy_payload)
         return None
@@ -553,9 +574,11 @@ class ReceiptService:
             model = await session.get(ReceiptModel, receipt_id)
             if model is None:
                 return None
-            return await self.signing_input_for_model(model)
+            return await self.signing_input_for_model(model, session=session)
 
-    async def verify_model(self, model: ReceiptModel) -> bool:
+    async def verify_model(
+        self, model: ReceiptModel, *, session: AsyncSession | None = None
+    ) -> bool:
         """Verify current signatures, then the constrained migration fallback."""
         signing_keys = get_signing_key_service()
         current_payload = self._verification_payload(model, include_linkage=True)
@@ -563,6 +586,7 @@ class ReceiptService:
             current_payload,
             signature=model.signature,
             key_id=model.signature_key_id,
+            session=session,
         ):
             return True
 
@@ -570,13 +594,16 @@ class ReceiptService:
         # receipts whose original signature predates linkage fields. Do not
         # generalize legacy verification: dispatch-linked receipts and links
         # that are absent, mismatched, or ambiguous must fail closed.
-        if not await self._has_unambiguous_historical_idempotency_link(model):
+        if not await self._has_unambiguous_historical_idempotency_link(
+            model, session=session
+        ):
             return False
         legacy_payload = self._verification_payload(model, include_linkage=False)
         return await signing_keys.verify_payload(
             legacy_payload,
             signature=model.signature,
             key_id=model.signature_key_id,
+            session=session,
         )
 
 

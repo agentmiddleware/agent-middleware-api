@@ -6,10 +6,18 @@ Modern token-based auth alongside legacy API keys.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, status
+from sqlalchemy import update
+from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.jwt import JWTError, get_jwt_service
+from app.core.jwt import (
+    JWT_AUTHORITY_SCOPES,
+    JWTError,
+    get_jwt_service,
+    has_jwt_authority_scope_profile,
+)
 from app.db.database import get_session_factory
 from app.db.models import RefreshTokenModel
 from app.schemas.auth import (
@@ -26,6 +34,24 @@ router = APIRouter(prefix="/v1/auth", tags=["Authentication"])
 def _exp_to_datetime(ts: int) -> datetime:
     """Convert JWT exp (int) to timezone-aware datetime."""
     return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+
+def _normalize_authority_scopes(requested: list[str] | None) -> list[str]:
+    """Return the one JWT profile the current authorization layer supports."""
+    if requested is None:
+        return list(JWT_AUTHORITY_SCOPES)
+    if not has_jwt_authority_scope_profile(requested):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "unsupported_jwt_scope_profile",
+                "message": (
+                    "JWT scope attenuation is not supported. Request exactly "
+                    f"{' '.join(JWT_AUTHORITY_SCOPES)} or omit scopes."
+                ),
+            },
+        )
+    return list(JWT_AUTHORITY_SCOPES)
 
 
 @router.post("/token", response_model=TokenExchangeResponse)
@@ -51,15 +77,18 @@ async def exchange_api_key_for_tokens(
 
     jwt_svc = get_jwt_service()
 
-    # Default scopes: all billing and tool invoke
-    scopes = request.scopes or ["billing:charge", "tool:invoke"]
+    scopes = _normalize_authority_scopes(request.scopes)
 
     access_token = jwt_svc.create_access_token(
         wallet_id=db_key.wallet_id,
         key_id=db_key.key_id,
         scopes=scopes,
     )
-    refresh_token = jwt_svc.create_refresh_token(wallet_id=db_key.wallet_id)
+    refresh_token = jwt_svc.create_refresh_token(
+        wallet_id=db_key.wallet_id,
+        key_id=db_key.key_id,
+        scopes=scopes,
+    )
 
     # Store refresh token JTI for revocation
     refresh_payload = jwt_svc.verify_refresh_token(refresh_token)
@@ -104,53 +133,23 @@ async def refresh_access_token(
             detail={"error": "invalid_refresh_token", "message": str(e)},
         ) from e
 
-    # Check if revoked in DB
-    factory = get_session_factory()
-    async with factory() as session:
-        record = await session.get(RefreshTokenModel, payload.jti)
-        if not record or record.revoked:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": "revoked_refresh_token",
-                    "message": "Token has been revoked.",
-                },
-            )
-
-        # Mark old refresh token as revoked
-        record.revoked = True
-        origin_key_id = record.key_id
-        await session.commit()
-
-    # A JWT is derived authority: it exists only because an API key was
-    # presented at /token. Refreshing checked the signature and the revoked
-    # flag but never re-checked the underlying credential, so tokens minted
-    # from a stolen key kept renewing for the refresh lifetime after that key
-    # was revoked — revocation did not contain the compromise.
-    #
-    # Check the ORIGINATING key, not merely the wallet. Wallet-level liveness is
-    # too coarse: a wallet with several keys stays live after the compromised one
-    # is revoked, and auto_rotate_on_suspicious_activity revokes the suspect key
-    # while issuing a replacement, so the wallet is never keyless and the
-    # attacker's chain would survive the rotation meant to contain it. Binding
-    # also makes the revoke/refresh race benign — a token that wins the timing
-    # window is still bound to the revoked key, so it cannot be renewed.
-    #
-    # Tokens issued before binding existed carry no key_id. They cannot be
-    # safely associated with a still-live credential, so fail closed and force
-    # the caller to exchange an API key again. The migration also revokes all
-    # such rows, but this guard protects partially migrated/restored databases.
-    if origin_key_id is None:
+    # Refresh JWTs minted before the fixed-profile contract do not carry enough
+    # information to preserve their original authority. Never infer it from a
+    # wallet or from the database row: require the caller to re-present a key.
+    if payload.key_id is None or not has_jwt_authority_scope_profile(payload.scopes):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
-                "error": "unbound_refresh_token",
+                "error": "invalid_refresh_token",
                 "message": (
-                    "This refresh token predates API-key binding and cannot be "
-                    "renewed; authenticate with an active API key."
+                    "This refresh token predates the supported authority profile "
+                    "and cannot be renewed; authenticate with an active API key."
                 ),
             },
         )
+
+    origin_key_id = payload.key_id
+    scopes = list(JWT_AUTHORITY_SCOPES)
 
     from app.services.api_key_service import get_api_key_service
 
@@ -172,22 +171,85 @@ async def refresh_access_token(
     new_access = jwt_svc.create_access_token(
         wallet_id=payload.sub,
         key_id=origin_key_id,
-        scopes=["billing:charge", "tool:invoke"],
+        scopes=scopes,
     )
-    new_refresh = jwt_svc.create_refresh_token(wallet_id=payload.sub)
+    new_refresh = jwt_svc.create_refresh_token(
+        wallet_id=payload.sub,
+        key_id=origin_key_id,
+        scopes=scopes,
+    )
 
-    # Store new refresh token, carrying the binding forward so rotation cannot
-    # launder a chain into an unbound one.
+    # Consume the parent and persist its sole child in one transaction. The
+    # revoked=False predicate is the compare-and-swap primitive: concurrent
+    # refreshes may all verify the JWT, but only one can update one row.
     new_refresh_payload = jwt_svc.verify_refresh_token(new_refresh)
+    factory = get_session_factory()
+    failed_reason: str | None = None
     async with factory() as session:
-        model = RefreshTokenModel(
-            jti=new_refresh_payload.jti,
-            wallet_id=payload.sub,
-            key_id=origin_key_id,
-            expires_at=_exp_to_datetime(new_refresh_payload.exp),
+        async with session.begin():
+            consumed = await session.execute(
+                update(RefreshTokenModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        RefreshTokenModel.jti == payload.jti,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        RefreshTokenModel.wallet_id == payload.sub,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        RefreshTokenModel.key_id == origin_key_id,
+                    ),
+                    cast(Any, RefreshTokenModel.revoked).is_(False),
+                )
+                .values(revoked=True)
+            )
+            if (cast(Any, consumed).rowcount or 0) != 1:
+                # Preserve the old fail-closed behavior for a partially restored
+                # database whose token row lost its key binding. This update is
+                # also conditional and commits without creating a child.
+                unbound = await session.execute(
+                    update(RefreshTokenModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            RefreshTokenModel.jti == payload.jti,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            RefreshTokenModel.wallet_id == payload.sub,
+                        ),
+                        cast(Any, RefreshTokenModel.key_id).is_(None),
+                        cast(Any, RefreshTokenModel.revoked).is_(False),
+                    )
+                    .values(revoked=True)
+                )
+                if (cast(Any, unbound).rowcount or 0) == 1:
+                    failed_reason = "unbound_refresh_token"
+                else:
+                    failed_reason = "revoked_refresh_token"
+            else:
+                session.add(
+                    RefreshTokenModel(
+                        jti=new_refresh_payload.jti,
+                        wallet_id=payload.sub,
+                        key_id=origin_key_id,
+                        expires_at=_exp_to_datetime(new_refresh_payload.exp),
+                    )
+                )
+
+    if failed_reason is not None:
+        message = (
+            "This refresh token is no longer bound to its originating API key."
+            if failed_reason == "unbound_refresh_token"
+            else "Token has been revoked."
         )
-        session.add(model)
-        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": failed_reason, "message": message},
+        )
 
     return TokenRefreshResponse(
         access_token=new_access,

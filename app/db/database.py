@@ -48,6 +48,7 @@ REQUIRED_TRUST_TABLES = frozenset(
         "permits",
         "receipts",
         "idempotency_records",
+        "permit_call_reservations",
         "mcp_dispatch_attempts",
     }
 )

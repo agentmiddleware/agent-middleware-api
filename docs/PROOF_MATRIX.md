@@ -19,7 +19,7 @@ the claims the project deliberately does not make, see
 | `make prove-trust-plane` | The full trust loop plus replay and tamper detection — see the breakdown below | Throwaway SQLite |
 | `make prove-trust-plane-postgres` | **Migrations only** — see the defect note below | Throwaway SQLite, after migrating PostgreSQL |
 | `make red-team-trust-plane` | Ten distinct attacks are each denied with a specific reason code and none produces a debit | Throwaway SQLite |
-| `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |
+| `make dogfood-trust-plane` | Completed exact replay does not repeat this local fixture's **real durable side effect** (a file on disk) | Throwaway SQLite |
 | `make agent-ops-war-room` | The operator narrative: discovery, provisioning, invoke, replay, self-inspection, denial | Temp SQLite |
 
 ### Known defect: `prove-trust-plane-postgres` does not prove PostgreSQL
@@ -38,7 +38,7 @@ on SQLite.
 The same defect makes CI's `postgres_trust` job a SQLite run.
 
 Real PostgreSQL coverage in this repository comes from `make
-prove-crash-recovery` (the two-process harness fails closed unless the URL is
+prove-crash-recovery` (the multi-process harness fails closed unless the URL is
 PostgreSQL) and from the CI suites parameterized by `TEST_POSTGRES_URL`, not
 from the demo script. **Fixing this means having `configure_environment()`
 respect a caller-supplied `DATABASE_URL` instead of overwriting it** — a small
@@ -83,13 +83,18 @@ once, and that the audit chain remains valid throughout.
 
 ```bash
 export DATABASE_URL=postgresql+asyncpg://...   # dedicated, EMPTY database
+export STATE_BACKEND=postgres
+export ENVIRONMENT=test
+export MCP_STRESS_DB_ISOLATED=1
+export MCP_STRESS_EXPECTED_DATABASE_NAME=agent_middleware_stress_test
 make prove-crash-recovery
 ```
 
-This starts two independent Uvicorn worker processes against one shared
-PostgreSQL database and injects faults at durable commit boundaries. It proves
-six things — the first three on the local execution path, the last three on
-the governed *remote* dispatch path:
+This starts two independent Uvicorn gateway worker processes against one shared
+PostgreSQL database. Remote-path cases also start a separate synthetic FastMCP
+partner process with its own durable effect store. The harness injects faults at
+named durable commit boundaries; the narrative cases are followed by focused
+approval, response-loss, and table-driven boundary coverage.
 
 1. **Concurrent invokes serialize.** While worker A is paused mid-side-effect,
    an identical invoke on worker B receives `idempotency_in_progress`. After
@@ -104,68 +109,79 @@ the governed *remote* dispatch path:
    untouched and reports it in its `needs_review` count rather than repairing
    it, replay stays `idempotency_in_progress`, and nothing is redispatched
    automatically.
-4. **A kill past the dispatch checkpoint is charged and signed ambiguous.** The
-   worker is killed after the durable `prepared -> dispatched` transition but
-   before the remote effect runs. No effect actually landed, and the trust
-   plane still cannot prove that, so reconciliation terminalizes the attempt as
-   `delivery_uncertain`: the charge is retained, no refund is issued, the permit
-   reservation stands, and the signed receipt records the ambiguity.
+4. **A kill past the dispatch checkpoint is charged and signed ambiguous.**
+   The worker is killed after the durable dispatch transition but before the
+   remote effect runs. No effect actually landed, and the gateway still cannot
+   prove that, so reconciliation terminalizes the attempt as
+   `delivery_uncertain`: the charge and permit reservation remain, no refund is
+   issued, and no worker redispatches it.
 5. **A kill after the remote effect never redispatches it.** The worker is
-   killed once the remote effect is durable but before any terminal result is
-   recorded. Reconciliation terminalizes the attempt as `delivery_uncertain`
-   and the upstream side-effect count stays at exactly one — the effects table
-   permits duplicates on purpose, so a redispatch would be visible as a second
-   row rather than hidden by a constraint.
-6. **A kill before the checkpoint is refunded, not held.** The worker is killed
-   immediately after the debit commits, while the attempt is still `prepared`
-   and does not yet name the ledger entry that paid for it. Nothing crossed the
-   dispatch boundary, so this is the one post-charge crash the plane can resolve
-   in the caller's favour: recovery finds the orphaned debit by its operation
-   identity rather than by the attempt's null pointer, refunds it, releases the
-   reservation, signs `failed_refunded`, and never contacts the upstream server.
+   killed after the synthetic partner's effect is durable but before a terminal
+   result is recorded. Reconciliation records `delivery_uncertain`; the debit
+   remains singular and the effect store still shows one call.
+6. **A kill before the dispatch checkpoint is refunded.** The worker is killed
+   after the debit commits while the attempt is still provably pre-dispatch.
+   Reconciliation finds the debit by operation identity, refunds it, releases
+   the reservation, signs `failed_refunded`, and never contacts the upstream.
    A second sweep issues no second refund.
 
-Note that (3) is deliberately *not* a recovery. The correct behavior for an
-ambiguous post-side-effect crash on the local path is fail-closed manual
-review, because the gateway cannot know whether the effect landed. Describing
-this proof as "crash recovery" without that qualifier overstates it; the
-accurate framing is **crash consistency with reconciliation, and fail-closed
-review for ambiguous outcomes**. (4), (5), and (6) are the governed remote path's
-answer to the same question: there the durable dispatch state machine can tell
-the cases apart. A crash before the checkpoint is provably non-delivered and is
-refunded; a crash after it is unknowable and terminalizes into
-`delivery_uncertain` instead of waiting for a human — and neither redispatches.
+Focused cases cover two additional authority boundaries: an approval survives a
+crash before preparation without consuming budget, and approval, permit
+reservation, and attempt preparation roll back together when the worker dies
+before their PostgreSQL transaction commits. PostgreSQL concurrency coverage
+also makes competing sessions converge on one consumed approval, one permit
+reservation, and one prepared attempt, and rejects a late decision whose worker
+timestamp cannot establish timely approval.
 
-Alongside those six narrative scenarios, a table-driven boundary suite kills a
-worker at each of the seven remaining instrumented commit boundaries and pins
-the disposition it must leave. Its value is mostly negative: it records that
-the local path is deliberately *more* conservative than the remote one. A
-provably effect-free local crash is still not released for retry, because the
-effect-free sweep is scoped to `operation_kind == "upstream_mcp"`; and a
-reservation stranded before any charge stays stranded on a live permit, because
-reclaiming it early could let a concurrent request over-spend. Both were
-verified against the code rather than inferred from the observed behaviour.
+Additional remote cases pin a committed claim before send, an acknowledged
+upstream response lost before terminal commit, and a real timeout after the
+synthetic partner commits its effect. Reconciliation never redispatches these
+ambiguous actions. The response-loss case rebuilds the portable receipt and
+verifies its signed gateway claims offline using a fixture-pinned public key,
+including wrong-key and tampered-signing-input failures; a repeated sweep is a
+no-op and an exact replay returns the same receipt.
 
-All three remote-path proofs additionally rebuild the full evidence bundle for the
-recovered receipt and require every check to pass, so the claim is that the
-recovered evidence *verifies*, not merely that a receipt row exists. Each also
-re-runs reconciliation and asserts the second sweep is a no-op, and replays the
-call to confirm a client retry gets the ambiguous disposition back rather than a
-fresh execution.
+The synthetic partner's effect table is authoritative only for this local
+fixture. These cases prove the tested gateway state, accounting, replay, and
+signed-claim linkage. They do not prove an arbitrary upstream effect, the
+absence of omitted gateway events, independent key distribution, or the
+partner-owned acceptance milestone in
+[`30-day-customer-validation.md`](30-day-customer-validation.md).
 
-The harness refuses to run unless it is safe: it fails closed on a
-non-PostgreSQL URL, a production-like `ENVIRONMENT`, a stale Alembic revision,
-or any application table that already holds rows, and it takes an advisory lock
-so two runs cannot overlap. Without the opt-in environment variables it skips,
-so it never interferes with `make test`.
+The local post-side-effect case in point 3 deliberately remains unresolved for
+manual review because that path has no downstream evidence lookup. Remote cases
+can distinguish provably pre-dispatch work from post-dispatch ambiguity using
+the persisted dispatch state. Both paths fail closed and never infer a
+successful upstream outcome from gateway evidence alone.
 
-CI runs these in the `postgres_permit_concurrency` job, as two steps against
-one PostgreSQL service: the **13** crash-consistency tests in
-`tests/test_mcp_postgres_multiprocess.py`, then the **11** row-lock
-concurrency tests in `tests/test_permit_postgres_concurrency.py`. That job
-installs dependencies with `pip` rather than `uv`, so its step is spelled
-inline; the Make target is the operator-facing equivalent, not a literal
-copy of the CI step.
+Recovered remote receipts are checked through the full gateway evidence bundle,
+then reconciliation and exact replay are repeated. That establishes that the
+bundle verifies against the gateway's own stored permit, dispatch, ledger,
+receipt, and audit data; only the exported receipt signature is independently
+offline-verifiable.
+
+The accurate framing is **crash consistency with reconciliation, and
+fail-closed review for ambiguous outcomes**. None of these tests turns a missing
+downstream result into a claimed success.
+
+The Make target runs a read-only database/isolation preflight before Alembic.
+The preflight requires `ENVIRONMENT=test` (or `testing`) and compares
+`MCP_STRESS_EXPECTED_DATABASE_NAME` to PostgreSQL's selected database before it
+inspects any tables. The harness fails closed on a non-PostgreSQL URL, a stale
+Alembic revision, or application tables that already hold rows, and takes an
+advisory lock so two proof runs cannot overlap. Without the explicit isolation
+environment variables, it skips under ordinary pytest and the Make preflight
+fails.
+
+The PostgreSQL database is disposable and single-run by design. Proof rows are
+retained for inspection; drop and recreate the database before another run.
+
+CI runs `tests/test_mcp_postgres_multiprocess.py` and
+`tests/test_permit_postgres_concurrency.py` in the
+`postgres_permit_concurrency` job against its PostgreSQL service. The operator
+entry point remains `make prove-crash-recovery`; CI spells the commands inline
+where needed and does not turn a setup or migration step into proof of the
+application assertions.
 
 ## Release gates
 
@@ -187,12 +203,13 @@ same five claims are reachable and checkable from the published docs alone.
 data to the selected target and have no cleanup. Point them at staging unless
 you intend to retain those wallets, permits, receipts, and keys. Neither script
 has a default target: pass `--api-url` or explicitly set
-`AGENT_MIDDLEWARE_API_URL`. The canonical production origin additionally
-requires `--confirm-production`.
+`AGENT_MIDDLEWARE_API_URL`. Both also require
+`AGENT_MIDDLEWARE_API_URL_ACK` to exactly equal the normalized selected target.
+The canonical production origin additionally requires `--confirm-production`.
 
 | Command | Proves | Requires |
 |---|---|---|
-| `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | Environment-only `AGENT_MIDDLEWARE_API_KEY`; explicit `AGENT_MIDDLEWARE_API_URL` or `TRUST_CONFORMANCE_ARGS="--api-url https://..."`; add `--confirm-production` to the args for the canonical production origin |
+| `make trust-conformance-live` | Golden path; sequential replay; 15 identical concurrent requests exposing one receipt identity or explicit `idempotency_in_progress`, followed by a completed replay and one charge; a changed payload under a reused key conflicting rather than replaying; budget denial; expired and forged permit rejection; receipt and audit-chain verification; tenant isolation against a directly-supplied foreign wallet and permit id | Environment-only `AGENT_MIDDLEWARE_API_KEY`; explicit `AGENT_MIDDLEWARE_API_URL` or `TRUST_CONFORMANCE_ARGS="--api-url https://..."`; `AGENT_MIDDLEWARE_API_URL_ACK` exactly matching the normalized selected target; add `--confirm-production` to the args for the canonical production origin |
 | `python scripts/constant_test_loop.py` | Scoped permit sized from the tool's advertised `creditsPerCall`; governed invoke; signed success receipt with a ledger entry; replay returning the same `receipt_id` with no second debit; an out-of-scope but genuinely registered tool refused with `permit_tool_not_allowed` and charged nothing | `CI_SMOKE_AGENT_KEY` holding a **wallet-scoped** key (self-provisions on loopback when absent); `--tool` and `--tool-args` required off loopback |
 | `make adversarial-battery-live` | Wallet isolation, invalid-key rejection, forged-receipt rejection, permit key binding, expired permits, revoked keys, replay idempotency; always revokes keys it minted | `API_URL` (no default, by design) and `BOOTSTRAP_KEY` |
 
@@ -239,9 +256,10 @@ Being explicit about the boundary is what makes the proofs worth anything.
     issuing origin, so an attacker controlling that origin can serve a key set
     that validates forged receipts. Out-of-band key pinning is not
     implemented.
-  - **No transparency log.** Receipts prove what happened, never what did not.
-    A plane can issue a receipt to one party and omit it from another's
-    listing, and no verifier can detect that.
+  - **No transparency log.** A valid signature proves what the gateway signed
+    and linked, not the downstream effect or the absence of omitted actions. A
+    plane can issue a receipt to one party and omit it from another's listing,
+    and no verifier can detect that.
   - **`/v1/audit/verify-chain` and the evidence bundle remain first-party.**
     Those are computed by the operator over the operator's database; only the
     receipt signature travels.
@@ -257,11 +275,9 @@ Being explicit about the boundary is what makes the proofs worth anything.
 - **The crash proof covers instrumented boundaries, not arbitrary failure.**
   Faults are injected at specific durable commit points. It does not prove
   survival of a kill at an arbitrary instruction, database crash or failover,
-  or multi-node high availability. All twelve instrumented fault points are now
-  reached by a test: five by the narrative scenarios above, and the remaining
-  seven by a table-driven boundary suite that pins the disposition a kill at
-  each commit boundary must leave. What is still not proven is a kill at an
-  *arbitrary* instruction — only at the instrumented boundaries.
+  or multi-node high availability. The named scenarios and table-driven suite
+  exercise instrumented commit boundaries; they do not prove a kill at an
+  arbitrary instruction.
 - **`make prove-trust-plane` runs on SQLite with a hardcoded demo signing
   seed.** It proves the logic, not the production posture. No target re-runs
   these assertions against PostgreSQL — see the defect note above. PostgreSQL
@@ -286,8 +302,8 @@ Ordered by how much each would strengthen the differentiator per unit of work.
    origin being audited. Key pinning, or publication through an independent
    channel, is what makes the verifier meaningful against a compromised
    issuer.
-3. **Exercise the remaining crash fault points.** The harness already
-   instrumented boundaries are all covered as of 2026-08-15; what remains is
+3. **Exercise additional crash modes.** The currently instrumented boundaries
+   are covered; what remains is
    coverage of failure modes the harness cannot inject at all — database crash
    or failover, and multi-node high availability.
 4. **External anchoring or append-only storage**, which is what would let the

@@ -1,8 +1,8 @@
 # Design Partner Guide
 
-Use this guide to qualify design partners for the concrete trust-plane proof:
-scoped signed permit, governed MCP invoke, wallet charge, signed receipt,
-ledger entry, audit chain, replay safety, and out-of-scope denial.
+Use this guide to qualify whether one partner-owned consequential staging action
+needs durable logical identity, bounded authority consumption, at-most-one
+gateway dispatch/debit, explicit uncertainty, and linked evidence.
 
 This guide proves technical fit. It does not by itself prove customer demand.
 Use the interview funnel, commercial evidence gate, and partner-owned pilot
@@ -14,16 +14,17 @@ pilot material, use the [documentation guide](docs/README.md).
 
 ## Best-Fit Partner
 
-An AI platform, infrastructure, or security engineering team that already has
-internal agents calling MCP-style tools and needs a practical control point for:
+An AI platform, infrastructure, or security engineering team that:
 
-- Tool-level authorization.
-- Wallet or budget-backed metering.
-- Replay-safe retries.
-- Post-hoc receipt verification.
-- Audit evidence for who authorized what, what ran, and what it cost.
+- Operates or wants to operate an autonomous write.
+- Currently prohibits or human-gates it because duplicate or ambiguous
+  execution matters.
+- Cannot already establish retry safety through its gateway, downstream
+  idempotency, or effect lookup.
+- Can provide one partner-owned, retry-sensitive staging mutation and one
+  engineer.
 
-This is best for teams that can bring one real internal tool call to the demo.
+This is best for teams that can bring that one real action to the pilot.
 It is not yet a fit for teams seeking production settlement, a full IAM
 replacement, or universal governance across every agent framework.
 
@@ -112,23 +113,33 @@ Then walk the partner through the live flow:
 7. Verify the signed receipt.
 8. Verify the wallet audit chain.
 9. Replay the same request and show the same receipt ID with no second debit.
-10. Attempt a different tool under the same permit and show out-of-scope
+10. Reuse the same key with changed input and show a fail-closed conflict.
+11. Attempt a different tool under the same permit and show out-of-scope
     denial.
-11. Attempt the same allowed tool with no permit at all and show the
+12. Attempt the same allowed tool with no permit at all and show the
     `permit_required` denial, proving the trust plane fails closed when
     `ALLOW_LEGACY_UNPERMITTED_MCP=false`.
+13. Force response loss after the partner tool commits its staging effect.
+14. Observe `delivery_uncertain`, retained configured consumption, and no
+    automatic redispatch when the exact same payload and idempotency key are
+    replayed.
+15. Have the partner engineer reconcile the downstream effect from the
+    partner's authoritative system and record its effect identifier.
 
 ## Problem Discovery Before The Demo
 
 Start with one question:
 
-> Give me one tool you are currently afraid to let an autonomous agent invoke.
+> Which consequential action do you prohibit from full autonomy or require a
+> human to operate because duplicate or uncertain execution is too risky?
 
 Then establish the consequence, current control, and buyer before showing the
 product:
 
 - What happens when that request times out and the agent retries?
+- After an ambiguous result, what establishes whether retry is safe?
 - Who authorizes the action and its economic exposure today?
+- Which exact approval, call allowance, or budget can be shown as consumed?
 - How does the team prove what happened?
 - Which existing IAM, gateway, logging, or approval control is insufficient?
 - Would the team accept an inline availability, latency, and security
@@ -140,12 +151,17 @@ tool and engineer, not agreeing that the demo is interesting.
 
 ## Success Criteria
 
-- The partner can point one internal tool call through the MCP proxy.
-- The partner can define a wallet budget and tool scope.
-- Retries are safe under the same idempotency key.
-- The partner can verify a receipt after the fact.
-- The partner can audit who authorized the action, what tool ran, and what it
-  cost.
+- The partner can point one consequential, retry-sensitive staging mutation
+  through the MCP proxy.
+- The partner can define its scoped permit and configured credit or call
+  allowance.
+- Exact replay does not redispatch; changed input under the same key fails
+  closed.
+- A partner-controlled effect-then-response-loss case produces charged
+  `delivery_uncertain`, and replay creates no second gateway dispatch.
+- The partner engineer reconciles the actual downstream effect from the
+  partner system without rewriting the gateway receipt.
+- The partner can verify the linked gateway evidence after the fact.
 - The partner can see an out-of-scope request denied with an explicit reason.
 - The partner's engineer can export and verify the receipt in the partner's own
   environment.
@@ -158,12 +174,12 @@ tool and engineer, not agreeing that the demo is interesting.
 
 Use:
 
-- "Authorize one agent action. Charge it once. Prove what happened."
-- "Exactly-once gateway authorization, debit, and receipt finalization for
-  metered MCP calls."
-- "Signed proof of authorization, execution, and credit debit for one tool."
-- "Replay-safe metering: same idempotency key, same receipt, no second gateway
-  dispatch or debit."
+- "Make consequential agent actions transactional."
+- "One logical action, bounded authority consumption, at most one gateway
+  dispatch."
+- "When delivery is uncertain, preserve the uncertainty and do not redispatch
+  blindly."
+- "Linked gateway evidence—not proof of the downstream effect."
 
 Avoid:
 

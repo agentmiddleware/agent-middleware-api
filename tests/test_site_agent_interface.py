@@ -213,21 +213,23 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
 
     page = (output / "index.html").read_text(encoding="utf-8")
     text = _page_text(page)
-    headline = "Authorize one agent action. Charge it once. Prove what happened."
+    headline = "Make consequential agent actions transactional."
     failure = (
-        "Your agent invokes a costly tool. The request times out. Was it dispatched? "
-        "Should the agent retry? Will the retry create another debit?"
+        "A consequential tool commits the action, but its response disappears. "
+        "Did the effect land? Is retry safe? Which authority was consumed?"
     )
     boundary = (
-        "Agent Middleware API is a transaction boundary between your autonomous "
-        "agents and your consequential MCP (Model Context Protocol) tools. The "
-        "first call executes and is charged once; a retry carrying the same "
-        "idempotency key cannot dispatch again or debit again. Every completed "
-        "call returns a signed receipt you can verify offline."
+        "On the configured upstream-MCP path, Agent Middleware API binds "
+        "delegated authority and configured consumption to one accepted "
+        "logical-action identity. It permits at most one gateway dispatch and "
+        "debit for that identity, preserves ambiguous delivery without automatic "
+        "redispatch, and links gateway evidence for external reconciliation."
     )
     wedge = (
-        "The wedge today is metered calls. The underlying primitive is bounded "
-        "authority for machine actions."
+        "Transaction integrity for consequential autonomous actions is the wedge: "
+        "stable identity, bounded authority consumption, an at-most-one "
+        "configured-upstream dispatch and debit, honest uncertainty, and linked "
+        "gateway evidence."
     )
     only_path = (
         "The gateway sits between the agent and one tool, and becomes the only "
@@ -238,6 +240,11 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert failure in text
     assert boundary in text
     assert wedge in text
+    assert "not partner validation or proof of the downstream effect" in text
+    assert "Proof that the actual downstream effect occurred" in text
+    assert "An independently witnessed or transparency-logged receipt" in text
+    assert "Prove what happened" not in text
+    assert "The first call executes and is charged once" not in text
     # The non-bypassability claim rides directly under the offer copy with its
     # diagram, before the numbered sections begin.
     assert only_path in text
@@ -504,6 +511,13 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert "https://www.thisisatest.tech/proof/" in sitemap
     assert "https://www.thisisatest.tech/compare/" in sitemap
     assert _png_dimensions(output / "social-card.png") == (1200, 630)
+    social_svg = (SITE / "social-card.svg").read_text(encoding="utf-8")
+    assert "Make consequential agent actions transactional." in social_svg
+    assert "MAKE CONSEQUENTIAL" in social_svg
+    assert "LOGICAL ACTION" in social_svg
+    assert "ONE-SHOT DISPATCH" in social_svg
+    assert "HONEST UNCERTAINTY" in social_svg
+    assert "PROVE WHAT HAPPENED" not in social_svg
     organization = next(
         node
         for node in _json_ld_graph(page, "index.html")
@@ -1325,7 +1339,7 @@ def test_landing_hero_wave_is_progressive_enhancement(tmp_path) -> None:
     # The funnel's tested copy still leads the page: the wave is a treatment,
     # not a content change.
     text = _page_text(page)
-    assert "Authorize one agent action. Charge it once. Prove what happened." in text
+    assert "Make consequential agent actions transactional." in text
 
     stylesheet = (output / "styles.css").read_text(encoding="utf-8")
     assert 'html[data-a11y-contrast="high"] .wave-canvas' in stylesheet

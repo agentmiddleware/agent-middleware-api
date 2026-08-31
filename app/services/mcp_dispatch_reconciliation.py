@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import get_settings
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     ControlPlaneAuditEventModel,
@@ -25,10 +27,11 @@ from app.services.agent_money import AgentMoney, get_agent_money
 from app.services.audit_log import AuditEvent, record_audit_event
 from app.services.idempotency import IdempotencyService, get_idempotency_service
 from app.services.mcp_dispatch_attempts import (
-    DISPATCH_DISPATCHED,
+    DISPATCH_SENT_STATES,
     DISPATCH_PREPARED,
     DISPATCH_TERMINAL_STATES,
     DispatchAttemptContext,
+    DispatchAttemptConflictError,
     DispatchAttemptError,
     McpDispatchAttemptService,
     get_mcp_dispatch_attempt_service,
@@ -39,6 +42,13 @@ from app.services.permits import (
     permit_constraints_snapshot,
 )
 from app.services.receipts import ReceiptError, ReceiptService, get_receipt_service
+from app.services.quotes import (
+    QUOTE_REASON_CONSUMED,
+    QUOTE_REASON_INVOCATION_LINKAGE_AMBIGUOUS,
+    QuoteError,
+    QuoteService,
+    get_quote_service,
+)
 from app.services.signing_keys import sha256_hex
 
 logger = logging.getLogger(__name__)
@@ -74,6 +84,7 @@ class McpDispatchReconciliationService:
         money: AgentMoney | None = None,
         permit_service: PermitService | None = None,
         receipt_service: ReceiptService | None = None,
+        quote_service: QuoteService | None = None,
         idempotency_service: IdempotencyService | None = None,
         max_result_bytes: int | None = None,
     ) -> None:
@@ -81,6 +92,7 @@ class McpDispatchReconciliationService:
         self._money = money or get_agent_money()
         self._permits = permit_service or get_permit_service()
         self._receipts = receipt_service or get_receipt_service()
+        self._quotes = quote_service or get_quote_service()
         self._idempotency = idempotency_service or get_idempotency_service()
         self._max_result_bytes = (
             max_result_bytes
@@ -114,11 +126,10 @@ class McpDispatchReconciliationService:
             attempt_id = context.attempt.attempt_id
             processed.add(attempt_id)
             try:
-                original_state = context.attempt.state
-                await self._reconcile_active(context)
-                if original_state == DISPATCH_PREPARED:
+                outcome = await self._reconcile_active(context)
+                if outcome == "prepared_finalized":
                     prepared_finalized += 1
-                elif original_state == DISPATCH_DISPATCHED:
+                elif outcome == "dispatched_uncertain":
                     dispatched_uncertain += 1
             except Exception as exc:
                 failed.append(attempt_id)
@@ -183,86 +194,129 @@ class McpDispatchReconciliationService:
         attempt_id: str,
         *,
         prepared_error_code: str = "upstream_pre_dispatch_failed",
+        idle_seconds: int | None = None,
     ) -> None:
         """Immediately finalize one known failed checkpoint without redispatch.
 
         This is used when charging or checkpointing raises before the upstream
         call. It performs the same operation-key debit inspection and
         compensation as the periodic sweep, but does not leave a deterministic
-        failure unsigned for five minutes.
+        failure unsigned for five minutes. When ``idle_seconds`` is provided,
+        active attempts are repaired only after that idle window; this allows
+        retry-triggered recovery without stealing a live dispatch owner.
         """
+        if idle_seconds is not None and idle_seconds < 0:
+            raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
         context = await self._required_context(attempt_id)
         attempt = context.attempt
+        if idle_seconds is not None and (
+            attempt.state == DISPATCH_PREPARED or attempt.state in DISPATCH_SENT_STATES
+        ):
+            cutoff = to_naive_utc(utc_now() - timedelta(seconds=idle_seconds))
+            if to_naive_utc(attempt.updated_at) >= cutoff:
+                return
+            await self._reconcile_active(context)
+            return
         if attempt.state == DISPATCH_PREPARED:
-            debit = await self._find_operation_debit(attempt)
-            if debit is not None and attempt.ledger_entry_id is None:
-                await self._dispatch.attach_charge(
-                    attempt_id=attempt.attempt_id,
-                    ledger_entry_id=debit.entry_id,
-                    credits_charged=abs(debit.amount),
-                )
-            await self._dispatch.complete(
-                attempt_id=attempt.attempt_id,
-                state="returned_error",
-                result_payload={
-                    "error": "failed_refunded",
-                    "error_code": prepared_error_code,
-                },
+            terminal = await self._complete_prepared_failure(
+                attempt,
                 error_code=prepared_error_code,
-                max_result_bytes=self._max_result_bytes,
             )
-        elif attempt.state == DISPATCH_DISPATCHED:
-            # A caller that lost the dispatch checkpoint race can no longer
-            # prove non-delivery. Preserve the charge and classify ambiguity.
-            await self._dispatch.complete(
-                attempt_id=attempt.attempt_id,
-                state="delivery_uncertain",
-                result_payload={"error": "delivery_uncertain"},
-                error_code="delivery_uncertain",
-                max_result_bytes=self._max_result_bytes,
-            )
+            if terminal is None:
+                return
+            await self._finalize_terminal(terminal)
+            return
+        elif attempt.state in DISPATCH_SENT_STATES:
+            # A durable claim is fresh until the normal stale window proves
+            # its owner stopped making progress. Targeted pre-dispatch repair
+            # must not race that live owner or manufacture ambiguity.
+            return
         elif attempt.state not in DISPATCH_TERMINAL_STATES:
             raise DispatchAttemptError("dispatch_reconciliation_state_invalid")
-        await self._finalize_terminal(await self._required_context(attempt_id))
+        await self._finalize_terminal(context)
 
-    async def _reconcile_active(self, context: DispatchAttemptContext) -> None:
+    async def _reconcile_active(
+        self,
+        context: DispatchAttemptContext,
+    ) -> str | None:
         fresh = await self._required_context(context.attempt.attempt_id)
         attempt = fresh.attempt
         if attempt.state in DISPATCH_TERMINAL_STATES:
             await self._finalize_terminal(fresh)
-            return
+            return None
+
+        # The stale scan is only a snapshot. Any active-state or timestamp
+        # change after selection is fresh progress, so this sweep yields. The
+        # next sweep may act only after the normal idle window elapses again.
+        if (
+            attempt.state != context.attempt.state
+            or attempt.updated_at != context.attempt.updated_at
+        ):
+            return None
 
         if attempt.state == DISPATCH_PREPARED:
-            debit = await self._find_operation_debit(attempt)
-            if debit is not None and attempt.ledger_entry_id is None:
-                attempt = await self._dispatch.attach_charge(
-                    attempt_id=attempt.attempt_id,
-                    ledger_entry_id=debit.entry_id,
-                    credits_charged=abs(debit.amount),
-                )
-            terminal_payload = {
-                "error": "failed_refunded",
-                "error_code": "reconciled_stale_prepared",
-            }
-            await self._dispatch.complete(
-                attempt_id=attempt.attempt_id,
-                state="returned_error",
-                result_payload=terminal_payload,
+            terminal = await self._complete_prepared_failure(
+                attempt,
                 error_code="reconciled_stale_prepared",
-                max_result_bytes=self._max_result_bytes,
             )
-        elif attempt.state == DISPATCH_DISPATCHED:
-            await self._dispatch.complete(
-                attempt_id=attempt.attempt_id,
-                state="delivery_uncertain",
-                result_payload={"error": "delivery_uncertain"},
-                error_code="delivery_uncertain",
-                max_result_bytes=self._max_result_bytes,
-            )
+            if terminal is None:
+                return None
+            await self._finalize_terminal(terminal)
+            return "prepared_finalized"
+        elif attempt.state in DISPATCH_SENT_STATES:
+            try:
+                await self._dispatch.complete(
+                    attempt_id=attempt.attempt_id,
+                    state="delivery_uncertain",
+                    result_payload={"error": "delivery_uncertain"},
+                    error_code="delivery_uncertain",
+                    max_result_bytes=self._max_result_bytes,
+                )
+            except DispatchAttemptConflictError:
+                raced = await self._required_context(attempt.attempt_id)
+                if raced.attempt.state not in DISPATCH_TERMINAL_STATES:
+                    raise
+                await self._finalize_terminal(raced)
+                return None
+            terminal = await self._required_context(attempt.attempt_id)
+            await self._finalize_terminal(terminal)
+            return "dispatched_uncertain"
         else:
             raise DispatchAttemptError("dispatch_reconciliation_state_invalid")
 
-        await self._finalize_terminal(await self._required_context(attempt.attempt_id))
+    async def _complete_prepared_failure(
+        self,
+        attempt: McpDispatchAttemptModel,
+        *,
+        error_code: str,
+    ) -> DispatchAttemptContext | None:
+        debit = await self._find_operation_debit(attempt)
+        try:
+            await self._dispatch.complete_pre_dispatch_failure(
+                attempt_id=attempt.attempt_id,
+                expected_updated_at=attempt.updated_at,
+                ledger_entry_id=(debit.entry_id if debit is not None else None),
+                credits_charged=(abs(debit.amount) if debit is not None else None),
+                result_payload={
+                    "error": "failed_refunded",
+                    "error_code": error_code,
+                },
+                error_code=error_code,
+                max_result_bytes=self._max_result_bytes,
+            )
+        except DispatchAttemptConflictError:
+            raced = await self._required_context(attempt.attempt_id)
+            if raced.attempt.state in DISPATCH_SENT_STATES:
+                return None
+            if raced.attempt.state in DISPATCH_TERMINAL_STATES:
+                return raced
+            if (
+                raced.attempt.state == DISPATCH_PREPARED
+                and raced.attempt.updated_at != attempt.updated_at
+            ):
+                return None
+            raise
+        return await self._required_context(attempt.attempt_id)
 
     async def _finalize_terminal(self, context: DispatchAttemptContext) -> None:
         context = await self._required_context(context.attempt.attempt_id)
@@ -271,7 +325,7 @@ class McpDispatchReconciliationService:
             raise DispatchAttemptError("dispatch_reconciliation_state_invalid")
 
         if attempt.state == "returned_error":
-            await self._compensate_returned_error(attempt)
+            await self._compensate_returned_error(context)
             context = await self._required_context(attempt.attempt_id)
             attempt = context.attempt
 
@@ -322,8 +376,9 @@ class McpDispatchReconciliationService:
 
     async def _compensate_returned_error(
         self,
-        attempt: McpDispatchAttemptModel,
+        context: DispatchAttemptContext,
     ) -> None:
+        attempt = context.attempt
         existing_receipt = await self._receipts.get_receipt_by_idempotency_record_id(
             attempt.idempotency_record_id
         )
@@ -354,8 +409,36 @@ class McpDispatchReconciliationService:
         if existing_receipt is not None:
             if existing_receipt.outcome != "failed_refunded":
                 raise DispatchAttemptError("dispatch_receipt_outcome_conflict")
-            return
-        await self._permits.release_dispatch_budget_once(attempt.attempt_id)
+        else:
+            # Budget integrity is the primary compensation invariant. Commit
+            # its exactly-once checkpoint before attempting the application-
+            # enforced quote lookup below.
+            await self._permits.release_dispatch_budget_once(attempt.attempt_id)
+
+        if debit is None and attempt.dispatched_at is None:
+            # A quote is consumed after ``prepared`` but before the debit. If
+            # that worker dies, this durable invocation identity is the only
+            # safe recovery key. Never release after a debit or dispatch: in
+            # those cases the quoted attempt was financially or externally
+            # exercised even if it was later refunded.
+            try:
+                await self._quotes.release_for_invocation(
+                    wallet_id=attempt.wallet_id,
+                    tool_name=attempt.public_tool_id,
+                    idempotency_key=context.idempotency_key,
+                )
+            except QuoteError as exc:
+                if exc.reason != QUOTE_REASON_INVOCATION_LINKAGE_AMBIGUOUS:
+                    raise
+                # Historical rows have no exact quote FK. Multiple tuple
+                # matches are therefore unrecoverable, but they must not keep
+                # a known no-dispatch attempt permanently in progress. Leave
+                # every quote consumed, surface the anomaly to operators, and
+                # finish the signed terminal disposition.
+                logger.error(
+                    "Ambiguous quote linkage while reconciling dispatch attempt %s",
+                    attempt.attempt_id,
+                )
 
     async def _find_operation_debit(
         self,
@@ -731,7 +814,11 @@ class McpDispatchReconciliationService:
         status_code = 504 if attempt.state == "delivery_uncertain" else 502
         if attempt.error_code == "insufficient_funds":
             status_code = 402
-        elif attempt.error_code in {"wallet_expired", "wallet_frozen"}:
+        elif attempt.error_code in {
+            "wallet_expired",
+            "wallet_frozen",
+            QUOTE_REASON_CONSUMED,
+        }:
             status_code = 403
         return error_response, status_code
 
@@ -754,6 +841,8 @@ class McpDispatchReconciliationService:
             return "insufficient_funds"
         if attempt.error_code in {"wallet_expired", "wallet_frozen"}:
             return attempt.error_code
+        if attempt.error_code == QUOTE_REASON_CONSUMED:
+            return QUOTE_REASON_CONSUMED
         if attempt.error_code == "upstream_returned_error":
             return "upstream_returned_error"
         if attempt.error_code == "reconciled_stale_prepared":

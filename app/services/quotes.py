@@ -62,6 +62,7 @@ QUOTE_REASON_WALLET_MISMATCH = "quote_wallet_mismatch"
 QUOTE_REASON_TOOL_MISMATCH = "quote_tool_mismatch"
 QUOTE_REASON_EXPIRED = "quote_expired"
 QUOTE_REASON_CONSUMED = "quote_already_consumed"
+QUOTE_REASON_INVOCATION_LINKAGE_AMBIGUOUS = "quote_invocation_linkage_ambiguous"
 
 _TTL_MIN = 30
 _TTL_MAX = 3600
@@ -225,9 +226,7 @@ class QuoteService:
 
             total = (
                 await session.execute(
-                    select(func.count())
-                    .select_from(QuoteModel)
-                    .where(*filters)
+                    select(func.count()).select_from(QuoteModel).where(*filters)
                 )
             ).scalar_one()
             rows = (
@@ -339,6 +338,67 @@ class QuoteService:
             )
             await session.commit()
             return cast(Any, result).rowcount == 1
+
+    async def release_for_invocation(
+        self,
+        *,
+        wallet_id: str,
+        tool_name: str,
+        idempotency_key: str,
+    ) -> bool:
+        """Release the one uncharged quote claimed by a crashed invocation.
+
+        Governed upstream recovery has the durable wallet/tool/idempotency
+        identity even though dispatch attempts predate explicit quote linkage.
+        Match all three fields, lock at most one consumed row, and fail closed
+        if historical corruption made that identity ambiguous. Expired quotes
+        are never revived.
+        """
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                matches = list(
+                    (
+                        await session.execute(
+                            select(QuoteModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    QuoteModel.wallet_id == wallet_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    QuoteModel.tool == tool_name,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    QuoteModel.status == QUOTE_STATUS_CONSUMED,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    QuoteModel.consumed_by_idempotency_key
+                                    == idempotency_key,
+                                ),
+                            )
+                            .limit(2)
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if len(matches) > 1:
+                    raise QuoteError(QUOTE_REASON_INVOCATION_LINKAGE_AMBIGUOUS)
+                if not matches:
+                    return False
+                quote = matches[0]
+                if utc_now() >= quote.expires_at:
+                    return False
+                quote.status = QUOTE_STATUS_ACTIVE
+                quote.consumed_at = None
+                quote.consumed_by_idempotency_key = None
+                session.add(quote)
+                return True
 
     async def verify_signature(self, model: QuoteModel) -> bool:
         payload = _signing_payload(model)

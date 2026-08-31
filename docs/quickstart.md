@@ -431,8 +431,9 @@ rotated — [docs/key-management.md](key-management.md)), real settlement
 (these credits are synthetic), or remote-upstream failure semantics — for
 what happens when a metered call dies mid-flight, including the
 deliberately unfixable `delivery_uncertain` state, read
-[docs/failure-semantics.md](failure-semantics.md). A receipt proves what
-happened, never what did not
+[docs/failure-semantics.md](failure-semantics.md). A valid signature proves what
+the gateway signed and linked; it does not prove the downstream effect occurred
+or that no omitted action exists
 ([SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md)).
 
 Where to go next:

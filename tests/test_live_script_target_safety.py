@@ -16,8 +16,10 @@ SCRIPT_MODULES = (
     "scripts.stress_test_live",
 )
 TARGET_ENV = "AGENT_MIDDLEWARE_API_URL"
+ACK_ENV = "AGENT_MIDDLEWARE_API_URL_ACK"
 KEY_ENV = "AGENT_MIDDLEWARE_API_KEY"
 CANARY_KEY = "key-must-never-be-printed"
+NORMALIZED_STAGING = "https://staging.example.test"
 
 
 def test_missing_target_is_rejected() -> None:
@@ -164,88 +166,137 @@ def test_target_normalization(target: str, normalized: str) -> None:
 
 
 REJECTED_CONFIGURATIONS = (
-    pytest.param([], None, CANARY_KEY, id="missing-target"),
+    pytest.param([], None, NORMALIZED_STAGING, CANARY_KEY, id="missing-target"),
+    pytest.param(
+        [],
+        NORMALIZED_STAGING,
+        None,
+        CANARY_KEY,
+        id="environment-target-missing-ack",
+    ),
+    pytest.param(
+        [],
+        NORMALIZED_STAGING,
+        "https://other.example.test",
+        CANARY_KEY,
+        id="environment-target-mismatched-ack",
+    ),
+    pytest.param(
+        [],
+        "https://STAGING.EXAMPLE.TEST:443/",
+        "https://STAGING.EXAMPLE.TEST:443/",
+        CANARY_KEY,
+        id="ack-must-equal-normalized-target",
+    ),
+    pytest.param(
+        ["--api-url", NORMALIZED_STAGING],
+        None,
+        None,
+        CANARY_KEY,
+        id="cli-target-missing-ack",
+    ),
+    pytest.param(
+        ["--api-url", NORMALIZED_STAGING],
+        None,
+        "https://other.example.test",
+        CANARY_KEY,
+        id="cli-target-mismatched-ack",
+    ),
     pytest.param(
         ["--api-url", " https://staging.example.test"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="leading-whitespace",
     ),
     pytest.param(
         ["--api-url", "https://staging.example.test "],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="trailing-whitespace",
     ),
     pytest.param(
         ["--api-url", "\thttps://staging.example.test"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="leading-tab",
     ),
     pytest.param(
         ["--api-url", "https://staging.example.test\x7f"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="trailing-control",
     ),
     pytest.param(
         ["--api-url", "https://staging.example.test:"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="dns-empty-port",
     ),
     pytest.param(
         ["--api-url", "https://[::1]:"],
         None,
+        "https://[::1]",
         CANARY_KEY,
         id="ipv6-empty-port",
     ),
     pytest.param(
         ["--api-url", "https://staging.example.test.."],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="multiple-trailing-root-dots",
     ),
     pytest.param(
         ["--api-url", "https://api.thisisatest.tech"],
         None,
+        "https://api.thisisatest.tech",
         CANARY_KEY,
         id="production-without-confirmation",
     ),
     pytest.param(
         ["--api-url", "http://staging.example.test"],
         None,
+        "http://staging.example.test",
         CANARY_KEY,
         id="remote-cleartext",
     ),
     pytest.param(
         ["--api-url", "https://user:password@staging.example.test"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="embedded-credentials",
     ),
     pytest.param(
         ["--api-url", "https://staging.example.test?mode=test"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="query-string",
     ),
     pytest.param(
         ["--api-url", "https://staging.example.test#fragment"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="fragment",
     ),
     pytest.param(
         ["--api-url", "https://staging.example.test/v1"],
         None,
+        NORMALIZED_STAGING,
         CANARY_KEY,
         id="non-root-path",
     ),
     pytest.param(
-        ["--api-url", "https://staging.example.test"],
-        None,
+        [],
+        NORMALIZED_STAGING,
+        NORMALIZED_STAGING,
         None,
         id="missing-key",
     ),
@@ -254,22 +305,26 @@ REJECTED_CONFIGURATIONS = (
 
 @pytest.mark.parametrize("module_name", SCRIPT_MODULES)
 @pytest.mark.parametrize(
-    ("argv", "environment_target", "api_key"),
+    ("argv", "environment_target", "acknowledged_target", "api_key"),
     REJECTED_CONFIGURATIONS,
 )
 def test_rejected_configuration_never_creates_an_http_client(
     module_name: str,
     argv: list[str],
     environment_target: str | None,
+    acknowledged_target: str | None,
     api_key: str | None,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = importlib.import_module(module_name)
     monkeypatch.delenv(TARGET_ENV, raising=False)
+    monkeypatch.delenv(ACK_ENV, raising=False)
     monkeypatch.delenv(KEY_ENV, raising=False)
     if environment_target is not None:
         monkeypatch.setenv(TARGET_ENV, environment_target)
+    if acknowledged_target is not None:
+        monkeypatch.setenv(ACK_ENV, acknowledged_target)
     if api_key is not None:
         monkeypatch.setenv(KEY_ENV, api_key)
 
@@ -283,16 +338,42 @@ def test_rejected_configuration_never_creates_an_http_client(
     output = capsys.readouterr()
     assert CANARY_KEY not in output.out
     assert CANARY_KEY not in output.err
+    assert module.API_URL == ""
+    assert module.API_KEY == ""
 
 
 @pytest.mark.parametrize("module_name", SCRIPT_MODULES)
-def test_script_cli_target_overrides_env_and_key_is_not_printed(
+@pytest.mark.parametrize(
+    ("argv", "environment_target", "acknowledged_target", "normalized_target"),
+    (
+        pytest.param(
+            [],
+            "https://ENVIRONMENT.EXAMPLE.TEST:443/",
+            "https://environment.example.test",
+            "https://environment.example.test",
+            id="environment",
+        ),
+        pytest.param(
+            ["--api-url", "https://CLI.EXAMPLE.TEST:8443/"],
+            "https://environment.example.test",
+            "https://cli.example.test:8443",
+            "https://cli.example.test:8443",
+            id="cli-override",
+        ),
+    ),
+)
+def test_explicit_acknowledged_target_runs_without_printing_the_key(
     module_name: str,
+    argv: list[str],
+    environment_target: str,
+    acknowledged_target: str,
+    normalized_target: str,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = importlib.import_module(module_name)
-    monkeypatch.setenv(TARGET_ENV, "https://environment.example.test")
+    monkeypatch.setenv(TARGET_ENV, environment_target)
+    monkeypatch.setenv(ACK_ENV, acknowledged_target)
     monkeypatch.setenv(KEY_ENV, CANARY_KEY)
 
     if module_name.endswith("trust_plane_conformance"):
@@ -338,21 +419,48 @@ def test_script_cli_target_overrides_env_and_key_is_not_printed(
         ):
             monkeypatch.setattr(module, name, no_op)
 
-    assert (
-        asyncio.run(module.main(["--api-url", "https://CLI.EXAMPLE.TEST:8443/"])) == 0
-    )
-    assert module.API_URL == "https://cli.example.test:8443"
+    assert asyncio.run(module.main(argv)) == 0
+    assert module.API_URL == normalized_target
     output = capsys.readouterr()
     assert CANARY_KEY not in output.out
     assert CANARY_KEY not in output.err
     if module_name.endswith("trust_plane_conformance"):
-        assert created_with == ["https://cli.example.test:8443"]
+        assert created_with == [normalized_target]
+
+
+@pytest.mark.parametrize("module_name", SCRIPT_MODULES)
+def test_unacknowledged_target_never_receives_or_retains_the_key(
+    module_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = importlib.import_module(module_name)
+    monkeypatch.setenv(TARGET_ENV, NORMALIZED_STAGING)
+    monkeypatch.setenv(ACK_ENV, "https://unacknowledged.example.test")
+    monkeypatch.setenv(KEY_ENV, CANARY_KEY)
+
+    module.API_URL = "https://previous.example.test"
+    module.API_KEY = CANARY_KEY
+
+    class UnexpectedAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pytest.fail("unacknowledged target created an HTTP client")
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", UnexpectedAsyncClient)
+
+    assert asyncio.run(module.main([])) == 2
+    assert module.API_URL == ""
+    assert module.API_KEY == ""
+    output = capsys.readouterr()
+    assert CANARY_KEY not in output.out
+    assert CANARY_KEY not in output.err
 
 
 def test_scripts_import_without_configuration_or_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(TARGET_ENV, raising=False)
+    monkeypatch.delenv(ACK_ENV, raising=False)
     monkeypatch.delenv(KEY_ENV, raising=False)
 
     class UnexpectedAsyncClient:
@@ -365,3 +473,4 @@ def test_scripts_import_without_configuration_or_network(
         imported = importlib.import_module(module_name)
         assert imported.API_URL == ""
         assert imported.API_KEY == ""
+        assert imported.API_URL_ACK_ENV_VAR == ACK_ENV

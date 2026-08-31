@@ -1,5 +1,10 @@
 # Hyper-Focused Sprints: Trust Plane Gap Closure
 
+> **Historical and frozen as of 2026-08-28.** No sprint or task in this document
+> is active. It predates the transaction-integrity wedge and the current
+> customer-validation gate. Do not resume it without the named-prospect evidence
+> required by [`30-day-customer-validation.md`](30-day-customer-validation.md).
+
 **Target:** Production-ready enterprise trust plane
 **Sprint cadence:** 2-week sprints
 **Team size:** 1-2 engineers

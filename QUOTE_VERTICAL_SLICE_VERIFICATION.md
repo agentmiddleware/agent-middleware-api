@@ -1,8 +1,15 @@
 # Quote-Locked Pricing Vertical Slice — Implementation Verification
 
-## Status: ✅ COMPLETE ON MAIN
+> **Historical snapshot — not current readiness evidence.** This document records
+> verification against commit `254a4ad`. Its implementation notes, line numbers,
+> and test counts are retained as evidence of that review; they have not been
+> rerun or rebound to the current checkout. This document does not establish
+> production readiness or customer validation.
 
-The quote-locked pricing vertical slice described in WEDGE.md is **already fully implemented** on the current main branch (commit `254a4ad`).
+## Status at `254a4ad`: verification reported complete
+
+At the captured commit, the quote-locked pricing vertical slice described in
+WEDGE.md was reported fully implemented.
 
 ## WEDGE.md Promise
 
@@ -58,7 +65,7 @@ The quote-locked pricing vertical slice described in WEDGE.md is **already fully
 
 ### Test Coverage
 
-All tests passing in `tests/test_signed_quotes.py` (14 tests):
+The snapshot recorded 14 passing tests in `tests/test_signed_quotes.py`:
 
 - ✅ Quote carries live price and window
 - ✅ Signature verifies, detects tampering, survives consumption
@@ -105,11 +112,14 @@ python3 -m pytest tests/test_signed_quotes.py -v
 python3 -m pytest tests/test_quote_vertical_slice.py -v
 ```
 
-All 17 tests pass (14 original + 3 new verification tests).
+The historical run recorded all 17 tests as passing (14 original + 3 new
+verification tests).
 
 ## Conclusion
 
-The quote-locked pricing vertical slice is **already complete** and **fully tested** on main. The implementation:
+For commit `254a4ad`, this report recorded the quote-locked pricing vertical
+slice as complete and tested. It does not transfer that result to a later
+checkout. At the snapshot, the implementation:
 
 1. ✅ Issues signed quotes that lock the price of one call
 2. ✅ Honors the quote even after the tool's registered price moves (up or down)
@@ -117,6 +127,7 @@ The quote-locked pricing vertical slice is **already complete** and **fully test
 4. ✅ Denies invalid quotes without silent repricing (expired, wrong wallet, wrong tool, already consumed)
 5. ✅ Releases consumed quotes if the charge fails (compensation)
 6. ✅ Does not log secrets
-7. ✅ Has comprehensive test coverage
+7. ✅ Had the focused coverage recorded above
 
-No implementation work was required. This document and the new verification tests confirm that the WEDGE.md promise is already delivered.
+No implementation work was required by that review. This document retains the
+verification evidence for that snapshot.

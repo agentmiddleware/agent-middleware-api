@@ -1,14 +1,16 @@
 # AgentMarket.cloud Submission
 
-> **Status: pre-publication draft — do not submit.** The listing requires a
-> monitored public contact and a live, enabled standard MCP endpoint that has
-> passed the registry preflight. See
+> **Status: paused — do not submit.** Publication remains frozen until one
+> named partner-owned consequential action passes the acceptance test in
+> [`30-day-customer-validation.md`](30-day-customer-validation.md). A later
+> submission also requires a monitored public contact and a live standard MCP
+> endpoint that passes the registry preflight in
 > [MCP Registry Submission](mcp-registry-submission.md).
 
 ## Listing Information
 
 **Service Name:** Agent Middleware API
-**Category:** MCP authorization and metering infrastructure
+**Category:** Transaction integrity for consequential autonomous actions
 **Pricing:** Design-partner pilot; no public SLA or commercial tier is committed
 
 ## Listing Content
@@ -16,22 +18,25 @@
 ```markdown
 # Agent Middleware API
 
-**MCP authorization gateway for agent-to-tool actions.**
+**Make consequential agent actions transactional.**
 
-Agent Middleware API authorizes one configured upstream MCP tool under a
-wallet-scoped permit. One accepted idempotency key permits at most one gateway
-dispatch and wallet debit; signed receipts and audit evidence record the
-terminal gateway outcome.
+Agent Middleware API binds one consequential, retry-sensitive MCP action to
+scoped authority, configured consumption, at most one gateway dispatch and
+debit, explicit delivery uncertainty, and linked gateway evidence.
 
-Canonical loop: `discover -> authenticate -> authorize -> invoke -> meter -> receipt -> audit -> govern`.
+Canonical loop: `logical action -> authorize -> reserve allowance -> debit -> claim dispatch -> confirmed outcome | delivery_uncertain -> receipt/audit -> reconcile`.
 
 ## Capabilities
 
-- **Scoped authority** — signed permits bind wallet, key, tool, budget, and expiry
-- **Replay-safe metering** — at most one gateway debit and dispatch per accepted idempotency key
+- **Scoped authority** — signed permits bind wallet, key, tool, configured credits, and expiry
+- **Logical action** — an accepted key binds the payload; changed input fails closed
+- **One-shot dispatch** — at most one gateway dispatch and debit per logical action
 - **Remote MCP dispatch** — one operator-configured HTTPS Streamable HTTP tool
-- **Signed evidence** — receipts link permit, ledger, dispatch state, and audit
-- **Explicit uncertainty** — ambiguous post-dispatch failures are signed and not retried
+- **Explicit uncertainty** — ambiguous post-dispatch failures are charged,
+  signed as `delivery_uncertain`, and never automatically redispatched
+- **Linked evidence** — receipts bind the logical action and permit to gateway
+  dispatch state, ledger entries when present, and audit identifiers; they do
+  not prove the downstream effect or the absence of omitted actions
 
 AWI, browser, RAG, sandbox, telemetry, and orchestration code in the repository
 is disabled proof-surface scaffolding, not part of this listing.
@@ -93,9 +98,8 @@ No public production demo or SLA is promised by this document.
 ## Tags
 
 ```
-mcp, model-context-protocol, mcp-gateway, agent-authorization,
-idempotency, replay-protection, usage-metering, signed-receipts,
-agent-governance
+transaction-integrity, consequential-actions, delivery-uncertainty,
+idempotency, mcp, autonomous-agents
 ```
 
 ## Contact

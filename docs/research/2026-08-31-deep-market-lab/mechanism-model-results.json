@@ -1,0 +1,253 @@
+{
+  "generated_at_utc": "2026-08-31T22:35:31.408067+00:00",
+  "kind": "exhaustive finite explanatory model; not application validation",
+  "bound": "one durable identity; two activations; zero to two effects per dispatch",
+  "reachable_states": 340,
+  "examined_transitions": 1526,
+  "assertions": "passed: <=1 send/debit/refund; debit before send; no ambiguity refund; absorbing terminal; fixed owner; replay/drift unchanged",
+  "indistinguishable_gateway_observation": {
+    "no_effect": {
+      "events": [
+        "authorized_reserve_prepare_atomic",
+        "debit_atomic",
+        "worker_0_claims_ready",
+        "owner_sends_once",
+        "timeout_or_stale_claim",
+        "sign_terminal_accounting"
+      ],
+      "state": {
+        "phase": "uncertain",
+        "debits": 1,
+        "refunds": 0,
+        "reserved": true,
+        "owner": 0,
+        "right": "spent",
+        "alive": [
+          true,
+          true
+        ],
+        "sends": 1,
+        "effects": 0,
+        "receipt": true
+      }
+    },
+    "one_effect": {
+      "events": [
+        "authorized_reserve_prepare_atomic",
+        "debit_atomic",
+        "worker_0_claims_ready",
+        "owner_sends_once",
+        "upstream_commits_effect",
+        "timeout_or_stale_claim",
+        "sign_terminal_accounting"
+      ],
+      "state": {
+        "phase": "uncertain",
+        "debits": 1,
+        "refunds": 0,
+        "reserved": true,
+        "owner": 0,
+        "right": "spent",
+        "alive": [
+          true,
+          true
+        ],
+        "sends": 1,
+        "effects": 1,
+        "receipt": true
+      }
+    }
+  },
+  "counterexamples": {
+    "refunded_does_not_mean_no_business_effect": {
+      "events": [
+        "authorized_reserve_prepare_atomic",
+        "debit_atomic",
+        "worker_0_claims_ready",
+        "owner_sends_once",
+        "upstream_commits_effect",
+        "response_error",
+        "exact_correlated_refund",
+        "release_credit_reservation_once",
+        "sign_terminal_accounting"
+      ],
+      "state": {
+        "phase": "error",
+        "debits": 1,
+        "refunds": 1,
+        "reserved": false,
+        "owner": 0,
+        "right": "spent",
+        "alive": [
+          true,
+          true
+        ],
+        "sends": 1,
+        "effects": 1,
+        "receipt": true
+      }
+    },
+    "one_send_does_not_mean_one_business_effect": {
+      "events": [
+        "authorized_reserve_prepare_atomic",
+        "debit_atomic",
+        "worker_0_claims_ready",
+        "owner_sends_once",
+        "upstream_commits_effect",
+        "upstream_commits_effect"
+      ],
+      "state": {
+        "phase": "claimed",
+        "debits": 1,
+        "refunds": 0,
+        "reserved": true,
+        "owner": 0,
+        "right": "spent",
+        "alive": [
+          true,
+          true
+        ],
+        "sends": 1,
+        "effects": 2,
+        "receipt": false
+      }
+    },
+    "charged_uncertainty_does_not_require_a_send": {
+      "events": [
+        "authorized_reserve_prepare_atomic",
+        "debit_atomic",
+        "worker_0_claims_ready",
+        "timeout_or_stale_claim",
+        "sign_terminal_accounting"
+      ],
+      "state": {
+        "phase": "uncertain",
+        "debits": 1,
+        "refunds": 0,
+        "reserved": true,
+        "owner": 0,
+        "right": "ready",
+        "alive": [
+          true,
+          true
+        ],
+        "sends": 0,
+        "effects": 0,
+        "receipt": true
+      }
+    },
+    "empty_lookup_does_not_authorize_safe_replacement": {
+      "old_identity_prefix": {
+        "events": [
+          "authorized_reserve_prepare_atomic",
+          "debit_atomic",
+          "worker_0_claims_ready",
+          "timeout_or_stale_claim",
+          "sign_terminal_accounting"
+        ],
+        "state": {
+          "phase": "uncertain",
+          "debits": 1,
+          "refunds": 0,
+          "reserved": true,
+          "owner": 0,
+          "right": "ready",
+          "alive": [
+            true,
+            true
+          ],
+          "sends": 0,
+          "effects": 0,
+          "receipt": true
+        }
+      },
+      "lookup": "At this instant effects=0; a lookup can truthfully say not_applied.",
+      "replacement_identity_trace": {
+        "events": [
+          "authorized_reserve_prepare_atomic",
+          "debit_atomic",
+          "worker_0_claims_ready",
+          "owner_sends_once",
+          "upstream_commits_effect",
+          "timeout_or_stale_claim",
+          "sign_terminal_accounting"
+        ],
+        "state": {
+          "phase": "uncertain",
+          "debits": 1,
+          "refunds": 0,
+          "reserved": true,
+          "owner": 0,
+          "right": "spent",
+          "alive": [
+            true,
+            true
+          ],
+          "sends": 1,
+          "effects": 1,
+          "receipt": true
+        }
+      },
+      "old_identity_late_suffix": [
+        "owner_sends_once",
+        "upstream_commits_effect"
+      ],
+      "semantic_effects_total": 2,
+      "caveat": "Composition of allowed transitions with an external point-in-time lookup; an operational counterexample, not a proven runtime schedule. Safe replacement additionally requires authoritative finality/quiescence or a shared idempotent business identity."
+    },
+    "fresh_identity_or_database_restore": {
+      "construction": "Run this trace under K1, then under K2 for the same semantic action; or reset gateway history after the first trace while preserving upstream history. Each per-identity invariant holds; total effects=2.",
+      "per_identity_trace": {
+        "events": [
+          "authorized_reserve_prepare_atomic",
+          "debit_atomic",
+          "worker_0_claims_ready",
+          "owner_sends_once",
+          "upstream_commits_effect",
+          "timeout_or_stale_claim",
+          "sign_terminal_accounting"
+        ],
+        "state": {
+          "phase": "uncertain",
+          "debits": 1,
+          "refunds": 0,
+          "reserved": true,
+          "owner": 0,
+          "right": "spent",
+          "alive": [
+            true,
+            true
+          ],
+          "sends": 1,
+          "effects": 1,
+          "receipt": true
+        }
+      },
+      "semantic_effects_total": 2,
+      "caveat": "Composition/counterfactual construction, not an enumerated multi-identity or database-failover implementation test."
+    }
+  },
+  "limits": [
+    "No application imports, HTTP requests, database operations, or cryptography.",
+    "Atomic SQL, serializable admission, unique identity, and debit fencing are assumed.",
+    "No unbounded liveness or implementation refinement proof; a scheduler can starve repair forever.",
+    "A refundable error is a business accounting rule, not an upstream rollback guarantee."
+  ],
+  "inspected_source_sha256_at_model_run": {
+    "app/routers/mcp.py": "5ff35d203d3eea7e6b0b5681a1e1c7fc19dd2c1b7a028f93b6385bd17d1f82c4",
+    "app/routers/mcp_standard.py": "991ac11fbf5e144635b30b603846baff1c2775db6be05162477e20296e27de9a",
+    "app/db/models.py": "7fe56ab174d493c5f80275a7b633cbc0a7570c65508763f695554e068ebbe15b",
+    "app/services/idempotency.py": "a21185d5cd4a8144e7381b73b02e253bc819a9ac70f315cd76497c0ed22bf721",
+    "app/services/billing_engine.py": "44ba41898f24126650f4ddde1bd7ed58f2c8505018b4bc2b8eaf05a043e1affd",
+    "app/services/mcp_dispatch_attempts.py": "7367784ad6b2307771ba108a4052af4c42f17c0ffbe8a0e067d20c6c5c0a9910",
+    "app/services/mcp_dispatch_reconciliation.py": "aca7a209eba8d8217b30ca49878e8bfcbfa7063fc1cb3dc6a8813172afcfa2fa",
+    "app/services/upstream_mcp.py": "0be686ea7562a64fd8b8bbc48380aa14ef1ae92724379e377156082e9f5be27b",
+    "app/services/permits.py": "64ed1e58f21324c2ce94e4ab4eced4cee30c5c2452f9f0ce32f12f7895a89124",
+    "app/services/receipts.py": "79560e44d81954acb20a44a9209815d66f1615f27fbe3164c68a59b250ae3ec9",
+    "app/services/signing_keys.py": "3320dfb04cef3594437eb026024c0a11285d5e450bdde86a793a627f8546483b",
+    "b2a_sdk/src/b2a_sdk/receipt_verifier.py": "393282c9dae378a06f3933c27ef5fd848d33981894005ebb4d80853b4b3fe2df",
+    "docs/failure-semantics.md": "3707f3aa58a2f8e45eed2b1289e803ef1dda62a4b4e36eb6a4c084b58cb1162d",
+    "SECURITY_LIMITATIONS.md": "2f99989a6b899ea45452db6bfe56ccdee0f000f8a9d7a6355610835012bda20b"
+  },
+  "model_sha256": "1a8af6e9cdcee1b64b53bc53b483ce499a2e8c60cbd934462d42813595e30e00"
+}

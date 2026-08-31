@@ -36,11 +36,11 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.exc import IntegrityError
 
@@ -51,7 +51,7 @@ from app.core.sentinel_target import (
     normalize_sentinel_origin,
     sentinel_api_key_is_valid,
 )
-from app.core.time import utc_now
+from app.core.time import to_naive_utc
 from app.core.trust_mode import is_production_like_environment
 from app.db.database import get_session_factory
 from app.db.models import HumanApprovalModel
@@ -385,13 +385,45 @@ class HumanApprovalService:
             return result.scalar_one_or_none()
 
     @staticmethod
+    def _database_utc_now_expression(
+        session: Any,
+    ) -> ColumnElement[Any]:
+        """Return a naive-UTC database clock expression for this dialect."""
+        dialect = session.get_bind().dialect.name
+        if dialect == "postgresql":
+            return cast(
+                ColumnElement[Any],
+                func.timezone("UTC", func.statement_timestamp()),
+            )
+        if dialect == "sqlite":
+            # SQLite's ``%f`` has millisecond precision; append zeros so the
+            # fixed-width value matches the microsecond storage convention.
+            return cast(
+                ColumnElement[Any],
+                func.strftime("%Y-%m-%d %H:%M:%f000", "now"),
+            )
+        return cast(ColumnElement[Any], func.current_timestamp())
+
+    async def _database_utc_now(self) -> datetime:
+        factory = get_session_factory()
+        async with factory() as session:
+            value = await session.scalar(
+                select(self._database_utc_now_expression(session))
+            )
+        if isinstance(value, datetime):
+            return to_naive_utc(value)
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        raise HumanApprovalUnavailableError()
+
+    @staticmethod
     def _apply_decision(model: HumanApprovalModel, payload: dict[str, Any]) -> None:
+        """Parse Sentinel's decision; the database authors its timestamp."""
         status = payload.get("status") or payload.get("decision") or ""
         if status in {APPROVAL_STATUS_APPROVED, APPROVAL_STATUS_REJECTED}:
             model.status = status
             model.decided_by = payload.get("decided_by")
             model.reason = payload.get("reason")
-            model.decided_at = utc_now()
 
     async def _persist(self, model: HumanApprovalModel) -> None:
         factory = get_session_factory()
@@ -403,13 +435,12 @@ class HumanApprovalService:
     async def _expire_if_stale(self, model: HumanApprovalModel) -> bool:
         """Best-effort label a still-pending, past-window approval as expired.
 
-        Conditional on ``status='pending'`` so it can never clobber an
-        ``approved`` or ``consumed`` row. The atomic consume is the real
-        arbiter (it also requires ``expires_at > now``); this only keeps the
-        stored status honest for observers.
+        Conditional on ``status='pending'`` and the database row's deadline so
+        it can never clobber an approved, consumed, or still-live decision.
         """
         factory = get_session_factory()
         async with factory() as session:
+            database_now = self._database_utc_now_expression(session)
             result = await session.execute(
                 update(HumanApprovalModel)
                 .where(
@@ -421,24 +452,29 @@ class HumanApprovalService:
                         ColumnElement[bool],
                         HumanApprovalModel.status == APPROVAL_STATUS_PENDING,
                     ),
+                    cast(
+                        ColumnElement[bool],
+                        HumanApprovalModel.expires_at <= database_now,
+                    ),
                 )
                 .values(
                     status=APPROVAL_STATUS_EXPIRED,
                     reason="approval_window_elapsed",
-                    decided_at=utc_now(),
+                    decided_at=database_now,
                 )
             )
             await session.commit()
             return bool(cast(Any, result).rowcount)
 
     async def _consume(self, approval_id: str) -> bool:
-        """Atomically spend an approved, unexpired approval — single use.
+        """Atomically spend an observed approved authority — single use.
 
         The one place a governed invoke is authorized to move money. The
-        ``WHERE status='approved' AND expires_at > now`` clause makes this the
-        single serialization point for three races at once: the same key over
-        both transports, two concurrent retries, and approved-vs-expired at the
-        window boundary. Exactly one caller wins; everyone else is denied.
+        guarded update is the serialization point for the same key over both
+        transports and concurrent retries. A decision may be consumed after
+        its review window only when durable timestamps prove it was observed
+        after the request and before the deadline. Exactly one caller can
+        advance that authority to ``consumed``.
         """
         factory = get_session_factory()
         async with factory() as session:
@@ -455,7 +491,17 @@ class HumanApprovalService:
                     ),
                     cast(
                         ColumnElement[bool],
-                        HumanApprovalModel.expires_at > utc_now(),
+                        cast(Any, HumanApprovalModel.decided_at).is_not(None),
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, HumanApprovalModel.requested_at)
+                        <= cast(Any, HumanApprovalModel.decided_at),
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, HumanApprovalModel.decided_at)
+                        < cast(Any, HumanApprovalModel.expires_at),
                     ),
                 )
                 # Preserve decided_at (the human decision time) — only the
@@ -474,14 +520,16 @@ class HumanApprovalService:
         idempotency_key: str,
         arguments: dict[str, Any],
         estimated_credits: Any,
+        consume_immediately: bool = True,
     ) -> ApprovalCheck:
         """Return the current approval state for one governed invoke attempt.
 
         Creates the approval (locally, and in Sentinel in real mode) on first
         sight of this (wallet, permit, tool, idempotency_key); re-checks the
-        stored one on retries. On an APPROVED decision the approval is
-        atomically consumed here, so the returned ``approved`` check authorizes
-        exactly one invoke.
+        stored one on retries. By default, an APPROVED decision is atomically
+        consumed here. Remote dispatch passes ``consume_immediately=False`` so
+        approval consumption can commit in the same transaction as permit
+        reservation and durable dispatch preparation.
 
         Raises ``HumanApprovalError`` for terminal misconfiguration/mismatch
         and ``HumanApprovalUnavailableError`` when Sentinel cannot be reached.
@@ -505,10 +553,35 @@ class HumanApprovalService:
         )
         if model is not None:
             self._reauthorize(model, req_hash=req_hash, production_like=production_like)
-            check = await self._refresh(model)
-            return await self._finalize(model, check)
+            if (
+                model.status == APPROVAL_STATUS_PENDING
+                and not model.simulated
+                and not model.sentinel_action_id
+            ):
+                # A worker may have died after persisting intent but before
+                # provider create/binding. Expire from the database clock
+                # before reissuing create so a dead authority never pages a
+                # human or reports a misleading pending state.
+                await self._expire_if_stale(model)
+                model = await self._reload_authoritative(model)
+                if model.status == APPROVAL_STATUS_PENDING:
+                    model = await self._create_bind_and_observe_remote(
+                        model,
+                        arguments,
+                        estimated_credits,
+                    )
+                check = self._check(model)
+            else:
+                check = await self._refresh(model)
+            return await self._finalize(
+                model,
+                check,
+                consume_immediately=consume_immediately,
+            )
 
-        now = utc_now()
+        # The database clock defines both ends of the observation window.
+        # Worker skew must not extend or prematurely close human authority.
+        now = await self._database_utc_now()
         expires_at = now + timedelta(seconds=self._timeout_seconds())
         model = HumanApprovalModel(
             approval_id=f"appr-{uuid.uuid4().hex[:16]}",
@@ -525,35 +598,38 @@ class HumanApprovalService:
 
         if simulated:
             # Local/dev only (production-like was rejected above): approve
-            # instantly, clearly marked, so demo loops stay self-contained.
+            # instantly in the insert itself, clearly marked, so a crash cannot
+            # strand a synthetic pending row. ``now`` came from the database.
             model.status = APPROVAL_STATUS_APPROVED
             model.decided_by = "simulation"
             model.reason = "simulated_auto_approval"
             model.decided_at = now
             model = await self._persist_new(model)
             self._reauthorize(model, req_hash=req_hash, production_like=production_like)
-            return await self._finalize(model, self._check(model))
+            return await self._finalize(
+                model,
+                self._check(model),
+                consume_immediately=consume_immediately,
+            )
 
-        remote = await self._create_remote(model, arguments, estimated_credits)
-        self._apply_decision(model, remote)
-
-        if model.status == APPROVAL_STATUS_PENDING:
-            wait_seconds = float(settings.SENTINEL_WAIT_SECONDS or 0)
-            if wait_seconds > 0 and model.sentinel_action_id:
-                try:
-                    waited = await self._sentinel().wait_approval(
-                        model.sentinel_action_id, wait_seconds
-                    )
-                    self._apply_decision(model, waited)
-                except httpx.HTTPError as exc:
-                    # The approval exists; a failed wait is not fatal.
-                    logger.warning("sentinel_wait_failed: %s", exc)
-
+        # Persist the request identity and its database-authored deadline
+        # before contacting Sentinel. A provider commit followed by worker
+        # death must not let a retry mint a fresh observation window.
         model = await self._persist_new(model)
         # The winner of a concurrent race may carry different binding/simulated
         # state; re-validate against the authoritative row before consuming.
         self._reauthorize(model, req_hash=req_hash, production_like=production_like)
-        return await self._finalize(model, self._check(model))
+        if model.status == APPROVAL_STATUS_PENDING and not model.sentinel_action_id:
+            model = await self._create_bind_and_observe_remote(
+                model,
+                arguments,
+                estimated_credits,
+            )
+        return await self._finalize(
+            model,
+            self._check(model),
+            consume_immediately=consume_immediately,
+        )
 
     @staticmethod
     def _reauthorize(
@@ -582,10 +658,14 @@ class HumanApprovalService:
             raise HumanApprovalError(APPROVAL_REASON_MISMATCH)
 
     async def _finalize(
-        self, model: HumanApprovalModel, check: ApprovalCheck
+        self,
+        model: HumanApprovalModel,
+        check: ApprovalCheck,
+        *,
+        consume_immediately: bool,
     ) -> ApprovalCheck:
         """Consume an approved decision so it authorizes exactly one invoke."""
-        if check.status != APPROVAL_STATUS_APPROVED:
+        if check.status != APPROVAL_STATUS_APPROVED or not consume_immediately:
             return check
         if await self._consume(model.approval_id):
             return check  # this invoke holds the single-use authorization
@@ -597,8 +677,9 @@ class HumanApprovalService:
             idempotency_key=model.idempotency_key,
         )
         if latest is None or latest.status == APPROVAL_STATUS_APPROVED:
-            # approved-but-unconsumable means the window elapsed (consume
-            # requires expires_at > now).
+            # An approved-but-unconsumable row is unexpected after the
+            # single-use compare-and-swap. Fail closed rather than returning
+            # an authorization this caller did not consume.
             status: str = APPROVAL_STATUS_EXPIRED
         else:
             status = latest.status
@@ -632,6 +713,34 @@ class HumanApprovalService:
             if existing is None:  # pragma: no cover - repair path
                 raise
             return existing
+
+    async def _reload_authoritative(
+        self,
+        model: HumanApprovalModel,
+    ) -> HumanApprovalModel:
+        latest = await self._load(
+            wallet_id=model.wallet_id,
+            permit_id=model.permit_id,
+            tool_name=model.tool,
+            idempotency_key=model.idempotency_key,
+        )
+        if latest is None:  # pragma: no cover - deleted-row repair path
+            raise HumanApprovalUnavailableError()
+        return latest
+
+    async def _observe_persisted_decision(
+        self,
+        model: HumanApprovalModel,
+        payload: dict[str, Any],
+    ) -> HumanApprovalModel:
+        """Apply a provider decision only through the durable guarded CAS."""
+        if model.status != APPROVAL_STATUS_PENDING:
+            return model
+        self._apply_decision(model, payload)
+        if model.status == APPROVAL_STATUS_PENDING:
+            return model
+        await self._persist_decision(model)
+        return await self._reload_authoritative(model)
 
     async def _create_remote(
         self,
@@ -684,18 +793,80 @@ class HumanApprovalService:
         model.sentinel_action_id = str(action_id)
         return payload
 
+    async def _persist_sentinel_action(
+        self,
+        model: HumanApprovalModel,
+        action_id: str,
+    ) -> HumanApprovalModel:
+        """Bind the deterministic provider action without rewriting state."""
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(
+                update(HumanApprovalModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        HumanApprovalModel.approval_id == model.approval_id,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        HumanApprovalModel.status == APPROVAL_STATUS_PENDING,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, HumanApprovalModel.sentinel_action_id).is_(None),
+                    ),
+                )
+                .values(sentinel_action_id=action_id)
+            )
+            await session.commit()
+        latest = await self._reload_authoritative(model)
+        if latest.sentinel_action_id != action_id:
+            # The deterministic provider key must resolve to one action. A
+            # mismatch is external evidence ambiguity, never authority.
+            raise HumanApprovalUnavailableError()
+        return latest
+
+    async def _create_bind_and_observe_remote(
+        self,
+        model: HumanApprovalModel,
+        arguments: dict[str, Any],
+        estimated_credits: Any,
+    ) -> HumanApprovalModel:
+        """Create/replay Sentinel action, bind it, then observe its decision."""
+        remote = await self._create_remote(model, arguments, estimated_credits)
+        action_id = model.sentinel_action_id
+        if not action_id:  # guarded by _create_remote; keeps this fail closed
+            raise HumanApprovalUnavailableError()
+        model = await self._persist_sentinel_action(model, action_id)
+        decision_payload = remote
+        remote_status = remote.get("status") or remote.get("decision") or ""
+        wait_seconds = float(get_settings().SENTINEL_WAIT_SECONDS or 0)
+        if (
+            remote_status not in {APPROVAL_STATUS_APPROVED, APPROVAL_STATUS_REJECTED}
+            and wait_seconds > 0
+        ):
+            try:
+                decision_payload = await self._sentinel().wait_approval(
+                    action_id,
+                    wait_seconds,
+                )
+            except httpx.HTTPError as exc:
+                # The action binding is durable; a failed wait is retryable.
+                logger.warning("sentinel_wait_failed: %s", exc)
+        return await self._observe_persisted_decision(model, decision_payload)
+
     async def _refresh(self, model: HumanApprovalModel) -> ApprovalCheck:
-        """Re-evaluate a stored approval: local expiry first, then Sentinel."""
+        """Re-evaluate a stored approval using database-authoritative time."""
         if model.status != APPROVAL_STATUS_PENDING:
             return self._check(model)
 
-        if utc_now() >= model.expires_at:
-            # Sentinel never expires approvals server-side, so enforce the
-            # window locally before spending a poll. Conditional update won't
-            # clobber a concurrently-approved/consumed row.
-            await self._expire_if_stale(model)
-            model.status = APPROVAL_STATUS_EXPIRED
-            model.reason = "approval_window_elapsed"
+        # Ask the database to expire first on every pending observation. A
+        # worker-local precheck would let a slow clock poll and persist a late
+        # approval as if it were timely.
+        await self._expire_if_stale(model)
+        model = await self._reload_authoritative(model)
+        if model.status != APPROVAL_STATUS_PENDING:
             return self._check(model)
 
         if model.simulated:  # pragma: no cover - simulated rows decide at create
@@ -718,34 +889,61 @@ class HumanApprovalService:
             # time (one human approval, two charges). The atomic _consume
             # reads the authoritative DB state regardless of this no-op.
             await self._persist_decision(model)
+            model = await self._reload_authoritative(model)
         return self._check(model)
 
     async def _persist_decision(self, model: HumanApprovalModel) -> bool:
         """Persist a pending→approved/rejected decision without clobbering a
         row a concurrent request already advanced (approved/consumed)."""
+        if model.status not in {
+            APPROVAL_STATUS_APPROVED,
+            APPROVAL_STATUS_REJECTED,
+        }:
+            return False
         factory = get_session_factory()
         async with factory() as session:
+            database_now = self._database_utc_now_expression(session)
+            predicates: list[ColumnElement[bool]] = [
+                cast(
+                    ColumnElement[bool],
+                    HumanApprovalModel.approval_id == model.approval_id,
+                ),
+                cast(
+                    ColumnElement[bool],
+                    HumanApprovalModel.status == APPROVAL_STATUS_PENDING,
+                ),
+            ]
+            if model.status == APPROVAL_STATUS_APPROVED:
+                predicates.extend(
+                    [
+                        cast(
+                            ColumnElement[bool],
+                            HumanApprovalModel.requested_at <= database_now,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            database_now < HumanApprovalModel.expires_at,
+                        ),
+                    ]
+                )
             result = await session.execute(
                 update(HumanApprovalModel)
-                .where(
-                    cast(
-                        ColumnElement[bool],
-                        HumanApprovalModel.approval_id == model.approval_id,
-                    ),
-                    cast(
-                        ColumnElement[bool],
-                        HumanApprovalModel.status == APPROVAL_STATUS_PENDING,
-                    ),
-                )
+                .where(*predicates)
                 .values(
                     status=model.status,
                     decided_by=model.decided_by,
                     reason=model.reason,
-                    decided_at=model.decided_at,
+                    decided_at=database_now,
                 )
             )
             await session.commit()
-            return bool(cast(Any, result).rowcount)
+            changed = bool(cast(Any, result).rowcount)
+        if model.status == APPROVAL_STATUS_APPROVED and not changed:
+            # If the approval lost specifically because the database deadline
+            # elapsed, persist that terminal fact. This is also guarded against
+            # clobbering a concurrent approval/consume winner.
+            await self._expire_if_stale(model)
+        return changed
 
 
 _service: HumanApprovalService | None = None

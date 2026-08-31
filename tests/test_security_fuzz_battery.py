@@ -567,7 +567,10 @@ async def test_oversized_payload_on_invoke_is_refused(client, clean_database):
 async def test_rapid_fire_invokes_all_accounted(client, clean_database):
     """Fire 20 rapid invokes; check all receipts exist and total charge is exact.
     Requires PostgreSQL for accurate row-lock accounting."""
+    from sqlalchemy import select
+
     from app.db.database import get_engine
+    from app.db.models import IdempotencyRecordModel, LedgerEntryModel, WalletModel
 
     engine = get_engine()
     if engine is None or engine.dialect.name != "postgresql":
@@ -588,6 +591,12 @@ async def test_rapid_fire_invokes_all_accounted(client, clean_database):
             extra={"max_calls_per_tool": {tool_name: 100}},
         )
         permit_id = permit["permit_id"]
+
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet_before = await session.get(WalletModel, wallet_id)
+            assert wallet_before is not None
+            balance_before = wallet_before.balance
 
         async def fire(i: int):
             return await _invoke(
@@ -628,5 +637,87 @@ async def test_rapid_fire_invokes_all_accounted(client, clean_database):
         async with factory() as session:
             model = await session.get(PermitModel, permit_id)
             assert model.spent_credits == Decimal("20")
+
+        original_results = [response.json()["result"] for response in responses]
+        original_receipts = [result["receipt"] for result in original_results]
+        receipt_ids = {receipt["receipt_id"] for receipt in original_receipts}
+        record_ids = {receipt["idempotency_record_id"] for receipt in original_receipts}
+        assert len(receipt_ids) == 20
+        assert len(record_ids) == 20
+
+        async def assert_persisted_accounting() -> set[str]:
+            async with factory() as session:
+                wallet = await session.get(WalletModel, wallet_id)
+                stored_permit = await session.get(PermitModel, permit_id)
+                debits = list(
+                    (
+                        await session.scalars(
+                            select(LedgerEntryModel).where(
+                                LedgerEntryModel.wallet_id == wallet_id,
+                                LedgerEntryModel.action == "debit",
+                            )
+                        )
+                    ).all()
+                )
+                receipts = list(
+                    (
+                        await session.scalars(
+                            select(ReceiptModel).where(
+                                ReceiptModel.wallet_id == wallet_id,
+                            )
+                        )
+                    ).all()
+                )
+                records = list(
+                    (
+                        await session.scalars(
+                            select(IdempotencyRecordModel).where(
+                                IdempotencyRecordModel.wallet_id == wallet_id,
+                                IdempotencyRecordModel.idempotency_key.in_(
+                                    [f"rl-{i}" for i in range(20)]
+                                ),
+                            )
+                        )
+                    ).all()
+                )
+
+            assert wallet is not None
+            assert balance_before - wallet.balance == Decimal("20")
+            assert stored_permit is not None
+            assert stored_permit.spent_credits == Decimal("20")
+            assert len(debits) == 20
+            assert sum((debit.amount for debit in debits), Decimal("0")) == Decimal(
+                "-20"
+            )
+            assert len(receipts) == 20
+            assert {receipt.receipt_id for receipt in receipts} == receipt_ids
+            assert len(records) == 20
+            assert {record.record_id for record in records} == record_ids
+            debit_by_operation = {debit.operation_key: debit for debit in debits}
+            receipt_by_id = {receipt.receipt_id: receipt for receipt in receipts}
+            record_by_id = {record.record_id: record for record in records}
+            assert set(debit_by_operation) == record_ids
+            for i, original in enumerate(original_receipts):
+                receipt = receipt_by_id[original["receipt_id"]]
+                record = record_by_id[original["idempotency_record_id"]]
+                debit = debit_by_operation[record.record_id]
+                assert record.idempotency_key == f"rl-{i}"
+                assert receipt.idempotency_record_id == record.record_id
+                assert receipt.request_hash == record.request_hash
+                assert receipt.ledger_entry_id == debit.entry_id
+                assert receipt.permit_id == permit_id
+                assert receipt.tool == tool_name
+                assert receipt.outcome == "success"
+                assert receipt.credits_charged == Decimal("1")
+                assert debit.amount == Decimal("-1")
+            return {debit.entry_id for debit in debits}
+
+        debit_ids = await assert_persisted_accounting()
+        replays = await asyncio.gather(*[fire(i) for i in range(20)])
+        for i, replay in enumerate(replays):
+            assert replay.status_code == 200
+            assert "error" not in replay.json()
+            assert replay.json()["result"] == original_results[i]
+        assert await assert_persisted_accounting() == debit_ids
     finally:
         get_service_registry().unregister_local(tool_name)

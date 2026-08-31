@@ -34,9 +34,10 @@ same call once an approval is decided).
 
 Replay safety: a client-supplied ``Idempotency-Key`` header (or the
 ``io.agentmiddleware/idempotency_key`` entry in ``params._meta``) is honored
-exactly like the governed endpoints. Without one, each call gets a fresh
-generated key, so client retries are charged as new calls — the same contract
-as an un-keyed governed invoke.
+with a nonblank, already-trimmed, 128-character limit. An explicitly invalid
+key is rejected before permit minting; a valid header takes precedence over
+valid metadata. Without either, each call gets a fresh
+generated key, so client retries are charged as new calls.
 
 The endpoint is stateless: each POST gets a fresh SDK transport in JSON mode
 (no ``Mcp-Session-Id``, responses are plain JSON, never SSE), so there is no
@@ -74,6 +75,7 @@ from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
 from app.core.time import utc_now
 from app.routers.mcp import (
+    GovernedRetryableSignal,
     GovernedToolError,
     HumanApprovalPendingSignal,
     ToolPermissionDenied,
@@ -99,7 +101,7 @@ router = APIRouter(prefix="/mcp", tags=["MCP Standard Endpoint"])
 
 _IDEMPOTENCY_META_KEY = "io.agentmiddleware/idempotency_key"
 _RECEIPT_META_KEY = "io.agentmiddleware/receipt"
-_MAX_META_VALUE_LENGTH = 256
+_MAX_IDEMPOTENCY_KEY_LENGTH = 128
 
 # Idempotency scope for auto-minted permits; distinct from the governed-call
 # scope so mint replay and call replay never collide.
@@ -200,15 +202,24 @@ def _tool_call_budget(record: dict[str, Any]) -> Decimal:
     return cost if cost > 0 else Decimal("1")
 
 
+def _validate_idempotency_key(value: Any) -> str:
+    """Reject invalid supplied identity instead of silently creating a new action."""
+    if not isinstance(value, str):
+        raise _mcp_error(-32602, "idempotency_key_invalid")
+    key = value.strip()
+    # Previously accepted keys were stored verbatim. Normalizing a padded key
+    # here could make its exact retry acquire a different durable identity.
+    if not key or key != value or len(key) > _MAX_IDEMPOTENCY_KEY_LENGTH:
+        raise _mcp_error(-32602, "idempotency_key_invalid")
+    return key
+
+
 def _meta_idempotency_key(params: mcp_types.CallToolRequestParams) -> str | None:
     meta = params.meta
     extra = getattr(meta, "model_extra", None) if meta is not None else None
-    if not extra:
+    if not extra or _IDEMPOTENCY_META_KEY not in extra:
         return None
-    value = extra.get(_IDEMPOTENCY_META_KEY)
-    if isinstance(value, str) and 0 < len(value) <= _MAX_META_VALUE_LENGTH:
-        return value
-    return None
+    return _validate_idempotency_key(extra[_IDEMPOTENCY_META_KEY])
 
 
 async def _mint_auto_permit(
@@ -407,6 +418,10 @@ async def _governed_tools_call(
                 },
             )
         raise _mcp_error(e.jsonrpc_code, reason, pending_data or None) from e
+    except GovernedRetryableSignal as e:
+        # Preserve retryable non-approval signals without erasing the richer
+        # human-approval remediation above.
+        raise _mcp_error(e.jsonrpc_code, str(e), e.data or None) from e
     except ToolPermissionDenied as e:
         denial_data: dict[str, Any] = {}
         if e.receipt:
@@ -471,10 +486,15 @@ def _build_standard_mcp_server() -> Server:
             # driven by an unexpected transport. Fail closed.
             raise _mcp_error(-32603, "auth_context_missing")
 
-        client_key = None
+        header_key = None
         if http_request is not None:
-            client_key = http_request.headers.get("Idempotency-Key")
-        client_key = client_key or _meta_idempotency_key(req.params)
+            supplied_header = http_request.headers.get("Idempotency-Key")
+            if supplied_header is not None:
+                header_key = _validate_idempotency_key(supplied_header)
+        # Validate both explicit aliases, even when the header takes precedence.
+        # Invalid identity must never fall through to a fresh generated key.
+        metadata_key = _meta_idempotency_key(req.params)
+        client_key = header_key if header_key is not None else metadata_key
 
         result = await _governed_tools_call(
             auth=auth,

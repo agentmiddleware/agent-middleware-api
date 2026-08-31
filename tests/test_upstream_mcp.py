@@ -35,6 +35,7 @@ from app.services.upstream_mcp import (
     UpstreamMcpConfiguration,
     UpstreamMcpConfigurationError,
     UpstreamMcpDeliveryUncertainError,
+    UpstreamMcpDispatchClaimUnavailableError,
     UpstreamMcpPreDispatchError,
     UpstreamMcpResponseRejectedError,
     UpstreamMcpReturnedError,
@@ -1042,6 +1043,45 @@ async def test_initialize_and_checkpoint_failures_are_pre_dispatch() -> None:
     assert checkpoint_error.value.code == "upstream_dispatch_checkpoint_failed"
     assert checkpoint_error.value.dispatch_started is False
     assert "call_tool" not in session.events
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [
+        RuntimeError("secret-partner-token"),
+        UpstreamMcpPreDispatchError("secret-partner-token"),
+    ],
+    ids=["generic-cleanup-error", "typed-cleanup-error"],
+)
+async def test_dispatch_claim_contention_is_preserved_without_calling_upstream(
+    caplog: pytest.LogCaptureFixture,
+    cleanup_error: Exception,
+) -> None:
+    adapter = UpstreamMcpAdapter(_configuration())
+    _mark_discovered(adapter)
+    session = FakeSession()
+    _bind_session(
+        adapter,
+        session,
+        cleanup_error=cleanup_error,
+    )
+
+    async def claim_already_owned() -> None:
+        raise UpstreamMcpDispatchClaimUnavailableError()
+
+    with pytest.raises(UpstreamMcpDispatchClaimUnavailableError) as exc_info:
+        await adapter.call_tool(
+            {},
+            invocation_id="inv",
+            idempotency_key="idem",
+            before_dispatch=claim_already_owned,
+        )
+
+    assert exc_info.value.code == "idempotency_in_progress"
+    assert exc_info.value.dispatch_started is False
+    assert session.events == ["initialize"]
+    assert "secret-partner-token" not in caplog.text
 
 
 @pytest.mark.anyio

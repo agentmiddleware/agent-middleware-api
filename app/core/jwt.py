@@ -25,13 +25,24 @@ from app.services.signing_keys import _decode_private_key
 JWT_ALGORITHM = "EdDSA"
 JWT_ISSUER = "agent-middleware-api"
 JWT_AUDIENCE = "agent-middleware-api"
-JWT_ACCESS_EXPIRY = 900   # 15 minutes
+JWT_ACCESS_EXPIRY = 900  # 15 minutes
 JWT_REFRESH_EXPIRY = 604800  # 7 days
+JWT_AUTHORITY_SCOPES = ("billing:charge", "tool:invoke")
+
+
+def has_jwt_authority_scope_profile(scopes: object) -> bool:
+    """Return whether scopes encode the one currently supported JWT profile."""
+    return (
+        isinstance(scopes, list)
+        and all(isinstance(scope, str) for scope in scopes)
+        and len(scopes) == len(JWT_AUTHORITY_SCOPES)
+        and set(scopes) == set(JWT_AUTHORITY_SCOPES)
+    )
 
 
 @dataclass(frozen=True)
 class JWTPayload:
-    sub: str          # wallet_id
+    sub: str  # wallet_id
     key_id: str | None
     scopes: list[str]
     # Epoch seconds, as PyJWT decodes them. Callers that need a datetime
@@ -40,8 +51,8 @@ class JWTPayload:
     exp: int
     iss: str
     aud: str
-    jti: str          # unique token id
-    type: str         # access | refresh
+    jti: str  # unique token id
+    type: str  # access | refresh
 
 
 class JWTError(Exception):
@@ -96,7 +107,13 @@ class JWTService:
 
         return jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
 
-    def create_refresh_token(self, wallet_id: str) -> str:
+    def create_refresh_token(
+        self,
+        wallet_id: str,
+        *,
+        key_id: str | None = None,
+        scopes: list[str] | None = None,
+    ) -> str:
         """Create a long-lived refresh token."""
         private_key, signing_key_id = self._load_keys()
         now = datetime.now(timezone.utc)
@@ -112,6 +129,10 @@ class JWTService:
             "type": "refresh",
             "kid": signing_key_id,
         }
+        if key_id is not None:
+            payload["key_id"] = key_id
+        if scopes is not None:
+            payload["scopes"] = scopes
 
         return jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
 

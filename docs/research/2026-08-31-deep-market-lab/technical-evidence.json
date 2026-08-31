@@ -1,0 +1,336 @@
+{
+  "captured_at_utc": "2026-08-31T22:35:50.469319+00:00",
+  "method": "Independent read-only file hashes and retained result-line inspection; no app tests run by this audit.",
+  "limitations": [
+    "Concurrent tasks can change source after capture; this is not a source freeze.",
+    "The manifest is a scoped inventory, not every local file or a signed attestation.",
+    "Result rows overlap; never add them into a unique-test total.",
+    "Logs establish local synthetic observations, not customer or production validation.",
+    "Missing test cases, excluded markers, and environment differences still matter."
+  ],
+  "manifest": {
+    "path": "/tmp/amw-launch-20260831/logs/acceptance-source-manifest.json",
+    "sha256": "f0c7d4236ffc785ca98e002bc4ea3f1759c9d0cc30e972798f37c2a021b5c289",
+    "entries": 572
+  },
+  "base_commit_context": "46d7310a3b771542dfb1fe874b5cff9d6bf137b2",
+  "source_comparisons": [
+    {
+      "root": "/Users/sellers/Documents/GitHub/agent-middleware-api",
+      "matched": 554,
+      "missing": [],
+      "mismatches": [
+        "app/services/human_approval.py",
+        "app/services/quotes.py",
+        "app/services/receipts.py",
+        "app/services/refund_reconciliation.py",
+        "tests/support/mcp_remote_partner_app.py",
+        "tests/test_accounting_input_validation.py",
+        "tests/test_human_approval_gate.py",
+        "tests/test_late_debit_reconciliation.py",
+        "tests/test_mcp_dispatch_reconciliation.py",
+        "tests/test_mcp_idempotency_validation.py",
+        "tests/test_mcp_postgres_multiprocess.py",
+        "tests/test_mcp_upstream_governed.py",
+        "tests/test_permit_verification_sessions.py",
+        "tests/test_refund_amount_evidence.py",
+        "tests/test_security_fuzz_battery.py",
+        "tests/test_signed_quotes.py",
+        "tests/test_site_agent_interface.py",
+        "tests/test_wedge_honesty.py"
+      ]
+    },
+    {
+      "root": "/tmp/amw-launch-20260831/acceptance-sqlite",
+      "matched": 572,
+      "missing": [],
+      "mismatches": []
+    },
+    {
+      "root": "/tmp/amw-launch-20260831/acceptance-pg-reg",
+      "matched": 572,
+      "missing": [],
+      "mismatches": []
+    },
+    {
+      "root": "/tmp/amw-launch-20260831/acceptance-pg-crash",
+      "matched": 572,
+      "missing": [],
+      "mismatches": []
+    },
+    {
+      "root": "/tmp/amw-launch-20260831/acceptance-pg-poolone",
+      "matched": 572,
+      "missing": [],
+      "mismatches": []
+    }
+  ],
+  "all_manifest_files_match": false,
+  "files_changed_since_this_review_started": [
+    "app/routers/billing.py",
+    "app/schemas/trust.py",
+    "app/services/billing_engine.py",
+    "app/services/human_approval.py",
+    "app/services/mcp_dispatch_attempts.py",
+    "app/services/permits.py",
+    "app/services/quotes.py",
+    "app/services/receipts.py",
+    "app/services/refund_reconciliation.py",
+    "app/services/signing_keys.py",
+    "app/services/velocity_monitor.py",
+    "docs/openapi.json",
+    "docs/railway-customer-manifest.example.json",
+    "tests/support/mcp_remote_partner_app.py",
+    "tests/test_human_approval_gate.py",
+    "tests/test_mcp_dispatch_reconciliation.py",
+    "tests/test_mcp_postgres_multiprocess.py",
+    "tests/test_mcp_upstream_governed.py",
+    "tests/test_permit_postgres_concurrency.py",
+    "tests/test_security_fuzz_battery.py",
+    "tests/test_signed_quotes.py",
+    "tests/test_site_agent_interface.py",
+    "tests/test_wedge_honesty.py",
+    "tests/test_mcp_idempotency_validation.py",
+    "tests/test_refund_amount_evidence.py"
+  ],
+  "test_results_owned_by": "Existing launch engineering task 01a056df-ba0b-7472-b6cc-747dccc8cdd9",
+  "command_manifest": {
+    "path": "/tmp/amw-launch-20260831/logs/acceptance-command-manifest.json",
+    "sha256": "37b055206d843f7a8bb055082852db3ace4ff3335ec240f11820561af3ff435c",
+    "status": "all_ten_final_commands_passed",
+    "runs": [
+      {
+        "id": "poolone",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-pg-poolone",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "68e4d5fa2c6e72b5244ccf1299f8abe7b799150bf6f66080a9cf189c12ce1700",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "regressions",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-pg-reg",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "dcb7fef63e8247c1644d33615815053b7b457eb985934fa622358e2ee2c9eec5",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "full",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-sqlite",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "457264aaf1fe4ff4d107f1afdd354e89b06626273ba0e743377f527abaff36ef",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "multiprocess",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-pg-crash",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "0fbcc36f1981efcbbe636c4ea61be9a4e14452bdef9acbe98846623772052527",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "concurrency",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-pg-crash",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "aa0ed578846f5f38c77615b60dfc9deea5b7e7f4eb565420a630a1e7d7f81d35",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "datetime",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-pg-reg",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "ae4be17b77130d9d6cda6cd1fc088dd55c63a5d6854302776836ce7126aa9212",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "production",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-sqlite",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "67a6b9c5594de45da6878757991a51081035f78f7e74330ad0c4e8806f13d95f",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "trust",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-sqlite",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "f57d2b26d51f82a7e03e01e0e3dfa708af8a4446b1515e0edd79763254e99c8b",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "ruff",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-sqlite",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      },
+      {
+        "id": "mypy",
+        "cwd": "/tmp/amw-launch-20260831/acceptance-sqlite",
+        "environment_cleared": true,
+        "exit_code": 0,
+        "status": "completed",
+        "result": null,
+        "log_sha256": "5a5d18602ec811a5e8d5394689dedc469378e3dc613794f1897fef5a5de66523",
+        "source_verified_before": 572,
+        "source_verified_after": 572
+      }
+    ],
+    "scope": "Summary only; environments, argv and shell strings are not copied. Executor supplied command history, not an independent execution attestation."
+  },
+  "logs": [
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-full.log",
+      "exists": true,
+      "sha256": "457264aaf1fe4ff4d107f1afdd354e89b06626273ba0e743377f527abaff36ef",
+      "results": [
+        "1688 passed, 65 skipped, 6 deselected, 67 warnings in 60.04s (0:01:00)"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-regressions.log",
+      "exists": true,
+      "sha256": "dcb7fef63e8247c1644d33615815053b7b457eb985934fa622358e2ee2c9eec5",
+      "results": [
+        "65 passed, 66 warnings in 4.45s"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-poolone.log",
+      "exists": true,
+      "sha256": "68e4d5fa2c6e72b5244ccf1299f8abe7b799150bf6f66080a9cf189c12ce1700",
+      "results": [
+        "36 passed, 4 warnings in 2.27s"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-multiprocess.log",
+      "exists": true,
+      "sha256": "0fbcc36f1981efcbbe636c4ea61be9a4e14452bdef9acbe98846623772052527",
+      "results": [
+        "9 passed, 2 warnings in 145.91s (0:02:25)"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-concurrency.log",
+      "exists": true,
+      "sha256": "aa0ed578846f5f38c77615b60dfc9deea5b7e7f4eb565420a630a1e7d7f81d35",
+      "results": [
+        "18 passed, 1 warning in 2.94s"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-datetime.log",
+      "exists": true,
+      "sha256": "ae4be17b77130d9d6cda6cd1fc088dd55c63a5d6854302776836ce7126aa9212",
+      "results": [
+        "5 passed, 1 warning in 2.32s"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-production.log",
+      "exists": true,
+      "sha256": "67a6b9c5594de45da6878757991a51081035f78f7e74330ad0c4e8806f13d95f",
+      "results": [
+        "6 passed in 2.99s"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-trust.log",
+      "exists": true,
+      "sha256": "f57d2b26d51f82a7e03e01e0e3dfa708af8a4446b1515e0edd79763254e99c8b",
+      "results": [
+        "133 passed in 7.38s",
+        "403 passed, 1 warning in 24.94s",
+        "10 passed in 1.70s",
+        "[trust-gate] trust release gate passed"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-ruff.log",
+      "exists": true,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "results": [
+        "All checks passed!"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/acceptance-mypy.log",
+      "exists": true,
+      "sha256": "5a5d18602ec811a5e8d5394689dedc469378e3dc613794f1897fef5a5de66523",
+      "results": [
+        "Success: no issues found in 171 source files"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/final-postgres-rapidfire.log",
+      "exists": true,
+      "sha256": "0e49ac5580f069e5c8c4690402429329e3bebc9118a42e712106a0b97bda045a",
+      "results": [
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "FAILED tests/test_security_fuzz_battery.py::test_rapid_fire_invokes_all_accounted",
+        "1 failed, 13 warnings in 32.32s"
+      ]
+    },
+    {
+      "path": "/tmp/amw-launch-20260831/logs/baseline-postgres-rapidfire.log",
+      "exists": true,
+      "sha256": "60a3efddb346dde6828c8c69e4d73048d114e537e1332e073855dc96deada8c5",
+      "results": [
+        "sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "ERROR    app.routers.mcp:mcp.py:379 MCP tool call failed: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/20/3o7r)",
+        "FAILED tests/test_security_fuzz_battery.py::test_rapid_fire_invokes_all_accounted",
+        "1 failed, 13 warnings in 32.36s"
+      ]
+    }
+  ]
+}

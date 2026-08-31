@@ -10,12 +10,15 @@ FastAPI dependency behavior is tested by calling the dependencies directly.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import jwt
 import pytest
@@ -27,6 +30,7 @@ from cryptography.hazmat.primitives.serialization import (
 )
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.core.oidc_iga as oidc_iga
 from app.core.auth import get_enterprise_principal, require_enterprise_tool_access
@@ -39,16 +43,19 @@ from app.core.oidc_iga import (
     resolve_policy_grants,
 )
 from app.db.database import get_session_factory
-from app.db.models import PolicyBundleModel, WalletModel
+from app.db.models import McpDispatchAttemptModel, PolicyBundleModel, WalletModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.service_registry import get_service_registry
+from app.services.upstream_mcp import UpstreamMcpResult
 
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
 
 OKTA_ISS = "https://example.okta.com/oauth2/default"
-ENTRA_ISS = "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+ENTRA_ISS = (
+    "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+)
 AUDIENCE = "api://agent-middleware"
 KID = "iga-test-kid"
 TOOL = "demo.tool"
@@ -70,9 +77,7 @@ def wrong_rsa_key():
 
 
 def _pem(private_key) -> bytes:
-    return private_key.private_bytes(
-        Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
-    )
+    return private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
 
 
 def _b64url_uint(value: int) -> str:
@@ -116,7 +121,9 @@ def _mint(
     }
     if extra:
         claims.update(extra)
-    return jwt.encode(claims, _pem(private_key), algorithm="RS256", headers={"kid": kid})
+    return jwt.encode(
+        claims, _pem(private_key), algorithm="RS256", headers={"kid": kid}
+    )
 
 
 def _okta_issuers(private_key) -> dict:
@@ -279,9 +286,7 @@ async def test_unauthorized_principal_without_required_role_is_blocked(
 async def test_entra_roles_claim_allows(iga_config, clean_database, rsa_key):
     wallet_id = await _make_wallet()
     policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
-    iga_config(
-        _entra_issuers(rsa_key), {"Payments.Operator": {"policy_id": policy_id}}
-    )
+    iga_config(_entra_issuers(rsa_key), {"Payments.Operator": {"policy_id": policy_id}})
 
     token = _mint(
         rsa_key, iss=ENTRA_ISS, sub="entra-user", extra={"roles": ["Payments.Operator"]}
@@ -336,9 +341,7 @@ async def test_unknown_issuer_rejected(iga_config, rsa_key):
     assert excinfo.value.reason == "iga_issuer_not_trusted"
 
 
-async def test_token_signed_with_wrong_key_rejected(
-    iga_config, rsa_key, wrong_rsa_key
-):
+async def test_token_signed_with_wrong_key_rejected(iga_config, rsa_key, wrong_rsa_key):
     iga_config(_okta_issuers(rsa_key))
     # Same kid so key selection succeeds and the signature check itself fails.
     with pytest.raises(IGAError) as excinfo:
@@ -749,8 +752,7 @@ async def test_get_enterprise_principal_none_when_disabled_or_headerless(rsa_key
     assert not get_settings().IGA_TRUSTED_ISSUERS
     assert await get_enterprise_principal(authorization=None) is None
     assert (
-        await get_enterprise_principal(authorization=f"Bearer {_mint(rsa_key)}")
-        is None
+        await get_enterprise_principal(authorization=f"Bearer {_mint(rsa_key)}") is None
     )
 
 
@@ -763,9 +765,9 @@ async def test_get_enterprise_principal_ignores_internal_issuer_tokens(
     # The internal EdDSA flow's issuer is not IGA-trusted: fall through (None)
     # so get_auth_context keeps owning those tokens.
     internal_token = _mint(rsa_key, iss="agent-middleware-api")
-    assert await get_enterprise_principal(
-        authorization=f"Bearer {internal_token}"
-    ) is None
+    assert (
+        await get_enterprise_principal(authorization=f"Bearer {internal_token}") is None
+    )
 
 
 async def test_get_enterprise_principal_401_on_bad_enterprise_token(
@@ -780,9 +782,7 @@ async def test_get_enterprise_principal_401_on_bad_enterprise_token(
     assert excinfo.value.detail["error"] == "iga_token_expired"
 
 
-async def test_get_enterprise_principal_returns_verified_principal(
-    iga_config, rsa_key
-):
+async def test_get_enterprise_principal_returns_verified_principal(iga_config, rsa_key):
     iga_config(_okta_issuers(rsa_key))
     token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
     principal = await get_enterprise_principal(authorization=f"Bearer {token}")
@@ -1101,6 +1101,133 @@ async def test_insufficient_funds_denial_releases_iga_use(
         assert payload["result"]["receipt"]["outcome"] == "success"
         assert calls == [{"message": "hello"}]
         # The dispatched call keeps its committed use.
+        assert sum(oidc_iga._lifetime_uses.values()) == 1
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_prepare_rollback_releases_iga_use_for_exact_retry(
+    iga_config, clean_database, rsa_key, client, monkeypatch
+):
+    """A proven preparation rollback gives back its IGA use and identity."""
+
+    class SuccessExecutor:
+        dispatch_count = 0
+
+        async def call_tool(
+            self,
+            arguments: dict[str, Any],
+            *,
+            invocation_id: str,
+            idempotency_key: str,
+            before_dispatch: Callable[[], Awaitable[None]],
+        ) -> UpstreamMcpResult:
+            assert invocation_id
+            assert idempotency_key
+            await before_dispatch()
+            self.dispatch_count += 1
+            payload = {
+                "content": [{"type": "text", "text": "partner response"}],
+                "structuredContent": {"echo": arguments},
+                "isError": False,
+            }
+            canonical = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            encoded = canonical.encode()
+            return UpstreamMcpResult(
+                payload=payload,
+                canonical_json=canonical,
+                response_hash=hashlib.sha256(encoded).hexdigest(),
+                size_bytes=len(encoded),
+                is_error=False,
+            )
+
+    executor = SuccessExecutor()
+    registry = get_service_registry()
+    registry.register_upstream(
+        service_id=E2E_TOOL,
+        name="IGA E2E Upstream",
+        description="Throwaway upstream tool for IGA compensation tests",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=executor,
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        credits_per_unit=2.0,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+    )
+    original_flush = AsyncSession.flush
+    failed_once = False
+
+    async def fail_attempt_flush(self, objects=None):  # noqa: ANN001
+        nonlocal failed_once
+        if not failed_once and any(
+            isinstance(row, McpDispatchAttemptModel) for row in self.new
+        ):
+            failed_once = True
+            raise RuntimeError("simulated_prepare_write_failure")
+        return await original_flush(self, objects)
+
+    monkeypatch.setattr(AsyncSession, "flush", fail_attempt_flush)
+    try:
+        setup = await _provision_for_e2e(client, idem_key="iga-prepare-permit")
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(
+            _okta_issuers(rsa_key),
+            {"payments-ops": {"policy_id": policy_id, "max_uses": 1}},
+        )
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        headers = {
+            **setup["agent_headers"],
+            "Authorization": f"Bearer {token}",
+        }
+        idempotency_key = "iga-prepare-exact-retry-1"
+
+        rolled_back = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key=idempotency_key,
+            headers=headers,
+        )
+        assert failed_once is True
+        assert rolled_back["error"] == {
+            "code": -32005,
+            "message": "upstream_prepare_retryable",
+        }
+        assert executor.dispatch_count == 0
+        assert oidc_iga._lifetime_uses == {}
+        assert oidc_iga._window_calls == {}
+
+        monkeypatch.setattr(AsyncSession, "flush", original_flush)
+        succeeded = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key=idempotency_key,
+            headers=headers,
+        )
+        replayed = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key=idempotency_key,
+            headers=headers,
+        )
+
+        assert replayed == succeeded
+        assert succeeded["result"]["receipt"]["outcome"] == "success"
+        assert executor.dispatch_count == 1
         assert sum(oidc_iga._lifetime_uses.values()) == 1
     finally:
         registry.unregister_local(E2E_TOOL)

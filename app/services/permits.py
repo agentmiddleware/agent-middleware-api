@@ -11,13 +11,16 @@ from typing import Any, cast
 
 from sqlalchemy import case, func, or_, select, update as sa_update
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     BillingAlertModel,
+    IdempotencyRecordModel,
     McpDispatchAttemptModel,
+    PermitCallReservationModel,
     PermitModel,
     ReceiptModel,
     WalletModel,
@@ -32,6 +35,10 @@ class PermitError(RuntimeError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(reason)
+
+
+class _PermitWriteConflict(RuntimeError):
+    """A guarded permit mutation lost a retryable optimistic race."""
 
 
 @dataclass(frozen=True)
@@ -127,7 +134,9 @@ def permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
     if max_calls:
         ce["max_calls_per_tool"] = max_calls
     if permit_model.aggregate_value_cap is not None:
-        ce["aggregate_value_cap"] = format(permit_model.aggregate_value_cap.normalize(), "f")
+        ce["aggregate_value_cap"] = format(
+            permit_model.aggregate_value_cap.normalize(), "f"
+        )
     forbidden = _loads_list(permit_model.forbidden_fields_json or "[]")
     if forbidden:
         ce["forbidden_fields"] = forbidden
@@ -365,9 +374,13 @@ class PermitService:
             signature=signature,
             key_id=key_id,
             issued_at=now,
-            max_calls_per_tool_json=json.dumps(request.max_calls_per_tool) if request.max_calls_per_tool else None,
+            max_calls_per_tool_json=json.dumps(request.max_calls_per_tool)
+            if request.max_calls_per_tool
+            else None,
             aggregate_value_cap=request.aggregate_value_cap,
-            forbidden_fields_json=json.dumps(request.forbidden_fields) if request.forbidden_fields else None,
+            forbidden_fields_json=json.dumps(request.forbidden_fields)
+            if request.forbidden_fields
+            else None,
             recipient_domain=request.recipient_domain,
         )
         async with factory() as session:
@@ -405,6 +418,7 @@ class PermitService:
             if not model:
                 return PermitValidation(False, "permit_not_found", None)
             return await self._validate_model_for_action(
+                session=session,
                 model=model,
                 wallet_id=wallet_id,
                 tool_name=tool_name,
@@ -436,13 +450,29 @@ class PermitService:
             model = await session.get(PermitModel, permit_id)
             if model is None:
                 return PermitValidation(False, "permit_not_found", None)
-            if model.subject_wallet_id != wallet_id:
-                return PermitValidation(False, "permit_wallet_mismatch", model)
-            if model.subject_key_id and model.subject_key_id != key_id:
-                return PermitValidation(False, "permit_key_mismatch", model)
-            if not await self.verify_signature(model):
-                return PermitValidation(False, "permit_signature_invalid", model)
-            return PermitValidation(True, None, model)
+            return await self._validate_replay_model_access(
+                session=session,
+                model=model,
+                wallet_id=wallet_id,
+                key_id=key_id,
+            )
+
+    async def _validate_replay_model_access(
+        self,
+        *,
+        session: AsyncSession | None = None,
+        model: PermitModel,
+        wallet_id: str,
+        key_id: str | None,
+    ) -> PermitValidation:
+        """Check only stable permit identity for an existing reservation."""
+        if model.subject_wallet_id != wallet_id:
+            return PermitValidation(False, "permit_wallet_mismatch", model)
+        if model.subject_key_id and model.subject_key_id != key_id:
+            return PermitValidation(False, "permit_key_mismatch", model)
+        if not await self.verify_signature(model, session=session):
+            return PermitValidation(False, "permit_signature_invalid", model)
+        return PermitValidation(True, None, model)
 
     async def authorize_and_reserve(
         self,
@@ -453,25 +483,82 @@ class PermitService:
         estimated_credits: Decimal,
         key_id: str | None = None,
         arguments: dict[str, Any] | None = None,
+        idempotency_record_id: str | None = None,
+        request_hash: str | None = None,
     ) -> PermitValidation:
         """Atomically authorize an action and reserve its permit budget.
 
-        The permit row remains locked from the final authorization checks
-        through the ``spent_credits`` update. A revocation, expiry, scope
-        change, key mismatch, signature failure, or concurrent reservation
-        therefore cannot slip between a stale read and the budget mutation.
+        For a governed local invocation, ``idempotency_record_id`` and
+        ``request_hash`` bind the budget mutation to a durable call-slot row in
+        the same transaction. An exact retry adopts that row before mutable
+        constraints are re-evaluated and never reserves twice.
         """
+        if (idempotency_record_id is None) != (request_hash is None):
+            raise PermitError("permit_call_identity_incomplete")
         factory = get_session_factory()
 
         async def _once() -> PermitValidation:
             async with factory() as session:
                 async with session.begin():
+                    identity: IdempotencyRecordModel | None = None
+                    if idempotency_record_id is not None:
+                        identity = await session.get(
+                            IdempotencyRecordModel,
+                            idempotency_record_id,
+                            with_for_update=True,
+                        )
+                        if (
+                            identity is None
+                            or identity.wallet_id != wallet_id
+                            or identity.operation_kind != "local"
+                            or identity.request_hash != request_hash
+                            or identity.response_json is not None
+                        ):
+                            raise PermitError("permit_call_identity_invalid")
+
                     model = await session.get(
                         PermitModel, permit_id, with_for_update=True
                     )
                     if not model:
                         return PermitValidation(False, "permit_not_found", None)
+
+                    if idempotency_record_id is not None:
+                        existing = await session.get(
+                            PermitCallReservationModel,
+                            idempotency_record_id,
+                            with_for_update=True,
+                        )
+                        if existing is not None:
+                            if (
+                                existing.wallet_id != wallet_id
+                                or existing.permit_id != permit_id
+                                or existing.tool != tool_name
+                                or existing.request_hash != request_hash
+                                or existing.credits_authorized != estimated_credits
+                            ):
+                                raise PermitError("permit_call_reservation_conflict")
+                            replay_access = await self._validate_replay_model_access(
+                                session=session,
+                                model=model,
+                                wallet_id=wallet_id,
+                                key_id=key_id,
+                            )
+                            if not replay_access.allowed:
+                                return replay_access
+                            if existing.state == "released":
+                                return PermitValidation(
+                                    False,
+                                    "permit_call_reservation_released",
+                                    model,
+                                )
+                            if existing.state not in {"reserved", "consumed"}:
+                                raise PermitError(
+                                    "permit_call_reservation_state_invalid"
+                                )
+                            return PermitValidation(True, None, model)
+
                     validation = await self._validate_model_for_action(
+                        session=session,
                         model=model,
                         wallet_id=wallet_id,
                         tool_name=tool_name,
@@ -502,19 +589,33 @@ class PermitService:
                     # A concurrent call that committed between our read and write
                     # causes the UPDATE to match zero rows, and we retry.
                     now = utc_now()
-                    
+
                     # Compute the updated call counter. If max_calls_per_tool is
                     # set for this tool, the UPDATE will atomically increment it
                     # via optimistic concurrency control (CAS on the JSON column).
-                    max_calls_config = _loads_dict(model.max_calls_per_tool_json or "{}")
+                    max_calls_config = _loads_dict(
+                        model.max_calls_per_tool_json or "{}"
+                    )
                     call_limit = max_calls_config.get(tool_name)
                     original_counts_json = model.tool_call_counts_json
                     updated_counts_json = None
                     if call_limit is not None and type(call_limit) is int:
                         current_counts = _loads_dict(original_counts_json or "{}")
                         current_tool_count = current_counts.get(tool_name, 0)
-                        if not isinstance(current_tool_count, int):
-                            current_tool_count = 0
+                        if (
+                            type(current_tool_count) is not int
+                            or current_tool_count < 0
+                        ):
+                            return PermitValidation(
+                                False,
+                                "permit_max_calls_exceeded",
+                                model,
+                                {
+                                    "tool": tool_name,
+                                    "limit": call_limit,
+                                    "calls_made": "malformed",
+                                },
+                            )
                         new_tool_count = current_tool_count + 1
                         if new_tool_count > call_limit:
                             # This attempt would exceed the limit. Deny without
@@ -532,7 +633,7 @@ class PermitService:
                         updated_counts = dict(current_counts)
                         updated_counts[tool_name] = new_tool_count
                         updated_counts_json = json.dumps(updated_counts)
-                    
+
                     # Build the UPDATE values and WHERE predicates.
                     update_values: dict[str, Any] = {
                         "spent_credits": PermitModel.spent_credits + estimated_credits,
@@ -547,8 +648,19 @@ class PermitService:
                             PermitModel.spent_credits + estimated_credits
                             <= PermitModel.max_credits,
                         ),
+                        or_(
+                            cast(
+                                ColumnElement[bool],
+                                cast(Any, PermitModel.aggregate_value_cap).is_(None),
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits + estimated_credits
+                                <= cast(Any, PermitModel.aggregate_value_cap),
+                            ),
+                        ),
                     ]
-                    
+
                     if updated_counts_json is not None:
                         # Optimistic lock: only UPDATE if tool_call_counts_json
                         # still equals the value we read. If another transaction
@@ -559,17 +671,20 @@ class PermitService:
                             where_conditions.append(
                                 cast(
                                     ColumnElement[bool],
-                                    cast(Any, PermitModel.tool_call_counts_json).is_(None),
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(
+                                        None
+                                    ),
                                 )
                             )
                         else:
                             where_conditions.append(
                                 cast(
                                     ColumnElement[bool],
-                                    PermitModel.tool_call_counts_json == original_counts_json,
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
                                 )
                             )
-                    
+
                     reserved = await session.execute(
                         sa_update(PermitModel)
                         .where(*where_conditions)
@@ -610,10 +725,21 @@ class PermitService:
                         # incremented the counter between our pre-check and the
                         # failed optimistic UPDATE.
                         if call_limit is not None and type(call_limit) is int:
-                            refreshed_counts = _loads_dict(model.tool_call_counts_json or "{}")
+                            refreshed_counts = _loads_dict(
+                                model.tool_call_counts_json or "{}"
+                            )
                             refreshed_count = refreshed_counts.get(tool_name, 0)
-                            if not isinstance(refreshed_count, int):
-                                refreshed_count = 0
+                            if type(refreshed_count) is not int or refreshed_count < 0:
+                                return PermitValidation(
+                                    False,
+                                    "permit_max_calls_exceeded",
+                                    model,
+                                    {
+                                        "tool": tool_name,
+                                        "limit": call_limit,
+                                        "calls_made": "malformed",
+                                    },
+                                )
                             if refreshed_count >= call_limit:
                                 return PermitValidation(
                                     False,
@@ -625,22 +751,243 @@ class PermitService:
                                         "calls_made": refreshed_count,
                                     },
                                 )
-                        return PermitValidation(
-                            False,
-                            "permit_budget_exceeded",
-                            model,
-                            {
-                                "required_credits": _num(estimated_credits),
-                                "remaining_credits": _num(
-                                    model.max_credits - model.spent_credits
-                                ),
-                                "spent_credits": _num(model.spent_credits),
-                                "max_credits": _num(model.max_credits),
-                            },
-                        )
+                        if (
+                            model.aggregate_value_cap is not None
+                            and model.spent_credits + estimated_credits
+                            > model.aggregate_value_cap
+                        ):
+                            return PermitValidation(
+                                False,
+                                "permit_aggregate_value_cap_exceeded",
+                                model,
+                                {
+                                    "required_credits": _num(estimated_credits),
+                                    "charged_to_date": _num(model.spent_credits),
+                                    "reserved_or_charged_to_date": _num(
+                                        model.spent_credits
+                                    ),
+                                    "aggregate_value_cap": _num(
+                                        model.aggregate_value_cap
+                                    ),
+                                },
+                            )
+                        if model.spent_credits + estimated_credits > model.max_credits:
+                            return PermitValidation(
+                                False,
+                                "permit_budget_exceeded",
+                                model,
+                                {
+                                    "required_credits": _num(estimated_credits),
+                                    "remaining_credits": _num(
+                                        model.max_credits - model.spent_credits
+                                    ),
+                                    "spent_credits": _num(model.spent_credits),
+                                    "max_credits": _num(model.max_credits),
+                                },
+                            )
+                        # A concurrent call changed the JSON counter but did not
+                        # exhaust it. Retry the complete transaction from a fresh
+                        # snapshot rather than misreporting a budget denial.
+                        raise _PermitWriteConflict
                     # Reflect the committed reservation on the returned model.
                     await session.refresh(model)
+                    if identity is not None:
+                        now = utc_now()
+                        session.add(
+                            PermitCallReservationModel(
+                                idempotency_record_id=identity.record_id,
+                                wallet_id=wallet_id,
+                                permit_id=permit_id,
+                                tool=tool_name,
+                                request_hash=identity.request_hash,
+                                credits_authorized=estimated_credits,
+                                call_slot_reserved=updated_counts_json is not None,
+                                state="reserved",
+                                created_at=now,
+                                updated_at=now,
+                            )
+                        )
+                        # Force unique/FK/check constraints before commit so a
+                        # failure rolls the paired budget increment back.
+                        await session.flush()
                 return validation
+
+        return await self._run_with_write_retry(_once)
+
+    async def consume_local_call(self, idempotency_record_id: str) -> bool:
+        """Durably cross the local execution boundary exactly once.
+
+        The commit completes before the callable is entered. A consumed row is
+        never released or automatically re-executed after a crash because the
+        downstream effect may already have occurred.
+        """
+        factory = get_session_factory()
+
+        async def _once() -> bool:
+            async with factory() as session:
+                async with session.begin():
+                    now = utc_now()
+                    consumed = await session.execute(
+                        sa_update(PermitCallReservationModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.idempotency_record_id
+                                == idempotency_record_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.state == "reserved",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                cast(
+                                    Any,
+                                    PermitCallReservationModel.execution_started_at,
+                                ).is_(None),
+                            ),
+                        )
+                        .values(
+                            state="consumed",
+                            execution_started_at=now,
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, consumed).rowcount or 0) == 1:
+                        return True
+                    reservation = await session.get(
+                        PermitCallReservationModel,
+                        idempotency_record_id,
+                    )
+                    if reservation is None:
+                        raise PermitError("permit_call_reservation_not_found")
+                    if reservation.state == "consumed":
+                        return False
+                    raise PermitError("permit_call_reservation_state_invalid")
+
+        return await self._run_with_write_retry(_once)
+
+    async def release_local_call_reservation_once(
+        self,
+        idempotency_record_id: str,
+    ) -> bool:
+        """Release a proven pre-execution local reservation exactly once.
+
+        Reservation state and permit budget move in one transaction. The lock
+        order matches authorization: idempotency, permit, reservation.
+        """
+        factory = get_session_factory()
+
+        async def _once() -> bool:
+            async with factory() as session:
+                async with session.begin():
+                    identity = await session.get(
+                        IdempotencyRecordModel,
+                        idempotency_record_id,
+                        with_for_update=True,
+                    )
+                    if identity is None:
+                        raise PermitError("permit_call_identity_invalid")
+                    permit_id = await session.scalar(
+                        select(cast(Any, PermitCallReservationModel.permit_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.idempotency_record_id
+                                == idempotency_record_id,
+                            )
+                        )
+                    )
+                    if permit_id is None:
+                        raise PermitError("permit_call_reservation_not_found")
+                    model = await session.get(
+                        PermitModel,
+                        permit_id,
+                        with_for_update=True,
+                    )
+                    if model is None:
+                        raise PermitError("permit_not_found")
+                    reservation = await session.scalar(
+                        select(PermitCallReservationModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitCallReservationModel.idempotency_record_id
+                                == idempotency_record_id,
+                            )
+                        )
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                    if reservation is None:
+                        raise PermitError("permit_call_reservation_not_found")
+                    if reservation.state == "released":
+                        return False
+                    if (
+                        reservation.state != "reserved"
+                        or reservation.execution_started_at is not None
+                    ):
+                        raise PermitError("permit_call_reservation_state_invalid")
+                    if model.spent_credits < reservation.credits_authorized:
+                        raise PermitError("permit_budget_release_invalid")
+                    now = utc_now()
+                    update_values: dict[str, Any] = {
+                        "spent_credits": PermitModel.spent_credits
+                        - reservation.credits_authorized,
+                        "updated_at": now,
+                    }
+                    where_conditions: list[ColumnElement[bool]] = [
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.permit_id == reservation.permit_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits >= reservation.credits_authorized,
+                        ),
+                    ]
+                    if reservation.call_slot_reserved:
+                        original_counts_json = model.tool_call_counts_json
+                        counts = _loads_dict(original_counts_json or "{}")
+                        current_count = counts.get(reservation.tool, 0)
+                        if type(current_count) is not int or current_count <= 0:
+                            raise PermitError("permit_call_slot_release_invalid")
+                        updated_counts = dict(counts)
+                        updated_counts[reservation.tool] = current_count - 1
+                        update_values["tool_call_counts_json"] = json.dumps(
+                            updated_counts
+                        )
+                        if original_counts_json is None:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(
+                                        None
+                                    ),
+                                )
+                            )
+                        else:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
+                                )
+                            )
+                    released = await session.execute(
+                        sa_update(PermitModel)
+                        .where(*where_conditions)
+                        .values(**update_values)
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, released).rowcount or 0) != 1:
+                        raise _PermitWriteConflict
+                    reservation.state = "released"
+                    reservation.call_slot_reserved = False
+                    reservation.released_at = now
+                    reservation.updated_at = now
+                    session.add(reservation)
+                return True
 
         return await self._run_with_write_retry(_once)
 
@@ -649,10 +996,13 @@ class PermitService:
         write conflicts (WAL "database is locked"/"snapshot" errors a genuinely
         concurrent writer raises). PostgreSQL blocks on the row lock instead of
         raising, so this simply runs ``operation`` once there."""
-        last_exc: OperationalError | None = None
+        last_exc: BaseException | None = None
         for attempt in range(_PERMIT_WRITE_MAX_ATTEMPTS):
             try:
                 return await operation()
+            except _PermitWriteConflict as exc:
+                last_exc = exc
+                await asyncio.sleep(min(0.02, 0.002 * (attempt + 1)))
             except OperationalError as exc:
                 last_exc = exc
                 if not _is_retryable_write_conflict(exc):
@@ -663,6 +1013,7 @@ class PermitService:
     async def _validate_model_for_action(
         self,
         *,
+        session: AsyncSession | None = None,
         model: PermitModel,
         wallet_id: str,
         tool_name: str,
@@ -697,7 +1048,10 @@ class PermitService:
         # would answer a question it has not earned.
         if model.subject_wallet_id != wallet_id:
             return PermitValidation(
-                False, "permit_wallet_mismatch", model, {"bound_to": "subject_wallet_id"}
+                False,
+                "permit_wallet_mismatch",
+                model,
+                {"bound_to": "subject_wallet_id"},
             )
         if model.subject_key_id and model.subject_key_id != key_id:
             return PermitValidation(
@@ -756,8 +1110,13 @@ class PermitService:
             # Read the atomic call counter. Missing or null defaults to empty dict.
             call_counts = _loads_dict(model.tool_call_counts_json or "{}")
             current_count = call_counts.get(tool_name, 0)
-            if not isinstance(current_count, int):
-                current_count = 0
+            if type(current_count) is not int or current_count < 0:
+                return PermitValidation(
+                    False,
+                    "permit_max_calls_exceeded",
+                    model,
+                    {"tool": tool_name, "limit": limit, "calls_made": "malformed"},
+                )
             if current_count >= limit:
                 return PermitValidation(
                     False,
@@ -768,15 +1127,16 @@ class PermitService:
 
         # 2. aggregate_value_cap
         if model.aggregate_value_cap is not None:
-            total_charged = await self._sum_permit_charges(model.permit_id)
-            if total_charged + estimated_credits > model.aggregate_value_cap:
+            reserved_or_charged = model.spent_credits
+            if reserved_or_charged + estimated_credits > model.aggregate_value_cap:
                 return PermitValidation(
                     False,
                     "permit_aggregate_value_cap_exceeded",
                     model,
                     {
                         "required_credits": _num(estimated_credits),
-                        "charged_to_date": _num(total_charged),
+                        "charged_to_date": _num(reserved_or_charged),
+                        "reserved_or_charged_to_date": _num(reserved_or_charged),
                         "aggregate_value_cap": _num(model.aggregate_value_cap),
                     },
                 )
@@ -795,7 +1155,7 @@ class PermitService:
                     {"field": hit, "forbidden_fields": forbidden},
                 )
 
-        if not await self.verify_signature(model):
+        if not await self.verify_signature(model, session=session):
             return PermitValidation(
                 False,
                 "permit_signature_invalid",
@@ -808,45 +1168,107 @@ class PermitService:
         self,
         permit_id: str,
         tool_name: str,
-        session: Any | None = None,
+        *,
+        session: AsyncSession | None = None,
     ) -> int:
-        """Count successful receipts for (permit_id, tool_name).
-        
-        When called with an existing session, reads within that transaction's
-        isolation level (e.g., to re-check a constraint before commit).
-        """
-        if session:
-            result = await session.execute(
-                select(func.count()).select_from(ReceiptModel).where(
-                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
-                    cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
-                    cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
-                )
-            )
-            return int(result.scalar() or 0)
-        
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(func.count()).select_from(ReceiptModel).where(
-                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
-                    cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
-                    cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
-                )
-            )
-            return int(result.scalar() or 0)
+        """Count reserved or possibly executed calls for one permit/tool."""
 
-    async def _sum_permit_charges(self, permit_id: str) -> Decimal:
-        """Sum credits_charged across all receipts for this permit."""
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(func.sum(ReceiptModel.credits_charged)).where(
-                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
+        async def count(current: AsyncSession) -> int:
+            attempts = await current.scalar(
+                select(func.count())
+                .select_from(McpDispatchAttemptModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        McpDispatchAttemptModel.permit_id == permit_id,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        McpDispatchAttemptModel.public_tool_id == tool_name,
+                    ),
+                    or_(
+                        cast(
+                            ColumnElement[bool],
+                            McpDispatchAttemptModel.state != "returned_error",
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            cast(
+                                Any,
+                                McpDispatchAttemptModel.dispatched_at,
+                            ).is_not(None),
+                        ),
+                    ),
                 )
             )
-            total = result.scalar()
-            return Decimal(str(total)) if total is not None else Decimal("0")
+            local_reservations = await current.scalar(
+                select(func.count())
+                .select_from(PermitCallReservationModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.permit_id == permit_id,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.tool == tool_name,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.state != "released",
+                    ),
+                )
+            )
+            unlinked_receipts = await current.scalar(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .outerjoin(
+                    PermitCallReservationModel,
+                    cast(
+                        ColumnElement[bool],
+                        PermitCallReservationModel.idempotency_record_id
+                        == ReceiptModel.idempotency_record_id,
+                    ),
+                )
+                .where(
+                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
+                    cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, ReceiptModel.outcome).in_(
+                            [
+                                "success",
+                                "delivery_uncertain",
+                                "response_rejected",
+                                "failed_refunded",
+                                "failed_unrefunded",
+                            ]
+                        ),
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, ReceiptModel.dispatch_attempt_id).is_(None),
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(
+                            Any,
+                            PermitCallReservationModel.idempotency_record_id,
+                        ).is_(None),
+                    ),
+                )
+            )
+            return (
+                int(attempts or 0)
+                + int(local_reservations or 0)
+                + int(unlinked_receipts or 0)
+            )
+
+        if session is not None:
+            return await count(session)
+        factory = get_session_factory()
+        async with factory() as owned_session:
+            return await count(owned_session)
 
     async def reserve_budget(self, permit_id: str, amount: Decimal) -> None:
         factory = get_session_factory()
@@ -1062,7 +1484,11 @@ class PermitService:
         async def _once() -> bool:
             async with factory() as session:
                 async with session.begin():
-                    attempt = await session.get(McpDispatchAttemptModel, attempt_id)
+                    attempt = await session.get(
+                        McpDispatchAttemptModel,
+                        attempt_id,
+                        with_for_update=True,
+                    )
                     if attempt is None:
                         raise PermitError("dispatch_attempt_not_found")
                     # Only a terminal returned_error attempt has a reservation
@@ -1075,6 +1501,11 @@ class PermitService:
                         raise PermitError("dispatch_budget_release_state_invalid")
                     if attempt.budget_released_at is not None:
                         return False
+                    release_call_slot = bool(
+                        attempt.call_slot_reserved
+                        and attempt.dispatch_claim_hash is None
+                        and attempt.dispatched_at is None
+                    )
                     now = utc_now()
                     # Claim the release atomically before touching the permit.
                     # The read above is guarded by a row lock, but SQLAlchemy
@@ -1084,6 +1515,12 @@ class PermitService:
                     # This guarded UPDATE is the once-only gate on every engine:
                     # exactly one caller can flip NULL -> now, and only that
                     # caller proceeds to release the budget.
+                    attempt_values: dict[str, Any] = {
+                        "budget_released_at": now,
+                        "updated_at": now,
+                    }
+                    if release_call_slot:
+                        attempt_values["call_slot_reserved"] = False
                     claimed = await session.execute(
                         sa_update(McpDispatchAttemptModel)
                         .where(
@@ -1098,47 +1535,83 @@ class PermitService:
                                 ).is_(None),
                             ),
                         )
-                        .values(budget_released_at=now, updated_at=now)
+                        .values(**attempt_values)
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, claimed).rowcount or 0) != 1:
                         # Another caller claimed it first; its transaction owns
                         # the single decrement.
                         return False
-                    # Atomic clamped decrement so a concurrent reservation on the
-                    # same permit is not clobbered by a read-modify-write here.
+                    permit = await session.get(
+                        PermitModel,
+                        attempt.permit_id,
+                        with_for_update=True,
+                    )
+                    if permit is None:
+                        raise PermitError("permit_not_found")
+                    if permit.spent_credits < attempt.credits_authorized:
+                        raise PermitError("permit_budget_release_invalid")
+                    # Budget and call-slot release are one permit-row UPDATE.
+                    # The attempt marker tells us whether this particular
+                    # transaction incremented the counter. Legacy attempts
+                    # default false and therefore cannot steal a newer slot.
+                    update_values: dict[str, Any] = {
+                        "spent_credits": PermitModel.spent_credits
+                        - attempt.credits_authorized,
+                        "updated_at": now,
+                    }
+                    where_conditions: list[ColumnElement[bool]] = [
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.permit_id == attempt.permit_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits >= attempt.credits_authorized,
+                        ),
+                    ]
+                    if release_call_slot:
+                        original_counts_json = permit.tool_call_counts_json
+                        counts = _loads_dict(original_counts_json or "{}")
+                        current_count = counts.get(attempt.public_tool_id, 0)
+                        if type(current_count) is not int or current_count <= 0:
+                            raise PermitError("permit_call_slot_release_invalid")
+                        updated_counts = dict(counts)
+                        updated_counts[attempt.public_tool_id] = current_count - 1
+                        update_values["tool_call_counts_json"] = json.dumps(
+                            updated_counts
+                        )
+                        if original_counts_json is None:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(
+                                        None
+                                    ),
+                                )
+                            )
+                        else:
+                            where_conditions.append(
+                                cast(
+                                    ColumnElement[bool],
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
+                                )
+                            )
                     released = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == attempt.permit_id,
-                            )
-                        )
-                        .values(
-                            spent_credits=case(
-                                (
-                                    cast(
-                                        ColumnElement[bool],
-                                        PermitModel.spent_credits
-                                        - attempt.credits_authorized
-                                        < Decimal("0"),
-                                    ),
-                                    Decimal("0"),
-                                ),
-                                else_=PermitModel.spent_credits
-                                - attempt.credits_authorized,
-                            ),
-                            updated_at=now,
-                        )
+                        .where(*where_conditions)
+                        .values(**update_values)
                         .execution_options(synchronize_session=False)
                     )
-                    if (cast(Any, released).rowcount or 0) == 0:
-                        raise PermitError("permit_not_found")
+                    if (cast(Any, released).rowcount or 0) != 1:
+                        raise _PermitWriteConflict
                     # budget_released_at was already set by the guarded claim
                     # above; refresh the identity-mapped instance so callers
                     # holding it observe the committed value.
                     attempt.budget_released_at = now
+                    if release_call_slot:
+                        attempt.call_slot_reserved = False
                     attempt.updated_at = now
                     session.add(attempt)
                 return True
@@ -1423,7 +1896,9 @@ class PermitService:
             )
         return corrected
 
-    async def verify_signature(self, model: PermitModel) -> bool:
+    async def verify_signature(
+        self, model: PermitModel, *, session: AsyncSession | None = None
+    ) -> bool:
         payload: dict[str, Any] = {
             "permit_id": model.permit_id,
             "issuer_wallet_id": model.issuer_wallet_id,
@@ -1462,6 +1937,7 @@ class PermitService:
             payload,
             signature=model.signature,
             key_id=model.key_id,
+            session=session,
         )
 
 

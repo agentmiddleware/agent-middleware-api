@@ -1,8 +1,15 @@
 # Quote-Locked Pricing Implementation — Final Summary
 
-## Task Outcome: ✅ ALREADY COMPLETE ON MAIN
+> **Historical snapshot — not current readiness evidence.** This report records
+> verification against commit `254a4ad`. Its implementation notes, line numbers,
+> and test counts are retained as evidence of that review; they have not been
+> rerun or rebound to the current checkout. This report does not establish
+> production readiness or customer validation.
 
-The requested vertical slice for quote-locked pricing is **fully implemented** on the current main branch (commit `254a4ad`). No implementation changes were required.
+## Task Outcome at `254a4ad`: verification reported complete
+
+At the captured commit, the requested quote-locked pricing slice was reported
+fully implemented. That review required no implementation changes.
 
 ## What Was Requested
 
@@ -12,7 +19,7 @@ The requested vertical slice for quote-locked pricing is **fully implemented** o
 
 ## What Was Found
 
-The complete vertical slice is already implemented and tested:
+The captured review found the complete vertical slice implemented and tested:
 
 ### 1. Issue Quote → Invoke with Quote → Charge Uses Quoted Amount ✅
 
@@ -94,7 +101,8 @@ All invalid quote conditions are checked in `validate_for_action` and cause a 40
 - `quote_already_consumed`: L276
 - `quote_expired`: L278-280
 
-**Test Evidence:** All negative path tests pass:
+**Test Evidence at the snapshot:** The negative-path tests were recorded as
+passing:
 - `test_expired_quote_denies_rather_than_repricing`
 - `test_quote_for_another_wallet_or_tool_is_refused`
 - `test_quote_is_single_use`
@@ -124,9 +132,9 @@ if isinstance(charge_result, InsufficientFundsResponse):
 
 ## Test Coverage
 
-### Existing Tests: 14 tests in `tests/test_signed_quotes.py` ✅
+### Existing Tests at the snapshot: 14 tests in `tests/test_signed_quotes.py` ✅
 
-All passing:
+Recorded as passing:
 
 1. Quote carries live price and window
 2. Signature verifies and detects tampering
@@ -143,18 +151,18 @@ All passing:
 13. Concurrent consume spends quote once
 14. Wallet can list its own quotes
 
-### New Verification Tests: 3 tests in `tests/test_quote_vertical_slice.py` ✅
+### New Verification Tests at the snapshot: 3 tests in `tests/test_quote_vertical_slice.py` ✅
 
-All passing:
+Recorded as passing:
 
 1. **Complete vertical slice**: quote → price hike → charge uses quote
 2. **All negative paths** deny without charge
 3. **Price cuts also honored** (commitment property)
 
-### Related Tests: All passing ✅
+### Related Tests recorded as passing ✅
 
-- `tests/test_billing.py`: 76 tests passing
-- `tests/test_trust_boundary.py`: 2 tests passing
+- `tests/test_billing.py`: 76 tests recorded as passing
+- `tests/test_trust_boundary.py`: 2 tests recorded as passing
 
 ## Files Changed in This PR
 
@@ -177,7 +185,7 @@ Per task requirements:
 
 **URL:** https://github.com/PetrefiedThunder/agent-middleware-api/pull/331
 
-**Title:** Verify quote-locked pricing vertical slice (already complete on main)
+**Title:** Verify quote-locked pricing vertical slice (historical PR title)
 
 **Status:** Ready for review (not draft)
 
@@ -187,7 +195,10 @@ Per task requirements:
 
 ## Conclusion
 
-The quote-locked pricing vertical slice described in WEDGE.md is **complete, tested, and production-ready** on main. The implementation:
+For commit `254a4ad`, this report recorded the quote-locked pricing vertical
+slice described in WEDGE.md as complete and tested. It does not transfer that
+result or a production-readiness claim to a later checkout. At the snapshot,
+the implementation:
 
 1. ✅ Issues signed quotes that lock the price of one call
 2. ✅ Honors the quote even after the tool's registered price moves (both hikes and cuts)
@@ -195,18 +206,19 @@ The quote-locked pricing vertical slice described in WEDGE.md is **complete, tes
 4. ✅ Denies invalid quotes without silent repricing
 5. ✅ Releases consumed quotes if the charge fails (compensation)
 6. ✅ Does not log secrets
-7. ✅ Has comprehensive test coverage (17 tests, all passing)
+7. ✅ Had 17 focused tests recorded as passing
 
-**No implementation work was required.** This PR adds verification artifacts to document and prove the implementation delivers the WEDGE.md promise.
+**No implementation work was required by that review.** The PR added
+verification artifacts for the snapshot described above.
 
 ---
 
-## Files Changed
+## Historical report summary
 
 - **Files changed:** 3
 - **What changed:** Added verification tests and documentation only
-- **Tests run:** 93 tests (14 quote tests + 3 new verification tests + 76 related tests)
-- **What passed:** All 93 tests passed
-- **What was not tested:** N/A (implementation already complete)
-- **Remaining risks:** None identified (implementation complete and tested)
-- **Recommended next step:** Review PR #331 and merge when ready
+- **Tests run at the snapshot:** 93 tests (14 quote tests + 3 new verification tests + 76 related tests)
+- **What passed at the snapshot:** All 93 tests were recorded as passed
+- **What was not tested:** The historical report recorded N/A; the current checkout was not tested by this document
+- **Remaining risks:** The historical report recorded none; current readiness requires fresh source binding and verification
+- **Recommended next step at the time:** Review PR #331

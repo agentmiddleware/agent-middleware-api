@@ -1,23 +1,28 @@
 # Agent Middleware API — MCP / AgentMarket Listing (honest wedge)
 
-**Status:** Freeze this copy for registry submissions until the trust-plane
-loop is the only advertised product. Do not pitch AWI, RAG, sandbox, oracle,
-telemetry, or media as the product.
+**Status:** Submission paused during customer validation. This is bounded draft
+copy, not evidence of listing approval, market demand, or a live partner. Do not
+pitch AWI, RAG, sandbox, oracle, telemetry, or media as the product.
 
 ---
 
 ## Value Proposition / Tagline
 
-**"Authorize one agent action. Charge it once. Prove what happened."**
+**"Make consequential agent actions transactional."**
 
-Credible wedge: exactly-once gateway debit, dispatch checkpoint, and receipt
-finalization for metered MCP calls. Remote side effects are exactly once only
-when the upstream independently honors the forwarded idempotency key.
+Credible wedge: transaction integrity for one consequential, autonomous,
+retry-sensitive action. One logical action binds scoped authority and configured
+consumption to at most one gateway dispatch and debit, explicit
+`delivery_uncertain` that is never automatically redispatched, and linked
+gateway evidence. Remote side effects are
+exactly once only when the upstream independently honors the forwarded
+idempotency key.
 
 Canonical loop:
 
 ```text
-discover → authenticate → authorize → invoke → meter → receipt → audit → govern
+logical action → authorize → reserve allowance → debit → claim dispatch
+→ confirmed outcome | delivery_uncertain → receipt/audit → reconcile
 ```
 
 Not a full agent middleware platform.
@@ -26,10 +31,11 @@ Not a full agent middleware platform.
 
 ## Target Audience
 
-- Platform / AI infra teams with internal agents calling MCP-style tools
-- Teams that need wallet budgets, scoped permits, replay-safe retries, and
-  signed receipts before tools run
-- Design partners who can bring **one** real internal tool to the proxy
+- Platform / AI infra / security teams with consequential autonomous writes
+- Teams that currently keep an action read-only or human-gated because
+  duplicate or ambiguous execution matters
+- Design partners who can bring **one** retry-sensitive staging mutation, an
+  authoritative effect lookup, and an engineer
 
 Not yet a fit for: production settlement, compliance-grade ledger, universal
 IAM replacement, or broad agent-framework governance.
@@ -38,9 +44,10 @@ IAM replacement, or broad agent-framework governance.
 
 ## Competitive Differentiation
 
-- Closed-loop credit + delegated authority for internal agent tool calls
-- Scoped signed permits with economic idempotency (retry ≠ double charge)
-- Signed receipts + wallet-scoped audit chain on governed MCP invoke
+- Stable logical-action identity with changed-input conflict
+- One-shot gateway dispatch/debit and explicit `delivery_uncertain`
+- Bounded configured authority consumption linked to execution-time evidence
+- Signed receipts and wallet-scoped audit chains as supporting evidence
 - Self-hostable; proof surfaces (AWI/RAG/sandbox/etc.) stay labeled and off
   by default (`ENABLE_PROOF_SURFACES=false`)
 
@@ -51,9 +58,9 @@ IAM replacement, or broad agent-framework governance.
 | Field | Value |
 |-------|--------|
 | Name | Agent Middleware API |
-| Category | MCP trust plane / governed tool metering |
-| Product | Replay-safe gateway debit + dispatch evidence + signed receipts |
-| Mechanism | Permit → governed invoke → wallet charge → receipt → audit |
+| Category | Transaction integrity for consequential autonomous actions |
+| Product | Durable logical-action, dispatch, debit, and uncertainty state |
+| Mechanism | Authority → logical action → one dispatch → outcome/uncertainty → evidence |
 | Pricing | Controlled design-partner pilot; no public tier or SLA committed |
 | Repo | https://github.com/PetrefiedThunder/agent-middleware-api |
 

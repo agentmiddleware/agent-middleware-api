@@ -214,8 +214,11 @@ async def test_docs_index_gates_proof_services(client, proof_surfaces_off):
 
 def test_agentmarket_listing_is_wedge_honest():
     text = open("docs/agentmarket-listing.md", encoding="utf-8").read().lower()
-    assert "exactly-once" in text
+    assert "transaction integrity" in text
+    assert "delivery_uncertain" in text
+    assert "never automatically redispatched" in text
     assert "not a full agent middleware platform" in text
+    assert "submission paused" in text
     assert "do **not** list" in text or "do not list" in text
     # Must not pitch AWI/RAG as product capabilities section.
     assert "core capabilities (product)" in text
@@ -234,7 +237,32 @@ def test_feature_request_preserves_customer_identity_privacy():
 
 
 def test_readme_does_not_claim_deployment_ready_complete():
-    text = open("README.md", encoding="utf-8").read().lower()
+    text = " ".join(open("README.md", encoding="utf-8").read().lower().split())
     assert "not a full agent middleware platform" in text
+    assert "make consequential agent actions transactional" in text
+    assert "transaction integrity for consequential autonomous actions" in text
     assert "deployment-ready for railway" not in text
     assert "tech-debt-remediation-plan.md" in text
+
+
+def test_canonical_positioning_docs_share_the_transaction_boundary():
+    paths = (
+        "AGENTS.md",
+        "CONTEXT.md",
+        "WEDGE.md",
+        "ELEVATOR_PITCH.md",
+        "DESIGN_PARTNER_GUIDE.md",
+        "docs/30-day-customer-validation.md",
+        "docs/partner-first-tool-runbook.md",
+    )
+    corpus = {path: open(path, encoding="utf-8").read().lower() for path in paths}
+
+    for path, text in corpus.items():
+        assert "consequential" in text, path
+        assert "delivery_uncertain" in text, path
+
+    assert "transaction integrity" in corpus["WEDGE.md"]
+    assert "transaction integrity" in corpus["CONTEXT.md"]
+    assert "exactly-once economic authorization" not in corpus["WEDGE.md"]
+    assert "exactly-once economic authorization" not in corpus["ELEVATOR_PITCH.md"]
+    assert "the debit and receipt are the product" not in corpus["ELEVATOR_PITCH.md"]

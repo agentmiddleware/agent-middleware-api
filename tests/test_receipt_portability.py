@@ -35,6 +35,7 @@ _PUBLIC_VERIFIER_STATE_TABLES = (
     "ledger_entries",
     "receipts",
     "mcp_dispatch_attempts",
+    "permit_call_reservations",
     "signing_keys",
     "control_plane_audit_events",
 )

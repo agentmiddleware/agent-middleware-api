@@ -44,6 +44,9 @@ from ..services.mcp_generator import get_mcp_generator
 from ..services.dogfood_tool import sync_dogfood_tool_registration
 from ..services.mcp_phase9_tools import sync_proof_surface_mcp_registration
 from ..services.mcp_dispatch_attempts import (
+    DispatchClaimUnavailableError,
+    DispatchPrepareCommitUncertainError,
+    DispatchPrepareRolledBackError,
     DispatchResultRejectedError,
     DispatchResultTooLargeError,
     McpDispatchAttemptService,
@@ -54,6 +57,7 @@ from ..services.mcp_dispatch_reconciliation import (
 )
 from ..services.upstream_mcp import (
     UpstreamMcpDeliveryUncertainError,
+    UpstreamMcpDispatchClaimUnavailableError,
     UpstreamMcpPreDispatchError,
     UpstreamMcpResponseRejectedError,
     UpstreamMcpReturnedError,
@@ -160,13 +164,12 @@ class ToolPermissionDenied(PermissionError):
         self.jsonrpc_code = -32003
 
 
-class HumanApprovalPendingSignal(RuntimeError):
-    """Governed invoke paused on a retryable human-approval condition.
+class GovernedRetryableSignal(RuntimeError):
+    """Governed invoke has no terminal disposition and may be retried.
 
-    Not a terminal outcome: no receipt exists, nothing was charged, and the
-    caller's idempotency key was released — the same invoke (same body, same
-    key) should be retried once the approval is decided (or, for
-    ``human_approval_unavailable``, once Sentinel is reachable again).
+    Effect-free paths release their identity. Commit-uncertain paths preserve
+    it for its durable owner/reconciler, so a retry receives in-progress until
+    that state resolves; neither case writes a competing receipt.
     """
 
     jsonrpc_code = -32005
@@ -176,11 +179,21 @@ class HumanApprovalPendingSignal(RuntimeError):
         reason: str,
         *,
         data: dict[str, Any] | None = None,
-        status_code: int = 202,
+        status_code: int = 503,
     ) -> None:
         super().__init__(reason)
         self.data = data or {}
         self.status_code = status_code
+
+
+class HumanApprovalPendingSignal(GovernedRetryableSignal):
+    """Governed invoke paused on a retryable human-approval condition.
+
+    Not a terminal outcome: no receipt exists, nothing was charged, and the
+    caller's idempotency key was released — the same invoke (same body, same
+    key) should be retried once the approval is decided (or, for
+    ``human_approval_unavailable``, once Sentinel is reachable again).
+    """
 
 
 class McpContext(BaseModel):
@@ -307,7 +320,7 @@ async def handle_messages(
                     "result": result,
                 }
             )
-        except HumanApprovalPendingSignal as e:
+        except GovernedRetryableSignal as e:
             error_payload: dict[str, Any] = {
                 "code": e.jsonrpc_code,
                 "message": str(e),
@@ -735,6 +748,68 @@ async def _execute_registered_tool(
 
     registered_cost = _registered_tool_cost(service, category)
 
+    async def begin_governed_idempotency(
+        audit_decision: PolicyDecision,
+    ) -> dict[str, Any] | None:
+        """Start or replay this logical invocation through one guarded path."""
+        nonlocal idem_begin, replay, idem_started
+        try:
+            idem_begin = await _begin_governed_mcp_idempotency(
+                idem=idem,
+                wallet_id=wallet_id,
+                idempotency_key=idempotency_key or "",
+                tool_name=tool_name,
+                endpoint=endpoint,
+                logical_request_payload=effective_request_payload,
+                legacy_request_payload=request_payload,
+                operation_kind=execution_backend,
+                wait_timeout_seconds=(
+                    idempotency_wait_seconds
+                    if execution_backend == "upstream_mcp"
+                    else 0.0
+                ),
+            )
+            replay = idem_begin.replay
+            idem_started = True
+        except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
+            await _audit_mcp_invocation(
+                decision=audit_decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error=str(exc),
+                extra_metadata={
+                    "permit_id": permit_id,
+                    "idempotency_key": idempotency_key,
+                    "request_hash": effective_request_hash,
+                },
+            )
+            raise ValueError(str(exc)) from exc
+        if replay and replay.response_json is not None:
+            await _assert_governed_replay_access(
+                permit_id=permit_id,
+                wallet_id=wallet_id,
+                tool_name=tool_name,
+                key_id=auth.key_id,
+            )
+            await _raise_replayed_error(replay)
+            return replay.response_json
+        return None
+
+    # A completed or in-flight invocation owns the caller's key before mutable
+    # quote state is considered. Probe only: a new invalid quote retains the
+    # existing no-record behavior, while an exact retry can replay after its
+    # single-use quote has been consumed.
+    if governed_call and idempotency_key and not idem_started:
+        existing_identity = await idem.get_governed_mcp_record(
+            wallet_id=wallet_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing_identity is not None:
+            replay_response = await begin_governed_idempotency(tenant_decision)
+            if replay_response is not None:
+                return replay_response
+
     # A quote is a signed commitment to a price. Resolve it before anything
     # downstream reads the cost, so the policy decision, the permit budget
     # check, and the charge all see the number the caller was promised — not
@@ -748,6 +823,20 @@ async def _execute_registered_tool(
             tool_name=tool_name,
         )
         if not quoted.allowed or quoted.quote is None:
+            # Close the gap between the read-only probe above and quote
+            # validation. A concurrent identical request can create its
+            # durable identity and consume the quote after both callers miss
+            # the first probe. Once the quote is consumed, that identity is
+            # necessarily durable, so re-resolve it before emitting a denial.
+            if governed_call and idempotency_key and not idem_started:
+                concurrent_identity = await idem.get_governed_mcp_record(
+                    wallet_id=wallet_id,
+                    idempotency_key=idempotency_key,
+                )
+                if concurrent_identity is not None:
+                    replay_response = await begin_governed_idempotency(tenant_decision)
+                    if replay_response is not None:
+                        return replay_response
             reason = quoted.reason or "quote_invalid"
             await _audit_mcp_invocation(
                 decision=tenant_decision,
@@ -831,47 +920,9 @@ async def _execute_registered_tool(
         raise ValueError("idempotency_key_required")
 
     if governed_call and idempotency_key and not idem_started:
-        try:
-            idem_begin = await _begin_governed_mcp_idempotency(
-                idem=idem,
-                wallet_id=wallet_id,
-                idempotency_key=idempotency_key,
-                tool_name=tool_name,
-                endpoint=endpoint,
-                logical_request_payload=effective_request_payload,
-                legacy_request_payload=request_payload,
-                operation_kind=execution_backend,
-                wait_timeout_seconds=(
-                    idempotency_wait_seconds
-                    if execution_backend == "upstream_mcp"
-                    else 0.0
-                ),
-            )
-            replay = idem_begin.replay
-            idem_started = True
-        except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
-            await _audit_mcp_invocation(
-                decision=decision,
-                endpoint=endpoint,
-                transport=transport,
-                ok=False,
-                error=str(exc),
-                extra_metadata={
-                    "permit_id": permit_id,
-                    "idempotency_key": idempotency_key,
-                    "request_hash": effective_request_hash,
-                },
-            )
-            raise ValueError(str(exc))
-        if replay and replay.response_json:
-            await _assert_governed_replay_access(
-                permit_id=permit_id,
-                wallet_id=wallet_id,
-                tool_name=tool_name,
-                key_id=auth.key_id,
-            )
-            await _raise_replayed_error(replay)
-            return replay.response_json
+        replay_response = await begin_governed_idempotency(decision)
+        if replay_response is not None:
+            return replay_response
 
     permit_model = None
     if governed_call:
@@ -1048,7 +1099,8 @@ async def _execute_registered_tool(
         # below satisfies a policy's human_approval_required demand; the
         # policy's other constraints are still enforced.
         approval_gate_active=bool(
-            governed_call and permit_model is not None
+            governed_call
+            and permit_model is not None
             and permit_model.requires_human_approval
         ),
     )
@@ -1125,6 +1177,7 @@ async def _execute_registered_tool(
             request_payload=effective_request_payload,
             arguments=arguments,
             registered_cost=registered_cost,
+            consume_immediately=execution_backend != "upstream_mcp",
         )
 
     # Permit schema v2: recipient_domain constraint for upstream calls
@@ -1210,6 +1263,61 @@ async def _execute_registered_tool(
                     credits_authorized=registered_cost,
                     arguments=arguments,
                 )
+            except DispatchPrepareCommitUncertainError:
+                # A durable attempt may already exist or have advanced. Only
+                # its owner/reconciler may classify it; this activation must
+                # not write a competing receipt or complete idempotency.
+                raise GovernedRetryableSignal(
+                    "idempotency_in_progress",
+                    status_code=409,
+                ) from None
+            except DispatchPrepareRolledBackError as exc:
+                reason = "upstream_prepare_retryable"
+                await _audit_mcp_invocation(
+                    decision=decision,
+                    endpoint=endpoint,
+                    transport=transport,
+                    ok=False,
+                    error=reason,
+                    extra_metadata={
+                        **policy_metadata,
+                        **_trust_metadata(
+                            permit_id=permit_id,
+                            idempotency_key=idempotency_key,
+                            request_payload=effective_request_payload,
+                            arguments=arguments,
+                        ),
+                        **_approval_metadata(approval_check),
+                    },
+                )
+                # The IGA gate records its use before preparation. Recovery
+                # proved that this action never reserved, debited, or
+                # dispatched, so hand that exact use back before retrying.
+                if iga_granted_use is not None:
+                    try:
+                        await release_tool_use(
+                            iga_granted_use[0],
+                            tool_name,
+                            group=iga_granted_use[1],
+                            policy_id=iga_granted_use[2],
+                        )
+                    except Exception:
+                        logger.exception(
+                            "iga_use_release_failed",
+                            extra={"tool": tool_name},
+                        )
+                # Recovery proved that approval consumption, reservation, and
+                # preparation all rolled back. Release the unchanged identity
+                # so the exact same invocation can retry.
+                await idem.abandon(
+                    wallet_id=wallet_id,
+                    endpoint=idempotency_endpoint,
+                    idempotency_key=idempotency_key or "",
+                )
+                raise GovernedRetryableSignal(
+                    reason,
+                    status_code=503,
+                ) from exc
             except Exception as exc:
                 reason = "upstream_prepare_failed"
                 audit_event = await _audit_mcp_invocation(
@@ -1257,6 +1365,7 @@ async def _execute_registered_tool(
                     jsonrpc_code=-32006,
                 ) from exc
         else:
+            assert idem_begin is not None
             permit_validation = await get_permit_service().authorize_and_reserve(
                 permit_id=permit_id or "",
                 wallet_id=wallet_id,
@@ -1264,6 +1373,8 @@ async def _execute_registered_tool(
                 estimated_credits=registered_cost,
                 key_id=auth.key_id,
                 arguments=arguments,
+                idempotency_record_id=idem_begin.record_id,
+                request_hash=idem_begin.request_hash,
             )
         permit_model = permit_validation.permit
         if not permit_validation.allowed:
@@ -1345,10 +1456,33 @@ async def _execute_registered_tool(
                     "request_hash": effective_request_hash,
                 },
             )
+            if dispatch_service is not None and dispatch_attempt is not None:
+                # Remote reservations have a durable attempt. Compensate via
+                # its exactly-once checkpoints; a plain budget release would
+                # leave ``prepared`` behind and let reconciliation subtract the
+                # same reservation a second time.
+                await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+                    dispatch_attempt.attempt_id,
+                    prepared_error_code=reason,
+                )
+                replayed = await idem.begin_with_record(
+                    wallet_id=wallet_id,
+                    endpoint=idempotency_endpoint,
+                    idempotency_key=idempotency_key or "",
+                    request_payload=effective_request_payload,
+                    operation_kind="upstream_mcp",
+                )
+                if (
+                    replayed.replay is not None
+                    and replayed.replay.response_json is not None
+                ):
+                    await _raise_replayed_error(replayed.replay)
+                    return replayed.replay.response_json
+                raise RuntimeError("quote_denial_replay_missing")
             if governed_call and permit_model:
-                await get_permit_service().release_budget(
-                    permit_model.permit_id,
-                    registered_cost,
+                assert idem_begin is not None
+                await get_permit_service().release_local_call_reservation_once(
+                    idem_begin.record_id,
                 )
             await _complete_governed_denial_idempotency(
                 idem=idem,
@@ -1435,20 +1569,23 @@ async def _execute_registered_tool(
         denial_reason = charge_result.error
         denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:
-            dispatch_attempt = await dispatch_service.complete(
-                attempt_id=dispatch_attempt.attempt_id,
-                state="returned_error",
-                result_payload={"error": denial_reason},
-                error_code=denial_reason,
-                max_result_bytes=settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES,
-            )
+            try:
+                dispatch_attempt = await dispatch_service.complete_pre_dispatch_failure(
+                    attempt_id=dispatch_attempt.attempt_id,
+                    expected_updated_at=dispatch_attempt.updated_at,
+                    result_payload={"error": denial_reason},
+                    error_code=denial_reason,
+                    max_result_bytes=(settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES),
+                )
+            except DispatchClaimUnavailableError:
+                raise ValueError("idempotency_in_progress") from None
             await get_permit_service().release_dispatch_budget_once(
                 dispatch_attempt.attempt_id
             )
         elif governed_call and permit_model:
-            await get_permit_service().release_budget(
-                permit_model.permit_id,
-                registered_cost,
+            assert idem_begin is not None
+            await get_permit_service().release_local_call_reservation_once(
+                idem_begin.record_id,
             )
         audit_event = await _audit_mcp_invocation(
             decision=decision,
@@ -1558,6 +1695,23 @@ async def _execute_registered_tool(
         )
 
     assert func is not None
+    if governed_call:
+        assert idem_begin is not None
+        # The consumed checkpoint commits before the local callable is entered.
+        # A crash after this point is ambiguous and never frees the call slot or
+        # triggers automatic re-execution.
+        crossed_execution_boundary = await get_permit_service().consume_local_call(
+            idem_begin.record_id
+        )
+        if not crossed_execution_boundary:
+            # A consumed row may belong to an earlier activation, or the
+            # transition's COMMIT acknowledgement may have been lost. There is
+            # no durable caller-ownership token that can distinguish those
+            # cases, so fail closed and never enter the callable.
+            raise GovernedRetryableSignal(
+                "idempotency_in_progress",
+                status_code=409,
+            )
     try:
         if inspect.iscoroutinefunction(func):
             result = await func(**arguments)
@@ -1919,8 +2073,11 @@ async def _execute_upstream_after_charge(
 ) -> dict[str, Any]:
     """Dispatch once and durably classify every post-charge remote outcome."""
 
-    async def mark_dispatched() -> None:
-        await dispatch_service.mark_dispatched(dispatch_attempt.attempt_id)
+    async def claim_dispatch() -> None:
+        try:
+            await dispatch_service.claim_dispatch(dispatch_attempt.attempt_id)
+        except DispatchClaimUnavailableError as exc:
+            raise UpstreamMcpDispatchClaimUnavailableError() from exc
 
     async def raise_response_rejected(
         error_code: str,
@@ -1975,7 +2132,7 @@ async def _execute_upstream_after_charge(
             arguments,
             invocation_id=idempotency_record_id,
             idempotency_key=idempotency_key,
-            before_dispatch=mark_dispatched,
+            before_dispatch=claim_dispatch,
         )
     except UpstreamMcpReturnedError as exc:
         try:
@@ -2018,18 +2175,28 @@ async def _execute_upstream_after_charge(
             approval_check=approval_check,
         )
         raise AssertionError("unreachable")
+    except UpstreamMcpDispatchClaimUnavailableError:
+        # Another activation owns this invocation's one-shot send authority.
+        # It must finish (or be reconciled) without this loser mutating the
+        # shared charge, budget, attempt, receipt, or idempotency record.
+        raise ValueError("idempotency_in_progress") from None
     except UpstreamMcpPreDispatchError as exc:
         terminal_payload = {
             "error": "failed_refunded",
             "error_code": exc.code,
         }
-        terminal = await dispatch_service.complete(
-            attempt_id=dispatch_attempt.attempt_id,
-            state="returned_error",
-            result_payload=terminal_payload,
-            error_code=exc.code,
-            max_result_bytes=settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES,
-        )
+        try:
+            terminal = await dispatch_service.complete_pre_dispatch_failure(
+                attempt_id=dispatch_attempt.attempt_id,
+                expected_updated_at=dispatch_attempt.updated_at,
+                ledger_entry_id=ledger_entry_id,
+                credits_charged=credits_charged,
+                result_payload=terminal_payload,
+                error_code=exc.code,
+                max_result_bytes=settings.MCP_UPSTREAM_MAX_RESPONSE_BYTES,
+            )
+        except DispatchClaimUnavailableError:
+            raise ValueError("idempotency_in_progress") from None
         await _raise_refunded_upstream_failure(
             reason="upstream_pre_dispatch_failed",
             terminal_payload=terminal_payload,
@@ -2642,6 +2809,7 @@ async def _require_human_approval(
     request_payload: dict[str, Any] | None,
     arguments: dict[str, Any],
     registered_cost: Decimal,
+    consume_immediately: bool = True,
 ) -> Any:
     """Enforce the permit's human-approval gate before any budget moves.
 
@@ -2718,6 +2886,7 @@ async def _require_human_approval(
             idempotency_key=idempotency_key or "",
             arguments=arguments,
             estimated_credits=registered_cost,
+            consume_immediately=consume_immediately,
         )
     except HumanApprovalUnavailableError as exc:
         await _retryable(exc.reason, data={}, status_code=503)
@@ -2993,7 +3162,7 @@ async def invoke_tool(
         )
         result = await _mcp_adapter.invoke(governed_request)
         return ToolCallResponse(**await _mcp_adapter.normalize_response(result))
-    except HumanApprovalPendingSignal as exc:
+    except GovernedRetryableSignal as exc:
         detail: dict[str, Any] = {"error": str(exc)}
         if exc.data:
             detail["approval"] = exc.data

@@ -227,7 +227,10 @@ async def _check_upstream_mcp() -> dict[str, Any]:
         return {"status": "not_configured", "enabled": False}
 
     from ..services.service_registry import get_service_registry
-    from ..services.mcp_dispatch_attempts import get_mcp_dispatch_attempt_service
+    from ..services.mcp_dispatch_attempts import (
+        dispatch_reconciliation_idle_seconds,
+        get_mcp_dispatch_attempt_service,
+    )
     from ..services.upstream_mcp import get_upstream_mcp_metrics_snapshot
 
     registry = get_service_registry()
@@ -245,7 +248,10 @@ async def _check_upstream_mcp() -> dict[str, Any]:
             "error": "configured upstream tool is not registered",
         }
     dispatch_metrics = await get_mcp_dispatch_attempt_service().summarize(
-        idle_seconds=300
+        idle_seconds=dispatch_reconciliation_idle_seconds(
+            connect_timeout_seconds=settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+            call_timeout_seconds=settings.MCP_UPSTREAM_CALL_TIMEOUT_SECONDS,
+        )
     )
     returned_errors = dispatch_metrics.state_counts.get("returned_error", 0)
     rejected = dispatch_metrics.state_counts.get("response_rejected", 0)

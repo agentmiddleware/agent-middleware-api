@@ -3,10 +3,13 @@
 Usage:
     export AGENT_MIDDLEWARE_API_KEY=...        # required, never hardcode
     export AGENT_MIDDLEWARE_API_URL=https://...  # required unless --api-url is set
+    export AGENT_MIDDLEWARE_API_URL_ACK=https://...  # normalized target, exactly
     python scripts/stress_test_live.py
 
-Pass ``--confirm-production`` when intentionally targeting the canonical
-production origin. Remote targets require HTTPS; loopback targets may use HTTP.
+``--api-url`` may replace ``AGENT_MIDDLEWARE_API_URL``, but the target-bound
+acknowledgement is always required. Pass ``--confirm-production`` when
+intentionally targeting the canonical production origin. Remote targets require
+HTTPS; loopback targets may use HTTP.
 
 This script creates persistent wallets, permits, and receipts on its target. It
 has no cleanup. Point it at staging unless you intend to retain its test data in
@@ -30,6 +33,7 @@ else:
 
 API_URL = ""
 API_KEY = ""
+API_URL_ACK_ENV_VAR = "AGENT_MIDDLEWARE_API_URL_ACK"
 
 # Every idempotency key is namespaced with a fresh per-run prefix. Without this
 # a second run replays the first run's cached responses instead of re-testing,
@@ -46,7 +50,34 @@ def ikey(name: str) -> str:
 SEM = asyncio.Semaphore(10)
 
 
+def _resolve_acknowledged_target(
+    api_url: str | None,
+    *,
+    confirm_production: bool,
+) -> str:
+    """Resolve the target and require an exact acknowledgement of its origin."""
+
+    normalized_target = resolve_live_target(
+        api_url,
+        confirm_production=confirm_production,
+    )
+    acknowledged_target = os.environ.get(API_URL_ACK_ENV_VAR)
+    if not acknowledged_target:
+        raise LiveTargetError(
+            f"{API_URL_ACK_ENV_VAR} is required and must exactly equal the "
+            f"normalized target {normalized_target!r}"
+        )
+    if acknowledged_target != normalized_target:
+        raise LiveTargetError(
+            f"{API_URL_ACK_ENV_VAR} must exactly equal the normalized target "
+            f"{normalized_target!r}"
+        )
+    return normalized_target
+
+
 async def req(method, path, **kwargs):
+    if not API_URL or not API_KEY:
+        raise RuntimeError("live target and API key must be validated before requests")
     async with SEM:
         async with httpx.AsyncClient(base_url=API_URL, timeout=30) as c:
             headers = {"X-API-Key": API_KEY, "Content-Type": "application/json"}
@@ -570,8 +601,12 @@ async def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    global API_KEY, API_URL
+    API_URL = ""
+    API_KEY = ""
+
     try:
-        api_url = resolve_live_target(
+        api_url = _resolve_acknowledged_target(
             args.api_url,
             confirm_production=args.confirm_production,
         )
@@ -588,7 +623,6 @@ async def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    global API_KEY, API_URL
     API_URL = api_url
     API_KEY = api_key
 

@@ -1,9 +1,9 @@
 # Railway IaC and deploy SOP
 
-**Audience:** operators deploying the trust-plane API.  
+**Audience:** operators deploying the transaction-integrity API.
 **Product lens:** [`WEDGE.md`](../WEDGE.md) + [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md).
 
-## Managed single-tenant compliance-evidence pilot
+## Managed single-tenant transaction-integrity pilot
 
 The supported enterprise pilot is vendor-managed single-tenant. Each customer
 gets a separate Railway Enterprise project containing exactly one API service,
@@ -31,8 +31,8 @@ Configure exactly one real public HTTPS MCP upstream and keep
 is self-issued public demo material only; never publish customer evidence
 there or describe it as an enterprise compliance dashboard.
 
-This release is an agent governance and audit-evidence pilot, not a SOC 2,
-HIPAA, PCI, or regulatory-compliance platform. Accept only synthetic or
+This release is a transaction-integrity pilot for one consequential autonomous
+action, not a SOC 2, HIPAA, PCI, or regulatory-compliance platform. Accept only synthetic or
 redacted, low-sensitivity workloads: no PHI, PCI data, regulated production
 records, secrets, or sensitive tool arguments. Arguments sent to Sentinel must
 also be synthetic or redacted. The signing seed remains a customer-specific
@@ -317,6 +317,13 @@ fails, so it works as a gate in a shell or in CI:
   `--expected-commit-sha` after deployment to require exact release identity
   from both `/health` and `/health/dependencies`; the SHA must be the full
   40-character value.
+
+The live posture check is a deployment gate, not a pilot-tool qualification
+gate. Its healthy dependency model can report the upstream as `not_configured`;
+it does not assert that the exact partner tool in the worksheet is enabled,
+discovered, or effect-reconcilable. Qualify that surface separately below and
+do not claim the preflight script enforces it.
+
 - **Customer deployment manifest** (`--manifest`) — validates the strict
   non-secret JSON record, requires its Alembic revision and commit SHA to equal
   this release checkout, and rejects tracked or ordinary untracked worktree
@@ -522,6 +529,117 @@ trigger. Roll back by deploying the previously green exact SHA through this
 same sequence; never reverse database migrations. Migrations used for a
 rolling release must remain compatible with that rollback release.
 
+Revision `033_mcp_dispatch_claim_fence` is schema-compatible with the prior
+release: old workers can omit its nullable column, while the new
+`dispatch_claimed` state makes an old worker reject (rather than adopt) a
+claim created by new code. The approval protocol in the same release is **not**
+safe under mixed old/new workers. An old worker can consume an approval and
+die before creating its dispatch attempt; a new worker must reject that
+orphaned authority.
+
+For the forward deployment, pause governed upstream traffic on every MCP
+entrypoint, gracefully drain and stop all prior workers, apply migration 033,
+start only the new workers, and require the following query to return zero
+before resuming traffic:
+
+```sql
+SELECT count(*)
+FROM human_approvals AS h
+JOIN idempotency_records AS i
+  ON i.wallet_id = h.wallet_id
+ AND i.idempotency_key = h.idempotency_key
+WHERE h.status = 'consumed'
+  AND i.operation_kind = 'upstream_mcp'
+  AND i.response_json IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM mcp_dispatch_attempts AS d
+    WHERE d.idempotency_record_id = i.record_id
+      AND d.approval_id = h.approval_id
+  );
+```
+
+A nonzero result is an incident requiring manual review; do not automatically
+redispatch it. Migration 033 also expires every still-`pending` or `approved`
+row created under the former worker-clock/execute-before-expiry contract, so
+callers must obtain a new approval under a new invocation key.
+
+Revision `034_permit_call_reservations` is also **not safe for a mixed-version
+rolling deployment of governed local tools**. It intentionally cannot backfill
+an in-flight local invocation: legacy idempotency rows do not identify the
+permit, tool, or authorized cost. An old worker can therefore pass a call cap
+without writing the reservation that a new worker counts.
+
+For the forward deployment, pause governed local traffic on every MCP
+entrypoint, gracefully drain and stop all prior workers, apply migration 034,
+and start only the new workers. Before resuming, inspect this query:
+
+```sql
+SELECT wallet_id, count(*) AS unresolved_local_invocations
+FROM idempotency_records AS i
+WHERE i.operation_kind = 'local'
+  AND i.response_json IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM permit_call_reservations AS r
+    WHERE r.idempotency_record_id = i.record_id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM receipts AS p
+    WHERE p.idempotency_record_id = i.record_id
+  )
+GROUP BY wallet_id;
+```
+
+A nonzero result is legacy ambiguity, not proof that execution did or did not
+occur. Keep governed local traffic paused for each listed wallet until an
+operator resolves the record; never delete, release, or redispatch a charged
+row merely to make this query empty. Do not describe the local call-cap
+invariant as active until the old workers are gone and this review is complete.
+
+Revision `038_dispatch_call_slot_marker` adds the equivalent ownership marker
+to remote attempts. The column is additive and defaults existing and old-worker
+rows to `false`, so compensation cannot subtract a newer worker's call slot on
+their behalf. The schema change is rolling-compatible, but the stronger remote
+`max_calls_per_tool` behavior is not active while an old worker can still
+prepare an attempt without incrementing the counter. Pause governed upstream
+traffic, drain prior workers, apply revision 038, and start only the new workers
+before relying on that cap. Treat permits with pre-038 remote attempts as
+legacy accounting evidence; do not rewrite their counters automatically.
+
+Application rollback requires one additional drain check because the prior
+release does not reconcile the new active state. Before rolling the
+application back, pause governed upstream traffic and require:
+
+```sql
+SELECT count(*)
+FROM mcp_dispatch_attempts
+WHERE state = 'dispatch_claimed';
+```
+
+to return zero. Let the new release finish live calls and reconcile any stale
+claims before deploying the prior SHA. Do not downgrade migration `033`; doing
+so discards claim evidence. A rollback with active `dispatch_claimed` rows can
+leave charged invocations permanently in progress under the prior release.
+Keep approval-gated upstream traffic paused after that application rollback:
+the prior release consumes approval before durable preparation and therefore
+reintroduces the crash gap this release closes. Resume that traffic only on a
+release with atomic approval consumption and preparation.
+
+The prior release also ignores local call-reservation rows. After an application
+rollback, keep governed local traffic paused; do not resume it under the prior
+code while any permit issued for local execution under revision 034 remains
+usable. Do not downgrade migration 034, because its rows are the only durable
+evidence that those call slots were reserved or consumed.
+
+The prior release also ignores `mcp_dispatch_attempts.call_slot_reserved`. Keep
+governed upstream traffic paused after an application rollback while any usable
+permit depends on remote call caps; otherwise the prior worker can admit calls
+without reserving their slots. Do not downgrade revision 038 until all attempts
+with a true marker have been retired under an explicit retention policy; a
+forward roll needs that ownership evidence to compensate safely.
+
 ### Customer operations manifest
 
 Copy [`railway-customer-manifest.example.json`](railway-customer-manifest.example.json)
@@ -653,17 +771,25 @@ Qualify every customer stack with synthetic or redacted data before onboarding:
    public domain/TCP proxy, and the customer has unique database, Redis,
    administrator, signing, and upstream credentials. If Sentinel-backed human
    approval is enabled, also confirm a unique Sentinel tenant and credentials.
-3. Exercise the complete trust loop: provision → authenticate → permit → quote
+3. Confirm manually that `dependencies.upstream_mcp.enabled == true`,
+   `dependencies.upstream_mcp.status == "up"`, the public and upstream tool IDs
+   equal the partner worksheet, and `/mcp/tools.json` exposes that exact tool
+   with `requirePermit`. A dogfood or proof tool does not qualify.
+4. Exercise the complete trust loop: provision → authenticate → permit → quote
    → invoke → meter → receipt → audit → offline verification → replay. If
    Sentinel-backed human approval is enabled, additionally exercise approve
    and deny with synthetic or redacted arguments. Verify governed denials do
    not charge and portable evidence verifies with the published customer key.
-4. Test cross-customer isolation from both directions: a customer-A key must be
+5. Run the partner-controlled effect-then-response-loss case. Require charged
+   `delivery_uncertain`, no gateway redispatch on exact replay, and partner-side
+   effect reconciliation by the partner engineer. The gateway receipt is not
+   proof of that downstream effect.
+6. Test cross-customer isolation from both directions: a customer-A key must be
    rejected by customer B, a customer-B key must be rejected by customer A,
    each trust-key document must omit the other customer's key id, and the
    database/signing-key identifiers must differ. Never print or copy the key
    values into the qualification record.
-5. Complete and record the provider-backup restore drill. Prefer a PITR-created
+7. Complete and record the provider-backup restore drill. Prefer a PITR-created
    sibling and re-run the trust loop there before removing it through the
    [restore drill teardown](#restore-drill-teardown) below. Do not treat an
    ordinary volume-backup restore as disposable: it replaces the source
@@ -694,7 +820,7 @@ Tear it down in the same operator session that ran the drill.
 
 1. Verify the drill result before removing anything. The sibling must have
    reached the intended recovery target and served the trust loop re-run from
-   qualification step 3. A sibling that never started — for example one whose
+   qualification step 4. A sibling that never started — for example one whose
    volume was never mounted at `/var/lib/postgresql/data` — is a failed drill,
    not a passed one. Record the failure, delete it the same way, and re-run.
 2. Record the drill in the controlled operations record next to the customer

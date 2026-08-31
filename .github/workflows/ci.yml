@@ -414,27 +414,37 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio uv
 
-      - name: Apply PostgreSQL migrations
-        env:
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
-        run: alembic upgrade head
-
-      - name: Prove governed MCP across two OS processes
+      - name: Prove governed MCP crash consistency
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
           STATE_BACKEND: postgres
           ENVIRONMENT: test
-          RUN_MCP_MULTIPROCESS_TESTS: "1"
           MCP_STRESS_DB_ISOLATED: "1"
-        run: pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
+          MCP_STRESS_EXPECTED_DATABASE_NAME: agent_middleware_permit_test
+        run: make prove-crash-recovery
 
       - name: Prove permit row-lock concurrency
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
           RUN_POSTGRES_CONCURRENCY_TESTS: "1"
         run: pytest tests/test_permit_postgres_concurrency.py -v --tb=short
+
+      - name: Prove single-connection verification progress
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/agent_middleware_permit_test
+          STATE_BACKEND: postgres
+          ENVIRONMENT: test
+          RUN_POSTGRES_CONCURRENCY_TESTS: "1"
+          DB_POOL_SIZE: "1"
+          DB_MAX_OVERFLOW: "0"
+        run: |
+          pytest -o asyncio_default_fixture_loop_scope=session -v --tb=short \
+            tests/test_permit_verification_sessions.py::test_permit_validation_and_replay_complete_with_one_postgres_connection \
+            tests/test_permit_verification_sessions.py::test_refund_completion_and_denials_use_one_postgres_connection \
+            tests/test_permit_verification_sessions.py::test_pending_refund_creation_uses_one_postgres_connection \
+            tests/test_permit_verification_sessions.py::test_public_receipt_export_uses_application_pool_and_authentic_signatures
 
   # Blocks credentials from being committed. A live production API key reached
   # main through scripts/stress_test_live.py because nothing scanned for this.

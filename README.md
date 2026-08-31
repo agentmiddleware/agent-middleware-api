@@ -6,20 +6,30 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141%2B-009688)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-> **Authorize one agent action. Charge it once. Prove what happened.**
+> **Customer-validation phase.** Agent Middleware API is a transaction-integrity
+> boundary for consequential autonomous MCP actions. The supported
+> design-partner deployment is vendor-managed and single-tenant. It is not a full agent middleware platform,
+> payment network, IAM replacement, or
+> compliance platform.
 
-Your agent invokes a costly tool. The request times out. Was the call dispatched? Should the agent retry? Will the retry create another debit? Can you prove who authorized the action and what the gateway observed?
+Your agent dispatches a consequential mutation. The tool may commit the effect
+while its response disappears. Did the effect land? Is retry safe? Which
+authority was consumed, and what can the gateway prove?
 
-Agent Middleware API is a governed MCP gateway and replay-safe transaction boundary for metered agent-to-tool actions. For a configured upstream MCP tool, one accepted idempotency key permits at most one gateway dispatch and at most one wallet debit. Replaying the same request under that key returns the original result and signed receipt; a changed request fails closed.
+For one configured upstream MCP tool, Agent Middleware binds a scoped permit
+and configured credit or call allowance to one logical action. The same
+accepted idempotency key permits at most one gateway dispatch and at most one
+wallet debit, changed input fails closed, and a missing post-dispatch result
+becomes `delivery_uncertain` instead of triggering an automatic redispatch. The
+gateway record does not by itself prove the upstream effect.
 
-```text
-scoped permit → governed MCP invoke → wallet charge → signed receipt
-→ replay without second debit → out-of-scope denial
-```
+> **Make consequential agent actions transactional.**
 
-**Best fit:** platform engineering, AI infrastructure, and security teams governing one consequential internal MCP tool where a retry could create duplicate cost or an auditable side effect.
-
-The supported design-partner deployment is vendor-managed and single-tenant. This is **not a full agent middleware platform**, payment network, IAM replacement, or compliance platform.
+**Best fit:** platform engineering, AI infrastructure, and security teams
+governing one consequential internal MCP tool where a retry could duplicate
+cost or another material effect. Core scope is frozen during the
+[30-day customer-validation sprint](docs/30-day-customer-validation.md) until a
+named partner proves this loop on a partner-owned staging action.
 
 ## Start here
 
@@ -40,7 +50,13 @@ cd agent-middleware-api
 make prove-trust-plane
 ```
 
-That one command boots a local instance, walks the complete loop — discover, authenticate, authorize, invoke, meter, receipt, replay, and govern — and asserts every invariant: the call charges once, the replay returns the same receipt with no second debit, the audit chain verifies, and the out-of-scope call is denied. It exits non-zero the moment any stage's invariant breaks. Follow [docs/quickstart.md](docs/quickstart.md) to drive the loop yourself with your own keys.
+That one command boots a local instance, walks the governed local loop —
+discover, authenticate, authorize, invoke, meter, receipt, replay, and govern —
+and asserts its listed invariants: the call charges once, replay returns the same
+receipt with no second debit, the audit chain verifies, and an out-of-scope call
+is denied. It exits non-zero if one of those assertions fails. Follow
+[docs/quickstart.md](docs/quickstart.md) to drive the loop yourself with your
+own keys. It does not prove the remote response-loss case or partner acceptance.
 
 ## Product site and canonical API
 
@@ -77,9 +93,34 @@ For local testing only, provision your own wallet-scoped dev key:
 make quickstart
 ```
 
-Then follow [docs/quickstart.md](docs/quickstart.md): mint your own key (no operator, no pre-shared secret), issue yourself a permit, invoke a governed tool, deliberately retry and overspend, verify your wallet's audit chain, and finish holding a signed receipt you verified offline.
+Follow [the 15-minute walkthrough](docs/quickstart.md) to execute a real local
+side effect, replay the completed action, confirm one debit and one receipt,
+exceed the permit budget, and verify the receipt offline. The walkthrough is
+exercised in CI. It does not simulate post-dispatch delivery uncertainty; use
+`make prove-crash-recovery` for gateway crash semantics and the partner runbook
+for the upstream effect-then-response-loss acceptance test.
 
-See [docs/static-dev-api-keys.md](docs/static-dev-api-keys.md) for static bootstrap keys that never rotate (local-compatible environments only) and self-serve dev key provisioning (`POST /v1/dev-keys/self-provision`).
+For local-only credentials, see
+[docs/static-dev-api-keys.md](docs/static-dev-api-keys.md). Static bootstrap keys
+and `POST /v1/dev-keys/self-provision` are refused by production-like
+configurations.
+
+Agent Middleware API puts a durable transaction boundary between autonomous
+agents and one operator-configured upstream MCP tool. Wallet-scoped keys,
+bounded permits, configured accounting, signed receipts, and audit trails
+support the state machine; they are not separate product wedges.
+
+```text
+logical action -> authorize -> reserve allowance -> debit -> claim dispatch
+-> confirmed outcome | delivery_uncertain -> receipt/audit -> reconcile
+```
+
+The wedge is deliberately narrow: **transaction integrity for consequential
+autonomous actions**. This is a durable gateway state machine, not one
+distributed ACID transaction. It does not prove the downstream effect, and a
+remote side effect is exactly once only when the upstream honors the forwarded
+idempotency key. See [WEDGE.md](WEDGE.md) and
+[SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md) for the claim ceilings.
 
 ## What is implemented
 
@@ -91,14 +132,14 @@ discover → authenticate → authorize → invoke → meter → receipt → aud
 
 | Trust step | Implemented behavior | Primary surface |
 |---|---|---|
-| **Discover** | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth, and public signing keys | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt`, `/openapi.json`, `/health/dependencies`, `/.well-known/trust-keys.json`, `/.well-known/jwks.json` |
-| **Authenticate** | Bootstrap operator keys plus database-issued wallet keys; API keys stored as hashes | `X-API-Key`, `/v1/api-keys` |
+| **Discover** | Agent manifest, MCP tool manifest, agent-oriented prose, OpenAPI, dependency truth, and public signing keys | `/.well-known/agent.json`, `/mcp/tools.json`, `/llms.txt` (`/llm.txt` alias), `/openapi.json`, `/health/dependencies`, `/.well-known/trust-keys.json`, `/.well-known/jwks.json` |
+| **Authenticate** | Bootstrap operator keys plus database-issued wallet keys; trust-core API keys are stored as hashes | `X-API-Key`, `/v1/api-keys` |
 | **Authorize** | Ed25519-signed permits bound to issuer wallet, subject wallet/key, tools, scopes, budget, nonce, and expiry | `/v1/permits` |
 | **Request** | An agent with no authority asks a human for a scoped, budgeted permit; the permit is minted from the reviewed terms after approval | `/v1/permit-requests` |
 | **Quote** | Signed, single-use price commitments the metered charge honors, so a call's cost is known before it is committed to | `/v1/quotes` |
 | **Invoke** | The governed HTTP/JSON-RPC MCP subset requires a permit and idempotency key and can dispatch one configured Streamable HTTP partner tool | `/mcp` (opt-in standard endpoint), `/mcp/messages`, `/mcp/tools/{service_id}/invoke` |
 | **Meter** | Decimal wallet balances, row-locked debits, limits, ledger linkage, and replay-safe charging | `/v1/billing`, `/v1/me/*` |
-| **Receipt** | Signed post-permit success, denial, and failure receipts linked to permits, idempotency records, remote dispatch attempts, ledger entries, and audit events | `/v1/receipts`, `/v1/evidence/{receipt_id}` |
+| **Receipt** | Signed post-permit success, denial, failure, and uncertainty receipts linked where applicable to permits, idempotency records, remote dispatch attempts, ledger entries, and audit events | `/v1/receipts`, `/v1/evidence/{receipt_id}` |
 | **Audit** | Per-wallet signed hash chains with concurrent append protection and verification | `/v1/audit`, `/v1/audit/verify-chain` |
 | **Govern** | Policy decisions, revocation, spend boundaries, signing-key metadata, and operator repair paths | `/v1/policies`, permit revocation, `/v1/signing-keys`, refund reconciliation |
 
@@ -110,7 +151,7 @@ The end-to-end governed MCP path lives in [`app/routers/mcp.py`](app/routers/mcp
 2. **Budget over-spend containment.** Permit budget caps are reserved with a single atomic guarded `UPDATE` — the cap is enforced in the statement's `WHERE` clause, not a read-modify-write — so concurrent invocations against one permit cannot over-spend it on any storage engine, including SQLite.
 3. **Interrupted-invocation accounting.** For the configured upstream tool, one persisted chain links the idempotency record, permit reservation, ledger debit, dispatch attempt, signed receipt, and audit event. Recovery finalizes pre-dispatch failures or marks ambiguous post-dispatch calls `delivery_uncertain`; it never redispatches them.
 4. **Signed offline-verifiable receipts.** Receipts are Ed25519-signed and verifiable without credentials or network access to the issuing server. Export a receipt with `GET /v1/receipts/{receipt_id}/portable`, fetch the public key set from `/.well-known/trust-keys.json` or `/.well-known/jwks.json`, and verify with the SDK verifier or any off-the-shelf JOSE tooling.
-5. **Authority-before-money denial.** A request outside the permit scope, with no permit, or with an expired/revoked/tampered permit is denied with a concrete reason code before any wallet charge. When the trust plane refuses the call, a signed denial receipt proves *that* refusal.
+5. **Authority-before-money denial.** A request outside the permit scope, with no permit, or with an expired/revoked/tampered permit is denied with a concrete reason code before any wallet charge. A post-permit, out-of-scope refusal carries a signed denial receipt; requests rejected before a valid permit and executable tool are established may terminate without one.
 
 Adversarial coverage of all five claims, enforced gate-first, lives in [`tests/test_adversarial_five_claims.py`](tests/test_adversarial_five_claims.py). CI runs the full release gate as one dedicated check (`trust_release_gate`), starting with the offline Railway IaC package and fail-closed graph contract, so configuration or trust claims cannot regress into `main` unproven.
 
@@ -122,23 +163,30 @@ From [WEDGE.md](WEDGE.md) and [SECURITY_LIMITATIONS.md](SECURITY_LIMITATIONS.md)
 - **Not a compliance platform.** Receipts may be one input an operator's auditor accepts; that is the operator's determination, not ours. No mappings, no certifications, no "compliance-ready."
 - **Not an IAM replacement.** Wallet checks provide application-layer isolation; there is no row-level-security or public multi-tenant security claim.
 - **Not universal exactly-once.** Gateway replay safety does not make a remote tool's side effect exactly once unless that tool also honors the forwarded idempotency key.
-- **Not a transparency log.** Receipts can be verified offline, but there is no external transparency log. A receipt proves what happened, never what did not.
+- **Not a transparency log.** Receipts can be verified offline, but there is no external transparency log. A valid signature authenticates what the gateway signed; it does not prove the downstream effect or reveal omitted actions.
 - **No public SLA.** The supported design-partner deployment is vendor-managed and single-tenant: one Railway project, API service, PostgreSQL database, Redis instance, public origin, signing key, and bootstrap-admin set per customer. Customer deployments must not share runtime services, databases, signing material, or operator credentials.
 
 ## Product boundary
 
-The agent-action transaction boundary is the product. Broader agent features in this repository are retained as proof surfaces and are frozen unless a specific product decision brings one through the same permit, metering, receipt, and audit loop.
+The agent-action transaction-integrity boundary is the product. Broader agent
+features in this repository are retained as proof surfaces and are frozen
+unless a specific product decision brings one through the same logical-action,
+authority-consumption, dispatch/debit, uncertainty, and evidence loop.
 
-| Core transaction boundary | Frozen proof surfaces |
+| Core transaction-integrity boundary | Frozen proof surfaces |
 |---|---|
-| Wallet-scoped API keys and tenant checks | AWI, browser, DOM, passkey, and RAG demos |
-| Signed permits and revocation | Content, media, IoT, oracle, and comms demos |
-| Governed MCP invocation and idempotency | Red-team, RTaaS, sandbox, telemetry, and auto-PR demos |
-| Wallet metering and ledger | Simulated or partial external integrations |
-| Signed receipts and evidence | Framework examples not yet shipped as packages |
-| Signed wallet audit chains | Marketing/demo workloads |
+| Logical-action identity and payload binding | AWI, browser, DOM, passkey, and RAG demos |
+| Scoped delegated authority and configured credit/call allowance | Content, media, IoT, oracle, and comms demos |
+| One-shot upstream gateway dispatch claim | Red-team, RTaaS, sandbox, telemetry, and auto-PR demos |
+| At-most-one gateway debit plus explicit `delivery_uncertain` | Simulated or partial external integrations |
+| Exact replay without redispatch; changed input fails closed | Framework examples not yet shipped as packages |
+| Linked receipt/audit evidence plus external effect reconciliation | Marketing/demo workloads |
 
-Production-like deployments must set `ENABLE_PROOF_SURFACES=false`; startup refuses a production configuration that enables them. The complete inventory and unfreeze rules are in [docs/PROOF_SURFACES.md](docs/PROOF_SURFACES.md).
+Production-like deployments must set `ENABLE_PROOF_SURFACES=false`; startup
+refuses a production configuration that enables them. Locally mounted proof
+surfaces must not be interpreted as production integrations. The complete
+inventory and unfreeze rules are in
+[docs/PROOF_SURFACES.md](docs/PROOF_SURFACES.md).
 
 ## Quick start: prove the trust loop
 
@@ -356,7 +404,14 @@ TRUST_SIGNING_PRIVATE_KEY_B64=...     # base64-encoded 32-byte Ed25519 seed
 
 The application refuses unsafe production combinations. It also refuses silent in-memory fallback when durable state was configured for production, and on a hosted runtime (detected through the platform-injected `RAILWAY_*` variables) it refuses to boot when `ENVIRONMENT` is unset or blank instead of silently running with local-compatible defaults. Use `alembic upgrade head` for schema changes; production startup verifies the schema instead of relying on `create_all`.
 
-Apply the current migration head before mixed old/current workers take traffic. Migration 027 serializes the legacy JSON-RPC and REST governed-MCP endpoint identities behind one wallet/idempotency-key uniqueness boundary.
+Apply the current migration head before traffic reaches the new workers.
+Revision 034 additionally requires pausing governed local traffic, draining and
+stopping every prior worker, migrating, and then starting only current workers;
+it is not a mixed-version rolling migration because old workers do not write
+local call-reservation rows. The exact forward/rollback checklist is in
+[docs/deploy-railway.md](docs/deploy-railway.md). Migration 027 serializes the
+legacy JSON-RPC and REST governed-MCP endpoint identities behind one
+wallet/idempotency-key uniqueness boundary.
 
 The supported API deployment path is the repository Dockerfile on Railway: [docs/deploy-railway.md](docs/deploy-railway.md). The static agent-first site in [`site/`](site/) is a separate marketing/discovery surface, not the API runtime.
 
@@ -492,7 +547,7 @@ Offline receipt verification is deliberately dependency-minimal: the `b2a-verify
 - [docs/30-day-customer-validation.md](docs/30-day-customer-validation.md) — active company milestone: customer interviews, partner-owned pilot, and day-30 decision gate
 - [WEDGE.md](WEDGE.md) — narrow product thesis and first design-partner motion
 - [ELEVATOR_PITCH.md](ELEVATOR_PITCH.md) — bounded pitch copy at four lengths, with objection handling
-- [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — strategy assessment and priorities
+- [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md) — superseded strategy history; not an active roadmap
 - [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) — every proof command, what it proves, and what it does not
 - [docs/stranger-test.md](docs/stranger-test.md) — the human milestone: a stranger drives the governed loop and checks the five claims from the public docs alone
 - [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) — gate-first branch protection: the exact required checks for `main`

@@ -61,7 +61,7 @@ The authoritative proof already lives in the repo and kills workers at **exact
 commit boundaries** (not a random `kill -9`):
 
 ```bash
-make prove-crash-recovery      # 2 fault-boundary deaths + 1 serialization test
+make prove-crash-recovery      # PostgreSQL multi-process boundary-kill tests
 ```
 
 `attack5_crash_sqlite.py` is the complementary live-instance test: it needs the

@@ -26,7 +26,7 @@ from app.schemas.billing import ServiceCategory
 from app.services.agent_money import get_agent_money
 from app.services.idempotency import get_idempotency_service
 from app.services.mcp_dispatch_attempts import (
-    DISPATCH_DISPATCHED,
+    DISPATCH_CLAIMED,
     get_mcp_dispatch_attempt_service,
 )
 from app.services.service_registry import get_service_registry
@@ -173,18 +173,18 @@ async def test_replay_after_dispatched_triggers_reconciliation(
             credits_charged=Decimal("2"),
         )
 
-        # Mark as dispatched (this is where the "crash" happens)
-        attempt = await dispatch.mark_dispatched(attempt.attempt_id)
-        assert attempt.state == DISPATCH_DISPATCHED
+        # Claim the one-shot send right (this is where the "crash" happens).
+        attempt = await dispatch.claim_dispatch(attempt.attempt_id)
+        assert attempt.state == DISPATCH_CLAIMED
 
         # Backdate the attempt to make it stale (>300s old) so on-demand
         # reconciliation will treat it as abandoned/crashed rather than live.
         from datetime import timedelta
-        
+
         from app.core.time import utc_now
         from app.db.database import get_session_factory as get_db_factory
         from app.db.models import McpDispatchAttemptModel
-        
+
         stale_timestamp = utc_now() - timedelta(seconds=301)
         db_factory = get_db_factory()
         async with db_factory() as session:

@@ -15,7 +15,8 @@ class PermitCreateRequest(BaseModel):
     subject_key_id: str | None = None
     scopes: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
-    max_credits: Decimal
+    # Match NUMERIC(20, 8) storage before these values are signed.
+    max_credits: Decimal = Field(max_digits=20, decimal_places=8, allow_inf_nan=False)
     expires_at: datetime
     nonce: str | None = None
     # Governed invokes under this permit block on a human decision (Sentinel)
@@ -23,7 +24,9 @@ class PermitCreateRequest(BaseModel):
     requires_human_approval: bool = False
     # Permit schema v2 constraints (all optional)
     max_calls_per_tool: dict[str, int] = Field(default_factory=dict)
-    aggregate_value_cap: Decimal | None = None
+    aggregate_value_cap: Decimal | None = Field(
+        default=None, max_digits=20, decimal_places=8, allow_inf_nan=False
+    )
     forbidden_fields: list[str] = Field(default_factory=list)
     recipient_domain: str | None = None
 
@@ -90,7 +93,10 @@ class PermitRequestCreate(BaseModel):
     subject_wallet_id: str
     allowed_tools: list[str] = Field(min_length=1)
     scopes: list[str] = Field(default_factory=list)
-    max_credits: Decimal = Field(gt=0)
+    # This request persists its amount before it is used to mint a permit.
+    max_credits: Decimal = Field(
+        gt=0, max_digits=20, decimal_places=8, allow_inf_nan=False
+    )
     expires_at: datetime
     # Shown to the human approver: why the agent needs this authority.
     justification: str = Field(min_length=1, max_length=2000)

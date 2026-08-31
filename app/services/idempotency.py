@@ -14,12 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from app.core.time import utc_now
+from app.core.config import get_settings
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     IdempotencyRecordModel,
     LedgerEntryModel,
     McpDispatchAttemptModel,
+    PermitCallReservationModel,
     ReceiptModel,
 )
 from app.services.signing_keys import sha256_hex
@@ -115,6 +117,7 @@ class IdempotencyService:
             # Import here to avoid circular dependency
             from app.services.mcp_dispatch_attempts import (
                 DISPATCH_TERMINAL_STATES,
+                dispatch_reconciliation_idle_seconds,
             )
             from app.services.mcp_dispatch_reconciliation import (
                 get_mcp_dispatch_reconciliation_service,
@@ -129,26 +132,27 @@ class IdempotencyService:
                         return replay
                 # Terminal but no response yet - fall through to wait
 
-            # Only reconcile PREPARED or DISPATCHED attempts that are truly stale
-            # (updated >300s ago, matching the periodic sweep's idle threshold).
+            # Only reconcile PREPARED or DISPATCHED attempts that are truly stale,
+            # using the same timeout-aware idle window as the periodic sweep.
             # Live attempts with active owners must wait, not be stolen.
             should_reconcile = False
-            
+
             # Check staleness using updated_at (last state change), matching
             # list_stale_contexts logic in mcp_dispatch_attempts.py
             if dispatch_attempt.updated_at is not None:
-                from datetime import timedelta
-                
-                from app.core.time import to_naive_utc, utc_now
-                
-                # 300 seconds = standard staleness threshold used by periodic sweep
-                STALE_IDLE_SECONDS = 300
-                cutoff = to_naive_utc(utc_now() - timedelta(seconds=STALE_IDLE_SECONDS))
+                settings = get_settings()
+                stale_idle_seconds = dispatch_reconciliation_idle_seconds(
+                    connect_timeout_seconds=(
+                        settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS
+                    ),
+                    call_timeout_seconds=settings.MCP_UPSTREAM_CALL_TIMEOUT_SECONDS,
+                )
+                cutoff = to_naive_utc(utc_now() - timedelta(seconds=stale_idle_seconds))
                 updated_naive = to_naive_utc(dispatch_attempt.updated_at)
                 is_stale = updated_naive < cutoff
-                
+
                 if is_stale:
-                    # Attempt hasn't been updated in 300s: truly stale/crashed
+                    # Attempt exceeded the configured live-call window.
                     should_reconcile = True
                 # else: fresh update, assume live owner, wait
 
@@ -158,6 +162,7 @@ class IdempotencyService:
                     await reconciler.reconcile_attempt(
                         dispatch_attempt.attempt_id,
                         prepared_error_code="reconciled_stale_prepared",
+                        idle_seconds=stale_idle_seconds,
                     )
                 except Exception:
                     # Reconciliation failed; fall through to normal wait path
@@ -523,8 +528,10 @@ class IdempotencyService:
 
         Effect-free canonical MCP rows that never reached the atomic prepared
         checkpoint are deleted so the same key can safely retry. A governed
-        invoke that did debit calls mark_charged() before finalization. For
-        each such record idle for at least ``idle_seconds`` (so live in-flight
+        invoke's debit transaction checkpoints its ledger entry before
+        finalization. Historical local rows missing that pointer are repaired
+        from the exact ``(wallet_id, operation_key)`` debit identity. For each
+        charged record idle for at least ``idle_seconds`` (so live in-flight
         requests are never touched):
         if a receipt already exists for its ledger_entry_id (finalization got
         as far as writing the receipt but not completing this record), the
@@ -547,6 +554,87 @@ class IdempotencyService:
         needs_review = 0
         async with factory() as session:
             async with session.begin():
+                # Before BillingEngine wrote the checkpoint atomically, a
+                # process could commit a local operation-keyed debit and die
+                # before mark_charged() linked it. The ledger's unique
+                # (wallet_id, operation_key) identity is sufficient to repair
+                # only that exact historical local row; never infer across
+                # wallets or attach a credit/refund entry.
+                legacy_local = (
+                    (
+                        await session.execute(
+                            select(IdempotencyRecordModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.endpoint
+                                    == GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.operation_kind == "local",
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(Any, IdempotencyRecordModel.response_json).is_(
+                                        None
+                                    ),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    cast(
+                                        Any, IdempotencyRecordModel.ledger_entry_id
+                                    ).is_(None),
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.created_at < cutoff,
+                                ),
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for record in legacy_local:
+                    debit_entry_id = await session.scalar(
+                        select(cast(Any, LedgerEntryModel.entry_id)).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == record.wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.operation_key == record.record_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == "debit",
+                            ),
+                        )
+                    )
+                    if debit_entry_id is not None:
+                        record.ledger_entry_id = str(debit_entry_id)
+                        session.add(record)
+                        continue
+
+                    # An uncharged local reservation stays held. Age does not
+                    # prove that its owner died: a live worker may be paused
+                    # immediately before the durable execution-boundary write.
+                    # Deleting the identity or returning its budget/call slot
+                    # here could let an exact retry execute the local effect a
+                    # second time. Only the live request path, while it still
+                    # has direct evidence that execution never began, may call
+                    # release_local_call_reservation_once().
+                    reservation = await session.get(
+                        PermitCallReservationModel,
+                        record.record_id,
+                    )
+                    if reservation is not None and reservation.state == "reserved":
+                        needs_review += 1
+                await session.flush()
+
                 # The upstream pipeline creates its idempotency row before the
                 # atomic permit-reservation/prepared-attempt transaction. A
                 # crash in that narrow, effect-free gap leaves no budget,

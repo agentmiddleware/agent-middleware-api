@@ -1,5 +1,13 @@
 # Trust Plane Competitive Analysis
 
+> **Historical and superseded as of 2026-08-28.** Do not use this document's
+> category, moat, capability matrix, or roadmap claims for current product
+> decisions. The comparison set is incomplete, several repo claims below are
+> known wrong, and the active wedge is transaction integrity for consequential
+> autonomous actions. Use [`related-work.md`](related-work.md),
+> [`../WEDGE.md`](../WEDGE.md), and the active customer-validation evidence
+> instead. This body remains only as decision history.
+
 **Date:** 2026-08-04
 **System:** Agent-Middleware-API (PetrefiedThunder)
 **Version:** 1.2.0

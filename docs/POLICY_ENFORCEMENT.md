@@ -70,6 +70,14 @@ bootstrap admin **or** owns the target wallet (`auth.wallet_id == wallet_id`);
 otherwise it is denied `wallet_access_denied`. This layer does not consider
 cost, scope, or budget — it exists purely to stop cross-tenant access.
 
+JWT access tokens currently support one indivisible authority profile:
+`billing:charge` plus `tool:invoke`. Token exchange rejects narrower, duplicate,
+or additional JWT scope sets because route-level JWT scope enforcement is not
+implemented. Per-action attenuation is enforced by the signed permit in Layer B.
+Refresh rotation preserves that fixed profile and consumes the parent token with
+a conditional database update in the same transaction that inserts its child;
+scope-less legacy refresh tokens must re-authenticate with an active API key.
+
 ---
 
 ## 4. Layer B — Permit validation
@@ -88,13 +96,23 @@ capability bound to a wallet (and optionally an API key).
 | Scopes include both `tool:{tool}:invoke` and `billing:charge` | `permit_scope_missing` |
 | `spent_credits + estimated ≤ max_credits` | `permit_budget_exceeded` |
 | Per-tool call cap `max_calls_per_tool` (v2) — malformed cap fails closed rather than coercing | `permit_max_calls_exceeded` |
-| Cumulative `aggregate_value_cap` (v2): total charged + estimated within cap | `permit_aggregate_value_cap_exceeded` |
+| Cumulative `aggregate_value_cap` (v2): reserved-or-charged credits + estimated within cap | `permit_aggregate_value_cap_exceeded` |
 | `forbidden_fields` (v2): deep scan of tool arguments for banned keys | `permit_forbidden_field:{field}` |
 | Ed25519 signature over the permit verifies — checked **last** | `permit_signature_invalid` |
 
-The per-tool call count is computed from **successful receipts**, and the
-aggregate cap from **settled permit charges** — so both caps are enforced
-against real history, not in-memory counters.
+For upstream MCP, the per-tool call count includes the durable dispatch attempt
+as soon as it is prepared. It continues to count claimed, successful,
+delivery-uncertain, response-rejected, and post-dispatch error attempts; only a
+durable pre-dispatch `returned_error` frees the slot. Local execution uses a
+`permit_call_reservations` row keyed by the invocation's idempotency record. A
+`reserved` or `consumed` row occupies the slot before a receipt exists;
+`released` is allowed only while durable state still proves execution never
+started. Unlinked legacy effect-bearing receipts (`success`,
+`delivery_uncertain`, `response_rejected`, `failed_refunded`, and
+`failed_unrefunded`) are counted separately, while receipts linked to a local
+reservation or modern dispatch attempt are not counted twice. The aggregate cap
+uses the permit's locked `spent_credits`, so active reservations are admitted
+against the cap before any receipt exists.
 
 ---
 
@@ -151,13 +169,21 @@ gap in naive MCP proxies that forward wherever the tool registration points.
 ## 8. Atomicity, budget reservation, and receipts
 
 Authorization is linearized as late as possible. For a remote (`upstream_mcp`)
-call, the permit budget reservation and the recoverable "prepared" dispatch
-checkpoint are created in the **same transaction**, so a durable reservation can
-never exist without an attempt the reconciler knows how to compensate.
+call, the permit budget reservation and recoverable `prepared` dispatch
+checkpoint are created in the **same transaction**. For a local call, the budget
+reservation and `permit_call_reservations` identity are likewise created or
+adopted inside the locked permit transaction. Immediately before entering the
+local callable, the row is durably changed from `reserved` to `consumed`; a
+crash after that commit is treated as an ambiguous effect and never releases the
+call slot or triggers automatic execution.
 
 - Budget reservation takes a row lock (`SELECT ... FOR UPDATE`) and re-checks
   `spent_credits + amount ≤ max_credits` inside the lock, preventing concurrent
   calls from overspending a permit.
+- A local reservation can move to `released` and return its budget only on a
+  proven pre-execution path, with both writes committed atomically. Once
+  `execution_started_at` is set, even a refunded tool error remains a consumed
+  call for `max_calls_per_tool`.
 - Crossing 80% / 90% / 100% of a permit's budget emits `info` / `warning` /
   `critical` billing alerts exactly once per threshold.
 - On success the call is metered and a **signed receipt** is issued; on a
