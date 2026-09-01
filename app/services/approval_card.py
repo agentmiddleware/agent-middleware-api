@@ -32,15 +32,15 @@ from html import escape
 # muted = --paper-dim, accents = the on-paper brass link tone and the
 # .button-primary brass/ink pair, alert = --danger-on-paper (the plain
 # --danger terracotta falls below 4.5:1 on the paper card face).
-_PAPER = "#e4dfc8"
-_PAPER_LIGHT = "#f4f1e0"
-_INK = "#14122b"
-_INK_MUTED = "#4a4670"
-_INK_FAINT = "#4a4670"
-_LINE = "rgba(20, 18, 43, 0.17)"
+_PAPER = "#e8e3d2"
+_PAPER_LIGHT = "#f6f3e9"
+_INK = "#121629"
+_INK_MUTED = "#4c526b"
+_INK_FAINT = "#4c526b"
+_LINE = "rgba(18, 22, 41, 0.17)"
 _BRASS_DARK = "#8a6414"
-_BUTTON_BRASS = "#ffc233"
-_BUTTON_INK = "#0d0b1f"
+_BUTTON_BRASS = "#f0b43c"
+_BUTTON_INK = "#0b1020"
 _SIGNAL = "#b0281a"
 # The display face is the mono stack, not the site's pixel face: mail clients
 # do not load webfonts, so "Press Start 2P" here would resolve to a fallback

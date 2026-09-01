@@ -58,11 +58,12 @@ WANTED_SUBSETS = ("latin", "latin-ext")
 #: committed and deployed, so the host is pinned rather than trusted.
 ALLOWED_FONT_HOSTS = frozenset({"fonts.gstatic.com"})
 #: Faces rendered in the first viewport of every page. ``latin`` only:
-#: latin-ext exists for characters most pages never show.
+#: latin-ext exists for characters most pages never show. Press Start 2P is
+#: deliberately absent: it dresses only the footer's PRESS START control and
+#: the arcade overlay, both far below the fold.
 PRELOAD = (
-    ("Press Start 2P", 400, "latin"),
-    ("Libre Franklin", 800, "latin"),
     ("Instrument Serif", 400, "latin"),
+    ("Libre Franklin", 800, "latin"),
     ("Public Sans", 400, "latin"),
     ("IBM Plex Mono", 400, "latin"),
     ("IBM Plex Mono", 500, "latin"),

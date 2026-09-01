@@ -11,6 +11,29 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🌐 Site: the arcade treatment steps back to the footer
+
+- **The public site drops the full 8-bit chrome.** `site/styles.css` is
+  rewritten as the "ledger night" system: Instrument Serif headlines,
+  Libre Franklin card titles, Public Sans body, IBM Plex Mono for every
+  label and receipt row; hairline borders, soft corners and soft shadows;
+  no CRT scanlines or vignette, no hard-offset shadows, no stepped
+  transitions, no pixel upscaling of the particle field, and font
+  antialiasing back on. The palette moves from CRT purple to a deep navy
+  ink with the same gold seal accent; the operator index, the approval
+  card, the favicon, the social card and the particle field's ground are
+  re-resolved to the new tokens so the palette guards still hold.
+- **The waiting room keeps its cabinet.** The pixel tokens `arcade.css`
+  is built on (`--px`, `--edge`, the hard shadows, the pixel display face,
+  the zero radius) are now declared on `.arcade-overlay` itself, so the
+  arcade is unchanged behind its `HUMANS: PRESS START` control — which is
+  the one place the page still wears the pixel face.
+- **Resolved surfaces follow.** `static/dashboard.html` sheds its inlined
+  Press Start 2P and pixel chrome for the same hairline system on system
+  fonts; `social-card.svg`/`.png` are redrawn in the page's own faces; the
+  pixel font is no longer preloaded; the `?v=gateway-14` cache token is
+  bumped on every page.
+
 ### 🧹 One supported production configuration path
 
 - **Selected Railway API settings now have a reviewable IaC owner.** The

@@ -47,7 +47,7 @@ CARD_SIZE = (1200, 630)
 # between bands and stays pure ink. Keep that in mind if the card height or
 # the 3px scanline period ever changes — the probe would start reading a
 # dimmed ground and fail for the wrong reason.
-INK_RGB = (0x0D, 0x0B, 0x1F)
+INK_RGB = (0x0B, 0x10, 0x20)
 
 
 class RenderError(RuntimeError):

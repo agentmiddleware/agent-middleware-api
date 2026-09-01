@@ -705,7 +705,7 @@
     ember: { amp: 0.6, order: 0.25, flow: 0.1, crystal: 0.0, bright: 0.42, warmth: 0.35, ground: 1.0 },
   };
   var PRESET_KEYS = ["amp", "order", "flow", "crystal", "bright", "warmth", "ground"];
-  var GROUND_INK = [13 / 255, 11 / 255, 31 / 255]; // --ink #0d0b1f
+  var GROUND_INK = [11 / 255, 16 / 255, 32 / 255]; // --ink #0b1020
 
   var sections = []; // { center, preset } in document coordinates
   var pageHeight = 0;

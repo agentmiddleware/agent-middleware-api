@@ -1,10 +1,11 @@
 /* ==========================================================================
    THE HUMAN WAITING ROOM — overlay styling.
 
-   Loaded on the landing page only, after styles.css, so the shape primitives
-   settled in that file's ARCADE CHROME section (square corners, --edge
-   borders, hard --shadow-ink offsets, the pixel focus ring) are already in
-   force and this file only has to stay inside them. The overlay itself is
+   Loaded on the landing page only, after styles.css. The page itself no
+   longer wears the arcade chrome; the shape primitives this file is built
+   on (square corners, --edge borders, hard --shadow-ink offsets, the pixel
+   display face, the pixel focus ring) are declared on .arcade-overlay
+   below and scoped to it. The overlay itself is
    built by /arcade.js; everything here is presentation for that structure,
    plus the reduced-motion and high-contrast behaviour the accessibility
    widget drives through data-a11y-* attributes on <html>.
@@ -23,6 +24,20 @@
    hides while it is open: a modal that leaves a floating control from the
    page underneath it is neither modal nor navigable by keyboard. */
 .arcade-overlay {
+  /* The pixel grid lives here now. styles.css dropped the arcade-cabinet
+     treatment from the page, so the tokens this file is built on — the
+     pixel display face, the --px unit, the --edge plate border, the hard
+     offset shadows — are declared on the overlay itself. Nothing outside
+     this element inherits them, and nothing in here depends on the page
+     still being 8-bit. */
+  --font-display: var(--font-pixel);
+  --px: 4px;
+  --edge: 3px;
+  --shadow-hard: var(--px) var(--px) 0 var(--shadow-ink);
+  --shadow-hard-sm: 2px 2px 0 var(--shadow-ink);
+  --focus-ring: var(--edge) solid var(--brass);
+  -webkit-font-smoothing: none;
+  text-rendering: geometricPrecision;
   position: fixed;
   inset: 0;
   z-index: 95;
@@ -45,6 +60,15 @@
 
 .arcade-overlay[hidden] {
   display: none;
+}
+
+/* Square everything inside the cabinet: a radius on a pixel grid is an
+   antialiased arc. The page stopped applying this globally. */
+.arcade-overlay,
+.arcade-overlay *,
+.arcade-overlay *::before,
+.arcade-overlay *::after {
+  border-radius: 0;
 }
 
 /* Scanlines. Purely decorative, so they sit on a pseudo-element that

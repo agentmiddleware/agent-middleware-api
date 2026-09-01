@@ -52,20 +52,20 @@
   var MAX_CATCHUP = 5; // never simulate more than this many steps per frame
 
   var PALETTE = {
-    bg: "#05040f",
-    grid: "#2e2663",
-    ink: "#eceafd",
-    dim: "#a49ddb",
-    brass: "#ffc233",
-    bright: "#ffe066",
-    verify: "#4cf08a",
-    danger: "#ff6b5e",
+    bg: "#05070f",
+    grid: "#1f2b4a",
+    ink: "#e9edf8",
+    dim: "#9ca8cb",
+    brass: "#f0b43c",
+    bright: "#ffd166",
+    verify: "#4ade80",
+    danger: "#ff7b6b",
     /* Four wall shades for the first-person cabinets, darkest last. A wall
        painted in `ink` (near-white) reads as a light source rather than as
        stone, which is what the corridors looked like before this ramp existed.
        Four steps, not a gradient: a continuous ramp needs colours this palette
        does not have, and banding is how depth was said at this vintage. */
-    wall: ["#8b7cd4", "#5f52a8", "#463a86", "#2e2663"]
+    wall: ["#8b7cd4", "#5f52a8", "#463a86", "#1f2b4a"]
   };
 
   var BOOT_LINES = [

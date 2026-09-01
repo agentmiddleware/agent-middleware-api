@@ -544,7 +544,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-13"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-15"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -554,7 +554,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-13"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-15"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -2743,11 +2743,11 @@ def test_arcade_modal_contains_focus_and_input() -> None:
 
 
 def test_pressable_chrome_holds_still_under_reduced_motion() -> None:
-    """Every cabinet control that travels must be pinned for reduced motion.
+    """Every control that travels must be pinned for reduced motion.
 
-    The arcade chrome makes buttons and the accessibility toggle physically
-    depress on hover and press. That travel is decoration, and it is the kind
-    a motion-sensitive visitor asks to be spared.
+    Buttons lift a pixel on hover and the footer's PRESS START control
+    depresses on press. That travel is decoration, and it is the kind a
+    motion-sensitive visitor asks to be spared.
 
     Two mechanisms have to be honoured and neither substitutes for the other:
     the OS-level ``prefers-reduced-motion`` query, and the ``data-a11y-motion``
@@ -2762,14 +2762,22 @@ def test_pressable_chrome_holds_still_under_reduced_motion() -> None:
     stylesheet = (SITE / "styles.css").read_text(encoding="utf-8")
 
     travelling = {
-        ".button:hover",
-        ".button:active",
         ".button-primary:hover",
+        ".button-secondary:hover",
         ".button-wave:hover",
         ".button-wave:active",
-        ".nav-links .nav-agent:active",
-        ".amw-a11y-toggle:active",
+        ".arcade-launch:active",
     }
+    # The named set is the floor. Anything else that translates on hover or
+    # press has to be pinned too, so a control added later cannot slip past
+    # this test by not being listed here.
+    for selectors, body in re.findall(r"\n([^{}@]+?)\s*\{([^{}]*)\}", stylesheet):
+        if "transform: translate" not in body:
+            continue
+        for selector in selectors.split(","):
+            selector = selector.strip()
+            if ":hover" in selector or ":active" in selector:
+                travelling.add(selector)
 
     # Anything that translates on hover or press has to appear in both blocks.
     # Pull the selector lists rather than scanning the file, so a rule that
@@ -2843,8 +2851,8 @@ def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
     # The opt-in default the guard falls back to still exists.
     assert re.search(r"pixelWidth: \d+,", wave_js)
 
-    # Only pages that pair the cap with pixelated upscaling may opt in:
-    # /concept/ keeps its own stylesheet and its full-resolution field.
+    # The landing page opts into the cap as a rendering budget; /concept/
+    # keeps its own stylesheet and its full-resolution field.
     landing = (SITE / "index.html").read_text(encoding="utf-8")
     concept = (SITE / "concept" / "index.html").read_text(encoding="utf-8")
     declared = re.search(r'data-pixel-width="([^"]*)"', landing)
@@ -2857,11 +2865,18 @@ def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
         f"landing page declares a malformed data-pixel-width: {declared.group(1)!r}"
     )
     assert "data-pixel-width" not in concept, (
-        "/concept/ has no image-rendering: pixelated rule, so a capped "
-        "framebuffer would render as a blurred background there"
+        "/concept/ is the archived full-resolution study; it does not cap "
+        "its framebuffer"
     )
 
+    # The cap is a GPU budget, not a pixel-art treatment: the compositor
+    # scales the framebuffer smoothly, and the field reads as a soft surface.
+    # Hard pixel upscaling belongs to the arcade overlay alone.
     styles = (SITE / "styles.css").read_text(encoding="utf-8")
-    assert re.search(r"\.wave-canvas \{\s*image-rendering: pixelated;", styles), (
-        "the capped framebuffer is no longer upscaled as hard pixels"
+    assert "image-rendering: pixelated" not in styles, (
+        "styles.css upscales the wave as hard pixels again; the page dropped "
+        "the pixel-grid treatment and only arcade.css may pixelate"
+    )
+    assert re.search(r"\.wave-canvas \{[^}]*image-rendering: auto;", styles, re.S), (
+        "the wave canvas no longer declares smooth upscaling"
     )
