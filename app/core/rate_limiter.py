@@ -13,10 +13,14 @@ import os
 import time
 
 import redis.asyncio as redis
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from .auth import (
+    select_api_key_authentication_path,
+    select_bearer_authentication_path,
+)
 from .config import get_settings
 from .runtime_degradation import mark_rate_limiter_memory_fallback
 from .trust_mode import is_production_like_environment
@@ -60,11 +64,36 @@ def _public_mcp_client_id(request: Request) -> str:
 def _private_credential_bucket(request: Request) -> str:
     """Hash the credential selected by the authentication precedence rules."""
     authorization = request.headers.get("authorization")
+    api_key = request.headers.get(settings.API_KEY_HEADER)
     if authorization is not None:
-        credential = f"authorization:{authorization}"
+        try:
+            authentication_path, credential_value = select_bearer_authentication_path(
+                api_key,
+                authorization,
+            )
+        except HTTPException:
+            # Malformed Authorization remains authoritative and fails in auth;
+            # it must never fall back to an accompanying API-key bucket here.
+            credential = f"authorization:{authorization}"
+        else:
+            if authentication_path == "api_key":
+                authentication_path, credential_value = (
+                    select_api_key_authentication_path(api_key or "")
+                )
+            credential = (
+                f"authorization:Bearer {credential_value}"
+                if authentication_path == "bearer"
+                else f"api-key:{credential_value or 'anonymous'}"
+            )
     else:
-        api_key = request.headers.get(settings.API_KEY_HEADER, "anonymous")
-        credential = f"api-key:{api_key}"
+        authentication_path, credential_value = select_api_key_authentication_path(
+            api_key or ""
+        )
+        credential = (
+            f"authorization:Bearer {credential_value}"
+            if authentication_path == "bearer"
+            else f"api-key:{credential_value or 'anonymous'}"
+        )
     digest = hashlib.sha256(credential.encode("utf-8")).hexdigest()
     namespace = f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
     return f"{namespace}:{_PRIVATE_BUCKET_PREFIX}:credential:{digest}"

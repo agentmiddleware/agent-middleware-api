@@ -43,13 +43,6 @@ paths = [
   '''^b2a_sdk/tests/''',
   # Demo transcripts and copy-paste docs use placeholder keys.
   '''^docs/demo-.*\.md$''',
-  # Generated path -> SHA-256 evidence map. Filenames containing words such as
-  # "api_key" make the default generic rule mistake their adjacent checksums
-  # for credentials; verify_evidence.py validates that every value is a hash.
-  '''^docs/research/2026-08-31-deep-market-lab/baseline-manifest\.json$''',
-  # Generated mechanism output contains the same path -> SHA-256 evidence
-  # shape under `inspected_source_sha256_at_model_run`.
-  '''^docs/research/2026-08-31-deep-market-lab/mechanism-model-results\.json$''',
 ]
 
 regexes = [
@@ -79,3 +72,22 @@ regexes = [
   # which the generic-api-key rule reads as an assigned secret value.
   '''Ed25519PrivateKey''',
 ]
+
+# Generated evidence maps place SHA-256 values next to filenames containing
+# credential words such as "api_key", which triggers the default generic rule.
+# Limit the exception to that rule, those two files, and exact lowercase
+# SHA-256 values. Every condition must match, so other secret shapes in either
+# file remain detectable.
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "SHA-256 values in generated research evidence maps"
+  condition = "AND"
+  regexTarget = "secret"
+  paths = [
+    '''^docs/research/2026-08-31-deep-market-lab/(?:baseline-manifest|mechanism-model-results)\.json$''',
+  ]
+  regexes = [
+    '''^[0-9a-f]{64}$''',
+  ]

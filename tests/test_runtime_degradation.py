@@ -265,6 +265,92 @@ async def test_bearer_rate_bucket_ignores_concurrent_api_key_header():
 
 
 @pytest.mark.anyio
+async def test_iga_attribution_rate_bucket_uses_authenticating_api_key(monkeypatch):
+    from app.core import auth as auth_module
+
+    monkeypatch.setattr(
+        auth_module,
+        "is_iga_issuer_token",
+        lambda token: token.startswith("enterprise-attribution-"),
+    )
+
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    limited = RateLimitMiddleware(
+        Starlette(routes=[Route("/v1/ping", ok)]),
+        requests_per_minute=2,
+    )
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        api_key_variants = [
+            "stable-api-key",
+            " stable-api-key",
+            "stable-api-key ",
+            "\tstable-api-key",
+        ]
+        same_key = [
+            await http.get(
+                "/v1/ping",
+                headers={
+                    "Authorization": f"Bearer enterprise-attribution-{index}",
+                    "X-API-Key": api_key,
+                },
+            )
+            for index, api_key in enumerate(api_key_variants)
+        ]
+        different_key = await http.get(
+            "/v1/ping",
+            headers={
+                "Authorization": "Bearer enterprise-attribution-0",
+                "X-API-Key": "different-api-key",
+            },
+        )
+
+    assert [response.status_code for response in same_key] == [200, 200, 429, 429]
+    assert different_key.status_code == 200
+    assert len(limited._requests) == 2
+    assert all("stable-api-key" not in key for key in limited._requests)
+    assert all("different-api-key" not in key for key in limited._requests)
+
+
+@pytest.mark.anyio
+async def test_jwt_rate_bucket_is_shared_across_supported_header_forms():
+    async def ok(_request):
+        return PlainTextResponse("ok")
+
+    limited = RateLimitMiddleware(
+        Starlette(routes=[Route("/v1/ping", ok)]),
+        requests_per_minute=2,
+    )
+    token = f"{'a' * 24}.{'b' * 24}.{'c' * 24}"
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        responses = [
+            await http.get(
+                "/v1/ping",
+                headers={"Authorization": f"Bearer {token}"},
+            ),
+            await http.get(
+                "/v1/ping",
+                headers={"X-API-Key": token},
+            ),
+            await http.get(
+                "/v1/ping",
+                headers={"X-API-Key": f"Bearer  {token}"},
+            ),
+            await http.get(
+                "/v1/ping",
+                headers={"X-API-Key": f"Bearer \t{token}  "},
+            ),
+        ]
+
+    assert [response.status_code for response in responses] == [200, 200, 429, 429]
+    assert len(limited._requests) == 1
+    assert all(token not in key for key in limited._requests)
+
+
+@pytest.mark.anyio
 async def test_in_memory_rate_bucket_count_is_bounded_and_reclaims_expired():
     async def ok(_request):
         return PlainTextResponse("ok")

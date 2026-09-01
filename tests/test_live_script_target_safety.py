@@ -360,6 +360,17 @@ def test_rejected_configuration_never_creates_an_http_client(
             "https://cli.example.test:8443",
             id="cli-override",
         ),
+        pytest.param(
+            [
+                "--api-url",
+                "https://API.THISISATEST.TECH.:443/",
+                "--confirm-production",
+            ],
+            "https://environment.example.test",
+            "https://api.thisisatest.tech",
+            "https://api.thisisatest.tech",
+            id="confirmed-production",
+        ),
     ),
 )
 def test_explicit_acknowledged_target_runs_without_printing_the_key(
@@ -377,11 +388,23 @@ def test_explicit_acknowledged_target_runs_without_printing_the_key(
     monkeypatch.setenv(KEY_ENV, CANARY_KEY)
 
     if module_name.endswith("trust_plane_conformance"):
-        created_with: list[str] = []
+        created_with: list[dict[str, object]] = []
 
         class FakeAsyncClient:
-            def __init__(self, *, base_url: str, timeout: int) -> None:
-                created_with.append(base_url)
+            def __init__(
+                self,
+                *,
+                base_url: str,
+                timeout: int,
+                trust_env: bool,
+            ) -> None:
+                created_with.append(
+                    {
+                        "base_url": base_url,
+                        "timeout": timeout,
+                        "trust_env": trust_env,
+                    }
+                )
 
             async def __aenter__(self) -> object:
                 return object()
@@ -425,7 +448,109 @@ def test_explicit_acknowledged_target_runs_without_printing_the_key(
     assert CANARY_KEY not in output.out
     assert CANARY_KEY not in output.err
     if module_name.endswith("trust_plane_conformance"):
-        assert created_with == [normalized_target]
+        assert created_with == [
+            {
+                "base_url": normalized_target,
+                "timeout": 45,
+                "trust_env": False,
+            }
+        ]
+
+
+def test_stress_requests_use_acknowledged_origin_without_ambient_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("scripts.stress_test_live")
+    monkeypatch.delenv(TARGET_ENV, raising=False)
+    monkeypatch.setenv(ACK_ENV, NORMALIZED_STAGING)
+    monkeypatch.setenv(KEY_ENV, CANARY_KEY)
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    class FakeAsyncClient:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout: int,
+            trust_env: bool,
+        ) -> None:
+            captured["client"] = {
+                "base_url": base_url,
+                "timeout": timeout,
+                "trust_env": trust_env,
+            }
+
+        async def __aenter__(self) -> FakeAsyncClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def request(
+            self,
+            method: str,
+            path: str,
+            *,
+            headers: dict[str, str],
+            **kwargs: object,
+        ) -> FakeResponse:
+            captured["request"] = {
+                "method": method,
+                "path": path,
+                "headers": headers,
+                "kwargs": kwargs,
+            }
+            return FakeResponse()
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", FakeAsyncClient)
+
+    async def fake_setup_wallets() -> tuple[str, str]:
+        response = await module.req("GET", "/health")
+        assert response.status_code == 200
+        return "sponsor", "agent"
+
+    async def no_op(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(module, "setup_wallets", fake_setup_wallets)
+    for name in (
+        "test_budget_exhaustion",
+        "test_expired_permit",
+        "test_concurrent_permit_creation",
+        "test_concurrent_governed_invokes",
+        "test_unicode_payload",
+        "test_tampered_permit",
+        "test_cross_wallet_access",
+        "test_timezone_extremes",
+        "test_decimal_precision",
+        "test_rapid_fire_idempotency",
+        "test_permit_reuse_after_replay",
+        "test_health_under_load",
+    ):
+        monkeypatch.setattr(module, name, no_op)
+
+    result = asyncio.run(
+        module.main(["--api-url", "https://STAGING.EXAMPLE.TEST:443/"])
+    )
+
+    assert result == 0
+    assert module.API_URL == NORMALIZED_STAGING
+    assert captured["client"] == {
+        "base_url": NORMALIZED_STAGING,
+        "timeout": 30,
+        "trust_env": False,
+    }
+    request = captured["request"]
+    assert isinstance(request, dict)
+    assert request["method"] == "GET"
+    assert request["path"] == "/health"
+    assert request["headers"] == {
+        "X-API-Key": CANARY_KEY,
+        "Content-Type": "application/json",
+    }
 
 
 @pytest.mark.parametrize("module_name", SCRIPT_MODULES)

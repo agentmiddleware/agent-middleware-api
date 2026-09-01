@@ -79,7 +79,13 @@ async def req(method, path, **kwargs):
     if not API_URL or not API_KEY:
         raise RuntimeError("live target and API key must be validated before requests")
     async with SEM:
-        async with httpx.AsyncClient(base_url=API_URL, timeout=30) as c:
+        # This diagnostic carries a target-bound API key. Ambient HTTP(S)_PROXY
+        # settings must never redirect it away from the acknowledged origin.
+        async with httpx.AsyncClient(
+            base_url=API_URL,
+            timeout=30,
+            trust_env=False,
+        ) as c:
             headers = {"X-API-Key": API_KEY, "Content-Type": "application/json"}
             headers.update(kwargs.pop("headers", {}))
             return await c.request(method, path, headers=headers, **kwargs)

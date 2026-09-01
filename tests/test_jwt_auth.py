@@ -207,6 +207,27 @@ async def test_http_bearer_access_token_takes_priority_over_api_key(
 
 
 @pytest.mark.anyio
+async def test_enterprise_attribution_bearer_authenticates_with_api_key(monkeypatch):
+    from app.core import auth as auth_module
+
+    token = "enterprise-attribution-token"
+    monkeypatch.setattr(
+        auth_module,
+        "is_iga_issuer_token",
+        lambda candidate: candidate == token,
+    )
+
+    context = await get_auth_context(
+        api_key=" test-key ",
+        authorization=f"Bearer {token}",
+    )
+
+    assert context.source == "env"
+    assert context.raw_key == "test-key"
+    assert context.enterprise_bearer_token == token
+
+
+@pytest.mark.anyio
 async def test_narrow_access_token_fails_closed(jwt_service, auth_client, live_key):
     token = jwt_service.create_access_token(
         wallet_id="wallet_narrow",

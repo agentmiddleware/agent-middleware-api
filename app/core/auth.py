@@ -8,7 +8,7 @@ Agents pass credentials via:
 
 import hmac
 from dataclasses import dataclass, replace
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
@@ -110,7 +110,10 @@ async def get_auth_context(
     # doing so would let an invalid bearer credential authenticate as a different
     # principal than the caller intended.
     if authorization is not None:
-        token = _parse_bearer_authorization(authorization)
+        authentication_path, token = select_bearer_authentication_path(
+            api_key,
+            authorization,
+        )
         # Enterprise IGA reroute — deliberately narrow. is_iga_issuer_token
         # peeks ONLY at the token's unverified `iss` claim and is True solely
         # when it names an issuer pinned in IGA_TRUSTED_ISSUERS; with IGA
@@ -125,14 +128,9 @@ async def get_auth_context(
         # it never authenticates. An enterprise bearer with NO accompanying
         # API key is not an API credential: it falls through to
         # _auth_from_jwt and fails with 401 exactly as before.
-        if api_key and is_iga_issuer_token(token):
+        if authentication_path == "api_key":
             context = await get_auth_context(api_key=api_key, authorization=None)
             return replace(context, enterprise_bearer_token=token)
-        return await _auth_from_jwt(token)
-
-    # Preserve the pre-header direct-call/X-API-Key compatibility path.
-    if api_key and api_key.startswith("Bearer "):
-        token = api_key[7:].strip()
         return await _auth_from_jwt(token)
 
     if api_key is None:
@@ -158,8 +156,21 @@ async def get_auth_context(
             detail=detail,
         )
 
+    authentication_path, stripped = select_api_key_authentication_path(api_key)
+    if authentication_path == "bearer":
+        if api_key.startswith("Bearer "):
+            return await _auth_from_jwt(stripped)
+        try:
+            return await _auth_from_jwt(stripped)
+        except HTTPException:
+            raise
+        except Exception:
+            # Preserve the legacy raw-JWT compatibility fallback for an
+            # unexpected verifier failure; ordinary JWT rejections are
+            # HTTPException and remain authoritative.
+            stripped = api_key.strip()
+
     # RED TEAM FIX: Reject empty or whitespace-only keys.
-    stripped = api_key.strip()
     if not stripped or len(stripped) < 8:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -168,15 +179,6 @@ async def get_auth_context(
                 "message": "API key must be at least 8 characters.",
             },
         )
-
-    # Try JWT first (token might not start with "Bearer " but be a raw JWT)
-    if stripped.count(".") == 2 and len(stripped) > 50:
-        try:
-            return await _auth_from_jwt(stripped)
-        except HTTPException:
-            raise
-        except Exception:
-            pass  # Not a valid JWT, fall through to API key
 
     valid_keys = [k.strip() for k in settings.VALID_API_KEYS.split(",") if k.strip()]
 
@@ -280,6 +282,35 @@ def _parse_bearer_authorization(authorization: str) -> str:
             },
         )
     return token
+
+
+def select_bearer_authentication_path(
+    api_key: str | None,
+    authorization: str,
+) -> tuple[Literal["api_key", "bearer"], str]:
+    """Select the credential that authenticates a dual-header request.
+
+    The Authorization header remains authoritative except for the narrow IGA
+    attribution flow: a correctly shaped bearer whose unverified issuer is
+    operator-trusted rides alongside, rather than replaces, the API key.
+    """
+    token = _parse_bearer_authorization(authorization)
+    if api_key and is_iga_issuer_token(token):
+        return "api_key", token
+    return "bearer", token
+
+
+def select_api_key_authentication_path(
+    api_key: str,
+) -> tuple[Literal["api_key", "bearer"], str]:
+    """Canonicalize the credential carried in the legacy API-key header."""
+    if api_key.startswith("Bearer "):
+        return "bearer", api_key[len("Bearer ") :].strip()
+
+    stripped = api_key.strip()
+    if stripped.count(".") == 2 and len(stripped) > 50:
+        return "bearer", stripped
+    return "api_key", stripped
 
 
 async def _auth_from_jwt(token: str) -> AuthContext:
