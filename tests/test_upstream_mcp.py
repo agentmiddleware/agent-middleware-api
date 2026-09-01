@@ -21,6 +21,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.db.database import get_session_factory
@@ -35,6 +36,7 @@ from app.services.upstream_mcp import (
     UpstreamMcpConfiguration,
     UpstreamMcpConfigurationError,
     UpstreamMcpDeliveryUncertainError,
+    UpstreamMcpDispatchClaimUnavailableError,
     UpstreamMcpPreDispatchError,
     UpstreamMcpResponseRejectedError,
     UpstreamMcpReturnedError,
@@ -65,6 +67,14 @@ def _settings(**overrides: Any) -> Settings:
 
 def _configuration(**overrides: Any) -> UpstreamMcpConfiguration:
     return UpstreamMcpConfiguration.from_settings(_settings(**overrides))
+
+
+def _cleanup_validation_error() -> ValidationError:
+    try:
+        _settings(MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS="not-a-number")
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("invalid timeout unexpectedly passed validation")
 
 
 class FakeSession:
@@ -236,9 +246,11 @@ def _bind_session(
 ) -> None:
     @asynccontextmanager
     async def session_context(**_kwargs: Any) -> AsyncIterator[FakeSession]:
-        yield session
-        if cleanup_error:
-            raise cleanup_error
+        try:
+            yield session
+        finally:
+            if cleanup_error:
+                raise cleanup_error
 
     adapter._session = session_context  # type: ignore[method-assign]
 
@@ -316,6 +328,30 @@ def test_configuration_accepts_credits_representable_as_numeric_20_8(
     assert _configuration(
         MCP_UPSTREAM_CREDITS_PER_CALL=credits
     ).credits_per_call == Decimal(credits)
+
+
+@pytest.mark.parametrize("credits", ["0", "-0.00000001"])
+def test_configuration_rejects_non_positive_credits(credits: str) -> None:
+    with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
+        _configuration(MCP_UPSTREAM_CREDITS_PER_CALL=credits)
+
+    assert "greater than zero" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "setting_name",
+    [
+        "MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS",
+        "MCP_UPSTREAM_CALL_TIMEOUT_SECONDS",
+    ],
+)
+def test_configuration_rejects_timeout_above_global_safety_bound(
+    setting_name: str,
+) -> None:
+    with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
+        _configuration(**{setting_name: 1e308})
+
+    assert setting_name in exc_info.value.detail
 
 
 @pytest.mark.parametrize(
@@ -1042,6 +1078,53 @@ async def test_initialize_and_checkpoint_failures_are_pre_dispatch() -> None:
     assert checkpoint_error.value.code == "upstream_dispatch_checkpoint_failed"
     assert checkpoint_error.value.dispatch_started is False
     assert "call_tool" not in session.events
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [
+        RuntimeError("secret-partner-token"),
+        UpstreamMcpPreDispatchError("secret-partner-token"),
+        _cleanup_validation_error(),
+        json.JSONDecodeError("malformed cleanup payload", "{", 1),
+    ],
+    ids=[
+        "generic-cleanup-error",
+        "typed-cleanup-error",
+        "validation-cleanup-error",
+        "json-cleanup-error",
+    ],
+)
+async def test_dispatch_claim_contention_is_preserved_without_calling_upstream(
+    caplog: pytest.LogCaptureFixture,
+    cleanup_error: Exception,
+) -> None:
+    adapter = UpstreamMcpAdapter(_configuration())
+    caplog.set_level(logging.DEBUG, logger="app.services.upstream_mcp")
+    _mark_discovered(adapter)
+    session = FakeSession()
+    _bind_session(
+        adapter,
+        session,
+        cleanup_error=cleanup_error,
+    )
+
+    async def claim_already_owned() -> None:
+        raise UpstreamMcpDispatchClaimUnavailableError()
+
+    with pytest.raises(UpstreamMcpDispatchClaimUnavailableError) as exc_info:
+        await adapter.call_tool(
+            {},
+            invocation_id="inv",
+            idempotency_key="idem",
+            before_dispatch=claim_already_owned,
+        )
+
+    assert exc_info.value.code == "idempotency_in_progress"
+    assert exc_info.value.dispatch_started is False
+    assert session.events == ["initialize"]
+    assert "secret-partner-token" not in caplog.text
 
 
 @pytest.mark.anyio

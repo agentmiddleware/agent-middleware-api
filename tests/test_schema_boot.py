@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy import create_engine, inspect
 
 from app.core.config import get_settings
@@ -135,6 +137,46 @@ async def test_init_db_production_like_accepts_legacy_create_all_tables(
     assert "alembic_version" not in tables
 
     await init_db()  # must not raise SchemaInitError
+    await close_db()
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_init_db_rejects_unstamped_legacy_dispatch_table_missing_claim_column(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "legacy_missing_claim.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    get_settings.cache_clear()
+    await close_db()
+    await init_db()
+    await close_db()
+
+    sync = create_engine(f"sqlite:///{db_path}")
+    with sync.begin() as connection:
+        context = MigrationContext.configure(connection)
+        operations = Operations(context)
+        with operations.batch_alter_table(
+            "mcp_dispatch_attempts",
+            recreate="always",
+        ) as batch_operations:
+            batch_operations.drop_column("dispatch_claim_hash")
+    assert "dispatch_claim_hash" not in {
+        column["name"]
+        for column in inspect(sync).get_columns("mcp_dispatch_attempts")
+    }
+    sync.dispose()
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("DEBUG", "false")
+    monkeypatch.setenv("ENABLE_PROOF_SURFACES", "false")
+    monkeypatch.setenv("ALLOW_METADATA_CREATE_ALL", "false")
+    get_settings.cache_clear()
+
+    with pytest.raises(SchemaInitError, match="dispatch_claim_hash") as exc_info:
+        await init_db()
+    assert "alembic upgrade head" in str(exc_info.value)
     await close_db()
     get_settings.cache_clear()
 

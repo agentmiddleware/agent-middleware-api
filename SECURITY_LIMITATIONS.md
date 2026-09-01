@@ -49,6 +49,12 @@ Keep these out of the wedge until a design partner requires them:
   redispatches automatically, and requires operator/upstream reconciliation.
 - Gateway exactly-once behavior does not make a remote side effect exactly
   once unless the upstream honors the forwarded idempotency key.
+- The configured upstream path atomically enforces the permit's `max_credits`
+  ceiling. It rejects permits carrying `max_calls_per_tool` or
+  `aggregate_value_cap` before reservation or dispatch because it does not yet
+  implement an atomic remote counter-and-release lifecycle for those fields.
+  On the local path, `aggregate_value_cap` is a settled-receipt check, not a
+  concurrent-reservation boundary; use `max_credits` for a no-overshoot total.
 - URL validation rejects unsafe destinations and redirects, then pins one
   validated resolved address through the later connection while preserving the
   configured HTTP Host and TLS SNI. Production should still enforce a network

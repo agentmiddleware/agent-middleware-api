@@ -8,13 +8,17 @@ validation, server-minted permits, exactly-once replay, and signed receipts.
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from app.core.config import get_settings
 from app.main import app
+from app.routers import mcp_standard as standard_mcp_router
 from app.schemas.billing import ServiceCategory
+from app.services.idempotency import get_idempotency_service
 from app.services.mcp_generator import McpGenerator
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
@@ -308,3 +312,63 @@ async def test_tools_call_auto_mints_bounded_permit_and_charges_once(
         assert len(debits) == 1
     finally:
         registry.unregister_local("standard-echo")
+
+
+@pytest.mark.anyio
+async def test_tools_call_reports_auto_permit_contention_as_retryable(
+    client,
+    standard_mcp_enabled,
+    clean_database,
+):
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    tool_name = "standard-idempotency-in-progress"
+    client_key = "standard-mcp-contention-1"
+    calls = 0
+
+    def tool() -> dict[str, bool]:
+        nonlocal calls
+        calls += 1
+        return {"ok": True}
+
+    registry = get_service_registry()
+    registry.register_local(
+        service_id=tool_name,
+        name="Standard Contention",
+        description="Standard MCP retry contract test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=tool,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    mint_key = "smcp-" + hashlib.sha256(client_key.encode("utf-8")).hexdigest()[:48]
+    await get_idempotency_service().begin(
+        wallet_id=wallet_id,
+        endpoint=standard_mcp_router._AUTO_PERMIT_ENDPOINT,
+        idempotency_key=mint_key,
+        request_payload={
+            "kind": "standard-mcp-auto-permit",
+            "tool": tool_name,
+            "wallet_id": wallet_id,
+            "subject_key_id": provisioned["key_id"],
+        },
+    )
+    try:
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", params={"name": tool_name, "arguments": {}}),
+            headers={
+                **provisioned["agent_headers"],
+                **MCP_HEADERS,
+                "Idempotency-Key": client_key,
+            },
+        )
+    finally:
+        registry.unregister_local(tool_name)
+
+    assert response.status_code == 200
+    assert response.json()["error"] == {
+        "code": -32005,
+        "message": "idempotency_in_progress",
+    }
+    assert calls == 0

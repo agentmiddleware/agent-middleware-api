@@ -51,7 +51,7 @@ only reachable in local/dev/test, and it logs a loud startup warning.
 | 7 | **Wallet policy bundles** (Layer C) | `evaluate_wallet_policy` | policy reason |
 | 8 | **Human-approval gate** (Layer D) | `_require_human_approval` | blocks / `human_approval_unavailable` |
 | 9 | **Recipient-domain binding** (Layer E) | router | `permit_recipient_domain_mismatch` |
-| 10 | **Atomic budget reservation + dispatch checkpoint**, then dispatch, then meter + sign receipt | permits + dispatch services | reconcilable failure |
+| 10 | **Atomic budget reservation + prepared remote attempt**; after debit, acquire the one-shot remote dispatch claim, send, then meter + sign receipt | permits + dispatch services | reconcilable failure / fail-closed claim contention |
 
 Ownership is checked **twice** on purpose: once unpriced *before* the
 idempotency store is touched (so an unauthorized caller can neither be served
@@ -87,14 +87,19 @@ capability bound to a wallet (and optionally an API key).
 | Tool is in the permit's `allowed_tools` | `permit_tool_not_allowed` |
 | Scopes include both `tool:{tool}:invoke` and `billing:charge` | `permit_scope_missing` |
 | `spent_credits + estimated ≤ max_credits` | `permit_budget_exceeded` |
-| Per-tool call cap `max_calls_per_tool` (v2) — malformed cap fails closed rather than coercing | `permit_max_calls_exceeded` |
-| Cumulative `aggregate_value_cap` (v2): total charged + estimated within cap | `permit_aggregate_value_cap_exceeded` |
+| Per-tool call cap `max_calls_per_tool` (v2) — atomically reserved on local governed tools; configured upstream calls fail closed pending an equivalent remote lifecycle | `permit_max_calls_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
+| Cumulative `aggregate_value_cap` (v2) — checked against settled receipts on the local path but not a concurrent-reservation boundary; configured upstream calls fail closed | `permit_aggregate_value_cap_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
 | `forbidden_fields` (v2): deep scan of tool arguments for banned keys | `permit_forbidden_field:{field}` |
 | Ed25519 signature over the permit verifies — checked **last** | `permit_signature_invalid` |
 
-The per-tool call count is computed from **successful receipts**, and the
-aggregate cap from **settled permit charges** — so both caps are enforced
-against real history, not in-memory counters.
+The local per-tool call limit is enforced with a persisted reservation counter,
+including an optimistic compare-and-swap when the database does not honor the
+requested row lock. The aggregate cap is computed from **settled permit
+charges**, so concurrent in-flight reservations can pass the same historical
+read; it must not be presented as a no-overshoot concurrency boundary. The
+configured upstream path rejects permits carrying either constraint before any
+reservation, attempt, debit, or dispatch. `max_credits` remains the atomic
+authorization ceiling on both local and configured-upstream paths.
 
 ---
 
@@ -152,8 +157,25 @@ gap in naive MCP proxies that forward wherever the tool registration points.
 
 Authorization is linearized as late as possible. For a remote (`upstream_mcp`)
 call, the permit budget reservation and the recoverable "prepared" dispatch
-checkpoint are created in the **same transaction**, so a durable reservation can
+attempt are created in the **same transaction**, so a durable reservation can
 never exist without an attempt the reconciler knows how to compensate.
+
+Immediately before the remote network send, that attempt must transition from
+`prepared` to `dispatch_claimed` while setting its one nullable
+`dispatch_claim_hash`. Only the activation that created the stored hash may
+recover a lost commit acknowledgement; every later activation fails closed and
+must not send. A missing trustworthy result after the claim becomes durable is
+`delivery_uncertain`, not evidence that the downstream effect occurred. The
+reconciler waits a fixed 11,430-second window that covers the maximum supported
+600-second connection timeout, three 3,600-second call phases, and cleanup
+margin. The window does not shrink across workers with different local timeout
+settings.
+
+The claim fence is remote-only. It does not change local-tool reservations,
+per-tool call slots, quotes, human approvals, API-key/JWT authentication, or
+rate limiting. Focused state-machine, reconciliation, migration, and PostgreSQL
+process-kill tests cover this transition; deployment remains a separate
+operator action.
 
 - Budget reservation takes a row lock (`SELECT ... FOR UPDATE`) and re-checks
   `spent_credits + amount ≤ max_credits` inside the lock, preventing concurrent
@@ -199,6 +221,7 @@ out-of-scope tool itself remains replayable.
 | `permit_budget_exceeded` | B | Spend would exceed `max_credits` |
 | `permit_max_calls_exceeded` | B | Per-tool call cap hit / malformed cap |
 | `permit_aggregate_value_cap_exceeded` | B | Cumulative value cap hit |
+| `permit_constraint_unsupported_for_upstream` | B | Configured upstream call carries a usage constraint without an atomic remote enforcement lifecycle |
 | `permit_forbidden_field:{field}` | B | Banned argument key present |
 | `permit_signature_invalid` | B | Permit signature failed verification |
 | `human_approval_required` | C | Wallet policy demands approval |
@@ -226,7 +249,7 @@ for the full model.
 | Exfiltration via argument injection | `forbidden_fields` deep-scan (B) |
 | Permit redirection to a rogue upstream | Recipient-domain binding (E) |
 | High-risk action without oversight | Human-approval gate (D) |
-| Double-charge / duplicate side effects | Logical-invocation idempotency + atomic reserve-and-checkpoint |
+| Double-charge / duplicate gateway dispatch | Logical-invocation idempotency + one-shot remote dispatch claim |
 | Silent loss of governance in prod | Trust-mode boot guardrails (`core/trust_mode.py`) |
 
 ---
@@ -237,4 +260,7 @@ for the full model.
 - `app/policy/decisions.py` — `evaluate_tool_invocation` (Layer A)
 - `app/services/permits.py` — `_evaluate` / `validate_for_action` (Layer B)
 - `app/services/policies.py` — `evaluate_wallet_policy` (Layer C)
+- `app/services/mcp_dispatch_attempts.py` — prepared attempts and the one-shot dispatch claim
+- `app/services/mcp_dispatch_reconciliation.py` — fixed maximum-lifetime stale-claim handling without redispatch
+- `app/services/upstream_mcp.py` — claim callback immediately before the network send
 - `app/core/trust_mode.py` — production trust-posture guardrails

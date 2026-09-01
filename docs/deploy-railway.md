@@ -177,6 +177,65 @@ through the same immutable `railway up` sequence. Do not reattach automatic
 GitHub deployment as a shortcut, regenerate IaC from live state, or reverse
 database migrations as an IaC rollback.
 
+### Dispatch-claim migration and rollback
+
+Migration `037_mcp_dispatch_claim_hash` adds exactly one nullable column,
+`mcp_dispatch_attempts.dispatch_claim_hash`. Apply it before application code
+that writes the new `dispatch_claimed` state. The nullable shape lets an older
+worker continue creating its legacy rows, and the new worker treats a legacy
+`dispatched` row as already sent rather than claimable.
+
+Migration 037 **requires a maintenance window; do not deploy it while old and
+new application workers overlap**:
+
+1. Pause ingress.
+2. Fully drain every old worker and in-flight request.
+3. Apply migration 037.
+4. Deploy the new exact application SHA.
+5. Resume traffic only after the new deployment passes its release gates.
+
+An old worker may fail closed if it reads the unknown `dispatch_claimed` state,
+but that is not enough for rolling compatibility. Its debit path does not hold
+the dispatch-attempt write fence introduced with this migration. An old request
+that started from `prepared` can therefore commit a late debit after a new
+reconciler has terminalized the attempt as having no debit. The terminal attempt
+then rejects attaching that debit, leaving accounting that contradicts the
+zero-charge failure evidence. Fully draining old workers is the compatibility
+boundary. Do not infer rolling safety from the column being nullable or from an
+old worker refusing an unknown state.
+
+An application rollback after the database upgrade must leave migration 037 in
+place. Before deploying the previous green application SHA:
+
+1. Pause ingress and drain in-flight requests on the current application.
+2. Through the private PostgreSQL connection, require this query to return
+   zero:
+
+   ```sql
+   SELECT COUNT(*)
+   FROM mcp_dispatch_attempts
+   WHERE state = 'dispatch_claimed';
+   ```
+
+3. If any `dispatch_claimed` row remains, abort the rollback. Keep the current
+   code available to reconcile or complete it; do not clear its hash, rewrite
+   its state, refund it, or redispatch it manually.
+4. Only after the count is zero, deploy the previous green exact SHA through
+   the same immutable release sequence. Do not run `alembic downgrade` and do
+   not drop the nullable column.
+
+Migration 037's downgrade converts any surviving `dispatch_claimed` row to the
+older runtime's already-sent `dispatched` state before dropping the hash. That
+is a last-resort schema safety property, not the application rollback runbook:
+the supported rollback keeps migration 037 in place and drains claims first.
+
+The claim fence is limited to configured remote upstream dispatch. This
+migration does not alter local-tool reservations, per-tool call slots, quotes,
+human approvals, API-key/JWT authentication, or rate limiting. Its integrated
+migration and downgrade paths are covered by focused tests. A production
+mixed-worker overlap or rollback drill remains unverified for this release
+slice.
+
 ## Canonical deploy path
 
 **Build and ship from this repo with the in-repo Dockerfile. Production
@@ -519,8 +578,10 @@ Afterward, inspect application and HTTP logs for tracebacks, dependency
 degradation, or unexpected 5xx responses. A failed private sentinel, schema
 check, exact-SHA check, health check, or critical user flow is a rollback
 trigger. Roll back by deploying the previously green exact SHA through this
-same sequence; never reverse database migrations. Migrations used for a
-rolling release must remain compatible with that rollback release.
+same sequence; never reverse database migrations. For migration 037, first
+follow the [dispatch-claim rollback gate](#dispatch-claim-migration-and-rollback).
+Migrations used for a rolling release must remain compatible with that rollback
+release.
 
 ### Customer operations manifest
 

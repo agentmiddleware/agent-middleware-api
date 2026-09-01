@@ -60,6 +60,7 @@ def test_alembic_upgrade_creates_auth_schema(tmp_path, monkeypatch):
         "approval_id",
         "ledger_entry_id",
         "state",
+        "dispatch_claim_hash",
         "result_json",
         "result_size_bytes",
         "response_hash",

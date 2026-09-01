@@ -21,6 +21,11 @@ TRUST_TESTS=(
   tests/test_audit_chain.py
   tests/test_idempotency.py
   tests/test_adversarial_five_claims.py
+  tests/test_dispatch_claim_migration.py
+  tests/test_governed_debit_dispatch_fence.py
+  tests/test_late_debit_reconciliation.py
+  tests/test_mcp_dispatch_claim.py
+  tests/test_mcp_dispatch_router_claim.py
 )
 
 echo "[trust-gate] focused trust-plane pytest suite"

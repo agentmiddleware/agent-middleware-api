@@ -499,7 +499,7 @@ async def test_governed_mcp_rejects_in_progress_idempotency_without_charge(
 
     assert resp.status_code == 200
     payload = resp.json()
-    assert payload["error"]["code"] == -32003
+    assert payload["error"]["code"] == -32005
     assert payload["error"]["message"] == "idempotency_in_progress"
     assert calls["count"] == 0
     ledger_resp = await client.get(

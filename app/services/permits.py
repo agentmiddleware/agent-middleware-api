@@ -9,8 +9,9 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import case, func, or_, select, update as sa_update
+from sqlalchemy import and_, case, func, or_, select, update as sa_update
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.time import to_naive_utc, utc_now
@@ -405,6 +406,7 @@ class PermitService:
             if not model:
                 return PermitValidation(False, "permit_not_found", None)
             return await self._validate_model_for_action(
+                session=session,
                 model=model,
                 wallet_id=wallet_id,
                 tool_name=tool_name,
@@ -420,6 +422,7 @@ class PermitService:
         wallet_id: str,
         tool_name: str,
         key_id: str | None = None,
+        session: AsyncSession | None = None,
     ) -> PermitValidation:
         """Authorize access to an already-finalized governed invocation.
 
@@ -431,18 +434,23 @@ class PermitService:
         a key-bound permit. Tool scope is intentionally not re-evaluated: a
         signed denial for an out-of-scope tool must itself remain replayable.
         """
-        factory = get_session_factory()
-        async with factory() as session:
-            model = await session.get(PermitModel, permit_id)
+        async def validate(current_session: AsyncSession) -> PermitValidation:
+            model = await current_session.get(PermitModel, permit_id)
             if model is None:
                 return PermitValidation(False, "permit_not_found", None)
             if model.subject_wallet_id != wallet_id:
                 return PermitValidation(False, "permit_wallet_mismatch", model)
             if model.subject_key_id and model.subject_key_id != key_id:
                 return PermitValidation(False, "permit_key_mismatch", model)
-            if not await self.verify_signature(model):
+            if not await self.verify_signature(model, session=current_session):
                 return PermitValidation(False, "permit_signature_invalid", model)
             return PermitValidation(True, None, model)
+
+        if session is not None:
+            return await validate(session)
+        factory = get_session_factory()
+        async with factory() as owned_session:
+            return await validate(owned_session)
 
     async def authorize_and_reserve(
         self,
@@ -472,6 +480,7 @@ class PermitService:
                     if not model:
                         return PermitValidation(False, "permit_not_found", None)
                     validation = await self._validate_model_for_action(
+                        session=session,
                         model=model,
                         wallet_id=wallet_id,
                         tool_name=tool_name,
@@ -663,6 +672,7 @@ class PermitService:
     async def _validate_model_for_action(
         self,
         *,
+        session: AsyncSession | None = None,
         model: PermitModel,
         wallet_id: str,
         tool_name: str,
@@ -768,7 +778,10 @@ class PermitService:
 
         # 2. aggregate_value_cap
         if model.aggregate_value_cap is not None:
-            total_charged = await self._sum_permit_charges(model.permit_id)
+            total_charged = await self._sum_permit_charges(
+                model.permit_id,
+                session=session,
+            )
             if total_charged + estimated_credits > model.aggregate_value_cap:
                 return PermitValidation(
                     False,
@@ -795,7 +808,7 @@ class PermitService:
                     {"field": hit, "forbidden_fields": forbidden},
                 )
 
-        if not await self.verify_signature(model):
+        if not await self.verify_signature(model, session=session):
             return PermitValidation(
                 False,
                 "permit_signature_invalid",
@@ -836,11 +849,24 @@ class PermitService:
             )
             return int(result.scalar() or 0)
 
-    async def _sum_permit_charges(self, permit_id: str) -> Decimal:
+    async def _sum_permit_charges(
+        self,
+        permit_id: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> Decimal:
         """Sum credits_charged across all receipts for this permit."""
-        factory = get_session_factory()
-        async with factory() as session:
+        if session is not None:
             result = await session.execute(
+                select(func.sum(ReceiptModel.credits_charged)).where(
+                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
+                )
+            )
+            total = result.scalar()
+            return Decimal(str(total)) if total is not None else Decimal("0")
+        factory = get_session_factory()
+        async with factory() as owned_session:
+            result = await owned_session.execute(
                 select(func.sum(ReceiptModel.credits_charged)).where(
                     cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
                 )
@@ -1153,6 +1179,11 @@ class PermitService:
         budget actually consumed. This resets such drift to the sum of the
         permit's successful receipts.
 
+        A remote dispatch attempt that still owns its reservation and has no
+        receipt is excluded. Its reconciler must first prove a terminal outcome
+        or release the reservation; otherwise expiry or revocation could erase
+        the budget of a call that is still running.
+
         Crucially, it only ever touches permits that can no longer admit a new
         charge -- non-active (revoked) OR already past ``expires_at``. A live,
         chargeable permit is never downward-reset here, because a governed call
@@ -1219,6 +1250,136 @@ class PermitService:
                     .all()
                 )
                 for permit in stale:
+                    # An upstream attempt owns this reservation until it either
+                    # releases the budget or persists its receipt. This check is
+                    # deliberately state-independent: a result may be durable
+                    # while receipt finalization is still pending, and erasing
+                    # that reservation would understate a later success or
+                    # delivery-uncertain outcome. The dispatch reconciler runs
+                    # before this sweep and is the only component allowed to
+                    # classify an unreceipted remote attempt.
+                    unreceipted_dispatch_id = (
+                        await session.execute(
+                            select(
+                                cast(Any, McpDispatchAttemptModel.attempt_id)
+                            )
+                            .outerjoin(
+                                ReceiptModel,
+                                and_(
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.dispatch_attempt_id
+                                        == McpDispatchAttemptModel.attempt_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.idempotency_record_id
+                                        == McpDispatchAttemptModel.idempotency_record_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.permit_id
+                                        == McpDispatchAttemptModel.permit_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.wallet_id
+                                        == McpDispatchAttemptModel.wallet_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.tool
+                                        == McpDispatchAttemptModel.public_tool_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.request_hash
+                                        == McpDispatchAttemptModel.request_hash,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.ledger_entry_id
+                                        == McpDispatchAttemptModel.ledger_entry_id,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.credits_authorized
+                                        == McpDispatchAttemptModel.credits_authorized,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        ReceiptModel.credits_charged
+                                        == McpDispatchAttemptModel.credits_charged,
+                                    ),
+                                    or_(
+                                        and_(
+                                            cast(
+                                                ColumnElement[bool],
+                                                McpDispatchAttemptModel.state
+                                                == "succeeded",
+                                            ),
+                                            cast(
+                                                ColumnElement[bool],
+                                                ReceiptModel.outcome == "success",
+                                            ),
+                                        ),
+                                        and_(
+                                            cast(
+                                                ColumnElement[bool],
+                                                McpDispatchAttemptModel.state
+                                                == "delivery_uncertain",
+                                            ),
+                                            cast(
+                                                ColumnElement[bool],
+                                                ReceiptModel.outcome
+                                                == "delivery_uncertain",
+                                            ),
+                                        ),
+                                        and_(
+                                            cast(
+                                                ColumnElement[bool],
+                                                McpDispatchAttemptModel.state
+                                                == "response_rejected",
+                                            ),
+                                            cast(
+                                                ColumnElement[bool],
+                                                ReceiptModel.outcome
+                                                == "response_rejected",
+                                            ),
+                                        ),
+                                        and_(
+                                            cast(
+                                                ColumnElement[bool],
+                                                McpDispatchAttemptModel.state
+                                                == "returned_error",
+                                            ),
+                                            cast(
+                                                ColumnElement[bool],
+                                                ReceiptModel.outcome
+                                                == "failed_unrefunded",
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            )
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    McpDispatchAttemptModel.permit_id
+                                    == permit.permit_id,
+                                ),
+                                cast(
+                                    Any,
+                                    McpDispatchAttemptModel.budget_released_at,
+                                ).is_(None),
+                                cast(Any, ReceiptModel.receipt_id).is_(None),
+                            )
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if unreceipted_dispatch_id is not None:
+                        continue
+
                     receipt_rows = (
                         await session.execute(
                             select(
@@ -1423,7 +1584,12 @@ class PermitService:
             )
         return corrected
 
-    async def verify_signature(self, model: PermitModel) -> bool:
+    async def verify_signature(
+        self,
+        model: PermitModel,
+        *,
+        session: AsyncSession | None = None,
+    ) -> bool:
         payload: dict[str, Any] = {
             "permit_id": model.permit_id,
             "issuer_wallet_id": model.issuer_wallet_id,
@@ -1462,6 +1628,7 @@ class PermitService:
             payload,
             signature=model.signature,
             key_id=model.key_id,
+            session=session,
         )
 
 

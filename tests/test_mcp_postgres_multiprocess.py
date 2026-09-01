@@ -1,10 +1,10 @@
-"""Opt-in two-process PostgreSQL proofs for governed MCP crash behavior.
+"""Opt-in multi-process PostgreSQL proofs for governed MCP crash behavior.
 
-The API workers run on loopback and share one explicitly isolated PostgreSQL
-database.  This module is intentionally skipped unless both opt-in flags are
-present; an opted-in run fails closed if the database is not PostgreSQL, the
-application environment is production-like, the Alembic revision is stale, or
-any application table already contains data.
+The API workers and independent MCP partner run on loopback. The workers share
+one explicitly isolated PostgreSQL database. This module is intentionally
+skipped unless both opt-in flags are present; an opted-in run fails closed if
+the database is not PostgreSQL, the application environment is production-like,
+the Alembic revision is stale, or any application table already contains data.
 """
 
 from __future__ import annotations
@@ -40,9 +40,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTROL_HEADER = "X-MCP-Stress-Control"
 GOVERNED_MCP_ENDPOINT = "/mcp/invoke"
 STRESS_TOOL = "stress-governed-tool"
+REMOTE_STRESS_TOOL = "remote-stress-governed-tool"
 UPSTREAM_STRESS_TOOL = "stress-upstream-tool"
 _ADVISORY_LOCK_ID = int.from_bytes(b"MCPSTRES", byteorder="big", signed=False)
 _STRESS_TABLES = ("mcp_stress_tool_executions", "mcp_stress_upstream_effects")
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("RUN_MCP_MULTIPROCESS_TESTS") != "1",
+    reason=(
+        "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL "
+        "multiprocess harness"
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +74,16 @@ class StressWorker:
     log_stream: TextIO
 
 
+@dataclass
+class RemotePartner:
+    process: subprocess.Popen[str]
+    base_url: str
+    database_path: Path
+    log_path: Path
+    log_stream: TextIO
+    bearer_token: str
+
+
 @dataclass(frozen=True)
 class SeededCall:
     wallet_id: str
@@ -80,6 +99,11 @@ class OperationSnapshot:
     execution_count: int
     debit_count: int
     receipt_ids: tuple[str, ...]
+    idempotency_record_id: str
+    attempt_id: str | None
+    attempt_state: str | None
+    debit_refunded: bool
+    idempotency_completed: bool
 
 
 @dataclass(frozen=True)
@@ -335,6 +359,128 @@ def _stop_worker(worker: StressWorker) -> None:
             worker.log_stream.close()
 
 
+def _kill_worker(worker: StressWorker) -> None:
+    """Terminate the worker without graceful shutdown or cleanup hooks."""
+    try:
+        if worker.process.poll() is None:
+            worker.process.kill()
+            worker.process.wait(timeout=3)
+    finally:
+        if not worker.log_stream.closed:
+            worker.log_stream.close()
+
+
+def _partner_output(partner: RemotePartner) -> str:
+    if not partner.log_stream.closed:
+        partner.log_stream.flush()
+    try:
+        return partner.log_path.read_text(encoding="utf-8")[-12000:]
+    except OSError:
+        return "<partner log unavailable>"
+
+
+def _stop_partner(partner: RemotePartner) -> None:
+    try:
+        if partner.process.poll() is None:
+            partner.process.terminate()
+            try:
+                partner.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                partner.process.kill()
+                partner.process.wait(timeout=3)
+    finally:
+        if not partner.log_stream.closed:
+            partner.log_stream.close()
+
+
+async def _wait_for_partner(
+    partner: RemotePartner,
+    control_token: str,
+) -> None:
+    deadline = asyncio.get_running_loop().time() + 30
+    headers = {CONTROL_HEADER: control_token}
+    async with httpx.AsyncClient(base_url=partner.base_url, timeout=1) as client:
+        while asyncio.get_running_loop().time() < deadline:
+            if partner.process.poll() is not None:
+                pytest.fail(
+                    "remote partner exited during startup:\n"
+                    + _partner_output(partner),
+                    pytrace=False,
+                )
+            try:
+                response = await client.get("/__stress/health", headers=headers)
+                if response.status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(0.05)
+    pytest.fail(
+        "remote partner did not become ready:\n" + _partner_output(partner),
+        pytrace=False,
+    )
+
+
+async def _start_remote_partner(harness: StressHarness) -> RemotePartner:
+    port = _unused_loopback_port()
+    bearer_token = secrets.token_urlsafe(32)
+    database_path = harness.temp_root / "remote-partner.sqlite3"
+    log_path = harness.temp_root / "remote-partner.log"
+    log_stream = log_path.open("w", encoding="utf-8")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "MCP_REMOTE_PARTNER_ALLOWED_HOST": f"127.0.0.1:{port}",
+            "MCP_REMOTE_PARTNER_BEARER_TOKEN": bearer_token,
+            "MCP_REMOTE_PARTNER_CONTROL_TOKEN": harness.control_token,
+            "MCP_REMOTE_PARTNER_DB_PATH": str(database_path),
+            "MCP_REMOTE_PARTNER_HOLD_RESPONSE_DIR": str(
+                harness.temp_root / "held-partner-responses"
+            ),
+            "PYTHONUNBUFFERED": "1",
+        }
+    )
+    try:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "tests.support.mcp_remote_partner_app:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--workers",
+                "1",
+                "--lifespan",
+                "on",
+                "--no-access-log",
+            ],
+            cwd=REPO_ROOT,
+            env=environment,
+            stdout=log_stream,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except BaseException:
+        log_stream.close()
+        raise
+    partner = RemotePartner(
+        process=process,
+        base_url=f"http://127.0.0.1:{port}",
+        database_path=database_path,
+        log_path=log_path,
+        log_stream=log_stream,
+        bearer_token=bearer_token,
+    )
+    try:
+        await _wait_for_partner(partner, harness.control_token)
+    except BaseException:
+        _stop_partner(partner)
+        raise
+    return partner
+
+
 async def _wait_for_worker(worker: StressWorker, control_token: str) -> None:
     deadline = asyncio.get_running_loop().time() + 30
     headers = {CONTROL_HEADER: control_token}
@@ -363,6 +509,7 @@ async def _start_worker(
     *,
     name: str,
     fault_point: str = "",
+    remote_partner: RemotePartner | None = None,
 ) -> StressWorker:
     port = _unused_loopback_port()
     marker_path = harness.temp_root / f"{name}.marker.json"
@@ -385,14 +532,23 @@ async def _start_worker(
             "MCP_STRESS_FAULT_REPEAT": "once",
             "MCP_STRESS_MARKER_PATH": str(marker_path),
             "MCP_STRESS_RELEASE_PATH": str(release_path),
-            # A concurrent caller on the remote path waits for an in-flight
-            # dispatch to resolve before failing closed, and that wait is
-            # derived from the upstream timeouts. Shrinking them keeps the
-            # contention probes quick without changing the behavior proved:
-            # the stress executor never consults these values.
-            "MCP_UPSTREAM_CALL_TIMEOUT_SECONDS": "0.5",
-            "MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS": "0.5",
-            "MCP_UPSTREAM_ENABLED": "false",
+            "MCP_UPSTREAM_BEARER_TOKEN": (
+                remote_partner.bearer_token if remote_partner else ""
+            ),
+            # The independent partner needs time to return its acknowledgement.
+            # Main's in-process upstream stress executor does not consult these
+            # values, so keep its contention probes quick.
+            "MCP_UPSTREAM_CALL_TIMEOUT_SECONDS": ("10" if remote_partner else "0.5"),
+            "MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS": ("5" if remote_partner else "0.5"),
+            "MCP_UPSTREAM_CREDITS_PER_CALL": "2",
+            "MCP_UPSTREAM_ENABLED": "true" if remote_partner else "false",
+            "MCP_UPSTREAM_PUBLIC_TOOL_ID": (
+                REMOTE_STRESS_TOOL if remote_partner else ""
+            ),
+            "MCP_UPSTREAM_TOOL_NAME": "partner.write" if remote_partner else "",
+            "MCP_UPSTREAM_URL": (
+                f"{remote_partner.base_url}/mcp" if remote_partner else ""
+            ),
             "PUBLIC_URL": f"http://127.0.0.1:{port}",
             "PYTHONUNBUFFERED": "1",
             "REDIS_URL": "",
@@ -452,8 +608,35 @@ async def _start_worker(
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="session")
+async def remote_partner(
+    stress_harness: StressHarness,
+) -> AsyncIterator[RemotePartner]:
+    partner = await _start_remote_partner(stress_harness)
+    try:
+        yield partner
+    finally:
+        _stop_partner(partner)
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def steady_worker(stress_harness: StressHarness) -> AsyncIterator[StressWorker]:
     worker = await _start_worker(stress_harness, name="steady")
+    try:
+        yield worker
+    finally:
+        _stop_worker(worker)
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
+async def remote_steady_worker(
+    stress_harness: StressHarness,
+    remote_partner: RemotePartner,
+) -> AsyncIterator[StressWorker]:
+    worker = await _start_worker(
+        stress_harness,
+        name="remote-steady",
+        remote_partner=remote_partner,
+    )
     try:
         yield worker
     finally:
@@ -561,11 +744,11 @@ async def _snapshot(seeded: SeededCall) -> OperationSnapshot:
 
     factory = get_session_factory()
     async with factory() as session:
-        record_id = (
+        record_row = (
             await session.execute(
                 text(
                     """
-                    SELECT record_id
+                    SELECT record_id, response_json
                     FROM idempotency_records
                     WHERE wallet_id = :wallet_id
                       AND endpoint = :endpoint
@@ -578,7 +761,8 @@ async def _snapshot(seeded: SeededCall) -> OperationSnapshot:
                     "idempotency_key": seeded.idempotency_key,
                 },
             )
-        ).scalar_one()
+        ).one()
+        record_id = str(record_row.record_id)
         execution_count = int(
             (
                 await session.execute(
@@ -613,11 +797,57 @@ async def _snapshot(seeded: SeededCall) -> OperationSnapshot:
                 )
             ).scalars()
         )
+        attempt_row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT attempt_id, state, debit_refunded_at
+                    FROM mcp_dispatch_attempts
+                    WHERE idempotency_record_id = :record_id
+                    """
+                ),
+                {"record_id": record_id},
+            )
+        ).one_or_none()
     return OperationSnapshot(
         execution_count=execution_count,
         debit_count=debit_count,
         receipt_ids=receipt_ids,
+        idempotency_record_id=record_id,
+        attempt_id=(str(attempt_row.attempt_id) if attempt_row is not None else None),
+        attempt_state=(str(attempt_row.state) if attempt_row is not None else None),
+        debit_refunded=(
+            attempt_row is not None and attempt_row.debit_refunded_at is not None
+        ),
+        idempotency_completed=record_row.response_json is not None,
     )
+
+
+async def _partner_executions(
+    harness: StressHarness,
+    partner: RemotePartner,
+    call_token: str,
+) -> list[dict[str, object]]:
+    async with httpx.AsyncClient(base_url=partner.base_url, timeout=5) as client:
+        response = await client.get(
+            "/__stress/executions",
+            params={"call_token": call_token},
+            headers={CONTROL_HEADER: harness.control_token},
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == len(payload["executions"])
+    return payload["executions"]
+
+
+def _assert_delivery_uncertain(response: httpx.Response) -> dict[str, object]:
+    assert response.status_code == 200
+    error = response.json()["error"]
+    assert error["code"] == -32005
+    assert error["message"] == "delivery_uncertain"
+    receipt = error["data"]["receipt"]
+    assert receipt["outcome"] == "delivery_uncertain"
+    return receipt
 
 
 async def _upstream_snapshot(seeded: SeededCall) -> UpstreamSnapshot:
@@ -704,9 +934,7 @@ async def _upstream_snapshot(seeded: SeededCall) -> UpstreamSnapshot:
         )
         permit_spent = (
             await session.execute(
-                text(
-                    "SELECT spent_credits FROM permits WHERE permit_id = :permit_id"
-                ),
+                text("SELECT spent_credits FROM permits WHERE permit_id = :permit_id"),
                 {"permit_id": seeded.permit_id},
             )
         ).scalar_one()
@@ -985,6 +1213,201 @@ async def test_post_side_effect_crash_requires_review_without_redispatch(
             await asyncio.gather(first_task, return_exceptions=True)
 
 
+def test_remote_partner_execution_count_is_not_capped(tmp_path: Path) -> None:
+    database_path = tmp_path / "remote-partner-count.sqlite3"
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "MCP_REMOTE_PARTNER_ALLOWED_HOST": "testserver",
+            "MCP_REMOTE_PARTNER_BEARER_TOKEN": "saturation-bearer",
+            "MCP_REMOTE_PARTNER_CONTROL_TOKEN": "saturation-control",
+            "MCP_REMOTE_PARTNER_DB_PATH": str(database_path),
+        }
+    )
+    script = (
+        "from starlette.testclient import TestClient\n"
+        "from tests.support import mcp_remote_partner_app as partner\n"
+        "with partner._connect() as connection:\n"
+        "    connection.executemany(\n"
+        '        "INSERT INTO mcp_remote_partner_executions '
+        "(call_token, invocation_id, idempotency_key, worker_pid) "
+        'VALUES (?, ?, ?, ?)",\n'
+        '        [(f"call-{index}", "invocation", "idempotency", 1234) '
+        "for index in range(1001)],\n"
+        "    )\n"
+        "    connection.commit()\n"
+        "client = TestClient(partner.app)\n"
+        "response = client.get(\n"
+        '    "/__stress/health",\n'
+        '    headers={partner.CONTROL_HEADER: "saturation-control"},\n'
+        ")\n"
+        "assert response.status_code == 200\n"
+        'assert response.json()["execution_count"] == 1001\n'
+        "assert len(partner._execution_rows()) == 1000\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_remote_claim_commit_before_send_crash_never_redispatches(
+    stress_harness: StressHarness,
+    remote_partner: RemotePartner,
+    remote_steady_worker: StressWorker,
+) -> None:
+    seeded = await _seed_call(
+        stress_harness,
+        remote_steady_worker,
+        scenario="remote-claim-crash",
+        tool_name=REMOTE_STRESS_TOOL,
+    )
+    fault_worker = await _start_worker(
+        stress_harness,
+        name=f"remote-claim-crash-{uuid.uuid4().hex[:8]}",
+        fault_point="after_dispatch_claim",
+        remote_partner=remote_partner,
+    )
+    first_task: asyncio.Task[httpx.Response] | None = None
+    try:
+        first_task = asyncio.create_task(_invoke(fault_worker, seeded))
+        marker = await _wait_for_marker(fault_worker)
+        assert marker["point"] == "after_dispatch_claim"
+
+        before = await _snapshot(seeded)
+        assert before.execution_count == 0
+        assert before.debit_count == 1
+        assert before.receipt_ids == ()
+        assert before.attempt_state == "dispatch_claimed"
+        assert before.debit_refunded is False
+        assert before.idempotency_completed is False
+        assert (
+            await _partner_executions(stress_harness, remote_partner, seeded.call_token)
+            == []
+        )
+
+        _kill_worker(fault_worker)
+        await asyncio.gather(first_task, return_exceptions=True)
+
+        blocked = await _invoke(remote_steady_worker, seeded)
+        _assert_in_progress(blocked)
+        assert (
+            await _partner_executions(stress_harness, remote_partner, seeded.call_token)
+            == []
+        )
+
+        reconciliation = await _reconcile(stress_harness, remote_steady_worker)
+        assert reconciliation["dispatch_uncertain"] == 1
+        assert reconciliation["dispatch_failed_attempt_ids"] == []
+
+        replay = await _invoke(remote_steady_worker, seeded)
+        receipt = _assert_delivery_uncertain(replay)
+        after = await _snapshot(seeded)
+        assert after.execution_count == 0
+        assert after.debit_count == 1
+        assert after.attempt_state == "delivery_uncertain"
+        assert after.debit_refunded is False
+        assert after.idempotency_completed is True
+        assert after.receipt_ids == (receipt["receipt_id"],)
+        assert (
+            await _partner_executions(stress_harness, remote_partner, seeded.call_token)
+            == []
+        )
+    finally:
+        _kill_worker(fault_worker)
+        if first_task is not None:
+            await asyncio.gather(first_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_remote_ack_before_terminal_commit_crash_becomes_uncertain_without_redispatch(
+    stress_harness: StressHarness,
+    remote_partner: RemotePartner,
+    remote_steady_worker: StressWorker,
+) -> None:
+    seeded = await _seed_call(
+        stress_harness,
+        remote_steady_worker,
+        scenario="remote-ack-crash",
+        tool_name=REMOTE_STRESS_TOOL,
+    )
+    fault_worker = await _start_worker(
+        stress_harness,
+        name=f"remote-ack-crash-{uuid.uuid4().hex[:8]}",
+        fault_point="after_upstream_ack_before_terminal",
+        remote_partner=remote_partner,
+    )
+    first_task: asyncio.Task[httpx.Response] | None = None
+    try:
+        first_task = asyncio.create_task(_invoke(fault_worker, seeded))
+        marker = await _wait_for_marker(fault_worker)
+        assert marker["point"] == "after_upstream_ack_before_terminal"
+
+        before = await _snapshot(seeded)
+        executions = await _partner_executions(
+            stress_harness, remote_partner, seeded.call_token
+        )
+        assert len(executions) == 1
+        execution = executions[0]
+        assert execution["invocation_id"] == before.idempotency_record_id
+        assert execution["idempotency_key"] == seeded.idempotency_key
+        assert execution["worker_pid"] != marker["pid"]
+        assert before.execution_count == 0
+        assert before.debit_count == 1
+        assert before.receipt_ids == ()
+        assert before.attempt_state == "dispatch_claimed"
+        assert before.debit_refunded is False
+        assert before.idempotency_completed is False
+
+        _kill_worker(fault_worker)
+        await asyncio.gather(first_task, return_exceptions=True)
+
+        blocked = await _invoke(remote_steady_worker, seeded)
+        _assert_in_progress(blocked)
+        assert (
+            len(
+                await _partner_executions(
+                    stress_harness, remote_partner, seeded.call_token
+                )
+            )
+            == 1
+        )
+
+        reconciliation = await _reconcile(stress_harness, remote_steady_worker)
+        assert reconciliation["dispatch_uncertain"] == 1
+        assert reconciliation["dispatch_failed_attempt_ids"] == []
+
+        replay = await _invoke(remote_steady_worker, seeded)
+        receipt = _assert_delivery_uncertain(replay)
+        after = await _snapshot(seeded)
+        assert after.execution_count == 0
+        assert after.debit_count == 1
+        assert after.attempt_state == "delivery_uncertain"
+        assert after.debit_refunded is False
+        assert after.idempotency_completed is True
+        assert after.receipt_ids == (receipt["receipt_id"],)
+        assert (
+            len(
+                await _partner_executions(
+                    stress_harness, remote_partner, seeded.call_token
+                )
+            )
+            == 1
+        )
+    finally:
+        _kill_worker(fault_worker)
+        if first_task is not None:
+            await asyncio.gather(first_task, return_exceptions=True)
+
+
 async def _kill_governed_upstream_call(
     stress_harness: StressHarness,
     steady_worker: StressWorker,
@@ -1026,7 +1449,7 @@ async def test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain(
 ) -> None:
     """A kill just past the dispatch checkpoint is ambiguous, not failed.
 
-    The worker dies after the durable ``prepared -> dispatched`` transition but
+    The worker dies after the durable ``prepared -> dispatch_claimed`` transition but
     before the simulated remote effect runs.  No effect actually landed, yet
     the trust plane cannot know that, so the conservative disposition is the
     one that must be recorded: charged, signed ambiguous, never redispatched.
@@ -1062,7 +1485,9 @@ async def test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain(
         attempt_error_code="delivery_uncertain",
         terminal_result={"error": "delivery_uncertain"},
     )
-    _assert_replayed_terminal(first_retry, reason="delivery_uncertain", receipt_id=receipt_id)
+    _assert_replayed_terminal(
+        first_retry, reason="delivery_uncertain", receipt_id=receipt_id
+    )
 
     # The periodic reconciler sweep is now idempotent: the forced sweep above
     # already reconciled the attempt.
@@ -1072,7 +1497,9 @@ async def test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain(
 
     # A client retry must replay the ambiguous disposition, never re-execute.
     replay = await _invoke(steady_worker, seeded)
-    _assert_replayed_terminal(replay, reason="delivery_uncertain", receipt_id=receipt_id)
+    _assert_replayed_terminal(
+        replay, reason="delivery_uncertain", receipt_id=receipt_id
+    )
     assert await _upstream_snapshot(seeded) == after
 
     # Reconciliation is idempotent: a second sweep is not a second recovery.
@@ -1121,7 +1548,9 @@ async def test_kill_after_remote_effect_never_redispatches_the_effect(
         attempt_error_code="delivery_uncertain",
         terminal_result={"error": "delivery_uncertain"},
     )
-    _assert_replayed_terminal(first_retry, reason="delivery_uncertain", receipt_id=receipt_id)
+    _assert_replayed_terminal(
+        first_retry, reason="delivery_uncertain", receipt_id=receipt_id
+    )
 
     # The periodic reconciler sweep is now idempotent: the forced sweep above
     # already reconciled the attempt.
@@ -1130,7 +1559,9 @@ async def test_kill_after_remote_effect_never_redispatches_the_effect(
     assert reconciliation["dispatch_failed_attempts"] == 0
 
     replay = await _invoke(steady_worker, seeded)
-    _assert_replayed_terminal(replay, reason="delivery_uncertain", receipt_id=receipt_id)
+    _assert_replayed_terminal(
+        replay, reason="delivery_uncertain", receipt_id=receipt_id
+    )
     assert await _upstream_snapshot(seeded) == after
 
     again = await _reconcile(stress_harness, steady_worker)
@@ -1190,7 +1621,9 @@ async def test_kill_between_debit_and_dispatch_refunds_without_dispatching(
             "error_code": "reconciled_stale_prepared",
         },
     )
-    _assert_replayed_terminal(first_retry, reason="failed_refunded", receipt_id=receipt_id)
+    _assert_replayed_terminal(
+        first_retry, reason="failed_refunded", receipt_id=receipt_id
+    )
 
     # The periodic reconciler sweep is now idempotent: the forced sweep above
     # already reconciled the attempt.

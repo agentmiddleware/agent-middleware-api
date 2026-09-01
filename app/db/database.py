@@ -51,6 +51,9 @@ REQUIRED_TRUST_TABLES = frozenset(
         "mcp_dispatch_attempts",
     }
 )
+REQUIRED_TRUST_COLUMNS = {
+    "mcp_dispatch_attempts": frozenset({"dispatch_claim_hash"}),
+}
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -251,6 +254,23 @@ def _missing_required_tables(sync_conn) -> set[str]:  # noqa: ANN001
     return set(REQUIRED_TRUST_TABLES) - existing
 
 
+def _missing_required_columns(sync_conn) -> set[str]:  # noqa: ANN001
+    inspector = sa_inspect(sync_conn)
+    existing_tables = set(inspector.get_table_names())
+    missing: set[str] = set()
+    for table_name, required_columns in REQUIRED_TRUST_COLUMNS.items():
+        if table_name not in existing_tables:
+            continue
+        existing_columns = {
+            str(column["name"]) for column in inspector.get_columns(table_name)
+        }
+        missing.update(
+            f"{table_name}.{column_name}"
+            for column_name in required_columns - existing_columns
+        )
+    return missing
+
+
 def _stale_alembic_message(sync_conn) -> str | None:  # noqa: ANN001
     """If alembic_version is stamped but behind packaged head, return an error.
 
@@ -286,6 +306,7 @@ async def verify_required_schema(engine: AsyncEngine) -> None:
     """Fail closed when Alembic/trust tables are missing or stamp is stale."""
     async with engine.connect() as conn:
         missing = await conn.run_sync(_missing_required_tables)
+        missing_columns = await conn.run_sync(_missing_required_columns)
         stale = await conn.run_sync(_stale_alembic_message)
     # A stamped database can be both behind head and missing tables introduced
     # by later revisions. Report the revision mismatch first: it is the
@@ -299,6 +320,14 @@ async def verify_required_schema(engine: AsyncEngine) -> None:
             + ". Run `alembic upgrade head` (or set RUN_MIGRATIONS_ON_START=true "
             "on the Docker entrypoint) before starting the API. "
             "Production-like boots do not call create_all."
+        )
+    if missing_columns:
+        raise SchemaInitError(
+            "Required database columns missing: "
+            + ", ".join(sorted(missing_columns))
+            + ". Bring the schema to the packaged Alembic head before starting "
+            "the API (normally `alembic upgrade head`; review an unstamped "
+            "legacy schema before stamping its exact existing revision)."
         )
 
 
@@ -322,6 +351,14 @@ async def init_db() -> None:
     if allows_metadata_create_all(dialect_name=dialect, environment=environment):
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
+            missing_columns = await conn.run_sync(_missing_required_columns)
+        if missing_columns:
+            raise SchemaInitError(
+                "Required database columns missing after create_all: "
+                + ", ".join(sorted(missing_columns))
+                + ". create_all cannot alter existing tables; run the packaged "
+                "Alembic migration before starting the API."
+            )
         logger.info(
             "Database tables initialized via create_all",
             extra={"dialect": dialect, "environment": environment},

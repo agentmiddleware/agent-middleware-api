@@ -79,17 +79,40 @@ overspend it.
 
 **Ambiguity is a first-class durable state.** For the configured upstream MCP
 tool, a dispatch attempt is persisted through
-`prepared → dispatched → {succeeded, returned_error, delivery_uncertain,
-response_rejected}`. If the process dies after the request left the gateway but
-before an acknowledgement arrived, recovery classifies the attempt as
+`prepared → dispatch_claimed → {succeeded, returned_error,
+delivery_uncertain, response_rejected}`. Immediately before the network send,
+the activation commits `dispatch_claimed` with one nullable
+`dispatch_claim_hash`. The raw process-local claim is not persisted; only that
+still-live activation may match its stored hash after a lost commit
+acknowledgement. A fresh activation cannot reacquire the claim. Historical
+`dispatched` rows remain classified as already sent even though their claim hash
+is null.
+
+If the process dies after the claim becomes durable but before a trustworthy
+result is committed, recovery classifies the attempt as
 `delivery_uncertain`: **the charge stands and the call is never redispatched**,
-because non-delivery can no longer be proven. Local (non-upstream) governed tools
-have no dispatch state machine; a crash there fails closed into manual review
-instead. See [`docs/failure-semantics.md`](docs/failure-semantics.md).
+because non-delivery can no longer be proven. Reconciliation waits a fixed,
+globally conservative 11,430-second window before treating the claim as stale.
+That window covers the maximum supported 600-second connection timeout, three
+maximum 3,600-second call phases, and cleanup margin; it does not shrink when a
+new worker is deployed with smaller local settings.
+Local (non-upstream) governed tools have no dispatch state machine; a crash
+there fails closed into manual review instead. See
+[`docs/failure-semantics.md`](docs/failure-semantics.md).
 
 This is at-most-one *gateway* dispatch plus refusal to redispatch an ambiguous
 invocation. It is **not** effect-once inside an arbitrary upstream tool, which
-requires that tool to honour the forwarded idempotency key.
+requires that tool to honour the forwarded idempotency key. The claim record is
+also not proof that any downstream effect occurred.
+
+The durable claim and send-state transitions apply only to the configured
+remote upstream boundary. The supporting operation-keyed billing transaction
+fence is shared by other callers, but this slice does not change local-tool
+reservations, per-tool call slots, quotes, human approvals, API-key/JWT
+authentication, or rate limiting.
+Focused state-machine, reconciliation, migration, and PostgreSQL process-kill
+tests cover the claim transition. Deployment and downstream-effect truth remain
+outside that evidence.
 
 ## Signed Receipts
 

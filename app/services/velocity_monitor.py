@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Optional, cast
 
 from sqlalchemy import select, update as sa_update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.time import to_naive_utc, utc_now
@@ -25,6 +26,20 @@ from ..core.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+_ZERO_LIMIT_BREACH_PERCENT = 101.0
+
+
+def _usage_percentage(spent: Decimal, limit: Decimal) -> float:
+    """Return a finite utilization signal, including for a strict zero cap."""
+    if limit > 0:
+        return float(spent / limit * 100)
+    if limit == 0 and spent > 0:
+        # The mathematical ratio is undefined, while 100% would look like the
+        # non-breaching equality boundary. Keep the existing numeric schema and
+        # report a small, explicit breach value that is safe to serialize.
+        return _ZERO_LIMIT_BREACH_PERCENT
+    return 0.0
 
 
 class VelocityCheckResult:
@@ -89,6 +104,8 @@ class VelocityMonitor:
         self,
         wallet_id: str,
         charge_amount: Decimal,
+        *,
+        session: AsyncSession | None = None,
     ) -> VelocityCheckResult:
         """
         Check if a charge is within velocity limits and record it.
@@ -99,104 +116,131 @@ class VelocityMonitor:
         Raises:
             WalletFrozenError: If wallet should be frozen
         """
+        # Governed billing supplies its transaction so the velocity mutation,
+        # dispatch fence, debit, and idempotency checkpoint either all commit or
+        # all roll back. The caller also owns any post-commit notification.
+        if session is not None:
+            return await self._record_charge(session, wallet_id, charge_amount)
+
+        async with self._session_factory()() as owned_session:
+            async with owned_session.begin():
+                velocity_result = await self._record_charge(
+                    owned_session,
+                    wallet_id,
+                    charge_amount,
+                )
+        if velocity_result.should_freeze:
+            await self.notify_committed_freeze(wallet_id)
+        return velocity_result
+
+    async def _record_charge(
+        self,
+        session: AsyncSession,
+        wallet_id: str,
+        charge_amount: Decimal,
+    ) -> VelocityCheckResult:
+        result = await session.execute(
+            select(WalletModel)
+            .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
+            .with_for_update()
+        )
+        wallet = result.scalar_one_or_none()
+
+        if not wallet:
+            return VelocityCheckResult(
+                allowed=True,
+                reason="Wallet not found",
+            )
+
+        now = utc_now()
+
+        self._reset_if_needed(wallet, now)
+        # Land any period reset before the relative increment below, so the
+        # increment applies on top of the reset value rather than racing it
+        # inside the same statement.
+        await session.flush()
+
+        hourly_limit = (
+            wallet.hourly_limit
+            if wallet.hourly_limit is not None
+            else self._default_hourly_limit
+        )
+        daily_limit = (
+            wallet.daily_limit
+            if wallet.daily_limit is not None
+            else self._default_daily_limit
+        )
+
+        # Accumulate relatively, in one statement. Reading a counter and
+        # writing back read+charge is a read-modify-write serialized only by the
+        # ``SELECT ... FOR UPDATE`` above, which is a silent no-op on SQLite:
+        # concurrent charges each add to the same observed total and all but
+        # one increment is lost. This counter is what the spend cap and anomaly
+        # auto-freeze are measured against, so under-counting silently disables
+        # both controls precisely when spend is most concurrent.
+        await session.execute(
+            sa_update(WalletModel)
+            .where(cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id))
+            .values(
+                hourly_spent=WalletModel.hourly_spent + charge_amount,
+                daily_spent=WalletModel.daily_spent + charge_amount,
+                last_charge_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        # The limit check below must see the totals this charge produced, not
+        # the ones read before it.
+        await session.refresh(wallet)
+
+        # Stamp the period the increment landed in, so a separately committed
+        # caller reversing it can refuse to decrement a later one.
+        recorded_hourly_reset_at = wallet.hourly_reset_at
+        recorded_daily_reset_at = wallet.daily_reset_at
+
+        velocity_result = self._check_limits(
+            wallet=wallet,
+            hourly_limit=hourly_limit,
+            daily_limit=daily_limit,
+            charge_amount=charge_amount,
+        )
+
+        if velocity_result.should_freeze:
+            wallet.status = "frozen"
+            wallet.velocity_alerts_triggered += 1
+            # The billing writer can issue relative SQL updates and refresh the
+            # wallet before this caller-owned transaction commits. Flush these
+            # ORM-only control mutations first so that refresh cannot discard
+            # the freeze or alert checkpoint.
+            await session.flush()
+            logger.warning(
+                f"Auto-freezing wallet {wallet_id}: "
+                f"hourly_spent={wallet.hourly_spent}, "
+                f"limit={hourly_limit}, "
+                f"alerts={wallet.velocity_alerts_triggered}"
+            )
+            return VelocityCheckResult(
+                allowed=False,
+                reason="Wallet frozen due to anomalous spend velocity",
+                alert_triggered=True,
+                should_freeze=True,
+                hourly_reset_at=recorded_hourly_reset_at,
+                daily_reset_at=recorded_daily_reset_at,
+            )
+
+        if velocity_result.alert_triggered:
+            wallet.velocity_alerts_triggered += 1
+            await session.flush()
+
+        velocity_result.hourly_reset_at = recorded_hourly_reset_at
+        velocity_result.daily_reset_at = recorded_daily_reset_at
+        return velocity_result
+
+    async def notify_committed_freeze(self, wallet_id: str) -> None:
+        """Notify only after the transaction that froze the wallet committed."""
         async with self._session_factory()() as session:
-            async with session.begin():
-                result = await session.execute(
-                    select(WalletModel)
-                    .where(
-                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
-                    )
-                    .with_for_update()
-                )
-                wallet = result.scalar_one_or_none()
-
-                if not wallet:
-                    return VelocityCheckResult(
-                        allowed=True,
-                        reason="Wallet not found",
-                    )
-
-                now = utc_now()
-
-                self._reset_if_needed(wallet, now)
-                # Land any period reset before the relative increment below, so
-                # the increment applies on top of the reset value rather than
-                # racing it inside the same statement.
-                await session.flush()
-
-                hourly_limit = wallet.hourly_limit or self._default_hourly_limit
-                daily_limit = wallet.daily_limit or self._default_daily_limit
-
-                # Accumulate relatively, in one statement. Reading a counter and
-                # writing back read+charge is a read-modify-write serialized
-                # only by the ``SELECT ... FOR UPDATE`` above, which is a silent
-                # no-op on SQLite: concurrent charges each add to the same
-                # observed total and all but one increment is lost. This counter
-                # is what the spend cap and the anomaly auto-freeze are measured
-                # against, so under-counting does not merely skew a metric -- it
-                # silently disables both controls, and it does so precisely when
-                # spend is most concurrent.
-                await session.execute(
-                    sa_update(WalletModel)
-                    .where(
-                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
-                    )
-                    .values(
-                        hourly_spent=WalletModel.hourly_spent + charge_amount,
-                        daily_spent=WalletModel.daily_spent + charge_amount,
-                        last_charge_at=now,
-                    )
-                    .execution_options(synchronize_session=False)
-                )
-                # The limit check below must see the totals this charge produced,
-                # not the ones read before it.
-                await session.refresh(wallet)
-
-                # Stamp the period the increment landed in, so a caller
-                # reversing it can refuse to decrement a later one.
-                recorded_hourly_reset_at = wallet.hourly_reset_at
-                recorded_daily_reset_at = wallet.daily_reset_at
-
-                velocity_result = self._check_limits(
-                    wallet=wallet,
-                    hourly_limit=hourly_limit,
-                    daily_limit=daily_limit,
-                    charge_amount=charge_amount,
-                )
-
-                if velocity_result.should_freeze:
-                    wallet.status = "frozen"
-                    wallet.velocity_alerts_triggered += 1
-                    velocity_result = VelocityCheckResult(
-                        allowed=False,
-                        reason="Wallet frozen due to anomalous spend velocity",
-                        alert_triggered=True,
-                        should_freeze=True,
-                        hourly_reset_at=recorded_hourly_reset_at,
-                        daily_reset_at=recorded_daily_reset_at,
-                    )
-
-                    logger.warning(
-                        f"Auto-freezing wallet {wallet_id}: "
-                        f"hourly_spent={wallet.hourly_spent}, "
-                        f"limit={hourly_limit}, "
-                        f"alerts={wallet.velocity_alerts_triggered}"
-                    )
-
-                    await session.commit()
-
-                    await self._notify_freeze(wallet)
-
-                    return velocity_result
-
-                if velocity_result.alert_triggered:
-                    wallet.velocity_alerts_triggered += 1
-
-                await session.commit()
-
-                velocity_result.hourly_reset_at = recorded_hourly_reset_at
-                velocity_result.daily_reset_at = recorded_daily_reset_at
-                return velocity_result
+            wallet = await session.get(WalletModel, wallet_id)
+        if wallet is not None and wallet.status == "frozen":
+            await self._notify_freeze(wallet)
 
     def _reset_if_needed(self, wallet: WalletModel, now: datetime) -> None:
         """Reset hourly/daily counters if period has elapsed."""
@@ -288,24 +332,30 @@ class VelocityMonitor:
             now = utc_now()
             self._reset_if_needed(wallet, now)
 
-            hourly_limit = wallet.hourly_limit or self._default_hourly_limit
-            daily_limit = wallet.daily_limit or self._default_daily_limit
+            hourly_limit = (
+                wallet.hourly_limit
+                if wallet.hourly_limit is not None
+                else self._default_hourly_limit
+            )
+            daily_limit = (
+                wallet.daily_limit
+                if wallet.daily_limit is not None
+                else self._default_daily_limit
+            )
 
             return {
                 "wallet_id": wallet_id,
                 "hourly_spent": float(wallet.hourly_spent),
                 "hourly_limit": float(hourly_limit),
-                "hourly_pct": (
-                    float(wallet.hourly_spent / hourly_limit * 100)
-                    if hourly_limit > 0
-                    else 0
+                "hourly_pct": _usage_percentage(
+                    wallet.hourly_spent,
+                    hourly_limit,
                 ),
                 "daily_spent": float(wallet.daily_spent),
                 "daily_limit": float(daily_limit),
-                "daily_pct": (
-                    float(wallet.daily_spent / daily_limit * 100)
-                    if daily_limit > 0
-                    else 0
+                "daily_pct": _usage_percentage(
+                    wallet.daily_spent,
+                    daily_limit,
                 ),
                 "velocity_alerts": wallet.velocity_alerts_triggered,
                 "status": wallet.status,

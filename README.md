@@ -12,6 +12,15 @@ Your agent invokes a costly tool. The request times out. Was the call dispatched
 
 Agent Middleware API is a governed MCP gateway and replay-safe transaction boundary for metered agent-to-tool actions. For a configured upstream MCP tool, one accepted idempotency key permits at most one gateway dispatch and at most one wallet debit. Replaying the same request under that key returns the original result and signed receipt; a changed request fails closed.
 
+The claim-before-send release slice narrows that remote guarantee to a durable
+fence: immediately before the network send, `prepared` becomes
+`dispatch_claimed` and one nullable `dispatch_claim_hash` prevents a later
+activation from acquiring the same send authority. Historical `dispatched`
+rows remain treated as already sent. This is a gateway record, not proof that
+the downstream effect occurred. Focused claim, reconciliation, migration, and
+PostgreSQL process-kill tests cover the fence; those tests do not prove a
+deployment or a downstream effect.
+
 ```text
 scoped permit → governed MCP invoke → wallet charge → signed receipt
 → replay without second debit → out-of-scope denial
@@ -107,8 +116,8 @@ The end-to-end governed MCP path lives in [`app/routers/mcp.py`](app/routers/mcp
 ## The loop proves these claims
 
 1. **Charge-once under retry.** Replaying the same governed invoke with the same idempotency key returns the same receipt without a second gateway dispatch or wallet debit, even across the governed MCP entrypoints; changed payloads conflict.
-2. **Budget over-spend containment.** Permit budget caps are reserved with a single atomic guarded `UPDATE` — the cap is enforced in the statement's `WHERE` clause, not a read-modify-write — so concurrent invocations against one permit cannot over-spend it on any storage engine, including SQLite.
-3. **Interrupted-invocation accounting.** For the configured upstream tool, one persisted chain links the idempotency record, permit reservation, ledger debit, dispatch attempt, signed receipt, and audit event. Recovery finalizes pre-dispatch failures or marks ambiguous post-dispatch calls `delivery_uncertain`; it never redispatches them.
+2. **Budget over-spend containment.** A permit's `max_credits` budget is reserved with a single atomic guarded `UPDATE` — the bound is enforced in the statement's `WHERE` clause, not a read-modify-write — so concurrent invocations against one permit cannot over-spend it on any storage engine, including SQLite.
+3. **Interrupted-invocation accounting.** For the configured upstream tool, one persisted chain links the idempotency record, permit reservation, ledger debit, dispatch attempt, signed receipt, and audit event. Recovery finalizes pre-claim failures or marks a missing trustworthy result after a durable send claim `delivery_uncertain`; it never redispatches that attempt. The gateway record does not prove the downstream effect.
 4. **Signed offline-verifiable receipts.** Receipts are Ed25519-signed and verifiable without credentials or network access to the issuing server. Export a receipt with `GET /v1/receipts/{receipt_id}/portable`, fetch the public key set from `/.well-known/trust-keys.json` or `/.well-known/jwks.json`, and verify with the SDK verifier or any off-the-shelf JOSE tooling.
 5. **Authority-before-money denial.** A request outside the permit scope, with no permit, or with an expired/revoked/tampered permit is denied with a concrete reason code before any wallet charge. When the trust plane refuses the call, a signed denial receipt proves *that* refusal.
 
@@ -356,7 +365,12 @@ TRUST_SIGNING_PRIVATE_KEY_B64=...     # base64-encoded 32-byte Ed25519 seed
 
 The application refuses unsafe production combinations. It also refuses silent in-memory fallback when durable state was configured for production, and on a hosted runtime (detected through the platform-injected `RAILWAY_*` variables) it refuses to boot when `ENVIRONMENT` is unset or blank instead of silently running with local-compatible defaults. Use `alembic upgrade head` for schema changes; production startup verifies the schema instead of relying on `create_all`.
 
-Apply the current migration head before mixed old/current workers take traffic. Migration 027 serializes the legacy JSON-RPC and REST governed-MCP endpoint identities behind one wallet/idempotency-key uniqueness boundary.
+Pause ingress, drain every old worker, and apply the current migration head
+before starting current workers. Migration 027 serializes the legacy JSON-RPC
+and REST governed-MCP endpoint identities behind one wallet/idempotency-key
+uniqueness boundary. Migration `037_mcp_dispatch_claim_hash` adds the nullable
+remote dispatch-claim fence and does not support old/current worker overlap.
+Its rollout and rollback requirements are in [the Railway deploy SOP](docs/deploy-railway.md#dispatch-claim-migration-and-rollback).
 
 The supported API deployment path is the repository Dockerfile on Railway: [docs/deploy-railway.md](docs/deploy-railway.md). The static agent-first site in [`site/`](site/) is a separate marketing/discovery surface, not the API runtime.
 
@@ -372,8 +386,9 @@ The public site and `/proof/` receipt are self-issued product demonstrations. Cu
 
 - Credits use `Decimal` values internally and expose paired exact fields where API compatibility also requires floats.
 - Charges, transfers, refunds, wallet provisioning, and Stripe settlement use database transactions and row locks where ordering matters.
-- Permit budget caps are reserved with a single atomic guarded `UPDATE` — the cap is enforced in the statement's `WHERE` clause, not a read-modify-write — so concurrent invocations against one permit cannot over-spend it on any storage engine, including SQLite, where `SELECT ... FOR UPDATE` is a silent no-op. Covered by `tests/test_permits.py::test_concurrent_reservations_never_exceed_cap` and the PostgreSQL `postgres_permit_concurrency` CI job.
-- Per-tool call caps (`max_calls_per_tool` on a permit) carry the same no-overshoot guarantee: an optimistic compare-and-swap on a persisted per-permit counter means concurrent invocations can never exceed the cap, and an over-limit or race-losing attempt is denied without reserving budget. The cap is a ceiling, not a liveness guarantee — a call that loses the race may be denied while a slot remains. Covered by `tests/test_max_calls_race.py`.
+- A permit's `max_credits` budget is reserved with a single atomic guarded `UPDATE` — the bound is enforced in the statement's `WHERE` clause, not a read-modify-write — so concurrent invocations against one permit cannot over-spend it on any storage engine, including SQLite, where `SELECT ... FOR UPDATE` is a silent no-op. Covered by `tests/test_permits.py::test_concurrent_reservations_never_exceed_cap`, `tests/test_governed_persistence.py::test_remote_prepare_cap_holds_under_concurrency`, and the PostgreSQL `postgres_permit_concurrency` CI job.
+- On local governed tools, per-tool call caps (`max_calls_per_tool`) use an optimistic compare-and-swap on a persisted per-permit counter. The configured upstream MCP path does not yet own the matching atomic counter-and-release lifecycle, so it fails closed with `permit_constraint_unsupported_for_upstream` before reserving budget, debiting, or dispatching whenever that constraint is configured.
+- `aggregate_value_cap` is evaluated from settled receipt history on the local path; it is not a concurrent-reservation boundary. The upstream path likewise fails closed when it is configured. Use `max_credits` when the required property is an atomic total authorization ceiling.
 - Direct top-up is deprecated and returns `410 Gone`; a client-supplied token is not treated as proof of payment.
 - Stripe webhooks are signature checked, settlement fields are validated, and event identities prevent duplicate application.
 - This is an internal credit and budget ledger. It is not merchant settlement, a dispute system, or a compliance ledger.
@@ -388,7 +403,7 @@ The public site and `/proof/` receipt are self-issued product demonstrations. Cu
 - Permits are reusable budget envelopes, not one-shot delegation chains; parent delegation containment is not implemented.
 - Database service registrations remain metadata and are omitted from executable MCP discovery. Executable tools are local callables or the single configured upstream tool.
 - Requests rejected before a valid permit and executable tool are established may terminate without a receipt.
-- Replay safety is scoped to the governed gateway boundary. A post-dispatch transport failure is signed as `delivery_uncertain`; an invalid or oversized confirmed response is signed as `response_rejected`. Both remain charged and are never automatically retried or refunded. The complete outcome-by-outcome contract, including every crash window, is [docs/failure-semantics.md](docs/failure-semantics.md).
+- Replay safety is scoped to the governed gateway boundary. A missing trustworthy result after the durable remote send claim is signed as `delivery_uncertain`; an invalid or oversized confirmed response is signed as `response_rejected`. Both remain charged and are never automatically retried or refunded. Neither state proves the downstream effect. The complete outcome-by-outcome contract, including every crash window, is [docs/failure-semantics.md](docs/failure-semantics.md).
 - Wallet isolation is enforced by application authorization and query scoping; PostgreSQL row-level security and a public multi-tenant isolation guarantee are not implemented.
 - Upstream connections pin one validated resolved address for the session while preserving the configured HTTP Host and TLS SNI. Production operators should still enforce a network egress allowlist or proxy as defense in depth.
 - Upstream responses are capped while streaming the identity-encoded wire body, including the JSON-RPC envelope, and retained decoded payloads are capped again after protocol validation.

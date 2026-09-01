@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import Settings, get_settings
@@ -242,14 +243,24 @@ class SigningKeyService:
         )
         return keys
 
-    async def get_public_key(self, key_id: str) -> SigningKeyModel | None:
+    async def get_public_key(
+        self,
+        key_id: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> SigningKeyModel | None:
+        # Refresh caller-owned identity-map rows so disabling a key cannot
+        # retain a cached active verdict inside a larger transaction.
+        query = (
+            select(SigningKeyModel)
+            .where(cast(ColumnElement[bool], SigningKeyModel.key_id == key_id))
+            .execution_options(populate_existing=True)
+        )
+        if session is not None:
+            return (await session.execute(query)).scalar_one_or_none()
         factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(SigningKeyModel).where(
-                    cast(ColumnElement[bool], SigningKeyModel.key_id == key_id)
-                )
-            )
+        async with factory() as owned_session:
+            result = await owned_session.execute(query)
             return result.scalar_one_or_none()
 
     async def retire_key_metadata(self, key_id: str) -> SigningKeyModel:
@@ -321,6 +332,27 @@ class SigningKeyService:
         key = await self.ensure_active_key()
         return self.sign_payload_with_key_id(payload, key.key_id)
 
+    async def validate_prepared_signing_key(
+        self,
+        key_id: str,
+        *,
+        session: AsyncSession,
+    ) -> SigningKeyModel:
+        """Lock and revalidate a pre-provisioned key before caller-owned signing."""
+        key = await session.get(
+            SigningKeyModel,
+            key_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
+        if key is None:
+            raise SigningKeyError("signing_key_not_found")
+        self._assert_public_key_mapping(key, self._public_key_b64())
+        self._assert_key_not_disabled(key)
+        if key.status != "active" or key.retired_at is not None:
+            raise SigningKeyError("signing_key_not_active")
+        return key
+
     def sign_payload_with_key_id(
         self,
         payload: dict[str, Any],
@@ -348,8 +380,9 @@ class SigningKeyService:
         *,
         signature: str,
         key_id: str,
+        session: AsyncSession | None = None,
     ) -> bool:
-        key = await self.get_public_key(key_id)
+        key = await self.get_public_key(key_id, session=session)
         if not key or key.status == "disabled":
             return False
         # Verification must fail closed on malformed stored data, not raise. The

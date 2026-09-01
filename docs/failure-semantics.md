@@ -8,9 +8,9 @@ told, whether the wallet ends up charged, whether the tool may have executed,
 and which test proves it.
 
 Like [PROOF_MATRIX.md](PROOF_MATRIX.md), this is descriptive, not aspirational.
-Every row names the code path and the test that asserts it; the last section
-lists what is deliberately **not** claimed. For the claims the project never
-makes, see [SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md).
+Each row names its proving tests, and the last section lists what is deliberately
+**not** claimed. For the claims the project never makes, see
+[SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md).
 
 ## The invariant
 
@@ -27,26 +27,29 @@ compensate:
 2. The **debit strictly precedes dispatch**, is keyed to the idempotency
    record (`operation_key`), and is linked to the attempt before the upstream
    call starts (`_charge_and_checkpoint`, `app/routers/mcp.py`).
-3. A durable **dispatch checkpoint** (`mark_dispatched`) is committed
-   immediately before the network send. This checkpoint is the entire basis
-   of the refund policy below.
+3. A durable, one-shot **dispatch claim** (`claim_dispatch`) is committed
+   immediately before the network send. The transition stores
+   `state = dispatch_claimed` plus one nullable `dispatch_claim_hash`; the raw
+   process-local claim is not persisted. Only the still-live activation that
+   created that hash may recover a lost commit acknowledgement. Every later
+   activation must fail closed without sending.
 
-The dispatch attempt is a small state machine — `prepared → dispatched →
+The dispatch attempt is a small state machine — `prepared → dispatch_claimed →
 {succeeded, returned_error, delivery_uncertain, response_rejected}`, with
 `prepared → returned_error` as the only pre-dispatch terminal. Terminal states
-are absorbing: any attempt to re-transition raises
-(`test_dispatch_attempt_state_machine_and_bounded_result`).
+are absorbing. Historical `dispatched` rows have a null claim hash and remain
+classified as already sent; they are never claimable again.
 
 ## Terminal outcomes
 
-| Outcome | Trigger | Wallet | Did the tool run? | HTTP / JSON-RPC | Proven by |
+| Outcome | Trigger | Wallet | Gateway observation | HTTP / JSON-RPC | Proven by |
 |---|---|---|---|---|---|
-| `success` | Tool returned a valid result; receipt committed | **Charged** | Yes | 200 | `test_governed_mcp_invoke_returns_receipt_and_replay_does_not_double_charge`, `test_governed_upstream_success_replays_without_second_debit_or_dispatch` |
-| `denied` | Permit, wallet-policy, recipient-domain, or human-approval denial — all evaluated **before money moves** | Never debited; reservation released | No | 403 / `-32003` | `test_frozen_wallet_denial_returns_receipt_and_replays_without_charge`, `test_out_of_scope_governed_mcp_denial_returns_receipt`, `test_rejected_approval_is_terminal_and_replays`, `test_upstream_permit_denials_never_charge_or_dispatch` |
-| `insufficient_funds` | The charge itself was refused (balance, child-wallet cap, daily limit) | Never debited; reservation released | No | 402 / `-32004` | `test_insufficient_funds_returns_receipt_and_replays_without_charge` |
-| `failed_refunded` | A **confirmed** failure: local tool raised; upstream returned `isError: true`; DNS/TLS/`initialize` failed before the dispatch checkpoint; charge refused on the upstream path; or a crash before dispatch, finalized by the reconciler | Debit refunded (or never taken). The receipt signs `credits_charged = 0`; the ledger separately proves the correlated refund | Upstream `isError` → yes; everything else → no | 500 or 502 / `-32006` (402/403 for refused charges) | `test_governed_tool_failure_returns_refunded_receipt`, `test_confirmed_upstream_failures_refund_and_replay_without_redispatch`, `test_charge_failure_is_immediately_signed_and_releases_remote_budget`, `test_crash_between_debit_and_dispatch_reconciles_refund` |
-| `delivery_uncertain` | The dispatch checkpoint was passed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | `test_ambiguous_or_rejected_upstream_response_stays_charged_and_replays`, `test_kill_between_dispatch_and_response_becomes_delivery_uncertain`, `test_stale_dispatched_becomes_charged_delivery_uncertain_without_retry`, `test_kill_after_remote_effect_never_redispatches_the_effect` |
-| `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape, reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence) | **Stays charged** | Yes — confirmed executed | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable` |
+| `success` | Tool returned a valid result; receipt committed | **Charged** | A valid response reached the gateway; the downstream effect is not independently proven | 200 | `test_governed_mcp_invoke_returns_receipt_and_replay_does_not_double_charge`, `test_governed_upstream_success_replays_without_second_debit_or_dispatch` |
+| `denied` | Permit, wallet-policy, recipient-domain, or human-approval denial — all evaluated **before money moves** | Never debited; reservation released | No gateway dispatch | 403 / `-32003` | `test_frozen_wallet_denial_returns_receipt_and_replays_without_charge`, `test_out_of_scope_governed_mcp_denial_returns_receipt`, `test_rejected_approval_is_terminal_and_replays`, `test_upstream_permit_denials_never_charge_or_dispatch` |
+| `insufficient_funds` | The charge itself was refused (balance, child-wallet cap, daily limit) | Never debited; reservation released | No gateway dispatch | 402 / `-32004` | `test_insufficient_funds_returns_receipt_and_replays_without_charge` |
+| `failed_refunded` | A **confirmed** failure: local tool raised; upstream returned `isError: true`; DNS/TLS/`initialize` failed before the remote dispatch claim; charge refused on the upstream path; or a crash before dispatch, finalized by the reconciler | Debit refunded (or never taken). The receipt signs `credits_charged = 0`; the ledger separately proves the correlated refund | An `isError` response may have reached the gateway; pre-claim cases were not dispatched; no downstream effect is independently proven | 500 or 502 / `-32006` (402/403 for refused charges) | Pre-claim failure, guarded completion, and reconciliation tests in `tests/test_mcp_upstream_governed.py`, `tests/test_mcp_dispatch_router_claim.py`, and `tests/test_mcp_dispatch_reconciliation.py` |
+| `delivery_uncertain` | The one-shot remote dispatch claim was committed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | Claim-contention, lost-commit-ack, reconciliation, and PostgreSQL process-kill cases |
+| `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape, reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence) | **Stays charged** | A response reached the gateway; the downstream effect is not independently proven | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable` |
 | `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
 
 Requests rejected before a valid permit and an executable tool are established
@@ -57,9 +60,9 @@ envelope.
 
 ## Why `delivery_uncertain` cannot be "fixed"
 
-The durable dispatch checkpoint is written immediately before the network
+The durable dispatch claim is written immediately before the network
 send (`before_dispatch` in `app/services/upstream_mcp.py`). Every failure
-**before** that checkpoint is provably non-delivered, so it is safe to refund
+**before** that claim is provably non-delivered, so it is safe to refund
 and sign `failed_refunded`. Every failure **after** it is inherently
 ambiguous: the upstream may or may not have executed, and no amount of gateway
 logic can find out. The design response is to *preserve the ambiguity
@@ -67,10 +70,9 @@ honestly* rather than guess:
 
 - the debit is retained and the receipt says so;
 - the server **never redispatches** — the HTTP transport is built with
-  `retries=0`, the adapter invokes the tool exactly once, the state machine
-  rejects any transition out of a terminal state, and the reconciler imports
-  no executor at all (`test_governed_upstream_conflicting_payload_reuse_never_redispatches`,
-  `test_confirmed_upstream_failures_refund_and_replay_without_redispatch`);
+  `retries=0`, the adapter invokes the tool exactly once, the claim transition
+  permits only one activation, terminal states are absorbing, and the
+  reconciler imports no executor at all;
 - resolution belongs to the caller and the upstream provider, using the
   forwarded idempotency metadata (below) and the signed evidence.
 
@@ -89,16 +91,18 @@ injected at each durable boundary in the tests named below.
 |---|---|---|---|
 | **A. after debit, before dispatch** (attempt `prepared`) | Stale-active sweep; the debit is found by its `operation_key` even if the crash preceded `attach_charge` | `failed_refunded` (`reconciled_stale_prepared`), signed receipt + audit, replay returns 502 | **Refunded**, budget released |
 | **A′. A, proved by an actual process kill** (worker killed the instant the debit commits, before `attach_charge`) | Stale-active sweep, after a real `SIGKILL` across two OS processes | `failed_refunded`; the orphaned debit is adopted by operation identity and the upstream is never contacted | **Refunded** exactly once, budget released |
-| **B. after dispatch, before response** (attempt `dispatched`) | Stale-active sweep | `delivery_uncertain`, signed receipt + audit, replay returns 504 | **Stays charged** |
-| **B′. B, proved by an actual process kill** (worker killed past the checkpoint, with and without a landed remote effect) | Stale-active sweep, after a real `SIGKILL` across two OS processes | `delivery_uncertain`; the upstream effect count never grows and the recovered evidence bundle verifies | **Stays charged**, reservation retained |
+| **B. after the claim, before a trustworthy response** (attempt `dispatch_claimed`) | Stale-active sweep after the fixed maximum-lifetime idle window | `delivery_uncertain`, signed receipt + audit, replay returns 504; no gateway redispatch | **Stays charged** |
+| **B′. B, with a landed remote effect** (attempt still `dispatch_claimed`) | Same stale-active sweep | `delivery_uncertain`; the gateway does not send again, but this record does not prove whether or how many downstream effects occurred | **Stays charged** |
 | **C. after the response, before the receipt commit** (attempt terminal, no receipt) | Terminal-without-receipt sweep; the stored canonical result is **re-hashed byte-exact** before reuse (`dispatch_stored_result_hash_mismatch` on any tamper) | The recorded terminal state is adopted and signed; a recorded `returned_error` completes its refund | Per the recorded state |
 | **D1. lost COMMIT ack on reserve+prepare** | Recovery re-read adopts only an invariant-identical `prepared` row | Same attempt id returned; no second reservation | Unchanged (`test_lost_commit_ack_recovery_no_double_charge`) |
-| **D2. lost ack on the final completion** (receipt exists, idempotency record empty) | Receipt-present / response-`NULL` sweep, which runs **before** the generic sweep | The replay record is rebuilt from the signed receipt; an existing `failed_refunded` receipt **blocks** a second budget release | Unchanged |
+| **D2. lost COMMIT ack on the dispatch claim** | Only the still-live activation whose generated hash matches the stored `dispatch_claim_hash` may adopt the committed claim | That activation may continue to one send; a fresh caller cannot acquire the claim | **Stays charged** if the claim later becomes ambiguous |
+| **D3. lost ack on the final completion** (receipt exists, idempotency record empty) | Receipt-present / response-`NULL` sweep, which runs **before** the generic sweep | The replay record is rebuilt from the signed receipt; an existing `failed_refunded` receipt **blocks** a second budget release | Unchanged |
 | **E. before any effect** (no attempt, no debit, no receipt) | Effect-free idempotency sweep | The record is deleted so the same key can genuinely retry. **Governed remote dispatch only** — the sweep is scoped to `operation_kind == "upstream_mcp"`, because a local tool's side-effect ordering is not observable to the reconciler. A local-path crash in the same window is held in progress rather than released, and the key cannot be reused until an operator intervenes. | Nothing ever moved |
 | **F. reserved, then died before charging** (budget reserved, no debit) | Permit budget reconciliation, but only once the permit can no longer admit a charge | The reservation is left in place on a still-active permit: a long-running call is indistinguishable from a dead one, so reclaiming early could let a concurrent request over-spend. It is reclaimed when the permit is revoked or expires. | **Nothing charged**; the agent can spend less than authorized, never more |
 
-Proven by `tests/test_mcp_dispatch_reconciliation.py` (each window has a named
-test — `test_crash_between_debit_and_dispatch_reconciles_refund`,
+The established pre-claim and terminal recovery behavior is covered by
+`tests/test_mcp_dispatch_reconciliation.py` (including
+`test_crash_between_debit_and_dispatch_reconciles_refund`,
 `test_kill_between_dispatch_and_response_becomes_delivery_uncertain`,
 `test_terminal_success_is_reconstructed_from_bounded_result`,
 `test_existing_receipt_missing_idempotency_completion_replays_full_result`,
@@ -109,6 +113,17 @@ which `test_kill_after_dispatch_checkpoint_is_charged_delivery_uncertain` and
 killing a real worker on either side of the remote effect, and
 `test_kill_between_debit_and_dispatch_refunds_without_dispatching` covers
 window A the same way, rather than by seeding the durable state in process.
+
+Focused state-machine and reconciliation tests cover the `dispatch_claimed`
+transition, hash ownership after a lost commit acknowledgement, claim
+contention, and the fixed stale window. The PostgreSQL process-kill harness
+covers the durable claim boundaries across independent workers.
+
+The reconciliation idle threshold is a fixed 11,430 seconds: enough for the
+maximum supported 600-second connection timeout, three maximum 3,600-second
+call phases, and cleanup margin. Using the global ceiling instead of each
+worker's current settings prevents a rollout with shorter timeouts from
+declaring an older worker's valid long-running call stale.
 
 Reconciliation itself is idempotent by construction: audit event ids are
 derived deterministically from the attempt id, refunds are keyed
@@ -143,6 +158,11 @@ Two non-terminal answers matter to clients:
   terminal result yet. Upstream calls wait a bounded window for the winner;
   local calls answer immediately. Retry the **same** key; do not mint a new
   one, because the original may already have had a side effect.
+  The claim fence also uses this response for an uncertain
+  preparation commit and for a losing dispatch claimant. That is an observable
+  correction from the earlier generic upstream-prepare failure on the rare
+  uncertain-commit path. REST returns `409`; JSON-RPC returns the retryable
+  `-32005` code.
 - **`idempotency_key_reused`** — the same key arrived with a *different*
   logical payload. Fail-closed; nothing is dispatched or charged
   (`test_governed_upstream_conflicting_payload_reuse_never_redispatches`).
@@ -172,10 +192,11 @@ and replay (`test_forged_resolved_reconciliation_without_refund_fails_closed`).
    probabilistic refund. The charge stands, the receipt says
    `delivery_uncertain`, and reconciliation with the upstream is the caller's
    and operator's job.
-2. **Remote exactly-once is not claimed.** The gateway forwards
+2. **Remote exactly-once and downstream-effect proof are not claimed.** The gateway forwards
    `io.agentmiddleware/invocation_id` and `io.agentmiddleware/idempotency_key`
    in the MCP call metadata; a remote side effect is exactly-once only if the
-   upstream honors them.
+   upstream honors them. `dispatch_claimed` proves only that the gateway
+   committed its one-shot send authority, not that the effect happened.
 3. **Crashed reservations on still-live permits are not reclaimed early.** A
    long-running call and a crashed one are indistinguishable from outside, so
    the reservation is conservatively held until the permit expires.
@@ -183,16 +204,21 @@ and replay (`test_forged_resolved_reconciliation_without_refund_fails_closed`).
    recovery.** With no persisted response there is nothing safe to
    reconstruct; the row is counted for review and the replay stays
    in-progress (`test_post_side_effect_crash_requires_review_without_redispatch`).
-5. **There is a blind window after a crash.** The reconciler first runs ~5
-   minutes after boot and sweeps rows older than `idle_seconds` (300), in
-   bounded batches; backlog is surfaced in `/health/dependencies` and the
-   operator dispatch summary rather than hidden.
+5. **There is a blind window after a crash.** The reconciler runs periodically
+   and sweeps rows only after the fixed 11,430-second idle window, in bounded
+   batches; backlog is surfaced in
+   `/health/dependencies` and the operator dispatch summary rather than hidden.
 6. **Crash proofs are boundary-instrumented.** Faults are injected at the
    durable commit points listed above — not at arbitrary instructions, not
    database failover, not multi-node HA (see PROOF_MATRIX).
 7. **Cross-process correctness is PostgreSQL's row locks.** The SQLite test
    path adds a process-local lock for determinism; it is not the
    correctness boundary.
+8. **The durable claim and send-state transitions are remote-only.** The
+   supporting operation-keyed billing transaction fence is shared by other
+   callers, but this slice does not change local-tool reservations, per-tool
+   call slots, quotes, human approvals, API-key/JWT authentication, or rate
+   limiting.
 
 ## Verify it yourself
 

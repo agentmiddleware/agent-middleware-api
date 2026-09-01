@@ -266,6 +266,9 @@ async def lifespan(app: FastAPI):
                 if settings.DATABASE_URL:
                     from .services.idempotency import get_idempotency_service
                     from .services.mcp_dispatch_attempts import (
+                        MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
+                        MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+                        dispatch_reconciliation_idle_seconds,
                         get_mcp_dispatch_attempt_service,
                     )
                     from .services.mcp_dispatch_reconciliation import (
@@ -273,9 +276,18 @@ async def lifespan(app: FastAPI):
                     )
                     from .services.permits import get_permit_service
 
+                    # Reconciliation uses the rollout-wide supported maximum,
+                    # not this worker's optional upstream settings. Dormant or
+                    # locally smaller timeout values cannot disable unrelated
+                    # permit/idempotency maintenance.
+                    dispatch_idle_seconds = dispatch_reconciliation_idle_seconds(
+                        connect_timeout_seconds=MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+                        call_timeout_seconds=MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
+                    )
                     dispatch_result = (
                         await get_mcp_dispatch_reconciliation_service().reconcile(
-                            idle_seconds=300
+                            idle_seconds=dispatch_idle_seconds,
+                            terminal_idle_seconds=300,
                         )
                     )
                     if dispatch_result.repaired:
@@ -302,7 +314,8 @@ async def lifespan(app: FastAPI):
 
                     dispatch_metrics = (
                         await get_mcp_dispatch_attempt_service().summarize(
-                            idle_seconds=300
+                            idle_seconds=dispatch_idle_seconds,
+                            terminal_idle_seconds=300,
                         )
                     )
                     uncertainty_count = dispatch_metrics.state_counts.get(

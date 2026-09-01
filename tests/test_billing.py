@@ -2323,8 +2323,7 @@ async def test_zero_daily_limit_blocks_spending_rather_than_unlocking_it(
     agent_wallet_id = agent_resp.json()["wallet_id"]
 
     charge_resp = await client.post(
-        f"/v1/billing/charge?wallet_id={agent_wallet_id}"
-        "&service=agent_comms&units=1",
+        f"/v1/billing/charge?wallet_id={agent_wallet_id}&service=agent_comms&units=1",
         headers=api_headers,
     )
     assert charge_resp.status_code == 402, (
@@ -2380,29 +2379,23 @@ def test_register_local_derives_an_input_schema_alongside_an_output_model() -> N
 async def test_losing_an_operation_key_race_does_not_leave_velocity_overcounted(
     client, api_headers
 ):
-    """A charge that loses the idempotency race must give back its velocity.
+    """A blinded debit read cannot bypass the durable operation checkpoint.
 
-    The velocity monitor records a charge in its own transaction, before the
-    billing transaction takes the wallet lock. When the ledger insert then
-    violates the wallet/operation-key uniqueness constraint, the billing
-    transaction rolls back -- but that already-committed increment does not go
-    with it. The loser adopts the winner's durable debit and returns it as a
-    successful idempotent replay, so one charge ends up counted twice against
-    the caller's hourly and daily spend.
-
-    That is not a cosmetic metric: those counters are what the spend cap and
-    the anomaly auto-freeze are measured against, so the wallet is eventually
-    throttled and frozen for money it never spent.
-
-    The race is reproduced deterministically by having the winner's debit land
-    during the exact window the loser is exposed to -- after its duplicate
-    pre-check, before its own insert.
+    Governed velocity now shares the billing transaction and runs only after
+    the idempotency checkpoint and dispatch fence are validated. If a stale
+    reader misses the winner's ledger row while the operation record already
+    names it, the checkpoint conflict rejects that reader before it can mutate
+    velocity or any other wallet control state. This keeps one logical charge
+    counted exactly once without relying on after-the-fact compensation.
     """
 
     from app.db.models import IdempotencyRecordModel
     from app.schemas.billing import ServiceCategory
     from app.services import billing_engine as billing_engine_module
-    from app.services.billing_engine import BillingEngine
+    from app.services.billing_engine import (
+        BillingEngine,
+        LedgerOperationConflictError,
+    )
 
     sponsor_resp = await client.post(
         "/v1/billing/wallets/sponsor",
@@ -2440,21 +2433,37 @@ async def test_losing_an_operation_key_race_does_not_leave_velocity_overcounted(
 
     # The winner: an ordinary charge under the same operation key.
     winner = await money.charge(**charge_kwargs)
+    assert hasattr(winner, "entry_id")
 
     async with session_factory() as session:
         wallet = await session.get(WalletModel, wallet_id)
-        spent_after_winner = (wallet.hourly_spent, wallet.daily_spent)
+        operation_record = await session.get(IdempotencyRecordModel, operation_key)
+        assert wallet is not None
+        assert operation_record is not None
+        assert operation_record.ledger_entry_id == winner.entry_id
+        wallet_after_winner = {
+            field: getattr(wallet, field)
+            for field in (
+                "balance",
+                "lifetime_debits",
+                "hourly_spent",
+                "daily_spent",
+                "last_charge_at",
+                "hourly_reset_at",
+                "daily_reset_at",
+                "velocity_alerts_triggered",
+                "status",
+            )
+        }
 
-    # The loser: force it past its own duplicate pre-check so it reaches the
-    # insert and collides, which is the window the bug lives in.
+    # Simulate a stale ledger read while retaining the authoritative checkpoint.
     real_get_operation_debit = BillingEngine._get_operation_debit
     calls = {"n": 0}
 
     async def _blind_first_precheck(session, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            # Stand in for the winner's row not being visible yet: this is the
-            # window between the loser's pre-check and its own insert.
+            # Stand in for the winner's ledger row not being visible yet.
             return None
         return await real_get_operation_debit(session, **kwargs)
 
@@ -2465,18 +2474,35 @@ async def test_losing_an_operation_key_race_does_not_leave_velocity_overcounted(
         staticmethod(_blind_first_precheck),
     )
     try:
-        loser = await money.charge(**charge_kwargs)
+        with pytest.raises(
+            LedgerOperationConflictError,
+            match="ledger_operation_checkpoint_conflict",
+        ):
+            await money.charge(**charge_kwargs)
     finally:
         monkeypatch.undo()
 
-    # The loser adopted the winner's debit rather than writing a second one.
-    assert loser.entry_id == winner.entry_id
+    assert calls["n"] == 1
 
     async with session_factory() as session:
         wallet = await session.get(WalletModel, wallet_id)
-        spent_after_loser = (wallet.hourly_spent, wallet.daily_spent)
+        assert wallet is not None
+        wallet_after_loser = {
+            field: getattr(wallet, field) for field in wallet_after_winner
+        }
+        operation_debits = list(
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(
+                        LedgerEntryModel.wallet_id == wallet_id,
+                        LedgerEntryModel.operation_key == operation_key,
+                        LedgerEntryModel.action == "debit",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-    assert spent_after_loser == spent_after_winner, (
-        "the losing attempt's velocity increment survived its rollback: "
-        f"{spent_after_winner} -> {spent_after_loser} for one charge"
-    )
+    assert wallet_after_loser == wallet_after_winner
+    assert [entry.entry_id for entry in operation_debits] == [winner.entry_id]

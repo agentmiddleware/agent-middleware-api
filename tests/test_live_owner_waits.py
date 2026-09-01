@@ -1,28 +1,37 @@
-"""Test that live PREPARED/DISPATCHED attempts with running owners wait, not steal.
+"""Test that live prepared/claimed attempts with running owners wait, not steal.
 
-This verifies the 300s staleness rule: attempts that are fresh (<300s since
-last update) are assumed to have live owners and must not be stolen by
-concurrent requests. Only truly stale attempts (>300s idle) are reconciled.
+Attempts inside the globally conservative reconciliation window are assumed to
+have live owners and must not be stolen by concurrent requests. Only attempts
+idle beyond that fixed window are reconciled.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import update as sa_update
 
+from app.core.config import get_settings
+from app.core.time import utc_now
 from app.db.database import get_session_factory
+from app.db.models import McpDispatchAttemptModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import get_agent_money
 from app.services.idempotency import IdempotencyInProgressError, get_idempotency_service
 from app.services.mcp_dispatch_attempts import (
-    DISPATCH_DISPATCHED,
+    DISPATCH_CLAIMED,
     DISPATCH_PREPARED,
+    dispatch_reconciliation_idle_seconds,
     get_mcp_dispatch_attempt_service,
+)
+from app.services.mcp_dispatch_reconciliation import (
+    get_mcp_dispatch_reconciliation_service,
 )
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
@@ -58,11 +67,11 @@ async def test_live_prepared_attempt_waits_not_steal(
     clean_database,
 ) -> None:
     """A live PREPARED attempt with a running owner must wait, not be stolen.
-    
+
     Scenario: First request creates PREPARED attempt and is processing.
     Second concurrent request with same idempotency key arrives while first
-    is still in PREPARED state (<300s old). Second request must wait for
-    first to complete, not steal/reconcile the PREPARED attempt.
+    is still inside the global idle window. It must wait for the
+    first request instead of stealing or reconciling the attempt.
     """
     tool_name = f"live-prepared-{uuid.uuid4().hex[:8]}"
     executor = PausedUpstreamExecutor()
@@ -140,9 +149,9 @@ async def test_live_prepared_attempt_waits_not_steal(
         # Verify attempt is still PREPARED (not stolen/reconciled)
         factory = get_session_factory()
         async with factory() as session:
-            from app.db.models import McpDispatchAttemptModel
-
-            fresh_attempt = await session.get(McpDispatchAttemptModel, attempt.attempt_id)
+            fresh_attempt = await session.get(
+                McpDispatchAttemptModel, attempt.attempt_id
+            )
             assert fresh_attempt is not None
             assert fresh_attempt.state == DISPATCH_PREPARED
 
@@ -150,18 +159,32 @@ async def test_live_prepared_attempt_waits_not_steal(
         registry.unregister_local(tool_name)
 
 
+@pytest.mark.parametrize(
+    ("attempt_age_seconds", "call_timeout_seconds"),
+    [(2, 30), (301, 600)],
+    ids=["default-window", "long-timeout-window"],
+)
 @pytest.mark.anyio
-async def test_live_dispatched_older_than_1s_waits_not_steal(
+async def test_live_claimed_attempt_inside_global_idle_window_waits_not_steal(
     client: AsyncClient,
     clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+    attempt_age_seconds: int,
+    call_timeout_seconds: float,
 ) -> None:
-    """A live DISPATCHED attempt >1s old with a running owner must wait, not be stolen.
-    
-    Scenario: First request creates DISPATCHED attempt and is processing (slowly).
-    Attempt is >1 second old but <300s (the staleness threshold). Second concurrent
-    request arrives and must wait for first to complete, not steal the DISPATCHED
-    attempt just because it's >1s old. Only >300s is considered stale/abandoned.
-    """
+    """A claimed attempt inside the fixed maximum-lifetime window stays live."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS", 5.0)
+    monkeypatch.setattr(
+        settings,
+        "MCP_UPSTREAM_CALL_TIMEOUT_SECONDS",
+        call_timeout_seconds,
+    )
+    idle_seconds = dispatch_reconciliation_idle_seconds(
+        connect_timeout_seconds=settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+        call_timeout_seconds=settings.MCP_UPSTREAM_CALL_TIMEOUT_SECONDS,
+    )
+    assert attempt_age_seconds < idle_seconds
     tool_name = f"live-dispatched-{uuid.uuid4().hex[:8]}"
     executor = PausedUpstreamExecutor()
     registry = get_service_registry()
@@ -209,7 +232,7 @@ async def test_live_dispatched_older_than_1s_waits_not_steal(
 
         dispatch = get_mcp_dispatch_attempt_service()
         money = get_agent_money()
-        
+
         validation, attempt = await dispatch.authorize_reserve_and_prepare(
             idempotency_record_id=begun.record_id,
             wallet_id=provisioned["agent_wallet_id"],
@@ -230,7 +253,8 @@ async def test_live_dispatched_older_than_1s_waits_not_steal(
         charge = await money.charge(
             wallet_id=provisioned["agent_wallet_id"],
             service_category=ServiceCategory.AGENT_COMMS,
-            units=Decimal("1") / Decimal("1.5"),  # AGENT_COMMS pricing is 1.5 credits/unit
+            units=Decimal("1")
+            / Decimal("1.5"),  # AGENT_COMMS pricing is 1.5 credits/unit
             request_path="/test",
             operation_key=begun.record_id,
         )
@@ -240,15 +264,22 @@ async def test_live_dispatched_older_than_1s_waits_not_steal(
             credits_charged=Decimal("1"),
         )
 
-        # Mark as dispatched
-        attempt = await dispatch.mark_dispatched(attempt.attempt_id)
-        assert attempt.state == DISPATCH_DISPATCHED
+        # Claim the one-shot send right.
+        attempt = await dispatch.claim_dispatch(attempt.attempt_id)
+        assert attempt.state == DISPATCH_CLAIMED
 
-        # Wait >1 second to make attempt appear "old" (but still <300s, so not stale)
-        await asyncio.sleep(1.1)
+        backdated = utc_now() - timedelta(seconds=attempt_age_seconds)
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(
+                sa_update(McpDispatchAttemptModel)
+                .where(McpDispatchAttemptModel.attempt_id == attempt.attempt_id)
+                .values(updated_at=backdated)
+            )
+            await session.commit()
 
         # Second concurrent request arrives while first is still processing
-        # Attempt is >1s old but <300s, so it's live, not stale
+        # and the global idle window still considers the owner live.
         # Should raise IdempotencyInProgressError (wait_timeout=0), not steal
         with pytest.raises(IdempotencyInProgressError) as exc_info:
             await idem.begin_with_record(
@@ -260,14 +291,18 @@ async def test_live_dispatched_older_than_1s_waits_not_steal(
             )
         assert "idempotency_in_progress" in str(exc_info.value)
 
-        # Verify attempt is still DISPATCHED (not stolen/reconciled to delivery_uncertain)
-        factory = get_session_factory()
-        async with factory() as session:
-            from app.db.models import McpDispatchAttemptModel
+        await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+            attempt.attempt_id,
+            idle_seconds=idle_seconds,
+        )
 
-            fresh_attempt = await session.get(McpDispatchAttemptModel, attempt.attempt_id)
+        # Verify the live claim was not stolen or reconciled to uncertainty.
+        async with factory() as session:
+            fresh_attempt = await session.get(
+                McpDispatchAttemptModel, attempt.attempt_id
+            )
             assert fresh_attempt is not None
-            assert fresh_attempt.state == DISPATCH_DISPATCHED
+            assert fresh_attempt.state == DISPATCH_CLAIMED
 
     finally:
         registry.unregister_local(tool_name)

@@ -81,16 +81,30 @@ one:
 > the configured upstream MCP tool** and **at most one** ledger debit, linked by
 > a single persisted chain, with a receipt on every path that finalizes or
 > reconciles — and, on that same upstream path, a genuinely ambiguous
-> post-dispatch outcome becomes a distinct receipted state rather than a silent
-> redispatch.
+> outcome after the durable send claim becomes a distinct receipted state
+> rather than a silent redispatch.
 
 Two qualifications that must travel with that sentence.
 
 **Scope it to the upstream path.** The dispatch state machine
-(`prepared → dispatched → {succeeded, returned_error, delivery_uncertain,
-response_rejected}`) covers the **configured upstream MCP tool**. Local governed
-tools have no attempt row and no ambiguous state; a crash there fails closed into
-manual review. Say "for the configured upstream tool" — `README.md` already does.
+(`prepared → dispatch_claimed → {succeeded, returned_error,
+delivery_uncertain, response_rejected}`) covers the **configured upstream MCP
+tool**. Immediately before the network send, one nullable
+`dispatch_claim_hash` stores the process-local activation's one-shot claim. A
+historical `dispatched` row is treated as already sent, never as an available
+claim. Once either sent state is durable, a missing trustworthy result becomes
+ambiguous and the gateway does not redispatch.
+
+Local governed tools have no attempt row and no ambiguous state; a crash there
+fails closed into manual review. The claim fence does not change local-tool
+execution or reservations, per-tool call slots, quotes, human approval,
+API-key/JWT authentication, or rate limiting. Say "for the configured upstream
+tool" — `README.md` already does.
+
+**Verification boundary for this release slice:** focused state-machine,
+reconciliation, migration, and PostgreSQL process-kill tests cover the
+claim-before-send fence. They do not establish that a deployment is current or
+that any downstream effect occurred.
 
 **The signature adds the binding, not the evidence.** For the configured
 upstream tool, the receipt's Ed25519 signature covers the ledger entry, the
@@ -221,6 +235,7 @@ Agent-executable remediation of known spine/discovery/deploy debt:
 - Full autonomous economic actor infrastructure.
 - Universal policy enforcement across every agent framework.
 - Distributed exactly-once side effects in arbitrary upstream MCP servers.
+- Proof that a durable gateway dispatch claim caused any downstream effect.
 - Quotes as a pricing or settlement product. A quote fixes what this gateway
   will debit from an internal wallet for one call; it is not a market price, a
   vendor commitment, or an invoice.

@@ -26,6 +26,7 @@ from ..db.models import (
     BillingAlertModel,
     IdempotencyRecordModel,
     LedgerEntryModel,
+    McpDispatchAttemptModel,
     ServiceRegistryModel,
     WalletModel,
 )
@@ -664,14 +665,18 @@ class BillingEngine:
                 raise ValueError("invalid_ledger_operation_key")
 
         velocity_monitor = get_velocity_monitor()
-        # Hoisted out of the transaction below so the recovery path can still
-        # see which increment it owes a reversal for. None until the monitor
-        # has actually committed one.
+        # Only standalone velocity commits outside the billing transaction.
+        # Hoist its period markers so an exception can compensate that one
+        # external increment from a fresh transaction. Governed velocity uses
+        # the billing session and therefore rolls back with the debit.
         recorded_velocity: tuple[datetime | None, datetime | None] | None = None
+        velocity_period: tuple[datetime | None, datetime | None] = (None, None)
+        notify_governed_freeze = False
 
         try:
             async with self._session_factory()() as session:
                 async with session.begin():
+                    dispatch_attempt = None
                     if operation_key is not None:
                         # The idempotency record is the durable lock for this
                         # governed financial operation. Holding it across the
@@ -691,7 +696,7 @@ class BillingEngine:
                                         IdempotencyRecordModel.wallet_id == wallet_id,
                                     ),
                                 )
-                                .with_for_update()
+                                .with_for_update(key_share=True)
                             )
                         ).scalar_one_or_none()
                         if operation_record is None:
@@ -701,6 +706,13 @@ class BillingEngine:
                             wallet_id=wallet_id,
                             operation_key=operation_key,
                         )
+                        if (
+                            existing_entry is None
+                            and operation_record.ledger_entry_id is not None
+                        ):
+                            raise LedgerOperationConflictError(
+                                "ledger_operation_checkpoint_conflict"
+                            )
                         if existing_entry is not None:
                             self._assert_operation_debit_matches(
                                 existing_entry,
@@ -710,17 +722,97 @@ class BillingEngine:
                                 charge_amount=charge_amount,
                                 request_path=request_path,
                             )
+                            if operation_record.ledger_entry_id not in {
+                                None,
+                                existing_entry.entry_id,
+                            }:
+                                raise LedgerOperationConflictError(
+                                    "ledger_operation_checkpoint_conflict"
+                                )
+                            operation_record.ledger_entry_id = existing_entry.entry_id
+                            session.add(operation_record)
                             return ledger_entry_model_to_schema(existing_entry)
 
-                    velocity = await velocity_monitor.check_and_record_charge(
-                        wallet_id, charge_amount
-                    )
-                    recorded_velocity = (
+                        dispatch_attempt = (
+                            await session.execute(
+                                select(McpDispatchAttemptModel).where(
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.idempotency_record_id
+                                        == operation_key,
+                                    ),
+                                    cast(
+                                        ColumnElement[bool],
+                                        McpDispatchAttemptModel.wallet_id == wallet_id,
+                                    ),
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if dispatch_attempt is not None and (
+                            dispatch_attempt.state != "prepared"
+                            or dispatch_attempt.dispatch_claim_hash is not None
+                            or dispatch_attempt.dispatched_at is not None
+                            or dispatch_attempt.ledger_entry_id is not None
+                        ):
+                            raise LedgerOperationConflictError(
+                                "ledger_operation_dispatch_unavailable"
+                            )
+
+                    if dispatch_attempt is not None:
+                        # Share the attempt write lock with pre-dispatch cleanup
+                        # through the debit commit. Governed velocity uses this
+                        # same session, so SQLite does not open a second writer
+                        # while the fence is held.
+                        fenced = await session.execute(
+                            sa_update(McpDispatchAttemptModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    McpDispatchAttemptModel.attempt_id
+                                    == dispatch_attempt.attempt_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    McpDispatchAttemptModel.state == "prepared",
+                                ),
+                                cast(
+                                    Any, McpDispatchAttemptModel.dispatch_claim_hash
+                                ).is_(None),
+                                cast(Any, McpDispatchAttemptModel.dispatched_at).is_(
+                                    None
+                                ),
+                                cast(Any, McpDispatchAttemptModel.ledger_entry_id).is_(
+                                    None
+                                ),
+                            )
+                            .values(state="prepared")
+                            .execution_options(synchronize_session=False)
+                        )
+                        if cast(Any, fenced).rowcount != 1:
+                            raise LedgerOperationConflictError(
+                                "ledger_operation_dispatch_unavailable"
+                            )
+
+                    if operation_key is not None:
+                        velocity = await velocity_monitor.check_and_record_charge(
+                            wallet_id,
+                            charge_amount,
+                            session=session,
+                        )
+                        notify_governed_freeze = velocity.should_freeze
+                    else:
+                        velocity = await velocity_monitor.check_and_record_charge(
+                            wallet_id,
+                            charge_amount,
+                        )
+                    velocity_period = (
                         getattr(velocity, "hourly_reset_at", None),
                         getattr(velocity, "daily_reset_at", None),
                     )
+                    if operation_key is None:
+                        recorded_velocity = velocity_period
 
-                    return await self._apply_charge_to_locked_wallet(
+                    charge = await self._apply_charge_to_locked_wallet(
                         session,
                         wallet_id=wallet_id,
                         service_category=service_category,
@@ -735,16 +827,21 @@ class BillingEngine:
                         operation_key=operation_key,
                         # Which period the increment landed in, so a reversal
                         # cannot decrement a later one.
-                        velocity_hourly_reset_at=recorded_velocity[0],
-                        velocity_daily_reset_at=recorded_velocity[1],
+                        velocity_hourly_reset_at=velocity_period[0],
+                        velocity_daily_reset_at=velocity_period[1],
                     )
+                    if operation_key is not None and isinstance(charge, LedgerEntry):
+                        assert operation_record is not None
+                        operation_record.ledger_entry_id = charge.entry_id
+                        session.add(operation_record)
+            if notify_governed_freeze:
+                await velocity_monitor.notify_committed_freeze(wallet_id)
+            return charge
         except IntegrityError:
-            # The monitor committed this attempt's increment in its own
-            # transaction, before the one that just rolled back, so it survived
-            # that rollback and is now counting spend that produced no debit.
-            # Reverse it before deciding what to return: whether this attempt
-            # adopts the winner's durable debit or re-raises, its own increment
-            # was spurious either way. The winner recorded its own.
+            # Standalone velocity committed before the transaction that just
+            # rolled back, so its increment survived without a debit. Governed
+            # velocity shares the rolled-back transaction and records no
+            # external compensation marker.
             await self._reverse_recorded_velocity(
                 wallet_id=wallet_id,
                 amount=charge_amount,
@@ -755,28 +852,57 @@ class BillingEngine:
             # The unique wallet/operation-key constraint is the final guard if
             # a non-service writer raced the locked governed path. The failed
             # transaction rolled back its balance mutation; adopt only an
-            # invariant-equivalent durable debit.
+            # invariant-equivalent durable debit, and restore the idempotency
+            # checkpoint in the same recovery transaction.
             async with self._session_factory()() as recovery_session:
-                existing_entry = await self._get_operation_debit(
-                    recovery_session,
-                    wallet_id=wallet_id,
-                    operation_key=operation_key,
-                )
-                if existing_entry is None:
-                    raise
-                self._assert_operation_debit_matches(
-                    existing_entry,
-                    wallet_id=wallet_id,
-                    operation_key=operation_key,
-                    service_category=service_category,
-                    charge_amount=charge_amount,
-                    request_path=request_path,
-                )
+                async with recovery_session.begin():
+                    operation_record = (
+                        await recovery_session.execute(
+                            select(IdempotencyRecordModel)
+                            .where(
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.record_id == operation_key,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    IdempotencyRecordModel.wallet_id == wallet_id,
+                                ),
+                            )
+                            .with_for_update(key_share=True)
+                        )
+                    ).scalar_one_or_none()
+                    if operation_record is None:
+                        raise ValueError("ledger_operation_record_not_found")
+                    existing_entry = await self._get_operation_debit(
+                        recovery_session,
+                        wallet_id=wallet_id,
+                        operation_key=operation_key,
+                    )
+                    if existing_entry is None:
+                        raise
+                    self._assert_operation_debit_matches(
+                        existing_entry,
+                        wallet_id=wallet_id,
+                        operation_key=operation_key,
+                        service_category=service_category,
+                        charge_amount=charge_amount,
+                        request_path=request_path,
+                    )
+                    if operation_record.ledger_entry_id not in {
+                        None,
+                        existing_entry.entry_id,
+                    }:
+                        raise LedgerOperationConflictError(
+                            "ledger_operation_checkpoint_conflict"
+                        )
+                    operation_record.ledger_entry_id = existing_entry.entry_id
+                    recovery_session.add(operation_record)
                 return ledger_entry_model_to_schema(existing_entry)
         except Exception:
-            # Same debt on every other way out after the increment landed --
-            # a conflict raised by the ledger writer, a database error mid
-            # flush. No-ops when the increment never happened.
+            # Same debt on every other standalone path after its external
+            # increment landed. No-op for governed velocity because it rolled
+            # back with this transaction.
             await self._reverse_recorded_velocity(
                 wallet_id=wallet_id,
                 amount=charge_amount,
@@ -923,9 +1049,7 @@ class BillingEngine:
                 await session.execute(
                     sa_update(WalletModel)
                     .where(
-                        cast(
-                            ColumnElement[bool], WalletModel.wallet_id == wallet_id
-                        )
+                        cast(ColumnElement[bool], WalletModel.wallet_id == wallet_id)
                     )
                     .values(**refund_values)
                     .execution_options(synchronize_session=False)

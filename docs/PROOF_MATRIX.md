@@ -87,9 +87,13 @@ make prove-crash-recovery
 ```
 
 This starts two independent Uvicorn worker processes against one shared
-PostgreSQL database and injects faults at durable commit boundaries. It proves
-six things — the first three on the local execution path, the last three on
-the governed *remote* dispatch path:
+PostgreSQL database and injects faults at durable commit boundaries. The
+established harness covers six scenarios — the first three on the local
+execution path, the last three on the governed *remote* dispatch path. The
+claim-before-send release changes the boundary exercised by remote scenarios 4
+and 5 from `dispatched` to `dispatch_claimed`. The harness also exercises a
+claim committed before any send and an acknowledged remote response lost before
+the terminal gateway commit.
 
 1. **Concurrent invokes serialize.** While worker A is paused mid-side-effect,
    an identical invoke on worker B receives `idempotency_in_progress`. After
@@ -104,19 +108,20 @@ the governed *remote* dispatch path:
    untouched and reports it in its `needs_review` count rather than repairing
    it, replay stays `idempotency_in_progress`, and nothing is redispatched
    automatically.
-4. **A kill past the dispatch checkpoint is charged and signed ambiguous.** The
-   worker is killed after the durable `prepared -> dispatched` transition but
-   before the remote effect runs. No effect actually landed, and the trust
-   plane still cannot prove that, so reconciliation terminalizes the attempt as
-   `delivery_uncertain`: the charge is retained, no refund is issued, the permit
-   reservation stands, and the signed receipt records the ambiguity.
-5. **A kill after the remote effect never redispatches it.** The worker is
+4. **A kill past the one-shot dispatch claim is charged and signed
+   ambiguous.** The worker is killed after the durable `prepared ->
+   dispatch_claimed` transition but before the network send. A test observer
+   may know no effect landed; a restarted gateway cannot prove that fact, so
+   reconciliation must terminalize the attempt as `delivery_uncertain`, retain
+   the charge, and never redispatch it.
+5. **A kill after the remote effect never causes a gateway redispatch.** The worker is
    killed once the remote effect is durable but before any terminal result is
    recorded. Reconciliation terminalizes the attempt as `delivery_uncertain`
    and the upstream side-effect count stays at exactly one — the effects table
    permits duplicates on purpose, so a redispatch would be visible as a second
-   row rather than hidden by a constraint.
-6. **A kill before the checkpoint is refunded, not held.** The worker is killed
+   row rather than hidden by a constraint. This harness observation does not
+   turn the gateway's claim record into general proof of the downstream effect.
+6. **A kill before the claim is refunded, not held.** The worker is killed
    immediately after the debit commits, while the attempt is still `prepared`
    and does not yet name the ledger entry that paid for it. Nothing crossed the
    dispatch boundary, so this is the one post-charge crash the plane can resolve
@@ -131,10 +136,10 @@ review, because the gateway cannot know whether the effect landed. Describing
 this proof as "crash recovery" without that qualifier overstates it; the
 accurate framing is **crash consistency with reconciliation, and fail-closed
 review for ambiguous outcomes**. (4), (5), and (6) are the governed remote path's
-answer to the same question: there the durable dispatch state machine can tell
-the cases apart. A crash before the checkpoint is provably non-delivered and is
-refunded; a crash after it is unknowable and terminalizes into
-`delivery_uncertain` instead of waiting for a human — and neither redispatches.
+   answer to the same question: there the durable dispatch state machine can tell
+   the cases apart. A crash before the claim is provably non-delivered and is
+   refunded; a crash after it is unknowable and terminalizes into
+   `delivery_uncertain` instead of waiting for a human — and neither redispatches.
 
 Alongside those six narrative scenarios, a table-driven boundary suite kills a
 worker at each of the seven remaining instrumented commit boundaries and pins
@@ -146,7 +151,7 @@ reservation stranded before any charge stays stranded on a live permit, because
 reclaiming it early could let a concurrent request over-spend. Both were
 verified against the code rather than inferred from the observed behaviour.
 
-All three remote-path proofs additionally rebuild the full evidence bundle for the
+The established remote-path proofs additionally rebuild the full evidence bundle for the
 recovered receipt and require every check to pass, so the claim is that the
 recovered evidence *verifies*, not merely that a receipt row exists. Each also
 re-runs reconciliation and asserts the second sweep is a no-op, and replays the
@@ -160,19 +165,36 @@ so two runs cannot overlap. Without the opt-in environment variables it skips,
 so it never interferes with `make test`.
 
 CI runs these in the `postgres_permit_concurrency` job, as two steps against
-one PostgreSQL service: the **13** crash-consistency tests in
-`tests/test_mcp_postgres_multiprocess.py`, then the **11** row-lock
+one PostgreSQL service: **15** crash/reconciliation cases plus **one**
+fixture-saturation guard in `tests/test_mcp_postgres_multiprocess.py`, then the **17** row-lock
 concurrency tests in `tests/test_permit_postgres_concurrency.py`. That job
 installs dependencies with `pip` rather than `uv`, so its step is spelled
 inline; the Make target is the operator-facing equivalent, not a literal
 copy of the CI step.
+
+### Claim-fence evidence
+
+The remote fence adds one nullable `dispatch_claim_hash`, the
+`dispatch_claimed` state, lost-commit-ack ownership by the still-live claiming
+activation, and a reconciliation idle threshold derived from the globally
+supported connection and tool-call timeout ceilings. The fixed 11,430-second
+window does not shrink across workers with different local settings. Focused
+claim-contention, stale-boundary, migration, and PostgreSQL process-kill cases
+exercise those gateway invariants. Normal release gates remain mandatory for
+every proposed merge.
+
+The durable claim and send-state transitions are limited to the configured
+remote upstream path. The supporting operation-keyed billing transaction fence
+is shared by other callers, but this delta does not change local reservations,
+per-tool call slots, quotes, human approvals, API-key/JWT authentication, or
+rate limiting.
 
 ## Release gates
 
 | Command | Enforces |
 |---|---|
 | `make trust-coverage-gate` | 24 focused trust test files at an **80% coverage floor** across 22 named trust-plane control modules |
-| `make trust-release-gate` | The offline Railway IaC contract first (lock-pinned package install with lifecycle scripts disabled, then fail-closed API-only graph validation), followed by the 13-file trust suite including `tests/test_adversarial_five_claims.py`, coverage, demo, discovery-drift, committed-OpenAPI, and simulation-inventory gates |
+| `make trust-release-gate` | The offline Railway IaC contract first (lock-pinned package install with lifecycle scripts disabled, then fail-closed API-only graph validation), followed by the 18-file trust suite including the focused claim/migration/debit regressions and `tests/test_adversarial_five_claims.py`, coverage, demo, discovery-drift, committed-OpenAPI, and simulation-inventory gates |
 
 CI runs `scripts/trust_release_gate.sh` as a dedicated required check
 (`trust_release_gate`) so `main` cannot advance past an unproven claim; the
@@ -219,12 +241,17 @@ exercise over-spend containment.
 Being explicit about the boundary is what makes the proofs worth anything.
 
 - **Exactly-once is gateway-scoped.** A remote tool's side effect is exactly
-  once only if that tool honors the forwarded idempotency key. A post-dispatch
-  transport failure is signed `delivery_uncertain`, stays charged, and is never
+  once only if that tool honors the forwarded idempotency key. A missing
+  trustworthy result after the durable send claim is signed
+  `delivery_uncertain`, stays charged, and is never
   automatically retried or refunded. The gateway-scoped half of that — no
-  redispatch after ambiguity, charge retained, evidence verifiable — is proved
-  by a real process kill in `make prove-crash-recovery`; the downstream half
-  remains the tool's responsibility and is not proved here.
+  redispatch after ambiguity, charge retained, evidence verifiable — is covered
+  by the process-kill suite, including the `dispatch_claimed` boundaries. The
+  downstream half remains the tool's responsibility and is not proved here.
+- **A durable claim is not downstream-effect proof.** `dispatch_claimed`
+  establishes that one gateway activation owns the one-shot send boundary. It
+  does not establish that a request reached the upstream, that an effect
+  occurred, or that the upstream applied the effect only once.
 - **Audit chains are tamper-evident, not immutable.** An administrator who can
   alter both the database and its chain metadata is inside the trust boundary.
   Append-only storage and external anchoring are not implemented.
@@ -257,11 +284,10 @@ Being explicit about the boundary is what makes the proofs worth anything.
 - **The crash proof covers instrumented boundaries, not arbitrary failure.**
   Faults are injected at specific durable commit points. It does not prove
   survival of a kill at an arbitrary instruction, database crash or failover,
-  or multi-node high availability. All twelve instrumented fault points are now
-  reached by a test: five by the narrative scenarios above, and the remaining
-  seven by a table-driven boundary suite that pins the disposition a kill at
-  each commit boundary must leave. What is still not proven is a kill at an
-  *arbitrary* instruction — only at the instrumented boundaries.
+  or multi-node high availability. The harness exposes fourteen instrumented
+  fault points and maps each to a targeted case, including two PostgreSQL
+  claim-boundary cases. What is still not proven is a kill at an *arbitrary*
+  instruction — only at the instrumented boundaries.
 - **`make prove-trust-plane` runs on SQLite with a hardcoded demo signing
   seed.** It proves the logic, not the production posture. No target re-runs
   these assertions against PostgreSQL — see the defect note above. PostgreSQL

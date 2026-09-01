@@ -6,7 +6,7 @@ installs process-local gates around the production commit boundaries.  No
 test-only hooks are imported by the normal application.
 
 The upstream tool exists so the remote governed dispatch state machine
-(``prepared -> dispatched -> delivery_uncertain``) is exercised by a real
+(``prepared -> dispatch_claimed -> delivery_uncertain``) is exercised by a real
 process kill rather than by seeding its durable states in-process.  Its
 side-effect table is deliberately duplicate-tolerant: a redispatch after
 ambiguity must be observable as a second row, never hidden by a constraint.
@@ -32,6 +32,7 @@ from app.routers import mcp as mcp_router
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import AgentMoney
 from app.services.idempotency import IdempotencyService, get_idempotency_service
+from app.services.mcp_dispatch_attempts import McpDispatchAttemptService
 from app.services.mcp_dispatch_reconciliation import (
     get_mcp_dispatch_reconciliation_service,
 )
@@ -91,6 +92,8 @@ def _install_fault_wrappers() -> None:
     original_begin_with_record = IdempotencyService.begin_with_record
     original_complete = IdempotencyService.complete
     original_mark_charged = IdempotencyService.mark_charged
+    original_claim_dispatch = McpDispatchAttemptService.claim_dispatch
+    original_complete_dispatch = McpDispatchAttemptService.complete
     original_authorize_and_reserve = PermitService.authorize_and_reserve
     original_charge = AgentMoney.charge
     original_create_receipt = ReceiptService.create_receipt
@@ -123,6 +126,26 @@ def _install_fault_wrappers() -> None:
             ledger_entry_id=kwargs.get("ledger_entry_id"),
         )
         return result
+
+    async def claim_dispatch(
+        self: McpDispatchAttemptService, *args: Any, **kwargs: Any
+    ) -> Any:
+        result = await original_claim_dispatch(self, *args, **kwargs)
+        _fault(
+            "after_dispatch_claim",
+            attempt_id=getattr(result, "attempt_id", None),
+        )
+        return result
+
+    async def complete_dispatch(
+        self: McpDispatchAttemptService, *args: Any, **kwargs: Any
+    ) -> Any:
+        if kwargs.get("state") == "succeeded":
+            _fault(
+                "after_upstream_ack_before_terminal",
+                attempt_id=kwargs.get("attempt_id"),
+            )
+        return await original_complete_dispatch(self, *args, **kwargs)
 
     async def authorize_and_reserve(
         self: PermitService, *args: Any, **kwargs: Any
@@ -167,6 +190,8 @@ def _install_fault_wrappers() -> None:
     IdempotencyService.begin_with_record = begin_with_record
     IdempotencyService.complete = complete
     IdempotencyService.mark_charged = mark_charged
+    McpDispatchAttemptService.claim_dispatch = claim_dispatch
+    McpDispatchAttemptService.complete = complete_dispatch
     PermitService.authorize_and_reserve = authorize_and_reserve
     AgentMoney.charge = charge
     ReceiptService.create_receipt = create_receipt
@@ -255,7 +280,7 @@ class _StressUpstreamExecutor:
     """Stand-in for the upstream MCP adapter with gates at the dispatch boundary.
 
     ``before_dispatch`` is the production checkpoint that moves the durable
-    attempt to ``dispatched``; the gates around it are what let the harness
+    attempt to ``dispatch_claimed``; the gates around it are what let the harness
     kill a worker on either side of the point where an external effect
     becomes possible.
     """
@@ -270,8 +295,9 @@ class _StressUpstreamExecutor:
     ) -> UpstreamMcpResult:
         call_token = str(arguments.get("call_token", ""))
 
-        # Durable pre-dispatch checkpoint: prepared -> dispatched.
+        # Durable pre-dispatch checkpoint: prepared -> dispatch_claimed.
         await before_dispatch()
+        # The legacy fault-point label remains stable for existing harness users.
         _fault(
             "after_mark_dispatched",
             call_token=call_token,
@@ -429,8 +455,10 @@ async def stress_reconcile(
         "idempotency_needs_review": needs_review,
         "permit_budgets_corrected": permits_corrected,
         "dispatch_prepared_finalized": dispatch.prepared_finalized,
+        "dispatch_uncertain": dispatch.dispatched_uncertain,
         "dispatch_dispatched_uncertain": dispatch.dispatched_uncertain,
         "dispatch_terminal_recovered": dispatch.terminal_recovered,
         "dispatch_idempotency_recovered": dispatch.idempotency_recovered,
+        "dispatch_failed_attempt_ids": list(dispatch.failed_attempt_ids),
         "dispatch_failed_attempts": len(dispatch.failed_attempt_ids),
     }

@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from app.core.time import utc_now
+from app.core.config import get_settings
+from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
     IdempotencyRecordModel,
@@ -115,57 +116,71 @@ class IdempotencyService:
             # Import here to avoid circular dependency
             from app.services.mcp_dispatch_attempts import (
                 DISPATCH_TERMINAL_STATES,
+                dispatch_reconciliation_idle_seconds,
             )
             from app.services.mcp_dispatch_reconciliation import (
                 get_mcp_dispatch_reconciliation_service,
             )
 
-            # If attempt is already terminal and the idempotency record has a response,
-            # return it directly without re-reconciling.
+            # Terminal rows own no send authority. Repair their missing receipt
+            # or replay immediately; the long idle window exists only to avoid
+            # stealing a live prepared/claimed attempt.
             if dispatch_attempt.state in DISPATCH_TERMINAL_STATES:
                 if existing.response_json is not None:
                     replay = _replay_from_record(existing, request_hash)
                     if replay is not None:
                         return replay
-                # Terminal but no response yet - fall through to wait
+                should_reconcile = True
+                reconcile_idle_seconds: int | None = None
+            else:
+                should_reconcile = False
+                reconcile_idle_seconds = None
 
-            # Only reconcile PREPARED or DISPATCHED attempts that are truly stale
-            # (updated >300s ago, matching the periodic sweep's idle threshold).
+            # Only reconcile active attempts that are truly stale, using the
+            # same globally conservative idle window as the periodic sweep.
             # Live attempts with active owners must wait, not be stolen.
-            should_reconcile = False
-            
             # Check staleness using updated_at (last state change), matching
             # list_stale_contexts logic in mcp_dispatch_attempts.py
-            if dispatch_attempt.updated_at is not None:
-                from datetime import timedelta
-                
-                from app.core.time import to_naive_utc, utc_now
-                
-                # 300 seconds = standard staleness threshold used by periodic sweep
-                STALE_IDLE_SECONDS = 300
-                cutoff = to_naive_utc(utc_now() - timedelta(seconds=STALE_IDLE_SECONDS))
+            if (
+                dispatch_attempt.state not in DISPATCH_TERMINAL_STATES
+                and dispatch_attempt.updated_at is not None
+            ):
+                settings = get_settings()
+                stale_idle_seconds = dispatch_reconciliation_idle_seconds(
+                    connect_timeout_seconds=(
+                        settings.MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS
+                    ),
+                    call_timeout_seconds=settings.MCP_UPSTREAM_CALL_TIMEOUT_SECONDS,
+                )
+                cutoff = to_naive_utc(utc_now() - timedelta(seconds=stale_idle_seconds))
                 updated_naive = to_naive_utc(dispatch_attempt.updated_at)
                 is_stale = updated_naive < cutoff
-                
+
                 if is_stale:
-                    # Attempt hasn't been updated in 300s: truly stale/crashed
+                    # Attempt exceeded the configured live-call window.
                     should_reconcile = True
+                    reconcile_idle_seconds = stale_idle_seconds
                 # else: fresh update, assume live owner, wait
 
             if should_reconcile:
                 reconciler = get_mcp_dispatch_reconciliation_service()
+                attempt_id = dispatch_attempt.attempt_id
+                # The lookup transaction otherwise retains the application's
+                # only pooled connection while reconciliation opens its own
+                # session. Release it before crossing that service boundary.
+                await session.rollback()
+                session.expire_all()
                 try:
                     await reconciler.reconcile_attempt(
-                        dispatch_attempt.attempt_id,
+                        attempt_id,
                         prepared_error_code="reconciled_stale_prepared",
+                        idle_seconds=reconcile_idle_seconds,
                     )
                 except Exception:
                     # Reconciliation failed; fall through to normal wait path
                     pass
                 else:
                     # Reconciliation succeeded; re-read the record
-                    await session.rollback()
-                    session.expire_all()
                     fresh = (
                         await session.execute(
                             select(IdempotencyRecordModel).where(

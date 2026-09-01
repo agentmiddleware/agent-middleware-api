@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import math
+import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -28,7 +31,8 @@ from app.services.permits import PermitService, PermitValidation, get_permit_ser
 from app.services.signing_keys import canonical_json, sha256_hex
 
 DISPATCH_PREPARED = "prepared"
-DISPATCH_DISPATCHED = "dispatched"
+DISPATCH_LEGACY_DISPATCHED = "dispatched"
+DISPATCH_CLAIMED = "dispatch_claimed"
 DISPATCH_TERMINAL_STATES = frozenset(
     {
         "succeeded",
@@ -37,7 +41,21 @@ DISPATCH_TERMINAL_STATES = frozenset(
         "response_rejected",
     }
 )
-DISPATCH_ACTIVE_STATES = frozenset({DISPATCH_PREPARED, DISPATCH_DISPATCHED})
+DISPATCH_SENT_STATES = frozenset({DISPATCH_LEGACY_DISPATCHED, DISPATCH_CLAIMED})
+DISPATCH_ACTIVE_STATES = frozenset({DISPATCH_PREPARED, *DISPATCH_SENT_STATES})
+_MIN_DISPATCH_IDLE_SECONDS = 300
+_DISPATCH_CLEANUP_MARGIN_SECONDS = 30
+# These maxima are a rolling-deployment safety contract. Reconciliation uses
+# their derived lifetime even when one worker has smaller local settings, so a
+# newly deployed worker cannot reap a still-live claim created by an older one.
+MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS = 600
+MAX_UPSTREAM_CALL_TIMEOUT_SECONDS = 3600
+_DISPATCH_RECONCILIATION_IDLE_SECONDS = max(
+    _MIN_DISPATCH_IDLE_SECONDS,
+    MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS
+    + (3 * MAX_UPSTREAM_CALL_TIMEOUT_SECONDS)
+    + _DISPATCH_CLEANUP_MARGIN_SECONDS,
+)
 
 
 class DispatchAttemptError(RuntimeError):
@@ -48,12 +66,45 @@ class DispatchAttemptConflictError(DispatchAttemptError):
     """One durable dispatch identity was reused with different invariants."""
 
 
+class DispatchPrepareRolledBackError(DispatchAttemptError):
+    """Remote preparation failed and recovery proved that nothing committed."""
+
+
+class DispatchPrepareCommitUncertainError(DispatchAttemptConflictError):
+    """Remote preparation may have committed and must not be compensated here."""
+
+
+class DispatchClaimUnavailableError(DispatchAttemptConflictError):
+    """The one-shot authority to send this invocation is already owned."""
+
+
 class DispatchResultRejectedError(DispatchAttemptError):
     """A confirmed upstream result cannot be represented in durable storage."""
 
 
 class DispatchResultTooLargeError(DispatchResultRejectedError):
     """The serialized upstream result exceeds its configured storage bound."""
+
+
+def dispatch_reconciliation_idle_seconds(
+    *,
+    connect_timeout_seconds: float,
+    call_timeout_seconds: float,
+) -> int:
+    """Return the fixed maximum lifetime for any supported live call."""
+    if (
+        not math.isfinite(connect_timeout_seconds)
+        or not math.isfinite(call_timeout_seconds)
+        or connect_timeout_seconds <= 0
+        or call_timeout_seconds <= 0
+    ):
+        raise ValueError("dispatch_timeout_invalid")
+    if (
+        connect_timeout_seconds > MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS
+        or call_timeout_seconds > MAX_UPSTREAM_CALL_TIMEOUT_SECONDS
+    ):
+        raise ValueError("dispatch_timeout_exceeds_supported_maximum")
+    return _DISPATCH_RECONCILIATION_IDLE_SECONDS
 
 
 @dataclass(frozen=True)
@@ -81,6 +132,51 @@ class DispatchAttemptMetrics:
             + self.unfinalized_terminal
             + self.terminal_idempotency_incomplete
         )
+
+
+async def _claim_debit_is_valid(
+    session: AsyncSession,
+    attempt: McpDispatchAttemptModel,
+) -> bool:
+    """Verify the debit linked to an attempt before granting send authority."""
+    if attempt.ledger_entry_id is None or attempt.credits_charged <= 0:
+        return False
+    ledger = await session.get(LedgerEntryModel, attempt.ledger_entry_id)
+    return bool(
+        ledger is not None
+        and ledger.wallet_id == attempt.wallet_id
+        and ledger.action == "debit"
+        and ledger.operation_key == attempt.idempotency_record_id
+        and ledger.amount == -attempt.credits_charged
+    )
+
+
+async def _claim_evidence_is_valid(
+    session: AsyncSession,
+    attempt: McpDispatchAttemptModel,
+) -> bool:
+    """Verify every persisted fact required to send and later terminalize."""
+    claim_hash = attempt.dispatch_claim_hash
+    return bool(
+        attempt.state == DISPATCH_CLAIMED
+        and claim_hash is not None
+        and len(claim_hash) == 64
+        and all(char in "0123456789abcdef" for char in claim_hash)
+        and attempt.dispatched_at is not None
+        and await _claim_debit_is_valid(session, attempt)
+    )
+
+
+def _unsupported_upstream_constraints(permit: PermitModel) -> list[str]:
+    """Return constraints the atomic upstream reservation cannot yet enforce."""
+    return [
+        name
+        for name, configured in (
+            ("max_calls_per_tool", permit.max_calls_per_tool_json is not None),
+            ("aggregate_value_cap", permit.aggregate_value_cap is not None),
+        )
+        if configured
+    ]
 
 
 def _assert_sha256(value: str) -> str:
@@ -129,6 +225,27 @@ def _bounded_result(
     if size > max_result_bytes:
         raise DispatchResultTooLargeError("dispatch_result_too_large")
     return serialized, size, sha256_hex(serialized)
+
+
+def _validated_terminal_result(
+    *,
+    state: str,
+    result_payload: dict[str, Any] | None,
+    error_code: str | None,
+    max_result_bytes: int,
+) -> tuple[str | None, int | None, str | None]:
+    if state not in DISPATCH_TERMINAL_STATES:
+        raise DispatchAttemptError("dispatch_terminal_state_invalid")
+    if state == "succeeded" and result_payload is None:
+        raise DispatchAttemptError("dispatch_success_result_required")
+    if error_code is not None and (
+        not error_code or len(error_code) > 64 or error_code != error_code.strip()
+    ):
+        raise DispatchAttemptError("dispatch_error_code_invalid")
+    return _bounded_result(
+        result_payload,
+        max_result_bytes=max_result_bytes,
+    )
 
 
 class McpDispatchAttemptService:
@@ -418,6 +535,7 @@ class McpDispatchAttemptService:
                         wallet_id=wallet_id,
                         public_tool_id=public_tool_id,
                     )
+                    unsupported_constraints = _unsupported_upstream_constraints(permit)
 
                     existing = await self._get_by_idempotency_record(
                         session,
@@ -437,8 +555,16 @@ class McpDispatchAttemptService:
                             request_hash=request_hash,
                             credits_authorized=credits_authorized,
                         )
+                        if unsupported_constraints:
+                            # A row created by an older worker may already hold a
+                            # reservation. Do not turn that uncertain rollout
+                            # state into a new denial receipt or a remote send;
+                            # the reconciler owns its terminal classification.
+                            raise DispatchPrepareCommitUncertainError(
+                                "dispatch_prepare_constraint_unsupported"
+                            )
                         if existing.state != DISPATCH_PREPARED:
-                            raise DispatchAttemptConflictError(
+                            raise DispatchPrepareCommitUncertainError(
                                 "dispatch_prepare_already_advanced"
                             )
                         replay_access = await permits.validate_replay_access(
@@ -446,10 +572,12 @@ class McpDispatchAttemptService:
                             wallet_id=wallet_id,
                             tool_name=public_tool_id,
                             key_id=key_id,
+                            session=session,
                         )
                         return replay_access, existing
 
                     validation = await permits._validate_model_for_action(
+                        session=session,
                         model=permit,
                         wallet_id=wallet_id,
                         tool_name=public_tool_id,
@@ -459,6 +587,25 @@ class McpDispatchAttemptService:
                     )
                     if not validation.allowed:
                         return validation, None
+                    if unsupported_constraints:
+                        # The remote path atomically enforces max_credits below,
+                        # but it does not yet reserve per-tool call slots or fold
+                        # in-flight reservations into aggregate_value_cap. A
+                        # read-time check would let concurrent calls overshoot;
+                        # refuse the constrained permit before creating any
+                        # attempt or moving budget instead.
+                        return (
+                            PermitValidation(
+                                False,
+                                "permit_constraint_unsupported_for_upstream",
+                                permit,
+                                {
+                                    "execution_backend": "upstream_mcp",
+                                    "unsupported_constraints": unsupported_constraints,
+                                },
+                            ),
+                            None,
+                        )
 
                     # Reserve with the same guarded UPDATE that
                     # PermitService.authorize_and_reserve() uses. The cap
@@ -578,40 +725,93 @@ class McpDispatchAttemptService:
                     session.add(attempt)
                     await session.flush()
                 return validation, attempt
-        except Exception:
+        except DispatchAttemptError:
+            raise
+        except Exception as exc:
             # A database driver can report a failed COMMIT after the server
-            # durably applied it. Adopt only the exact prepared identity; an
-            # ordinary transaction failure has no row and is re-raised.
-            async with factory() as recovery_session:
-                existing = await self._get_by_idempotency_record(
-                    recovery_session,
-                    idempotency_record_id,
-                )
-            if existing is None:
+            # durably applied it. Adopt only the exact prepared identity; a
+            # normal rollback leaves no row. If the recovery read itself fails,
+            # the outcome is unknown and callers must not compensate it.
+            try:
+                async with factory() as recovery_session:
+                    existing = await self._get_by_idempotency_record(
+                        recovery_session,
+                        idempotency_record_id,
+                    )
+                    if existing is not None:
+                        record = await recovery_session.get(
+                            IdempotencyRecordModel,
+                            idempotency_record_id,
+                        )
+                        permit = await recovery_session.get(PermitModel, permit_id)
+                        if (
+                            record is None
+                            or record.wallet_id != wallet_id
+                            or record.request_hash != request_hash
+                            or permit is None
+                        ):
+                            raise DispatchPrepareCommitUncertainError(
+                                "dispatch_prepare_commit_uncertain"
+                            )
+                        await self._assert_approval_binding(
+                            recovery_session,
+                            record=record,
+                            permit=permit,
+                            approval_id=approval_id,
+                            wallet_id=wallet_id,
+                            public_tool_id=public_tool_id,
+                        )
+                        if _unsupported_upstream_constraints(permit):
+                            raise DispatchPrepareCommitUncertainError(
+                                "dispatch_prepare_constraint_unsupported"
+                            )
+            except DispatchPrepareCommitUncertainError:
                 raise
-            self._assert_prepared_match(
-                existing,
-                idempotency_record_id=idempotency_record_id,
-                wallet_id=wallet_id,
-                permit_id=permit_id,
-                approval_id=approval_id,
-                key_id=key_id,
-                public_tool_id=public_tool_id,
-                upstream_tool_name=upstream_tool_name,
-                upstream_origin=upstream_origin,
-                request_hash=request_hash,
-                credits_authorized=credits_authorized,
-            )
+            except Exception as recovery_exc:
+                raise DispatchPrepareCommitUncertainError(
+                    "dispatch_prepare_commit_uncertain"
+                ) from recovery_exc
+            if existing is None:
+                raise DispatchPrepareRolledBackError(
+                    "dispatch_prepare_rolled_back"
+                ) from exc
+            try:
+                self._assert_prepared_match(
+                    existing,
+                    idempotency_record_id=idempotency_record_id,
+                    wallet_id=wallet_id,
+                    permit_id=permit_id,
+                    approval_id=approval_id,
+                    key_id=key_id,
+                    public_tool_id=public_tool_id,
+                    upstream_tool_name=upstream_tool_name,
+                    upstream_origin=upstream_origin,
+                    request_hash=request_hash,
+                    credits_authorized=credits_authorized,
+                )
+            except DispatchAttemptError as invariant_exc:
+                raise DispatchPrepareCommitUncertainError(
+                    "dispatch_prepare_commit_uncertain"
+                ) from invariant_exc
             if existing.state != DISPATCH_PREPARED:
-                raise DispatchAttemptConflictError("dispatch_prepare_commit_uncertain")
-            replay_access = await permits.validate_replay_access(
-                permit_id=permit_id,
-                wallet_id=wallet_id,
-                tool_name=public_tool_id,
-                key_id=key_id,
-            )
+                raise DispatchPrepareCommitUncertainError(
+                    "dispatch_prepare_commit_uncertain"
+                )
+            try:
+                replay_access = await permits.validate_replay_access(
+                    permit_id=permit_id,
+                    wallet_id=wallet_id,
+                    tool_name=public_tool_id,
+                    key_id=key_id,
+                )
+            except Exception as replay_exc:
+                raise DispatchPrepareCommitUncertainError(
+                    "dispatch_prepare_commit_uncertain"
+                ) from replay_exc
             if not replay_access.allowed:
-                raise DispatchAttemptConflictError("dispatch_prepare_commit_uncertain")
+                raise DispatchPrepareCommitUncertainError(
+                    "dispatch_prepare_commit_uncertain"
+                )
             return replay_access, existing
 
     async def attach_charge(
@@ -621,7 +821,7 @@ class McpDispatchAttemptService:
         ledger_entry_id: str,
         credits_charged: Decimal,
     ) -> McpDispatchAttemptModel:
-        if credits_charged < 0:
+        if credits_charged <= 0:
             raise DispatchAttemptError("dispatch_charge_invalid")
         factory = get_session_factory()
         async with factory() as session:
@@ -662,29 +862,292 @@ class McpDispatchAttemptService:
                 session.add(attempt)
                 return attempt
 
-    async def mark_dispatched(self, attempt_id: str) -> McpDispatchAttemptModel:
+    async def claim_dispatch(self, attempt_id: str) -> McpDispatchAttemptModel:
+        """Acquire the durable, non-reacquirable right to send exactly once.
+
+        Every activation generates a fresh process-local secret and persists
+        only its hash. A later activation can never adopt an existing claim.
+        If the database commits but its acknowledgement is lost, this still-
+        live call may recover only the row carrying its own generated hash.
+        """
+        claim_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+        factory = get_session_factory()
+        claim_written = False
+        try:
+            async with factory() as session:
+                async with session.begin():
+                    observed = await session.get(
+                        McpDispatchAttemptModel,
+                        attempt_id,
+                        with_for_update=True,
+                    )
+                    if observed is None:
+                        raise DispatchAttemptError("dispatch_attempt_not_found")
+                    if (
+                        observed.state == DISPATCH_PREPARED
+                        and observed.dispatch_claim_hash is None
+                        and observed.dispatched_at is None
+                        and not await _claim_debit_is_valid(session, observed)
+                    ):
+                        raise DispatchAttemptConflictError(
+                            "dispatch_claim_evidence_invalid"
+                        )
+                    now = utc_now()
+                    claimed = await session.execute(
+                        sa_update(McpDispatchAttemptModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                McpDispatchAttemptModel.attempt_id == attempt_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                McpDispatchAttemptModel.state == DISPATCH_PREPARED,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                cast(
+                                    Any,
+                                    McpDispatchAttemptModel.dispatch_claim_hash,
+                                ).is_(None),
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                cast(
+                                    Any,
+                                    McpDispatchAttemptModel.ledger_entry_id,
+                                ).is_not(None),
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                cast(
+                                    Any,
+                                    McpDispatchAttemptModel.dispatched_at,
+                                ).is_(None),
+                            ),
+                        )
+                        .values(
+                            state=DISPATCH_CLAIMED,
+                            dispatch_claim_hash=claim_hash,
+                            dispatched_at=now,
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if cast(Any, claimed).rowcount == 1:
+                        claim_written = True
+                    await session.refresh(observed)
+                    attempt = observed
+                    if claim_written:
+                        if not await _claim_evidence_is_valid(session, attempt):
+                            raise DispatchAttemptConflictError(
+                                "dispatch_claim_evidence_invalid"
+                            )
+                        return attempt
+                    if attempt.state in DISPATCH_TERMINAL_STATES:
+                        raise DispatchClaimUnavailableError(
+                            "dispatch_transition_terminal"
+                        )
+                    if (
+                        attempt.state in DISPATCH_SENT_STATES
+                        or attempt.dispatch_claim_hash is not None
+                        or attempt.dispatched_at is not None
+                    ):
+                        raise DispatchClaimUnavailableError(
+                            "dispatch_claim_unavailable"
+                        )
+                    raise DispatchAttemptConflictError("dispatch_transition_invalid")
+        except Exception as exc:
+            if not claim_written:
+                raise
+            # A driver can report a failed COMMIT after the database durably
+            # applied it. Only this still-live activation knows the generated
+            # hash, so only it may adopt that uncertain acknowledgement.
+            async with factory() as recovery_session:
+                recovered = await recovery_session.get(
+                    McpDispatchAttemptModel,
+                    attempt_id,
+                )
+                recovered_evidence_valid = bool(
+                    recovered is not None
+                    and recovered.state == DISPATCH_CLAIMED
+                    and recovered.dispatch_claim_hash == claim_hash
+                    and await _claim_evidence_is_valid(recovery_session, recovered)
+                )
+            if (
+                recovered is not None
+                and recovered.state == DISPATCH_CLAIMED
+                and recovered.dispatch_claim_hash == claim_hash
+            ):
+                if recovered_evidence_valid:
+                    return recovered
+                raise DispatchAttemptConflictError(
+                    "dispatch_claim_evidence_invalid"
+                ) from exc
+            raise
+
+    async def complete_pre_dispatch_failure(
+        self,
+        *,
+        attempt_id: str,
+        expected_updated_at: datetime,
+        ledger_entry_id: str | None = None,
+        credits_charged: Decimal | None = None,
+        result_payload: dict[str, Any] | None,
+        error_code: str | None,
+        max_result_bytes: int,
+    ) -> McpDispatchAttemptModel:
+        """Terminalize only while the one-shot send authority is unclaimed."""
+        result_json, result_size_bytes, response_hash = _validated_terminal_result(
+            state="returned_error",
+            result_payload=result_payload,
+            error_code=error_code,
+            max_result_bytes=max_result_bytes,
+        )
+        if (ledger_entry_id is None) != (credits_charged is None):
+            raise DispatchAttemptError("dispatch_charge_linkage_incomplete")
+        if credits_charged is not None and credits_charged <= 0:
+            raise DispatchAttemptError("dispatch_charge_invalid")
         factory = get_session_factory()
         async with factory() as session:
             async with session.begin():
-                attempt = await session.get(
-                    McpDispatchAttemptModel,
-                    attempt_id,
-                    with_for_update=True,
+                # Acquire the same write fence used before a fresh debit. The
+                # no-op UPDATE starts a SQLite writer transaction before reads.
+                await session.execute(
+                    sa_update(McpDispatchAttemptModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            McpDispatchAttemptModel.attempt_id == attempt_id,
+                        )
+                    )
+                    .values(state=McpDispatchAttemptModel.state)
+                    .execution_options(synchronize_session=False)
                 )
-                if attempt is None:
+                observed = await session.get(McpDispatchAttemptModel, attempt_id)
+                if observed is None:
                     raise DispatchAttemptError("dispatch_attempt_not_found")
-                if attempt.state == DISPATCH_DISPATCHED:
-                    return attempt
-                if attempt.state in DISPATCH_TERMINAL_STATES:
-                    raise DispatchAttemptConflictError("dispatch_transition_terminal")
-                if attempt.state != DISPATCH_PREPARED or not attempt.ledger_entry_id:
-                    raise DispatchAttemptConflictError("dispatch_transition_invalid")
+
+                operation_debit = (
+                    await session.execute(
+                        select(LedgerEntryModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == observed.wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.operation_key
+                                == observed.idempotency_record_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == "debit",
+                            ),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if operation_debit is not None:
+                    if (
+                        operation_debit.amount >= 0
+                        or ledger_entry_id not in {None, operation_debit.entry_id}
+                        or credits_charged not in {None, -operation_debit.amount}
+                    ):
+                        raise DispatchAttemptConflictError(
+                            "dispatch_ledger_linkage_invalid"
+                        )
+                    ledger_entry_id = operation_debit.entry_id
+                    credits_charged = -operation_debit.amount
+                if ledger_entry_id is not None and credits_charged is not None:
+                    if observed.ledger_entry_id not in {None, ledger_entry_id}:
+                        raise DispatchAttemptConflictError("dispatch_charge_conflict")
+                    ledger = await session.get(LedgerEntryModel, ledger_entry_id)
+                    if (
+                        ledger is None
+                        or ledger.wallet_id != observed.wallet_id
+                        or ledger.action != "debit"
+                        or ledger.operation_key != observed.idempotency_record_id
+                        or ledger.amount != -credits_charged
+                    ):
+                        raise DispatchAttemptConflictError(
+                            "dispatch_ledger_linkage_invalid"
+                        )
+
                 now = utc_now()
-                attempt.state = DISPATCH_DISPATCHED
-                attempt.dispatched_at = now
-                attempt.updated_at = now
-                session.add(attempt)
-                return attempt
+                values: dict[str, Any] = {
+                    "state": "returned_error",
+                    "result_json": result_json,
+                    "result_size_bytes": result_size_bytes,
+                    "response_hash": response_hash,
+                    "error_code": error_code,
+                    "updated_at": now,
+                    "completed_at": now,
+                }
+                if ledger_entry_id is not None and credits_charged is not None:
+                    values["ledger_entry_id"] = ledger_entry_id
+                    values["credits_charged"] = credits_charged
+                completed = await session.execute(
+                    sa_update(McpDispatchAttemptModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            McpDispatchAttemptModel.attempt_id == attempt_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            McpDispatchAttemptModel.state == DISPATCH_PREPARED,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            McpDispatchAttemptModel.updated_at == expected_updated_at,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            cast(
+                                Any,
+                                McpDispatchAttemptModel.dispatch_claim_hash,
+                            ).is_(None),
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            cast(
+                                Any,
+                                McpDispatchAttemptModel.dispatched_at,
+                            ).is_(None),
+                        ),
+                    )
+                    .values(**values)
+                )
+                transitioned = cast(Any, completed).rowcount == 1
+                await session.refresh(observed)
+                attempt = observed
+                if transitioned:
+                    return attempt
+                if (
+                    attempt.state in DISPATCH_SENT_STATES
+                    or attempt.dispatch_claim_hash is not None
+                    or attempt.dispatched_at is not None
+                ):
+                    raise DispatchClaimUnavailableError("dispatch_claim_unavailable")
+                if attempt.state in DISPATCH_TERMINAL_STATES:
+                    if (
+                        attempt.state != "returned_error"
+                        or attempt.result_json != result_json
+                        or attempt.result_size_bytes != result_size_bytes
+                        or attempt.response_hash != response_hash
+                        or attempt.error_code != error_code
+                    ):
+                        raise DispatchAttemptConflictError("dispatch_terminal_conflict")
+                    return attempt
+                if (
+                    attempt.state == DISPATCH_PREPARED
+                    and attempt.dispatch_claim_hash is None
+                    and attempt.updated_at != expected_updated_at
+                ):
+                    raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
+                raise DispatchAttemptConflictError(
+                    "dispatch_terminal_transition_invalid"
+                )
 
     async def mark_debit_refunded(
         self,
@@ -709,26 +1172,48 @@ class McpDispatchAttemptService:
                     )
                 if attempt.state != "returned_error":
                     raise DispatchAttemptConflictError("dispatch_refund_state_invalid")
-                refund = (
-                    await session.execute(
-                        select(LedgerEntryModel).where(
-                            cast(
-                                ColumnElement[bool],
-                                LedgerEntryModel.wallet_id == attempt.wallet_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                LedgerEntryModel.action == "refund",
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                LedgerEntryModel.correlation_id == ledger_entry_id,
-                            ),
+                debit = await session.get(LedgerEntryModel, ledger_entry_id)
+                if (
+                    attempt.credits_charged <= 0
+                    or debit is None
+                    or debit.wallet_id != attempt.wallet_id
+                    or debit.action != "debit"
+                    or debit.operation_key != attempt.idempotency_record_id
+                    or debit.amount != -attempt.credits_charged
+                ):
+                    raise DispatchAttemptConflictError(
+                        "dispatch_refund_evidence_invalid"
+                    )
+                refunds = list(
+                    (
+                        await session.execute(
+                            select(LedgerEntryModel).where(
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.wallet_id == attempt.wallet_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.action == "refund",
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.correlation_id == ledger_entry_id,
+                                ),
+                            )
                         )
                     )
-                ).scalar_one_or_none()
-                if refund is None:
-                    raise DispatchAttemptConflictError("dispatch_refund_not_durable")
+                    .scalars()
+                    .all()
+                )
+                if (
+                    len(refunds) != 1
+                    or refunds[0].entry_id != f"refund-{ledger_entry_id}"
+                    or refunds[0].amount != attempt.credits_charged
+                ):
+                    raise DispatchAttemptConflictError(
+                        "dispatch_refund_evidence_invalid"
+                    )
                 if attempt.debit_refunded_at is None:
                     now = utc_now()
                     attempt.debit_refunded_at = now
@@ -745,16 +1230,10 @@ class McpDispatchAttemptService:
         error_code: str | None,
         max_result_bytes: int,
     ) -> McpDispatchAttemptModel:
-        if state not in DISPATCH_TERMINAL_STATES:
-            raise DispatchAttemptError("dispatch_terminal_state_invalid")
-        if state == "succeeded" and result_payload is None:
-            raise DispatchAttemptError("dispatch_success_result_required")
-        if error_code is not None and (
-            not error_code or len(error_code) > 64 or error_code != error_code.strip()
-        ):
-            raise DispatchAttemptError("dispatch_error_code_invalid")
-        result_json, result_size_bytes, response_hash = _bounded_result(
-            result_payload,
+        result_json, result_size_bytes, response_hash = _validated_terminal_result(
+            state=state,
+            result_payload=result_payload,
+            error_code=error_code,
             max_result_bytes=max_result_bytes,
         )
 
@@ -779,8 +1258,15 @@ class McpDispatchAttemptService:
                         raise DispatchAttemptConflictError("dispatch_terminal_conflict")
                     return attempt
 
-                valid_transition = attempt.state == DISPATCH_DISPATCHED or (
-                    attempt.state == DISPATCH_PREPARED and state == "returned_error"
+                if attempt.state == DISPATCH_CLAIMED:
+                    if not await _claim_evidence_is_valid(session, attempt):
+                        raise DispatchAttemptConflictError(
+                            "dispatch_claim_evidence_invalid"
+                        )
+
+                valid_transition = attempt.state == DISPATCH_CLAIMED or (
+                    attempt.state == DISPATCH_LEGACY_DISPATCHED
+                    and state == "delivery_uncertain"
                 )
                 if not valid_transition:
                     raise DispatchAttemptConflictError(
@@ -1020,11 +1506,16 @@ class McpDispatchAttemptService:
         self,
         *,
         idle_seconds: int = 300,
+        terminal_idle_seconds: int | None = None,
     ) -> DispatchAttemptMetrics:
         """Return state counts and reconciliation backlog without payloads."""
-        if idle_seconds < 0:
+        terminal_idle = (
+            idle_seconds if terminal_idle_seconds is None else terminal_idle_seconds
+        )
+        if idle_seconds < 0 or terminal_idle < 0:
             raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
-        cutoff = utc_now() - timedelta(seconds=idle_seconds)
+        active_cutoff = utc_now() - timedelta(seconds=idle_seconds)
+        terminal_cutoff = utc_now() - timedelta(seconds=terminal_idle)
         factory = get_session_factory()
         async with factory() as session:
             state_rows = (
@@ -1047,7 +1538,7 @@ class McpDispatchAttemptService:
                     ),
                     cast(
                         ColumnElement[bool],
-                        McpDispatchAttemptModel.updated_at < cutoff,
+                        McpDispatchAttemptModel.updated_at < active_cutoff,
                     ),
                 )
             )
@@ -1071,7 +1562,7 @@ class McpDispatchAttemptService:
                     ),
                     cast(
                         ColumnElement[bool],
-                        McpDispatchAttemptModel.updated_at < cutoff,
+                        McpDispatchAttemptModel.updated_at < terminal_cutoff,
                     ),
                     cast(
                         ColumnElement[bool],
@@ -1107,7 +1598,7 @@ class McpDispatchAttemptService:
                     ),
                     cast(
                         ColumnElement[bool],
-                        McpDispatchAttemptModel.updated_at < cutoff,
+                        McpDispatchAttemptModel.updated_at < terminal_cutoff,
                     ),
                     cast(
                         ColumnElement[bool],
