@@ -67,6 +67,31 @@ For the live engagement checklist that replaces `trust-plane-echo` /
 `partner.notes.write` with the partner's real tool id, use
 [`docs/partner-first-tool-runbook.md`](docs/partner-first-tool-runbook.md).
 
+### Rate limits
+
+The deployed limit is `RATE_LIMIT_PER_MINUTE` (default and production value:
+120). `RateLimitMiddleware` counts it in a fixed 60-second Redis window and
+returns `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
+on every counted response; the 121st request in a window gets `429`.
+
+- **Authenticated requests:** one bucket per `X-API-Key` value. Two agents
+  sharing one key share the 120; two keys get 120 each.
+- **Requests without a key:** one `anonymous` bucket shared by every
+  unauthenticated caller of the deployment. `/health/dependencies` is counted
+  here.
+- **Exempt paths:** `/`, `/health`, `/.well-known/agent.json`, `/llms.txt`,
+  `/docs`, `/openapi.json`, and the served markdown docs.
+- **`POST /mcp/public` (when enabled):** per client IP at the same limit, plus
+  a global cap of ten times the limit.
+- **No burst allowance and no per-key override.** Raising the limit for one
+  partner today means raising it for the whole deployment.
+- **Redis outage:** production-like environments return `503` instead of
+  falling back to per-process memory, so the limit is never silently wider
+  than declared.
+
+`GET /v1/discover` → `rate_limits` and `GET /` → `rate_limits` report the
+same figure the middleware enforces.
+
 ### MCP discovery gate (Phase 2)
 
 Live trust mode keeps both `ENABLE_PROOF_SURFACES=false` and

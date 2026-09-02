@@ -513,6 +513,7 @@ Offline receipt verification is deliberately dependency-minimal: the `b2a-verify
 - [docs/trust-release-gate-branch-protection.md](docs/trust-release-gate-branch-protection.md) — gate-first branch protection: the exact required checks for `main`
 - [docs/hard-run-report-2026-08-12.md](docs/hard-run-report-2026-08-12.md) — adversarial black-box run against the live production trust plane, with reproduction commands
 - [docs/external-surface-review-2026-08-23.md](docs/external-surface-review-2026-08-23.md) — dated black-box review of the deployed origins from outside, and the deploy gap it exposed
+- [docs/reality-check-2026-09-01.md](docs/reality-check-2026-09-01.md) — dated evidence-level audit of the live deployment from raw public responses: what is verified, what the upstream `partner.echo` actually is, the rate-limit scope, and the commercial gaps ranked by decision value
 - [docs/invariant-attack-report.md](docs/invariant-attack-report.md) — hostile concurrency/tampering/crash/credential campaign against a local instance, the one invariant it broke (permit-cap over-spend on SQLite), and the fix that closed it
 - [docs/owasp-agentic-top10-mapping.md](docs/owasp-agentic-top10-mapping.md) — OWASP Top 10 for Agentic Applications (ASI01–ASI10, 2026) mapped to controls, proofs, and known gaps
 - [docs/security-review-kit.md](docs/security-review-kit.md) — rules of engagement for an external reviewer: which target to attack, how to mint your own credentials, the claims a finding must break, and the limits already documented

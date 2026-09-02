@@ -101,7 +101,11 @@ class CoreDiscoveryManifest(BaseModel):
     )
 
     rate_limits: dict = Field(
-        default_factory=lambda: {"requests_per_minute": 120, "burst_allowance": 20}
+        default_factory=lambda: _build_rate_limits(),
+        description=(
+            "Enforced request budget and the bucket it is counted against. "
+            "Mirrors the X-RateLimit-* response headers."
+        ),
     )
 
     documentation: dict = Field(
@@ -432,6 +436,25 @@ def _build_awi_endpoints() -> list[AWIEndpoint]:
     ]
 
 
+def _build_rate_limits() -> dict[str, Any]:
+    """Describe the limit ``RateLimitMiddleware`` actually enforces.
+
+    One fixed-window budget per minute, keyed by the ``X-API-Key`` header value.
+    Requests without a key share a single 'anonymous' bucket. There is no
+    burst allowance and no per-partner override; ``RATE_LIMIT_PER_MINUTE`` is
+    the only knob, so this payload is derived from it rather than hardcoded.
+    """
+    return {
+        "requests_per_minute": get_settings().RATE_LIMIT_PER_MINUTE,
+        "window_seconds": 60,
+        "scope": "per_api_key",
+        "unauthenticated_scope": "shared_anonymous_bucket",
+        "burst_allowance": 0,
+        "per_partner_override": False,
+        "headers": ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
+    }
+
+
 def _build_pricing() -> list[PricingTier]:
     """Describe the controlled pilot without inventing public commercial tiers."""
     return [
@@ -537,6 +560,7 @@ async def get_discovery_manifest():
         if get_settings().ENABLE_PROOF_SURFACES
         else [],
         pricing=_build_pricing(),
+        rate_limits=_build_rate_limits(),
         integration_guides=_build_integration_guides(),
     )
 
