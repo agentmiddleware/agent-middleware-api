@@ -238,7 +238,7 @@ class SigningKeyService:
         # Sort in Python so the ordering is identical on SQLite and PostgreSQL
         # regardless of how each backend collates NULL activated_at.
         keys.sort(
-            key=lambda key: (key.activated_at or key.created_at),
+            key=lambda key: key.activated_at or key.created_at,
             reverse=True,
         )
         return keys

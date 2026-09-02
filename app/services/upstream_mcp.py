@@ -973,7 +973,27 @@ class UpstreamMcpAdapter:
                 # typed errors. The saved claim contention still takes
                 # precedence so the router cannot enter a refund path.
                 raise dispatch_claim_unavailable
-            raise
+            if response_guard.rejection_code is not None:
+                if dispatch_started:
+                    raise UpstreamMcpResponseRejectedError(
+                        response_guard.rejection_code
+                    ) from None
+                raise UpstreamMcpPreDispatchError(
+                    response_guard.rejection_code
+                ) from None
+            if canonical_result is not None or response_rejected is not None:
+                # Cleanup may raise one of our typed transport exceptions too.
+                # A canonical result or a known rejection still outranks that
+                # close-time failure just as it does for an untyped exception.
+                logger.warning(
+                    "upstream_mcp_session_cleanup_failed",
+                    extra={
+                        "public_tool_id": self.configuration.public_tool_id,
+                        "upstream_origin": self.configuration.origin,
+                    },
+                )
+            else:
+                raise
         except (ValidationError, json.JSONDecodeError):
             if dispatch_claim_unavailable is not None:
                 raise dispatch_claim_unavailable

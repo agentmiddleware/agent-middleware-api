@@ -165,7 +165,7 @@ so two runs cannot overlap. Without the opt-in environment variables it skips,
 so it never interferes with `make test`.
 
 CI runs these in the `postgres_permit_concurrency` job, as two steps against
-one PostgreSQL service: **15** crash/reconciliation cases plus **one**
+one PostgreSQL service: **16** crash/reconciliation cases plus **one**
 fixture-saturation guard in `tests/test_mcp_postgres_multiprocess.py`, then the **17** row-lock
 concurrency tests in `tests/test_permit_postgres_concurrency.py`. That job
 installs dependencies with `pip` rather than `uv`, so its step is spelled
@@ -194,7 +194,7 @@ rate limiting.
 | Command | Enforces |
 |---|---|
 | `make trust-coverage-gate` | 24 focused trust test files at an **80% coverage floor** across 22 named trust-plane control modules |
-| `make trust-release-gate` | The offline Railway IaC contract first (lock-pinned package install with lifecycle scripts disabled, then fail-closed API-only graph validation), followed by the 18-file trust suite including the focused claim/migration/debit regressions and `tests/test_adversarial_five_claims.py`, coverage, demo, discovery-drift, committed-OpenAPI, and simulation-inventory gates |
+| `make trust-release-gate` | The offline Railway IaC contract first (lock-pinned package install with lifecycle scripts disabled, then fail-closed API-only graph validation), followed by the 20-file trust suite including the focused claim/migration/debit, schema-boot, Standard MCP, and `tests/test_adversarial_five_claims.py` regressions, coverage, demo, discovery-drift, committed-OpenAPI, and simulation-inventory gates |
 
 CI runs `scripts/trust_release_gate.sh` as a dedicated required check
 (`trust_release_gate`) so `main` cannot advance past an unproven claim; the

@@ -67,7 +67,7 @@ revocation case.
 | `permit_budget_exceeded` | `required_credits`, `remaining_credits`, `spent_credits`, `max_credits` | Request a permit with enough remaining credits, then retry with a new idempotency key. |
 | `permit_aggregate_value_cap_exceeded` | `required_credits`, `charged_to_date`, `aggregate_value_cap` | Request a higher aggregate cap or a replacement permit. |
 | `permit_max_calls_exceeded` | `tool`, `limit`, `calls_made` | Request a replacement permit with a higher per-tool call limit. |
-| `permit_constraint_unsupported_for_upstream` | `execution_backend`, `unsupported_constraints` | Use an atomic `max_credits` ceiling for the configured upstream tool, or use a local governed tool for the listed constraint; do not retry the same request with a new idempotency key. |
+| `permit_constraint_unsupported_for_upstream` | `execution_backend`, `unsupported_constraints` | Request a replacement permit that omits the listed remote-unsupported constraints and uses `max_credits` as the atomic ceiling, then invoke with a new idempotency key. Replaying the denied key returns the stored denial. |
 | `permit_tool_not_allowed` | `requested_tool`, `allowed_tools` | Use an allowed tool or request a permit that names the requested tool. |
 | `permit_scope_missing` | `required_scopes`, `missing_scopes` | Request a permit containing every listed missing scope. |
 | `permit_expired` | `expired_at`, `checked_at` | Request a new, unexpired permit; do not retry the expired one. |

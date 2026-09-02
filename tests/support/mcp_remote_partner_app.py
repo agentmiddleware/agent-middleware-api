@@ -28,7 +28,6 @@ CONTROL_HEADER = "X-MCP-Stress-Control"
 PARTNER_TOOL_NAME = "partner.write"
 _INVOCATION_META_KEY = "io.agentmiddleware/invocation_id"
 _IDEMPOTENCY_META_KEY = "io.agentmiddleware/idempotency_key"
-_MAX_HOLD_SECONDS = 120.0
 
 
 def _required_environment(name: str) -> str:
@@ -188,11 +187,7 @@ async def partner_write(call_token: str, ctx: Context) -> dict[str, Any]:
         # Keep the control endpoints live so the committed effect is observable.
         token_hash = hashlib.sha256(call_token.encode("utf-8")).hexdigest()
         hold_path = _HOLD_RESPONSE_DIRECTORY / token_hash
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + _MAX_HOLD_SECONDS
         while hold_path.exists():
-            if loop.time() >= deadline:
-                raise RuntimeError("mcp_remote_partner_response_hold_timeout")
             await asyncio.sleep(0.02)
     return {
         "call_token": call_token,

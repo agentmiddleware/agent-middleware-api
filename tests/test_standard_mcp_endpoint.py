@@ -18,7 +18,10 @@ from app.core.config import get_settings
 from app.main import app
 from app.routers import mcp_standard as standard_mcp_router
 from app.schemas.billing import ServiceCategory
-from app.services.idempotency import get_idempotency_service
+from app.services.idempotency import (
+    IdempotencyInProgressError,
+    get_idempotency_service,
+)
 from app.services.mcp_generator import McpGenerator
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import BOOTSTRAP_HEADERS, provision_agent_wallet
@@ -372,3 +375,47 @@ async def test_tools_call_reports_auto_permit_contention_as_retryable(
         "message": "idempotency_in_progress",
     }
     assert calls == 0
+
+
+@pytest.mark.anyio
+async def test_tools_call_reports_governed_invoke_contention_with_existing_code(
+    client,
+    standard_mcp_enabled,
+    clean_database,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "standard-governed-idempotency-in-progress"
+
+    async def report_contention(*_args, **_kwargs):
+        raise IdempotencyInProgressError("idempotency_in_progress")
+
+    registry = get_service_registry()
+    registry.register_local(
+        service_id=tool_name,
+        name="Standard Governed Contention",
+        description="Standard MCP governed contention contract test",
+        category=ServiceCategory.AGENT_COMMS,
+        func=lambda: {"ok": True},
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    monkeypatch.setattr(standard_mcp_router, "_handle_tools_call", report_contention)
+    try:
+        response = await client.post(
+            "/mcp",
+            json=_rpc("tools/call", params={"name": tool_name, "arguments": {}}),
+            headers={
+                **provisioned["agent_headers"],
+                **MCP_HEADERS,
+                "Idempotency-Key": "standard-governed-contention-1",
+            },
+        )
+    finally:
+        registry.unregister_local(tool_name)
+
+    assert response.status_code == 200
+    assert response.json()["error"] == {
+        "code": -32005,
+        "message": "idempotency_in_progress",
+    }

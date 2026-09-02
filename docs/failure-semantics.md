@@ -14,9 +14,11 @@ Each row names its proving tests, and the last section lists what is deliberatel
 
 ## The invariant
 
-Every governed invocation ends in **exactly one signed terminal accounting**:
-an Ed25519-signed receipt (plus a chain-hashed audit event) stating the
-outcome and the net charge, replayable forever under the same idempotency key.
+Every governed invocation that terminalizes or is reconcilable ends in
+**exactly one signed terminal accounting**: an Ed25519-signed receipt (plus a
+chain-hashed audit event) stating the outcome and the net charge. A local
+post-effect crash is the explicit exception: it remains in manual review with
+no receipt and no automatic redispatch.
 Money only moves next to a durable record that a reconciler can later
 compensate:
 
@@ -48,7 +50,7 @@ classified as already sent; they are never claimable again.
 | `denied` | Permit, wallet-policy, recipient-domain, or human-approval denial — all evaluated **before money moves** | Never debited; reservation released | No gateway dispatch | 403 / `-32003` | `test_frozen_wallet_denial_returns_receipt_and_replays_without_charge`, `test_out_of_scope_governed_mcp_denial_returns_receipt`, `test_rejected_approval_is_terminal_and_replays`, `test_upstream_permit_denials_never_charge_or_dispatch` |
 | `insufficient_funds` | The charge itself was refused (balance, child-wallet cap, daily limit) | Never debited; reservation released | No gateway dispatch | 402 / `-32004` | `test_insufficient_funds_returns_receipt_and_replays_without_charge` |
 | `failed_refunded` | A **confirmed** failure: local tool raised; upstream returned `isError: true`; DNS/TLS/`initialize` failed before the remote dispatch claim; charge refused on the upstream path; or a crash before dispatch, finalized by the reconciler | Debit refunded (or never taken). The receipt signs `credits_charged = 0`; the ledger separately proves the correlated refund | An `isError` response may have reached the gateway; pre-claim cases were not dispatched; no downstream effect is independently proven | 500 or 502 / `-32006` (402/403 for refused charges) | Pre-claim failure, guarded completion, and reconciliation tests in `tests/test_mcp_upstream_governed.py`, `tests/test_mcp_dispatch_router_claim.py`, and `tests/test_mcp_dispatch_reconciliation.py` |
-| `delivery_uncertain` | The one-shot remote dispatch claim was committed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | Claim-contention, lost-commit-ack, reconciliation, and PostgreSQL process-kill cases |
+| `delivery_uncertain` | The one-shot remote dispatch claim was committed, then a timeout, transport failure, or process death left the outcome unknowable | **Stays charged.** Never redispatched | **Unknown** — that is the definition | 504 / `-32005` | Stale-claim reconciliation and PostgreSQL process-kill cases |
 | `response_rejected` | The upstream **did** respond, but the response is unusable: invalid shape, reflected bearer token, non-serializable, or over the byte cap (wire-level or at persistence) | **Stays charged** | A response reached the gateway; the downstream effect is not independently proven | 502 / `-32006` | `test_confirmed_result_rejected_by_persistence_is_terminal_and_replayable`, `test_terminal_response_rejected_retains_charge_and_is_replayable` |
 | `failed_unrefunded` | A refund was owed and the refund **itself** failed | Charged; a durable operator work item is created atomically with the receipt | Depends on the underlying failure | 500 / `-32603` | `test_governed_refund_failure_keeps_permit_budget_reserved`, `test_refund_reconciliation_retries_exactly_once_and_preserves_agent_replay` |
 
@@ -119,11 +121,13 @@ transition, hash ownership after a lost commit acknowledgement, claim
 contention, and the fixed stale window. The PostgreSQL process-kill harness
 covers the durable claim boundaries across independent workers.
 
-The reconciliation idle threshold is a fixed 11,430 seconds: enough for the
-maximum supported 600-second connection timeout, three maximum 3,600-second
-call phases, and cleanup margin. Using the global ceiling instead of each
-worker's current settings prevents a rollout with shorter timeouts from
-declaring an older worker's valid long-running call stale.
+A claim becomes eligible after the fixed 11,430-second idle threshold: enough
+for the maximum supported 600-second connection timeout, three maximum
+3,600-second call phases, and cleanup margin. It is processed by the next
+five-minute sweep, so nominal pickup can take about 11,730 seconds, plus any
+bounded-batch backlog. Using the global ceiling instead of each worker's
+current settings prevents a rollout with shorter timeouts from declaring an
+older worker's valid long-running call stale.
 
 Reconciliation itself is idempotent by construction: audit event ids are
 derived deterministically from the attempt id, refunds are keyed
@@ -137,10 +141,12 @@ same permit-constraint snapshot bytes a live receipt would
 
 ## The replay contract
 
-Replaying the same idempotency key never re-executes and never re-charges; it
-returns the original envelope, including the original receipt. Replay access
-re-validates the permit↔wallet↔key binding first, so a revoked permit or a
-different key cannot read the stored receipt.
+A completed or terminalized invocation replays its stored envelope without
+re-execution or a second charge, including the original receipt where one
+exists. An unfinished local manual-review record instead remains
+`idempotency_in_progress` and has no receipt. Replay access re-validates the
+permit↔wallet↔key binding first, so a revoked permit or a different key cannot
+read the stored receipt.
 
 | Stored terminal state | Replay returns |
 |---|---|
@@ -161,8 +167,8 @@ Two non-terminal answers matter to clients:
   The claim fence also uses this response for an uncertain
   preparation commit and for a losing dispatch claimant. That is an observable
   correction from the earlier generic upstream-prepare failure on the rare
-  uncertain-commit path. REST returns `409`; JSON-RPC returns the retryable
-  `-32005` code.
+  uncertain-commit path. REST preserves the existing `400` response and
+  JSON-RPC preserves the existing `-32003` code.
 - **`idempotency_key_reused`** — the same key arrived with a *different*
   logical payload. Fail-closed; nothing is dispatched or charged
   (`test_governed_upstream_conflicting_payload_reuse_never_redispatches`).
@@ -204,9 +210,10 @@ and replay (`test_forged_resolved_reconciliation_without_refund_fails_closed`).
    recovery.** With no persisted response there is nothing safe to
    reconstruct; the row is counted for review and the replay stays
    in-progress (`test_post_side_effect_crash_requires_review_without_redispatch`).
-5. **There is a blind window after a crash.** The reconciler runs periodically
-   and sweeps rows only after the fixed 11,430-second idle window, in bounded
-   batches; backlog is surfaced in
+5. **There is a blind window after a crash.** A claim is eligible only after
+   the fixed 11,430-second idle window and is picked up by the next five-minute
+   sweep, in bounded batches; nominal pickup can therefore take about 11,730
+   seconds plus backlog. Backlog is surfaced in
    `/health/dependencies` and the operator dispatch summary rather than hidden.
 6. **Crash proofs are boundary-instrumented.** Faults are injected at the
    durable commit points listed above — not at arbitrary instructions, not

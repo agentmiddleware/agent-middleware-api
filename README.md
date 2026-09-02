@@ -365,12 +365,7 @@ TRUST_SIGNING_PRIVATE_KEY_B64=...     # base64-encoded 32-byte Ed25519 seed
 
 The application refuses unsafe production combinations. It also refuses silent in-memory fallback when durable state was configured for production, and on a hosted runtime (detected through the platform-injected `RAILWAY_*` variables) it refuses to boot when `ENVIRONMENT` is unset or blank instead of silently running with local-compatible defaults. Use `alembic upgrade head` for schema changes; production startup verifies the schema instead of relying on `create_all`.
 
-Pause ingress, drain every old worker, and apply the current migration head
-before starting current workers. Migration 027 serializes the legacy JSON-RPC
-and REST governed-MCP endpoint identities behind one wallet/idempotency-key
-uniqueness boundary. Migration `037_mcp_dispatch_claim_hash` adds the nullable
-remote dispatch-claim fence and does not support old/current worker overlap.
-Its rollout and rollback requirements are in [the Railway deploy SOP](docs/deploy-railway.md#dispatch-claim-migration-and-rollback).
+Apply the current migration head before mixed old/current workers take traffic. Migration 027 serializes the legacy JSON-RPC and REST governed-MCP endpoint identities behind one wallet/idempotency-key uniqueness boundary. Migration `037_mcp_dispatch_claim_hash` adds the nullable remote dispatch-claim fence. Its rolling and rollback requirements are in [the Railway deploy SOP](docs/deploy-railway.md#dispatch-claim-migration-and-rollback).
 
 The supported API deployment path is the repository Dockerfile on Railway: [docs/deploy-railway.md](docs/deploy-railway.md). The static agent-first site in [`site/`](site/) is a separate marketing/discovery surface, not the API runtime.
 

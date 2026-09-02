@@ -26,6 +26,8 @@ TRUST_TESTS=(
   tests/test_late_debit_reconciliation.py
   tests/test_mcp_dispatch_claim.py
   tests/test_mcp_dispatch_router_claim.py
+  tests/test_schema_boot.py
+  tests/test_standard_mcp_endpoint.py
 )
 
 echo "[trust-gate] focused trust-plane pytest suite"

@@ -32,12 +32,9 @@ from app.services.idempotency import (
 )
 from app.services.mcp_dispatch_attempts import (
     DISPATCH_CLAIMED,
-    MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
-    MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
     DispatchClaimUnavailableError,
     DispatchAttemptContext,
     McpDispatchAttemptService,
-    dispatch_reconciliation_idle_seconds,
     get_mcp_dispatch_attempt_service,
 )
 from app.services.mcp_dispatch_reconciliation import (
@@ -86,11 +83,6 @@ async def _seed_attempt(
     create_charge: bool = True,
     claim_dispatch: bool = True,
 ) -> SeededAttempt:
-    if not claim_dispatch:
-        assert state in {"prepared", "returned_error"}, (
-            "an unclaimed attempt can only remain prepared or terminalize "
-            "as returned_error"
-        )
     provisioned = await provision_agent_wallet(client)
     tool_name = f"reconcile-{suffix}"
     permit = await create_tool_permit(
@@ -458,10 +450,6 @@ async def test_terminal_repair_uses_shorter_idle_window_than_live_claim(
     client: AsyncClient,
     clean_database,
 ) -> None:
-    active_idle_seconds = dispatch_reconciliation_idle_seconds(
-        connect_timeout_seconds=MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
-        call_timeout_seconds=MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
-    )
     claimed_seed = await _seed_attempt(
         client,
         suffix="split-idle-live-claim",
@@ -475,7 +463,7 @@ async def test_terminal_repair_uses_shorter_idle_window_than_live_claim(
     )
 
     result = await get_mcp_dispatch_reconciliation_service().reconcile(
-        idle_seconds=active_idle_seconds,
+        idle_seconds=11_430,
         terminal_idle_seconds=300,
     )
 

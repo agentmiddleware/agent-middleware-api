@@ -205,13 +205,20 @@ class VelocityMonitor:
         )
 
         if velocity_result.should_freeze:
-            wallet.status = "frozen"
-            wallet.velocity_alerts_triggered += 1
-            # The billing writer can issue relative SQL updates and refresh the
-            # wallet before this caller-owned transaction commits. Flush these
-            # ORM-only control mutations first so that refresh cannot discard
-            # the freeze or alert checkpoint.
-            await session.flush()
+            # Guard the freeze with a source-state predicate. A wallet that a
+            # stronger control already moved out of "active" (closed, suspended,
+            # or pending_kyc) must not be clobbered to "frozen": an operator
+            # could later lift that freeze and restore spendability the stronger
+            # control had permanently removed. An already-frozen wallet needs no
+            # rewrite. The velocity trip still denies this call regardless.
+            if wallet.status == "active":
+                wallet.status = "frozen"
+                wallet.velocity_alerts_triggered += 1
+                # The billing writer can issue relative SQL updates and refresh
+                # the wallet before this caller-owned transaction commits. Flush
+                # these ORM-only control mutations first so that refresh cannot
+                # discard the freeze or alert checkpoint.
+                await session.flush()
             logger.warning(
                 f"Auto-freezing wallet {wallet_id}: "
                 f"hourly_spent={wallet.hourly_spent}, "

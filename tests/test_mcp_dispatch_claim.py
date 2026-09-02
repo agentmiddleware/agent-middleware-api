@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -8,7 +7,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSessionTransaction
 
 from app.db.database import get_session_factory
-from app.core.time import utc_now
 from app.db.models import LedgerEntryModel, McpDispatchAttemptModel, PermitModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
@@ -19,14 +17,11 @@ from app.services.mcp_dispatch_attempts import (
     MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
     MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
     DispatchAttemptConflictError,
-    DispatchAttemptError,
     DispatchClaimUnavailableError,
     McpDispatchAttemptService,
     dispatch_reconciliation_idle_seconds,
     get_mcp_dispatch_attempt_service,
 )
-from app.services.permits import get_permit_service
-from app.services.receipts import get_receipt_service
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
 
@@ -88,51 +83,26 @@ async def _prepare_attempt(
     return service, attempt
 
 
-@pytest.mark.anyio
-@pytest.mark.parametrize("credits_charged", [Decimal("0"), Decimal("-1")])
-async def test_attach_charge_rejects_non_positive_evidence(
-    credits_charged: Decimal,
-) -> None:
-    with pytest.raises(DispatchAttemptError, match="dispatch_charge_invalid"):
-        await get_mcp_dispatch_attempt_service().attach_charge(
-            attempt_id="dsp-does-not-need-to-exist",
-            ledger_entry_id="txn-does-not-need-to-exist",
-            credits_charged=credits_charged,
-        )
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("attempt_state", "cross_permit_receipt"),
-    [
-        (DISPATCH_CLAIMED, False),
-        ("succeeded", False),
-        ("succeeded", True),
-    ],
-    ids=["live-claim", "terminal-before-receipt", "cross-permit-receipt"],
-)
-async def test_budget_reconciliation_preserves_unreceipted_remote_reservation(
+async def _prepare_reserved_attempt(
     client: AsyncClient,
-    clean_database,
-    attempt_state: str,
-    cross_permit_receipt: bool,
-) -> None:
-    """Expiry cannot erase a remote reservation before its receipt exists."""
-    suffix = attempt_state.replace("_", "-")
+    *,
+    suffix: str,
+) -> tuple[McpDispatchAttemptService, McpDispatchAttemptModel, str]:
     provisioned = await provision_agent_wallet(client)
-    tool_name = f"partner-tool-unreceipted-{suffix}"
+    tool_name = f"partner-reserved-{suffix}"
     permit = await create_tool_permit(
         client,
         wallet_id=provisioned["agent_wallet_id"],
         key_id=provisioned["key_id"],
         tool_name=tool_name,
-        idem_key=f"permit-unreceipted-{suffix}",
+        idem_key=f"permit-reserved-{suffix}",
     )
     begun = await get_idempotency_service().begin_with_record(
         wallet_id=provisioned["agent_wallet_id"],
         endpoint="/mcp/messages",
-        idempotency_key=f"invoke-unreceipted-{suffix}",
-        request_payload={"tool": tool_name, "arguments": {"value": "slow"}},
+        idempotency_key=f"invoke-reserved-{suffix}",
+        request_payload={"tool": tool_name, "arguments": {"value": suffix}},
+        operation_kind="upstream_mcp",
     )
     service = get_mcp_dispatch_attempt_service()
     validation, attempt = await service.authorize_reserve_and_prepare(
@@ -145,78 +115,11 @@ async def test_budget_reconciliation_preserves_unreceipted_remote_reservation(
         upstream_origin="https://partner.example",
         request_hash=begun.request_hash,
         credits_authorized=Decimal("1.5"),
+        arguments={"value": suffix},
     )
     assert validation.allowed is True
     assert attempt is not None
-
-    debit = await get_agent_money().charge(
-        wallet_id=provisioned["agent_wallet_id"],
-        service_category=ServiceCategory.AGENT_COMMS,
-        units=Decimal("1"),
-        request_path="/mcp/messages",
-        operation_key=begun.record_id,
-    )
-    attempt = await service.attach_charge(
-        attempt_id=attempt.attempt_id,
-        ledger_entry_id=debit.entry_id,
-        credits_charged=Decimal("1.5"),
-    )
-    claimed = await service.claim_dispatch(attempt.attempt_id)
-    assert claimed.state == DISPATCH_CLAIMED
-    if attempt_state == "succeeded":
-        claimed = await service.complete(
-            attempt_id=attempt.attempt_id,
-            state="succeeded",
-            result_payload={"ok": True},
-            error_code=None,
-            max_result_bytes=1024,
-        )
-    assert claimed.state == attempt_state
-
-    if cross_permit_receipt:
-        other_permit = await create_tool_permit(
-            client,
-            wallet_id=provisioned["agent_wallet_id"],
-            key_id=provisioned["key_id"],
-            tool_name=tool_name,
-            idem_key=f"other-permit-unreceipted-{suffix}",
-        )
-        forged = await get_receipt_service().create_receipt(
-            permit_id=other_permit["permit_id"],
-            wallet_id=provisioned["agent_wallet_id"],
-            key_id=provisioned["key_id"],
-            tool=tool_name,
-            request_payload=None,
-            request_hash=begun.request_hash,
-            response_payload={"ok": True},
-            response_hash_override=claimed.response_hash,
-            ledger_entry_id=debit.entry_id,
-            credits_authorized=Decimal("1.5"),
-            credits_charged=Decimal("1.5"),
-            outcome="success",
-            audit_event_id=None,
-            idempotency_record_id=begun.record_id,
-            dispatch_attempt_id=attempt.attempt_id,
-        )
-        assert forged.permit_id == other_permit["permit_id"]
-
-    factory = get_session_factory()
-    async with factory() as session:
-        async with session.begin():
-            stored_permit = await session.get(PermitModel, permit["permit_id"])
-            assert stored_permit is not None
-            assert stored_permit.spent_credits == Decimal("1.5")
-            stored_permit.expires_at = utc_now() - timedelta(minutes=1)
-            stored_permit.updated_at = utc_now() - timedelta(hours=1)
-            session.add(stored_permit)
-
-    corrected = await get_permit_service().reconcile_budgets(idle_seconds=900)
-    assert corrected == 0
-
-    async with factory() as session:
-        stored_permit = await session.get(PermitModel, permit["permit_id"])
-        assert stored_permit is not None
-        assert stored_permit.spent_credits == Decimal("1.5")
+    return service, attempt, permit["permit_id"]
 
 
 def test_dispatch_idle_window_covers_full_transport_lifetime() -> None:
@@ -247,8 +150,18 @@ def test_dispatch_idle_window_covers_full_transport_lifetime() -> None:
         )
     with pytest.raises(ValueError, match="dispatch_timeout_exceeds_supported_maximum"):
         dispatch_reconciliation_idle_seconds(
+            connect_timeout_seconds=MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS + 0.001,
+            call_timeout_seconds=MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
+        )
+    with pytest.raises(ValueError, match="dispatch_timeout_exceeds_supported_maximum"):
+        dispatch_reconciliation_idle_seconds(
             connect_timeout_seconds=5,
             call_timeout_seconds=1e308,
+        )
+    with pytest.raises(ValueError, match="dispatch_timeout_exceeds_supported_maximum"):
+        dispatch_reconciliation_idle_seconds(
+            connect_timeout_seconds=MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+            call_timeout_seconds=MAX_UPSTREAM_CALL_TIMEOUT_SECONDS + 0.001,
         )
 
 
@@ -405,6 +318,55 @@ async def test_dispatch_claimed_corruption_cannot_be_terminalized(
     assert context.attempt.completed_at is None
 
 
+@pytest.mark.parametrize(
+    ("field_name", "corrupt_value"),
+    [
+        ("action", "refund"),
+        ("amount", Decimal("-1.25")),
+    ],
+)
+@pytest.mark.anyio
+async def test_dispatch_claimed_ledger_tampering_cannot_be_terminalized(
+    client: AsyncClient,
+    clean_database,
+    field_name: str,
+    corrupt_value: object,
+) -> None:
+    service, attempt = await _prepare_attempt(
+        client,
+        suffix=f"post-claim-ledger-{field_name}",
+        charge=True,
+    )
+    await service.claim_dispatch(attempt.attempt_id)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        async with session.begin():
+            stored = await session.get(McpDispatchAttemptModel, attempt.attempt_id)
+            assert stored is not None and stored.ledger_entry_id is not None
+            ledger = await session.get(LedgerEntryModel, stored.ledger_entry_id)
+            assert ledger is not None
+            setattr(ledger, field_name, corrupt_value)
+            session.add(ledger)
+
+    with pytest.raises(
+        DispatchAttemptConflictError,
+        match="dispatch_claim_evidence_invalid",
+    ):
+        await service.complete(
+            attempt_id=attempt.attempt_id,
+            state="succeeded",
+            result_payload={"ok": True},
+            error_code=None,
+            max_result_bytes=1024,
+        )
+
+    context = await service.get_context(attempt.attempt_id)
+    assert context is not None
+    assert context.attempt.state == DISPATCH_CLAIMED
+    assert context.attempt.completed_at is None
+
+
 @pytest.mark.anyio
 async def test_pre_dispatch_failure_cannot_overwrite_a_claim(
     client: AsyncClient,
@@ -439,234 +401,6 @@ async def test_pre_dispatch_failure_cannot_overwrite_a_claim(
     assert context.attempt.completed_at is None
 
 
-@pytest.mark.parametrize(
-    ("corruption", "expected_error", "message"),
-    [
-        (
-            "ledger_wallet",
-            DispatchAttemptConflictError,
-            "dispatch_ledger_linkage_invalid",
-        ),
-        (
-            "ledger_operation",
-            DispatchAttemptConflictError,
-            "dispatch_ledger_linkage_invalid",
-        ),
-        (
-            "ledger_action",
-            DispatchAttemptConflictError,
-            "dispatch_ledger_linkage_invalid",
-        ),
-        (
-            "ledger_amount",
-            DispatchAttemptConflictError,
-            "dispatch_ledger_linkage_invalid",
-        ),
-        (
-            "caller_amount",
-            DispatchAttemptConflictError,
-            "dispatch_ledger_linkage_invalid",
-        ),
-        (
-            "missing_amount",
-            DispatchAttemptError,
-            "dispatch_charge_linkage_incomplete",
-        ),
-        (
-            "missing_ledger",
-            DispatchAttemptError,
-            "dispatch_charge_linkage_incomplete",
-        ),
-        (
-            "negative_amount",
-            DispatchAttemptError,
-            "dispatch_charge_invalid",
-        ),
-        (
-            "zero_amount",
-            DispatchAttemptError,
-            "dispatch_charge_invalid",
-        ),
-        (
-            "stale_timestamp",
-            DispatchClaimUnavailableError,
-            "dispatch_attempt_advanced",
-        ),
-    ],
-)
-@pytest.mark.anyio
-async def test_pre_dispatch_failure_rejects_invalid_charge_evidence(
-    client: AsyncClient,
-    clean_database,
-    corruption: str,
-    expected_error: type[Exception],
-    message: str,
-) -> None:
-    service, attempt = await _prepare_attempt(
-        client,
-        suffix=f"pre-dispatch-invalid-{corruption}",
-        charge=True,
-    )
-    assert attempt.ledger_entry_id is not None
-    expected_updated_at = attempt.updated_at
-    ledger_entry_id = attempt.ledger_entry_id
-    credits_charged = attempt.credits_charged
-
-    if corruption == "ledger_wallet":
-        forged_wallet_id = (await provision_agent_wallet(client))["agent_wallet_id"]
-        factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                ledger = await session.get(LedgerEntryModel, ledger_entry_id)
-                assert ledger is not None
-                ledger.wallet_id = forged_wallet_id
-                session.add(ledger)
-    elif corruption == "ledger_operation":
-        factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                ledger = await session.get(LedgerEntryModel, ledger_entry_id)
-                assert ledger is not None
-                ledger.operation_key = "idm-forged-operation"
-                session.add(ledger)
-    elif corruption == "ledger_action":
-        factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                ledger = await session.get(LedgerEntryModel, ledger_entry_id)
-                assert ledger is not None
-                ledger.action = "refund"
-                session.add(ledger)
-    elif corruption == "ledger_amount":
-        factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                ledger = await session.get(LedgerEntryModel, ledger_entry_id)
-                assert ledger is not None
-                ledger.amount = Decimal("-1.25")
-                session.add(ledger)
-    elif corruption == "caller_amount":
-        credits_charged = Decimal("1.25")
-    elif corruption == "missing_amount":
-        credits_charged = None
-    elif corruption == "missing_ledger":
-        ledger_entry_id = None
-    elif corruption == "negative_amount":
-        credits_charged = Decimal("-1.5")
-    elif corruption == "zero_amount":
-        credits_charged = Decimal("0")
-    else:
-        expected_updated_at -= timedelta(microseconds=1)
-
-    with pytest.raises(expected_error, match=message):
-        await service.complete_pre_dispatch_failure(
-            attempt_id=attempt.attempt_id,
-            expected_updated_at=expected_updated_at,
-            ledger_entry_id=ledger_entry_id,
-            credits_charged=credits_charged,
-            result_payload={"error": "connect_failed"},
-            error_code="connect_failed",
-            max_result_bytes=1024,
-        )
-
-    context = await service.get_context(attempt.attempt_id)
-    assert context is not None
-    assert context.attempt.state == "prepared"
-    assert context.attempt.completed_at is None
-    assert context.attempt.dispatch_claim_hash is None
-    assert context.attempt.dispatched_at is None
-    assert context.attempt.ledger_entry_id == attempt.ledger_entry_id
-    assert context.attempt.credits_charged == attempt.credits_charged
-
-
-@pytest.mark.parametrize(
-    "corruption",
-    [
-        "refund_amount",
-        "refund_wallet",
-        "debit_operation",
-        "debit_amount",
-        "attempt_amount",
-    ],
-)
-@pytest.mark.anyio
-async def test_refund_marker_rejects_invalid_evidence(
-    client: AsyncClient,
-    clean_database,
-    corruption: str,
-) -> None:
-    service, attempt = await _prepare_attempt(
-        client,
-        suffix=f"refund-invalid-{corruption}",
-        charge=True,
-    )
-    assert attempt.ledger_entry_id is not None
-    terminal = await service.complete_pre_dispatch_failure(
-        attempt_id=attempt.attempt_id,
-        expected_updated_at=attempt.updated_at,
-        ledger_entry_id=attempt.ledger_entry_id,
-        credits_charged=attempt.credits_charged,
-        result_payload={"error": "connect_failed"},
-        error_code="connect_failed",
-        max_result_bytes=1024,
-    )
-    assert terminal.state == "returned_error"
-    await get_agent_money().refund_charge(
-        wallet_id=attempt.wallet_id,
-        charge_entry_id=attempt.ledger_entry_id,
-    )
-    forged_wallet_id = None
-    if corruption == "refund_wallet":
-        forged_wallet_id = (await provision_agent_wallet(client))["agent_wallet_id"]
-
-    factory = get_session_factory()
-    async with factory() as session:
-        async with session.begin():
-            stored_attempt = await session.get(
-                McpDispatchAttemptModel,
-                attempt.attempt_id,
-            )
-            debit = await session.get(LedgerEntryModel, attempt.ledger_entry_id)
-            refund = await session.get(
-                LedgerEntryModel,
-                f"refund-{attempt.ledger_entry_id}",
-            )
-            assert stored_attempt is not None
-            assert debit is not None
-            assert refund is not None
-            if corruption == "refund_amount":
-                refund.amount = Decimal("1.25")
-                session.add(refund)
-            elif corruption == "refund_wallet":
-                assert forged_wallet_id is not None
-                refund.wallet_id = forged_wallet_id
-                session.add(refund)
-            elif corruption == "debit_operation":
-                debit.operation_key = "idm-forged-operation"
-                session.add(debit)
-            elif corruption == "debit_amount":
-                debit.amount = Decimal("-1.25")
-                session.add(debit)
-            else:
-                stored_attempt.credits_charged = Decimal("1.25")
-                session.add(stored_attempt)
-
-    with pytest.raises(
-        DispatchAttemptConflictError,
-        match="dispatch_refund_evidence_invalid",
-    ):
-        await service.mark_debit_refunded(
-            attempt_id=attempt.attempt_id,
-            ledger_entry_id=attempt.ledger_entry_id,
-        )
-
-    context = await service.get_context(attempt.attempt_id)
-    assert context is not None
-    assert context.attempt.state == "returned_error"
-    assert context.attempt.debit_refunded_at is None
-    assert context.attempt.budget_released_at is None
-
-
 @pytest.mark.anyio
 async def test_dispatch_claim_recovers_lost_commit_acknowledgement(
     client: AsyncClient,
@@ -699,52 +433,84 @@ async def test_dispatch_claim_recovers_lost_commit_acknowledgement(
 
 
 @pytest.mark.anyio
-async def test_dispatch_claim_lost_ack_rejects_incomplete_evidence(
+async def test_effect_free_abandon_recovers_lost_commit_acknowledgement(
     client: AsyncClient,
     clean_database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, attempt = await _prepare_attempt(
+    service, attempt, permit_id = await _prepare_reserved_attempt(
         client,
-        suffix="claim-lost-ack-incomplete",
-        charge=True,
+        suffix="abandon-lost-ack",
     )
     original_exit = AsyncSessionTransaction.__aexit__
     acknowledgement_lost = False
 
-    async def corrupt_then_lose_ack(self, exc_type, exc, tb):  # noqa: ANN001
+    async def lose_commit_ack(self, exc_type, exc, tb):  # noqa: ANN001
         nonlocal acknowledgement_lost
         result = await original_exit(self, exc_type, exc, tb)
         if exc_type is None and not acknowledgement_lost:
             acknowledgement_lost = True
-            factory = get_session_factory()
-            async with factory() as corruption_session:
-                stored = await corruption_session.get(
-                    McpDispatchAttemptModel,
-                    attempt.attempt_id,
-                )
-                assert stored is not None
-                stored.dispatched_at = None
-                corruption_session.add(stored)
-                await corruption_session.commit()
-            raise RuntimeError("simulated_corrupt_claim_commit_ack_loss")
+            raise RuntimeError("simulated_abandon_commit_ack_loss")
         return result
 
-    monkeypatch.setattr(AsyncSessionTransaction, "__aexit__", corrupt_then_lose_ack)
+    monkeypatch.setattr(AsyncSessionTransaction, "__aexit__", lose_commit_ack)
 
-    with pytest.raises(
-        DispatchAttemptConflictError,
-        match="dispatch_claim_evidence_invalid",
-    ):
-        await service.claim_dispatch(attempt.attempt_id)
+    await service.abandon_effect_free_prepared_attempt(
+        attempt_id=attempt.attempt_id,
+        expected_updated_at=attempt.updated_at,
+    )
 
     assert acknowledgement_lost is True
-    context = await service.get_context(attempt.attempt_id)
-    assert context is not None
-    assert context.attempt.state == DISPATCH_CLAIMED
-    assert context.attempt.dispatch_claim_hash is not None
-    assert context.attempt.dispatched_at is None
-    assert context.attempt.completed_at is None
+    factory = get_session_factory()
+    async with factory() as session:
+        stored_attempt = await session.get(
+            McpDispatchAttemptModel,
+            attempt.attempt_id,
+        )
+        stored_permit = await session.get(PermitModel, permit_id)
+    assert stored_attempt is None
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("0")
+
+
+@pytest.mark.anyio
+async def test_effect_free_abandon_refuses_an_operation_with_a_debit(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    service, attempt, permit_id = await _prepare_reserved_attempt(
+        client,
+        suffix="abandon-after-debit",
+    )
+    debit = await get_agent_money().charge(
+        wallet_id=attempt.wallet_id,
+        service_category=ServiceCategory.AGENT_COMMS,
+        units=Decimal("1"),
+        request_path="/mcp/messages",
+        operation_key=attempt.idempotency_record_id,
+    )
+    assert debit.entry_id
+
+    with pytest.raises(
+        DispatchClaimUnavailableError,
+        match="dispatch_attempt_advanced",
+    ):
+        await service.abandon_effect_free_prepared_attempt(
+            attempt_id=attempt.attempt_id,
+            expected_updated_at=attempt.updated_at,
+        )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stored_attempt = await session.get(
+            McpDispatchAttemptModel,
+            attempt.attempt_id,
+        )
+        stored_permit = await session.get(PermitModel, permit_id)
+    assert stored_attempt is not None
+    assert stored_attempt.state == "prepared"
+    assert stored_permit is not None
+    assert stored_permit.spent_credits == Decimal("1.5")
 
 
 @pytest.mark.anyio

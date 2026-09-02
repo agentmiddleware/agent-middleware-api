@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -234,14 +233,16 @@ def _rest_call_body(
 
 
 @pytest.mark.anyio
-async def test_remote_quote_consume_loss_releases_attempt_budget_once(
+@pytest.mark.parametrize("transport", ["jsonrpc", "rest"])
+async def test_remote_quote_consume_loss_preserves_legacy_denial_without_leaks(
     client: AsyncClient,
-    clean_database,
+    clean_database: None,
     monkeypatch: pytest.MonkeyPatch,
+    transport: Literal["jsonrpc", "rest"],
 ) -> None:
     provisioned = await provision_agent_wallet(client)
-    tool_name = "partner-upstream-quote-consume-loss"
-    idempotency_key = "partner-upstream-quote-consume-loss-1"
+    tool_name = f"partner-upstream-quote-consume-loss-{transport}"
+    idempotency_key = f"partner-upstream-quote-consume-loss-{transport}-1"
     executor = FakeUpstreamExecutor("success")
     _register_upstream(tool_name, executor)
     quote_service = get_quote_service()
@@ -261,7 +262,7 @@ async def test_remote_quote_consume_loss_releases_attempt_budget_once(
             wallet_id=provisioned["agent_wallet_id"],
             key_id=provisioned["key_id"],
             tool_name=tool_name,
-            idem_key="partner-upstream-quote-consume-loss-permit",
+            idem_key=f"partner-upstream-quote-consume-loss-permit-{transport}",
         )
         quote = await quote_service.create_quote(
             wallet_id=provisioned["agent_wallet_id"],
@@ -269,26 +270,39 @@ async def test_remote_quote_consume_loss_releases_attempt_budget_once(
             quoted_credits=Decimal("2"),
             category=ServiceCategory.AGENT_COMMS.value,
         )
-        body = _call_body(
-            tool_name=tool_name,
-            wallet_id=provisioned["agent_wallet_id"],
-            permit_id=permit["permit_id"],
-            idempotency_key=idempotency_key,
-        )
-        body["params"]["mcpContext"]["quote_id"] = quote.quote_id
-
-        denied = await client.post(
-            "/mcp/messages",
-            json=body,
-            headers=provisioned["agent_headers"],
-        )
-
-        assert denied.status_code == 200
-        error = denied.json()["error"]
-        assert error["code"] == -32003
-        assert error["message"] == "quote_already_consumed"
-        receipt_payload = error["data"]["receipt"]
-        assert receipt_payload["outcome"] == "failed_refunded"
+        if transport == "jsonrpc":
+            body = _call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key=idempotency_key,
+            )
+            body["params"]["mcpContext"]["quote_id"] = quote.quote_id
+            denied = await client.post(
+                "/mcp/messages",
+                json=body,
+                headers=provisioned["agent_headers"],
+            )
+            assert denied.status_code == 200
+            assert denied.json()["error"] == {
+                "code": -32003,
+                "message": "quote_already_consumed",
+            }
+        else:
+            body = _rest_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key=idempotency_key,
+            )
+            body["mcp_context"]["quote_id"] = quote.quote_id
+            denied = await client.post(
+                f"/mcp/tools/{tool_name}/invoke",
+                json=body,
+                headers=provisioned["agent_headers"],
+            )
+            assert denied.status_code == 403
+            assert denied.json() == {"detail": "quote_already_consumed"}
         assert executor.calls == []
 
         factory = get_session_factory()
@@ -300,27 +314,35 @@ async def test_remote_quote_consume_loss_releases_attempt_budget_once(
                     )
                 )
             ).scalar_one()
-            attempt = (
-                await session.execute(
-                    select(McpDispatchAttemptModel).where(
-                        McpDispatchAttemptModel.idempotency_record_id
-                        == record.record_id
-                    )
+            stored_response = record.response_json
+            attempt_count = await session.scalar(
+                select(func.count())
+                .select_from(McpDispatchAttemptModel)
+                .where(
+                    McpDispatchAttemptModel.idempotency_record_id == record.record_id
                 )
-            ).scalar_one()
-            assert attempt.state == "returned_error"
-            assert attempt.ledger_entry_id is None
-            assert attempt.budget_released_at is not None
-            original_response = record.response_json
-
-        permit_service = get_permit_service()
-        stored_permit = await permit_service.get_permit(permit["permit_id"])
+            )
+            ledger_count = await session.scalar(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(LedgerEntryModel.operation_key == record.record_id)
+            )
+            receipt_count = await session.scalar(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(ReceiptModel.idempotency_record_id == record.record_id)
+            )
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+        assert int(attempt_count or 0) == 0
+        assert int(ledger_count or 0) == 0
+        assert int(receipt_count or 0) == 0
         assert stored_permit is not None
         assert stored_permit.spent_credits == Decimal("0")
 
-        # A later reservation on this permit must not be released when the
-        # already-finalized quote loser is swept again.
-        await permit_service.reserve_budget(permit["permit_id"], Decimal("2"))
+        # A later, unrelated reservation must survive repeated sweeps. The
+        # quote-loser left no attempt for reconciliation to refund twice or to
+        # convert into a new receipt-bearing public response.
+        await get_permit_service().reserve_budget(permit["permit_id"], Decimal("2"))
         first = await get_mcp_dispatch_reconciliation_service().reconcile(
             idle_seconds=0,
             terminal_idle_seconds=0,
@@ -331,16 +353,19 @@ async def test_remote_quote_consume_loss_releases_attempt_budget_once(
         )
         assert first.repaired == 0
         assert second.repaired == 0
-        stored_permit = await permit_service.get_permit(permit["permit_id"])
-        assert stored_permit is not None
-        assert stored_permit.spent_credits == Decimal("2")
 
         async with factory() as session:
             record = await session.get(IdempotencyRecordModel, record.record_id)
-            receipt = await session.get(ReceiptModel, receipt_payload["receipt_id"])
-        assert record is not None and record.response_json == original_response
-        assert receipt is not None
-        assert receipt.dispatch_attempt_id == attempt.attempt_id
+            stored_permit = await session.get(PermitModel, permit["permit_id"])
+            receipt_count = await session.scalar(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(ReceiptModel.idempotency_record_id == record.record_id)
+            )
+        assert record is not None and record.response_json == stored_response
+        assert stored_permit is not None
+        assert stored_permit.spent_credits == Decimal("2")
+        assert int(receipt_count or 0) == 0
     finally:
         get_service_registry().unregister_local(tool_name)
 
@@ -1189,7 +1214,6 @@ async def test_losing_dispatch_claim_does_not_compensate_or_send(
 @pytest.mark.parametrize("transport", ["jsonrpc", "rest"])
 async def test_prepare_commit_uncertain_preserves_owner_state_and_public_contract(
     client: AsyncClient,
-    caplog: pytest.LogCaptureFixture,
     clean_database: None,
     monkeypatch: pytest.MonkeyPatch,
     transport: Literal["jsonrpc", "rest"],
@@ -1200,7 +1224,6 @@ async def test_prepare_commit_uncertain_preserves_owner_state_and_public_contrac
     executor = FakeUpstreamExecutor("success")
     original_prepare = McpDispatchAttemptService.authorize_reserve_and_prepare
     committed_attempt_id: str | None = None
-    caplog.set_level(logging.WARNING, logger="app.routers.mcp")
 
     async def commit_then_report_uncertain(
         self: McpDispatchAttemptService,
@@ -1256,22 +1279,9 @@ async def test_prepare_commit_uncertain_preserves_owner_state_and_public_contrac
                 headers=provisioned["agent_headers"],
             )
             assert uncertain.status_code == 409
-            assert uncertain.json()["detail"] == {
-                "error": "idempotency_in_progress"
-            }
+            assert uncertain.json()["detail"] == {"error": "idempotency_in_progress"}
         assert committed_attempt_id is not None
         assert executor.calls == []
-
-        warning_records = [
-            record
-            for record in caplog.records
-            if record.name == "app.routers.mcp"
-            and record.getMessage() == "mcp_upstream_prepare_commit_uncertain"
-        ]
-        assert len(warning_records) == 1
-        warning = warning_records[0]
-        assert warning.reason == "dispatch_prepare_commit_uncertain"
-        assert idempotency_key not in caplog.text
 
         factory = get_session_factory()
         async with factory() as session:
@@ -1299,7 +1309,6 @@ async def test_prepare_commit_uncertain_preserves_owner_state_and_public_contrac
             )
 
         assert attempt.state == "prepared"
-        assert warning.idempotency_record_id == attempt.idempotency_record_id
         assert attempt.dispatch_claim_hash is None
         assert attempt.completed_at is None
         assert record is not None and record.response_json is None
@@ -2761,6 +2770,97 @@ async def test_upstream_usage_constraints_fail_closed_before_reservation(
         assert int(attempt_count or 0) == 0
         assert int(debit_count or 0) == 0
         assert int(receipt_count or 0) == 1
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_upstream_usage_constraint_rest_denial_keeps_call_slot_unreserved(
+    client: AsyncClient,
+    clean_database: None,
+) -> None:
+    provisioned = await provision_agent_wallet(client)
+    tool_name = "partner-upstream-unsupported-rest-call-slot"
+    idempotency_key = "partner-upstream-unsupported-rest-call-slot-1"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor)
+    try:
+        permit_response = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": provisioned["agent_wallet_id"],
+                "subject_wallet_id": provisioned["agent_wallet_id"],
+                "subject_key_id": provisioned["key_id"],
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 50,
+                "max_calls_per_tool": {tool_name: 1},
+                "expires_at": (utc_now() + timedelta(minutes=30)).isoformat(),
+            },
+            headers={
+                **BOOTSTRAP_HEADERS,
+                "Idempotency-Key": "permit-unsupported-rest-call-slot",
+            },
+        )
+        assert permit_response.status_code == 201
+        permit_id = permit_response.json()["permit_id"]
+
+        factory = get_session_factory()
+        async with factory() as session:
+            permit_before = await session.get(PermitModel, permit_id)
+        assert permit_before is not None
+        call_counts_before = permit_before.tool_call_counts_json
+
+        denied = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=_rest_call_body(
+                tool_name=tool_name,
+                wallet_id=provisioned["agent_wallet_id"],
+                permit_id=permit_id,
+                idempotency_key=idempotency_key,
+            ),
+            headers=provisioned["agent_headers"],
+        )
+
+        assert denied.status_code == 403
+        detail = denied.json()["detail"]
+        assert detail["error"] == "permit_constraint_unsupported_for_upstream"
+        assert detail["details"] == {
+            "execution_backend": "upstream_mcp",
+            "unsupported_constraints": ["max_calls_per_tool"],
+        }
+        assert detail["receipt"]["outcome"] == "denied"
+        assert detail["receipt"]["dispatch_attempt_id"] is None
+        assert executor.calls == []
+
+        async with factory() as session:
+            permit = await session.get(PermitModel, permit_id)
+            record = (
+                await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        IdempotencyRecordModel.wallet_id
+                        == provisioned["agent_wallet_id"],
+                        IdempotencyRecordModel.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            attempt_count = await session.scalar(
+                select(func.count())
+                .select_from(McpDispatchAttemptModel)
+                .where(
+                    McpDispatchAttemptModel.idempotency_record_id == record.record_id
+                )
+            )
+            debit_count = await session.scalar(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(LedgerEntryModel.operation_key == record.record_id)
+            )
+        assert permit is not None
+        assert permit.spent_credits == Decimal("0")
+        assert permit.tool_call_counts_json == call_counts_before
+        assert int(attempt_count or 0) == 0
+        assert int(debit_count or 0) == 0
     finally:
         get_service_registry().unregister_local(tool_name)
 

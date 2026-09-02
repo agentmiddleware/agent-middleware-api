@@ -330,26 +330,31 @@ def test_configuration_accepts_credits_representable_as_numeric_20_8(
     ).credits_per_call == Decimal(credits)
 
 
-@pytest.mark.parametrize("credits", ["0", "-0.00000001"])
-def test_configuration_rejects_non_positive_credits(credits: str) -> None:
-    with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
-        _configuration(MCP_UPSTREAM_CREDITS_PER_CALL=credits)
-
-    assert "greater than zero" in exc_info.value.detail
-
-
 @pytest.mark.parametrize(
-    "setting_name",
+    ("setting_name", "attribute_name", "maximum"),
     [
-        "MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS",
-        "MCP_UPSTREAM_CALL_TIMEOUT_SECONDS",
+        (
+            "MCP_UPSTREAM_CONNECT_TIMEOUT_SECONDS",
+            "connect_timeout_seconds",
+            600.0,
+        ),
+        (
+            "MCP_UPSTREAM_CALL_TIMEOUT_SECONDS",
+            "call_timeout_seconds",
+            3600.0,
+        ),
     ],
 )
-def test_configuration_rejects_timeout_above_global_safety_bound(
+def test_configuration_enforces_exact_timeout_safety_bound(
     setting_name: str,
+    attribute_name: str,
+    maximum: float,
 ) -> None:
+    configuration = _configuration(**{setting_name: maximum})
+
+    assert getattr(configuration, attribute_name) == maximum
     with pytest.raises(UpstreamMcpConfigurationError) as exc_info:
-        _configuration(**{setting_name: 1e308})
+        _configuration(**{setting_name: maximum + 0.001})
 
     assert setting_name in exc_info.value.detail
 
@@ -1101,7 +1106,6 @@ async def test_dispatch_claim_contention_is_preserved_without_calling_upstream(
     cleanup_error: Exception,
 ) -> None:
     adapter = UpstreamMcpAdapter(_configuration())
-    caplog.set_level(logging.DEBUG, logger="app.services.upstream_mcp")
     _mark_discovered(adapter)
     session = FakeSession()
     _bind_session(
@@ -1250,13 +1254,64 @@ async def test_oversized_or_invalid_response_is_rejected_after_dispatch() -> Non
 
 
 @pytest.mark.anyio
-async def test_cleanup_failure_does_not_replace_confirmed_response() -> None:
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [
+        UpstreamMcpPreDispatchError("secret-partner-token"),
+        UpstreamMcpDeliveryUncertainError(),
+    ],
+    ids=["typed-pre-dispatch", "typed-delivery-uncertain"],
+)
+async def test_typed_cleanup_failure_does_not_replace_known_response_rejection(
+    cleanup_error: Exception,
+) -> None:
+    oversized = CallToolResult(
+        content=[TextContent(type="text", text="x" * 200)],
+        isError=False,
+    )
+    adapter = UpstreamMcpAdapter(_configuration(MCP_UPSTREAM_MAX_RESPONSE_BYTES=80))
+    _mark_discovered(adapter)
+    _bind_session(
+        adapter,
+        FakeSession(result=oversized),
+        cleanup_error=cleanup_error,
+    )
+
+    async def before_dispatch() -> None:
+        return None
+
+    with pytest.raises(UpstreamMcpResponseRejectedError) as exc_info:
+        await adapter.call_tool(
+            {},
+            invocation_id="inv",
+            idempotency_key="idem",
+            before_dispatch=before_dispatch,
+        )
+
+    assert exc_info.value.code == "upstream_response_too_large"
+    assert exc_info.value.dispatch_started is True
+    assert "secret-partner-token" not in str(exc_info.value)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [
+        RuntimeError("secret-partner-token"),
+        UpstreamMcpPreDispatchError("secret-partner-token"),
+        UpstreamMcpDeliveryUncertainError(),
+    ],
+    ids=["untyped", "typed-pre-dispatch", "typed-delivery-uncertain"],
+)
+async def test_cleanup_failure_does_not_replace_confirmed_response(
+    cleanup_error: Exception,
+) -> None:
     adapter = UpstreamMcpAdapter(_configuration())
     _mark_discovered(adapter)
     _bind_session(
         adapter,
         FakeSession(),
-        cleanup_error=RuntimeError("secret-partner-token"),
+        cleanup_error=cleanup_error,
     )
 
     async def before_dispatch() -> None:

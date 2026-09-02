@@ -1487,9 +1487,7 @@ async def test_reconcile_flags_orphaned_local_debit_without_a_receipt(
 
 
 @pytest.mark.anyio
-async def test_reconcile_refuses_a_credit_as_compensation_proof(
-    client, clean_database
-):
+async def test_reconcile_refuses_a_credit_as_compensation_proof(client, clean_database):
     """Only a debit proves the local charge happened.
 
     The linking pass adopts a ledger entry as evidence that money moved under

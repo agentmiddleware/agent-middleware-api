@@ -151,24 +151,15 @@ async def _claim_debit_is_valid(
     )
 
 
-async def _claim_evidence_is_valid(
-    session: AsyncSession,
-    attempt: McpDispatchAttemptModel,
-) -> bool:
-    """Verify every persisted fact required to send and later terminalize."""
-    claim_hash = attempt.dispatch_claim_hash
-    return bool(
-        attempt.state == DISPATCH_CLAIMED
-        and claim_hash is not None
-        and len(claim_hash) == 64
-        and all(char in "0123456789abcdef" for char in claim_hash)
-        and attempt.dispatched_at is not None
-        and await _claim_debit_is_valid(session, attempt)
-    )
-
-
 def _unsupported_upstream_constraints(permit: PermitModel) -> list[str]:
-    """Return constraints the atomic upstream reservation cannot yet enforce."""
+    """Return constraints the atomic upstream reservation cannot yet enforce.
+
+    The prepare path can atomically reserve a flat per-call cost, but the
+    per-tool call cap and the aggregate value cap are not yet enforceable
+    inside that single guarded reservation. When either is configured, a
+    prepared row must be treated as commit-uncertain rather than adopted as a
+    clean success or turned into a denial receipt.
+    """
     return [
         name
         for name, configured in (
@@ -762,6 +753,11 @@ class McpDispatchAttemptService:
                             public_tool_id=public_tool_id,
                         )
                         if _unsupported_upstream_constraints(permit):
+                            # A row created by an older worker may already hold a
+                            # reservation the atomic path cannot re-validate.
+                            # Keep it commit-uncertain so the reconciler owns
+                            # its terminal classification instead of adopting it
+                            # here as a clean success or a new denial.
                             raise DispatchPrepareCommitUncertainError(
                                 "dispatch_prepare_constraint_unsupported"
                             )
@@ -821,7 +817,7 @@ class McpDispatchAttemptService:
         ledger_entry_id: str,
         credits_charged: Decimal,
     ) -> McpDispatchAttemptModel:
-        if credits_charged <= 0:
+        if credits_charged < 0:
             raise DispatchAttemptError("dispatch_charge_invalid")
         factory = get_session_factory()
         async with factory() as session:
@@ -861,6 +857,150 @@ class McpDispatchAttemptService:
                 attempt.updated_at = utc_now()
                 session.add(attempt)
                 return attempt
+
+    async def abandon_effect_free_prepared_attempt(
+        self,
+        *,
+        attempt_id: str,
+        expected_updated_at: datetime,
+    ) -> None:
+        """Atomically remove an unclaimed, uncharged attempt and its reservation.
+
+        This is the narrow escape hatch for a pre-dispatch condition whose
+        public contract predates durable dispatch attempts (currently a lost
+        quote-consumption race). Deleting the attempt is safe only while no
+        charge or send authority exists. The permit decrement and deletion
+        share one transaction, so reconciliation can never observe a prepared
+        row whose reservation was already released.
+        """
+
+        if not attempt_id:
+            raise DispatchAttemptError("dispatch_attempt_invalid")
+        factory = get_session_factory()
+        try:
+            async with factory() as session:
+                async with session.begin():
+                    # Acquire a SQLite writer transaction before inspecting the
+                    # row. PostgreSQL additionally protects it with FOR UPDATE.
+                    await session.execute(
+                        sa_update(McpDispatchAttemptModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                McpDispatchAttemptModel.attempt_id == attempt_id,
+                            )
+                        )
+                        .values(state=McpDispatchAttemptModel.state)
+                        .execution_options(synchronize_session=False)
+                    )
+                    attempt = await session.get(
+                        McpDispatchAttemptModel,
+                        attempt_id,
+                        with_for_update=True,
+                    )
+                    if attempt is None:
+                        raise DispatchAttemptConflictError("dispatch_attempt_not_found")
+                    if (
+                        attempt.state != DISPATCH_PREPARED
+                        or attempt.updated_at != expected_updated_at
+                        or attempt.dispatch_claim_hash is not None
+                        or attempt.dispatched_at is not None
+                        or attempt.ledger_entry_id is not None
+                        or attempt.credits_charged != Decimal("0")
+                        or attempt.completed_at is not None
+                        or attempt.debit_refunded_at is not None
+                        or attempt.budget_released_at is not None
+                    ):
+                        raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
+
+                    record = await session.get(
+                        IdempotencyRecordModel,
+                        attempt.idempotency_record_id,
+                        with_for_update=True,
+                    )
+                    if record is None or record.ledger_entry_id is not None:
+                        raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
+                    operation_debit = (
+                        await session.execute(
+                            select(LedgerEntryModel).where(
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.wallet_id == attempt.wallet_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.operation_key
+                                    == attempt.idempotency_record_id,
+                                ),
+                                cast(
+                                    ColumnElement[bool],
+                                    LedgerEntryModel.action == "debit",
+                                ),
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if operation_debit is not None:
+                        raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
+                    linked_receipt = (
+                        await session.execute(
+                            select(ReceiptModel).where(
+                                cast(
+                                    ColumnElement[bool],
+                                    ReceiptModel.dispatch_attempt_id == attempt_id,
+                                )
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if linked_receipt is not None:
+                        raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
+
+                    released = await session.execute(
+                        sa_update(PermitModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.permit_id == attempt.permit_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits >= attempt.credits_authorized,
+                            ),
+                        )
+                        .values(
+                            spent_credits=PermitModel.spent_credits
+                            - attempt.credits_authorized,
+                            updated_at=utc_now(),
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if (cast(Any, released).rowcount or 0) != 1:
+                        raise DispatchAttemptConflictError(
+                            "dispatch_budget_release_invalid"
+                        )
+                    await session.delete(attempt)
+                    await session.flush()
+        except DispatchAttemptError:
+            raise
+        except Exception as exc:
+            # A failed COMMIT acknowledgement is safe to adopt only when the
+            # exact attempt is gone. If it remains or the recovery read fails,
+            # leave the idempotency record in progress and let reconciliation
+            # classify the durable row; never emit the legacy denial response.
+            try:
+                async with factory() as recovery_session:
+                    recovered = await recovery_session.get(
+                        McpDispatchAttemptModel,
+                        attempt_id,
+                    )
+            except Exception as recovery_exc:
+                raise DispatchClaimUnavailableError(
+                    "dispatch_abandon_commit_uncertain"
+                ) from recovery_exc
+            if recovered is None:
+                return
+            raise DispatchClaimUnavailableError(
+                "dispatch_abandon_commit_uncertain"
+            ) from exc
 
     async def claim_dispatch(self, attempt_id: str) -> McpDispatchAttemptModel:
         """Acquire the durable, non-reacquirable right to send exactly once.
@@ -939,10 +1079,6 @@ class McpDispatchAttemptService:
                     await session.refresh(observed)
                     attempt = observed
                     if claim_written:
-                        if not await _claim_evidence_is_valid(session, attempt):
-                            raise DispatchAttemptConflictError(
-                                "dispatch_claim_evidence_invalid"
-                            )
                         return attempt
                     if attempt.state in DISPATCH_TERMINAL_STATES:
                         raise DispatchClaimUnavailableError(
@@ -957,7 +1093,7 @@ class McpDispatchAttemptService:
                             "dispatch_claim_unavailable"
                         )
                     raise DispatchAttemptConflictError("dispatch_transition_invalid")
-        except Exception as exc:
+        except Exception:
             if not claim_written:
                 raise
             # A driver can report a failed COMMIT after the database durably
@@ -968,22 +1104,17 @@ class McpDispatchAttemptService:
                     McpDispatchAttemptModel,
                     attempt_id,
                 )
-                recovered_evidence_valid = bool(
+                recovered_debit_valid = bool(
                     recovered is not None
-                    and recovered.state == DISPATCH_CLAIMED
-                    and recovered.dispatch_claim_hash == claim_hash
-                    and await _claim_evidence_is_valid(recovery_session, recovered)
+                    and await _claim_debit_is_valid(recovery_session, recovered)
                 )
             if (
                 recovered is not None
                 and recovered.state == DISPATCH_CLAIMED
                 and recovered.dispatch_claim_hash == claim_hash
+                and recovered_debit_valid
             ):
-                if recovered_evidence_valid:
-                    return recovered
-                raise DispatchAttemptConflictError(
-                    "dispatch_claim_evidence_invalid"
-                ) from exc
+                return recovered
             raise
 
     async def complete_pre_dispatch_failure(
@@ -1006,7 +1137,7 @@ class McpDispatchAttemptService:
         )
         if (ledger_entry_id is None) != (credits_charged is None):
             raise DispatchAttemptError("dispatch_charge_linkage_incomplete")
-        if credits_charged is not None and credits_charged <= 0:
+        if credits_charged is not None and credits_charged < 0:
             raise DispatchAttemptError("dispatch_charge_invalid")
         factory = get_session_factory()
         async with factory() as session:
@@ -1172,48 +1303,26 @@ class McpDispatchAttemptService:
                     )
                 if attempt.state != "returned_error":
                     raise DispatchAttemptConflictError("dispatch_refund_state_invalid")
-                debit = await session.get(LedgerEntryModel, ledger_entry_id)
-                if (
-                    attempt.credits_charged <= 0
-                    or debit is None
-                    or debit.wallet_id != attempt.wallet_id
-                    or debit.action != "debit"
-                    or debit.operation_key != attempt.idempotency_record_id
-                    or debit.amount != -attempt.credits_charged
-                ):
-                    raise DispatchAttemptConflictError(
-                        "dispatch_refund_evidence_invalid"
-                    )
-                refunds = list(
-                    (
-                        await session.execute(
-                            select(LedgerEntryModel).where(
-                                cast(
-                                    ColumnElement[bool],
-                                    LedgerEntryModel.wallet_id == attempt.wallet_id,
-                                ),
-                                cast(
-                                    ColumnElement[bool],
-                                    LedgerEntryModel.action == "refund",
-                                ),
-                                cast(
-                                    ColumnElement[bool],
-                                    LedgerEntryModel.correlation_id == ledger_entry_id,
-                                ),
-                            )
+                refund = (
+                    await session.execute(
+                        select(LedgerEntryModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.wallet_id == attempt.wallet_id,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.action == "refund",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                LedgerEntryModel.correlation_id == ledger_entry_id,
+                            ),
                         )
                     )
-                    .scalars()
-                    .all()
-                )
-                if (
-                    len(refunds) != 1
-                    or refunds[0].entry_id != f"refund-{ledger_entry_id}"
-                    or refunds[0].amount != attempt.credits_charged
-                ):
-                    raise DispatchAttemptConflictError(
-                        "dispatch_refund_evidence_invalid"
-                    )
+                ).scalar_one_or_none()
+                if refund is None:
+                    raise DispatchAttemptConflictError("dispatch_refund_not_durable")
                 if attempt.debit_refunded_at is None:
                     now = utc_now()
                     attempt.debit_refunded_at = now
@@ -1240,6 +1349,23 @@ class McpDispatchAttemptService:
         factory = get_session_factory()
         async with factory() as session:
             async with session.begin():
+                # Acquire the SQLite writer transaction before the terminal
+                # read-modify-write. FOR UPDATE alone is a silent no-op on
+                # SQLite, so a live success finalizer and the stale-claim
+                # reconciler could otherwise both observe dispatch_claimed and
+                # persist conflicting terminal states. PostgreSQL additionally
+                # protects the row with FOR UPDATE below.
+                await session.execute(
+                    sa_update(McpDispatchAttemptModel)
+                    .where(
+                        cast(
+                            ColumnElement[bool],
+                            McpDispatchAttemptModel.attempt_id == attempt_id,
+                        )
+                    )
+                    .values(state=McpDispatchAttemptModel.state)
+                    .execution_options(synchronize_session=False)
+                )
                 attempt = await session.get(
                     McpDispatchAttemptModel,
                     attempt_id,
@@ -1259,7 +1385,19 @@ class McpDispatchAttemptService:
                     return attempt
 
                 if attempt.state == DISPATCH_CLAIMED:
-                    if not await _claim_evidence_is_valid(session, attempt):
+                    claim_hash = attempt.dispatch_claim_hash
+                    if (
+                        claim_hash is None
+                        or len(claim_hash) != 64
+                        or any(char not in "0123456789abcdef" for char in claim_hash)
+                        or attempt.dispatched_at is None
+                        or attempt.ledger_entry_id is None
+                        or attempt.credits_charged <= 0
+                    ):
+                        raise DispatchAttemptConflictError(
+                            "dispatch_claim_evidence_invalid"
+                        )
+                    if not await _claim_debit_is_valid(session, attempt):
                         raise DispatchAttemptConflictError(
                             "dispatch_claim_evidence_invalid"
                         )

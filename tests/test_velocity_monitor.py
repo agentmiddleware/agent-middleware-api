@@ -183,3 +183,80 @@ class TestVelocityMonitorIntegration:
             assert "daily_spent" in data
             assert "daily_limit" in data
             assert "velocity_alerts" in data
+
+
+class TestVelocityFreezeStatusGuard:
+    """Auto-freeze must not clobber a stronger wallet control state."""
+
+    @staticmethod
+    async def _seed_wallet(status: str) -> str:
+        import uuid
+
+        from app.db.database import get_session_factory
+        from app.db.models import WalletModel
+
+        wallet_id = f"agt-vel-{uuid.uuid4().hex[:12]}"
+        factory = get_session_factory()
+        async with factory() as session:
+            async with session.begin():
+                session.add(
+                    WalletModel(
+                        wallet_id=wallet_id,
+                        wallet_type="agent",
+                        owner_name="velocity freeze guard probe",
+                        email=f"{wallet_id}@example.com",
+                        balance=Decimal("100"),
+                        status=status,
+                        # A tiny cap plus pre-loaded spend and a saturated alert
+                        # counter make the next charge trip the freeze branch.
+                        hourly_limit=Decimal("1"),
+                        daily_limit=Decimal("1000000"),
+                        hourly_spent=Decimal("5"),
+                        velocity_alerts_triggered=10_000,
+                    )
+                )
+        return wallet_id
+
+    @staticmethod
+    async def _status(wallet_id: str) -> str:
+        from app.db.database import get_session_factory
+        from app.db.models import WalletModel
+
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            return wallet.status
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("protected_status", ["closed", "suspended"])
+    async def test_freeze_does_not_clobber_stronger_status(
+        self, clean_database, protected_status
+    ):
+        """A velocity trip must not downgrade a closed/suspended wallet.
+
+        Overwriting a stronger control state with ``frozen`` would let an
+        operator later lift the freeze and restore spendability the stronger
+        control had permanently removed.
+        """
+        wallet_id = await self._seed_wallet(protected_status)
+
+        result = await VelocityMonitor().check_and_record_charge(
+            wallet_id, Decimal("1")
+        )
+
+        # The anomaly is still detected, but the stronger status is preserved.
+        assert result.should_freeze is True
+        assert await self._status(wallet_id) == protected_status
+
+    @pytest.mark.anyio
+    async def test_freeze_still_applies_to_active_wallet(self, clean_database):
+        """Positive control: the guard still freezes a currently-active wallet."""
+        wallet_id = await self._seed_wallet("active")
+
+        result = await VelocityMonitor().check_and_record_charge(
+            wallet_id, Decimal("1")
+        )
+
+        assert result.should_freeze is True
+        assert await self._status(wallet_id) == "frozen"

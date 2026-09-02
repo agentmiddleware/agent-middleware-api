@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import and_, case, func, or_, select, update as sa_update
+from sqlalchemy import case, func, or_, select, update as sa_update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -128,7 +128,9 @@ def permit_constraints_snapshot(permit_model: Any) -> dict[str, Any]:
     if max_calls:
         ce["max_calls_per_tool"] = max_calls
     if permit_model.aggregate_value_cap is not None:
-        ce["aggregate_value_cap"] = format(permit_model.aggregate_value_cap.normalize(), "f")
+        ce["aggregate_value_cap"] = format(
+            permit_model.aggregate_value_cap.normalize(), "f"
+        )
     forbidden = _loads_list(permit_model.forbidden_fields_json or "[]")
     if forbidden:
         ce["forbidden_fields"] = forbidden
@@ -366,9 +368,13 @@ class PermitService:
             signature=signature,
             key_id=key_id,
             issued_at=now,
-            max_calls_per_tool_json=json.dumps(request.max_calls_per_tool) if request.max_calls_per_tool else None,
+            max_calls_per_tool_json=json.dumps(request.max_calls_per_tool)
+            if request.max_calls_per_tool
+            else None,
             aggregate_value_cap=request.aggregate_value_cap,
-            forbidden_fields_json=json.dumps(request.forbidden_fields) if request.forbidden_fields else None,
+            forbidden_fields_json=json.dumps(request.forbidden_fields)
+            if request.forbidden_fields
+            else None,
             recipient_domain=request.recipient_domain,
         )
         async with factory() as session:
@@ -434,6 +440,7 @@ class PermitService:
         a key-bound permit. Tool scope is intentionally not re-evaluated: a
         signed denial for an out-of-scope tool must itself remain replayable.
         """
+
         async def validate(current_session: AsyncSession) -> PermitValidation:
             model = await current_session.get(PermitModel, permit_id)
             if model is None:
@@ -511,11 +518,13 @@ class PermitService:
                     # A concurrent call that committed between our read and write
                     # causes the UPDATE to match zero rows, and we retry.
                     now = utc_now()
-                    
+
                     # Compute the updated call counter. If max_calls_per_tool is
                     # set for this tool, the UPDATE will atomically increment it
                     # via optimistic concurrency control (CAS on the JSON column).
-                    max_calls_config = _loads_dict(model.max_calls_per_tool_json or "{}")
+                    max_calls_config = _loads_dict(
+                        model.max_calls_per_tool_json or "{}"
+                    )
                     call_limit = max_calls_config.get(tool_name)
                     original_counts_json = model.tool_call_counts_json
                     updated_counts_json = None
@@ -541,7 +550,7 @@ class PermitService:
                         updated_counts = dict(current_counts)
                         updated_counts[tool_name] = new_tool_count
                         updated_counts_json = json.dumps(updated_counts)
-                    
+
                     # Build the UPDATE values and WHERE predicates.
                     update_values: dict[str, Any] = {
                         "spent_credits": PermitModel.spent_credits + estimated_credits,
@@ -557,7 +566,7 @@ class PermitService:
                             <= PermitModel.max_credits,
                         ),
                     ]
-                    
+
                     if updated_counts_json is not None:
                         # Optimistic lock: only UPDATE if tool_call_counts_json
                         # still equals the value we read. If another transaction
@@ -568,17 +577,20 @@ class PermitService:
                             where_conditions.append(
                                 cast(
                                     ColumnElement[bool],
-                                    cast(Any, PermitModel.tool_call_counts_json).is_(None),
+                                    cast(Any, PermitModel.tool_call_counts_json).is_(
+                                        None
+                                    ),
                                 )
                             )
                         else:
                             where_conditions.append(
                                 cast(
                                     ColumnElement[bool],
-                                    PermitModel.tool_call_counts_json == original_counts_json,
+                                    PermitModel.tool_call_counts_json
+                                    == original_counts_json,
                                 )
                             )
-                    
+
                     reserved = await session.execute(
                         sa_update(PermitModel)
                         .where(*where_conditions)
@@ -619,7 +631,9 @@ class PermitService:
                         # incremented the counter between our pre-check and the
                         # failed optimistic UPDATE.
                         if call_limit is not None and type(call_limit) is int:
-                            refreshed_counts = _loads_dict(model.tool_call_counts_json or "{}")
+                            refreshed_counts = _loads_dict(
+                                model.tool_call_counts_json or "{}"
+                            )
                             refreshed_count = refreshed_counts.get(tool_name, 0)
                             if not isinstance(refreshed_count, int):
                                 refreshed_count = 0
@@ -707,7 +721,10 @@ class PermitService:
         # would answer a question it has not earned.
         if model.subject_wallet_id != wallet_id:
             return PermitValidation(
-                False, "permit_wallet_mismatch", model, {"bound_to": "subject_wallet_id"}
+                False,
+                "permit_wallet_mismatch",
+                model,
+                {"bound_to": "subject_wallet_id"},
             )
         if model.subject_key_id and model.subject_key_id != key_id:
             return PermitValidation(
@@ -824,24 +841,28 @@ class PermitService:
         session: Any | None = None,
     ) -> int:
         """Count successful receipts for (permit_id, tool_name).
-        
+
         When called with an existing session, reads within that transaction's
         isolation level (e.g., to re-check a constraint before commit).
         """
         if session:
             result = await session.execute(
-                select(func.count()).select_from(ReceiptModel).where(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(
                     cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
                     cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
                     cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
                 )
             )
             return int(result.scalar() or 0)
-        
+
         factory = get_session_factory()
         async with factory() as session:
             result = await session.execute(
-                select(func.count()).select_from(ReceiptModel).where(
+                select(func.count())
+                .select_from(ReceiptModel)
+                .where(
                     cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
                     cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
                     cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
@@ -1179,11 +1200,6 @@ class PermitService:
         budget actually consumed. This resets such drift to the sum of the
         permit's successful receipts.
 
-        A remote dispatch attempt that still owns its reservation and has no
-        receipt is excluded. Its reconciler must first prove a terminal outcome
-        or release the reservation; otherwise expiry or revocation could erase
-        the budget of a call that is still running.
-
         Crucially, it only ever touches permits that can no longer admit a new
         charge -- non-active (revoked) OR already past ``expires_at``. A live,
         chargeable permit is never downward-reset here, because a governed call
@@ -1250,136 +1266,6 @@ class PermitService:
                     .all()
                 )
                 for permit in stale:
-                    # An upstream attempt owns this reservation until it either
-                    # releases the budget or persists its receipt. This check is
-                    # deliberately state-independent: a result may be durable
-                    # while receipt finalization is still pending, and erasing
-                    # that reservation would understate a later success or
-                    # delivery-uncertain outcome. The dispatch reconciler runs
-                    # before this sweep and is the only component allowed to
-                    # classify an unreceipted remote attempt.
-                    unreceipted_dispatch_id = (
-                        await session.execute(
-                            select(
-                                cast(Any, McpDispatchAttemptModel.attempt_id)
-                            )
-                            .outerjoin(
-                                ReceiptModel,
-                                and_(
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.dispatch_attempt_id
-                                        == McpDispatchAttemptModel.attempt_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.idempotency_record_id
-                                        == McpDispatchAttemptModel.idempotency_record_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.permit_id
-                                        == McpDispatchAttemptModel.permit_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.wallet_id
-                                        == McpDispatchAttemptModel.wallet_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.tool
-                                        == McpDispatchAttemptModel.public_tool_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.request_hash
-                                        == McpDispatchAttemptModel.request_hash,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.ledger_entry_id
-                                        == McpDispatchAttemptModel.ledger_entry_id,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.credits_authorized
-                                        == McpDispatchAttemptModel.credits_authorized,
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        ReceiptModel.credits_charged
-                                        == McpDispatchAttemptModel.credits_charged,
-                                    ),
-                                    or_(
-                                        and_(
-                                            cast(
-                                                ColumnElement[bool],
-                                                McpDispatchAttemptModel.state
-                                                == "succeeded",
-                                            ),
-                                            cast(
-                                                ColumnElement[bool],
-                                                ReceiptModel.outcome == "success",
-                                            ),
-                                        ),
-                                        and_(
-                                            cast(
-                                                ColumnElement[bool],
-                                                McpDispatchAttemptModel.state
-                                                == "delivery_uncertain",
-                                            ),
-                                            cast(
-                                                ColumnElement[bool],
-                                                ReceiptModel.outcome
-                                                == "delivery_uncertain",
-                                            ),
-                                        ),
-                                        and_(
-                                            cast(
-                                                ColumnElement[bool],
-                                                McpDispatchAttemptModel.state
-                                                == "response_rejected",
-                                            ),
-                                            cast(
-                                                ColumnElement[bool],
-                                                ReceiptModel.outcome
-                                                == "response_rejected",
-                                            ),
-                                        ),
-                                        and_(
-                                            cast(
-                                                ColumnElement[bool],
-                                                McpDispatchAttemptModel.state
-                                                == "returned_error",
-                                            ),
-                                            cast(
-                                                ColumnElement[bool],
-                                                ReceiptModel.outcome
-                                                == "failed_unrefunded",
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            )
-                            .where(
-                                cast(
-                                    ColumnElement[bool],
-                                    McpDispatchAttemptModel.permit_id
-                                    == permit.permit_id,
-                                ),
-                                cast(
-                                    Any,
-                                    McpDispatchAttemptModel.budget_released_at,
-                                ).is_(None),
-                                cast(Any, ReceiptModel.receipt_id).is_(None),
-                            )
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
-                    if unreceipted_dispatch_id is not None:
-                        continue
-
                     receipt_rows = (
                         await session.execute(
                             select(

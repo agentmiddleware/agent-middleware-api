@@ -45,14 +45,6 @@ UPSTREAM_STRESS_TOOL = "stress-upstream-tool"
 _ADVISORY_LOCK_ID = int.from_bytes(b"MCPSTRES", byteorder="big", signed=False)
 _STRESS_TABLES = ("mcp_stress_tool_executions", "mcp_stress_upstream_effects")
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("RUN_MCP_MULTIPROCESS_TESTS") != "1",
-    reason=(
-        "set RUN_MCP_MULTIPROCESS_TESTS=1 only for the isolated PostgreSQL "
-        "multiprocess harness"
-    ),
-)
-
 
 @dataclass(frozen=True)
 class StressHarness:
@@ -1256,6 +1248,92 @@ def test_remote_partner_execution_count_is_not_capped(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_two_gateway_processes_share_one_remote_execution_and_replay(
+    stress_harness: StressHarness,
+    remote_partner: RemotePartner,
+    remote_steady_worker: StressWorker,
+) -> None:
+    """One remote winner is replayed by an independent gateway process."""
+    seeded = await _seed_call(
+        stress_harness,
+        remote_steady_worker,
+        scenario="remote-overlap",
+        tool_name=REMOTE_STRESS_TOOL,
+    )
+    owner_worker = await _start_worker(
+        stress_harness,
+        name=f"remote-overlap-{uuid.uuid4().hex[:8]}",
+        fault_point="after_upstream_ack_before_terminal",
+        remote_partner=remote_partner,
+    )
+    assert owner_worker.process.pid != remote_steady_worker.process.pid
+
+    owner_task: asyncio.Task[httpx.Response] | None = None
+    try:
+        owner_task = asyncio.create_task(_invoke(owner_worker, seeded))
+        marker = await _wait_for_marker(owner_worker)
+        assert marker["point"] == "after_upstream_ack_before_terminal"
+
+        before = await _snapshot(seeded)
+        executions = await _partner_executions(
+            stress_harness,
+            remote_partner,
+            seeded.call_token,
+        )
+        assert len(executions) == 1
+        assert executions[0]["invocation_id"] == before.idempotency_record_id
+        assert executions[0]["idempotency_key"] == seeded.idempotency_key
+        assert executions[0]["worker_pid"] != marker["pid"]
+        assert before.debit_count == 1
+        assert before.receipt_ids == ()
+        assert before.attempt_state == "dispatch_claimed"
+        assert before.idempotency_completed is False
+
+        competing = await _invoke(remote_steady_worker, seeded)
+        _assert_in_progress(competing)
+        assert len(
+            await _partner_executions(
+                stress_harness,
+                remote_partner,
+                seeded.call_token,
+            )
+        ) == 1
+
+        _release_worker(owner_worker)
+        owner_response = await asyncio.wait_for(owner_task, timeout=20)
+        assert owner_response.status_code == 200
+        owner_result = owner_response.json()["result"]
+
+        replay = await _invoke(remote_steady_worker, seeded)
+        assert replay.status_code == 200
+        assert replay.json()["result"] == owner_result
+
+        final_executions = await _partner_executions(
+            stress_harness,
+            remote_partner,
+            seeded.call_token,
+        )
+        assert len(final_executions) == 1
+        assert final_executions == executions
+
+        after = await _snapshot(seeded)
+        assert after.execution_count == 0
+        assert after.debit_count == 1
+        assert len(after.receipt_ids) == 1
+        assert after.attempt_state == "succeeded"
+        assert after.debit_refunded is False
+        assert after.idempotency_completed is True
+        receipt_id = owner_result["receipt"]["receipt_id"]
+        assert after.receipt_ids == (receipt_id,)
+        assert replay.json()["result"]["receipt"]["receipt_id"] == receipt_id
+    finally:
+        _release_worker(owner_worker)
+        _stop_worker(owner_worker)
+        if owner_task is not None:
+            await asyncio.gather(owner_task, return_exceptions=True)
 
 
 @pytest.mark.asyncio(loop_scope="session")
