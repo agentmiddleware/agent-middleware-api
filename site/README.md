@@ -49,6 +49,8 @@ Open `http://127.0.0.1:8765/`.
   [the waiting room](#the-waiting-room), a hundred-cabinet arcade
   (`/arcade.js`, `/arcade.css`)
 - `/proof/` — portable receipt, matching key snapshot, and offline command
+- `/proof/transcript.json` — the recorded governed-loop transcript the
+  homepage renders (see "The governed loop as evidence" below)
 - `/compare/` — named competitor comparison, build-vs-buy, and fit/compliance FAQ
 - `/concept/` — unlisted landing-page design study (noindex, absent from the
   sitemap, never linked from the funnel): the single-fold treatment the
@@ -69,6 +71,40 @@ Open `http://127.0.0.1:8765/`.
 `@@SECURITY_TXT_EXPIRES@@` becomes one year past the build, so a deployed
 `security.txt` never serves a lapsed `Expires`. Plain-text targets take the raw
 contact value; HTML and XML targets take the entity-escaped one.
+
+## The governed loop as evidence
+
+The homepage shows the governed loop as a terminal: real requests, real
+responses, and the offline verifier's real stdout. Nothing in those panels is
+typed into the HTML. `build_site.py` expands three tokens from
+`proof/transcript.json`:
+
+- `@@HERO_CONSOLE@@` — the loop's spine (permit → invoke → replay → verify)
+  beside the headline
+- `@@LOOP_TRANSCRIPT@@` — every recorded step with its loop label, title and
+  annotation, in the "Governed path" section
+- `@@LIVE_VERIFICATION@@` — `b2a-verify-receipt` run against the published
+  `receipt.json` and `trust-keys.json`, in the proof section
+
+`transcript.json` is **generated**. `scripts/record_site_transcript.py` runs
+the same proof as `make prove-trust-plane` against a throwaway local SQLite
+gateway, records every HTTP exchange the demo makes, keeps the ones the page
+shows, and runs the SDK verifier twice — on the demo's portable receipt and on
+the live one. The operator key and the minted agent key are replaced with
+`$OPERATOR_API_KEY` and `$AGENT_API_KEY` before anything is written.
+
+```bash
+make site-transcript          # re-record (≈30s; needs the app's requirements)
+make site-transcript-check    # fail if the committed file is stale or hand-edited
+```
+
+Re-record whenever the demo, a router's response shape, or `receipt.json`
+changes. The build refuses a transcript whose live verification names a
+different receipt than the one published, so republishing the receipt without
+re-recording cannot ship a verdict for the wrong artifact. The panels say in
+their own footer that the loop was recorded from a local gateway run, not the
+live API; the live receipt's verdict is the only line on the page that comes
+from production.
 
 ## Structured data
 
@@ -105,9 +141,9 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-15`. When you
-change any of those files (including `/wave.js`, `/arcade.js`, and
-`/arcade.css`), bump the token in
+query token**: every reference looks like `/styles.css?v=gateway-16`. When you
+change any of those files (including `/wave.js`, `/arcade-boot.js`,
+`/arcade.js`, and `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
 `404.html`, and `build_site.py`'s `ANALYTICS_SCRIPTS`, or
 returning visitors
@@ -134,8 +170,16 @@ the offline verifier.
 This product is built for agents. During the governed loop the human has
 nothing to do, so the landing page's footer offers a way to spend that time:
 `HUMANS: PRESS START` fades the page and opens a full-screen arcade with one
-hundred cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`, loaded on
-`/` only.
+hundred cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`,
+and neither loads with the page: `/arcade-boot.js` (a few hundred bytes,
+landing page only) reveals the launcher and fetches both the first time
+someone presses START, hovers or focuses the control, or arrives on a
+`?arcade=` deep link. The arcade is by far the heaviest asset on the site
+(~145 KB gzipped), and nobody needs it until they ask for it. Once loaded,
+`arcade.js` owns the launcher exactly as it did when it loaded eagerly; the
+bootstrap steps aside. The asset URLs live on the launcher's `data-arcade-script`
+and `data-arcade-style` attributes so they carry the page's cache token like
+every other reference.
 
 The cabinets are declared in one `CABINETS` table, each with an `id`, a `name`,
 a `genre`, a `family`, a tagline, a controls line and a `pad` layout. Every one

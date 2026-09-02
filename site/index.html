@@ -158,18 +158,20 @@
     />
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-15" />
-    <link rel="stylesheet" href="/arcade.css?v=gateway-15" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-16" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-15"></script>
+    <script src="/a11y-preload.js?v=gateway-16"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/wave.js?v=gateway-15"></script>
-    <script defer src="/arcade.js?v=gateway-15"></script>
-    <script defer src="/analytics.js?v=gateway-15"></script>
-    <script defer src="/proof/proof.js?v=gateway-15"></script>
-    <script defer src="/a11y.js?v=gateway-15"></script>
+    <script defer src="/wave.js?v=gateway-16"></script>
+    <!-- The arcade is fetched on demand by this bootstrap (on PRESS START,
+         on hover/focus, or on a ?arcade= deep link); /arcade.js and
+         /arcade.css are named on the launcher below, not loaded here. -->
+    <script defer src="/arcade-boot.js?v=gateway-16"></script>
+    <script defer src="/analytics.js?v=gateway-16"></script>
+    <script defer src="/proof/proof.js?v=gateway-16"></script>
+    <script defer src="/a11y.js?v=gateway-16"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -209,6 +211,7 @@
 
     <main id="main">
       <header class="hero" id="top" data-wave="sea">
+        <div class="hero-grid">
         <div class="hero-copy">
           <p class="eyebrow">
             <span class="eyebrow-mark" aria-hidden="true"></span>
@@ -256,6 +259,15 @@
             One internal MCP tool · fit and scope discussed privately · no
             self-serve rollout
           </p>
+        </div>
+        <!-- The governed loop as it actually ran. Rendered at build time from
+             /proof/transcript.json, which scripts/record_site_transcript.py
+             writes from a real local gateway run; nothing here is typed in.
+             The hero shows the spine (permit → invoke → replay → verify);
+             the governed-path section below shows every step. -->
+        <div class="hero-console">
+          @@HERO_CONSOLE@@
+        </div>
         </div>
       </header>
 
@@ -424,44 +436,15 @@
           <p class="section-kicker section-kicker-inverse">01 / Governed path</p>
           <h2 id="protocol-title">One control loop from intent to evidence.</h2>
           <p>
-            Start with the smallest action where permission, cost, or audit
-            evidence matters.
+            Discover, authenticate, authorize, invoke, meter, receipt, audit,
+            govern. Here is the loop as the gateway actually ran it: every
+            request, every response, and the verifier's verdict, recorded from
+            <code>make prove-trust-plane</code> and reproducible from a clone.
           </p>
         </div>
-        <ol class="loop-track" aria-label="Governed agent-to-tool action loop">
-          <li>
-            <span>01</span><strong>Discover</strong>
-            <p>The agent reads the manifest: which tools exist and what each call costs.</p>
-          </li>
-          <li>
-            <span>02</span><strong>Authenticate</strong>
-            <p>The caller presents an operator-issued API key. There is no self-serve mint.</p>
-          </li>
-          <li>
-            <span>03</span><strong>Authorize</strong>
-            <p>A scoped permit binds the call to one tool, one agent identity, a budget, and an expiry.</p>
-          </li>
-          <li>
-            <span>04</span><strong>Invoke</strong>
-            <p>With the tool reachable only through the gateway, an out-of-scope call is denied here.</p>
-          </li>
-          <li>
-            <span>05</span><strong>Meter</strong>
-            <p>The call is debited from the agent's scoped budget, once. The same key never debits twice.</p>
-          </li>
-          <li>
-            <span>06</span><strong>Receipt</strong>
-            <p>The terminal outcome is signed with Ed25519 and returned to the caller.</p>
-          </li>
-          <li>
-            <span>07</span><strong>Audit</strong>
-            <p>Ledger events are chained, so a later edit to the record is detectable.</p>
-          </li>
-          <li>
-            <span>08</span><strong>Govern</strong>
-            <p>Operators change scope, budget, and expiry from the control plane, not the agent.</p>
-          </li>
-        </ol>
+        <div class="section protocol-console">
+          @@LOOP_TRANSCRIPT@@
+        </div>
       </section>
 
       <section class="section proof-section" id="proof" aria-labelledby="proof-title" data-wave="crystal">
@@ -493,25 +476,24 @@
             </dl>
             <p class="proof-foot">Values are read from the published artifact, not typed into this page.</p>
           </article>
-          <article class="proof-col replay">
-            <div class="proof-label">
-              <span>Offline consistency check</span>
-              <span class="badge">offline CLI</span>
-            </div>
-            <p>
-              Download the portable receipt and matching key snapshot. The SDK
-              verifier checks the Ed25519 signature with no API credential and
-              no callback to the issuer. Authenticate the key snapshot through
-              a trusted channel before treating issuer identity as independently
-              established.
+          <div class="proof-verify">
+            <!-- The verifier's real stdout for the published receipt, captured
+                 by scripts/record_site_transcript.py. The build refuses to ship
+                 it if receipt.json no longer names the same receipt. -->
+            @@LIVE_VERIFICATION@@
+            <p class="proof-verify-note">
+              The SDK verifier checks the Ed25519 signature with no API
+              credential and no callback to the issuer. Authenticate the key
+              snapshot through a trusted channel before treating issuer
+              identity as independently established.
+              <a
+                class="text-link"
+                href="/proof/"
+                data-analytics-event="proof_click"
+                >Download the artifacts and run it yourself.</a
+              >
             </p>
-            <a
-              class="text-link"
-              href="/proof/"
-              data-analytics-event="proof_click"
-              >See the proof and run the verifier</a
-            >
-          </article>
+          </div>
         </div>
       </section>
 
@@ -574,7 +556,7 @@
           >
             <span
               >Agent manifest <span class="ext" aria-hidden="true">↗</span></span
-            ><code>/.well-known/agent.json</code>
+            ><code>GET /.well-known/agent.json</code>
           </a>
           <a
             href="https://api.thisisatest.tech/llms.txt"
@@ -584,7 +566,7 @@
             <span
               >Agent instructions
               <span class="ext" aria-hidden="true">↗</span></span
-            ><code>/llms.txt</code>
+            ><code>GET /llms.txt</code>
           </a>
           <a
             href="https://api.thisisatest.tech/mcp/tools.json"
@@ -593,7 +575,7 @@
           >
             <span
               >MCP discovery <span class="ext" aria-hidden="true">↗</span></span
-            ><code>/mcp/tools.json</code>
+            ><code>GET /mcp/tools.json</code>
           </a>
           <a
             href="https://api.thisisatest.tech/health/dependencies"
@@ -603,11 +585,13 @@
             <span
               >Live dependency status
               <span class="ext" aria-hidden="true">↗</span></span
-            ><code>/health/dependencies</code>
+            ><code>GET /health/dependencies</code>
           </a>
         </div>
         <p class="machine-note">
-          These four links open raw JSON on the API origin in a new tab.
+          Four unauthenticated GETs against the API origin; each opens the raw
+          JSON in a new tab. Protected routes answer these same requests with
+          401 until an operator-issued key is presented.
         </p>
       </section>
 
@@ -748,10 +732,19 @@
         >
         <a href="/.well-known/security.txt">Report a vulnerability</a>
       </div>
-      <!-- The waiting room. Hidden until /arcade.js proves it can run, so a
-           visitor without JavaScript never sees a dead control. -->
+      <!-- The waiting room. Hidden until /arcade-boot.js proves it can run,
+           so a visitor without JavaScript never sees a dead control. The
+           bootstrap reads the arcade's assets from the launcher's data
+           attributes and fetches them on first use. -->
       <div class="footer-arcade" hidden>
-        <button type="button" id="arcade-launch" class="arcade-launch" hidden>
+        <button
+          type="button"
+          id="arcade-launch"
+          class="arcade-launch"
+          data-arcade-script="/arcade.js?v=gateway-16"
+          data-arcade-style="/arcade.css?v=gateway-16"
+          hidden
+        >
           <span aria-hidden="true">▶</span> HUMANS: PRESS START
         </button>
         <p class="footer-arcade-note">

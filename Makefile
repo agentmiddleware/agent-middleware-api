@@ -1,4 +1,15 @@
-.PHONY: quickstart quickstart-check live-loop-proof test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+
+# The governed-loop transcript the public site renders. Re-runs the
+# trust-plane demo on a throwaway SQLite gateway, records the exchanges the
+# landing page shows, and captures the SDK verifier's real output for the
+# published receipt. Re-record after changing the demo, the routers' response
+# shapes, or site/proof/receipt.json; the site build refuses a stale file.
+site-transcript:
+	uv run --with-requirements requirements.txt python scripts/record_site_transcript.py
+
+site-transcript-check:
+	uv run --with-requirements requirements.txt python scripts/record_site_transcript.py --check
 
 # The 15-minute golden path: boot a real local trust plane on loopback with
 # self-serve key minting and one invokable governed tool, then follow

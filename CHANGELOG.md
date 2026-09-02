@@ -28,6 +28,15 @@ full release gate; do not backfill a final `v1.2.0` tag.
   the zero radius) are now declared on `.arcade-overlay` itself, so the
   arcade is unchanged behind its `HUMANS: PRESS START` control — which is
   the one place the page still wears the pixel face.
+- **The governed loop is shown as evidence, not described.** The homepage
+  hero pairs the headline with a terminal panel replaying permit → invoke →
+  replay → verify, and the "Governed path" section is the full annotated
+  transcript. Every line is rendered at build time from
+  `site/proof/transcript.json`, which `scripts/record_site_transcript.py`
+  (`make site-transcript`) records from a real `make prove-trust-plane` run
+  with credentials redacted; the proof section prints the SDK verifier's
+  real stdout for the published receipt, and the build refuses a transcript
+  whose verdict is for a different receipt than the one published.
 - **Resolved surfaces follow.** `static/dashboard.html` sheds its inlined
   Press Start 2P and pixel chrome for the same hairline system on system
   fonts; `social-card.svg`/`.png` are redrawn in the page's own faces; the

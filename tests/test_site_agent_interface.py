@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -544,7 +545,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-15"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-16"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -554,7 +555,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-15"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-16"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -1424,7 +1425,7 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
     Every full page offers the same three directories with the same
     destinations, so where a visitor can go next never depends on which page
     they happen to be reading. Only the waiting-room block differs — it is
-    landing-only by construction because ``arcade.js`` loads on ``/`` alone —
+    landing-only by construction because ``arcade-boot.js`` loads on ``/`` alone —
     and the 404 keeps its deliberately minimal footer.
     """
 
@@ -1752,6 +1753,7 @@ def test_local_site_assets_exist() -> None:
         SITE / "compare" / "index.html",
         SITE / "404.html",
         SITE / "a11y-preload.js",
+        SITE / "arcade-boot.js",
         SITE / "arcade.js",
         SITE / "arcade.css",
         SITE / "va-init.js",
@@ -2054,8 +2056,12 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
 
     The landing page's job is the funnel. The arcade is a joke told on top of
     it, so every part of it has to be removable: the launcher ships ``hidden``
-    and is revealed only once ``arcade.js`` runs, and nothing in the funnel
-    depends on either file loading.
+    and is revealed only once ``arcade-boot.js`` runs, and nothing in the
+    funnel depends on any of the three files loading.
+
+    The room itself is also the heaviest asset on the site, so it must not
+    load with the page: only the bootstrap does, and it names ``arcade.js``
+    and ``arcade.css`` on the launcher to fetch on first use.
     """
 
     output = tmp_path / "site"
@@ -2077,21 +2083,43 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
         "a button inside no form still defaults to submit in some engines"
     )
 
-    # Both assets ship, are cached like every other static asset, and carry the
-    # *same* token the rest of the page does. Merely requiring some token would
-    # let the arcade sit on a stale one through a bump and serve week-old bytes
-    # to returning visitors — which is the exact failure the manual token
-    # exists to prevent. Comparing against styles.css rather than hard-coding
-    # the current value keeps this from being one more literal to bump.
+    # All three assets ship, are cached like every other static asset, and
+    # carry the *same* token the rest of the page does. Merely requiring some
+    # token would let the arcade sit on a stale one through a bump and serve
+    # week-old bytes to returning visitors — which is the exact failure the
+    # manual token exists to prevent. Comparing against styles.css rather than
+    # hard-coding the current value keeps this from being one more literal to
+    # bump. The bootstrap is a normal deferred script; the room's two files
+    # are named on the launcher for the bootstrap to fetch on demand.
     shared_token = re.search(r'href="/styles\.css\?v=([^"]+)"', markup)
     assert shared_token, "index.html no longer references /styles.css with a token"
-    for asset in ("/arcade.js", "/arcade.css"):
-        expected = f'{asset}?v={shared_token.group(1)}"'
-        assert f'src="{expected}' in markup or f'href="{expected}' in markup, (
-            f"index.html does not reference {asset} with the page's "
-            f"?v={shared_token.group(1)} cache token"
-        )
+    token = shared_token.group(1)
+    assert f'<script defer src="/arcade-boot.js?v={token}"></script>' in markup, (
+        "index.html does not load the arcade bootstrap with the page's token"
+    )
+    assert f'data-arcade-script="/arcade.js?v={token}"' in launcher.group(0), (
+        "the launcher does not name /arcade.js with the page's cache token"
+    )
+    assert f'data-arcade-style="/arcade.css?v={token}"' in launcher.group(0), (
+        "the launcher does not name /arcade.css with the page's cache token"
+    )
+    for asset in ("/arcade-boot.js", "/arcade.js", "/arcade.css"):
         assert (output / asset.lstrip("/")).is_file(), f"{asset} was not published"
+    # The room must not ride along with the page: no <script> or <link> may
+    # fetch it eagerly. Lazy loading is the whole point of the bootstrap.
+    assert not re.search(r'<script[^>]*src="/arcade\.js', markup), (
+        "index.html loads /arcade.js eagerly; the bootstrap is supposed to"
+    )
+    assert not re.search(r'<link[^>]*href="/arcade\.css', markup), (
+        "index.html loads /arcade.css eagerly; the bootstrap is supposed to"
+    )
+    boot = (SITE / "arcade-boot.js").read_text(encoding="utf-8")
+    for attribute in ("data-arcade-script", "data-arcade-style"):
+        assert attribute in boot, f"arcade-boot.js does not read {attribute}"
+    assert "if (window.__amwArcade) return;" in boot, (
+        "the bootstrap's click handler does not step aside once arcade.js owns "
+        "the launcher, so a second press would open the room twice"
+    )
 
     config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
     cached_sources = {
@@ -2102,6 +2130,9 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
     }
     assert any("arcade.js" in source for source in cached_sources), (
         "arcade.js has no long-lived cache rule"
+    )
+    assert any("arcade-boot.js" in source for source in cached_sources), (
+        "arcade-boot.js has no long-lived cache rule"
     )
     assert any("arcade.css" in source for source in cached_sources), (
         "arcade.css has no long-lived cache rule"
@@ -2880,3 +2911,287 @@ def test_wave_pixel_width_attribute_rejects_malformed_values() -> None:
     assert re.search(r"\.wave-canvas \{[^}]*image-rendering: auto;", styles, re.S), (
         "the wave canvas no longer declares smooth upscaling"
     )
+
+
+# The governed loop as evidence -------------------------------------------------
+#
+# The landing page renders the governed loop as a terminal transcript. The
+# contract is that nothing in that panel is typed in: every line comes from
+# site/proof/transcript.json, which scripts/record_site_transcript.py writes
+# from a real local gateway run and the SDK's real offline verifier.
+
+
+def _transcript() -> dict:
+    return json.loads((SITE / "proof" / "transcript.json").read_text(encoding="utf-8"))
+
+
+def _console_text(markup: str) -> str:
+    """A console panel's visible text: tags stripped, entities left escaped.
+
+    The renderer wraps the verifier's verdict word in its own span, so a
+    verifier line has to be matched against text, not markup.
+    """
+    return re.sub(r"<[^>]+>", "", markup)
+
+
+def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> None:
+    """Every request, response value, and note on the page is in the recording.
+
+    The hero shows the loop's spine; the governed-path section shows every
+    step. Both are generated from the same file, so a step the page shows
+    but the recording lacks — or a value edited in the HTML — cannot ship.
+    """
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page = (output / "index.html").read_text(encoding="utf-8")
+    transcript = _transcript()
+    steps = {step["id"]: step for step in transcript["steps"]}
+
+    hero = re.search(
+        r'<figure class="console" aria-labelledby="hero-console-title">(.*?)</figure>',
+        page,
+        re.S,
+    )
+    full = re.search(
+        r'<figure class="console console-full" aria-labelledby="loop-console-title">(.*?)</figure>',
+        page,
+        re.S,
+    )
+    assert hero and full, "landing page lacks the hero console or the full transcript"
+    assert page.index('id="hero-console-title"') < page.index('id="thesis-title"')
+    assert page.index('id="loop-console-title"') < page.index('id="proof"')
+
+    hero_steps = re.findall(r'data-step="([a-z]+)"', hero.group(1))
+    full_steps = re.findall(r'data-step="([a-z]+)"', full.group(1))
+    assert hero_steps == ["authorize", "invoke", "replay", "verify"]
+    assert full_steps == [step["id"] for step in transcript["steps"]]
+
+    for step_id, step in steps.items():
+        for line in step["request"].splitlines():
+            assert html.escape(line.strip()) in full.group(1), (
+                f"step {step_id}: request line {line!r} is not on the page"
+            )
+        if "output" in step:
+            for line in step["output"].splitlines():
+                assert html.escape(line.strip()) in _console_text(full.group(1)), (
+                    f"step {step_id}: verifier line {line!r} is not on the page"
+                )
+        else:
+            for key, value in step["response"]:
+                assert (
+                    f"<dt>{html.escape(str(key))}</dt><dd>{html.escape(str(value))}</dd>"
+                    in full.group(1)
+                ), f"step {step_id}: {key}={value!r} is not on the page"
+        assert html.escape(step["note"]) in full.group(1)
+        assert html.escape(step["title"]) in full.group(1)
+
+    # The panel says where it came from, and links the full recording, which
+    # the build publishes beside the receipt with the same short cache life.
+    assert html.escape(transcript["source"]["label"]) in page
+    assert 'href="/proof/transcript.json"' in page
+    assert (output / "proof" / "transcript.json").read_bytes() == (
+        SITE / "proof" / "transcript.json"
+    ).read_bytes()
+    config = json.loads((SITE / "vercel.json").read_text(encoding="utf-8"))
+    rules = {entry["source"]: entry for entry in config["headers"]}
+    assert (
+        rules["/proof/transcript.json"]["headers"]
+        == rules["/proof/receipt.json"]["headers"]
+    )
+
+    # The demo's replay proves the product's central claim, in the recording
+    # itself rather than in prose: the same receipt id came back, and the
+    # ledger still holds exactly one debit for the tool.
+    invoke = dict(steps["invoke"]["response"])
+    replay = dict(steps["replay"]["response"])
+    assert replay["receipt_id"] == invoke["receipt_id"]
+    assert replay["ledger debits for this tool"] == "1"
+    discover = dict(steps["discover"]["response"])
+    assert discover["name"] == "trust-plane-echo"
+    assert discover["creditsPerCall"] == "2" and discover["requirePermit"] == "true", (
+        "discovery must show what the call costs and that it needs a permit"
+    )
+    deny = dict(steps["deny"]["response"])
+    assert deny["error"] == "permit_tool_not_allowed"
+    assert deny["ledger_entry_id"] == "null"
+    assert steps["verify"]["output"].startswith("VERIFIED")
+
+
+def test_transcript_carries_no_credentials() -> None:
+    """The recording redacts the operator key and the minted agent key.
+
+    The demo mints a real wallet-bound key and uses a fixed operator key; the
+    page shows both as shell-style placeholders. A raw key value in the JSON
+    would publish a credential — a throwaway one, but the page's whole point
+    is that it never asks a visitor to trust a value it cannot verify.
+    """
+    raw = (SITE / "proof" / "transcript.json").read_text(encoding="utf-8")
+    assert "demo-admin-key" not in raw
+    assert "$OPERATOR_API_KEY" in raw and "$AGENT_API_KEY" in raw
+    # Minted keys are long opaque tokens; none may survive redaction.
+    assert not re.search(r"\b(amw|sk|key)_[A-Za-z0-9]{24,}\b", raw)
+    assert "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" not in raw
+
+
+def test_live_verifier_output_matches_the_published_receipt(tmp_path) -> None:
+    """The proof section prints the verifier's real stdout for receipt.json.
+
+    The verdict is only proof if it is for the artifact beside it. The build
+    refuses a transcript whose live verification names a different receipt
+    than the one published, so republishing the receipt without re-recording
+    cannot ship a stale verdict.
+    """
+    output = tmp_path / "site"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+
+    page = (output / "index.html").read_text(encoding="utf-8")
+    transcript = _transcript()
+    live = transcript["live_receipt_verification"]
+    bundle = json.loads((SITE / "proof" / "receipt.json").read_text(encoding="utf-8"))
+    published_id = json.loads(bundle["signing_input"])["receipt_id"]
+
+    assert live["receipt_id"] == published_id
+    assert (
+        live["bundle_sha256"]
+        == hashlib.sha256((SITE / "proof" / "receipt.json").read_bytes()).hexdigest()
+    )
+    assert (
+        live["trust_document_sha256"]
+        == hashlib.sha256((SITE / "proof" / "trust-keys.json").read_bytes()).hexdigest()
+    )
+    assert live["exit_code"] == 0
+    assert live["output"].startswith(f"VERIFIED  {published_id}")
+    assert "--expect-issuer https://api.thisisatest.tech" in live["command"]
+    panel = re.search(r'<figure class="console console-live"(.*?)</figure>', page, re.S)
+    assert panel, "landing page lacks the live verifier panel"
+    for line in live["output"].splitlines():
+        assert html.escape(line.strip()) in _console_text(panel.group(1))
+    assert page.index('id="live-verify-title"') > page.index('id="proof"')
+
+    # Now the guard: a transcript for another receipt must fail the build.
+    # load_transcript resolves TRANSCRIPT from its own globals (runpy hands
+    # back a copy of the namespace, so the function's __globals__ is the one
+    # to rebind). It is pointed at a copy under tmp_path: the committed file
+    # is never written, and this test can run beside the others that read it.
+    build_module = runpy.run_path(str(SITE / "build_site.py"))
+    launch_error = build_module["LaunchConfigurationError"]
+    load_transcript = build_module["load_transcript"]
+    path = tmp_path / "transcript.json"
+    load_transcript.__globals__["TRANSCRIPT"] = path
+    original = (SITE / "proof" / "transcript.json").read_text(encoding="utf-8")
+
+    path.write_text(original, encoding="utf-8")
+    load_transcript()  # the real recording loads through the rebound path
+
+    stale = json.loads(original)
+    stale["live_receipt_verification"]["receipt_id"] = "rcpt-0000000000000000"
+    stale["live_receipt_verification"]["output"] = "VERIFIED  rcpt-0000000000000000"
+    path.write_text(json.dumps(stale), encoding="utf-8")
+    with pytest.raises(
+        launch_error, match="re-run python scripts/record_site_transcript.py"
+    ):
+        load_transcript()
+
+    # The id has to be on the verdict line itself. A verdict for another
+    # receipt that merely mentions the published id further down (in a
+    # field, a hint, an error) is not a verdict for the published receipt.
+    misbound = json.loads(original)
+    misbound["live_receipt_verification"]["output"] = (
+        "VERIFIED  rcpt-0000000000000000\n  supersedes  " + published_id
+    )
+    path.write_text(json.dumps(misbound), encoding="utf-8")
+    with pytest.raises(
+        launch_error, match="re-run python scripts/record_site_transcript.py"
+    ):
+        load_transcript()
+
+    resigned = json.loads(original)
+    resigned["live_receipt_verification"]["bundle_sha256"] = "0" * 64
+    path.write_text(json.dumps(resigned), encoding="utf-8")
+    with pytest.raises(launch_error, match="different receipt.json bytes"):
+        load_transcript()
+
+    # A changed key set with the same receipt is just as stale: the verdict
+    # was produced against keys the published command no longer names.
+    rekeyed = json.loads(original)
+    rekeyed["live_receipt_verification"]["trust_document_sha256"] = "0" * 64
+    path.write_text(json.dumps(rekeyed), encoding="utf-8")
+    with pytest.raises(launch_error, match="different trust-keys.json bytes"):
+        load_transcript()
+
+    failing = json.loads(original)
+    failing["live_receipt_verification"]["exit_code"] = 1
+    failing["live_receipt_verification"]["output"] = "MISMATCH  " + published_id
+    path.write_text(json.dumps(failing), encoding="utf-8")
+    with pytest.raises(launch_error, match="will not publish a failing verdict"):
+        load_transcript()
+
+    unverified = json.loads(original)
+    for step in unverified["steps"]:
+        if step["id"] == "verify":
+            step["output"] = "INVALID  receipt_signature_invalid"
+    path.write_text(json.dumps(unverified), encoding="utf-8")
+    with pytest.raises(launch_error, match="offline verify step did not verify"):
+        load_transcript()
+
+    malformed_rows = json.loads(original)
+    malformed_rows["steps"][0]["response"] = [["only-a-key"], "not-a-row"]
+    path.write_text(json.dumps(malformed_rows), encoding="utf-8")
+    with pytest.raises(launch_error, match=r"\[key, value\] rows"):
+        load_transcript()
+
+    for label, payload in {
+        "not json": "{",
+        "a list": "[]",
+        "no steps": '{"steps": []}',
+        "a step missing its note": json.dumps(
+            {
+                "steps": [
+                    {
+                        "id": "x",
+                        "loop": "l",
+                        "title": "t",
+                        "request": "r",
+                        "response": [],
+                    }
+                ],
+                "source": {"label": "s"},
+            }
+        ),
+    }.items():
+        path.write_text(payload, encoding="utf-8")
+        with pytest.raises(launch_error):
+            load_transcript()
+    path.unlink()
+    with pytest.raises(launch_error, match="missing"):
+        load_transcript()
+
+
+@pytest.mark.proof
+def test_recorded_transcript_is_reproducible_from_the_demo() -> None:
+    """``record_site_transcript.py --check`` must agree with the committed file.
+
+    This re-runs the trust-plane demo against a throwaway SQLite gateway and
+    compares everything that does not legitimately change between runs, so a
+    hand-edited transcript — or a demo whose behaviour has drifted from what
+    the page shows — fails here. It takes the demo's ~30 seconds on purpose:
+    the page's claim is that the transcript is real, and only running it
+    proves that. Marked ``proof`` so the fast product loop skips it; CI's
+    test job and ``make test-all`` still run it.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "record_site_transcript.py"),
+            "--check",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=600,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "transcript is current" in result.stdout

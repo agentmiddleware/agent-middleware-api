@@ -1898,6 +1898,296 @@ html[data-a11y-motion="reduce"] .arcade-launch:active {
   transform: none;
 }
 
+/* Console: the governed loop as evidence -----------------------------------
+   A terminal panel rendered at build time from /proof/transcript.json. It
+   is the one place the page is set entirely in the mono face, because
+   everything in it is literally a request, a response, or a verifier's
+   stdout. The hero shows the loop's spine beside the headline; the
+   governed-path section shows every step with its annotation. */
+
+.hero {
+  text-align: left;
+  padding-top: clamp(2.5rem, 6vw, 4.5rem);
+}
+
+.hero-grid {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4.5rem);
+  align-items: center;
+}
+
+.hero-copy {
+  align-items: flex-start;
+  max-width: none;
+}
+
+.hero h1 {
+  /* The column is the measure; balance wraps the three sentences evenly. */
+  max-width: none;
+  font-size: clamp(2.8rem, 5vw, 4.2rem);
+}
+
+.hero .eyebrow,
+.hero .cta-row {
+  justify-content: flex-start;
+}
+
+.hero .eyebrow {
+  max-width: none;
+}
+
+.hero .email-fallback {
+  text-align: left;
+}
+
+@media (max-width: 980px) {
+  .hero {
+    text-align: center;
+  }
+
+  .hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero-copy {
+    align-items: center;
+    max-width: 52rem;
+    margin: 0 auto;
+  }
+
+  .hero h1 {
+    max-width: 15ch;
+  }
+
+  .hero .eyebrow,
+  .hero .cta-row {
+    justify-content: center;
+  }
+
+  .hero .email-fallback {
+    text-align: center;
+  }
+
+  .hero-console {
+    max-width: 44rem;
+    width: 100%;
+    margin: 0 auto;
+  }
+}
+
+.console {
+  margin: 0;
+  background: rgba(5, 7, 15, 0.84);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.hero-console .console {
+  font-size: 0.78rem;
+}
+
+.console-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.console-title {
+  color: var(--brass);
+}
+
+.console-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.console-step {
+  padding: 0.9rem 1rem 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.console-step + .console-step {
+  border-top: 1px solid var(--line);
+}
+
+.console-request,
+.console-output {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: var(--text);
+}
+
+.console-request code,
+.console-output code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.console-live .console-request {
+  padding: 0.9rem 1rem 0;
+}
+
+.console-live .console-output {
+  padding: 0.6rem 1rem 1rem;
+}
+
+.console-prompt {
+  color: var(--brass);
+}
+
+.console-response {
+  margin: 0;
+  display: grid;
+  gap: 0.15rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--line-strong);
+}
+
+.console-response div {
+  display: grid;
+  grid-template-columns: minmax(9ch, max-content) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.console-response dt {
+  color: var(--text-dim);
+}
+
+.console-response dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.console-ok {
+  color: var(--verify);
+  font-weight: 600;
+}
+
+.console-note {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: none;
+}
+
+.console-foot {
+  margin: 0;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: none;
+}
+
+.console-loop {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+.console-step-title {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: 1.1rem;
+  letter-spacing: -0.01em;
+}
+
+/* The full transcript: annotation on the left, the exchange on the right. */
+.protocol-console {
+  padding-top: 0;
+}
+
+.console-full .console-step {
+  padding: 1.25rem 1.25rem 1.4rem;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  column-gap: clamp(1.25rem, 3vw, 2.5rem);
+  row-gap: 0.5rem;
+}
+
+.console-full .console-loop,
+.console-full .console-step-title,
+.console-full .console-note {
+  grid-column: 1;
+}
+
+.console-full .console-request,
+.console-full .console-response,
+.console-full .console-output {
+  grid-column: 2;
+}
+
+.console-full .console-request {
+  grid-row: 1 / span 2;
+}
+
+.console-full .console-response,
+.console-full .console-output {
+  grid-row: 3;
+}
+
+@media (max-width: 720px) {
+  .console-full .console-step {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .console-full .console-loop,
+  .console-full .console-step-title,
+  .console-full .console-note,
+  .console-full .console-request,
+  .console-full .console-response,
+  .console-full .console-output {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+/* Proof: the live receipt beside the verifier's real verdict. */
+.proof-verify {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.proof-verify-note {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
 /* ==========================================================================
    PRINT — last in the file so it has the final word.
    ========================================================================== */
