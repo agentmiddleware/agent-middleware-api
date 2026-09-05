@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from autogen.agentchat.conversable_agent import ConversableAgent
 
-from autogen_b2a import B2AClient, B2AFunctionTool
+from autogen_b2a import B2AClient, B2AFunctionTool, register_b2a_tools
 
 
 def _permit_payload() -> dict:
@@ -30,20 +31,26 @@ def _permit_payload() -> dict:
 
 
 def _receipt_payload(outcome: str = "success") -> dict:
+    # Mirrors the shape ``b2a_sdk.models.Receipt.from_dict`` requires (see
+    # b2a_sdk/tests/test_trust_client.py): ``tool``, ``request_hash``,
+    # ``credits_authorized``, ``created_at`` and ``signature_key_id`` are mandatory.
     return {
         "receipt_id": f"receipt-{outcome}",
-        "dispatch_attempt_id": "dispatch-1",
-        "idempotency_key": "invoke-key-1",
         "permit_id": "permit-1",
         "wallet_id": "wallet-1",
-        "service": "partner.search",
+        "key_id": "key-1",
+        "tool": "partner.search",
+        "request_hash": "request-hash",
+        "response_hash": "response-hash",
+        "ledger_entry_id": "ledger-1",
+        "dispatch_attempt_id": "dispatch-1",
+        "credits_authorized": "2",
         "credits_charged": "2",
         "outcome": outcome,
+        "audit_event_id": "audit-1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "signature": f"sig-{outcome}",
-        "key_id": "key-1",
-        "ledger_entry_id": "ledger-1",
-        "dispatched_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "signature_key_id": "signing-key-1",
     }
 
 
@@ -167,6 +174,7 @@ async def test_replay_protection():
 @pytest.mark.asyncio
 async def test_signed_receipt_returned():
     """Test that signed receipts are returned with all required fields."""
+
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/permits":
             return httpx.Response(201, json=_permit_payload())
@@ -225,5 +233,79 @@ async def test_missing_idempotency_key_rejected():
             permit_idempotency_key="permit-key",
             arguments={},
         )
+
+    await base_client.close()
+
+
+@pytest.mark.asyncio
+async def test_registered_tool_is_awaited_on_autogen_async_path():
+    """register_b2a_tools hands AutoGen coroutine functions; a_execute_function must await them.
+
+    AutoGen 0.2's sync execute_function calls func(**arguments) without awaiting, so a
+    registered coroutine would surface as ``str(coroutine)``. The async executor path is
+    the supported one; this pins that it awaits and returns the signed receipt.
+    """
+    calls = {"permit": 0, "invoke": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/permits":
+            calls["permit"] += 1
+            assert request.headers["idempotency-key"] == "autogen-permit-1"
+            return httpx.Response(201, json=_permit_payload())
+
+        if request.url.path == "/mcp/messages":
+            calls["invoke"] += 1
+            body = json.loads(request.content)
+            assert request.headers["idempotency-key"] == "autogen-invoke-1"
+            assert body["params"]["mcpContext"]["idempotency_key"] == "autogen-invoke-1"
+            assert body["params"]["arguments"] == {"query": "test"}
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "autogen-invoke-1",
+                    "result": {
+                        "content": [{"type": "text", "text": '{"ok": true}'}],
+                        "structuredContent": {"ok": True},
+                        "isError": False,
+                        "receipt": _receipt_payload(),
+                    },
+                },
+            )
+
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    base_client = B2AClient(api_key="test-key", transport=transport)
+    tool = B2AFunctionTool(api_key="test-key", wallet_id="wallet-1")
+    tool.client = base_client
+
+    executor = ConversableAgent(
+        name="executor",
+        llm_config=False,
+        human_input_mode="NEVER",
+        code_execution_config=False,
+    )
+    register_b2a_tools(executor, tool)
+
+    ok, message = await executor.a_execute_function(
+        {
+            "name": "call_mcp_tool",
+            "arguments": json.dumps(
+                {
+                    "tool_name": "partner.search",
+                    "idempotency_key": "autogen-invoke-1",
+                    "permit_idempotency_key": "autogen-permit-1",
+                    "arguments": {"query": "test"},
+                }
+            ),
+        }
+    )
+
+    assert ok, message
+    assert "coroutine" not in message["content"]
+    assert "receipt-success" in message["content"]
+    assert "sig-success" in message["content"]
+    assert calls == {"permit": 1, "invoke": 1}
 
     await base_client.close()

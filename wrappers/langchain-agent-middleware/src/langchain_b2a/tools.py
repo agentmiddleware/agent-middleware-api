@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .client import B2AClient
 
@@ -16,7 +16,7 @@ class MCPToolInput(BaseModel):
     tool_name: str
     idempotency_key: str
     permit_idempotency_key: str
-    arguments: dict[str, Any]
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 def get_mcp_tools(
@@ -44,6 +44,7 @@ def get_mcp_tools(
             result = await t.ainvoke({
                 "tool_name": "my_tool",
                 "idempotency_key": "unique-key-123",
+                "permit_idempotency_key": "permit-key-123",
                 "arguments": {...}
             })
     """
@@ -78,10 +79,11 @@ def get_langgraph_tools(
         List of callable tools compatible with LangGraph
 
     Example:
-        from langgraph.prebuilt import create_react_agent
+        from langchain.agents import create_agent
         client = B2AClient(api_key="...")
         tools = get_langgraph_tools(client, wallet_id="agent-001")
-        agent = create_react_agent(model, tools)
+        agent = create_agent(model, tools)
+        # The tools are async-only; drive the agent with ``await agent.ainvoke(...)``.
     """
     from ._tools import create_langgraph_tools
 

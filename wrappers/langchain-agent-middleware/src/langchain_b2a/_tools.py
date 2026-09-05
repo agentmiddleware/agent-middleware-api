@@ -9,6 +9,7 @@ from b2a_sdk.models import PermitRequest
 from langchain_core.tools import StructuredTool
 
 from .client import B2AClient
+from .tools import MCPToolInput
 
 
 def create_mcp_tool(
@@ -94,19 +95,20 @@ def create_mcp_tool(
             }
         )
 
+    # ``call_mcp`` is async, so it must be registered as ``coroutine=``. Passing it
+    # as ``func=`` makes LangChain run it in a worker thread and hand back the
+    # un-awaited coroutine object instead of the tool result.
+    # ``args_schema`` must be a Pydantic model: LangChain 1.x treats a plain dict as
+    # JSON Schema, so a dict of Python types validated nothing and could not be
+    # bound to a chat model.
     return StructuredTool.from_function(
-        func=call_mcp,
+        coroutine=call_mcp,
         name="mcp_tool_call",
         description="Call a Model Context Protocol (MCP) tool from Agent Middleware API. "
         "Use this to access billable services like data indexing, content generation, etc. "
         "Returns signed receipts for all invocations. "
         "Requires both idempotency_key and permit_idempotency_key for safe replay.",
-        args_schema={
-            "tool_name": str,
-            "idempotency_key": str,
-            "permit_idempotency_key": str,
-            "arguments": dict,
-        },
+        args_schema=MCPToolInput,
     )
 
 
@@ -119,7 +121,7 @@ def create_wallet_tool(client: B2AClient, *, wallet_id: str) -> StructuredTool:
         return f"Balance: {balance} credits"
 
     return StructuredTool.from_function(
-        func=get_balance,
+        coroutine=get_balance,
         name="wallet_balance",
         description="Get the current wallet balance from Agent Middleware API.",
     )

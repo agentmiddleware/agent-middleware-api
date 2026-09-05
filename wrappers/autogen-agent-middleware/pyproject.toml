@@ -11,7 +11,9 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "b2a-sdk>=0.3.0",
-    "autogen-agentchat>=0.2.0",
+    # 0.2.x ships the ``autogen`` module and ConversableAgent.register_function
+    # that this wrapper targets; 0.4+ is a rewrite under ``autogen_agentchat``.
+    "autogen-agentchat>=0.2.0,<0.4",
     "httpx>=0.25.0",
 ]
 

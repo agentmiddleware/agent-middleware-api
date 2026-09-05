@@ -25,11 +25,22 @@ depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `langchain_b2a`
 module used below.
 
+### Running the tests
+
+From the repository root, in a fresh virtual environment:
+
+```bash
+python -m pip install -e ./b2a_sdk -e "wrappers/langchain-agent-middleware[dev]"
+python -m pytest wrappers/langchain-agent-middleware/tests
+```
+
 ## Quick Start (Governed Flow)
 
 ```python
+from langchain.agents import create_agent
+from langchain_openai import ChatOpenAI  # any tool-calling chat model; not a dependency
+
 from langchain_b2a import B2AClient, get_langgraph_tools
-from langgraph.prebuilt import create_react_agent
 
 # Initialize client
 client = B2AClient(api_key="your-api-key")
@@ -37,10 +48,21 @@ client = B2AClient(api_key="your-api-key")
 # Get LangGraph-compatible tools with wallet_id
 tools = get_langgraph_tools(client, wallet_id="agent-001")
 
-# Create agent
+# Create agent. LangGraph 1.x deprecates langgraph.prebuilt.create_react_agent
+# in favour of langchain.agents.create_agent.
 model = ChatOpenAI(model="gpt-4o")
-agent = create_react_agent(model, tools)
+agent = create_agent(model, tools)
+
+# The tools are async-only (the SDK client is an httpx.AsyncClient), so drive
+# the agent with the async entry point.
+result = await agent.ainvoke({"messages": [{"role": "user", "content": "..."}]})
 ```
+
+## Async only
+
+Both tools implement only the async path. `await tool.ainvoke(...)` and
+`await agent.ainvoke(...)` work; `tool.invoke(...)` raises
+`NotImplementedError` because there is no sync implementation to fall back to.
 
 ## MCP Tools via Governed Flow
 
@@ -110,5 +132,5 @@ tools = get_mcp_tools(
 ## Requirements
 
 - Python 3.11+
-- LangChain 0.1.0+
+- LangChain 1.3.9+ and LangGraph 1.0.10+ (the range `pyproject.toml` declares)
 - httpx 0.25.0+
