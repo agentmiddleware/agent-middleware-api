@@ -15,8 +15,10 @@ module pins what the plain ``request.json()`` parse still let through:
   the wallet was charged, and *then* the response serializer refused to
   encode the echoed ``id`` or argument — HTTP 500 for a call that happened,
   and a keyed retry that 500s again on the replay;
-* an envelope whose ``jsonrpc`` member was missing or not ``"2.0"`` reached
-  dispatch.
+* an envelope that *stated* a ``jsonrpc`` version other than ``"2.0"`` reached
+  dispatch (a missing member is still accepted: the version-less legacy
+  envelopes pinned in ``tests/test_mcp_idempotency_key_validation.py`` and
+  ``test_version_less_envelope_is_still_accepted`` below depend on it).
 
 Every case here is sent with a valid permit in hand and asserts zero tool
 executions and zero ledger debits, because "refused" only counts if it is
