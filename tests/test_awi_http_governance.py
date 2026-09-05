@@ -322,6 +322,31 @@ async def test_absent_idempotency_key_is_required(client, clean_database):
 
 
 @pytest.mark.anyio
+async def test_invalid_idempotency_key_is_refused_before_permit_presence(
+    client, clean_database
+):
+    """A supplied-but-unusable key is reported even when the permit is missing.
+
+    Key resolution used to sit behind the ``permit_required`` guard, so a
+    request that got both headers wrong saw a bare 403 and never learned its
+    key was unusable. The MCP surfaces check the key first; so does this.
+    A request with *neither* header still gets ``permit_required``
+    (``test_rag_query_denied_without_permit``).
+    """
+    provisioned, headers = await _provision_rag_caller(
+        client, permit_idem_key="permit-awi-key-first"
+    )
+    del headers["X-Permit-Id"]
+    headers["Idempotency-Key"] = "x" * (MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH + 1)
+    resp = await client.post(
+        "/v1/awi/rag/query", json=RAG_QUERY_PAYLOAD, headers=headers
+    )
+    assert resp.status_code == 400, resp.text
+    _assert_invalid_key(resp.json()["detail"], reason_code="idempotency_key_too_long")
+    assert await _rag_query_state(provisioned["agent_wallet_id"]) == ([], 0)
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("header_value", "reason_code"),
     [

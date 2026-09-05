@@ -145,6 +145,28 @@ async def begin_awi_http_governed(
 
     auth.require_wallet_access(wallet_id)
 
+    # Same key contract as the governed MCP routes: every line the client sent
+    # must be usable, all lines must name one key, and that key is used
+    # verbatim as the replay identity. This path used to store
+    # ``idempotency_key.strip()`` (so ``' k'`` and ``'k'`` collapsed into one
+    # record) and applied no length cap (a key wider than the store column
+    # reached the database after permit validation instead of being refused
+    # here). A present-but-unusable key is refused rather than treated as
+    # absent: dropping it would turn the caller's retry into a second charged
+    # action. It is checked before the permit header, as on the MCP surfaces,
+    # so a request that got both wrong learns about the key defect rather
+    # than a bare ``permit_required``. No line at all still keeps
+    # ``idempotency_key_required`` below, after the permit-presence check.
+    try:
+        idempotency_key = resolve_client_idempotency_key(
+            [("Idempotency-Key header", line) for line in idempotency_key_lines or ()]
+        )
+    except InvalidIdempotencyKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": str(exc), **exc.as_error_data(), "tool": tool_name},
+        ) from exc
+
     if not permit_id or not permit_id.strip():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -157,25 +179,6 @@ async def begin_awi_http_governed(
                 "tool": tool_name,
             },
         )
-
-    # Same key contract as the governed MCP routes: every line the client sent
-    # must be usable, all lines must name one key, and that key is used
-    # verbatim as the replay identity. This path used to store
-    # ``idempotency_key.strip()`` (so ``' k'`` and ``'k'`` collapsed into one
-    # record) and applied no length cap (a key wider than the store column
-    # reached the database after permit validation instead of being refused
-    # here). A present-but-unusable key is refused rather than treated as
-    # absent: dropping it would turn the caller's retry into a second charged
-    # action. No line at all keeps ``idempotency_key_required``.
-    try:
-        idempotency_key = resolve_client_idempotency_key(
-            [("Idempotency-Key header", line) for line in idempotency_key_lines or ()]
-        )
-    except InvalidIdempotencyKeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": str(exc), **exc.as_error_data(), "tool": tool_name},
-        ) from exc
 
     if idempotency_key is None:
         raise HTTPException(
