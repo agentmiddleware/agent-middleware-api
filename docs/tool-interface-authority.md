@@ -72,14 +72,17 @@ A key the client *does* supply must be usable: a non-empty string of at most
 128 characters (the width of the idempotency store's key column), identical
 wherever the request carries it (`Idempotency-Key` header, `params._meta`, or
 the legacy `mcpContext` on `POST /mcp/messages` and
-`POST /mcp/tools/{service_id}/invoke`). Anything else — an empty string, a
-number, an array, an object, an over-long string, or two transports naming
-different keys — is refused with `-32602 invalid_idempotency_key` (HTTP 400
-with the same fields on the REST route), a `reason_code`
+`POST /mcp/tools/{service_id}/invoke`), and made of characters the store can
+hold (no control characters, no unpaired surrogates). Anything else — an
+empty string, a number, an array, an object, an over-long string, a string
+with a NUL or a `\ud800` escape in it, or two transports naming different
+keys — is refused with `-32602 invalid_idempotency_key`, a `reason_code`
 (`idempotency_key_empty`, `idempotency_key_not_a_string`,
-`idempotency_key_too_long`, `idempotency_key_conflict`), the offending
-`sources`, and a `remediation` block, *before* any permit is minted or tool
-executed. The key is never silently replaced by a generated one: that would
+`idempotency_key_too_long`, `idempotency_key_invalid_characters`,
+`idempotency_key_conflict`), the offending `sources`, and a `remediation`
+block, *before* any permit is minted or tool executed. The REST route answers
+HTTP 400 with the same fields, except that a non-string key there is a
+schema error (422) from the typed `mcp_context` body. The key is never silently replaced by a generated one: that would
 turn the client's retry into a second charged action. An explicit JSON `null`
 is read as "no key", the same as omitting it.
 

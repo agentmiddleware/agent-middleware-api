@@ -20,6 +20,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 from decimal import Decimal
 from typing import Any, NoReturn
 
@@ -227,6 +228,71 @@ class ToolCallResponse(BaseModel):
 
 _IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 
+# Far above any legitimate MCP message, far below where Python 3.11's JSON
+# parser starts raising RecursionError instead of returning a parse result.
+# Shared with the standard endpoint so both transports refuse the same depth.
+_MAX_JSON_NESTING_DEPTH = 100
+
+
+def _json_nesting_depth_exceeds(body: bytes, limit: int) -> bool:
+    """True when raw JSON bytes nest deeper than ``limit`` outside strings."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in body:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # backslash
+                escaped = True
+            elif byte == 0x22:  # double quote
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x7B, 0x5B):  # { or [
+            depth += 1
+            if depth > limit:
+                return True
+        elif byte in (0x7D, 0x5D):  # } or ]
+            depth = max(0, depth - 1)
+    return False
+
+
+def _reject_non_finite_constant(token: str) -> Any:
+    raise ValueError(f"non-finite JSON number: {token}")
+
+
+def _finite_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError(f"non-finite JSON number: {token}")
+    return value
+
+
+def _loads_strict_json(raw: bytes) -> Any:
+    """Parse a request body as RFC 8259 JSON, refusing what we could not echo.
+
+    Python's parser accepts the NaN and Infinity literals and overflows 1e400
+    to an infinite float. Every JSON-RPC response echoes the request id and a
+    result may echo arguments, and the response serializer refuses non-finite
+    floats — after the tool has run and the wallet has been charged. Refusing
+    them at parse time keeps that failure ahead of every side effect. Raises
+    ValueError, which also covers a JSON syntax error and the decode error of
+    a non-UTF-8 body.
+    """
+    return json.loads(
+        raw, parse_constant=_reject_non_finite_constant, parse_float=_finite_float
+    )
+
+
+def _is_valid_jsonrpc_id(value: Any) -> bool:
+    """JSON-RPC 2.0: a request id is a string, a number, or null."""
+    if value is None or isinstance(value, str):
+        return True
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, float))
+
 
 def _jsonrpc_error_response(
     request_id: Any,
@@ -243,11 +309,13 @@ def _jsonrpc_error_response(
 def _invalid_idempotency_key_data(exc: InvalidIdempotencyKeyError) -> dict[str, Any]:
     """Machine-actionable ``data`` for a ``-32602 invalid_idempotency_key``.
 
-    Shared by the legacy JSON-RPC route and the standard endpoint so a client
-    sees one contract wherever it carries the key.
+    Shared by the legacy JSON-RPC route, the standard endpoint and the REST
+    route so a client sees one contract wherever it carries the key.
+    ``error`` mirrors the JSON-RPC message (and is the REST ``detail.error``),
+    ``reason_code`` names the specific defect.
     """
     return {
-        "error": "invalid_params",
+        "error": str(exc),
         "reason_code": exc.reason_code,
         "sources": list(exc.sources),
         "remediation": {
@@ -312,9 +380,17 @@ async def handle_messages(
 
     The request body is a JSON-RPC 2.0 request.
     """
+    raw_body = await request.body()
+    if _json_nesting_depth_exceeds(raw_body, _MAX_JSON_NESTING_DEPTH):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON: nesting depth exceeds the supported limit",
+        )
     try:
-        body = await request.json()
-    except json.JSONDecodeError:
+        body = _loads_strict_json(raw_body)
+    except ValueError:
+        # Malformed JSON, a non-UTF-8 body, or a non-finite number: all are
+        # ValueErrors, and none may reach the pipeline.
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # The parser hands back whatever JSON it read; only an object is a
@@ -329,6 +405,14 @@ async def handle_messages(
 
     method = body.get("method")
     request_id = body.get("id")
+    # The id is echoed on every response; one we cannot echo must be refused
+    # before anything runs, and the spec says the reply then carries null.
+    if not _is_valid_jsonrpc_id(request_id):
+        return _jsonrpc_error_response(
+            None,
+            -32600,
+            "Invalid Request: id must be a string, a number, or null",
+        )
     params = body.get("params")
     if params is None:
         params = {}
@@ -358,6 +442,17 @@ async def handle_messages(
             return _jsonrpc_error_response(
                 request_id, -32602, "Invalid params: mcpContext must be an object"
             )
+        # Identifiers are bound as SQL parameters downstream; a list or object
+        # there produced a driver error whose text (table and column names)
+        # was echoed back as -32603.
+        for field in ("wallet_id", "permit_id", "quote_id"):
+            value = mcp_context.get(field)
+            if value is not None and not isinstance(value, str):
+                return _jsonrpc_error_response(
+                    request_id,
+                    -32602,
+                    f"Invalid params: mcpContext.{field} must be a string",
+                )
         tool_name = params.get("name")
         if tool_name is not None and not isinstance(tool_name, str):
             return _jsonrpc_error_response(
@@ -3143,10 +3238,9 @@ async def invoke_tool(
         )
     except InvalidIdempotencyKeyError as exc:
         # REST callers read ``detail.error`` as the reason (like
-        # ``wallet_frozen``); the JSON-RPC ``data`` fields ride alongside.
+        # ``wallet_frozen``); the same fields the JSON-RPC ``data`` carries.
         raise HTTPException(
-            status_code=400,
-            detail={**_invalid_idempotency_key_data(exc), "error": str(exc)},
+            status_code=400, detail=_invalid_idempotency_key_data(exc)
         ) from exc
 
     mcp_payload = {

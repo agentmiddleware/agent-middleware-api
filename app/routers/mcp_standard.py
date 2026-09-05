@@ -79,12 +79,14 @@ from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
 from app.core.time import utc_now
 from app.routers.mcp import (
+    _MAX_JSON_NESTING_DEPTH,
     GovernedToolError,
     HumanApprovalPendingSignal,
     ToolPermissionDenied,
     _handle_tools_call,
     _handle_tools_list,
     _invalid_idempotency_key_data,
+    _json_nesting_depth_exceeds,
     _value_error_jsonrpc_code,
 )
 from app.schemas.trust import PermitCreateRequest
@@ -129,35 +131,6 @@ _SERVER_INSTRUCTIONS = (
 
 def _mcp_error(code: int, message: str, data: dict[str, Any] | None = None) -> McpError:
     return McpError(mcp_types.ErrorData(code=code, message=message, data=data))
-
-
-# Far above any legitimate MCP message, far below where Python 3.11's JSON
-# parser starts raising RecursionError instead of returning a parse result.
-_MAX_JSON_NESTING_DEPTH = 100
-
-
-def _json_nesting_depth_exceeds(body: bytes, limit: int) -> bool:
-    """True when raw JSON bytes nest deeper than ``limit`` outside strings."""
-    depth = 0
-    in_string = False
-    escaped = False
-    for byte in body:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif byte == 0x5C:  # backslash
-                escaped = True
-            elif byte == 0x22:  # double quote
-                in_string = False
-        elif byte == 0x22:
-            in_string = True
-        elif byte in (0x7B, 0x5B):  # { or [
-            depth += 1
-            if depth > limit:
-                return True
-        elif byte in (0x7D, 0x5D):  # } or ]
-            depth = max(0, depth - 1)
-    return False
 
 
 def _permit_error(

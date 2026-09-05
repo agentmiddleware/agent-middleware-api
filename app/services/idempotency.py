@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import unicodedata
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -57,8 +58,9 @@ class InvalidIdempotencyKeyError(ValueError):
 
     ``reason_code`` names the defect (``idempotency_key_empty``,
     ``idempotency_key_not_a_string``, ``idempotency_key_too_long``,
-    ``idempotency_key_conflict``); ``sources`` names where on the request the
-    offending value(s) were carried.
+    ``idempotency_key_invalid_characters``, ``idempotency_key_conflict``);
+    ``sources`` names where on the request the offending value(s) were
+    carried.
     """
 
     def __init__(self, reason_code: str, *, sources: tuple[str, ...]) -> None:
@@ -83,6 +85,21 @@ def validate_idempotency_key(value: object, *, source: str) -> str:
     if len(value) > MAX_IDEMPOTENCY_KEY_LENGTH:
         raise InvalidIdempotencyKeyError(
             "idempotency_key_too_long", sources=(source,)
+        )
+    # The key is hashed (utf-8) for the auto-permit mint record and stored in
+    # a text column. A JSON "\ud800" escape decodes to a lone surrogate that
+    # cannot be utf-8 encoded, and Postgres text refuses NUL; either would
+    # surface as an internal error mid-pipeline instead of this refusal.
+    # Control characters in general are never a legitimate opaque token.
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_invalid_characters", sources=(source,)
+        ) from None
+    if any(unicodedata.category(ch) == "Cc" for ch in value):
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_invalid_characters", sources=(source,)
         )
     return value
 

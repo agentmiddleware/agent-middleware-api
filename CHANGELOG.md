@@ -22,25 +22,38 @@ full release gate; do not backfill a final `v1.2.0` tag.
   twice (adversarial review, 2026-09; the valid-key control replayed
   correctly). The header, `_meta`, and legacy `mcpContext` paths (both
   `POST /mcp/messages` and the deprecated `POST /mcp/tools/{service_id}/invoke`,
-  which answers HTTP 400 with the same fields) now share one contract
+  which answers HTTP 400 with the same fields; a non-string key there is a
+  422 schema error from the typed body) now share one contract
   (`app/services/idempotency.py`: `validate_idempotency_key`,
   `resolve_client_idempotency_key`): a supplied key must be a non-empty
   string of at most 128 characters — the width of
   `idempotency_records.idempotency_key`, which the header path previously
   exceeded unchecked, and the same bound the Python SDK already enforces
-  client-side — and every transport carrying a key on one request must name
-  the same key. Violations return `-32602 invalid_idempotency_key`
-  with a `reason_code` (`idempotency_key_empty`, `…_not_a_string`,
-  `…_too_long`, `…_conflict`), the offending `sources`, and a `remediation`
-  block, ahead of the wallet check, the auto-permit mint, and execution. An
-  absent key (including an explicit JSON `null`) keeps each surface's
-  documented default.
+  client-side — made of characters the store can hold (no control
+  characters, no unpaired surrogates: a JSON `"\ud800"` key previously
+  escaped the error contract as JSON-RPC code 0 with the raw
+  `UnicodeEncodeError` text, and a NUL would fail Postgres mid-pipeline),
+  and every transport carrying a key on one request must name the same
+  key. Violations return `-32602 invalid_idempotency_key` with a
+  `reason_code` (`idempotency_key_empty`, `…_not_a_string`, `…_too_long`,
+  `…_invalid_characters`, `…_conflict`), the offending `sources`, and a
+  `remediation` block, ahead of the wallet check, the auto-permit mint, and
+  execution. An absent key (including an explicit JSON `null`) keeps each
+  surface's documented default.
 - **Malformed legacy JSON-RPC envelopes are controlled errors, not 500s.**
-  `POST /mcp/messages` validates the parsed body and `params` shapes before
-  touching them: a non-object body (array, batch, null, scalar) is `-32600`
-  Invalid Request; non-object `params`, `mcpContext`, or `arguments`, or a
-  non-string `name`, is `-32602` Invalid params. Nothing executes or charges
-  on any of these paths.
+  `POST /mcp/messages` now parses strictly and validates shapes before
+  touching anything. A non-UTF-8 body, JSON nested deeper than the standard
+  endpoint's shared 100-level guard, or a non-finite number anywhere in the
+  body (`NaN`, `Infinity`, `1e400` — Python's parser accepted these, and
+  echoing such an `id` or argument made the response serializer fail *after*
+  the tool had run and the wallet had been charged, so the caller saw HTTP
+  500 for a call that happened) is HTTP 400 `Invalid JSON`. A non-object body
+  (array, batch, null, scalar) or an `id` that is not a string, number, or
+  null is `-32600` Invalid Request with `id: null`. Non-object `params`,
+  `mcpContext`, or `arguments`, a non-string `name`, or a non-string
+  `mcpContext.wallet_id`/`permit_id`/`quote_id` (which previously reached
+  the SQL driver and echoed its error text) is `-32602` Invalid params.
+  Nothing executes or charges on any of these paths.
 - **Regression coverage.** `tests/test_mcp_idempotency_key_validation.py`
   replays the reviewed attack over the real endpoint (five malformed key
   classes, two identical requests each, zero executions, zero debits, no

@@ -20,6 +20,7 @@ The contract pinned here:
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from typing import Any
 
@@ -121,7 +122,7 @@ def _assert_invalid_key(payload: dict, *, reason_code: str, sources: list[str]) 
     assert error["code"] == -32602
     assert error["message"] == "invalid_idempotency_key"
     data = error["data"]
-    assert data["error"] == "invalid_params"
+    assert data["error"] == "invalid_idempotency_key"
     assert data["reason_code"] == reason_code
     assert data["sources"] == sources
     assert data["remediation"]["type"] == "retry_with_valid_idempotency_key"
@@ -154,6 +155,15 @@ def test_max_key_length_matches_the_idempotency_store_column():
         (["k"], "idempotency_key_not_a_string"),
         ({"k": "v"}, "idempotency_key_not_a_string"),
         ("x" * (MAX_IDEMPOTENCY_KEY_LENGTH + 1), "idempotency_key_too_long"),
+        # A JSON "\ud800" escape decodes to a lone surrogate: a str that
+        # cannot be utf-8 encoded for the mint-record hash.
+        ("\ud800", "idempotency_key_invalid_characters"),
+        ("retry\ud800", "idempotency_key_invalid_characters"),
+        # NUL is refused by Postgres text columns; other control characters
+        # are never a legitimate opaque token.
+        ("\x00retry", "idempotency_key_invalid_characters"),
+        ("retry\nagain", "idempotency_key_invalid_characters"),
+        ("retry\x7f", "idempotency_key_invalid_characters"),
     ],
 )
 def test_validate_rejects_every_malformed_class(value, reason_code):
@@ -164,8 +174,13 @@ def test_validate_rejects_every_malformed_class(value, reason_code):
     assert excinfo.value.sources == ("_meta",)
 
 
-@pytest.mark.parametrize("value", ["k", "x" * MAX_IDEMPOTENCY_KEY_LENGTH])
+@pytest.mark.parametrize(
+    "value",
+    ["k", "x" * MAX_IDEMPOTENCY_KEY_LENGTH, "retry key", "clé-№1", "\U0001f511" * 128],
+    ids=["one-char", "at-limit", "interior-space", "non-ascii", "astral-at-limit"],
+)
 def test_validate_accepts_keys_up_to_the_store_limit(value):
+    """Opaque tokens stay opaque: spaces and any printable unicode are fine."""
     assert validate_idempotency_key(value, source="header") == value
 
 
@@ -205,6 +220,11 @@ def test_resolve_validates_before_comparing():
         (["retry-1"], "idempotency_key_not_a_string"),
         ({"key": "retry-1"}, "idempotency_key_not_a_string"),
         ("x" * (MAX_IDEMPOTENCY_KEY_LENGTH + 1), "idempotency_key_too_long"),
+        # Before this check the lone surrogate escaped the -32602 contract:
+        # utf-8 encoding failed inside the permit mint and the SDK catch-all
+        # answered code 0 with the raw exception text.
+        ("\ud800", "idempotency_key_invalid_characters"),
+        ("\x00retry-1", "idempotency_key_invalid_characters"),
     ],
 )
 async def test_malformed_meta_key_is_refused_before_any_effect(
@@ -219,8 +239,13 @@ async def test_malformed_meta_key_is_refused_before_any_effect(
     before = await _balance(client, agent)
 
     for attempt in (1, 2):
+        # Pre-serialized with ASCII escapes: this is the wire form a real
+        # client sends (a lone surrogate travels as the "\ud800" escape, which
+        # httpx's own json= path cannot utf-8 encode).
         resp = await client.post(
-            "/mcp", json=_tools_call({META_KEY: bad_key}, request_id=attempt), headers=headers
+            "/mcp",
+            content=json.dumps(_tools_call({META_KEY: bad_key}, request_id=attempt)),
+            headers=headers,
         )
         assert resp.status_code == 200, resp.text
         payload = resp.json()
