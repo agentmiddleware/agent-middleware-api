@@ -139,7 +139,7 @@ async def execute_action(
     request: AWIExecutionRequest,
     auth: AuthContext = Depends(get_auth_context),
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Execute a standardized AWI action.
@@ -172,7 +172,7 @@ async def execute_action(
             tool_name="awi_execute",
             endpoint="POST /v1/awi/execute",
             permit_id=x_permit_id,
-            idempotency_key=idempotency_key,
+            idempotency_key_lines=idempotency_key_lines,
             request_payload=request_payload,
         )
         replayed = consume_awi_http_replay(gov)

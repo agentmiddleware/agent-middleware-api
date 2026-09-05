@@ -68,6 +68,13 @@ depends on the key, approval-gated calls **require** a client
 without one the call is refused with
 `idempotency_key_required_for_human_approval` and a remediation block.
 
+A key the client *does* supply — here, on the legacy MCP transports, or on
+the governed AWI HTTP routes — must be usable: the contract (at most 128
+characters, no control characters, one key per request, never trimmed or
+replaced by a generated one) and the `invalid_idempotency_key` refusal are
+specified in [`failure-semantics.md`](failure-semantics.md) under "What
+counts as a key".
+
 An approval-gated auto-permit lives for the whole approval window
 (`SENTINEL_APPROVAL_TIMEOUT_SECONDS`) plus the standard TTL as execution
 margin, so a decision made late in the window still executes instead of

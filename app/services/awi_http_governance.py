@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -27,7 +28,9 @@ from app.services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyReplay,
+    InvalidIdempotencyKeyError,
     get_idempotency_service,
+    resolve_client_idempotency_key,
 )
 from app.services.permits import PermitError, get_permit_service
 from app.services.receipts import get_receipt_service
@@ -119,13 +122,17 @@ async def begin_awi_http_governed(
     tool_name: str,
     endpoint: str,
     permit_id: str | None,
-    idempotency_key: str | None,
+    idempotency_key_lines: Sequence[str] | None,
     request_payload: dict[str, Any] | None = None,
 ) -> AwiHttpGovernedContext:
     """
     Validate permit + idempotency for an AWI HTTP action.
 
     Clients must send ``X-Permit-Id`` and ``Idempotency-Key``.
+    ``idempotency_key_lines`` is every ``Idempotency-Key`` line on the
+    request: handlers declare the header as ``list[str]`` so FastAPI hands
+    over all of them, because a single-value ``Header`` parameter surfaces
+    only the first line and a second line naming a different key went unseen.
     """
     if not wallet_id:
         raise HTTPException(
@@ -137,6 +144,28 @@ async def begin_awi_http_governed(
         )
 
     auth.require_wallet_access(wallet_id)
+
+    # Same key contract as the governed MCP routes: every line the client sent
+    # must be usable, all lines must name one key, and that key is used
+    # verbatim as the replay identity. This path used to store
+    # ``idempotency_key.strip()`` (so ``' k'`` and ``'k'`` collapsed into one
+    # record) and applied no length cap (a key wider than the store column
+    # reached the database after permit validation instead of being refused
+    # here). A present-but-unusable key is refused rather than treated as
+    # absent: dropping it would turn the caller's retry into a second charged
+    # action. It is checked before the permit header, as on the MCP surfaces,
+    # so a request that got both wrong learns about the key defect rather
+    # than a bare ``permit_required``. No line at all still keeps
+    # ``idempotency_key_required`` below, after the permit-presence check.
+    try:
+        idempotency_key = resolve_client_idempotency_key(
+            [("Idempotency-Key header", line) for line in idempotency_key_lines or ()]
+        )
+    except InvalidIdempotencyKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": str(exc), **exc.as_error_data(), "tool": tool_name},
+        ) from exc
 
     if not permit_id or not permit_id.strip():
         raise HTTPException(
@@ -151,7 +180,7 @@ async def begin_awi_http_governed(
             },
         )
 
-    if not idempotency_key or not idempotency_key.strip():
+    if idempotency_key is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -187,7 +216,7 @@ async def begin_awi_http_governed(
         begun = await idem.begin_with_record(
             wallet_id=wallet_id,
             endpoint=endpoint,
-            idempotency_key=idempotency_key.strip(),
+            idempotency_key=idempotency_key,
             request_payload=request_payload
             or {
                 "tool_name": tool_name,
@@ -208,7 +237,7 @@ async def begin_awi_http_governed(
             auth=auth,
             wallet_id=wallet_id,
             permit_id=permit_id.strip(),
-            idempotency_key=idempotency_key.strip(),
+            idempotency_key=idempotency_key,
             tool_name=tool_name,
             credits=credits,
             permit=validation.permit,
@@ -221,7 +250,7 @@ async def begin_awi_http_governed(
         auth=auth,
         wallet_id=wallet_id,
         permit_id=permit_id.strip(),
-        idempotency_key=idempotency_key.strip(),
+        idempotency_key=idempotency_key,
         tool_name=tool_name,
         credits=credits,
         permit=validation.permit,
@@ -491,12 +520,16 @@ async def raise_awi_http_error(
 
 def parse_governed_headers(
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
     x_wallet_id: str | None = Header(None, alias="X-Wallet-Id"),
-) -> dict[str, str | None]:
-    """Optional FastAPI dependency returning governance headers."""
+) -> dict[str, str | list[str] | None]:
+    """Optional FastAPI dependency returning governance headers.
+
+    ``idempotency_key_lines`` carries every ``Idempotency-Key`` line, in the
+    shape :func:`begin_awi_http_governed` expects.
+    """
     return {
         "permit_id": x_permit_id,
-        "idempotency_key": idempotency_key,
+        "idempotency_key_lines": idempotency_key_lines,
         "wallet_id": x_wallet_id,
     }
