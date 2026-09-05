@@ -32,11 +32,31 @@ from urllib.parse import urlparse
 SITE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SITE_ROOT.parent
 DEFAULT_OUTPUT = SITE_ROOT / "dist"
+# Required launch contacts. Pilot intake is email-first by design: a prospect
+# sends the tool scenario and gets a written reply, and a call happens only when
+# a scenario needs one. So the accountable name and the monitored address gate
+# the build; a booking link is optional and never a prerequisite.
 CONTACT_FIELDS = {
     "@@PUBLIC_DISPLAY_NAME@@": "PUBLIC_DISPLAY_NAME",
     "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
-    "@@PUBLIC_BOOKING_URL@@": "PUBLIC_BOOKING_URL",
 }
+BOOKING_TOKEN = "@@PUBLIC_BOOKING_URL@@"
+BOOKING_FIELD = "PUBLIC_BOOKING_URL"
+# Markup that only makes sense with a booking link sits between these two
+# comments. When no link is configured the whole block is removed, so the
+# emitted page never carries an empty href or an unresolved token; when one is
+# configured only the marker comments are removed.
+BOOKING_BLOCK_START = "<!-- booking:start -->"
+BOOKING_BLOCK_END = "<!-- booking:end -->"
+_BOOKING_BLOCK = re.compile(
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_START)}[ \t]*\n.*?"
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_END)}[ \t]*\n",
+    flags=re.DOTALL | re.MULTILINE,
+)
+_BOOKING_MARKER_LINE = re.compile(
+    rf"^[ \t]*(?:{re.escape(BOOKING_BLOCK_START)}|{re.escape(BOOKING_BLOCK_END)})[ \t]*\n",
+    flags=re.MULTILINE,
+)
 ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
 ANALYTICS_TOKEN = "@@VERCEL_ANALYTICS_SCRIPTS@@"
 ANALYTICS_FLAG_ENABLED = frozenset({"true"})
@@ -51,6 +71,9 @@ FAQ_JSONLD_TOKEN = "@@FAQ_JSONLD@@"
 HERO_CONSOLE_TOKEN = "@@HERO_CONSOLE@@"
 LOOP_TRANSCRIPT_TOKEN = "@@LOOP_TRANSCRIPT@@"
 LIVE_VERIFICATION_TOKEN = "@@LIVE_VERIFICATION@@"
+# The day the published sample receipt was issued, read from the receipt's own
+# signed claims so the page can never drift from the artifact it describes.
+PROOF_RECEIPT_ISSUED_TOKEN = "@@PROOF_RECEIPT_ISSUED@@"
 TRANSCRIPT = SITE_ROOT / "proof" / "transcript.json"
 LIVE_RECEIPT = SITE_ROOT / "proof" / "receipt.json"
 LIVE_KEYS = SITE_ROOT / "proof" / "trust-keys.json"
@@ -156,14 +179,15 @@ def validated_contacts(
 
     display_name = environment["PUBLIC_DISPLAY_NAME"].strip()
     email = environment["PUBLIC_CONTACT_EMAIL"].strip()
-    booking_url = environment["PUBLIC_BOOKING_URL"].strip()
+    booking_url = environment.get(BOOKING_FIELD, "").strip()
 
     for field, value in (
         ("PUBLIC_DISPLAY_NAME", display_name),
         ("PUBLIC_CONTACT_EMAIL", email),
-        ("PUBLIC_BOOKING_URL", booking_url),
+        (BOOKING_FIELD, booking_url),
     ):
-        _reject_provisional(field, value)
+        if value:
+            _reject_provisional(field, value)
 
     if (
         display_name.casefold() == "agent middleware api"
@@ -186,40 +210,73 @@ def validated_contacts(
             "PUBLIC_CONTACT_EMAIL must use a routable public domain"
         )
 
-    booking = urlparse(booking_url)
-    if booking.scheme != "https" or not booking.hostname:
-        raise LaunchConfigurationError(
-            "PUBLIC_BOOKING_URL must be an absolute HTTPS URL"
-        )
-    if booking.username or booking.password:
-        raise LaunchConfigurationError(
-            "PUBLIC_BOOKING_URL must not contain credentials"
-        )
-    if _is_reserved_hostname(booking.hostname):
-        raise LaunchConfigurationError(
-            "PUBLIC_BOOKING_URL must use a routable public domain"
-        )
-    blocked_booking_hosts = {
-        "api.thisisatest.tech",
-        "thisisatest.tech",
-        "www.thisisatest.tech",
-    }
-    if booking.hostname.casefold() in blocked_booking_hosts:
-        raise LaunchConfigurationError(
-            "PUBLIC_BOOKING_URL must point to a booking service"
-        )
+    # Optional: a configured booking link is validated as strictly as before,
+    # and an absent one simply leaves the booking blocks out of the build.
+    if booking_url:
+        booking = urlparse(booking_url)
+        if booking.scheme != "https" or not booking.hostname:
+            raise LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must be an absolute HTTPS URL"
+            )
+        if booking.username or booking.password:
+            raise LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must not contain credentials"
+            )
+        if _is_reserved_hostname(booking.hostname):
+            raise LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must use a routable public domain"
+            )
+        blocked_booking_hosts = {
+            "api.thisisatest.tech",
+            "thisisatest.tech",
+            "www.thisisatest.tech",
+        }
+        if booking.hostname.casefold() in blocked_booking_hosts:
+            raise LaunchConfigurationError(
+                "PUBLIC_BOOKING_URL must point to a booking service"
+            )
 
     if not escape_markup:
-        return {
+        values = {
             "@@PUBLIC_DISPLAY_NAME@@": display_name,
             "@@PUBLIC_CONTACT_EMAIL@@": email,
-            "@@PUBLIC_BOOKING_URL@@": booking_url,
         }
-    return {
+        if booking_url:
+            values[BOOKING_TOKEN] = booking_url
+        return values
+    escaped = {
         "@@PUBLIC_DISPLAY_NAME@@": html.escape(display_name),
         "@@PUBLIC_CONTACT_EMAIL@@": html.escape(email, quote=True),
-        "@@PUBLIC_BOOKING_URL@@": html.escape(booking_url, quote=True),
     }
+    if booking_url:
+        escaped[BOOKING_TOKEN] = html.escape(booking_url, quote=True)
+    return escaped
+
+
+def booking_configured(environment: dict[str, str]) -> bool:
+    """Whether the build carries the optional booking link."""
+
+    return bool(environment.get(BOOKING_FIELD, "").strip())
+
+
+def render_booking_blocks(markup: str, *, configured: bool) -> str:
+    """Resolve the optional booking blocks in one page.
+
+    With a booking link configured only the marker comments go; without one
+    the whole block goes, so no page ever ships an empty ``href`` or a
+    ``@@PUBLIC_BOOKING_URL@@`` token. Unbalanced markers are a launch error.
+    """
+
+    if markup.count(BOOKING_BLOCK_START) != markup.count(BOOKING_BLOCK_END):
+        raise LaunchConfigurationError("booking block markers are unbalanced")
+    if configured:
+        return _BOOKING_MARKER_LINE.sub("", markup)
+    rendered = _BOOKING_BLOCK.sub("", markup)
+    if BOOKING_BLOCK_START in rendered or BOOKING_BLOCK_END in rendered:
+        raise LaunchConfigurationError(
+            "booking block markers must each sit on their own line"
+        )
+    return rendered
 
 
 def vercel_analytics_enabled(environment: dict[str, str]) -> bool:
@@ -533,6 +590,25 @@ def load_transcript() -> dict:
     return transcript
 
 
+def published_receipt_issued_date() -> str:
+    """Return the ISO date the published sample receipt was issued.
+
+    Read from ``created_at`` inside the receipt's signed ``signing_input``, so
+    the "historical sample" sentence on the pages names the date the bundle
+    itself attests to. A receipt without a parseable issue date is a launch
+    error: the page would otherwise have to guess.
+    """
+    try:
+        bundle = json.loads(LIVE_RECEIPT.read_text(encoding="utf-8"))
+        created_at = json.loads(bundle["signing_input"])["created_at"]
+        issued = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise LaunchConfigurationError(
+            f"site/proof/receipt.json has no readable created_at: {exc}"
+        ) from exc
+    return issued.date().isoformat()
+
+
 def _console_output(text: str) -> str:
     """A verifier's stdout as markup; the verdict word carries its own class."""
     lines = html.escape(text).split("\n")
@@ -615,7 +691,7 @@ def render_live_verification(transcript: dict) -> str:
     return (
         '<figure class="console console-live" aria-labelledby="live-verify-title">'
         '<figcaption class="console-bar">'
-        '<span class="console-title" id="live-verify-title">offline verifier · live receipt</span>'
+        '<span class="console-title" id="live-verify-title">offline verifier · published sample receipt</span>'
         '<span class="console-meta">b2a-verify-receipt</span>'
         "</figcaption>"
         f'<pre class="console-request"><code>{_console_request(live["command"])}</code></pre>'
@@ -705,6 +781,7 @@ def _build_timestamps() -> dict[str, str]:
 def render_site(output: Path, environment: dict[str, str]) -> None:
     markup_replacements = validated_contacts(environment)
     text_replacements = validated_contacts(environment, escape_markup=False)
+    with_booking = booking_configured(environment)
     timestamps = _build_timestamps()
     markup_replacements.update(timestamps)
     text_replacements.update(timestamps)
@@ -743,7 +820,12 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
                 flags=re.MULTILINE,
             )
         if relative_path.endswith(".html"):
+            rendered = render_booking_blocks(rendered, configured=with_booking)
             rendered = rendered.replace(FONT_PRELOAD_TOKEN, font_preload_tags())
+            if PROOF_RECEIPT_ISSUED_TOKEN in rendered:
+                rendered = rendered.replace(
+                    PROOF_RECEIPT_ISSUED_TOKEN, published_receipt_issued_date()
+                )
             rendered = rendered.replace(FONTS_CSS_VERSION_TOKEN, fonts_css_version())
             if FAQ_JSONLD_TOKEN in rendered:
                 rendered = rendered.replace(FAQ_JSONLD_TOKEN, faq_jsonld(rendered))

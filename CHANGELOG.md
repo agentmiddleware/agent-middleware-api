@@ -11,6 +11,68 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔒 A present-but-unusable replay key is refused, never replaced
+
+- **`POST /mcp` no longer generates a key on the caller's behalf when the
+  caller sent one it cannot use.** An `io.agentmiddleware/idempotency_key`
+  metadata entry or `Idempotency-Key` header that is not a string, blank,
+  longer than 128 characters, or carrying control characters used to fall
+  through to a fresh generated key, so identical retries carrying the bad key
+  executed and were charged again (an independent review measured two debits
+  for one intended action). Such a key is now refused with invalid params
+  (`-32602`) and a machine-readable `reason_code` before a permit is minted,
+  anything is metered, or anything is dispatched. The limit is 128 because
+  that is the width of the durable `idempotency_records.idempotency_key`
+  column (and the SDK's own bound); the metadata parser's former 256 could
+  never be stored on PostgreSQL.
+- **Two key sources must agree.** A header and a body key that differ are
+  refused as `idempotency_key_conflict` instead of one silently winning; the
+  same key in both places (what the Python SDK sends) keeps working.
+  Repeated `Idempotency-Key` headers follow the same rule.
+- **Absent stays absent.** No key anywhere, or a JSON `null` entry, is still
+  an un-keyed call: a generated key on `/mcp`, `idempotency_key_required` on
+  a governed `/mcp/messages` call. The contract is now pinned by tests in
+  both directions and documented in `docs/failure-semantics.md`.
+- **Legacy `POST /mcp/messages` validates the JSON-RPC envelope before reading
+  it.** A body that is an array, `null`, a string, or a number, a non-string
+  `method`, array `params`, a non-object `mcpContext` or `arguments`, or a
+  non-string identifier inside `mcpContext` used to reach `.get` and surface
+  as HTTP 500. They now return a controlled JSON-RPC error (`-32600` or
+  `-32602`) with a safe echoed `id` (`null` when the request's id is not a
+  string, number, or null), and — proven with a valid permit in hand —
+  execute nothing and debit nothing. The same shape check runs inside the
+  governed adapter seam, so every transport gets it. The REST
+  `/mcp/tools/{service_id}/invoke` path applies the same key rules and
+  answers HTTP 400.
+- **`GET /health` now publishes `build_provenance`** alongside `commit_sha`,
+  the same field `/health/dependencies` already carried, so the liveness
+  probe alone can tell a trustworthy-but-behind deployment from a stale stamp.
+  `docs/deployment-verification-checklist.md` records the 2026-09-05 reading
+  (production at `2880ca7`, `stamped`, eleven commits behind `main`) and the
+  steps that must precede any "this fix is live" claim.
+
+### 🌐 Site: pilot intake is email-first
+
+- **The primary CTA on every page is "Start a pilot by email"** (the
+  configured `PUBLIC_CONTACT_EMAIL`); the secondary is "Run the local proof".
+  The pilot section explains the three things to send in plain terms — the
+  tool or action, what goes wrong on retry, and how you currently check
+  whether the action happened — and asks for synthetic or redacted examples
+  only. A call is offered only when a scenario needs one.
+- **`PUBLIC_BOOKING_URL` is optional.** The build gates on the accountable
+  name and monitored address alone. A configured booking link renders as a
+  secondary "Book a call if your scenario needs one" link inside
+  `<!-- booking:start -->` … `<!-- booking:end -->` blocks; without one the
+  blocks are removed whole, so no page ships an empty `href`, an unresolved
+  token, or a `booking_click` hook. A supplied link is validated exactly as
+  before.
+- **The published receipt is described as what it is.** Both the landing
+  proof section and `/proof/` name the day the sample receipt was issued
+  (read from the receipt's own signed claims at build time), call it a
+  historical sample, and say that verifying it is not a test of the
+  deployment running today. The verifier panel is titled "published sample
+  receipt" rather than "live receipt".
+
 ### 🌐 Site: the arcade treatment steps back to the footer
 
 - **The public site drops the full 8-bit chrome.** `site/styles.css` is

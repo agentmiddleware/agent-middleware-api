@@ -181,12 +181,10 @@
         <a href="/#machine-discovery">Machine discovery</a>
         <a
           class="nav-agent"
-          href="@@PUBLIC_BOOKING_URL@@"
-          target="_blank"
-          rel="noopener noreferrer"
-          data-analytics-event="booking_click"
-          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-          >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          data-analytics-event="email_click"
+          aria-label="Start a pilot by email (opens your mail app)"
+          >Start a pilot by email</a
         >
       </div>
     </nav>
@@ -197,8 +195,11 @@
         <h1>Verify this receipt yourself.</h1>
         <p class="proof-page-lead">
           This receipt is self-issued from a non-sensitive
-          <code>partner.echo</code> call. It proves the gateway path end to
-          end; it is not customer evidence.
+          <code>partner.echo</code> call and was issued on
+          <time datetime="@@PROOF_RECEIPT_ISSUED@@">@@PROOF_RECEIPT_ISSUED@@</time>.
+          It is a published historical sample: verifying it proves the gateway
+          path signed this receipt with the published key. It is not customer
+          evidence, and it is not a test of the deployment running today.
         </p>
       </header>
 
@@ -303,18 +304,19 @@ b2a-verify-receipt \
         <div class="pilot-copy">
           <p>
             If this evidence shape maps to a real authorization, retry, or
-            audit problem in your stack, bring the tool and the operator who
-            owns it. Pricing and scope are discussed privately after fit.
+            audit problem in your stack, email the tool scenario: the tool or
+            action, what goes wrong when it is retried, and how you currently
+            check whether it ran. Synthetic or redacted examples only. Pricing
+            and scope are discussed privately after fit, in writing; a call
+            happens only when a scenario needs one.
           </p>
           <div class="pilot-links">
             <a
               class="button button-primary"
-              href="@@PUBLIC_BOOKING_URL@@"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-analytics-event="booking_click"
-              aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-              >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              data-analytics-event="email_click"
+              aria-label="Start a pilot by email (opens your mail app)"
+              >Start a pilot by email</a
             >
             <a
               href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
@@ -322,6 +324,16 @@ b2a-verify-receipt \
               aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
               >Email @@PUBLIC_CONTACT_EMAIL@@</a
             >
+            <!-- booking:start -->
+            <a
+              href="@@PUBLIC_BOOKING_URL@@"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-analytics-event="booking_click"
+              aria-label="Book a call if your scenario needs one (opens in a new tab)"
+              >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
+            >
+            <!-- booking:end -->
           </div>
         </div>
       </section>
@@ -336,12 +348,10 @@ b2a-verify-receipt \
         <p>Human contact</p>
         <a
           class="button button-primary"
-          href="@@PUBLIC_BOOKING_URL@@"
-          target="_blank"
-          rel="noopener noreferrer"
-          data-analytics-event="booking_click"
-          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-          >Book a one-tool pilot</a
+          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          data-analytics-event="email_click"
+          aria-label="Start a pilot by email (opens your mail app)"
+          >Start a pilot by email</a
         >
         <a
           href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
@@ -349,6 +359,16 @@ b2a-verify-receipt \
           aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
           >@@PUBLIC_CONTACT_EMAIL@@</a
         >
+        <!-- booking:start -->
+        <a
+          href="@@PUBLIC_BOOKING_URL@@"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-analytics-event="booking_click"
+          aria-label="Book a call if your scenario needs one (opens in a new tab)"
+          >Book a call if your scenario needs one</a
+        >
+        <!-- booking:end -->
         <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
       </div>
       <div class="footer-directory">

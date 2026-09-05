@@ -72,11 +72,13 @@ from ..trust import (
     QUOTE_REASON_CONSUMED,
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
     AgentMoney,
+    GovernedRequestInvalid,
     HumanApprovalError,
     HumanApprovalUnavailableError,
     IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
+    InvalidIdempotencyKeyError,
     McpGovernedAdapter,
     PolicyDecision,
     evaluate_tool_invocation,
@@ -90,8 +92,10 @@ from ..trust import (
     get_receipt_service,
     record_audit_event,
     get_refund_reconciliation_service,
+    resolve_client_idempotency_key,
     sha256_hex,
     tool_price,
+    validate_tools_call_params,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,6 +191,59 @@ class HumanApprovalPendingSignal(RuntimeError):
         self.status_code = status_code
 
 
+def _header_idempotency_key_sources(request: Request) -> list[tuple[str, object]]:
+    """Every ``Idempotency-Key`` header the caller sent, in wire order.
+
+    A repeated header is two explicit sources: identical copies collapse to
+    one key, differing copies are refused as a conflict rather than letting
+    the first one silently win.
+    """
+    return [
+        ("Idempotency-Key header", value)
+        for value in request.headers.getlist("idempotency-key")
+    ]
+
+
+def _context_idempotency_key_sources(
+    mcp_context: dict[str, Any],
+) -> list[tuple[str, object]]:
+    """The ``mcpContext.idempotency_key`` source when the body carries one.
+
+    JSON ``null`` reads as absent, matching the ``str | None`` shape the
+    typed ``McpContext`` schema has always declared for this member.
+    """
+    value = mcp_context.get("idempotency_key")
+    if value is None:
+        return []
+    return [("mcpContext.idempotency_key", value)]
+
+
+def _safe_jsonrpc_id(value: Any) -> str | int | float | None:
+    """Echo a JSON-RPC ``id`` only when it is a shape the spec allows.
+
+    Strings, numbers, and ``null`` come back as sent; anything else (an
+    object, an array, a boolean) is replaced with ``null`` so a malformed id
+    is neither echoed into the response nor stringified into audit records.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (str, int, float)):
+        return value
+    return None
+
+
+def _jsonrpc_error_response(
+    request_id: str | int | float | None,
+    code: int,
+    message: str,
+    data: dict[str, Any] | None = None,
+) -> JSONResponse:
+    error_payload: dict[str, Any] = {"code": code, "message": message}
+    if data:
+        error_payload["data"] = data
+    return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": error_payload})
+
+
 class McpContext(BaseModel):
     """MCP execution context passed in tool calls."""
 
@@ -276,9 +333,30 @@ async def handle_messages(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    # The envelope is validated before any member is read. A body that parsed
+    # but is not an object (``[]``, ``null``, a string, a number) used to reach
+    # ``.get`` and surface as HTTP 500; it is a client error, answered with the
+    # JSON-RPC invalid-request shape and a null id because no id can be
+    # trusted from a non-object body.
+    if not isinstance(body, dict):
+        return _jsonrpc_error_response(
+            None, -32600, "Invalid Request: JSON-RPC envelope must be an object"
+        )
+    request_id = _safe_jsonrpc_id(body.get("id"))
     method = body.get("method")
-    request_id = body.get("id")
-    params = body.get("params", {})
+    if not isinstance(method, str) or not method:
+        return _jsonrpc_error_response(
+            request_id, -32600, "Invalid Request: method must be a non-empty string"
+        )
+    params = body.get("params")
+    if params is None:
+        params = {}
+    elif not isinstance(params, dict):
+        # JSON-RPC allows positional params in general; this server's methods
+        # take named params only, and ``[]`` must not turn into ``{}``.
+        return _jsonrpc_error_response(
+            request_id, -32602, "Invalid params: params must be an object"
+        )
 
     if method == "tools/list":
         result = await _handle_tools_list(params)
@@ -291,17 +369,34 @@ async def handle_messages(
         )
 
     elif method == "tools/call":
-        mcp_context = params.get("mcpContext", {}) or {}
+        # Shape and replay-key validation run before the governed pipeline is
+        # entered, so a refused request has minted, reserved, charged, and
+        # dispatched nothing. The header and the body may both carry a key;
+        # they must then agree, and a present-but-unusable value in either is
+        # refused instead of the other source (or a generated key) winning.
+        try:
+            call_params = validate_tools_call_params(params)
+            client_idempotency_key = resolve_client_idempotency_key(
+                [
+                    *_header_idempotency_key_sources(request),
+                    *_context_idempotency_key_sources(call_params["mcpContext"]),
+                ]
+            )
+        except InvalidIdempotencyKeyError as e:
+            return _jsonrpc_error_response(
+                request_id, -32602, str(e), e.as_error_data()
+            )
+        except GovernedRequestInvalid as e:
+            return _jsonrpc_error_response(request_id, -32602, str(e))
         try:
             result = await _handle_tools_call(
-                params,
+                call_params,
                 auth=auth,
                 money=money,
                 transport="jsonrpc",
                 endpoint="/mcp/messages",
                 request_id=str(request_id) if request_id is not None else None,
-                idempotency_key=mcp_context.get("idempotency_key")
-                or request.headers.get("Idempotency-Key"),
+                idempotency_key=client_idempotency_key,
                 request_payload=body,
             )
             return JSONResponse(
@@ -426,11 +521,15 @@ async def handle_messages(
 async def _handle_tools_list(params: dict) -> dict:
     """Handle MCP tools/list request."""
     category = params.get("category")
-    if category:
+    if isinstance(category, str) and category:
         try:
             category = ServiceCategory(category)
         except ValueError:
             category = None
+    else:
+        # A non-string filter is not a category; list everything rather than
+        # let an unexpected shape reach the enum constructor.
+        category = None
 
     manifest = await build_mcp_tools_manifest(category=category)
     return {"tools": manifest["tools"]}
@@ -2902,6 +3001,8 @@ def _trust_metadata(
 def _value_error_jsonrpc_code(message: str) -> int:
     if message in {"Missing tool name", "Missing wallet_id in mcpContext"}:
         return -32602
+    if message.startswith(("Invalid params", "invalid_idempotency_key")):
+        return -32602
     if message.startswith("Tool not found"):
         return -32001
     if message.startswith("Tool not executable"):
@@ -3032,6 +3133,26 @@ async def invoke_tool(
     if not mcp_context.wallet_id:
         raise HTTPException(status_code=400, detail="Missing wallet_id")
 
+    # Same rule as the JSON-RPC transports: a present-but-unusable key in the
+    # header or the typed context is refused, two present keys must agree, and
+    # only a truly absent key proceeds as an un-keyed call.
+    try:
+        client_idempotency_key = resolve_client_idempotency_key(
+            [
+                *_header_idempotency_key_sources(http_request),
+                *(
+                    [("mcp_context.idempotency_key", mcp_context.idempotency_key)]
+                    if mcp_context.idempotency_key is not None
+                    else []
+                ),
+            ]
+        )
+    except InvalidIdempotencyKeyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), **exc.as_error_data()},
+        ) from exc
+
     mcp_payload = {
         "name": service_id,
         "arguments": request.arguments,
@@ -3050,8 +3171,7 @@ async def invoke_tool(
             transport="http",
             endpoint=f"/mcp/tools/{service_id}/invoke",
             request_id=None,
-            idempotency_key=mcp_context.idempotency_key
-            or http_request.headers.get("Idempotency-Key"),
+            idempotency_key=client_idempotency_key,
             request_payload=request.model_dump(mode="json"),
         )
         result = await _mcp_adapter.invoke(governed_request)

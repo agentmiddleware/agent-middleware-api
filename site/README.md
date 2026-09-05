@@ -10,22 +10,35 @@ the one-tool pilot funnel and through the static pointer files.
 
 ## Launch gate
 
-The deploy build refuses to emit `dist/` until all three values are provided:
+Pilot intake is email-first: a prospect emails the tool scenario (the tool or
+action, what goes wrong on retry, and how they currently check whether the
+action happened, with synthetic or redacted examples only) and gets a written
+reply. A call happens only when a scenario needs one. The deploy build
+therefore refuses to emit `dist/` until both required values are provided:
 
 - `PUBLIC_DISPLAY_NAME`: accountable public person or entity
-- `PUBLIC_CONTACT_EMAIL`: monitored email address
-- `PUBLIC_BOOKING_URL`: working absolute HTTPS booking URL
+- `PUBLIC_CONTACT_EMAIL`: monitored email address, the primary CTA on every
+  page
 
-The builder rejects missing, unresolved, and obviously provisional values.
-These inputs must still be exercised manually before production because syntax
-validation cannot prove that a mailbox is monitored or a booking calendar works.
+One value is optional:
+
+- `PUBLIC_BOOKING_URL`: absolute HTTPS booking URL. When set, a secondary
+  "Book a call if your scenario needs one" link is rendered inside the
+  `<!-- booking:start -->` … `<!-- booking:end -->` blocks in the page
+  sources. When unset, those blocks are removed whole, so the emitted pages
+  carry no empty link and no unresolved token.
+
+The builder rejects missing, unresolved, and obviously provisional values,
+and validates a booking URL as strictly as before whenever one is supplied.
+These inputs must still be exercised manually before production because
+syntax validation cannot prove that a mailbox is monitored or a booking
+calendar works.
 
 ```bash
 cd site
 PUBLIC_DISPLAY_NAME="..." \
 PUBLIC_CONTACT_EMAIL="..." \
-PUBLIC_BOOKING_URL="https://..." \
-python3 build_site.py
+python3 build_site.py            # add PUBLIC_BOOKING_URL="https://..." to render the optional link
 python3 -m http.server 8765 --directory dist
 ```
 
@@ -43,7 +56,7 @@ Open `http://127.0.0.1:8765/`.
   the canvas, 960 device pixels wide) and scaled up smoothly by the
   compositor; the cap is a GPU budget for large high-density screens, not
   a pixel-art treatment.
-  Hovering a governed-loop card or the booking CTA fires a pulse through
+  Hovering a governed-loop card or the primary email CTA fires a pulse through
   the field. Reduced motion renders one still frame per field state;
   high contrast hides the field entirely. The footer opens
   [the waiting room](#the-waiting-room), a hundred-cabinet arcade
@@ -469,8 +482,10 @@ is part of what it archives.
 ## Analytics
 
 Vercel Web Analytics records page views and three non-PII event names:
-`booking_click`, `email_click`, and `proof_click`. Event payloads never include
-the email address, booking URL, receipt fields, or link destination.
+`email_click` (the primary intake CTA and the address links), `proof_click`,
+and `booking_click`, which can only fire when the optional
+`PUBLIC_BOOKING_URL` was configured at build time. Event payloads never
+include the email address, booking URL, receipt fields, or link destination.
 
 The `/_vercel/insights/script.js` loader is emitted only when
 `PUBLIC_ENABLE_VERCEL_ANALYTICS=true` is set at build time; the default build

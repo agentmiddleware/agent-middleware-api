@@ -39,6 +39,15 @@ VALID_TEST_CONTACTS = {
     "PUBLIC_CONTACT_EMAIL": "operator@design-partner-labs.org",
     "PUBLIC_BOOKING_URL": "https://cal.com/design-partner-labs/one-tool-pilot",
 }
+# Pilot intake is email-first; the booking link is optional. This is the
+# configuration the site must build and stay whole under.
+EMAIL_ONLY_TEST_CONTACTS = {
+    key: value for key, value in VALID_TEST_CONTACTS.items() if key != "PUBLIC_BOOKING_URL"
+}
+PRIMARY_CTA = "Start a pilot by email"
+SECONDARY_CTA = "Run the local proof"
+OPTIONAL_BOOKING_CTA = "Book a call if your scenario needs one"
+MAILTO = f"mailto:{VALID_TEST_CONTACTS['PUBLIC_CONTACT_EMAIL']}"
 
 
 class _TextExtractor(HTMLParser):
@@ -164,6 +173,10 @@ def test_site_build_blocks_missing_and_provisional_contacts(tmp_path) -> None:
     missing = _render_site(tmp_path / "missing")
     assert missing.returncode == 2
     assert "missing required launch contact values" in missing.stderr
+    # The booking link is optional; only name and email gate the build.
+    assert "PUBLIC_BOOKING_URL" not in missing.stderr
+    email_only = _render_site(tmp_path / "email-only", EMAIL_ONLY_TEST_CONTACTS)
+    assert email_only.returncode == 0, email_only.stderr
 
     bad_contacts = dict(VALID_TEST_CONTACTS)
     bad_contacts["PUBLIC_CONTACT_EMAIL"] = "test@example.com"
@@ -243,16 +256,30 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     # diagram, before the numbered sections begin.
     assert only_path in text
     assert page.index('class="boundary-figure"') < page.index('id="thesis-title"')
-    assert "Book a one-tool pilot" in text
-    assert "Verify our receipt yourself — offline" in text
-    # One label for the booking CTA everywhere; the shorter "Book a pilot" and
-    # "Discuss fit" variants drifted away from the differentiator.
+    # Intake is email-first: the primary CTA is the monitored address, the
+    # secondary CTA is the local proof, and no mandatory call is offered.
+    assert PRIMARY_CTA in text
+    assert SECONDARY_CTA in text
+    assert "Book a one-tool pilot" not in text
+    assert "30-minute" not in text
+    # The three intake fields, in plain language, plus the no-secrets rule.
+    assert "The tool or action." in text
+    assert "What goes wrong on retry." in text
+    assert "How you check it happened." in text
+    assert "synthetic or redacted examples only" in text.casefold()
+    assert "Never send production secrets" in text
+    assert "a call is available only when a scenario needs one" in text.casefold()
+    # One label for the primary CTA everywhere; earlier variants drifted.
     assert "Book a pilot" not in text
     assert "Discuss fit" not in text
     assert "platform engineering, AI infrastructure, and security teams" in text
-    assert f'href="{VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]}"' in page
-    assert f'href="mailto:{VALID_TEST_CONTACTS["PUBLIC_CONTACT_EMAIL"]}"' in page
+    assert f'href="{MAILTO}"' in page
     assert VALID_TEST_CONTACTS["PUBLIC_DISPLAY_NAME"] in page
+    # With a booking link configured it is rendered as the optional, secondary
+    # "if your scenario needs one" link — never as the primary path.
+    assert f'href="{VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]}"' in page
+    assert OPTIONAL_BOOKING_CTA in text
+    assert page.index(PRIMARY_CTA) < page.index(OPTIONAL_BOOKING_CTA)
 
     assert page.index(headline) < page.index('id="pilot"')
     assert page.index('id="pilot"') < page.index('id="machine-discovery"')
@@ -282,9 +309,26 @@ def test_rendered_site_has_truthful_proof_and_no_browser_secret_storage(
         SITE / "proof" / "trust-keys.json"
     ).read_bytes()
 
-    assert "self-issued live gateway proof, not customer traction" in landing
-    assert "This receipt is self-issued from a non-sensitive" in proof
-    assert "it is not customer evidence" in proof
+    # The published receipt is a historical sample with its own issue date,
+    # read from the artifact, and it is never described as a fresh test of the
+    # current deployment.
+    issued = json.loads(
+        json.loads((SITE / "proof" / "receipt.json").read_text(encoding="utf-8"))[
+            "signing_input"
+        ]
+    )["created_at"][:10]
+    landing_text = _page_text(landing)
+    proof_text = _page_text(proof)
+    assert "published as a historical sample" in landing_text
+    assert f'<time datetime="{issued}">{issued}</time>' in landing
+    assert f'<time datetime="{issued}">{issued}</time>' in proof
+    assert "not a test of the deployment running today" in landing_text
+    assert "not a test of the deployment running today" in proof_text
+    assert "live gateway proof" not in landing_text
+    assert "offline verifier · live receipt" not in landing
+    assert "published sample receipt" in landing
+    assert "This receipt is self-issued from a non-sensitive" in proof_text
+    assert "not customer evidence" in proof_text
     assert "partner.echo" in landing
     assert "/proof/receipt.json" in proof
     assert "/proof/trust-keys.json" in proof
@@ -533,6 +577,15 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
     assert "dataset.href" not in analytics
     assert "textContent" not in analytics
 
+    # Truthful events: without a booking link nothing can emit booking_click.
+    email_only = tmp_path / "email-only"
+    assert _render_site(email_only, EMAIL_ONLY_TEST_CONTACTS).returncode == 0
+    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+        rendered = (email_only / relative_path).read_text(encoding="utf-8")
+        assert 'data-analytics-event="booking_click"' not in rendered
+        assert 'data-analytics-event="email_click"' in rendered
+        assert 'data-analytics-event="proof_click"' in rendered
+
 
 def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     """The insights script 404s unless the Vercel project enables analytics."""
@@ -658,44 +711,64 @@ class _LabeledLinkCollector(HTMLParser):
             self._hidden_stack.pop()
 
 
-def test_cta_aria_labels_preserve_visible_text_and_booking_url(tmp_path) -> None:
-    """WCAG 2.1 Label-in-Name for the rendered CTAs.
+def test_cta_aria_labels_preserve_visible_text_and_contact_targets(tmp_path) -> None:
+    """WCAG 2.1 Label-in-Name for the rendered CTAs, plus where they resolve.
 
     Every ``aria-label`` must contain the link's visible text as a contiguous
     phrase, so voice-control users can still activate a control by speaking its
-    visible wording. This is the regression guard for the footer booking CTA,
-    whose label once read "Book a 30-minute one-tool pilot call" — which does
-    NOT contain the visible phrase "Book a one-tool pilot" — and for every other
-    labelled CTA. Booking CTAs must also resolve to the build-time booking URL.
+    visible wording. This is the regression guard for the footer CTA, whose
+    label once read "Book a 30-minute one-tool pilot call" — which did NOT
+    contain the visible phrase — and for every other labelled CTA. Email CTAs
+    must resolve to the configured address; the optional booking link, when
+    configured, must resolve to the configured booking URL and nowhere else.
     """
-    output = tmp_path / "site"
-    result = _render_site(output, VALID_TEST_CONTACTS)
-    assert result.returncode == 0, result.stderr
-
     booking_url = VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
-        collector = _LabeledLinkCollector()
-        collector.feed((output / relative_path).read_text(encoding="utf-8"))
-        collector.close()
-        assert collector.labeled_links, (
-            f"{relative_path} exposes no aria-labelled links"
-        )
-        for visible, label, href in collector.labeled_links:
-            assert visible, (
-                f"{relative_path}: aria-label {label!r} on a link with no visible text"
+    for contacts, with_booking in ((VALID_TEST_CONTACTS, True), (EMAIL_ONLY_TEST_CONTACTS, False)):
+        output = tmp_path / ("with-booking" if with_booking else "email-only")
+        result = _render_site(output, contacts)
+        assert result.returncode == 0, result.stderr
+
+        for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+            page = (output / relative_path).read_text(encoding="utf-8")
+            collector = _LabeledLinkCollector()
+            collector.feed(page)
+            collector.close()
+            assert collector.labeled_links, (
+                f"{relative_path} exposes no aria-labelled links"
             )
-            assert visible in label, (
-                f"{relative_path}: aria-label {label!r} does not contain the "
-                f"visible link text {visible!r} (WCAG 2.1 Label-in-Name)"
-            )
-            if visible.startswith("Book a"):
-                assert href == booking_url, (
-                    f"{relative_path}: booking CTA {visible!r} resolves to {href!r}, "
-                    f"not the build-time booking URL {booking_url!r}"
+            for visible, label, href in collector.labeled_links:
+                assert visible, (
+                    f"{relative_path}: aria-label {label!r} on a link with no visible text"
                 )
-        assert any(
-            href == booking_url for _visible, _label, href in collector.labeled_links
-        ), f"{relative_path}: no CTA resolved to the build-time booking URL"
+                assert visible in label, (
+                    f"{relative_path}: aria-label {label!r} does not contain the "
+                    f"visible link text {visible!r} (WCAG 2.1 Label-in-Name)"
+                )
+                assert href, f"{relative_path}: labelled link {visible!r} has an empty href"
+                if visible.startswith(PRIMARY_CTA) or visible.startswith("Email "):
+                    assert href == MAILTO, (
+                        f"{relative_path}: email CTA {visible!r} resolves to {href!r}"
+                    )
+                if visible.startswith("Book a"):
+                    assert with_booking, (
+                        f"{relative_path}: booking CTA {visible!r} rendered without a booking URL"
+                    )
+                    assert href == booking_url, (
+                        f"{relative_path}: booking CTA {visible!r} resolves to {href!r}, "
+                        f"not the build-time booking URL {booking_url!r}"
+                    )
+            assert any(
+                href == MAILTO for _visible, _label, href in collector.labeled_links
+            ), f"{relative_path}: no CTA resolved to the configured email address"
+            assert (
+                any(href == booking_url for _visible, _label, href in collector.labeled_links)
+                is with_booking
+            ), f"{relative_path}: optional booking link presence does not match configuration"
+            assert 'href=""' not in page
+            assert "booking:start" not in page and "booking:end" not in page
+            if not with_booking:
+                assert booking_url not in page
+                assert "Book a" not in _page_text(page)
 
 
 class _JsonLdCollector(HTMLParser):
@@ -1340,7 +1413,7 @@ def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
     the funnel pages), keep working without JavaScript or WebGL (the canvas is
     progressive enhancement over a static backdrop), and still honor the
     site-wide contracts: build-time contacts, self-hosted typography, and a
-    booking CTA whose aria-label contains its visible text.
+    CTA whose aria-label contains its visible text.
     """
     output = tmp_path / "site"
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
@@ -1377,14 +1450,14 @@ def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
     for host in ("fonts.googleapis.com", "fonts.gstatic.com"):
         assert host not in page
 
-    # The CTA books the real call, and labels keep their visible text.
+    # The CTA reaches the monitored address, and labels keep their visible text.
     collector = _LabeledLinkCollector()
     collector.feed(page)
     collector.close()
     assert any(
-        href == VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]
-        for _visible, _label, href in collector.labeled_links
-    ), "concept page CTA does not resolve to the build-time booking URL"
+        href == MAILTO for _visible, _label, href in collector.labeled_links
+    ), "concept page CTA does not resolve to the configured email address"
+    assert VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"] not in page
     for visible, label, _href in collector.labeled_links:
         assert visible and visible in label, (
             f"concept page aria-label {label!r} does not contain the visible "
@@ -1409,7 +1482,7 @@ def test_navigation_is_identical_across_pages(tmp_path) -> None:
         for page in (proof, compare):
             assert f'href="{anchor}"' in page
 
-    # 404 carries the same nav minus the booking CTA, so a visitor who lands on
+    # 404 carries the same nav minus the email CTA, so a visitor who lands on
     # a dead URL can still reach every real page.
     not_found = (output / "404.html").read_text(encoding="utf-8")
     for anchor in ("/#pilot", "/#proof", "/compare/", "/#machine-discovery"):

@@ -1,6 +1,8 @@
 (function () {
   "use strict";
 
+  // booking_click fires only when the optional PUBLIC_BOOKING_URL is
+  // configured at build time; email_click is the primary intake path.
   const allowedEvents = new Set([
     "booking_click",
     "email_click",

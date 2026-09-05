@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
@@ -34,6 +36,115 @@ class IdempotencyConflictError(RuntimeError):
 
 class IdempotencyInProgressError(RuntimeError):
     """Raised when an idempotency key is already executing without a result."""
+
+
+# Caller-supplied replay keys are stored verbatim in the
+# idempotency_records.idempotency_key column, a String(128) since migration
+# 016, so 128 is the durable limit; the Python SDK enforces the same bound
+# before sending. Accepting a longer key would pass on SQLite in tests and be
+# refused by PostgreSQL mid-call, after the caller's retry protection had
+# already been promised.
+MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH = 128
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+class InvalidIdempotencyKeyError(ValueError):
+    """A caller explicitly supplied a replay key the gateway cannot honor.
+
+    This is distinct from an absent key. Absence means an un-keyed call, and
+    the transports document what that costs. Presence with an unusable value
+    means the caller asked for retry protection and would silently not get
+    it, so the call is refused before any permit, debit, or dispatch.
+    """
+
+    def __init__(self, reason_code: str, message: str, *, source: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.source = source
+
+    def as_error_data(self) -> dict[str, Any]:
+        """Machine-actionable detail for the transport's error envelope."""
+        return {
+            "error": "invalid_idempotency_key",
+            "reason_code": self.reason_code,
+            "source": self.source,
+            "remediation": {
+                "type": "retry_with_valid_idempotency_key",
+                "detail": (
+                    "Send exactly one idempotency key: a non-blank string of at "
+                    f"most {MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH} characters with no "
+                    "control characters, or the same key in every source. "
+                    "Nothing was minted, charged, or dispatched."
+                ),
+            },
+        }
+
+
+def validate_client_idempotency_key(value: object, *, source: str) -> str:
+    """Return ``value`` exactly as supplied or raise ``InvalidIdempotencyKeyError``.
+
+    A usable key is a JSON string with at least one non-whitespace character,
+    at most ``MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH`` characters, and no C0 control
+    characters or DEL. The value is never stripped, truncated, stringified,
+    or otherwise normalized: two distinct valid keys must stay two distinct
+    keys, and the key the caller sent is the key the ledger records.
+    """
+    if not isinstance(value, str):
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_not_a_string",
+            f"invalid_idempotency_key: {source} must be a JSON string",
+            source=source,
+        )
+    if not value.strip():
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_blank",
+            f"invalid_idempotency_key: {source} must contain a non-whitespace "
+            "character",
+            source=source,
+        )
+    if len(value) > MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH:
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_too_long",
+            f"invalid_idempotency_key: {source} must be at most "
+            f"{MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH} characters",
+            source=source,
+        )
+    if _CONTROL_CHARACTERS.search(value):
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_control_characters",
+            f"invalid_idempotency_key: {source} must not contain control "
+            "characters",
+            source=source,
+        )
+    return value
+
+
+def resolve_client_idempotency_key(
+    sources: Sequence[tuple[str, object]],
+) -> str | None:
+    """Reduce every explicitly supplied key source to the one key to honor.
+
+    ``sources`` holds ``(source_name, value)`` for each source the caller
+    actually sent; absent sources are simply not listed. Every present value
+    must validate, and when more than one source is present they must agree
+    exactly. Disagreement is refused as ambiguous rather than letting one
+    source silently win. Returns ``None`` only when no source was supplied.
+    """
+    validated: list[tuple[str, str]] = []
+    for source, value in sources:
+        validated.append((source, validate_client_idempotency_key(value, source=source)))
+    if not validated:
+        return None
+    first_source, first_key = validated[0]
+    for source, key in validated[1:]:
+        if key != first_key:
+            raise InvalidIdempotencyKeyError(
+                "idempotency_key_conflict",
+                f"invalid_idempotency_key: {first_source} and {source} disagree; "
+                "send one key, or the same key in both",
+                source=f"{first_source}, {source}",
+            )
+    return first_key
 
 
 @dataclass(frozen=True)

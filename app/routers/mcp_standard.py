@@ -34,9 +34,17 @@ same call once an approval is decided).
 
 Replay safety: a client-supplied ``Idempotency-Key`` header (or the
 ``io.agentmiddleware/idempotency_key`` entry in ``params._meta``) is honored
-exactly like the governed endpoints. Without one, each call gets a fresh
-generated key, so client retries are charged as new calls — the same contract
-as an un-keyed governed invoke.
+exactly like the governed endpoints. A key that is *present but unusable* —
+not a string, blank, longer than 128 characters (the durable column width the
+Python SDK also enforces), carrying control characters, or supplied in two
+sources that disagree — is refused with invalid params (``-32602``) before a
+permit is minted, anything is metered, or anything is dispatched. Generating
+a key on the caller's behalf in that case would silently defeat the retry
+protection the caller asked for. Only a genuinely absent key (no header, no
+metadata entry, or a JSON ``null`` entry) gets a generated one, and then
+every call, retries included, is a new charged operation — the same contract
+as an un-keyed governed invoke. Clients that retry must always send their own
+persistent key.
 
 The endpoint is stateless: each POST gets a fresh SDK transport in JSON mode
 (no ``Mcp-Session-Id``, responses are plain JSON, never SSE), so there is no
@@ -79,6 +87,7 @@ from app.routers.mcp import (
     ToolPermissionDenied,
     _handle_tools_call,
     _handle_tools_list,
+    _header_idempotency_key_sources,
     _value_error_jsonrpc_code,
 )
 from app.schemas.trust import PermitCreateRequest
@@ -86,12 +95,15 @@ from app.services.agent_money import get_agent_money
 from app.services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
+    InvalidIdempotencyKeyError,
     get_idempotency_service,
+    resolve_client_idempotency_key,
 )
 from app.services.mcp_generator import MCP_SERVER_VERSION, McpGenerator
 from app.services.permits import PermitError, get_permit_service
 from app.services.service_registry import get_service_registry
 from app.trust import approval_window_seconds, wallet_human_approval_required
+from app.trust.adapters import GovernedRequestInvalid
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +111,7 @@ router = APIRouter(prefix="/mcp", tags=["MCP Standard Endpoint"])
 
 _IDEMPOTENCY_META_KEY = "io.agentmiddleware/idempotency_key"
 _RECEIPT_META_KEY = "io.agentmiddleware/receipt"
-_MAX_META_VALUE_LENGTH = 256
+_META_KEY_SOURCE = 'params._meta["io.agentmiddleware/idempotency_key"]'
 
 # Idempotency scope for auto-minted permits; distinct from the governed-call
 # scope so mint replay and call replay never collide.
@@ -200,15 +212,45 @@ def _tool_call_budget(record: dict[str, Any]) -> Decimal:
     return cost if cost > 0 else Decimal("1")
 
 
-def _meta_idempotency_key(params: mcp_types.CallToolRequestParams) -> str | None:
+def _meta_idempotency_key_source(
+    params: mcp_types.CallToolRequestParams,
+) -> tuple[str, object] | None:
+    """Return the ``_meta`` key source when the caller sent one, else ``None``.
+
+    Presence is judged by the entry existing, not by its value being usable:
+    an entry that is present but malformed must reach the validator and be
+    refused, never fall through to a generated key. A JSON ``null`` entry is
+    the one value that reads as absent, matching an omitted entry.
+    """
     meta = params.meta
     extra = getattr(meta, "model_extra", None) if meta is not None else None
-    if not extra:
+    if not extra or _IDEMPOTENCY_META_KEY not in extra:
         return None
-    value = extra.get(_IDEMPOTENCY_META_KEY)
-    if isinstance(value, str) and 0 < len(value) <= _MAX_META_VALUE_LENGTH:
-        return value
-    return None
+    value = extra[_IDEMPOTENCY_META_KEY]
+    if value is None:
+        return None
+    return (_META_KEY_SOURCE, value)
+
+
+def _client_idempotency_key(
+    http_request: Request | None, params: mcp_types.CallToolRequestParams
+) -> str | None:
+    """Resolve the caller's replay key from every source it actually sent.
+
+    Runs before the auto-permit mint, so a refused key has no effect at all:
+    no permit, no idempotency record, no debit, no dispatch. ``None`` means
+    the caller sent no key anywhere.
+    """
+    sources: list[tuple[str, object]] = []
+    if http_request is not None:
+        sources.extend(_header_idempotency_key_sources(http_request))
+    meta_source = _meta_idempotency_key_source(params)
+    if meta_source is not None:
+        sources.append(meta_source)
+    try:
+        return resolve_client_idempotency_key(sources)
+    except InvalidIdempotencyKeyError as exc:
+        raise _mcp_error(-32602, str(exc), exc.as_error_data()) from exc
 
 
 async def _mint_auto_permit(
@@ -423,6 +465,10 @@ async def _governed_tools_call(
         raise _mcp_error(e.jsonrpc_code, str(e), data or None) from e
     except PermissionError as e:
         raise _mcp_error(-32003, str(e)) from e
+    except InvalidIdempotencyKeyError as e:
+        raise _mcp_error(-32602, str(e), e.as_error_data()) from e
+    except GovernedRequestInvalid as e:
+        raise _mcp_error(-32602, str(e)) from e
     except ValueError as e:
         code = _value_error_jsonrpc_code(str(e))
         if code == -32603:
@@ -473,10 +519,10 @@ def _build_standard_mcp_server() -> Server:
             # driven by an unexpected transport. Fail closed.
             raise _mcp_error(-32603, "auth_context_missing")
 
-        client_key = None
-        if http_request is not None:
-            client_key = http_request.headers.get("Idempotency-Key")
-        client_key = client_key or _meta_idempotency_key(req.params)
+        # Validated before anything is minted or metered: a present-but-
+        # unusable key is refused here, and only a truly absent key proceeds
+        # to the generated-key path inside _governed_tools_call.
+        client_key = _client_idempotency_key(http_request, req.params)
 
         result = await _governed_tools_call(
             auth=auth,

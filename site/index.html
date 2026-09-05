@@ -199,12 +199,10 @@
         <a href="#machine-discovery">Machine discovery</a>
         <a
           class="nav-agent"
-          href="@@PUBLIC_BOOKING_URL@@"
-          target="_blank"
-          rel="noopener noreferrer"
-          data-analytics-event="booking_click"
-          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-          >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          data-analytics-event="email_click"
+          aria-label="Start a pilot by email (opens your mail app)"
+          >Start a pilot by email</a
         >
       </div>
     </nav>
@@ -230,30 +228,28 @@
           <div class="cta-row">
             <a
               class="button-wave"
-              href="@@PUBLIC_BOOKING_URL@@"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-analytics-event="booking_click"
-              aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-              ><span class="button-wave-face"
-                >Book a one-tool pilot <span aria-hidden="true">↗</span></span
-              ></a
+              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              data-analytics-event="email_click"
+              aria-label="Start a pilot by email (opens your mail app)"
+              ><span class="button-wave-face">Start a pilot by email</span></a
             >
             <a
               class="button button-secondary"
               href="/proof/"
               data-analytics-event="proof_click"
-              aria-label="Verify our receipt yourself — offline. Opens the verification page."
-              >Verify our receipt yourself — offline</a
+              aria-label="Run the local proof — opens the verification page"
+              >Run the local proof</a
             >
           </div>
           <p class="email-fallback">
-            Prefer email?
+            Write to
             <a
               href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
               data-analytics-event="email_click"
               >@@PUBLIC_CONTACT_EMAIL@@</a
             >
+            with your tool scenario. Replies are written; a call happens only
+            when a scenario needs one.
           </p>
           <p class="constraint-line">
             One internal MCP tool · fit and scope discussed privately · no
@@ -313,12 +309,9 @@
           <div class="agent-entry-foot">
             <span>Built for operators of internal MCP tools</span>
             <a
-              href="@@PUBLIC_BOOKING_URL@@"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-analytics-event="booking_click"
-              aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-              >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              data-analytics-event="email_click"
+              >Start a pilot by email</a
             >
           </div>
         </aside>
@@ -454,10 +447,14 @@
             <h2 id="proof-title">Inspect the receipt, then verify it offline.</h2>
           </div>
           <p>
-            This is self-issued live gateway proof, not customer traction. The
-            published bundle comes from a non-sensitive <code>partner.echo</code>
-            call and is paired with the exact public-key snapshot used by the
-            offline verifier.
+            This is a self-issued gateway receipt, published as a historical
+            sample: it was issued on
+            <time datetime="@@PROOF_RECEIPT_ISSUED@@">@@PROOF_RECEIPT_ISSUED@@</time>
+            from a non-sensitive <code>partner.echo</code> call, and it is not
+            customer traction. The bundle is paired with the exact public-key
+            snapshot the offline verifier used. Verifying it proves that
+            signature against that key; it is not a test of the deployment
+            running today.
           </p>
         </div>
 
@@ -505,30 +502,60 @@
         <div class="pilot-copy">
           <p>
             Bring one internal MCP tool with a real operator, permission
-            boundary, and retry or audit concern. We qualify fit, define the
-            one action, and walk you through permit → invoke → charge → receipt
-            → replay → deny before discussing any broader rollout.
+            boundary, and retry or audit concern. Send the scenario by email.
+            You get a written answer on whether the boundary fits, and if it
+            does, we define the one action and walk it through permit →
+            invoke → charge → receipt → replay → deny before discussing any
+            broader rollout.
+          </p>
+          <p>Three things to include, in plain terms:</p>
+          <ol class="intake-list">
+            <li>
+              <strong>The tool or action.</strong> What the agent calls, and
+              what changes when it runs.
+            </li>
+            <li>
+              <strong>What goes wrong on retry.</strong> What happens today
+              when the call times out or the agent tries again.
+            </li>
+            <li>
+              <strong>How you check it happened.</strong> How you currently
+              find out whether the action ran, and whether it ran once.
+            </li>
+          </ol>
+          <p>
+            Use synthetic or redacted examples only. Never send production
+            secrets, credentials, or customer data.
           </p>
           <p class="constraint-line">
-            One tool · one operator · one action. The source repository is
+            One tool · one operator · one action. Email first; a call is
+            available only when a scenario needs one. The source repository is
             public; run <code>make prove-trust-plane</code> from a clone to
             assert the whole loop locally. No API credentials, no signup.
           </p>
           <div class="pilot-links">
             <a
               class="button button-primary"
-              href="@@PUBLIC_BOOKING_URL@@"
-              target="_blank"
-              rel="noopener noreferrer"
-              data-analytics-event="booking_click"
-              aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-              >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              data-analytics-event="email_click"
+              aria-label="Start a pilot by email (opens your mail app)"
+              >Start a pilot by email</a
             >
             <a
               href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
               data-analytics-event="email_click"
               >Email @@PUBLIC_CONTACT_EMAIL@@</a
             >
+            <!-- booking:start -->
+            <a
+              href="@@PUBLIC_BOOKING_URL@@"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-analytics-event="booking_click"
+              aria-label="Book a call if your scenario needs one (opens in a new tab)"
+              >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
+            >
+            <!-- booking:end -->
           </div>
         </div>
       </section>
@@ -653,26 +680,34 @@
           <div class="closing-cta">
             <h2>Bring one tool. Keep the evidence.</h2>
             <p>
-              A 30-minute call: we scope one governed action on a tool you
-              already run, and you leave with a receipt you can verify without
-              us.
+              Email one governed action on a tool you already run. You get a
+              written answer on fit, and if it fits, a receipt you can verify
+              without us. A call is available only when a scenario needs one.
             </p>
             <div class="pilot-links">
               <a
                 class="button button-primary"
-                href="@@PUBLIC_BOOKING_URL@@"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-analytics-event="booking_click"
-                aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-                >Book a one-tool pilot <span aria-hidden="true">↗</span></a
+                href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+                data-analytics-event="email_click"
+                aria-label="Start a pilot by email (opens your mail app)"
+                >Start a pilot by email</a
               >
               <a
                 class="button button-secondary"
                 href="/proof/"
                 data-analytics-event="proof_click"
-                >Verify our receipt yourself — offline</a
+                >Run the local proof</a
               >
+              <!-- booking:start -->
+              <a
+                href="@@PUBLIC_BOOKING_URL@@"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-analytics-event="booking_click"
+                aria-label="Book a call if your scenario needs one (opens in a new tab)"
+                >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
+              >
+              <!-- booking:end -->
             </div>
           </div>
         </div>
@@ -688,12 +723,10 @@
         <p>Human contact</p>
         <a
           class="button button-primary"
-          href="@@PUBLIC_BOOKING_URL@@"
-          target="_blank"
-          rel="noopener noreferrer"
-          data-analytics-event="booking_click"
-          aria-label="Book a one-tool pilot — 30-minute call (opens in a new tab)"
-          >Book a one-tool pilot</a
+          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          data-analytics-event="email_click"
+          aria-label="Start a pilot by email (opens your mail app)"
+          >Start a pilot by email</a
         >
         <a
           href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
@@ -701,6 +734,16 @@
           aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
           >@@PUBLIC_CONTACT_EMAIL@@</a
         >
+        <!-- booking:start -->
+        <a
+          href="@@PUBLIC_BOOKING_URL@@"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-analytics-event="booking_click"
+          aria-label="Book a call if your scenario needs one (opens in a new tab)"
+          >Book a call if your scenario needs one</a
+        >
+        <!-- booking:end -->
         <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
       </div>
       <div class="footer-directory">

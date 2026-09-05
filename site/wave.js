@@ -16,8 +16,8 @@
    swell at the close. The ground the composite paints lerps from pure
    black into the design system's ledger ink so field and page are one
    surface. UI hooks: hovering a governed-loop card fires a pulse through
-   the stream from that card's position; the booking CTA emits one from
-   center. A page with no data-wave sections (the concept study) renders
+   the stream from that card's position; the primary (email) CTA emits one
+   from center. A page with no data-wave sections (the concept study) renders
    the constant sea exactly as before.
 
    Debug/design hooks (URL query): ?t=SECONDS freezes time for
@@ -831,7 +831,7 @@
     state.pulses = pulses.length;
   }
 
-  // Wire the governed-loop cards and the booking CTA to the field. Cards
+  // Wire the governed-loop cards and the primary CTA to the field. Cards
   // map left-to-right onto the lattice, so a hover fires from "its"
   // station; the CTA ripples from center. Hover-capable devices only.
   function wireInteractions() {

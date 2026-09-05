@@ -20,7 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from .core.build_metadata import get_build_commit_sha
+from .core.build_metadata import get_build_commit_sha, get_build_provenance
 from .core.config import get_settings
 from .core.durable_state import (
     DurableStateConfigError,
@@ -1124,6 +1124,11 @@ async def health():
         "status": "healthy",
         "version": settings.APP_VERSION,
         "commit_sha": get_build_commit_sha(),
+        # Same field /health/dependencies publishes, so the liveness probe
+        # alone says whether that SHA came through the documented release
+        # path. A bare SHA cannot be told apart from a stale stamp; a SHA
+        # plus "stamped" can only mean the deployment is behind main.
+        "build_provenance": get_build_provenance(),
     }
 
 

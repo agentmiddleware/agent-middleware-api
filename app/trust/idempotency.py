@@ -8,20 +8,28 @@ from __future__ import annotations
 
 from app.services.idempotency import (
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH,
     IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyReplay,
     IdempotencyService,
+    InvalidIdempotencyKeyError,
     get_idempotency_service,
+    resolve_client_idempotency_key,
+    validate_client_idempotency_key,
 )
 
 __all__ = [
     "GOVERNED_MCP_IDEMPOTENCY_ENDPOINT",
+    "MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH",
     "IdempotencyBegin",
     "IdempotencyConflictError",
     "IdempotencyInProgressError",
     "IdempotencyReplay",
     "IdempotencyService",
+    "InvalidIdempotencyKeyError",
     "get_idempotency_service",
+    "resolve_client_idempotency_key",
+    "validate_client_idempotency_key",
 ]
