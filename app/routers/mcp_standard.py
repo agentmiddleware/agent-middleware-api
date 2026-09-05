@@ -60,6 +60,7 @@ turns it on.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import uuid
 from datetime import timedelta
@@ -82,12 +83,15 @@ from app.core.auth import AuthContext, get_auth_context
 from app.core.config import get_settings
 from app.core.time import utc_now
 from app.routers.mcp import (
+    _MAX_JSON_NESTING_DEPTH,
     GovernedToolError,
     HumanApprovalPendingSignal,
     ToolPermissionDenied,
     _handle_tools_call,
     _handle_tools_list,
     _header_idempotency_key_sources,
+    _json_nesting_depth_exceeds,
+    _loads_strict_json,
     _value_error_jsonrpc_code,
 )
 from app.schemas.trust import PermitCreateRequest
@@ -134,34 +138,6 @@ _SERVER_INSTRUCTIONS = (
 def _mcp_error(code: int, message: str, data: dict[str, Any] | None = None) -> McpError:
     return McpError(mcp_types.ErrorData(code=code, message=message, data=data))
 
-
-# Far above any legitimate MCP message, far below where Python 3.11's JSON
-# parser starts raising RecursionError instead of returning a parse result.
-_MAX_JSON_NESTING_DEPTH = 100
-
-
-def _json_nesting_depth_exceeds(body: bytes, limit: int) -> bool:
-    """True when raw JSON bytes nest deeper than ``limit`` outside strings."""
-    depth = 0
-    in_string = False
-    escaped = False
-    for byte in body:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif byte == 0x5C:  # backslash
-                escaped = True
-            elif byte == 0x22:  # double quote
-                in_string = False
-        elif byte == 0x22:
-            in_string = True
-        elif byte in (0x7B, 0x5B):  # { or [
-            depth += 1
-            if depth > limit:
-                return True
-        elif byte in (0x7D, 0x5D):  # } or ]
-            depth = max(0, depth - 1)
-    return False
 
 
 def _permit_error(
@@ -641,6 +617,31 @@ class _SdkTransportResponse(Response):
                     },
                 },
                 status_code=200,
+            )
+            await error_response(scope, receive, send)
+            return
+
+        # Refuse a body the reply could not carry before the SDK dispatches
+        # it. A JSON "\ud800" escape decodes to a lone surrogate that the
+        # SDK's JSON serializer cannot encode; as an ``id`` it failed the
+        # response *after* the governed tools/call had run and charged the
+        # wallet, so the client saw a 500 for a call that happened. Non-UTF-8
+        # bytes likewise escaped the SDK's JSONDecodeError handler as a 500.
+        # Malformed JSON is left to the SDK, which answers -32700 itself.
+        refusal: tuple[int, int, str] | None = None
+        try:
+            _loads_strict_json(bytes(body))
+        except json.JSONDecodeError:
+            pass
+        except UnicodeDecodeError:
+            refusal = (400, -32700, "Parse error: request body is not valid UTF-8")
+        except ValueError as exc:
+            refusal = (400, -32600, f"Invalid Request: {exc}")
+        if refusal is not None:
+            status_code, code, reason = refusal
+            error_response = JSONResponse(
+                {"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": reason}},
+                status_code=status_code,
             )
             await error_response(scope, receive, send)
             return

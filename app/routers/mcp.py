@@ -20,6 +20,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 from decimal import Decimal
 from typing import Any, NoReturn
 
@@ -218,6 +219,74 @@ def _context_idempotency_key_sources(
     return [("mcpContext.idempotency_key", value)]
 
 
+# Far above any legitimate MCP message, far below where Python 3.11's JSON
+# parser starts raising RecursionError instead of returning a parse result.
+# Shared with the standard endpoint so both transports refuse the same depth.
+_MAX_JSON_NESTING_DEPTH = 100
+
+
+def _json_nesting_depth_exceeds(body: bytes, limit: int) -> bool:
+    """True when raw JSON bytes nest deeper than ``limit`` outside strings."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in body:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # backslash
+                escaped = True
+            elif byte == 0x22:  # double quote
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x7B, 0x5B):  # { or [
+            depth += 1
+            if depth > limit:
+                return True
+        elif byte in (0x7D, 0x5D):  # } or ]
+            depth = max(0, depth - 1)
+    return False
+
+
+def _reject_non_finite_constant(token: str) -> Any:
+    """``json.loads`` hook for the NaN and Infinity literals: refuse them."""
+    raise ValueError(f"non-finite JSON number: {token}")
+
+
+def _finite_float(token: str) -> float:
+    """``json.loads`` hook for floats: refuse a literal that overflows to infinity."""
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError(f"non-finite JSON number: {token}")
+    return value
+
+
+def _loads_strict_json(raw: bytes) -> Any:
+    """Parse a request body as RFC 8259 JSON, refusing what a reply could not carry.
+
+    Python's parser accepts the NaN and Infinity literals and overflows 1e400
+    to an infinite float; a JSON "\\ud800" escape decodes to a lone surrogate.
+    Every JSON-RPC response echoes the request id and a result may echo
+    arguments, and the response serializer refuses non-finite floats and
+    cannot utf-8 encode a lone surrogate — after the tool has run and the
+    wallet has been charged. Refusing them at parse time keeps that failure
+    ahead of every side effect. Raises ValueError, which also covers a JSON
+    syntax error and the decode error of a non-UTF-8 body.
+    """
+    body = json.loads(
+        raw, parse_constant=_reject_non_finite_constant, parse_float=_finite_float
+    )
+    # Rehearse the encode the response will perform (ensure_ascii=False, then
+    # utf-8) so an unpaired surrogate anywhere — id, arguments, keys — is a
+    # refusal here rather than a 500 after the charge.
+    try:
+        json.dumps(body, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("request JSON contains an unpaired surrogate") from exc
+    return body
+
+
 def _safe_jsonrpc_id(value: Any) -> str | int | float | None:
     """Echo a JSON-RPC ``id`` only when it is a shape the spec allows.
 
@@ -328,9 +397,20 @@ async def handle_messages(
 
     The request body is a JSON-RPC 2.0 request.
     """
+    raw_body = await request.body()
+    if _json_nesting_depth_exceeds(raw_body, _MAX_JSON_NESTING_DEPTH):
+        # Python 3.11's parser raises RecursionError, not JSONDecodeError, on
+        # deep nesting; the standard endpoint already pre-screens raw bytes.
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON: nesting depth exceeds the supported limit",
+        )
     try:
-        body = await request.json()
-    except json.JSONDecodeError:
+        body = _loads_strict_json(raw_body)
+    except ValueError:
+        # Malformed JSON, a non-UTF-8 body, a non-finite number, or an
+        # unpaired surrogate: all are ValueErrors, and none may reach the
+        # pipeline — the last two would fail the reply after the charge.
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # The envelope is validated before any member is read. A body that parsed
@@ -343,6 +423,15 @@ async def handle_messages(
             None, -32600, "Invalid Request: JSON-RPC envelope must be an object"
         )
     request_id = _safe_jsonrpc_id(body.get("id"))
+    # A version member that is present must be exactly "2.0": a "1.0" envelope
+    # used to reach dispatch and execute a governed action. The member is not
+    # required here — this route has always accepted version-less envelopes
+    # and the standard endpoint is the strict transport — so only a stated,
+    # wrong version is refused.
+    if "jsonrpc" in body and body["jsonrpc"] != "2.0":
+        return _jsonrpc_error_response(
+            request_id, -32600, 'Invalid Request: jsonrpc must be "2.0"'
+        )
     method = body.get("method")
     if not isinstance(method, str) or not method:
         return _jsonrpc_error_response(

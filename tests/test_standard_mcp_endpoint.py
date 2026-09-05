@@ -419,3 +419,81 @@ async def test_tools_call_reports_governed_invoke_contention_with_existing_code(
         "code": -32005,
         "message": "idempotency_in_progress",
     }
+
+
+# ── Bodies the reply could not carry are refused before dispatch ─────────────
+# The SDK parses the envelope, but a JSON "\ud800" escape decodes to a lone
+# surrogate its serializer cannot encode: as an ``id`` it failed the response
+# after the governed tools/call had run and charged the wallet.
+
+
+@pytest.fixture
+def strict_counted_tool():
+    calls: list[str] = []
+
+    def _run(text: str = "") -> dict[str, str]:
+        calls.append(text)
+        return {"text": text}
+
+    registry = get_service_registry()
+    registry.register_local(
+        service_id="standard-echo-strict",
+        name="Standard Echo Strict",
+        description="Counts executions",
+        category=ServiceCategory.AGENT_COMMS,
+        func=_run,
+        credits_per_unit=2.0,
+        unit_name="call",
+    )
+    try:
+        yield calls
+    finally:
+        registry.unregister_local("standard-echo-strict")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"jsonrpc":"2.0","id":"\\ud800","method":"tools/call","params":{"name":"standard-echo-strict","arguments":{"text":"hi"}}}',
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"standard-echo-strict","arguments":{"text":"\\ud800"}}}',
+        '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"standard-echo-strict","arguments":{"text":NaN}}}',
+    ],
+    ids=["surrogate-id", "surrogate-argument", "nan-argument"],
+)
+async def test_unechoable_body_is_refused_before_any_charge(
+    client, standard_mcp_enabled, clean_database, strict_counted_tool, raw
+):
+    provisioned = await provision_agent_wallet(client)
+    headers = {**provisioned["agent_headers"], **MCP_HEADERS, "Idempotency-Key": "strict-1"}
+    wallet_url = f"/v1/billing/wallets/{provisioned['agent_wallet_id']}"
+    before = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()["balance"]
+
+    resp = await client.post("/mcp", content=raw.encode("ascii"), headers=headers)
+
+    assert resp.status_code == 400, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32600
+    assert error["message"].startswith("Invalid Request")
+    assert strict_counted_tool == [], "nothing may execute for a body the reply cannot carry"
+    after = (await client.get(wallet_url, headers=provisioned["agent_headers"])).json()["balance"]
+    assert after == before
+
+
+@pytest.mark.anyio
+async def test_non_utf8_body_is_a_parse_error_not_500(client, standard_mcp_enabled):
+    resp = await client.post(
+        "/mcp",
+        content=b'{"jsonrpc":"2.0","id":1,"method":"ping","x":"\xff"}',
+        headers=BOOTSTRAP_MCP_HEADERS,
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == -32700
+
+
+@pytest.mark.anyio
+async def test_malformed_json_is_still_the_sdks_parse_error(client, standard_mcp_enabled):
+    """The strict pre-check leaves syntax errors to the SDK's own -32700 path."""
+    resp = await client.post("/mcp", content=b"{not json", headers=BOOTSTRAP_MCP_HEADERS)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == -32700
