@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
@@ -34,6 +35,89 @@ class IdempotencyConflictError(RuntimeError):
 
 class IdempotencyInProgressError(RuntimeError):
     """Raised when an idempotency key is already executing without a result."""
+
+
+# The store persists a client key verbatim: ``IdempotencyRecordModel.
+# idempotency_key`` is ``VARCHAR(128)`` (migration 016). A key the store cannot
+# hold is refused at the boundary — never truncated (two distinct client keys
+# would collapse into one replay identity) and never swapped for a generated
+# key (the client's retry would become a second charged action).
+MAX_IDEMPOTENCY_KEY_LENGTH = 128
+
+
+class InvalidIdempotencyKeyError(ValueError):
+    """The caller supplied an idempotency key that is present but unusable.
+
+    Distinct from "no key supplied": an absent key falls through to the
+    surface's documented default (a generated per-call key, or
+    ``idempotency_key_required`` where a key is mandatory). A key the client
+    did send but that cannot serve as a replay identity must be rejected
+    before any permit is minted, tool executed, or wallet charged — silently
+    defaulting it would turn the client's retry into a second action.
+
+    ``reason_code`` names the defect (``idempotency_key_empty``,
+    ``idempotency_key_not_a_string``, ``idempotency_key_too_long``,
+    ``idempotency_key_conflict``); ``sources`` names where on the request the
+    offending value(s) were carried.
+    """
+
+    def __init__(self, reason_code: str, *, sources: tuple[str, ...]) -> None:
+        super().__init__("invalid_idempotency_key")
+        self.reason_code = reason_code
+        self.sources = sources
+
+
+def validate_idempotency_key(value: object, *, source: str) -> str:
+    """Return ``value`` as a usable client idempotency key or raise.
+
+    Only call this with a value the client actually supplied; deciding what
+    "absent" means belongs to the caller (see
+    :func:`resolve_client_idempotency_key`).
+    """
+    if not isinstance(value, str):
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_not_a_string", sources=(source,)
+        )
+    if not value.strip():
+        raise InvalidIdempotencyKeyError("idempotency_key_empty", sources=(source,))
+    if len(value) > MAX_IDEMPOTENCY_KEY_LENGTH:
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_too_long", sources=(source,)
+        )
+    return value
+
+
+def resolve_client_idempotency_key(
+    candidates: Iterable[tuple[str, object]],
+) -> str | None:
+    """Resolve the caller's replay key from every transport that carried one.
+
+    ``candidates`` holds ``(source, value)`` pairs for each place the client
+    actually put a key: the ``Idempotency-Key`` header (one pair per header
+    line), ``params._meta`` on the standard endpoint, ``mcpContext`` on the
+    legacy JSON-RPC route. Transports that carried nothing are simply not
+    listed, and an explicit JSON ``null`` counts as nothing — it is how
+    optional fields serialize, and ``McpContext.idempotency_key`` is declared
+    ``str | None``.
+
+    Every supplied value must validate, and all supplied values must agree.
+    Two different keys on one request is an ambiguity about which operation
+    identity the client meant; the store must never pick one.
+    """
+    resolved: list[tuple[str, str]] = []
+    for source, value in candidates:
+        if value is None:
+            continue
+        resolved.append((source, validate_idempotency_key(value, source=source)))
+    if not resolved:
+        return None
+    distinct = {key for _, key in resolved}
+    if len(distinct) > 1:
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_conflict",
+            sources=tuple(dict.fromkeys(source for source, _ in resolved)),
+        )
+    return distinct.pop()
 
 
 @dataclass(frozen=True)

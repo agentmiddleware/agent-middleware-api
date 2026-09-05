@@ -71,12 +71,14 @@ from ..trust import (
     APPROVAL_STATUS_PENDING,
     QUOTE_REASON_CONSUMED,
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    MAX_IDEMPOTENCY_KEY_LENGTH,
     AgentMoney,
     HumanApprovalError,
     HumanApprovalUnavailableError,
     IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
+    InvalidIdempotencyKeyError,
     McpGovernedAdapter,
     PolicyDecision,
     evaluate_tool_invocation,
@@ -90,6 +92,7 @@ from ..trust import (
     get_receipt_service,
     record_audit_event,
     get_refund_reconciliation_service,
+    resolve_client_idempotency_key,
     sha256_hex,
     tool_price,
 )
@@ -222,6 +225,44 @@ class ToolCallResponse(BaseModel):
     receipt: dict[str, Any] | None = None
 
 
+_IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+
+
+def _jsonrpc_error_response(
+    request_id: Any,
+    code: int,
+    message: str,
+    data: dict[str, Any] | None = None,
+) -> JSONResponse:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if data:
+        error["data"] = data
+    return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": error})
+
+
+def _invalid_idempotency_key_data(exc: InvalidIdempotencyKeyError) -> dict[str, Any]:
+    """Machine-actionable ``data`` for a ``-32602 invalid_idempotency_key``.
+
+    Shared by the legacy JSON-RPC route and the standard endpoint so a client
+    sees one contract wherever it carries the key.
+    """
+    return {
+        "error": "invalid_params",
+        "reason_code": exc.reason_code,
+        "sources": list(exc.sources),
+        "remediation": {
+            "type": "retry_with_valid_idempotency_key",
+            "detail": (
+                "Nothing was charged. Retry with a single Idempotency-Key that "
+                "is a non-empty string of at most "
+                f"{MAX_IDEMPOTENCY_KEY_LENGTH} characters and is identical "
+                "wherever the request carries it (header, params._meta, "
+                "mcpContext)."
+            ),
+        },
+    }
+
+
 @router.get("/tools.json", name="MCP Tools Manifest")
 async def get_tools_json(
     category: ServiceCategory | None = None,
@@ -276,9 +317,25 @@ async def handle_messages(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    # The parser hands back whatever JSON it read; only an object is a
+    # JSON-RPC request. Arrays (batches), scalars and null get the spec's
+    # Invalid Request error instead of an attribute error turned 500.
+    if not isinstance(body, dict):
+        return _jsonrpc_error_response(
+            None,
+            -32600,
+            "Invalid Request: JSON-RPC request must be a single object",
+        )
+
     method = body.get("method")
     request_id = body.get("id")
-    params = body.get("params", {})
+    params = body.get("params")
+    if params is None:
+        params = {}
+    elif not isinstance(params, dict):
+        return _jsonrpc_error_response(
+            request_id, -32602, "Invalid params: params must be an object"
+        )
 
     if method == "tools/list":
         result = await _handle_tools_list(params)
@@ -291,7 +348,45 @@ async def handle_messages(
         )
 
     elif method == "tools/call":
-        mcp_context = params.get("mcpContext", {}) or {}
+        # Shape checks precede every governed step so a malformed field is a
+        # controlled invalid-params error, never a 500 from inside the
+        # pipeline and never a silently defaulted value.
+        mcp_context = params.get("mcpContext")
+        if mcp_context is None:
+            mcp_context = {}
+        elif not isinstance(mcp_context, dict):
+            return _jsonrpc_error_response(
+                request_id, -32602, "Invalid params: mcpContext must be an object"
+            )
+        tool_name = params.get("name")
+        if tool_name is not None and not isinstance(tool_name, str):
+            return _jsonrpc_error_response(
+                request_id, -32602, "Invalid params: name must be a string"
+            )
+        arguments = params.get("arguments")
+        if arguments is not None and not isinstance(arguments, dict):
+            return _jsonrpc_error_response(
+                request_id, -32602, "Invalid params: arguments must be an object"
+            )
+        # A key the client supplied must be usable and must agree across the
+        # header and mcpContext; a present-but-invalid key is refused rather
+        # than dropped, because dropping it would make the client's retry a
+        # second charged action. An absent key keeps the surface's default
+        # (idempotency_key_required on governed calls).
+        try:
+            idempotency_key = resolve_client_idempotency_key(
+                [
+                    *(
+                        ("header", value)
+                        for value in request.headers.getlist(_IDEMPOTENCY_KEY_HEADER)
+                    ),
+                    ("mcpContext", mcp_context.get("idempotency_key")),
+                ]
+            )
+        except InvalidIdempotencyKeyError as exc:
+            return _jsonrpc_error_response(
+                request_id, -32602, str(exc), _invalid_idempotency_key_data(exc)
+            )
         try:
             result = await _handle_tools_call(
                 params,
@@ -300,8 +395,7 @@ async def handle_messages(
                 transport="jsonrpc",
                 endpoint="/mcp/messages",
                 request_id=str(request_id) if request_id is not None else None,
-                idempotency_key=mcp_context.get("idempotency_key")
-                or request.headers.get("Idempotency-Key"),
+                idempotency_key=idempotency_key,
                 request_payload=body,
             )
             return JSONResponse(

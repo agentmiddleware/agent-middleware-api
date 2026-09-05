@@ -68,6 +68,19 @@ depends on the key, approval-gated calls **require** a client
 without one the call is refused with
 `idempotency_key_required_for_human_approval` and a remediation block.
 
+A key the client *does* supply must be usable: a non-empty string of at most
+128 characters (the width of the idempotency store's key column), identical
+wherever the request carries it (`Idempotency-Key` header, `params._meta`, or
+the legacy `mcpContext`). Anything else — an empty string, a number, an
+array, an object, an over-long string, or two transports naming different
+keys — is refused with `-32602 invalid_idempotency_key`, a `reason_code`
+(`idempotency_key_empty`, `idempotency_key_not_a_string`,
+`idempotency_key_too_long`, `idempotency_key_conflict`), the offending
+`sources`, and a `remediation` block, *before* any permit is minted or tool
+executed. The key is never silently replaced by a generated one: that would
+turn the client's retry into a second charged action. An explicit JSON `null`
+is read as "no key", the same as omitting it.
+
 An approval-gated auto-permit lives for the whole approval window
 (`SENTINEL_APPROVAL_TIMEOUT_SECONDS`) plus the standard TTL as execution
 margin, so a decision made late in the window still executes instead of

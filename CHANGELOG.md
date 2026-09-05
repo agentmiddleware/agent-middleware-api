@@ -11,6 +11,42 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔒 Malformed retry keys and envelopes are refused, never defaulted
+
+- **A present-but-invalid idempotency key is rejected before any effect.**
+  On the standard MCP endpoint (`POST /mcp`) a
+  `params._meta["io.agentmiddleware/idempotency_key"]` that was empty, not a
+  string, or over-long failed the extractor's checks and was silently
+  replaced by a generated per-call key, so two identical retries carrying
+  the same malformed key executed the tool twice and debited the wallet
+  twice (adversarial review, 2026-09; the valid-key control replayed
+  correctly). The header, `_meta`, and legacy `mcpContext` paths now share
+  one contract (`app/services/idempotency.py`: `validate_idempotency_key`,
+  `resolve_client_idempotency_key`): a supplied key must be a non-empty
+  string of at most 128 characters — the width of
+  `idempotency_records.idempotency_key`, which the header path previously
+  exceeded unchecked, and the same bound the Python SDK already enforces
+  client-side — and every transport carrying a key on one request must name
+  the same key. Violations return `-32602 invalid_idempotency_key`
+  with a `reason_code` (`idempotency_key_empty`, `…_not_a_string`,
+  `…_too_long`, `…_conflict`), the offending `sources`, and a `remediation`
+  block, ahead of the wallet check, the auto-permit mint, and execution. An
+  absent key (including an explicit JSON `null`) keeps each surface's
+  documented default.
+- **Malformed legacy JSON-RPC envelopes are controlled errors, not 500s.**
+  `POST /mcp/messages` validates the parsed body and `params` shapes before
+  touching them: a non-object body (array, batch, null, scalar) is `-32600`
+  Invalid Request; non-object `params`, `mcpContext`, or `arguments`, or a
+  non-string `name`, is `-32602` Invalid params. Nothing executes or charges
+  on any of these paths.
+- **Regression coverage.** `tests/test_mcp_idempotency_key_validation.py`
+  replays the reviewed attack over the real endpoint (five malformed key
+  classes, two identical requests each, zero executions, zero debits, no
+  permit minted) beside the valid-key control, and pins the key cap to the
+  store column; `tests/test_mcp_legacy_envelope_validation.py` covers the
+  malformed envelope shapes and the legacy route's key contract on governed
+  calls.
+
 ### 🌐 Site: the arcade treatment steps back to the footer
 
 - **The public site drops the full 8-bit chrome.** `site/styles.css` is

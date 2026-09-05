@@ -58,12 +58,16 @@ from .evidence import (
 )
 from .idempotency import (
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    MAX_IDEMPOTENCY_KEY_LENGTH,
     IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyReplay,
     IdempotencyService,
+    InvalidIdempotencyKeyError,
     get_idempotency_service,
+    resolve_client_idempotency_key,
+    validate_idempotency_key,
 )
 from .metering import (
     DEFAULT_PRICING,
@@ -225,12 +229,16 @@ __all__ = [
     "sha256_hex",
     # idempotency
     "GOVERNED_MCP_IDEMPOTENCY_ENDPOINT",
+    "MAX_IDEMPOTENCY_KEY_LENGTH",
     "IdempotencyBegin",
     "IdempotencyService",
     "IdempotencyReplay",
     "IdempotencyConflictError",
     "IdempotencyInProgressError",
+    "InvalidIdempotencyKeyError",
     "get_idempotency_service",
+    "resolve_client_idempotency_key",
+    "validate_idempotency_key",
     # audit
     "verify_audit_chain",
     "sign_audit_model",

@@ -401,9 +401,11 @@ same server also speaks standard MCP (Streamable HTTP, official SDK) at
 `POST $API_URL/mcp` — point MCP Inspector or any standards-compliant client
 at it with your `X-API-Key` header. Standard clients cannot send permit
 context, so the server mints a bounded, single-tool, short-lived permit per
-call from your wallet; pass an `Idempotency-Key` header to make retries
-safe. `tests/test_minimal_path_e2e.py` drives exactly this with the
-official Python SDK client.
+call from your wallet; pass an `Idempotency-Key` header (a non-empty string
+of at most 128 characters) to make retries safe. A key that is present but
+malformed is refused with `-32602 invalid_idempotency_key` before anything
+is minted or charged, never silently ignored. `tests/test_minimal_path_e2e.py`
+drives exactly this with the official Python SDK client.
 
 ## Starting over
 
