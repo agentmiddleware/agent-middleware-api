@@ -14,6 +14,7 @@ consequential MCP tool behind a governed boundary. Start with the
 | Use the typed Python SDK and offline verifier | [Python SDK](../b2a_sdk/README.md) |
 | Understand retry, debit, and crash outcomes | [Failure semantics](failure-semantics.md) |
 | Review security claims and limits | [Security limitations](../SECURITY_LIMITATIONS.md) and [security review kit](security-review-kit.md) |
+| Confirm which commit production is actually running | [Deployment verification checklist](deployment-verification-checklist.md) |
 | Plan a design-partner evaluation | [Design partner guide](../DESIGN_PARTNER_GUIDE.md) |
 | Contribute to the repository | [Contributing guide](../CONTRIBUTING.md) |
 

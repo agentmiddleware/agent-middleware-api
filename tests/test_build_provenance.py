@@ -169,3 +169,25 @@ async def test_public_dependency_report_publishes_build_provenance(baked, monkey
     full = await health.gather_dependency_report()
     public = health.build_public_dependency_report(full)
     assert public["build_provenance"] == "control_plane_only"
+
+
+async def test_liveness_probe_publishes_build_provenance(baked, monkeypatch):
+    """``/health`` carries the same provenance answer as ``/health/dependencies``.
+
+    An operator comparing a live SHA against ``main`` needs to know whether the
+    SHA is trustworthy before deciding the deployment is merely behind; the
+    cheapest public probe must answer that on its own.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "")
+    baked("a" * 40)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        liveness = await client.get("/health")
+        dependencies = await client.get("/health/dependencies")
+    assert liveness.status_code == 200
+    assert liveness.json()["commit_sha"] == "a" * 40
+    assert liveness.json()["build_provenance"] == "stamped"
+    assert liveness.json()["build_provenance"] == dependencies.json()["build_provenance"]

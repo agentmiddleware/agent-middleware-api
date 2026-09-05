@@ -716,7 +716,10 @@ Expect:
 - `/health/dependencies` → `runtime_degradation.durable_state.fell_back_to_memory=false`.
 - `ENABLE_PROOF_SURFACES=false` reflected in health / agent.json.
 - `/health` and `/health/dependencies` report the expected application version
-  and exact 40-character deployed `commit_sha`.
+  and exact 40-character deployed `commit_sha`, with
+  `build_provenance: "stamped"` on both. Then follow the
+  [deployment verification checklist](deployment-verification-checklist.md)
+  before describing any commit as live.
 - `ENABLE_DOGFOOD_TOOL=false`; `/mcp/tools.json` contains no simulated dogfood
   tool ids.
 

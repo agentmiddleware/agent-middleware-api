@@ -1213,6 +1213,22 @@ main,
   font-size: 1.05rem;
 }
 
+/* The three intake fields a prospect emails; plain language, one per line. */
+.intake-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.75rem 0 0;
+  padding-left: 1.4rem;
+  color: var(--text-dim);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.intake-list strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .pilot-links {
   display: flex;
   flex-wrap: wrap;

@@ -21,6 +21,7 @@ from typing import Any
 
 from app.core.auth import AuthContext
 from app.services.agent_money import AgentMoney
+from app.services.idempotency import validate_client_idempotency_key
 
 
 @dataclass
@@ -41,6 +42,75 @@ class GovernedRequest:
     endpoint: str = "/mcp/messages"
     request_id: str | None = None
     request_payload: dict[str, Any] | None = None
+
+
+class GovernedRequestInvalid(ValueError):
+    """The protocol request cannot be normalized into a governed request.
+
+    Raised before any permit, idempotency, metering, or dispatch step runs.
+    Transports map it to their invalid-params shape (JSON-RPC ``-32602``,
+    HTTP 400); every message starts with ``Invalid params`` so the shared
+    JSON-RPC code mapping recognizes it even when it propagates as a plain
+    ``ValueError``.
+    """
+
+
+_CONTEXT_STRING_FIELDS = ("wallet_id", "permit_id", "quote_id", "request_path")
+
+
+def validate_tools_call_params(raw: Any) -> dict[str, Any]:
+    """Return the ``tools/call`` params as a well-shaped mapping, or refuse.
+
+    Accepts either the full JSON-RPC body (``{"params": {...}}``) or the
+    params object itself, as ``normalize_request`` always has. Every member
+    the pipeline later reads is type-checked here so a malformed envelope is
+    a controlled client error instead of an attribute error deep in the
+    governed path. JSON ``null`` for ``arguments`` or ``mcpContext`` reads as
+    the member being absent; any other non-object value is refused rather than
+    coerced into an empty default.
+    """
+    if not isinstance(raw, dict):
+        raise GovernedRequestInvalid("Invalid params: tools/call params must be an object")
+    params = raw["params"] if "params" in raw else raw
+    if not isinstance(params, dict):
+        raise GovernedRequestInvalid("Invalid params: params must be an object")
+
+    name = params.get("name")
+    if name is None or name == "":
+        # Same message the pipeline has always used for an absent tool name.
+        raise GovernedRequestInvalid("Missing tool name")
+    if not isinstance(name, str) or not name.strip():
+        raise GovernedRequestInvalid("Invalid params: name must be a non-blank string")
+
+    arguments = params.get("arguments")
+    if arguments is None:
+        arguments = {}
+    elif not isinstance(arguments, dict):
+        raise GovernedRequestInvalid("Invalid params: arguments must be an object")
+
+    mcp_context = params.get("mcpContext")
+    if mcp_context is None:
+        mcp_context = {}
+    elif not isinstance(mcp_context, dict):
+        raise GovernedRequestInvalid("Invalid params: mcpContext must be an object")
+    for field_name in _CONTEXT_STRING_FIELDS:
+        value = mcp_context.get(field_name)
+        if value is not None and not isinstance(value, str):
+            raise GovernedRequestInvalid(
+                f"Invalid params: mcpContext.{field_name} must be a string"
+            )
+    key = mcp_context.get("idempotency_key")
+    if key is not None:
+        # Raises InvalidIdempotencyKeyError, which carries its own
+        # machine-actionable detail; callers surface it as invalid params.
+        validate_client_idempotency_key(key, source="mcpContext.idempotency_key")
+
+    return {
+        **params,
+        "name": name,
+        "arguments": arguments,
+        "mcpContext": mcp_context,
+    }
 
 
 @dataclass
@@ -91,18 +161,22 @@ class McpGovernedAdapter(GovernedInvocationAdapter):
         money: AgentMoney = context["money"]
         idempotency_key: str | None = context.get("idempotency_key")
 
-        params = raw.get("params", raw)
-        mcp_context = params.get("mcpContext", {}) or {}
+        params = validate_tools_call_params(raw)
+        mcp_context = params["mcpContext"]
+        if idempotency_key is None:
+            # The transport resolved no key of its own; the body's key, if
+            # any, was validated above and is used exactly as sent.
+            idempotency_key = mcp_context.get("idempotency_key")
         return GovernedRequest(
             protocol=self.protocol,
-            tool_name=params.get("name"),
-            arguments=params.get("arguments", {}) or {},
+            tool_name=params["name"],
+            arguments=params["arguments"],
             wallet_id=mcp_context.get("wallet_id"),
             auth=auth,
             money=money,
             permit_id=mcp_context.get("permit_id"),
             quote_id=mcp_context.get("quote_id"),
-            idempotency_key=idempotency_key or mcp_context.get("idempotency_key"),
+            idempotency_key=idempotency_key,
             transport=context.get("transport", "adapter"),
             endpoint=context.get("endpoint", "/mcp/messages"),
             request_id=context.get("request_id"),
@@ -152,7 +226,9 @@ class McpGovernedAdapter(GovernedInvocationAdapter):
 
 __all__ = [
     "GovernedRequest",
+    "GovernedRequestInvalid",
     "GovernedResult",
     "GovernedInvocationAdapter",
     "McpGovernedAdapter",
+    "validate_tools_call_params",
 ]

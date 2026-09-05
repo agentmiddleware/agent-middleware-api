@@ -177,6 +177,34 @@ The idempotency identity is the *logical* call — transport-independent, so a
 JSON-RPC call and its REST retry share one identity
 (`test_governed_upstream_replays_across_jsonrpc_and_rest_transport`).
 
+## What counts as a key
+
+A client-supplied key is honored exactly as sent, and only when it is usable:
+a JSON string with at least one non-whitespace character, at most 128
+characters (the width of the durable `idempotency_records.idempotency_key`
+column; the Python SDK enforces the same bound before sending), and no control
+characters. The gateway never strips, truncates, stringifies, or regenerates a
+key on the caller's behalf, so two distinct valid keys stay two distinct keys.
+
+A key that is **present but unusable** — the wrong JSON type, blank, too long,
+carrying control characters, or supplied in two sources (`Idempotency-Key`
+header and body) that disagree — is refused with invalid params (JSON-RPC
+`-32602`, REST `400`) and a machine-readable
+`reason_code` (`idempotency_key_not_a_string`, `idempotency_key_blank`,
+`idempotency_key_too_long`, `idempotency_key_control_characters`,
+`idempotency_key_conflict`). The refusal happens before a permit is minted,
+anything is reserved or charged, or anything is dispatched. Substituting a
+generated key there would silently defeat the retry protection the caller
+asked for: every retry carrying the same malformed key would become a new
+charged operation (`test_mcp_idempotency_key_validation`).
+
+Only a genuinely **absent** key — no header, no body entry, or a JSON `null`
+entry — is treated as an un-keyed call. On the standard MCP endpoint that means
+a generated key, and every un-keyed call, retries included, is a new charged
+operation. Clients that retry must always send their own persistent key; a
+governed `/mcp/messages` call without one is refused with
+`idempotency_key_required`.
+
 ## Exactly-once refunds
 
 `failed_refunded` means the correlated refund is already durable — the receipt
