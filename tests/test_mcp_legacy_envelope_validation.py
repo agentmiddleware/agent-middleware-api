@@ -302,6 +302,106 @@ async def test_legacy_header_and_mcp_context_keys_must_agree(
     assert counted_tool == []
 
 
+# --- the deprecated REST route holds the same contract -----------------------
+
+
+def _rest_body(agent: dict[str, Any], **context: Any) -> dict:
+    mcp_context: dict[str, Any] = {"wallet_id": agent["agent_wallet_id"], **context}
+    if "permit_id" in agent:
+        mcp_context["permit_id"] = agent["permit_id"]
+    return {"name": TOOL, "arguments": {"message": "hi"}, "mcp_context": mcp_context}
+
+
+def _assert_rest_invalid_key(resp, *, reason_code: str, sources: list[str]) -> None:
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error"] == "invalid_idempotency_key"
+    assert detail["reason_code"] == reason_code
+    assert detail["sources"] == sources
+    assert detail["remediation"]["type"] == "retry_with_valid_idempotency_key"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("bad_key", "reason_code"),
+    [
+        ("", "idempotency_key_empty"),
+        ("   ", "idempotency_key_empty"),
+        ("x" * (MAX_IDEMPOTENCY_KEY_LENGTH + 1), "idempotency_key_too_long"),
+    ],
+)
+async def test_rest_invoke_refuses_malformed_body_key(
+    client, clean_database, counted_tool, bad_key, reason_code
+):
+    """``POST /mcp/tools/{id}/invoke`` used to pass the body key through a bare
+    ``or``: an empty key fell through to the header, a whitespace-only or
+    over-long key reached the store verbatim. Pydantic already rejects
+    non-string keys (422); this pins the rest of the contract.
+    """
+    agent = await _governed_agent(client)
+    for _ in (1, 2):
+        resp = await client.post(
+            f"/mcp/tools/{TOOL}/invoke",
+            json=_rest_body(agent, idempotency_key=bad_key),
+            headers=agent["agent_headers"],
+        )
+        _assert_rest_invalid_key(resp, reason_code=reason_code, sources=["mcpContext"])
+    assert counted_tool == []
+
+
+@pytest.mark.anyio
+async def test_rest_invoke_refuses_disagreeing_header_and_body_keys(
+    client, clean_database, counted_tool
+):
+    agent = await _governed_agent(client)
+    resp = await client.post(
+        f"/mcp/tools/{TOOL}/invoke",
+        json=_rest_body(agent, idempotency_key="body-key"),
+        headers={**agent["agent_headers"], "Idempotency-Key": "header-key"},
+    )
+    _assert_rest_invalid_key(
+        resp, reason_code="idempotency_key_conflict", sources=["header", "mcpContext"]
+    )
+    assert counted_tool == []
+
+
+@pytest.mark.anyio
+async def test_rest_invoke_matching_keys_replay_as_one_action(
+    client, clean_database, counted_tool
+):
+    agent = await _governed_agent(client)
+    headers = {**agent["agent_headers"], "Idempotency-Key": "rest-same-key"}
+    first = await client.post(
+        f"/mcp/tools/{TOOL}/invoke",
+        json=_rest_body(agent, idempotency_key="rest-same-key"),
+        headers=headers,
+    )
+    second = await client.post(
+        f"/mcp/tools/{TOOL}/invoke",
+        json=_rest_body(agent, idempotency_key="rest-same-key"),
+        headers=headers,
+    )
+    assert first.status_code == 200 and second.status_code == 200, (first.text, second.text)
+    assert first.json()["receipt"]["receipt_id"] == second.json()["receipt"]["receipt_id"]
+    assert len(counted_tool) == 1
+
+
+@pytest.mark.anyio
+async def test_rest_invoke_header_only_key_still_works(client, clean_database, counted_tool):
+    """A header with no body key is the documented single-source path."""
+    agent = await _governed_agent(client)
+    headers = {**agent["agent_headers"], "Idempotency-Key": "rest-header-only"}
+    first = await client.post(
+        f"/mcp/tools/{TOOL}/invoke", json=_rest_body(agent), headers=headers
+    )
+    second = await client.post(
+        f"/mcp/tools/{TOOL}/invoke", json=_rest_body(agent), headers=headers
+    )
+    assert first.status_code == 200 and second.status_code == 200, (first.text, second.text)
+    assert first.json()["receipt"]["receipt_id"] == second.json()["receipt"]["receipt_id"]
+    assert len(counted_tool) == 1
+
+
 @pytest.mark.anyio
 async def test_legacy_matching_keys_replay_as_one_action(client, clean_database, counted_tool):
     """Control: the SDK sends the same key in both places and must keep working."""

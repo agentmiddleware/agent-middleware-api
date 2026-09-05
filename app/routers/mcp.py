@@ -3126,6 +3126,29 @@ async def invoke_tool(
     if not mcp_context.wallet_id:
         raise HTTPException(status_code=400, detail="Missing wallet_id")
 
+    # Same key contract as the JSON-RPC surfaces: a supplied key must be
+    # usable and the header and body must agree, or the call is refused
+    # before the governed pipeline runs. Pydantic already guarantees the body
+    # value is a string or null; length, emptiness and agreement are checked
+    # here.
+    try:
+        idempotency_key = resolve_client_idempotency_key(
+            [
+                *(
+                    ("header", value)
+                    for value in http_request.headers.getlist(_IDEMPOTENCY_KEY_HEADER)
+                ),
+                ("mcpContext", mcp_context.idempotency_key),
+            ]
+        )
+    except InvalidIdempotencyKeyError as exc:
+        # REST callers read ``detail.error`` as the reason (like
+        # ``wallet_frozen``); the JSON-RPC ``data`` fields ride alongside.
+        raise HTTPException(
+            status_code=400,
+            detail={**_invalid_idempotency_key_data(exc), "error": str(exc)},
+        ) from exc
+
     mcp_payload = {
         "name": service_id,
         "arguments": request.arguments,
@@ -3133,7 +3156,7 @@ async def invoke_tool(
             "wallet_id": mcp_context.wallet_id,
             "permit_id": mcp_context.permit_id,
             "quote_id": mcp_context.quote_id,
-            "idempotency_key": mcp_context.idempotency_key,
+            "idempotency_key": idempotency_key,
         },
     }
     try:
@@ -3144,8 +3167,7 @@ async def invoke_tool(
             transport="http",
             endpoint=f"/mcp/tools/{service_id}/invoke",
             request_id=None,
-            idempotency_key=mcp_context.idempotency_key
-            or http_request.headers.get("Idempotency-Key"),
+            idempotency_key=idempotency_key,
             request_payload=request.model_dump(mode="json"),
         )
         result = await _mcp_adapter.invoke(governed_request)

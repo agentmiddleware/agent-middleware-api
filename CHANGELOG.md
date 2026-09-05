@@ -20,8 +20,10 @@ full release gate; do not backfill a final `v1.2.0` tag.
   replaced by a generated per-call key, so two identical retries carrying
   the same malformed key executed the tool twice and debited the wallet
   twice (adversarial review, 2026-09; the valid-key control replayed
-  correctly). The header, `_meta`, and legacy `mcpContext` paths now share
-  one contract (`app/services/idempotency.py`: `validate_idempotency_key`,
+  correctly). The header, `_meta`, and legacy `mcpContext` paths (both
+  `POST /mcp/messages` and the deprecated `POST /mcp/tools/{service_id}/invoke`,
+  which answers HTTP 400 with the same fields) now share one contract
+  (`app/services/idempotency.py`: `validate_idempotency_key`,
   `resolve_client_idempotency_key`): a supplied key must be a non-empty
   string of at most 128 characters — the width of
   `idempotency_records.idempotency_key`, which the header path previously
