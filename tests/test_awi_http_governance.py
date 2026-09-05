@@ -214,7 +214,10 @@ async def test_awi_route_keys_its_debit_to_the_idempotency_record(
                 .select_from(LedgerEntryModel)
                 .where(
                     LedgerEntryModel.wallet_id == provisioned["agent_wallet_id"],
-                    LedgerEntryModel.action == "charge",
+                    # Debits are written as action="debit" with a negative
+                    # amount (LedgerEntryModel: "Positive = credit, negative =
+                    # debit"). Select by sign so this counts real debits.
+                    LedgerEntryModel.amount < 0,
                     LedgerEntryModel.operation_key.is_(None),
                 )
             )
