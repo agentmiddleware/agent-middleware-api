@@ -30,20 +30,25 @@ def _permit_payload() -> dict:
 
 
 def _receipt_payload(outcome: str = "success") -> dict:
+    # Mirrors the receipt shape b2a_sdk.models.Receipt.from_dict requires
+    # (see b2a_sdk/tests/test_trust_client.py).
     return {
         "receipt_id": f"receipt-{outcome}",
-        "dispatch_attempt_id": "dispatch-1",
-        "idempotency_key": "invoke-key-1",
         "permit_id": "permit-1",
         "wallet_id": "wallet-1",
-        "service": "partner.search",
+        "key_id": "key-1",
+        "tool": "partner.search",
+        "request_hash": "request-hash",
+        "response_hash": "response-hash",
+        "ledger_entry_id": "ledger-1",
+        "dispatch_attempt_id": "dispatch-1",
+        "credits_authorized": "2",
         "credits_charged": "2",
         "outcome": outcome,
+        "audit_event_id": "audit-1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "signature": f"sig-{outcome}",
-        "key_id": "key-1",
-        "ledger_entry_id": "ledger-1",
-        "dispatched_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "signature_key_id": "signing-key-1",
     }
 
 
@@ -170,6 +175,7 @@ async def test_replay_protection():
 @pytest.mark.asyncio
 async def test_signed_receipt_returned():
     """Test that signed receipts are returned with signature and credits charged."""
+
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/permits":
             return httpx.Response(201, json=_permit_payload())

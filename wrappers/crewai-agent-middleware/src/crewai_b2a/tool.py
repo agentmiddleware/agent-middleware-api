@@ -52,12 +52,16 @@ class CrewAIB2ATool(BaseTool):
         permit_ttl_minutes: int = 30,
         **kwargs,
     ):
-        super().__init__(**kwargs)
-        self.base_url = base_url
-        self.api_key = api_key
-        self.wallet_id = wallet_id
-        self.permit_budget = permit_budget
-        self.permit_ttl_minutes = permit_ttl_minutes
+        # BaseTool is a pydantic model: required fields must reach its
+        # validator, so pass them through instead of assigning afterwards.
+        super().__init__(
+            api_key=api_key,
+            wallet_id=wallet_id,
+            base_url=base_url,
+            permit_budget=permit_budget,
+            permit_ttl_minutes=permit_ttl_minutes,
+            **kwargs,
+        )
         self._permit_cache = {}  # Instance-specific cache
 
     def _get_client(self) -> B2AClient:
@@ -85,8 +89,12 @@ class CrewAIB2ATool(BaseTool):
 
         try:
             if operation == "discover_tools":
-                tools = asyncio.get_event_loop().run_until_complete(client.discover_tools())
-                return str([{"name": t.name, "description": t.description} for t in tools])
+                tools = asyncio.get_event_loop().run_until_complete(
+                    client.discover_tools()
+                )
+                return str(
+                    [{"name": t.name, "description": t.description} for t in tools]
+                )
 
             elif operation == "call_tool":
                 tool_name = kwargs.get("tool_name")
@@ -115,7 +123,9 @@ class CrewAIB2ATool(BaseTool):
                     )
 
                     permit = asyncio.get_event_loop().run_until_complete(
-                        client.create_permit(request, idempotency_key=permit_idempotency_key)
+                        client.create_permit(
+                            request, idempotency_key=permit_idempotency_key
+                        )
                     )
                     permit_id = permit.permit_id
                     self._permit_cache[permit_idempotency_key] = permit_id
@@ -163,7 +173,9 @@ class CrewAIB2ATool(BaseTool):
         try:
             if operation == "discover_tools":
                 tools = await client.discover_tools()
-                return str([{"name": t.name, "description": t.description} for t in tools])
+                return str(
+                    [{"name": t.name, "description": t.description} for t in tools]
+                )
 
             elif operation == "call_tool":
                 tool_name = kwargs.get("tool_name")

@@ -25,11 +25,23 @@ depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `autogen_b2a`
 module used below.
 
+The framework dependency is the `autogen` distribution on PyPI
+([AG2 Classic](https://github.com/ag2ai/ag2classic)), which provides the
+`import autogen` namespace and `ConversableAgent` that this wrapper targets.
+It is installed automatically. Do not substitute `autogen-agentchat` (the
+AutoGen 0.4+ rewrite) or `ag2>=1.0` (`import ag2`): both are different APIs
+and neither ships the `autogen` module. To run an LLM-backed agent, add the
+provider extra for your model, for example:
+
+```bash
+python -m pip install "autogen[openai]"
+```
+
 ## Quick Start (Governed Flow)
 
 ```python
 import asyncio
-from autogen_agentchat import ConversableAgent
+from autogen import ConversableAgent, UserProxyAgent
 from autogen_b2a import B2AFunctionTool, register_b2a_tools
 
 # Initialize tool with required wallet_id and api_key
@@ -38,22 +50,32 @@ b2a_tool = B2AFunctionTool(
     wallet_id="agent-001",
 )
 
-# Create agent
-agent = ConversableAgent(
+# The assistant decides when to call a tool. Its llm_config carries the
+# OpenAI-style function schemas so the model can see them.
+assistant = ConversableAgent(
     name="assistant",
     system_message="You are a helpful assistant with access to MCP tools.",
-    tools=b2a_tool.get_function_schemas(),
+    llm_config={
+        "config_list": [{"model": "gpt-4o", "api_key": "your-openai-key"}],
+        "tools": b2a_tool.get_function_schemas(),
+    },
 )
 
-# Register tools
-register_b2a_tools(agent, b2a_tool)
+# The user proxy executes the tool calls the assistant proposes.
+user_proxy = UserProxyAgent(
+    name="user",
+    human_input_mode="NEVER",
+    code_execution_config=False,
+)
+register_b2a_tools(user_proxy, b2a_tool)
 
-# Run agent
+# Run the two-agent chat
 async def main():
-    result = await agent.run(
-        task="Discover available MCP tools and check the wallet balance"
+    result = await user_proxy.a_initiate_chat(
+        assistant,
+        message="Discover available MCP tools and check the wallet balance",
     )
-    print(result)
+    print(result.summary)
 
 asyncio.run(main())
 ```
@@ -141,5 +163,6 @@ tool = B2AFunctionTool(
 ## Requirements
 
 - Python 3.11+
-- AutoGen AgentChat 0.2.0+
+- `autogen` 0.10.0+ (AG2 Classic, the maintained distribution of the legacy
+  AutoGen 0.2 API)
 - httpx 0.25.0+
