@@ -72,7 +72,6 @@ from ..trust import (
     APPROVAL_STATUS_PENDING,
     QUOTE_REASON_CONSUMED,
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
-    MAX_IDEMPOTENCY_KEY_LENGTH,
     AgentMoney,
     HumanApprovalError,
     HumanApprovalUnavailableError,
@@ -93,6 +92,7 @@ from ..trust import (
     get_receipt_service,
     record_audit_event,
     get_refund_reconciliation_service,
+    invalid_idempotency_key_detail,
     resolve_client_idempotency_key,
     sha256_hex,
     tool_price,
@@ -312,23 +312,11 @@ def _invalid_idempotency_key_data(exc: InvalidIdempotencyKeyError) -> dict[str, 
     Shared by the legacy JSON-RPC route, the standard endpoint and the REST
     route so a client sees one contract wherever it carries the key.
     ``error`` mirrors the JSON-RPC message (and is the REST ``detail.error``),
-    ``reason_code`` names the specific defect.
+    ``reason_code`` names the specific defect. The body itself lives beside
+    the error type in the idempotency service so the governed AWI HTTP routes
+    answer with the identical fields.
     """
-    return {
-        "error": str(exc),
-        "reason_code": exc.reason_code,
-        "sources": list(exc.sources),
-        "remediation": {
-            "type": "retry_with_valid_idempotency_key",
-            "detail": (
-                "Nothing was charged. Retry with a single Idempotency-Key that "
-                "is a non-empty string of at most "
-                f"{MAX_IDEMPOTENCY_KEY_LENGTH} characters and is identical "
-                "wherever the request carries it (header, params._meta, "
-                "mcpContext)."
-            ),
-        },
-    }
+    return invalid_idempotency_key_detail(exc)
 
 
 @router.get("/tools.json", name="MCP Tools Manifest")

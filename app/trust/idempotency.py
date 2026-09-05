@@ -16,6 +16,7 @@ from app.services.idempotency import (
     IdempotencyService,
     InvalidIdempotencyKeyError,
     get_idempotency_service,
+    invalid_idempotency_key_detail,
     resolve_client_idempotency_key,
     validate_idempotency_key,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "IdempotencyService",
     "InvalidIdempotencyKeyError",
     "get_idempotency_service",
+    "invalid_idempotency_key_detail",
     "resolve_client_idempotency_key",
     "validate_idempotency_key",
 ]

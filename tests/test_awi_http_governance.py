@@ -123,6 +123,78 @@ async def test_rag_query_insufficient_funds_aborts_and_replays(client, clean_dat
 
 
 @pytest.mark.anyio
+async def test_conflicting_idempotency_key_header_lines_are_refused(
+    client, clean_database
+):
+    """Two differing ``Idempotency-Key`` lines are an ambiguity, not a preference.
+
+    The AWI HTTP routes read the key through a single-value
+    ``Header(None, alias="Idempotency-Key")``, which surfaces only the first
+    line of a repeated header. A duplicated or proxy-injected second line
+    carrying a different key therefore went unseen and the first line
+    silently chose the replay identity. The governed MCP routes already
+    refuse this with ``idempotency_key_conflict``; the AWI routes must hold
+    the same contract, and must do so before any record is opened or credit
+    charged.
+    """
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="awi_rag_query",
+        max_credits=50,
+        idem_key="permit-awi-conflict",
+    )
+    # httpx sends a list of tuples as separate header lines, so both keys
+    # reach the ASGI app as two ``Idempotency-Key`` entries.
+    headers = [
+        *provisioned["agent_headers"].items(),
+        ("X-Wallet-Id", provisioned["agent_wallet_id"]),
+        ("X-Permit-Id", permit["permit_id"]),
+        ("Idempotency-Key", "awi-conflict-first"),
+        ("Idempotency-Key", "awi-conflict-second"),
+    ]
+    resp = await client.post(
+        "/v1/awi/rag/query", json={"query": "laptops", "top_k": 3}, headers=headers
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert detail["error"] == "invalid_idempotency_key"
+    assert detail["reason_code"] == "idempotency_key_conflict"
+    assert detail["sources"] == ["header"]
+    assert detail["tool"] == "awi_rag_query"
+    assert detail["remediation"]["type"] == "retry_with_valid_idempotency_key"
+    assert "receipt" not in resp.json()
+
+    factory = get_session_factory()
+    async with factory() as session:
+        records = (
+            await session.execute(
+                select(func.count())
+                .select_from(IdempotencyRecordModel)
+                .where(
+                    IdempotencyRecordModel.wallet_id == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.endpoint == "POST /v1/awi/rag/query",
+                )
+            )
+        ).scalar_one()
+        debits = (
+            await session.execute(
+                select(func.count())
+                .select_from(LedgerEntryModel)
+                .where(
+                    LedgerEntryModel.wallet_id == provisioned["agent_wallet_id"],
+                    LedgerEntryModel.action == "charge",
+                )
+            )
+        ).scalar_one()
+
+    assert records == 0, "a conflicting key must be refused before a record is opened"
+    assert debits == 0, "a conflicting key must be refused before the wallet is charged"
+
+
+@pytest.mark.anyio
 async def test_execute_denied_without_wallet_scoped_session(client, clean_database):
     """Sessions without wallet_id cannot enter the governed execute path."""
     create = await client.post(

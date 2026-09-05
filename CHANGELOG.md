@@ -40,6 +40,21 @@ full release gate; do not backfill a final `v1.2.0` tag.
   `remediation` block, ahead of the wallet check, the auto-permit mint, and
   execution. An absent key (including an explicit JSON `null`) keeps each
   surface's documented default.
+- **The governed AWI HTTP routes hold the same key contract.**
+  `POST /v1/awi/execute`, `/passkey/challenge`, `/passkey/verify`,
+  `/dom/sync`, `/rag/index`, and `/rag/query` read `Idempotency-Key`
+  through a single-value `Header(...)` parameter, which surfaces only the
+  first line of a repeated header — so a duplicated or proxy-injected
+  second line carrying a different key went unseen and the first line
+  silently chose the replay identity. The routes now receive every header
+  line and resolve them with the shared `resolve_client_idempotency_key`;
+  two differing lines (or an empty or over-long key) answer HTTP 400
+  `invalid_idempotency_key` with the same `reason_code`
+  (`idempotency_key_conflict`, …), `sources`, and `remediation` fields as
+  the MCP routes (`invalid_idempotency_key_detail`, now beside the error
+  type in `app/services/idempotency.py`), before permit validation, any
+  idempotency record, or any wallet charge. No header at all still answers
+  `idempotency_key_required`.
 - **Malformed legacy JSON-RPC envelopes are controlled errors, not 500s.**
   `POST /mcp/messages` now parses strictly and validates shapes before
   touching anything. A non-UTF-8 body, JSON nested deeper than the standard

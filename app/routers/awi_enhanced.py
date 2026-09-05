@@ -112,7 +112,7 @@ async def create_passkey_challenge(
     request: PasskeyChallengeRequest,
     auth: AuthContext = Depends(get_auth_context),
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Create a WebAuthn registration/authentication challenge.
@@ -143,7 +143,7 @@ async def create_passkey_challenge(
         tool_name="awi_passkey_challenge",
         endpoint="POST /v1/awi/passkey/challenge",
         permit_id=x_permit_id,
-        idempotency_key=idempotency_key,
+        idempotency_key_lines=idempotency_key_lines,
         request_payload=request_payload,
     )
     replayed = consume_awi_http_replay(gov)
@@ -205,7 +205,7 @@ async def verify_passkey(
     request: PasskeyVerifyRequest,
     auth: AuthContext = Depends(get_auth_context),
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Verify WebAuthn assertion response.
@@ -240,7 +240,7 @@ async def verify_passkey(
         tool_name="awi_passkey_verify",
         endpoint="POST /v1/awi/passkey/verify",
         permit_id=x_permit_id,
-        idempotency_key=idempotency_key,
+        idempotency_key_lines=idempotency_key_lines,
         request_payload=request_payload,
     )
     replayed = consume_awi_http_replay(gov)
@@ -587,7 +587,7 @@ async def sync_dom(
     request: DOMSyncRequest,
     auth: AuthContext = Depends(get_auth_context),
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Bidirectional AWI ↔ DOM translation.
@@ -615,7 +615,7 @@ async def sync_dom(
         tool_name="awi_dom_sync",
         endpoint="POST /v1/awi/dom/sync",
         permit_id=x_permit_id,
-        idempotency_key=idempotency_key,
+        idempotency_key_lines=idempotency_key_lines,
         request_payload=request_payload,
     )
     replayed = consume_awi_http_replay(gov)
@@ -780,7 +780,7 @@ async def index_session(
     request: MemoryIndexRequest,
     auth: AuthContext = Depends(get_auth_context),
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
 ):
     """
     Index an AWI session for semantic search.
@@ -809,7 +809,7 @@ async def index_session(
         tool_name="awi_memory_index",
         endpoint="POST /v1/awi/rag/index",
         permit_id=x_permit_id,
-        idempotency_key=idempotency_key,
+        idempotency_key_lines=idempotency_key_lines,
         request_payload=request_payload,
     )
     replayed = consume_awi_http_replay(gov)
@@ -865,7 +865,7 @@ async def query_memories(
     request: RAGQueryRequest,
     auth: AuthContext = Depends(get_auth_context),
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
     x_wallet_id: str | None = Header(None, alias="X-Wallet-Id"),
 ):
     """
@@ -893,7 +893,7 @@ async def query_memories(
         tool_name="awi_rag_query",
         endpoint="POST /v1/awi/rag/query",
         permit_id=x_permit_id,
-        idempotency_key=idempotency_key,
+        idempotency_key_lines=idempotency_key_lines,
         request_payload=request_payload,
     )
     replayed = consume_awi_http_replay(gov)

@@ -82,7 +82,9 @@ keys — is refused with `-32602 invalid_idempotency_key`, a `reason_code`
 `idempotency_key_conflict`), the offending `sources`, and a `remediation`
 block, *before* any permit is minted or tool executed. The REST route answers
 HTTP 400 with the same fields, except that a non-string key there is a
-schema error (422) from the typed `mcp_context` body. The key is never silently replaced by a generated one: that would
+schema error (422) from the typed `mcp_context` body. The governed AWI HTTP
+routes (`/v1/awi/execute`, `/passkey/*`, `/dom/sync`, `/rag/*`) read every
+`Idempotency-Key` header line and answer HTTP 400 with the same fields. The key is never silently replaced by a generated one: that would
 turn the client's retry into a second charged action. An explicit JSON `null`
 is read as "no key", the same as omitting it.
 

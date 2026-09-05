@@ -83,9 +83,7 @@ def validate_idempotency_key(value: object, *, source: str) -> str:
     if not value.strip():
         raise InvalidIdempotencyKeyError("idempotency_key_empty", sources=(source,))
     if len(value) > MAX_IDEMPOTENCY_KEY_LENGTH:
-        raise InvalidIdempotencyKeyError(
-            "idempotency_key_too_long", sources=(source,)
-        )
+        raise InvalidIdempotencyKeyError("idempotency_key_too_long", sources=(source,))
     # The key is hashed (utf-8) for the auto-permit mint record and stored in
     # a text column. A JSON "\ud800" escape decodes to a lone surrogate that
     # cannot be utf-8 encoded, and Postgres text refuses NUL; either would
@@ -135,6 +133,33 @@ def resolve_client_idempotency_key(
             sources=tuple(dict.fromkeys(source for source, _ in resolved)),
         )
     return distinct.pop()
+
+
+def invalid_idempotency_key_detail(exc: InvalidIdempotencyKeyError) -> dict[str, Any]:
+    """Machine-actionable error body for a refused client idempotency key.
+
+    One contract wherever a client carries the key: JSON-RPC ``error.data``
+    on the MCP routes, ``detail`` on the deprecated REST invoke route, and
+    ``detail`` on the governed AWI HTTP routes. ``error`` mirrors the
+    exception message (``invalid_idempotency_key``), ``reason_code`` names
+    the specific defect, and ``sources`` says where on the request the
+    offending value(s) were carried.
+    """
+    return {
+        "error": str(exc),
+        "reason_code": exc.reason_code,
+        "sources": list(exc.sources),
+        "remediation": {
+            "type": "retry_with_valid_idempotency_key",
+            "detail": (
+                "Nothing was charged. Retry with a single Idempotency-Key that "
+                "is a non-empty string of at most "
+                f"{MAX_IDEMPOTENCY_KEY_LENGTH} characters and is identical "
+                "wherever the request carries it (header, params._meta, "
+                "mcpContext)."
+            ),
+        },
+    }
 
 
 @dataclass(frozen=True)

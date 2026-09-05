@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -27,7 +28,10 @@ from app.services.idempotency import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
     IdempotencyReplay,
+    InvalidIdempotencyKeyError,
     get_idempotency_service,
+    invalid_idempotency_key_detail,
+    resolve_client_idempotency_key,
 )
 from app.services.permits import PermitError, get_permit_service
 from app.services.receipts import get_receipt_service
@@ -119,13 +123,17 @@ async def begin_awi_http_governed(
     tool_name: str,
     endpoint: str,
     permit_id: str | None,
-    idempotency_key: str | None,
+    idempotency_key_lines: Sequence[str] | None,
     request_payload: dict[str, Any] | None = None,
 ) -> AwiHttpGovernedContext:
     """
     Validate permit + idempotency for an AWI HTTP action.
 
     Clients must send ``X-Permit-Id`` and ``Idempotency-Key``.
+    ``idempotency_key_lines`` is every ``Idempotency-Key`` line on the
+    request: declare the header parameter as ``list[str]`` so FastAPI hands
+    over all of them. A single-value ``Header`` parameter surfaces only the
+    first line, so a second line carrying a different key went unseen.
     """
     if not wallet_id:
         raise HTTPException(
@@ -151,7 +159,22 @@ async def begin_awi_http_governed(
             },
         )
 
-    if not idempotency_key or not idempotency_key.strip():
+    # Same key contract as the governed MCP routes: every supplied line must
+    # be usable and all lines must name one key. A present-but-invalid key is
+    # refused rather than treated as absent, because dropping it would leave
+    # the caller's retry as a second charged action. No line at all keeps
+    # ``idempotency_key_required``.
+    try:
+        idempotency_key = resolve_client_idempotency_key(
+            ("header", line) for line in idempotency_key_lines or ()
+        )
+    except InvalidIdempotencyKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={**invalid_idempotency_key_detail(exc), "tool": tool_name},
+        ) from exc
+
+    if idempotency_key is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -491,12 +514,16 @@ async def raise_awi_http_error(
 
 def parse_governed_headers(
     x_permit_id: str | None = Header(None, alias="X-Permit-Id"),
-    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    idempotency_key_lines: list[str] | None = Header(None, alias="Idempotency-Key"),
     x_wallet_id: str | None = Header(None, alias="X-Wallet-Id"),
-) -> dict[str, str | None]:
-    """Optional FastAPI dependency returning governance headers."""
+) -> dict[str, str | list[str] | None]:
+    """Optional FastAPI dependency returning governance headers.
+
+    ``idempotency_key_lines`` carries every ``Idempotency-Key`` line, in the
+    shape :func:`begin_awi_http_governed` expects.
+    """
     return {
         "permit_id": x_permit_id,
-        "idempotency_key": idempotency_key,
+        "idempotency_key_lines": idempotency_key_lines,
         "wallet_id": x_wallet_id,
     }
