@@ -25,11 +25,24 @@ depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `autogen_b2a`
 module used below.
 
+### Running the tests
+
+From the repository root, in a fresh virtual environment:
+
+```bash
+python -m pip install -e ./b2a_sdk -e "wrappers/autogen-agent-middleware[dev]"
+python -m pytest wrappers/autogen-agent-middleware/tests
+```
+
 ## Quick Start (Governed Flow)
+
+This wrapper targets AutoGen 0.2 (`import autogen`, `ConversableAgent`,
+`register_function`). The assistant advertises the tool schemas through its
+LLM config; a separate executor agent runs the registered functions.
 
 ```python
 import asyncio
-from autogen_agentchat import ConversableAgent
+from autogen import AssistantAgent, UserProxyAgent
 from autogen_b2a import B2AFunctionTool, register_b2a_tools
 
 # Initialize tool with required wallet_id and api_key
@@ -38,25 +51,42 @@ b2a_tool = B2AFunctionTool(
     wallet_id="agent-001",
 )
 
-# Create agent
-agent = ConversableAgent(
+# The assistant proposes tool calls; the schemas go in its llm_config.
+assistant = AssistantAgent(
     name="assistant",
     system_message="You are a helpful assistant with access to MCP tools.",
-    tools=b2a_tool.get_function_schemas(),
+    llm_config={
+        "config_list": [{"model": "gpt-4o", "api_key": "your-openai-key"}],
+        "tools": b2a_tool.get_function_schemas(),
+    },
 )
 
-# Register tools
-register_b2a_tools(agent, b2a_tool)
+# The executor runs the registered functions.
+executor = UserProxyAgent(
+    name="executor",
+    human_input_mode="NEVER",
+    code_execution_config=False,
+)
+register_b2a_tools(executor, b2a_tool)
 
-# Run agent
+# The registered functions are async. AutoGen 0.2 awaits them only on the
+# async chat path, so start the chat with a_initiate_chat, not initiate_chat.
 async def main():
-    result = await agent.run(
-        task="Discover available MCP tools and check the wallet balance"
+    await executor.a_initiate_chat(
+        assistant,
+        message="Discover available MCP tools and check the wallet balance",
     )
-    print(result)
 
 asyncio.run(main())
 ```
+
+## Async only
+
+`B2AFunctionTool` methods are coroutines, and `register_b2a_tools` registers
+them as such. AutoGen 0.2's sync `initiate_chat` calls registered functions
+without awaiting, so it would record the coroutine object as the tool result
+instead of the signed receipt. Use `a_initiate_chat` (or await the methods
+directly, as below).
 
 ## Direct Tool Usage (Governed Flow)
 
@@ -141,5 +171,7 @@ tool = B2AFunctionTool(
 ## Requirements
 
 - Python 3.11+
-- AutoGen AgentChat 0.2.0+
+- AutoGen 0.2.x (`autogen-agentchat>=0.2.0,<0.4`). The 0.4+ rewrite ships a
+  different package (`autogen_agentchat`) with a different agent and tool API
+  and is not supported by this wrapper.
 - httpx 0.25.0+

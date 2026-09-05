@@ -25,6 +25,15 @@ depends on `b2a-sdk>=0.3.0`, which is not on PyPI, so installing the
 wrapper on its own fails to resolve. That installs the `crewai_b2a`
 module used below.
 
+### Running the tests
+
+From the repository root, in a fresh virtual environment:
+
+```bash
+python -m pip install -e ./b2a_sdk -e "wrappers/crewai-agent-middleware[dev]"
+python -m pytest wrappers/crewai-agent-middleware/tests
+```
+
 ## Quick Start (Governed Flow)
 
 ```python
@@ -78,6 +87,18 @@ result = b2a_tool.run(
 result = b2a_tool.run(operation="balance")
 ```
 
+### Sync and async
+
+The tool implementation is async (the SDK client is an `httpx.AsyncClient`).
+`b2a_tool.run(...)` is CrewAI's sync entry point and runs each call to
+completion on its own event loop via `asyncio.run`. From async code, or in a
+long-lived application, prefer the async entry point so the HTTP client stays
+on one loop:
+
+```python
+result = await b2a_tool.arun(operation="balance")
+```
+
 ## Idempotency and Replay Protection
 
 Both `idempotency_key` and `permit_idempotency_key` are **required** and must be supplied by the caller. Do not auto-generate keys.
@@ -126,5 +147,6 @@ b2a_tool = CrewAIB2ATool(
 ## Requirements
 
 - Python 3.11+
-- CrewAI 0.1.0+
+- CrewAI with async tool support (`BaseTool.arun`, coroutine-aware `run()`);
+  tested with CrewAI 1.15
 - httpx 0.25.0+
