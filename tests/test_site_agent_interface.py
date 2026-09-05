@@ -3268,3 +3268,40 @@ def test_recorded_transcript_is_reproducible_from_the_demo() -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "transcript is current" in result.stdout
+
+
+def test_pointer_files_render_the_receipt_issue_date_at_build_time(tmp_path) -> None:
+    """The machine-pointer files cite the same bundle-derived date as the pages
+    instead of describing the published receipt as live gateway proof."""
+    output = tmp_path / "pointers"
+    result = _render_site(output, VALID_TEST_CONTACTS)
+    assert result.returncode == 0, result.stderr
+    issued = json.loads(
+        json.loads((SITE / "proof" / "receipt.json").read_text(encoding="utf-8"))[
+            "signing_input"
+        ]
+    )["created_at"][:10]
+    for pointer in ("llm.txt", "llms.txt", "llms-full.txt"):
+        rendered = (output / pointer).read_text(encoding="utf-8")
+        assert issued in rendered, pointer
+        assert "@@" not in rendered, pointer
+        assert "live gateway proof" not in rendered, pointer
+    assert (output / "llm.txt").read_text(encoding="utf-8") == (
+        output / "llms.txt"
+    ).read_text(encoding="utf-8")
+
+
+def test_booking_block_markers_accept_crlf_and_end_of_file() -> None:
+    """A page saved with CRLF line endings, or whose closing marker ends the
+    file, renders the same as one with LF endings and a trailing newline."""
+    build_module = runpy.run_path(str(SITE / "build_site.py"))
+    render = build_module["render_booking_blocks"]
+    lf = "before\n<!-- booking:start -->\n<a>call</a>\n<!-- booking:end -->\nafter\n"
+    crlf = lf.replace("\n", "\r\n")
+    at_eof = "before\n<!-- booking:start -->\n<a>call</a>\n<!-- booking:end -->"
+    assert render(lf, configured=False) == "before\nafter\n"
+    assert render(lf, configured=True) == "before\n<a>call</a>\nafter\n"
+    assert render(crlf, configured=False) == "before\r\nafter\r\n"
+    assert render(crlf, configured=True) == "before\r\n<a>call</a>\r\nafter\r\n"
+    assert render(at_eof, configured=False) == "before\n"
+    assert render(at_eof, configured=True) == "before\n<a>call</a>\n"

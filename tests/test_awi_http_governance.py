@@ -355,6 +355,8 @@ async def test_invalid_idempotency_key_is_refused_before_permit_presence(
         ("x" * (MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH + 1), "idempotency_key_too_long"),
         ("awi\x00key", "idempotency_key_control_characters"),
         ("awi\x7fkey", "idempotency_key_control_characters"),
+        # Latin-1 "é": not UTF-8, so it has no unambiguous reading as a key.
+        (b"awi-\xe9-key", "idempotency_key_not_utf8"),
     ],
 )
 async def test_malformed_idempotency_key_is_refused_before_any_effect(

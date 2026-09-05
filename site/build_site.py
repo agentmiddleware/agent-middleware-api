@@ -48,13 +48,15 @@ BOOKING_FIELD = "PUBLIC_BOOKING_URL"
 # configured only the marker comments are removed.
 BOOKING_BLOCK_START = "<!-- booking:start -->"
 BOOKING_BLOCK_END = "<!-- booking:end -->"
+# Marker lines may end in LF or CRLF, and the closing marker may end the
+# file; the block is dropped or unwrapped identically either way.
 _BOOKING_BLOCK = re.compile(
-    rf"^[ \t]*{re.escape(BOOKING_BLOCK_START)}[ \t]*\n.*?"
-    rf"^[ \t]*{re.escape(BOOKING_BLOCK_END)}[ \t]*\n",
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_START)}[ \t]*\r?\n.*?"
+    rf"^[ \t]*{re.escape(BOOKING_BLOCK_END)}[ \t]*(?:\r?\n|\Z)",
     flags=re.DOTALL | re.MULTILINE,
 )
 _BOOKING_MARKER_LINE = re.compile(
-    rf"^[ \t]*(?:{re.escape(BOOKING_BLOCK_START)}|{re.escape(BOOKING_BLOCK_END)})[ \t]*\n",
+    rf"^[ \t]*(?:{re.escape(BOOKING_BLOCK_START)}|{re.escape(BOOKING_BLOCK_END)})[ \t]*(?:\r?\n|\Z)",
     flags=re.MULTILINE,
 )
 ANALYTICS_FLAG = "PUBLIC_ENABLE_VERCEL_ANALYTICS"
@@ -91,6 +93,12 @@ TEXT_ASSETS = (
     "404.html",
     "sitemap.xml",
     ".well-known/security.txt",
+    # The machine-pointer files cite the published receipt's issue date, read
+    # from the bundle at build time like the HTML pages, so the two can never
+    # disagree.
+    "llm.txt",
+    "llms.txt",
+    "llms-full.txt",
 )
 COPY_ASSETS = (
     ".well-known",
@@ -105,9 +113,6 @@ COPY_ASSETS = (
     "compare",
     "concept",
     "favicon.svg",
-    "llm.txt",
-    "llms.txt",
-    "llms-full.txt",
     "social-card.png",
     "proof",
     "robots.txt",
@@ -819,13 +824,13 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
                 rendered,
                 flags=re.MULTILINE,
             )
+        if PROOF_RECEIPT_ISSUED_TOKEN in rendered:
+            rendered = rendered.replace(
+                PROOF_RECEIPT_ISSUED_TOKEN, published_receipt_issued_date()
+            )
         if relative_path.endswith(".html"):
             rendered = render_booking_blocks(rendered, configured=with_booking)
             rendered = rendered.replace(FONT_PRELOAD_TOKEN, font_preload_tags())
-            if PROOF_RECEIPT_ISSUED_TOKEN in rendered:
-                rendered = rendered.replace(
-                    PROOF_RECEIPT_ISSUED_TOKEN, published_receipt_issued_date()
-                )
             rendered = rendered.replace(FONTS_CSS_VERSION_TOKEN, fonts_css_version())
             if FAQ_JSONLD_TOKEN in rendered:
                 rendered = rendered.replace(FAQ_JSONLD_TOKEN, faq_jsonld(rendered))

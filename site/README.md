@@ -116,8 +116,9 @@ changes. The build refuses a transcript whose live verification names a
 different receipt than the one published, so republishing the receipt without
 re-recording cannot ship a verdict for the wrong artifact. The panels say in
 their own footer that the loop was recorded from a local gateway run, not the
-live API; the live receipt's verdict is the only line on the page that comes
-from production.
+live API; the published sample receipt's verdict is the only line on the page
+that comes from production, and the page dates that receipt as the historical
+sample it is.
 
 ## Structured data
 

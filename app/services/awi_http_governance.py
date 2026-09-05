@@ -29,6 +29,7 @@ from app.services.idempotency import (
     IdempotencyInProgressError,
     IdempotencyReplay,
     InvalidIdempotencyKeyError,
+    decode_idempotency_key_header,
     get_idempotency_service,
     resolve_client_idempotency_key,
 )
@@ -159,7 +160,10 @@ async def begin_awi_http_governed(
     # ``idempotency_key_required`` below, after the permit-presence check.
     try:
         idempotency_key = resolve_client_idempotency_key(
-            [("Idempotency-Key header", line) for line in idempotency_key_lines or ()]
+            [
+                ("Idempotency-Key header", decode_idempotency_key_header(line))
+                for line in idempotency_key_lines or ()
+            ]
         )
     except InvalidIdempotencyKeyError as exc:
         raise HTTPException(

@@ -80,6 +80,7 @@ from ..trust import (
     IdempotencyConflictError,
     IdempotencyInProgressError,
     InvalidIdempotencyKeyError,
+    decode_idempotency_key_header,
     McpGovernedAdapter,
     PolicyDecision,
     evaluate_tool_invocation,
@@ -195,12 +196,14 @@ class HumanApprovalPendingSignal(RuntimeError):
 def _header_idempotency_key_sources(request: Request) -> list[tuple[str, object]]:
     """Every ``Idempotency-Key`` header the caller sent, in wire order.
 
-    A repeated header is two explicit sources: identical copies collapse to
-    one key, differing copies are refused as a conflict rather than letting
-    the first one silently win.
+    Each line is read as the UTF-8 the client wrote, and refused when it is
+    not UTF-8, so a non-ASCII key equals the same key sent in the body and no
+    two wire values alias to one key. A repeated header is two explicit
+    sources: identical copies collapse to one key, differing copies are
+    refused as a conflict rather than letting the first one silently win.
     """
     return [
-        ("Idempotency-Key header", value)
+        ("Idempotency-Key header", decode_idempotency_key_header(value))
         for value in request.headers.getlist("idempotency-key")
     ]
 
@@ -3211,8 +3214,14 @@ async def invoke_tool(
     """
     mcp_context = request.mcp_context
     if not mcp_context:
+        # Legacy shape: the wallet rides in the arguments. Check its type
+        # here; McpContext would otherwise raise a pydantic ValidationError
+        # inside the handler, which is a 500, not the 400 it should be.
+        argument_wallet = request.arguments.get("wallet_id", "")
+        if not isinstance(argument_wallet, str):
+            raise HTTPException(status_code=400, detail="Missing wallet_id")
         mcp_context = McpContext(
-            wallet_id=request.arguments.get("wallet_id", ""),
+            wallet_id=argument_wallet,
             request_path=None,
             permit_id=None,
             quote_id=None,

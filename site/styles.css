@@ -2191,7 +2191,7 @@ html[data-a11y-motion="reduce"] .arcade-launch:active {
   }
 }
 
-/* Proof: the live receipt beside the verifier's real verdict. */
+/* Proof: the published sample receipt beside the verifier's real verdict. */
 .proof-verify {
   display: grid;
   gap: 1rem;

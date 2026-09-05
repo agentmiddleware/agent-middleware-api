@@ -73,8 +73,9 @@ class InvalidIdempotencyKeyError(ValueError):
                 "detail": (
                     "Send exactly one idempotency key: a non-blank string of at "
                     f"most {MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH} characters with no "
-                    "control characters, or the same key in every source. "
-                    "Nothing was minted, charged, or dispatched."
+                    "control characters (UTF-8 bytes when sent as a header), or "
+                    "the same key in every source. Nothing was minted, charged, "
+                    "or dispatched."
                 ),
             },
         }
@@ -117,6 +118,32 @@ def validate_client_idempotency_key(value: object, *, source: str) -> str:
             source=source,
         )
     return value
+
+
+IDEMPOTENCY_KEY_HEADER_SOURCE = "Idempotency-Key header"
+
+
+def decode_idempotency_key_header(line: str) -> str:
+    """Return an ``Idempotency-Key`` header line as the text the client sent.
+
+    Header bytes reach the application decoded as latin-1, so a key a client
+    sent as UTF-8 would otherwise arrive as mojibake: it would not equal the
+    same key sent in the body, and UTF-8 continuation bytes in 0x80-0x9F
+    would read as C1 control characters. The line is re-read as UTF-8 and
+    nothing else, so every wire value has at most one reading and two
+    different byte sequences can never alias to one key; bytes that are not
+    valid UTF-8 are refused (``idempotency_key_not_utf8``) rather than kept
+    as latin-1 text.
+    """
+    try:
+        return line.encode("latin-1").decode("utf-8")
+    except UnicodeError as exc:
+        raise InvalidIdempotencyKeyError(
+            "idempotency_key_not_utf8",
+            f"invalid_idempotency_key: {IDEMPOTENCY_KEY_HEADER_SOURCE} must be "
+            "valid UTF-8",
+            source=IDEMPOTENCY_KEY_HEADER_SOURCE,
+        ) from exc
 
 
 def resolve_client_idempotency_key(

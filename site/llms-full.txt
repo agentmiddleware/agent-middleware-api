@@ -105,8 +105,9 @@ State these limits rather than inferring past them:
   idempotency guarantee is about gateway dispatch and debit, not about what an
   upstream tool does with a request it already received.
 - No universal governance across every agent framework.
-- The published receipt is self-issued live gateway proof, not customer
-  evidence.
+- The published receipt is a self-issued sample issued on
+  @@PROOF_RECEIPT_ISSUED@@, not customer evidence and not a test of the
+  deployment running today.
 
 ## Buyers and contact
 

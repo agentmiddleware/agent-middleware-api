@@ -116,6 +116,9 @@ router = APIRouter(prefix="/mcp", tags=["MCP Standard Endpoint"])
 _IDEMPOTENCY_META_KEY = "io.agentmiddleware/idempotency_key"
 _RECEIPT_META_KEY = "io.agentmiddleware/receipt"
 _META_KEY_SOURCE = 'params._meta["io.agentmiddleware/idempotency_key"]'
+# A legacy-transport client may send its key in params.mcpContext; the
+# source label names that location in the conflict/refusal payload.
+_LEGACY_CONTEXT_KEY_SOURCE = "params.mcpContext.idempotency_key"
 
 # Idempotency scope for auto-minted permits; distinct from the governed-call
 # scope so mint replay and call replay never collide.
@@ -218,12 +221,25 @@ def _client_idempotency_key(
     the caller sent no key anywhere.
     """
     sources: list[tuple[str, object]] = []
-    if http_request is not None:
-        sources.extend(_header_idempotency_key_sources(http_request))
-    meta_source = _meta_idempotency_key_source(params)
-    if meta_source is not None:
-        sources.append(meta_source)
     try:
+        if http_request is not None:
+            sources.extend(_header_idempotency_key_sources(http_request))
+        meta_source = _meta_idempotency_key_source(params)
+        if meta_source is not None:
+            sources.append(meta_source)
+        # A client written against the legacy transport may send its key in
+        # params.mcpContext. This endpoint mints its own permit and ignores
+        # the rest of that object, but a key the caller explicitly sent must
+        # not be silently dropped: it is one more source, validated and
+        # conflict-checked like the others. JSON null reads as absent, as
+        # everywhere else.
+        legacy_context = (params.model_extra or {}).get("mcpContext")
+        if isinstance(legacy_context, dict):
+            context_value = legacy_context.get("idempotency_key")
+            if context_value is not None:
+                sources.append((_LEGACY_CONTEXT_KEY_SOURCE, context_value))
+        elif legacy_context is not None:
+            raise _mcp_error(-32602, "Invalid params: mcpContext must be an object")
         return resolve_client_idempotency_key(sources)
     except InvalidIdempotencyKeyError as exc:
         raise _mcp_error(-32602, str(exc), exc.as_error_data()) from exc
