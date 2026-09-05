@@ -205,6 +205,19 @@ operation. Clients that retry must always send their own persistent key; a
 governed `/mcp/messages` call without one is refused with
 `idempotency_key_required`.
 
+The governed AWI HTTP routes — `POST /v1/awi/execute`,
+`/v1/awi/passkey/challenge`, `/v1/awi/passkey/verify`, `/v1/awi/dom/sync`,
+`/v1/awi/rag/index`, and `/v1/awi/rag/query` — hold their `Idempotency-Key`
+header to this same contract. There the key is mandatory: no header at all is
+HTTP 400 `idempotency_key_required`, and a header that is present but unusable
+(blank, over 128 characters, control characters, or repeated lines that name
+different keys) is HTTP 400 `invalid_idempotency_key` with the same
+`reason_code`, `source`, and `remediation` fields plus the governed `tool`,
+refused before the permit is validated and before any idempotency record
+exists. The stored identity is the header value exactly as received — it is
+not trimmed, so `' k'` and `'k'` are two different keys
+(`test_awi_http_governance`).
+
 ## Exactly-once refunds
 
 `failed_refunded` means the correlated refund is already durable — the receipt

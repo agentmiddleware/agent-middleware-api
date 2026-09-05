@@ -44,6 +44,31 @@ full release gate; do not backfill a final `v1.2.0` tag.
   governed adapter seam, so every transport gets it. The REST
   `/mcp/tools/{service_id}/invoke` path applies the same key rules and
   answers HTTP 400.
+- **The governed AWI HTTP routes hold the same contract.**
+  `begin_awi_http_governed` — behind `POST /v1/awi/execute`,
+  `passkey/challenge`, `passkey/verify`, `dom/sync`, `rag/index`, and
+  `rag/query` — refused only an absent or blank `Idempotency-Key`, then
+  stored `key.strip()` as the replay identity, so `' k'` and `'k'` collapsed
+  into one record and the second call replayed the first receipt instead of
+  running; it applied no length cap, so a key wider than the 128-character
+  store column passed permit validation and reached the database; and it
+  read the header through a single-value parameter, so a second line
+  carrying a different key was never seen (adversarial verification of the
+  contract above, 2026-09). Every header line now goes through the shared
+  `resolve_client_idempotency_key` and the key is used verbatim: no header
+  is still `idempotency_key_required`; a present-but-unusable one, or two
+  lines that disagree, is HTTP 400 `invalid_idempotency_key` with the same
+  `reason_code`, `source`, and `remediation` fields plus the governed
+  `tool`, ahead of permit validation and before any record is written. A
+  blank header is therefore now `idempotency_key_blank` rather than
+  `idempotency_key_required`. Trimming was dropped on purpose: the Python
+  SDK trims client-side before sending and no first-party caller sends a
+  padded key, so server-side trimming only merged distinct client keys. The
+  handlers declare the header as a list so FastAPI delivers every line
+  (these proof-surface routes are not part of the exported core
+  `docs/openapi.json`, which is unchanged). `tests/test_awi_http_governance.py`
+  covers the absent, blank, over-long, control-character, conflicting, and
+  padded cases beside a valid-key replay control at the store width.
 - **`GET /health` now publishes `build_provenance`** alongside `commit_sha`,
   the same field `/health/dependencies` already carried, so the liveness
   probe alone can tell a trustworthy-but-behind deployment from a stale stamp.
