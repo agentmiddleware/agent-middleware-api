@@ -158,20 +158,21 @@
     />
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-16" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-17" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-16"></script>
+    <script src="/a11y-preload.js?v=gateway-17"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/wave.js?v=gateway-16"></script>
+    <script defer src="/wave.js?v=gateway-17"></script>
     <!-- The arcade is fetched on demand by this bootstrap (on PRESS START,
          on hover/focus, or on a ?arcade= deep link); /arcade.js and
          /arcade.css are named on the launcher below, not loaded here. -->
-    <script defer src="/arcade-boot.js?v=gateway-16"></script>
-    <script defer src="/analytics.js?v=gateway-16"></script>
-    <script defer src="/proof/proof.js?v=gateway-16"></script>
-    <script defer src="/a11y.js?v=gateway-16"></script>
+    <script defer src="/arcade-boot.js?v=gateway-17"></script>
+    <script defer src="/analytics.js?v=gateway-17"></script>
+    <script defer src="/proof/proof.js?v=gateway-17"></script>
+    <script defer src="/pilot-fit.js?v=pilot-1"></script>
+    <script defer src="/a11y.js?v=gateway-17"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -199,7 +200,7 @@
         <a href="#machine-discovery">Machine discovery</a>
         <a
           class="nav-agent"
-          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          href="@@PILOT_EMAIL_HREF@@"
           data-analytics-event="email_click"
           aria-label="Start a pilot by email (opens your mail app)"
           >Start a pilot by email</a
@@ -221,14 +222,14 @@
           </p>
           <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
           <p class="hero-body hero-body-lead">
-            Your agent invokes a costly tool. The request times out. Was it
-            dispatched? Should the agent retry? Will the retry create another
-            debit?
+            When a retried agent call debits twice, someone pays in lost money,
+            recovery time, or a customer problem. Put a number on that cost.
+            If preventing it cannot justify this boundary, we will tell you.
           </p>
           <div class="cta-row">
             <a
               class="button-wave"
-              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              href="@@PILOT_EMAIL_HREF@@"
               data-analytics-event="email_click"
               aria-label="Start a pilot by email (opens your mail app)"
               ><span class="button-wave-face">Start a pilot by email</span></a
@@ -252,8 +253,8 @@
             when a scenario needs one.
           </p>
           <p class="constraint-line">
-            One internal MCP tool · fit and scope discussed privately · no
-            self-serve rollout
+            Paid, bounded pilot · one internal MCP tool · priced after fit is
+            established · no self-serve rollout
           </p>
         </div>
         <!-- The governed loop as it actually ran. Rendered at build time from
@@ -295,6 +296,7 @@
             execution, one debit no matter how many times the same request is
             replayed, and portable evidence after.
           </p>
+          <p>Paid and bounded to one tool. Setup and recurring service are quoted separately after fit is established.</p>
           <ol class="pilot-steps">
             <li><span>01</span><strong>Scope the action and budget</strong></li>
             <li><span>02</span><strong>Invoke through the gateway</strong></li>
@@ -309,7 +311,7 @@
           <div class="agent-entry-foot">
             <span>Built for operators of internal MCP tools</span>
             <a
-              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              href="@@PILOT_EMAIL_HREF@@"
               data-analytics-event="email_click"
               >Start a pilot by email</a
             >
@@ -508,7 +510,21 @@
             invoke → charge → receipt → replay → deny before discussing any
             broader rollout.
           </p>
-          <p>Three things to include, in plain terms:</p>
+          <p>
+            The pilot is paid, bounded to one tool, and priced after fit is
+            established. We agree a setup fee and a separate recurring
+            managed-service quote, with infrastructure and support scope
+            stated in writing before work starts.
+          </p>
+          <h3>What the pilot includes</h3>
+          <ul class="intake-list">
+            <li>One partner-owned agent, one staging MCP tool, one consequential action, and one named partner engineer operating it.</li>
+            <li>A dedicated staging environment using synthetic or redacted data, with a written scope and end date.</li>
+            <li>An acceptance flow your engineer runs: repeat the request, confirm no second gateway dispatch or debit, test conflicts and denials, and verify the receipt offline.</li>
+            <li>Recorded onboarding hours, latency, infrastructure usage, and exception-handling effort.</li>
+            <li>A renewal decision at the end, with a named buyer, budget owner, and decision date.</li>
+          </ul>
+          <h3>Five things to include in your email</h3>
           <ol class="intake-list">
             <li>
               <strong>The tool or action.</strong> What the agent calls, and
@@ -521,6 +537,16 @@
             <li>
               <strong>How you check it happened.</strong> How you currently
               find out whether the action ran, and whether it ran once.
+            </li>
+            <li>
+              <strong>What one duplicate or unproven call costs.</strong>
+              Estimate lost money, recovery hours and their cost, or a
+              concrete customer consequence. Say what is measured and what is
+              an estimate; if the cost is unknown, say so.
+            </li>
+            <li>
+              <strong>Who owns the budget and when they decide.</strong>
+              Name the decision owner and a target decision date.
             </li>
           </ol>
           <p>
@@ -536,7 +562,7 @@
           <div class="pilot-links">
             <a
               class="button button-primary"
-              href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+              href="@@PILOT_EMAIL_HREF@@"
               data-analytics-event="email_click"
               aria-label="Start a pilot by email (opens your mail app)"
               >Start a pilot by email</a
@@ -555,8 +581,63 @@
               aria-label="Book a call if your scenario needs one (opens in a new tab)"
               >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
             >
+            <span class="booking-context">@@BOOKING_CONTEXT@@</span>
             <!-- booking:end -->
           </div>
+        </div>
+
+        <div class="pilot-fit" id="economic-fit" aria-labelledby="economic-fit-title">
+          <h3 id="economic-fit-title">Does avoiding duplicates justify the cost?</h3>
+          <p>
+            Monthly actions × baseline duplicate rate × loss per duplicate ×
+            expected reduction = estimated monthly avoided loss.
+            Use the loss you actually bear, including recovery labor, rather
+            than the full transaction value. Count each cost once.
+          </p>
+          <p id="fit-assumptions">
+            Expected reduction is an assumption about your whole adopted
+            workflow, including the upstream tool, to validate in a pilot.
+            It is not a gateway guarantee. These numbers stay in your browser
+            and are not saved or sent to us.
+          </p>
+          <fieldset class="fit-fields" aria-describedby="fit-assumptions" data-fit-inputs hidden>
+            <legend>Your workflow assumptions</legend>
+            <label for="fit-actions">Consequential actions / month
+              <input id="fit-actions" type="number" min="0" step="1" required inputmode="numeric" />
+            </label>
+            <label for="fit-rate">Baseline duplicate rate (%)
+              <input id="fit-rate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-describedby="fit-rate-help" />
+              <span id="fit-rate-help">Enter 0.1 for 0.1%, or one duplicate in 1,000 actions.</span>
+            </label>
+            <label for="fit-loss">Loss per duplicate (USD)
+              <input id="fit-loss" type="number" min="0" step="any" required inputmode="decimal" />
+            </label>
+            <label for="fit-reduction">Expected reduction (%)
+              <input id="fit-reduction" type="number" min="0" max="100" step="any" required inputmode="decimal" />
+            </label>
+            <label for="fit-cost">Total monthly cost (USD, optional)
+              <input id="fit-cost" type="number" min="0" step="any" inputmode="decimal" aria-describedby="fit-cost-help" />
+              <span id="fit-cost-help">Include the service quote, your operations, and setup plus integration costs spread over your evaluation period. Leave blank if unknown.</span>
+            </label>
+          </fieldset>
+          <div class="fit-result" role="status" aria-live="polite" aria-atomic="true" data-fit-result hidden>
+            <p data-fit-summary>Enter the four workflow assumptions to estimate avoided loss.</p>
+            <p data-fit-guidance></p>
+          </div>
+          <p data-fit-next hidden><a href="#pilot">Include these assumptions in your pilot email</a></p>
+          <p data-fit-alternative hidden><a href="/compare/">Compare simpler reliability options</a></p>
+          <details class="fit-example">
+            <summary>Illustrative example: how a $35 threshold is calculated</summary>
+            <p>
+              100,000 actions/month × 0.1% duplicates × $50 actual loss × 80%
+              reduction = $4,000/month in estimated avoided loss. With $2,800
+              in total monthly cost, the break-even loss is $35 per duplicate:
+              $2,800 ÷ (100,000 × 0.001 × 0.8). At 0.01% duplication, the
+              threshold rises to $350. These are illustrative assumptions,
+              not our pricing or measured results.
+            </p>
+          </details>
+          <noscript><p>Use the formula and example above to estimate fit, then include your assumptions in your email.</p></noscript>
         </div>
       </section>
 
@@ -687,7 +768,7 @@
             <div class="pilot-links">
               <a
                 class="button button-primary"
-                href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+                href="@@PILOT_EMAIL_HREF@@"
                 data-analytics-event="email_click"
                 aria-label="Start a pilot by email (opens your mail app)"
                 >Start a pilot by email</a
@@ -707,6 +788,7 @@
                 aria-label="Book a call if your scenario needs one (opens in a new tab)"
                 >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
               >
+              <span class="booking-context">@@BOOKING_CONTEXT@@</span>
               <!-- booking:end -->
             </div>
           </div>
@@ -723,7 +805,7 @@
         <p>Human contact</p>
         <a
           class="button button-primary"
-          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          href="@@PILOT_EMAIL_HREF@@"
           data-analytics-event="email_click"
           aria-label="Start a pilot by email (opens your mail app)"
           >Start a pilot by email</a
@@ -743,6 +825,7 @@
           aria-label="Book a call if your scenario needs one (opens in a new tab)"
           >Book a call if your scenario needs one</a
         >
+        <span class="booking-context">@@BOOKING_CONTEXT@@</span>
         <!-- booking:end -->
         <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
       </div>
@@ -784,8 +867,8 @@
           type="button"
           id="arcade-launch"
           class="arcade-launch"
-          data-arcade-script="/arcade.js?v=gateway-16"
-          data-arcade-style="/arcade.css?v=gateway-16"
+          data-arcade-script="/arcade.js?v=gateway-17"
+          data-arcade-style="/arcade.css?v=gateway-17"
           hidden
         >
           <span aria-hidden="true">▶</span> HUMANS: PRESS START
