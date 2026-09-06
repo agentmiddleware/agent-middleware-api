@@ -245,14 +245,22 @@ class TestVelocityFreezeStatusGuard:
             wallet_id, Decimal("1")
         )
 
-        # The anomaly is still detected, but the stronger status is preserved.
-        assert result.should_freeze is True
+        # The anomaly is still detected, but no freeze transition or downstream
+        # freeze notification is owed when a stronger status already owns the
+        # wallet.
+        assert result.alert_triggered is True
+        assert result.should_freeze is False
         assert await self._status(wallet_id) == protected_status
 
     @pytest.mark.anyio
-    async def test_freeze_still_applies_to_active_wallet(self, clean_database):
-        """Positive control: the guard still freezes a currently-active wallet."""
-        wallet_id = await self._seed_wallet("active")
+    @pytest.mark.parametrize("spendable_status", ["active", "pending_kyc"])
+    async def test_freeze_applies_to_every_spendable_status(
+        self,
+        clean_database,
+        spendable_status,
+    ):
+        """The anomaly control freezes every status billing permits to spend."""
+        wallet_id = await self._seed_wallet(spendable_status)
 
         result = await VelocityMonitor().check_and_record_charge(
             wallet_id, Decimal("1")
