@@ -204,7 +204,7 @@ keep the old bytes for up to a week. HTML itself carries no long-lived
 stylesheet uses an independent `?v=concept-N` token: bump it when
 `concept/concept.css` changes.
 
-The pilot calculator uses its own `?v=pilot-1` token and the default revalidating
+The pilot calculator uses its own `?v=pilot-2` token and the default revalidating
 cache policy; bump its token when `pilot-fit.js` changes.
 
 Explicit `/proof` → `/proof/` and `/compare` → `/compare/` redirects match

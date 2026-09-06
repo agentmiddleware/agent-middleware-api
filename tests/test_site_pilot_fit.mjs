@@ -43,6 +43,18 @@ try {
   assert.equal(await alternative.isVisible(), true);
   await fill([100000, 0.1, 50, 80, 4000]);
   assert.match(await guidance.innerText(), /does not exceed/);
+  // Displayed monetary amounts must govern fit, including binary rounding noise.
+  for (const values of [[3, 10, 100, 10, 3], [3, 10, 100, 10, 2.999], [1, 100, 1.004, 100, 1]]) {
+    await fill(values);
+    assert.match(await guidance.innerText(), /does not exceed/);
+    assert.equal(await next.isVisible(), false);
+  }
+  for (const cost of [1, 1.004]) {
+    await fill([1, 100, 1.005, 100, cost]);
+    assert.match(await summary.innerText(), /\$1.01/);
+    assert.match(await guidance.innerText(), /exceeds.*\$0.01/);
+    assert.equal(await next.isVisible(), true);
+  }
   await fill([100000, 0.1, 50, 80, ""]);
   assert.match(await guidance.innerText(), /fit is still unknown/);
   assert.equal(await next.isVisible(), false);

@@ -14,6 +14,10 @@
     currency: "USD",
     maximumFractionDigits: 2,
   });
+  const roundedAmount = new Intl.NumberFormat("en-US", {
+    useGrouping: false,
+    maximumFractionDigits: 2,
+  });
 
   function update() {
     next.hidden = true;
@@ -53,8 +57,11 @@
       guidance.textContent = "Economic fit is still unknown. Add your total monthly cost to compare; a service quote and operating scope are needed before deciding.";
     } else {
       const comparison = " Break-even loss per duplicate: " + money.format(threshold) + ".";
-      if (avoidedLoss > cost) {
-        guidance.textContent = "Estimated avoided loss exceeds total monthly cost by " + money.format(avoidedLoss - cost) + "." + comparison + " This is a reason to validate the assumptions in a paid pilot, not evidence of savings.";
+      // Use the same decimal rounding as the displayed currency amounts.
+      const displayedLoss = Number(roundedAmount.format(avoidedLoss));
+      const displayedCost = Number(roundedAmount.format(cost));
+      if (displayedLoss > displayedCost) {
+        guidance.textContent = "Estimated avoided loss exceeds total monthly cost by " + money.format(displayedLoss - displayedCost) + "." + comparison + " This is a reason to validate the assumptions in a paid pilot, not evidence of savings.";
         next.hidden = false;
       } else {
         guidance.textContent = "Estimated avoided loss does not exceed total monthly cost." + comparison + " Start with simpler reliability or upstream idempotency controls. Any separate operational benefit needs its own evidence.";
