@@ -54,17 +54,11 @@ from .wallet_engine import (
     WalletExpiredError,
     WalletNotFoundFactory,
 )
+from .wallet_status import SPENDABLE_WALLET_STATUSES
 
 KYCRequiredFactory = Callable[[str, str], Exception]
 
 logger = logging.getLogger(__name__)
-
-_SPENDABLE_WALLET_STATUSES = frozenset(
-    {
-        WalletStatus.ACTIVE.value,
-        WalletStatus.PENDING_KYC.value,
-    }
-)
 
 
 class DirectTopUpDisabledError(RuntimeError):
@@ -338,7 +332,7 @@ class BillingEngine:
             )
             await session.refresh(wallet)
 
-        if wallet.status not in _SPENDABLE_WALLET_STATUSES:
+        if wallet.status not in SPENDABLE_WALLET_STATUSES:
             await reverse_velocity_record()
             return InsufficientFundsResponse(
                 error=(
@@ -472,9 +466,7 @@ class BillingEngine:
                 # freeze exists precisely to stop that.
                 cast(
                     ColumnElement[bool],
-                    cast(Any, WalletModel.status).in_(
-                        tuple(_SPENDABLE_WALLET_STATUSES)
-                    ),
+                    cast(Any, WalletModel.status).in_(tuple(SPENDABLE_WALLET_STATUSES)),
                 ),
             )
             .values(
@@ -491,7 +483,7 @@ class BillingEngine:
             # corresponding check above would have reported it.
             await session.refresh(wallet)
             await reverse_velocity_record()
-            if wallet.status not in _SPENDABLE_WALLET_STATUSES:
+            if wallet.status not in SPENDABLE_WALLET_STATUSES:
                 # A non-spendable status landed between the read and the write.
                 # Report a real freeze specifically; every other control stays
                 # a fail-closed refusal rather than looking like empty balance.

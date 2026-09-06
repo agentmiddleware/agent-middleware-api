@@ -1,9 +1,9 @@
 """A KYC session must not widen what a wallet is allowed to do.
 
 ``create_verification_session`` moves a wallet to ``pending_kyc``, and
-``pending_kyc`` is a *spendable* status -- it is absent from the non-spendable
-set the debit paths check. Writing it unconditionally therefore let an ordinary
-API call undo three separate controls: the velocity anomaly auto-freeze, an
+``pending_kyc`` is a *spendable* status -- it is explicitly admitted by the
+allowlist the debit paths check. Writing it unconditionally therefore let an
+ordinary API call undo three separate controls: the velocity anomaly auto-freeze, an
 operator suspension, and wallet closure. No race was required.
 
 The wallet is also read *before* the Stripe network call and written after, so
@@ -87,14 +87,17 @@ async def _clean(clean_database):
         ("frozen", "pending"),
         ("suspended", "pending"),
         ("closed", "pending"),
+        ("operator_hold", "pending"),
+        ("operator_hold", "rejected"),
+        ("operator_hold", "expired"),
     ],
 )
 async def test_kyc_session_does_not_lift_a_control_it_does_not_own(
     status: str, kyc_status: str
 ) -> None:
-    """A frozen, operator-suspended, or closed wallet stays that way.
+    """A frozen, operator-suspended, closed, or unknown control stays in force.
 
-    The freeze is the sharpest of the three: it is the anomaly control that
+    The freeze is a critical case: it is the anomaly control that
     fires on a concurrent spend burst, and lifting it by starting KYC would
     hand the burst its wallet back.
     """
@@ -123,17 +126,21 @@ async def test_kyc_session_may_reclaim_a_suspension_it_imposed(
     assert await _status(wallet_id) == "pending_kyc"
 
 
-async def test_kyc_session_claims_a_spendable_wallet_normally() -> None:
+@pytest.mark.parametrize("status", ["active", "pending_kyc"])
+async def test_kyc_session_claims_a_spendable_wallet_normally(status: str) -> None:
     """The ordinary path is unchanged."""
-    wallet_id = await _seed_wallet("active", "pending")
+    wallet_id = await _seed_wallet(status, "pending")
 
     await _start_kyc(wallet_id)
 
     assert await _status(wallet_id) == "pending_kyc"
 
 
-async def test_a_freeze_landing_during_the_stripe_call_survives() -> None:
-    """A freeze committed while Stripe is being called must not be clobbered.
+@pytest.mark.parametrize("status", ["frozen", "operator_hold"])
+async def test_a_control_status_landing_during_the_stripe_call_survives(
+    status: str,
+) -> None:
+    """A control committed while Stripe is being called must not be clobbered.
 
     The wallet is read before the network call and written after, so this is
     the window the guarded write closes: the status is decided by the row at
@@ -141,31 +148,31 @@ async def test_a_freeze_landing_during_the_stripe_call_survives() -> None:
     """
     wallet_id = await _seed_wallet("active", "pending")
 
-    async def _freeze() -> None:
+    async def _set_control_status() -> None:
         factory = get_session_factory()
         async with factory() as session:
             async with session.begin():
                 wallet = await session.get(WalletModel, wallet_id)
                 assert wallet is not None
-                wallet.status = "frozen"
+                wallet.status = status
 
-    freezing_session = _stripe_session()
+    controlled_session = _stripe_session()
 
-    class _FreezeOnCreate:
-        """Commit the freeze at the moment Stripe would be answering."""
+    class _SetControlOnCreate:
+        """Commit the control status at the moment Stripe would be answering."""
 
         def __call__(self, *args: object, **kwargs: object) -> MagicMock:
             import anyio.from_thread
 
             with anyio.from_thread.start_blocking_portal() as portal:
-                portal.call(_freeze)
-            return freezing_session
+                portal.call(_set_control_status)
+            return controlled_session
 
     with patch(
-        "stripe.identity.VerificationSession.create", side_effect=_FreezeOnCreate()
+        "stripe.identity.VerificationSession.create", side_effect=_SetControlOnCreate()
     ):
         await KYCService().create_verification_session(
             wallet_id, "https://example.test/return"
         )
 
-    assert await _status(wallet_id) == "frozen"
+    assert await _status(wallet_id) == status

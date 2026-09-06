@@ -24,17 +24,12 @@ from ..db.models import WalletModel
 from ..schemas.billing import WalletStatus
 from ..services.notifications import get_notification_service
 from ..core.config import get_settings
+from .wallet_status import SPENDABLE_WALLET_STATUSES
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _ZERO_LIMIT_BREACH_PERCENT = 101.0
-_VELOCITY_FREEZABLE_WALLET_STATUSES = frozenset(
-    {
-        WalletStatus.ACTIVE.value,
-        WalletStatus.PENDING_KYC.value,
-    }
-)
 
 
 def _usage_percentage(spent: Decimal, limit: Decimal) -> float:
@@ -226,9 +221,7 @@ class VelocityMonitor:
                         ColumnElement[bool],
                         WalletModel.wallet_id == wallet_id,
                     ),
-                    cast(Any, WalletModel.status).in_(
-                        tuple(_VELOCITY_FREEZABLE_WALLET_STATUSES)
-                    ),
+                    cast(Any, WalletModel.status).in_(tuple(SPENDABLE_WALLET_STATUSES)),
                 )
                 .values(
                     status=WalletStatus.FROZEN.value,
