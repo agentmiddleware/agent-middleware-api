@@ -18,7 +18,7 @@ failure the trust plane refuses on its side as ``invalid_idempotency_key``.
 Permits
 -------
 One permit per (run, tool). Its idempotency key is ``oai-permit-<run>-<tool>``
-and the permit's ``expires_at`` is recorded in the store before the permit
+and the complete permit request is recorded in the store before the permit
 request goes out, so any later attempt — a retry after a crash, or the next
 tool call in a resumed process — re-sends the identical request and the server
 replays the permit instead of rejecting a fresh timestamp under the same key.
@@ -48,6 +48,16 @@ MAX_IDEMPOTENCY_KEY_LENGTH = 128
 _OPERATION_KEY_PREFIX = "oai-"
 _PERMIT_KEY_PREFIX = "oai-permit-"
 _FUNCTION_NAME_INVALID = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def _validate_identifier(value: str, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-blank string")
+    if not value.isascii() or not value.isprintable() or value.strip() != value:
+        raise ValueError(f"{label} must be printable ASCII with no surrounding whitespace")
+    if len(value) > MAX_IDEMPOTENCY_KEY_LENGTH:
+        raise ValueError(f"{label} is too long (limit {MAX_IDEMPOTENCY_KEY_LENGTH} characters)")
+    return value
 
 
 # ── Tool calls ───────────────────────────────────────────────────────────────
@@ -108,13 +118,7 @@ def normalize_tool_call(tool_call: Any) -> ToolCall:
             "tool call has no id: the model's tool_call.id is the operation identity "
             "and this runner never invents one"
         )
-    if not call_id.isprintable() or call_id.strip() != call_id:
-        raise ValueError("tool call id must be printable with no surrounding whitespace")
-    if len(_OPERATION_KEY_PREFIX) + len(call_id) > MAX_IDEMPOTENCY_KEY_LENGTH:
-        raise ValueError(
-            f"tool call id is too long to serve as an idempotency key (limit "
-            f"{MAX_IDEMPOTENCY_KEY_LENGTH - len(_OPERATION_KEY_PREFIX)} characters)"
-        )
+    operation_key_for(call_id)
     if not isinstance(name, str) or not name.strip():
         raise ValueError("tool call has no function name")
     return ToolCall(id=call_id, name=name, arguments=_parse_arguments(arguments))
@@ -122,7 +126,10 @@ def normalize_tool_call(tool_call: Any) -> ToolCall:
 
 def operation_key_for(tool_call_id: str) -> str:
     """The trust plane ``Idempotency-Key`` for one OpenAI tool call."""
-    return f"{_OPERATION_KEY_PREFIX}{tool_call_id}"
+    _validate_identifier(tool_call_id, "tool call id")
+    return _validate_identifier(
+        f"{_OPERATION_KEY_PREFIX}{tool_call_id}", "operation idempotency key"
+    )
 
 
 def function_name_for(tool_name: str) -> str:
@@ -143,6 +150,7 @@ class OperationRecord:
     permit_idempotency_key: str
     permit_id: str | None = None
     receipt_id: str | None = None
+    wallet_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -156,15 +164,16 @@ class OperationRecord:
 class PermitRecord:
     """The permit request a (run, tool) pair sends, fixed before it is sent.
 
-    The server hashes the whole permit body under the idempotency key, so the
-    ``expires_at`` chosen for the first attempt must be the one every later
-    attempt sends.
+    The server hashes the whole permit body under the idempotency key. The
+    JSON-safe snapshot fixes its wallet, budget, scopes, and expiry across
+    retries, even if a resumed runner has different configuration.
     """
 
     permit_idempotency_key: str
     tool_name: str
     expires_at: str
     permit_id: str | None = None
+    request_payload: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -323,7 +332,8 @@ class GovernedToolRunner:
         run_id: a stable identifier for this agent run (an OpenAI response id,
             thread id, or your own job id). It scopes the per-tool permit key,
             so it must be the *same* string when a crashed run is resumed. A
-            run resumed after its permits expired needs a new ``run_id``.
+            new run with new tool-call IDs is needed for work requiring fresh
+            permits after expiry; recorded calls remain bound to their run.
         key_store: where operation and permit records persist. Defaults to
             in-memory, which is only safe for runs that are never resumed.
         permit_budget / permit_ttl_minutes: the shape of each auto-issued permit.
@@ -341,8 +351,7 @@ class GovernedToolRunner:
     ) -> None:
         if not isinstance(run_id, str):
             raise TypeError("run_id must be a string")
-        if not run_id.strip() or run_id.strip() != run_id or not run_id.isprintable():
-            raise ValueError("run_id must be a non-blank printable string with no surrounding whitespace")
+        _validate_identifier(run_id, "run_id")
         self._client = client
         self._wallet_id = wallet_id
         self._run_id = run_id
@@ -365,6 +374,7 @@ class GovernedToolRunner:
         The returned dict goes straight into ``tools=[...]``. The function
         name is the MCP tool name made OpenAI-legal; the runner maps it back.
         """
+        self.permit_key_for(tool_name)
         function_name = function_name_for(tool_name)
         existing = self._functions.get(function_name)
         if existing is not None and existing != tool_name:
@@ -385,16 +395,16 @@ class GovernedToolRunner:
         }
 
     def tool_name_for(self, function_name: str) -> str:
-        return self._functions.get(function_name, function_name)
+        try:
+            return self._functions[function_name]
+        except KeyError:
+            raise ValueError(f"function {function_name!r} is not registered") from None
 
     def permit_key_for(self, tool_name: str) -> str:
-        key = f"{_PERMIT_KEY_PREFIX}{self._run_id}-{tool_name}"
-        if len(key) > MAX_IDEMPOTENCY_KEY_LENGTH:
-            raise ValueError(
-                f"run_id plus tool name is too long for a permit idempotency key "
-                f"(limit {MAX_IDEMPOTENCY_KEY_LENGTH} characters)"
-            )
-        return key
+        _validate_identifier(tool_name, "tool name")
+        return _validate_identifier(
+            f"{_PERMIT_KEY_PREFIX}{self._run_id}-{tool_name}", "permit idempotency key"
+        )
 
     # -- execution ---------------------------------------------------------
 
@@ -407,25 +417,50 @@ class GovernedToolRunner:
         """
         call = normalize_tool_call(tool_call)
         tool_name = self.tool_name_for(call.name)
+        operation_key = operation_key_for(call.id)
+        permit_key = self.permit_key_for(tool_name)
 
         record = self._key_store.get_operation(call.id)
         if record is None:
             record = OperationRecord(
                 tool_call_id=call.id,
                 tool_name=tool_name,
-                idempotency_key=operation_key_for(call.id),
-                permit_idempotency_key=self.permit_key_for(tool_name),
+                idempotency_key=operation_key,
+                permit_idempotency_key=permit_key,
+                wallet_id=self._wallet_id,
             )
-            # Durable before any network call: a crash from here on resumes
-            # with the same key, not a fresh one.
-            self._key_store.put_operation(record)
         elif record.tool_name != tool_name:
             raise ValueError(
                 f"tool call {call.id!r} was first recorded for tool {record.tool_name!r}; "
                 f"refusing to replay it as {tool_name!r}"
             )
+        if (
+            record.tool_call_id != call.id
+            or record.idempotency_key != operation_key
+            or record.permit_idempotency_key != permit_key
+        ):
+            raise ValueError("recorded operation identity does not match this call, run, and tool")
+        if record.wallet_id is not None and record.wallet_id != self._wallet_id:
+            raise ValueError("operation was recorded for a different wallet")
 
-        permit_id = await self._ensure_permit(record)
+        permit = self._key_store.get_permit(record.permit_idempotency_key)
+        if permit is not None:
+            if permit.permit_idempotency_key != permit_key or permit.tool_name != tool_name:
+                raise ValueError("recorded permit identity does not match this run and tool")
+            if permit.request_payload is not None:
+                if any(
+                    permit.request_payload.get(field) != self._wallet_id
+                    for field in ("issuer_wallet_id", "subject_wallet_id")
+                ):
+                    raise ValueError("permit request was recorded for a different wallet")
+            elif permit.permit_id is None:
+                raise ValueError(
+                    "incomplete legacy permit has no request snapshot; cannot safely resume"
+                )
+
+        # Durable before any network call, after local validation succeeds.
+        self._key_store.put_operation(record)
+        permit_id = await self._ensure_permit(record, permit)
         result = await self._client.invoke_tool(
             tool_name,
             call.arguments,
@@ -446,28 +481,36 @@ class GovernedToolRunner:
         """Execute a message's tool calls in order; each is its own action."""
         return [await self.run(tool_call) for tool_call in tool_calls]
 
-    async def _ensure_permit(self, record: OperationRecord) -> str:
+    async def _ensure_permit(self, record: OperationRecord, permit: PermitRecord | None) -> str:
         if record.permit_id:
             return record.permit_id
-        permit = self._key_store.get_permit(record.permit_idempotency_key)
         if permit is None:
             # Fixed and persisted before the request so every later attempt
             # under this key sends the identical body.
-            permit = PermitRecord(
-                permit_idempotency_key=record.permit_idempotency_key,
-                tool_name=record.tool_name,
-                expires_at=(datetime.now(UTC) + self._permit_ttl).isoformat(),
-            )
-            self._key_store.put_permit(permit)
-        if permit.permit_id is None:
             request = PermitRequest(
                 issuer_wallet_id=self._wallet_id,
                 subject_wallet_id=self._wallet_id,
                 max_credits=self._permit_budget,
-                expires_at=datetime.fromisoformat(permit.expires_at),
-                allowed_tools=[permit.tool_name],
-                scopes=[f"tool:{permit.tool_name}:invoke", "billing:charge"],
+                expires_at=datetime.now(UTC) + self._permit_ttl,
+                allowed_tools=[record.tool_name],
+                scopes=[f"tool:{record.tool_name}:invoke", "billing:charge"],
             )
+            permit = PermitRecord(
+                permit_idempotency_key=record.permit_idempotency_key,
+                tool_name=record.tool_name,
+                expires_at=request.expires_at.isoformat(),
+                request_payload=request.to_payload(),
+            )
+            self._key_store.put_permit(permit)
+        if permit.permit_id is None:
+            if permit.request_payload is None:
+                raise ValueError(
+                    "incomplete legacy permit has no request snapshot; cannot safely resume"
+                )
+            payload = dict(permit.request_payload)
+            payload["max_credits"] = Decimal(payload["max_credits"])
+            payload["expires_at"] = datetime.fromisoformat(payload["expires_at"])
+            request = PermitRequest(**payload)
             created = await self._client.create_permit(
                 request, idempotency_key=permit.permit_idempotency_key
             )
