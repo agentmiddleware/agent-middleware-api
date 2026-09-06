@@ -11,8 +11,9 @@ the one-tool pilot funnel and through the static pointer files.
 ## Launch gate
 
 Pilot intake is email-first: a prospect emails the tool scenario (the tool or
-action, what goes wrong on retry, and how they currently check whether the
-action happened, with synthetic or redacted examples only) and gets a written
+action, what goes wrong on retry, how they currently check whether the
+action happened, the cost of one duplicate or unproven call, and the budget
+owner and decision date, with synthetic or redacted examples only) and gets a written
 reply. A call happens only when a scenario needs one. The deploy build
 therefore refuses to emit `dist/` until both required values are provided:
 
@@ -33,6 +34,43 @@ and validates a booking URL as strictly as before whenever one is supplied.
 These inputs must still be exercised manually before production because
 syntax validation cannot prove that a mailbox is monitored or a booking
 calendar works.
+
+Primary pilot links open a draft with the five intake questions; the builder
+URL-encodes the subject, body, and address. No email is sent by the site.
+Optional booking links identify the accountable contact and product. When the
+configured URL is on `calendly.com/regengine/`, the note explains the RegEngine
+calendar name. That note disappears with the booking block in email-only builds.
+
+The offer is a paid, bounded one-tool staging pilot with setup and recurring
+service quoted separately after qualification. No fixed price is published.
+The scope includes a partner-owned acceptance flow, onboarding and operating
+measurements, and an end date with a named renewal decision owner.
+
+## Economic fit
+
+`/#economic-fit` uses `/pilot-fit.js` to estimate monthly avoided duplicate loss
+from actions, baseline duplicate percentage, actual loss per duplicate, and
+expected reduction. Inputs start blank; there is no assumed performance or
+price. An optional total monthly cost enables a break-even comparison and
+loss-per-duplicate threshold. Include the service quote, buyer operations, and
+amortized setup/integration costs. Unknown cost stays unqualified; zero avoided
+duplicates never produces an infinite threshold or a positive fit recommendation.
+Values stay in the page: no storage, network request, analytics payload, or
+automatic inclusion in an email. The formula and an explicitly illustrative
+example remain readable without JavaScript. The $35 example is conditional on
+100,000 actions, 0.1% duplicates, 80% reduction, and $2,800 total monthly cost;
+it is neither a universal threshold nor a service quote.
+
+Browser regression checks use the existing optional Playwright tooling after
+building and serving `dist` locally:
+
+```bash
+node tests/test_site_pilot_fit.mjs http://127.0.0.1:8765 /absolute/path/to/playwright/index.mjs
+```
+
+Run this command from the repository root. The optional second argument locates
+an already installed Playwright module outside normal Node resolution. No
+additional runtime dependency is required by the website.
 
 ```bash
 cd site
@@ -154,8 +192,8 @@ If you ever add an executable inline `<script>` to a page, the CSP will block
 it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
-CSS and JS are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-16`. When you
+The shared CSS and JS assets are served with `max-age=604800`, so cache busting is a **manual
+query token**: every reference looks like `/styles.css?v=gateway-17`. When you
 change any of those files (including `/wave.js`, `/arcade-boot.js`,
 `/arcade.js`, and `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
@@ -166,12 +204,19 @@ keep the old bytes for up to a week. HTML itself carries no long-lived
 stylesheet uses an independent `?v=concept-N` token: bump it when
 `concept/concept.css` changes.
 
+The pilot calculator uses its own `?v=pilot-2` token and the default revalidating
+cache policy; bump its token when `pilot-fit.js` changes.
+
 Explicit `/proof` → `/proof/` and `/compare` → `/compare/` redirects match
 those pages' `rel="canonical"`. Every directory page needs its own entry. Do **not** replace it with the global `trailingSlash: true`
 setting: on Vercel that makes every `/.well-known/*` entry in `headers` stop
 matching, so `agent.json` and `security.txt` silently fall back to
 `max-age=0, must-revalidate` while every other configured path keeps its
 headers. Confirmed on the deployed site.
+
+`/pilot` and `/pilot/` redirect to `/#pilot`. The configuration is checked by the
+site contract tests; verify the HTTP redirect after deployment because the
+plain Python preview server does not implement Vercel routing rules.
 
 The proof page reads fields from `/proof/receipt.json`; it does not hard-code a
 receipt ID, amount, or verification verdict. If either proof file is absent or
