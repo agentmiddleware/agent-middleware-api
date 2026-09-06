@@ -21,8 +21,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from app.db.database import get_session_factory
+from app.db.database import get_engine, get_session_factory
 from app.db.models import WalletModel
 from app.services.kyc_service import KYCService
 
@@ -147,14 +149,23 @@ async def test_a_control_status_landing_during_the_stripe_call_survives(
     write time, not by the copy this request read.
     """
     wallet_id = await _seed_wallet("active", "pending")
+    app_engine = get_engine()
+    assert app_engine is not None
+    database_url = app_engine.url
 
     async def _set_control_status() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            async with session.begin():
-                wallet = await session.get(WalletModel, wallet_id)
-                assert wallet is not None
-                wallet.status = status
+        # The blocking portal owns another event loop. Its independent writer
+        # must not borrow asyncpg connections created on the application loop.
+        engine = create_async_engine(database_url, poolclass=NullPool)
+        try:
+            factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with factory() as session:
+                async with session.begin():
+                    wallet = await session.get(WalletModel, wallet_id)
+                    assert wallet is not None
+                    wallet.status = status
+        finally:
+            await engine.dispose()
 
     controlled_session = _stripe_session()
 

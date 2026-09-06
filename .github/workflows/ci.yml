@@ -348,6 +348,24 @@ jobs:
           alembic upgrade head
           python scripts/demo_trust_plane.py --assert
 
+      - name: Run wallet status guards against Postgres
+        # Keep asyncpg's pool and test fixtures on one loop. The KYC race
+        # helper owns its separate-loop connection rather than borrowing it.
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          STATE_BACKEND: postgres
+          ENVIRONMENT: test
+        run: |
+          pytest -p no:anyio \
+            -o asyncio_default_fixture_loop_scope=session \
+            -o asyncio_default_test_loop_scope=session \
+            tests/test_wallet_spendable_status.py \
+            tests/test_kyc_status_authority.py \
+            tests/test_velocity_monitor.py::TestVelocityFreezeStatusGuard \
+            tests/test_wallet_status_enforcement.py::test_unknown_wallet_status_fails_closed_for_charge \
+            tests/test_governed_debit_dispatch_fence.py::test_freeze_notification_observes_committed_governed_state \
+            -q --tb=short
+
   # Production-like trust flags (default conftest stays permissive for unit speed).
   production_trust:
     runs-on: ubuntu-latest
