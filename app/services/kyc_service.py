@@ -25,21 +25,13 @@ from ..db.models import KYCVerificationModel, WalletModel
 from ..core.config import get_settings
 from ..schemas.billing import KYCStatus, WalletStatus
 from .agent_money import WalletNotFoundError
+from .wallet_status import SPENDABLE_WALLET_STATUSES
 
 logger = logging.getLogger(__name__)
 
-# Statuses a KYC session must never overwrite: each was set by a control that
-# KYC does not own -- the velocity anomaly freeze, an operator suspension, or
-# wallet closure.
-_NON_SPENDABLE_WALLET_STATUSES = (
-    WalletStatus.FROZEN.value,
-    WalletStatus.SUSPENDED.value,
-    WalletStatus.CLOSED.value,
-)
-
-# ...with one exception: a suspension KYC itself imposed. handle_rejected and
-# handle_expired below suspend the wallet, so re-verifying is the documented
-# way out of that state and must stay reachable.
+# KYC may reclaim a suspension it imposed, in addition to already-spendable
+# statuses. handle_rejected and handle_expired below suspend the wallet, so
+# re-verifying is the documented way out and must stay reachable.
 _KYC_OWNED_SUSPENSION_REASONS = ("rejected", "expired")
 settings = get_settings()
 
@@ -191,8 +183,8 @@ class KYCService:
                 .where(
                     cast(Any, WalletModel.wallet_id) == wallet_id,
                     or_(
-                        cast(Any, WalletModel.status).notin_(
-                            _NON_SPENDABLE_WALLET_STATUSES
+                        cast(Any, WalletModel.status).in_(
+                            tuple(SPENDABLE_WALLET_STATUSES)
                         ),
                         and_(
                             cast(Any, WalletModel.status)
