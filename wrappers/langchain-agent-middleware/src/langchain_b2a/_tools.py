@@ -94,19 +94,18 @@ def create_mcp_tool(
             }
         )
 
+    # call_mcp is async, so it must go in the coroutine slot; passing it as
+    # func makes ainvoke return an un-awaited coroutine object instead of a result.
+    # The argument schema is inferred from call_mcp's signature: an explicit
+    # args_schema dict must be JSON Schema, and a dict of Python types breaks
+    # tool.args and LLM tool binding.
     return StructuredTool.from_function(
-        func=call_mcp,
+        coroutine=call_mcp,
         name="mcp_tool_call",
         description="Call a Model Context Protocol (MCP) tool from Agent Middleware API. "
         "Use this to access billable services like data indexing, content generation, etc. "
         "Returns signed receipts for all invocations. "
         "Requires both idempotency_key and permit_idempotency_key for safe replay.",
-        args_schema={
-            "tool_name": str,
-            "idempotency_key": str,
-            "permit_idempotency_key": str,
-            "arguments": dict,
-        },
     )
 
 
@@ -119,7 +118,7 @@ def create_wallet_tool(client: B2AClient, *, wallet_id: str) -> StructuredTool:
         return f"Balance: {balance} credits"
 
     return StructuredTool.from_function(
-        func=get_balance,
+        coroutine=get_balance,
         name="wallet_balance",
         description="Get the current wallet balance from Agent Middleware API.",
     )

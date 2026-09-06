@@ -11,7 +11,11 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "b2a-sdk>=0.3.0",
-    "autogen-agentchat>=0.2.0",
+    # AG2 Classic: the maintained distribution of the legacy AutoGen 0.2 API that
+    # provides `import autogen` and `ConversableAgent.register_function`, which
+    # this wrapper targets. `autogen-agentchat` (0.4+ rewrite) and `ag2>=1.0`
+    # (`import ag2`) are different APIs and do not ship the `autogen` module.
+    "autogen>=0.10.0",
     "httpx>=0.25.0",
 ]
 

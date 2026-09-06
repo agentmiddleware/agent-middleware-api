@@ -11,6 +11,58 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🧩 OpenAI wrapper: the model's `tool_call.id` is the operation identity
+
+- **`wrappers/openai-agent-middleware` drives OpenAI function calling and the
+  Responses / Agents SDK through the governed permit → invoke → receipt
+  loop, and never invents a replay key.** Every tool call OpenAI emits
+  carries an id that is assigned once and lives in the transcript the
+  application already persists, so a retry of the same call after a dropped
+  connection, a crashed worker, or a resumed run carries the same id. The
+  runner derives the trust plane's `Idempotency-Key` from it (`oai-<id>`),
+  writes that derivation to an `OperationKeyStore` before the first network
+  call, and refuses a tool call that has no id rather than minting a key
+  that would turn the retry into a second charged action. One permit is
+  issued per `(run_id, tool)` under a stable key with its `expires_at`
+  recorded before the request, so a retried permit request is byte-identical
+  and the server replays it instead of rejecting it. Source-only like the
+  other wrappers, no `openai` dependency (it accepts the SDK's tool-call
+  objects and plain dicts), and not exercised against a live OpenAI model
+  in this repository's CI. `tests/test_openai_wrapper_trust_loop.py` drives
+  the runner against the real application in-process: a retried tool call,
+  including from a resumed process on the same store, returns the original
+  signed receipt, and the wallet is debited once per distinct tool call.
+- **`tests/test_mcp_legacy_envelope_validation.py` docstring corrected.** It
+  listed a missing `jsonrpc` member as refused; only a stated version other
+  than `"2.0"` is refused, and the version-less legacy envelope stays
+  accepted, as the module's own control test pins.
+
+### 🔒 Transport hardening on top of the replay-key, envelope, and strict-parse fixes
+
+- **Every explicitly supplied key source is read.** `POST /mcp` treats a
+  legacy-shaped `params.mcpContext.idempotency_key` as a key source
+  (validated and conflict-checked like the header and `_meta`) instead of
+  silently running such a call un-keyed twice; a non-object `mcpContext`
+  is invalid params. An `Idempotency-Key` header is decoded as UTF-8 and
+  nothing else, on the MCP and governed AWI surfaces alike: a non-ASCII key
+  no longer conflicts with the identical key sent in the body or trips the
+  control-character check on its continuation bytes, and a header whose
+  bytes are not UTF-8 is refused (`idempotency_key_not_utf8`) rather than
+  read as latin-1, so two different wire values can never alias to one key.
+- The adapter recognises a JSON-RPC envelope by its protocol members
+  (`method`, `jsonrpc`) and otherwise unwraps only an object with no
+  top-level tool `name`, so a `tools/call` whose params contain a key named
+  `params` is no longer misrouted while an envelope that also carries a
+  stray top-level `name` still is one. A legacy REST invoke whose
+  `arguments.wallet_id` is not a string is a 400, not a validation error
+  raised inside the handler.
+- Site: the machine-pointer files (`llm.txt`, `llms.txt`, `llms-full.txt`)
+  render the published receipt's issue date from the bundle at build time
+  like the HTML pages do, instead of describing it as live gateway proof;
+  the optional booking-block markers accept CRLF line endings and a closing
+  marker at end of file. (`tests/test_mcp_transport_hardening.py`,
+  `docs/failure-semantics.md` "What counts as a key".)
+
 ### 🔒 A present-but-unusable replay key is refused, never replaced
 
 - **`POST /mcp` no longer generates a key on the caller's behalf when the

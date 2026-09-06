@@ -479,7 +479,7 @@ Static test-count and coverage badges are intentionally avoided because they bec
 | [`scripts/`](scripts/) | Reproducible demos, release gates, OpenAPI export, and operator helpers |
 | [`tests/`](tests/) | Product, negative-path, concurrency, and proof-surface tests |
 | [`b2a_sdk/`](b2a_sdk/) | Python trust SDK 0.5.0 source and release build |
-| [`wrappers/`](wrappers/) | LangChain, CrewAI, and AutoGen wrapper packages driving the governed permit → invoke → receipt flow; source-only, not published to any index |
+| [`wrappers/`](wrappers/) | LangChain, CrewAI, AutoGen, and OpenAI (function calling / Agents SDK) wrapper packages driving the governed permit → invoke → receipt flow; source-only, not published to any index |
 | [`awi_sdk/`](awi_sdk/) | Agentic Web Interface SDK sources (Python and TypeScript); frozen proof surface, not published |
 | [`framework_integrations/`](framework_integrations/) | Source examples for agent frameworks; not published packages |
 | [`site/`](site/) | Static marketing and discovery pointer site |

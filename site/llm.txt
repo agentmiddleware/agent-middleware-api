@@ -55,8 +55,8 @@ The public proof page is:
 
 https://www.thisisatest.tech/proof/
 
-It labels the evidence as self-issued live gateway proof, not customer
-traction. The exact portable receipt and matching key snapshot can be checked
+It labels the evidence as a self-issued sample issued on @@PROOF_RECEIPT_ISSUED@@,
+not customer traction and not a test of the deployment running today. The exact portable receipt and matching key snapshot can be checked
 offline with the repository SDK verifier. The receipt, key files, and verifier
 source are public.
 

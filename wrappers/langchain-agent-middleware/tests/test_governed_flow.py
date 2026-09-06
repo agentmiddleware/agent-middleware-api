@@ -31,20 +31,25 @@ def _permit_payload() -> dict:
 
 
 def _receipt_payload(outcome: str = "success") -> dict:
+    # Mirrors the receipt shape b2a_sdk.models.Receipt.from_dict requires
+    # (see b2a_sdk/tests/test_trust_client.py).
     return {
         "receipt_id": f"receipt-{outcome}",
-        "dispatch_attempt_id": "dispatch-1",
-        "idempotency_key": "invoke-key-1",
         "permit_id": "permit-1",
         "wallet_id": "wallet-1",
-        "service": "partner.search",
+        "key_id": "key-1",
+        "tool": "partner.search",
+        "request_hash": "request-hash",
+        "response_hash": "response-hash",
+        "ledger_entry_id": "ledger-1",
+        "dispatch_attempt_id": "dispatch-1",
+        "credits_authorized": "2",
         "credits_charged": "2",
         "outcome": outcome,
+        "audit_event_id": "audit-1",
+        "created_at": datetime.now(UTC).isoformat(),
         "signature": f"sig-{outcome}",
-        "key_id": "key-1",
-        "ledger_entry_id": "ledger-1",
-        "dispatched_at": datetime.now(UTC).isoformat(),
-        "completed_at": datetime.now(UTC).isoformat(),
+        "signature_key_id": "signing-key-1",
     }
 
 
@@ -89,24 +94,28 @@ async def test_mcp_tool_requires_idempotency_key():
     tools = get_mcp_tools(client, wallet_id="wallet-1")
     tool = tools[0]
 
-    result = await tool.ainvoke({
-        "tool_name": "partner.search",
-        "idempotency_key": "invoke-key-1",
-        "permit_idempotency_key": "permit-invoke-key-1",
-        "arguments": {"query": "test"},
-    })
+    result = await tool.ainvoke(
+        {
+            "tool_name": "partner.search",
+            "idempotency_key": "invoke-key-1",
+            "permit_idempotency_key": "permit-invoke-key-1",
+            "arguments": {"query": "test"},
+        }
+    )
 
     assert permit_called
     assert invoke_called
     assert "receipt-success" in result
 
     with pytest.raises(ValueError, match="must not be blank"):
-        await tool.ainvoke({
-            "tool_name": "partner.search",
-            "idempotency_key": "   ",
-            "permit_idempotency_key": "permit-key",
-            "arguments": {},
-        })
+        await tool.ainvoke(
+            {
+                "tool_name": "partner.search",
+                "idempotency_key": "   ",
+                "permit_idempotency_key": "permit-key",
+                "arguments": {},
+            }
+        )
 
     await client.close()
 
@@ -144,19 +153,23 @@ async def test_replay_with_same_idempotency_key_returns_cached_receipt():
     tools = get_mcp_tools(client, wallet_id="wallet-1")
     tool = tools[0]
 
-    result1 = await tool.ainvoke({
-        "tool_name": "partner.search",
-        "idempotency_key": "replay-key",
-        "permit_idempotency_key": "permit-replay-key",
-        "arguments": {"query": "first"},
-    })
+    result1 = await tool.ainvoke(
+        {
+            "tool_name": "partner.search",
+            "idempotency_key": "replay-key",
+            "permit_idempotency_key": "permit-replay-key",
+            "arguments": {"query": "first"},
+        }
+    )
 
-    result2 = await tool.ainvoke({
-        "tool_name": "partner.search",
-        "idempotency_key": "replay-key",
-        "permit_idempotency_key": "permit-replay-key",
-        "arguments": {"query": "second"},
-    })
+    result2 = await tool.ainvoke(
+        {
+            "tool_name": "partner.search",
+            "idempotency_key": "replay-key",
+            "permit_idempotency_key": "permit-replay-key",
+            "arguments": {"query": "second"},
+        }
+    )
 
     assert call_count["permit"] >= 1
     assert call_count["invoke"] >= 1
@@ -169,6 +182,7 @@ async def test_replay_with_same_idempotency_key_returns_cached_receipt():
 @pytest.mark.asyncio
 async def test_signed_receipt_returned():
     """Test that signed receipts are returned with signature and credits charged."""
+
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/permits":
             return httpx.Response(201, json=_permit_payload())
@@ -195,12 +209,14 @@ async def test_signed_receipt_returned():
     tools = get_mcp_tools(client, wallet_id="wallet-1")
     tool = tools[0]
 
-    result = await tool.ainvoke({
-        "tool_name": "partner.search",
-        "idempotency_key": "signed-key",
-        "permit_idempotency_key": "permit-signed-key",
-        "arguments": {},
-    })
+    result = await tool.ainvoke(
+        {
+            "tool_name": "partner.search",
+            "idempotency_key": "signed-key",
+            "permit_idempotency_key": "permit-signed-key",
+            "arguments": {},
+        }
+    )
 
     result_dict = eval(result)
     assert "receipt_id" in result_dict
@@ -221,12 +237,14 @@ async def test_missing_idempotency_key_rejected():
     tool = tools[0]
 
     with pytest.raises(ValueError, match="required"):
-        await tool.ainvoke({
-            "tool_name": "partner.search",
-            "idempotency_key": "",
-            "permit_idempotency_key": "permit-key",
-            "arguments": {},
-        })
+        await tool.ainvoke(
+            {
+                "tool_name": "partner.search",
+                "idempotency_key": "",
+                "permit_idempotency_key": "permit-key",
+                "arguments": {},
+            }
+        )
 
     await client.close()
 
@@ -275,20 +293,24 @@ async def test_permit_cache_prevents_duplicate_create_permit():
     tool = tools[0]
 
     # First call: creates permit
-    result1 = await tool.ainvoke({
-        "tool_name": "partner.search",
-        "idempotency_key": "invoke-1",
-        "permit_idempotency_key": "permit-cache-test",
-        "arguments": {},
-    })
+    result1 = await tool.ainvoke(
+        {
+            "tool_name": "partner.search",
+            "idempotency_key": "invoke-1",
+            "permit_idempotency_key": "permit-cache-test",
+            "arguments": {},
+        }
+    )
 
     # Replay: reuses cached permit (does NOT call create_permit again)
-    result2 = await tool.ainvoke({
-        "tool_name": "partner.search",
-        "idempotency_key": "invoke-2",  # different invoke key
-        "permit_idempotency_key": "permit-cache-test",  # SAME permit key
-        "arguments": {},
-    })
+    result2 = await tool.ainvoke(
+        {
+            "tool_name": "partner.search",
+            "idempotency_key": "invoke-2",  # different invoke key
+            "permit_idempotency_key": "permit-cache-test",  # SAME permit key
+            "arguments": {},
+        }
+    )
 
     # Verify: create_permit called only ONCE (cached on second call)
     assert permit_create_count["count"] == 1, "create_permit should be called once and cached"

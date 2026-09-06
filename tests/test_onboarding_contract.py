@@ -125,6 +125,7 @@ UNPUBLISHED_DISTRIBUTIONS = (
     "langchain-agent-middleware",
     "crewai-agent-middleware",
     "autogen-agent-middleware",
+    "openai-agent-middleware",
     "b2a-sdk",
 )
 
