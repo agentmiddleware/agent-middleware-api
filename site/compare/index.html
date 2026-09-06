@@ -114,14 +114,14 @@
     </script>
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-16" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-17" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-16"></script>
+    <script src="/a11y-preload.js?v=gateway-17"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/analytics.js?v=gateway-16"></script>
-    <script defer src="/a11y.js?v=gateway-16"></script>
+    <script defer src="/analytics.js?v=gateway-17"></script>
+    <script defer src="/a11y.js?v=gateway-17"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -136,7 +136,7 @@
         <a href="/#machine-discovery">Machine discovery</a>
         <a
           class="nav-agent"
-          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          href="@@PILOT_EMAIL_HREF@@"
           data-analytics-event="email_click"
           aria-label="Start a pilot by email (opens your mail app)"
           >Start a pilot by email</a
@@ -500,14 +500,17 @@
           <div class="closing-cta">
             <h2>Still think it fits?</h2>
             <p>
-              Email one governed action on a tool you already run. You get a
-              written answer on fit, and if it fits, a receipt you can verify
-              without us. A call is available only when a scenario needs one.
+              The pilot is paid, bounded to one tool, and priced after fit is
+              established. Email the action, retry failure, current evidence,
+              cost of one duplicate, budget owner, and decision date. You get a
+              written answer on fit. A call is available only when a scenario
+              needs one. <a href="/#economic-fit">Estimate economic fit</a> and
+              <a href="/#pilot">read the pilot scope</a> before writing.
             </p>
             <div class="pilot-links">
               <a
                 class="button button-primary"
-                href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+                href="@@PILOT_EMAIL_HREF@@"
                 data-analytics-event="email_click"
                 aria-label="Start a pilot by email (opens your mail app)"
                 >Start a pilot by email</a
@@ -527,6 +530,7 @@
                 aria-label="Book a call if your scenario needs one (opens in a new tab)"
                 >Book a call if your scenario needs one <span aria-hidden="true">↗</span></a
               >
+              <span class="booking-context">@@BOOKING_CONTEXT@@</span>
               <!-- booking:end -->
             </div>
           </div>
@@ -543,7 +547,7 @@
         <p>Human contact</p>
         <a
           class="button button-primary"
-          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
+          href="@@PILOT_EMAIL_HREF@@"
           data-analytics-event="email_click"
           aria-label="Start a pilot by email (opens your mail app)"
           >Start a pilot by email</a
@@ -563,6 +567,7 @@
           aria-label="Book a call if your scenario needs one (opens in a new tab)"
           >Book a call if your scenario needs one</a
         >
+        <span class="booking-context">@@BOOKING_CONTEXT@@</span>
         <!-- booking:end -->
         <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
       </div>

@@ -1213,7 +1213,7 @@ main,
   font-size: 1.05rem;
 }
 
-/* The three intake fields a prospect emails; plain language, one per line. */
+/* The intake fields a prospect emails; plain language, one per line. */
 .intake-list {
   display: grid;
   gap: 0.6rem;
@@ -1235,6 +1235,92 @@ main,
   align-items: center;
   gap: 1.25rem;
   margin-top: 1.75rem;
+}
+
+.booking-context {
+  flex-basis: 100%;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.pilot-copy h3 {
+  margin-top: 2rem;
+}
+
+.pilot-fit {
+  margin-top: 2.5rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.pilot-fit p {
+  max-width: 75ch;
+  color: var(--text-dim);
+}
+
+.fit-fields:not([hidden]) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  min-width: 0;
+  margin: 1.5rem 0;
+  padding: 0;
+  border: 0;
+}
+
+.fit-fields legend {
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.fit-fields label {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+}
+
+.fit-fields input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.6rem;
+  border: 1px solid var(--text-dim);
+  border-radius: var(--radius-xs);
+  background: var(--ink);
+  color: var(--text);
+  font: inherit;
+}
+
+.fit-fields input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.fit-fields label span {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.fit-result {
+  border-top: 1px solid var(--line-strong);
+  padding-top: 1rem;
+}
+
+.fit-result [data-fit-summary] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.fit-example summary {
+  min-height: 44px;
+  padding: 0.65rem 0;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .fit-fields:not([hidden]) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .machine-heading p:not(.section-kicker) {

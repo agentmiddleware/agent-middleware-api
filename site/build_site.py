@@ -26,7 +26,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 
 SITE_ROOT = Path(__file__).resolve().parent
@@ -41,6 +41,20 @@ CONTACT_FIELDS = {
     "@@PUBLIC_CONTACT_EMAIL@@": "PUBLIC_CONTACT_EMAIL",
 }
 BOOKING_TOKEN = "@@PUBLIC_BOOKING_URL@@"
+BOOKING_CONTEXT_TOKEN = "@@BOOKING_CONTEXT@@"
+PILOT_EMAIL_TOKEN = "@@PILOT_EMAIL_HREF@@"
+PILOT_EMAIL_BODY = """One-tool paid pilot enquiry
+
+1. Tool or action (synthetic or redacted only):
+2. What goes wrong on retry:
+3. How we check whether the action ran:
+4. Cost of one duplicate or unproven call (money, recovery hours, or customer consequence; measured or estimated):
+5. Budget owner and target decision date:
+
+Optional workflow assumptions: monthly actions, baseline duplicate rate, expected reduction, and total monthly cost.
+
+Do not include production secrets, credentials, or customer data.
+"""
 BOOKING_FIELD = "PUBLIC_BOOKING_URL"
 # Markup that only makes sense with a booking link sits between these two
 # comments. When no link is configured the whole block is removed, so the
@@ -66,7 +80,7 @@ ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
 # The queue shim lives in /va-init.js rather than an inline <script> so the
 # deployed Content-Security-Policy can stay script-src 'self' with no
 # 'unsafe-inline'. It must load before the insights script reads window.vaq.
-ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-16"></script>
+ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-17"></script>
     <script defer src="/_vercel/insights/script.js"></script>"""
 BUILD_DATE_TOKEN = "@@BUILD_DATE@@"
 FAQ_JSONLD_TOKEN = "@@FAQ_JSONLD@@"
@@ -110,6 +124,7 @@ COPY_ASSETS = (
     "fonts",
     "fonts.css",
     "analytics.js",
+    "pilot-fit.js",
     "compare",
     "concept",
     "favicon.svg",
@@ -787,6 +802,25 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
     markup_replacements = validated_contacts(environment)
     text_replacements = validated_contacts(environment, escape_markup=False)
     with_booking = booking_configured(environment)
+    booking = urlparse(text_replacements.get(BOOKING_TOKEN, ""))
+    name = text_replacements["@@PUBLIC_DISPLAY_NAME@@"]
+    booking_context = f"Agent Middleware API calls are with {name}."
+    if booking.hostname == "calendly.com" and booking.path.split("/")[1:2] == [
+        "regengine"
+    ]:
+        booking_context += " The booking page uses their RegEngine calendar."
+    markup_replacements[BOOKING_CONTEXT_TOKEN] = html.escape(
+        booking_context, quote=True
+    )
+    pilot_email = (
+        "mailto:"
+        + quote(text_replacements["@@PUBLIC_CONTACT_EMAIL@@"], safe="@")
+        + "?subject="
+        + quote("One-tool paid pilot enquiry", safe="")
+        + "&body="
+        + quote(PILOT_EMAIL_BODY, safe="")
+    )
+    markup_replacements[PILOT_EMAIL_TOKEN] = html.escape(pilot_email, quote=True)
     timestamps = _build_timestamps()
     markup_replacements.update(timestamps)
     text_replacements.update(timestamps)

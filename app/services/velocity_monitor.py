@@ -12,7 +12,7 @@ Architecture:
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +21,10 @@ from sqlalchemy.sql.elements import ColumnElement
 from ..core.time import to_naive_utc, utc_now
 from ..db.database import get_session_factory
 from ..db.models import WalletModel
+from ..schemas.billing import WalletStatus
 from ..services.notifications import get_notification_service
 from ..core.config import get_settings
+from .wallet_status import SPENDABLE_WALLET_STATUSES
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -203,22 +205,37 @@ class VelocityMonitor:
             daily_limit=daily_limit,
             charge_amount=charge_amount,
         )
+        velocity_result.hourly_reset_at = recorded_hourly_reset_at
+        velocity_result.daily_reset_at = recorded_daily_reset_at
 
         if velocity_result.should_freeze:
-            # Guard the freeze with a source-state predicate. A wallet that a
-            # stronger control already moved out of "active" (closed, suspended,
-            # or pending_kyc) must not be clobbered to "frozen": an operator
-            # could later lift that freeze and restore spendability the stronger
-            # control had permanently removed. An already-frozen wallet needs no
-            # rewrite. The velocity trip still denies this call regardless.
-            if wallet.status == "active":
-                wallet.status = "frozen"
-                wallet.velocity_alerts_triggered += 1
-                # The billing writer can issue relative SQL updates and refresh
-                # the wallet before this caller-owned transaction commits. Flush
-                # these ORM-only control mutations first so that refresh cannot
-                # discard the freeze or alert checkpoint.
-                await session.flush()
+            # Velocity owns transitions from the two spendable states into
+            # ``frozen``. It does not own an operator suspension, closure, or a
+            # future control state. Decide that authority at write time so
+            # SQLite's no-op ``FOR UPDATE`` cannot let a stale ORM object
+            # overwrite a stronger state committed concurrently.
+            frozen = await session.execute(
+                sa_update(WalletModel)
+                .where(
+                    cast(
+                        ColumnElement[bool],
+                        WalletModel.wallet_id == wallet_id,
+                    ),
+                    cast(Any, WalletModel.status).in_(tuple(SPENDABLE_WALLET_STATUSES)),
+                )
+                .values(
+                    status=WalletStatus.FROZEN.value,
+                    velocity_alerts_triggered=(
+                        WalletModel.velocity_alerts_triggered + 1
+                    ),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            freeze_applied = (cast(Any, frozen).rowcount or 0) == 1
+            await session.refresh(wallet)
+            if not freeze_applied:
+                velocity_result.should_freeze = False
+                return velocity_result
             logger.warning(
                 f"Auto-freezing wallet {wallet_id}: "
                 f"hourly_spent={wallet.hourly_spent}, "
@@ -238,8 +255,6 @@ class VelocityMonitor:
             wallet.velocity_alerts_triggered += 1
             await session.flush()
 
-        velocity_result.hourly_reset_at = recorded_hourly_reset_at
-        velocity_result.daily_reset_at = recorded_daily_reset_at
         return velocity_result
 
     async def notify_committed_freeze(self, wallet_id: str) -> None:
