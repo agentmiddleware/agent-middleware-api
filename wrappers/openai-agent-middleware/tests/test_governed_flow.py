@@ -22,6 +22,8 @@ from openai_b2a import (
     GovernedToolRunner,
     InMemoryOperationKeyStore,
     JsonFileOperationKeyStore,
+    OperationRecord,
+    PermitRecord,
     normalize_tool_call,
 )
 from openai_b2a.runner import function_name_for
@@ -156,7 +158,10 @@ async def test_retrying_the_same_tool_call_is_one_action():
     second = await runner.run(_chat_tool_call("call_abc123"))
 
     assert first.receipt.receipt_id == second.receipt.receipt_id
-    keys = {json.loads(r.content)["params"]["mcpContext"]["idempotency_key"] for r in plane.invoke_requests}
+    keys = {
+        json.loads(r.content)["params"]["mcpContext"]["idempotency_key"]
+        for r in plane.invoke_requests
+    }
     assert keys == {"oai-call_abc123"}, "a retry must never carry a fresh key"
     assert len(plane.permit_requests) == 1, "the recorded permit is reused, not re-minted"
 
@@ -180,14 +185,18 @@ async def test_a_resumed_process_reuses_the_persisted_key_and_permit(tmp_path):
     store_path = tmp_path / "operations.json"
 
     first_process = GovernedToolRunner(
-        _client(plane), wallet_id=WALLET, run_id="run-1",
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
         key_store=JsonFileOperationKeyStore(store_path),
     )
     first_process.register_tool(TOOL, description="Append a note")
     first = await first_process.run(_chat_tool_call("call_abc123"))
 
     resumed = GovernedToolRunner(
-        _client(plane), wallet_id=WALLET, run_id="run-1",
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
         key_store=JsonFileOperationKeyStore(store_path),
     )
     resumed.register_tool(TOOL, description="Append a note")
@@ -219,7 +228,9 @@ async def test_record_is_durable_before_the_first_network_call():
         raise httpx.ConnectError("boom", request=request)
 
     store = InMemoryOperationKeyStore()
-    client = B2AClient(api_key="test-key", base_url="http://trust.test", transport=httpx.MockTransport(failing))
+    client = B2AClient(
+        api_key="test-key", base_url="http://trust.test", transport=httpx.MockTransport(failing)
+    )
     runner = GovernedToolRunner(client, wallet_id=WALLET, run_id="run-1", key_store=store)
     runner.register_tool(TOOL, description="Append a note")
 
@@ -236,38 +247,66 @@ async def test_record_is_durable_before_the_first_network_call():
     assert permit.expires_at and permit.permit_id is None
 
 
-async def test_permit_retry_after_crash_resends_the_identical_body():
+async def test_permit_retry_after_crash_resends_the_identical_body(tmp_path):
     """The server hashes the whole permit body. Re-sending a new expires_at
     under the same key would be refused, so the recorded timestamp is reused."""
-    calls: list[dict] = []
+    calls: list[bytes] = []
+    store_path = tmp_path / "operations.json"
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/permits":
-            calls.append(json.loads(request.content))
+            calls.append(request.content)
+            persisted = json.loads(store_path.read_text())
+            assert persisted["permits"][f"oai-permit-run-1-{TOOL}"][
+                "request_payload"
+            ] == json.loads(request.content)
             if len(calls) == 1:
                 raise httpx.ConnectError("boom", request=request)
             return httpx.Response(201, json=_permit_payload())
         body = json.loads(request.content)
         key = body["params"]["mcpContext"]["idempotency_key"]
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": {
-            "content": [], "structuredContent": None, "isError": False,
-            "receipt": _receipt_payload(key)}})
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": body["id"],
+                "result": {
+                    "content": [],
+                    "structuredContent": None,
+                    "isError": False,
+                    "receipt": _receipt_payload(key),
+                },
+            },
+        )
 
-    store = InMemoryOperationKeyStore()
-    client = B2AClient(api_key="test-key", base_url="http://trust.test", transport=httpx.MockTransport(handler))
+    store = JsonFileOperationKeyStore(store_path)
+    client = B2AClient(
+        api_key="test-key", base_url="http://trust.test", transport=httpx.MockTransport(handler)
+    )
     runner = GovernedToolRunner(client, wallet_id=WALLET, run_id="run-1", key_store=store)
+    runner.register_tool(TOOL, description="Append a note")
     with pytest.raises(TransportError):
         await runner.run(_chat_tool_call("call_abc123"))
-    await runner.run(_chat_tool_call("call_abc123"))
+    resumed = GovernedToolRunner(
+        client,
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+        permit_budget=Decimal(900),
+        permit_ttl_minutes=120,
+    )
+    resumed.register_tool(TOOL, description="Append a note")
+    await resumed.run(_chat_tool_call("call_abc123"))
 
     assert len(calls) == 2
     assert calls[0] == calls[1], "the retried permit request must be byte-for-byte the same"
+    assert json.loads(calls[1])["max_credits"] == "100"
 
 
 # ── refusals ─────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("bad_id", [None, "", "   ", " call_1", "call\n1"])
+@pytest.mark.parametrize("bad_id", [None, "", "   ", " call_1", "call_1 ", "call\n1", "call_é"])
 async def test_tool_call_without_a_usable_id_is_refused_before_any_network_call(bad_id):
     plane = FakeTrustPlane()
     runner = GovernedToolRunner(_client(plane), wallet_id=WALLET, run_id="run-1")
@@ -328,7 +367,7 @@ async def test_a_recorded_tool_call_cannot_be_replayed_as_a_different_tool():
         await runner.run(other)
 
 
-@pytest.mark.parametrize("run_id", ["", "  ", " run-1", "run\n1"])
+@pytest.mark.parametrize("run_id", ["", "  ", " run-1", "run-1 ", "run\n1", "run-é"])
 def test_run_id_must_be_a_stable_printable_identifier(run_id):
     with pytest.raises(ValueError):
         GovernedToolRunner(_client(FakeTrustPlane()), wallet_id=WALLET, run_id=run_id)
@@ -360,6 +399,7 @@ def test_register_tool_refuses_two_tools_that_collapse_to_one_function_name():
 async def test_results_render_as_chat_and_responses_outputs():
     plane = FakeTrustPlane()
     runner = GovernedToolRunner(_client(plane), wallet_id=WALLET, run_id="run-1")
+    runner.register_tool(TOOL, description="Append a note")
     result = await runner.run(_chat_tool_call("call_abc123"))
 
     message = result.as_tool_message()
@@ -380,3 +420,276 @@ def test_permit_budget_is_passed_through():
         _client(plane), wallet_id=WALLET, run_id="run-1", permit_budget=Decimal(7)
     )
     assert runner.permit_key_for(TOOL) == f"oai-permit-run-1-{TOOL}"
+
+
+@pytest.mark.parametrize("name", ["unadvertised_tool", "partner_notes_count", TOOL])
+async def test_unregistered_function_is_refused_without_persistence_or_network(tmp_path, name):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    runner = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    runner.register_tool(TOOL, description="Append a note")
+    call = _chat_tool_call()
+    call.function.name = name
+    with pytest.raises(ValueError, match="not registered"):
+        await runner.run(call)
+    assert not store_path.exists()
+    assert plane.permit_requests == [] and plane.invoke_requests == []
+
+
+@pytest.mark.parametrize(
+    "part,value",
+    [
+        ("call", "call_é"),
+        ("call", " call_1"),
+        ("call", "call_1 "),
+        ("call", "c" * 125),
+        ("run", "run-é"),
+        ("run", " run-1"),
+        ("run", "run-1 "),
+        ("run", "r" * 110),
+        ("tool", "notes.é"),
+        ("tool", " notes.write"),
+        ("tool", "notes.write "),
+        ("tool", ""),
+        ("tool", "   "),
+        ("tool", "notes\twrite"),
+        ("tool", "t" * 114),
+    ],
+)
+async def test_invalid_key_component_is_refused_before_persistence(tmp_path, part, value):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    with pytest.raises(ValueError):
+        runner = GovernedToolRunner(
+            _client(plane),
+            wallet_id=WALLET,
+            run_id=value if part == "run" else "run-1",
+            key_store=JsonFileOperationKeyStore(store_path),
+        )
+        definition = runner.register_tool(value if part == "tool" else TOOL, description="Note")
+        call = _chat_tool_call(value if part == "call" else "call_1")
+        call.function.name = definition["function"]["name"]
+        await runner.run(call)
+    assert not store_path.exists()
+    assert plane.permit_requests == [] and plane.invoke_requests == []
+
+
+@pytest.mark.parametrize("stage", ["permit_pending", "invoke_pending", "completed"])
+@pytest.mark.parametrize("call_id", ["call_original", "call_next"])
+async def test_resume_cannot_change_wallet_at_any_persisted_stage(tmp_path, stage, call_id):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+
+    def handler(request):
+        if stage == "permit_pending" or (
+            stage == "invoke_pending" and request.url.path == "/mcp/messages"
+        ):
+            raise httpx.ConnectError("interrupted", request=request)
+        return plane(request)
+
+    first = GovernedToolRunner(
+        B2AClient(
+            api_key="test-key", base_url="http://trust.test", transport=httpx.MockTransport(handler)
+        ),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    first.register_tool(TOOL, description="Note")
+    if stage == "completed":
+        await first.run(_chat_tool_call("call_original"))
+    else:
+        with pytest.raises(TransportError):
+            await first.run(_chat_tool_call("call_original"))
+
+    before = store_path.read_bytes()
+    resumed_plane = FakeTrustPlane()
+    resumed = GovernedToolRunner(
+        _client(resumed_plane),
+        wallet_id="wallet-other",
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    resumed.register_tool(TOOL, description="Note")
+    with pytest.raises(ValueError, match="wallet"):
+        await resumed.run(_chat_tool_call(call_id))
+    assert store_path.read_bytes() == before
+    assert resumed_plane.permit_requests == [] and resumed_plane.invoke_requests == []
+
+
+@pytest.mark.parametrize("issued", [False, True])
+async def test_legacy_permit_without_snapshot_can_only_reuse_an_issued_permit(issued):
+    plane = FakeTrustPlane()
+    store = InMemoryOperationKeyStore()
+    permit_key = f"oai-permit-run-1-{TOOL}"
+    # from_dict exercises records written before snapshot/wallet fields existed.
+    store.put_permit(
+        PermitRecord.from_dict(
+            {
+                "permit_idempotency_key": permit_key,
+                "tool_name": TOOL,
+                "expires_at": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
+                "permit_id": "permit-1" if issued else None,
+            }
+        )
+    )
+    store.put_operation(
+        OperationRecord.from_dict(
+            {
+                "tool_call_id": "call_legacy",
+                "tool_name": TOOL,
+                "idempotency_key": "oai-call_legacy",
+                "permit_idempotency_key": permit_key,
+                "permit_id": "permit-1" if issued else None,
+                "receipt_id": None,
+            }
+        )
+    )
+    runner = GovernedToolRunner(_client(plane), wallet_id=WALLET, run_id="run-1", key_store=store)
+    runner.register_tool(TOOL, description="Note")
+    if issued:
+        result = await runner.run(_chat_tool_call("call_legacy"))
+        assert result.receipt.permit_id == "permit-1"
+        assert len(plane.invoke_requests) == 1
+    else:
+        with pytest.raises(ValueError, match="snapshot"):
+            await runner.run(_chat_tool_call("call_legacy"))
+        assert plane.invoke_requests == []
+    assert plane.permit_requests == []
+
+
+@pytest.mark.parametrize("wallet_field", ["issuer_wallet_id", "subject_wallet_id"])
+async def test_legacy_operation_checks_each_wallet_in_its_permit_snapshot(wallet_field):
+    plane = FakeTrustPlane()
+    store = InMemoryOperationKeyStore()
+    runner = GovernedToolRunner(_client(plane), wallet_id=WALLET, run_id="run-1", key_store=store)
+    runner.register_tool(TOOL, description="Note")
+    await runner.run(_chat_tool_call("call_1"))
+    operation = store.get_operation("call_1")
+    operation.wallet_id = None  # Legacy operation, with a wallet-bound permit available.
+    store.put_operation(operation)
+    permit = store.get_permit(operation.permit_idempotency_key)
+    permit.request_payload[wallet_field] = "wallet-other"
+    store.put_permit(permit)
+    before = (len(plane.permit_requests), len(plane.invoke_requests))
+    with pytest.raises(ValueError, match="wallet"):
+        await runner.run(_chat_tool_call("call_1"))
+    assert (len(plane.permit_requests), len(plane.invoke_requests)) == before
+
+
+async def test_maximum_length_printable_ascii_keys_are_accepted():
+    plane = FakeTrustPlane()
+    runner = GovernedToolRunner(_client(plane), wallet_id=WALLET, run_id="run-1")
+    tool_name = "t" * (128 - len("oai-permit-run-1-"))
+    definition = runner.register_tool(tool_name, description="Boundary tool")
+    call = _chat_tool_call("c" * 124)
+    call.function.name = definition["function"]["name"]
+    await runner.run(call)
+    assert len(plane.permit_requests[0].headers["idempotency-key"]) == 128
+    assert len(plane.invoke_requests[0].headers["idempotency-key"]) == 128
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("idempotency_key", "oai-call_alternate"),
+        ("permit_idempotency_key", f"oai-permit-other-run-{TOOL}"),
+        ("tool_call_id", "call_alternate"),
+    ],
+)
+async def test_persisted_operation_identity_must_match_requested_call(tmp_path, field, value):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    runner = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    runner.register_tool(TOOL, description="Note")
+    await runner.run(_chat_tool_call("call_1"))
+    persisted = json.loads(store_path.read_text())
+    persisted["operations"]["call_1"][field] = value
+    store_path.write_text(json.dumps(persisted))
+    before = store_path.read_bytes()
+    plane.permit_requests.clear()
+    plane.invoke_requests.clear()
+
+    with pytest.raises(ValueError, match="identity"):
+        await runner.run(_chat_tool_call("call_1"))
+
+    assert store_path.read_bytes() == before
+    assert plane.permit_requests == [] and plane.invoke_requests == []
+
+
+async def test_resumed_call_cannot_silently_use_a_different_run_id(tmp_path):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    original = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    original.register_tool(TOOL, description="Note")
+    await original.run(_chat_tool_call("call_1"))
+    before = store_path.read_bytes()
+    plane.permit_requests.clear()
+    plane.invoke_requests.clear()
+    resumed = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-2",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    resumed.register_tool(TOOL, description="Note")
+
+    with pytest.raises(ValueError, match="identity"):
+        await resumed.run(_chat_tool_call("call_1"))
+
+    assert store_path.read_bytes() == before
+    assert plane.permit_requests == [] and plane.invoke_requests == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("permit_idempotency_key", "oai-permit-other-run-other_tool"),
+        ("tool_name", "other_tool"),
+    ],
+)
+@pytest.mark.parametrize("issued", [False, True])
+async def test_loaded_permit_identity_must_match_its_lookup_key_and_tool(
+    tmp_path, field, value, issued
+):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    runner = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    runner.register_tool(TOOL, description="Note")
+    await runner.run(_chat_tool_call("call_1"))
+    persisted = json.loads(store_path.read_text())
+    permit = persisted["permits"][f"oai-permit-run-1-{TOOL}"]
+    permit[field] = value
+    if not issued:
+        permit["permit_id"] = None
+    store_path.write_text(json.dumps(persisted))
+    before = store_path.read_bytes()
+    plane.permit_requests.clear()
+    plane.invoke_requests.clear()
+
+    # A new call exercises permit acquisition rather than a completed operation's fast path.
+    with pytest.raises(ValueError, match="identity"):
+        await runner.run(_chat_tool_call("call_2"))
+
+    assert store_path.read_bytes() == before
+    assert plane.permit_requests == [] and plane.invoke_requests == []

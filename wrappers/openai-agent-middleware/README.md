@@ -23,9 +23,13 @@ plane's `Idempotency-Key` exists to capture, so `GovernedToolRunner`:
 2. writes the derivation to an `OperationKeyStore` **before the first network
    call**, so a crash between "the model asked" and "the receipt came back"
    resumes with the same key;
-3. issues one permit per `(run_id, tool)` under a stable key, recording the
-   permit's `expires_at` first so a retried permit request is byte-for-byte
-   identical and the server replays it instead of rejecting it.
+3. issues one permit per `(run_id, tool)` under a stable key, recording its
+   complete JSON request before sending it. Retries reuse the original wallet,
+   budget, scopes, and expiry, so the server receives identical request bytes.
+
+Register each allowed tool with `register_tool` before executing calls. The
+runner accepts only the returned OpenAI function names; a model-emitted raw
+MCP name or an unregistered function is refused before persistence or HTTP.
 
 The server side of the same contract is described in
 [`docs/failure-semantics.md`](../../docs/failure-semantics.md): a key that is
@@ -100,19 +104,35 @@ input_items.append(outcome.as_function_call_output())
 ## Resuming after a crash
 
 Keep `operations.json` (or your own `OperationKeyStore` implementation) with
-the run's transcript. Construct a new runner with the **same `run_id`** and the
-same store, and replay the transcript's tool calls: every call that already
+the run's transcript. Construct a new runner with the **same `run_id` and
+wallet**, register the same tools, and replay the transcript's tool calls:
+every call that already
 completed returns its original receipt, every call that was interrupted
 finishes as one action, and nothing is charged twice. A run resumed after its
-permits expired needs a new `run_id`.
+permits expired needs a new `run_id` and new tool-call IDs for new work;
+previously recorded calls remain bound to their original run. Changing the
+runner's permit budget or TTL does not alter a persisted permit request; use a
+new run for new limits.
+
+Older stores without request snapshots can reuse permits whose IDs were
+already saved. An incomplete legacy permit cannot safely reconstruct the
+original request and is refused. Legacy records that contain neither a wallet
+binding nor a request snapshot cannot be checked locally for a changed wallet;
+keep them with their original wallet. New operation records persist that
+binding, including for completed-call replays.
 
 ## What is refused client-side
 
 | Input | Why |
 | --- | --- |
-| tool call without an id, or with a blank/padded/non-printable id | no operation identity to persist; an invented key would make retries new actions |
+| tool call without an id, or with a blank/padded/non-ASCII/non-printable id | no valid operation identity to persist; an invented key would make retries new actions |
 | tool call id longer than 124 characters | `oai-` + id would exceed the trust plane's 128-character key column |
+| blank, padded, non-ASCII, or non-printable run IDs or raw tool names; derived permit keys longer than 128 characters | invalid HTTP idempotency keys must fail before persistence or HTTP |
+| a function name that was not registered with this runner | the model cannot expand the application's allowed tool set |
 | a recorded tool call replayed under a different tool name | the operation identity is bound to one action |
+| a recorded call resumed under a different run ID, or stored record IDs/keys that disagree with the call, run, or tool | persisted identity must match the deterministic operation and permit key derivations |
+| a persisted operation or permit request reused with a different wallet | the original issuer and subject remain bound to the action |
+| an incomplete legacy permit without a request snapshot | rebuilding its body could change the request under the original key |
 | two MCP tools whose names collapse to the same OpenAI function name | the runner could not map the model's call back |
 
 ## Tests
