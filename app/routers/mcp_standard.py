@@ -90,6 +90,7 @@ from app.routers.mcp import (
     _handle_tools_call,
     _handle_tools_list,
     _header_idempotency_key_sources,
+    _internal_error,
     _json_nesting_depth_exceeds,
     _loads_strict_json,
     _value_error_jsonrpc_code,
@@ -140,7 +141,6 @@ _SERVER_INSTRUCTIONS = (
 
 def _mcp_error(code: int, message: str, data: dict[str, Any] | None = None) -> McpError:
     return McpError(mcp_types.ErrorData(code=code, message=message, data=data))
-
 
 
 def _permit_error(
@@ -463,14 +463,15 @@ async def _governed_tools_call(
         raise _mcp_error(-32602, str(e)) from e
     except ValueError as e:
         code = _value_error_jsonrpc_code(str(e))
-        if code == -32603:
-            logger.error(f"Standard MCP tool call failed: {e}")
+        if code is None:
+            error = _internal_error(e, surface="/mcp", request_id=request_id)
+            raise _mcp_error(error["code"], error["message"], error["data"]) from e
         raise _mcp_error(code, str(e)) from e
     except McpError:
         raise
     except Exception as e:
-        logger.error(f"Standard MCP tool call failed: {e}")
-        raise _mcp_error(-32603, str(e)) from e
+        error = _internal_error(e, surface="/mcp", request_id=request_id)
+        raise _mcp_error(error["code"], error["message"], error["data"]) from e
 
 
 def _build_standard_mcp_server() -> Server:
@@ -511,26 +512,40 @@ def _build_standard_mcp_server() -> Server:
             # driven by an unexpected transport. Fail closed.
             raise _mcp_error(-32603, "auth_context_missing")
 
-        # Validated before anything is minted or metered: a present-but-
-        # unusable key is refused here, and only a truly absent key proceeds
-        # to the generated-key path inside _governed_tools_call.
-        client_key = _client_idempotency_key(http_request, req.params)
+        request_id = str(ctx.request_id) if ctx.request_id is not None else None
+        try:
+            # Validated before anything is minted or metered: a present-but-
+            # unusable key is refused here, and only a truly absent key
+            # proceeds to the generated-key path inside _governed_tools_call.
+            client_key = _client_idempotency_key(http_request, req.params)
 
-        result = await _governed_tools_call(
-            auth=auth,
-            tool_name=req.params.name,
-            arguments=req.params.arguments or {},
-            client_idempotency_key=client_key,
-            request_id=str(ctx.request_id) if ctx.request_id is not None else None,
-        )
+            result = await _governed_tools_call(
+                auth=auth,
+                tool_name=req.params.name,
+                arguments=req.params.arguments or {},
+                client_idempotency_key=client_key,
+                request_id=request_id,
+            )
 
-        payload = dict(result)
-        receipt = payload.get("receipt")
-        if receipt is not None:
-            meta = dict(payload.get("_meta") or {})
-            meta[_RECEIPT_META_KEY] = receipt
-            payload["_meta"] = meta
-        return mcp_types.ServerResult(mcp_types.CallToolResult.model_validate(payload))
+            payload = dict(result)
+            receipt = payload.get("receipt")
+            if receipt is not None:
+                meta = dict(payload.get("_meta") or {})
+                meta[_RECEIPT_META_KEY] = receipt
+                payload["_meta"] = meta
+            return mcp_types.ServerResult(
+                mcp_types.CallToolResult.model_validate(payload)
+            )
+        except McpError:
+            raise
+        except Exception as e:
+            # The SDK reports any other exception that escapes a handler as
+            # str(e). This is the last boundary before it, so a failure in
+            # the registry lookup, the wallet-policy read, the auto-permit
+            # mint, or result validation is sanitized the same way as one
+            # inside the governed call.
+            error = _internal_error(e, surface="/mcp", request_id=request_id)
+            raise _mcp_error(error["code"], error["message"], error["data"]) from e
 
     server.request_handlers[mcp_types.CallToolRequest] = handle_call_tool
     return server
@@ -656,7 +671,11 @@ class _SdkTransportResponse(Response):
         if refusal is not None:
             status_code, code, reason = refusal
             error_response = JSONResponse(
-                {"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": reason}},
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": code, "message": reason},
+                },
                 status_code=status_code,
             )
             await error_response(scope, receive, send)

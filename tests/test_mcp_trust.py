@@ -804,7 +804,10 @@ async def test_governed_refund_failure_keeps_permit_budget_reserved(
 
     assert first.status_code == 200
     assert first.json()["error"]["code"] == -32603
-    assert "refund_failed:refund down" in first.json()["error"]["message"]
+    # The reason names the tool's own error; the refund store's text stays
+    # server-side (server log and audit event), as on the upstream path.
+    assert first.json()["error"]["message"] == "refund_failed; tool_error:tool exploded"
+    assert "refund down" not in first.text
     assert replay.json()["error"] == first.json()["error"]
     receipt = first.json()["error"]["data"]["receipt"]
     assert receipt["outcome"] == "failed_unrefunded"

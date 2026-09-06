@@ -998,9 +998,14 @@ class TestMcpInvokeRoute:
 
             assert response.status_code == 200
             payload = response.json()
+            # A failed refund is an infrastructure failure, not a tool
+            # outcome: the client gets the fixed internal_error and a
+            # correlation id; the composed reason is kept in the audit log.
             assert payload["error"]["code"] == -32603
-            assert "refund_failed:refund down" in payload["error"]["message"]
-            assert "tool_error:tool exploded" in payload["error"]["message"]
+            assert payload["error"]["message"] == "internal_error"
+            assert payload["error"]["data"]["correlation_id"]
+            assert "refund down" not in response.text
+            assert "tool exploded" not in response.text
             assert audit_resp.status_code == 200
             audit_events = audit_resp.json()["events"]
             assert len(audit_events) == 1
@@ -1078,9 +1083,10 @@ class TestMcpInvokeRoute:
             assert response.status_code == 200
             payload = response.json()
             assert payload["error"]["code"] == -32603
-            assert "refund_failed:refund down" in payload["error"]["message"]
-            assert "tool_error:tool exploded" in payload["error"]["message"]
-            assert "audit_failed:audit down" in payload["error"]["message"]
+            assert payload["error"]["message"] == "internal_error"
+            assert payload["error"]["data"]["correlation_id"]
+            for leaked in ("refund down", "tool exploded", "audit down"):
+                assert leaked not in response.text
         finally:
             registry.unregister_local("jsonrpc-refund-audit-fails")
 

@@ -60,6 +60,11 @@ terminal *idempotency record* but no receipt — there is no authority to bill
 against. The README states this limit; the replay still returns the original
 envelope.
 
+A failure the pipeline did not classify — an exception that is none of the
+typed denials, tool failures, or reason-coded errors above — is reported as
+`-32603` / `internal_error` with a `correlation_id` in `data`. The exception
+text is logged server-side under that id and never returned.
+
 ## Why `delivery_uncertain` cannot be "fixed"
 
 The durable dispatch claim is written immediately before the network
