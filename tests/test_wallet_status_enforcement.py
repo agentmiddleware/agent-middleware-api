@@ -9,6 +9,7 @@ child escaped its cap through transfer or child-spawn.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -18,6 +19,7 @@ from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import WalletModel
 from app.main import app
+from app.schemas.billing import InsufficientFundsResponse, ServiceCategory
 from app.services.agent_money import get_agent_money
 from app.services.wallet_engine import MAX_CHILD_WALLET_TTL_SECONDS
 
@@ -117,6 +119,31 @@ async def test_frozen_wallet_cannot_charge(client, clean_database):
     wallet = await client.get(f"/v1/billing/wallets/{agent}", headers=BOOTSTRAP)
     assert wallet.json()["balance"] == 5000
     assert wallet.json()["status"] == "frozen"
+
+
+@pytest.mark.anyio
+async def test_unknown_wallet_status_fails_closed_for_charge(client, clean_database):
+    """A future or malformed status must not become spendable by omission."""
+    _, agent = await _make_agent(client)
+    await _set_status(agent, "operator_hold")
+
+    result = await get_agent_money().charge(
+        wallet_id=agent,
+        service_category=ServiceCategory.IOT_BRIDGE,
+        units=Decimal("1"),
+        request_path="/tests/operator-hold",
+    )
+
+    assert isinstance(result, InsufficientFundsResponse)
+    assert result.error == "insufficient_funds"
+    async with get_session_factory()() as session:
+        wallet = await session.get(WalletModel, agent)
+        assert wallet is not None
+        assert wallet.status == "operator_hold"
+        assert wallet.balance == Decimal("5000")
+        assert wallet.lifetime_debits == Decimal("0")
+        assert wallet.hourly_spent == Decimal("0")
+        assert wallet.daily_spent == Decimal("0")
 
 
 @pytest.mark.anyio

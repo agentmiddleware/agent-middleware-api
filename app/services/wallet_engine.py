@@ -29,16 +29,9 @@ from ..schemas.billing import (
     WalletStatus,
     WalletType,
 )
+from .wallet_status import SPENDABLE_WALLET_STATUSES
 
 logger = logging.getLogger(__name__)
-
-_NON_SPENDABLE_WALLET_STATUSES = frozenset(
-    {
-        WalletStatus.FROZEN.value,
-        WalletStatus.SUSPENDED.value,
-        WalletStatus.CLOSED.value,
-    }
-)
 
 SessionFactoryProvider = Callable[[], async_sessionmaker[AsyncSession]]
 WalletNotFoundFactory = Callable[[str], Exception]
@@ -214,9 +207,7 @@ class WalletEngine:
             guards.append(
                 cast(
                     ColumnElement[bool],
-                    cast(Any, WalletModel.status).notin_(
-                        tuple(_NON_SPENDABLE_WALLET_STATUSES)
-                    ),
+                    cast(Any, WalletModel.status).in_(tuple(SPENDABLE_WALLET_STATUSES)),
                 )
             )
 
@@ -385,7 +376,7 @@ class WalletEngine:
                     raise ValueError(
                         "Can only provision agent wallets from sponsor wallets"
                     )
-                if sponsor.status in _NON_SPENDABLE_WALLET_STATUSES:
+                if sponsor.status not in SPENDABLE_WALLET_STATUSES:
                     raise ValueError(
                         f"Sponsor wallet is {sponsor.status} and cannot provision "
                         "agent wallets"
@@ -402,7 +393,7 @@ class WalletEngine:
                     require_balance=budget_credits,
                     require_spendable=True,
                 ):
-                    if sponsor.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    if sponsor.status not in SPENDABLE_WALLET_STATUSES:
                         raise ValueError(
                             f"Sponsor wallet is {sponsor.status} and cannot "
                             "provision agent wallets"
@@ -506,7 +497,7 @@ class WalletEngine:
                     raise ValueError(
                         "Only agent or child wallets can spawn child wallets"
                     )
-                if parent.status in _NON_SPENDABLE_WALLET_STATUSES:
+                if parent.status not in SPENDABLE_WALLET_STATUSES:
                     raise ValueError(
                         f"Parent wallet is {parent.status} and cannot spawn child wallets"
                     )
@@ -536,7 +527,7 @@ class WalletEngine:
                     require_spendable=True,
                     require_child_cap_for=budget_credits,
                 ):
-                    if parent.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    if parent.status not in SPENDABLE_WALLET_STATUSES:
                         raise ValueError(
                             f"Parent wallet is {parent.status} and cannot spawn "
                             "child wallets"
@@ -808,7 +799,7 @@ class WalletEngine:
                 if not dest:
                     raise self._wallet_not_found_error(to_wallet_id)
 
-                if source.status in _NON_SPENDABLE_WALLET_STATUSES:
+                if source.status not in SPENDABLE_WALLET_STATUSES:
                     raise ValueError(
                         f"Source wallet is {source.status} and cannot transfer credits"
                     )
@@ -834,7 +825,7 @@ class WalletEngine:
                     require_spendable=True,
                     require_child_cap_for=amount,
                 ):
-                    if source.status in _NON_SPENDABLE_WALLET_STATUSES:
+                    if source.status not in SPENDABLE_WALLET_STATUSES:
                         raise ValueError(
                             f"Source wallet is {source.status} and cannot "
                             "transfer credits"

@@ -76,7 +76,7 @@ async def _operation_debit_count(operation_key: str) -> int:
     return int(count or 0)
 
 
-async def _set_freeze_boundary(wallet_id: str) -> None:
+async def _set_freeze_boundary(wallet_id: str, *, status: str = "active") -> None:
     async with get_session_factory()() as session:
         async with session.begin():
             wallet = await session.get(WalletModel, wallet_id)
@@ -84,6 +84,7 @@ async def _set_freeze_boundary(wallet_id: str) -> None:
             wallet.hourly_limit = Decimal("1")
             wallet.daily_limit = Decimal("1000")
             wallet.velocity_alerts_triggered = get_velocity_monitor()._freeze_threshold
+            wallet.status = status
             session.add(wallet)
 
 
@@ -257,14 +258,16 @@ async def test_governed_failure_rolls_back_velocity_freeze_and_debit(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("source_status", ["active", "pending_kyc"])
 async def test_freeze_notification_observes_committed_governed_state(
     client: AsyncClient,
     clean_database,
     monkeypatch: pytest.MonkeyPatch,
+    source_status: str,
 ) -> None:
-    seed = await _prepared_seed(client, "committed-freeze")
+    seed = await _prepared_seed(client, f"committed-freeze-{source_status}")
     attempt = await _attempt(seed.attempt_id)
-    await _set_freeze_boundary(seed.wallet_id)
+    await _set_freeze_boundary(seed.wallet_id, status=source_status)
 
     async def assert_committed(wallet: WalletModel) -> None:
         snapshot = await _wallet_snapshot(wallet.wallet_id)
