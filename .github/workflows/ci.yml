@@ -282,6 +282,43 @@ jobs:
           path: sdk-dist/*
           if-no-files-found: error
 
+  wrapper_unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        wrapper: [autogen, crewai, langchain, openai]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            b2a_sdk/pyproject.toml
+            wrappers/${{ matrix.wrapper }}-agent-middleware/pyproject.toml
+
+      - name: Install SDK and wrapper package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./b2a_sdk "./wrappers/${{ matrix.wrapper }}-agent-middleware[dev]"
+
+      # Separate jobs avoid framework dependency conflicts and repeated test
+      # module names. Explicit pytest boundaries exclude root app fixtures and
+      # source-path overrides so these tests exercise the installed packages.
+      - name: Run wrapper unit tests
+        working-directory: wrappers/${{ matrix.wrapper }}-agent-middleware
+        run: >-
+          python -m pytest -c pyproject.toml --rootdir=. --confcutdir=.
+          -o pythonpath= -o asyncio_mode=auto tests/ -q --tb=short
+
   # Railway runs Postgres; the rest of CI runs SQLite. Dialect differences that
   # SQLite accepts silently (notably tz-aware datetimes bound to the schema's
   # TIMESTAMP WITHOUT TIME ZONE columns, which asyncpg rejects outright) are
