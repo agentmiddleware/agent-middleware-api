@@ -656,7 +656,13 @@ async def test_approval_required_upstream_crash_reconciliation_keeps_approval(
             json=body,
             headers=provisioned["agent_headers"],
         )
-        assert failed.json()["error"]["message"] == "simulated_receipt_crash"
+        # A receipt-store crash is an unclassified failure: the caller gets the
+        # fixed internal_error and a correlation id, never the exception text.
+        failed_error = failed.json()["error"]
+        assert failed_error["code"] == -32603
+        assert failed_error["message"] == "internal_error"
+        assert failed_error["data"]["correlation_id"]
+        assert "simulated_receipt_crash" not in failed.text
         assert receipt_crashed is True
         assert executor.dispatch_count == 1
 

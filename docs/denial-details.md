@@ -132,8 +132,12 @@ or Sentinel recovers.
 | `refund_failed` | The tool/dispatch failed and its debit could not be refunded; an operator work item is pending. | Do not retry the action; complete and verify refund reconciliation first. |
 | `failed_refunded` | Reconciliation finalized a stale prepared or otherwise confirmed failure and compensated any debit. | Inspect adjacent dispatch error/audit context for the underlying cause; use a new key only for an intentional retry. |
 
-For `refund_failed`, the API error may include dynamic diagnostic suffixes.
-The portable receipt signs only the stable `refund_failed` reason; refund
+For `refund_failed`, the API error names the tool's own error after the
+reason (`refund_failed; tool_error:…` for a local tool,
+`refund_failed; upstream_error:…` for a configured upstream tool) and may
+append `audit_failed`. The refund store's and audit store's own text never
+travels: it is kept in the server log and the linked audit event. The
+portable receipt signs only the stable `refund_failed` reason; refund
 reconciliation state remains adjacent API/audit context.
 
 ## What details deliberately do not say
