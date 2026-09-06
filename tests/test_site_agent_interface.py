@@ -15,7 +15,7 @@ import tempfile
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 import runpy
 
 import pytest
@@ -42,7 +42,9 @@ VALID_TEST_CONTACTS = {
 # Pilot intake is email-first; the booking link is optional. This is the
 # configuration the site must build and stay whole under.
 EMAIL_ONLY_TEST_CONTACTS = {
-    key: value for key, value in VALID_TEST_CONTACTS.items() if key != "PUBLIC_BOOKING_URL"
+    key: value
+    for key, value in VALID_TEST_CONTACTS.items()
+    if key != "PUBLIC_BOOKING_URL"
 }
 PRIMARY_CTA = "Start a pilot by email"
 SECONDARY_CTA = "Run the local proof"
@@ -229,8 +231,9 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     text = _page_text(page)
     headline = "Authorize one agent action. Charge it once. Prove what happened."
     failure = (
-        "Your agent invokes a costly tool. The request times out. Was it dispatched? "
-        "Should the agent retry? Will the retry create another debit?"
+        "When a retried agent call debits twice, someone pays in lost money, "
+        "recovery time, or a customer problem. Put a number on that cost. "
+        "If preventing it cannot justify this boundary, we will tell you."
     )
     boundary = (
         "Agent Middleware API is a transaction boundary between your autonomous "
@@ -262,10 +265,12 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert SECONDARY_CTA in text
     assert "Book a one-tool pilot" not in text
     assert "30-minute" not in text
-    # The three intake fields, in plain language, plus the no-secrets rule.
+    # Technical and economic qualification, plus the no-secrets rule.
     assert "The tool or action." in text
     assert "What goes wrong on retry." in text
     assert "How you check it happened." in text
+    assert "What one duplicate or unproven call costs." in text
+    assert "Who owns the budget and when they decide." in text
     assert "synthetic or redacted examples only" in text.casefold()
     assert "Never send production secrets" in text
     assert "a call is available only when a scenario needs one" in text.casefold()
@@ -290,6 +295,56 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
         assert hostname not in page
     for suffix in PROVIDER_HOST_SUFFIXES:
         assert suffix not in page
+
+
+@pytest.mark.parametrize(
+    ("booking_url", "names_regengine"),
+    [
+        ("https://calendly.com/regengine/30min", True),
+        ("https://cal.com/design-partner-labs/one-tool-pilot", False),
+        ("https://calendly.com/another-operator/regengine", False),
+        ("https://calendar.design-partner-labs.org/regengine/30min", False),
+        ("", False),
+    ],
+)
+def test_booking_identity_matches_configured_calendar(
+    tmp_path, booking_url, names_regengine
+):
+    contacts = {**VALID_TEST_CONTACTS, "PUBLIC_BOOKING_URL": booking_url}
+    contacts["PUBLIC_DISPLAY_NAME"] = "Sellers & Partners <Operations>"
+    output = tmp_path / "site"
+    result = _render_site(output, contacts)
+    assert result.returncode == 0, result.stderr
+    for relative in ("index.html", "proof/index.html", "compare/index.html"):
+        page = (output / relative).read_text()
+        assert ("their RegEngine calendar" in page) is names_regengine
+        assert ('class="booking-context"' in page) is bool(booking_url)
+        if booking_url:
+            assert "Sellers &amp; Partners &lt;Operations&gt;" in page
+            assert "Sellers & Partners <Operations>" not in page
+        assert "@@BOOKING_CONTEXT@@" not in page
+
+
+def test_pilot_draft_encodes_contact_without_adding_mail_headers(tmp_path):
+    contacts = {
+        **EMAIL_ONLY_TEST_CONTACTS,
+        "PUBLIC_CONTACT_EMAIL": "pilot+fit&scope@design-partner-labs.org",
+    }
+    output = tmp_path / "site"
+    result = _render_site(output, contacts)
+    assert result.returncode == 0, result.stderr
+    collector = _LabeledLinkCollector()
+    collector.feed((output / "index.html").read_text())
+    links = [
+        href
+        for visible, _, href in collector.labeled_links
+        if visible.startswith(PRIMARY_CTA)
+    ]
+    assert links
+    for href in links:
+        parsed = urlparse(href)
+        assert unquote(parsed.path) == contacts["PUBLIC_CONTACT_EMAIL"]
+        assert set(parse_qs(parsed.query)) == {"subject", "body"}
 
 
 def test_rendered_site_has_truthful_proof_and_no_browser_secret_storage(
@@ -500,6 +555,10 @@ def test_dynamic_routes_and_noncanonical_hosts_redirect_correctly() -> None:
 
     redirects = config["redirects"]
     dynamic = {entry["source"]: entry for entry in redirects if "has" not in entry}
+    for source in ("/pilot", "/pilot/"):
+        assert dynamic[source]["destination"] == "/#pilot"
+        assert dynamic[source]["permanent"] is True
+    assert 'id="pilot"' in (SITE / "index.html").read_text()
     expected = {
         "/mcp/tools.json": f"{CANONICAL_API}/mcp/tools.json",
         "/v1/discover": f"{CANONICAL_API}/v1/discover",
@@ -598,7 +657,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-16"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-17"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -608,7 +667,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-16"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-17"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -723,7 +782,10 @@ def test_cta_aria_labels_preserve_visible_text_and_contact_targets(tmp_path) -> 
     configured, must resolve to the configured booking URL and nowhere else.
     """
     booking_url = VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"]
-    for contacts, with_booking in ((VALID_TEST_CONTACTS, True), (EMAIL_ONLY_TEST_CONTACTS, False)):
+    for contacts, with_booking in (
+        (VALID_TEST_CONTACTS, True),
+        (EMAIL_ONLY_TEST_CONTACTS, False),
+    ):
         output = tmp_path / ("with-booking" if with_booking else "email-only")
         result = _render_site(output, contacts)
         assert result.returncode == 0, result.stderr
@@ -744,11 +806,24 @@ def test_cta_aria_labels_preserve_visible_text_and_contact_targets(tmp_path) -> 
                     f"{relative_path}: aria-label {label!r} does not contain the "
                     f"visible link text {visible!r} (WCAG 2.1 Label-in-Name)"
                 )
-                assert href, f"{relative_path}: labelled link {visible!r} has an empty href"
+                assert href, (
+                    f"{relative_path}: labelled link {visible!r} has an empty href"
+                )
                 if visible.startswith(PRIMARY_CTA) or visible.startswith("Email "):
-                    assert href == MAILTO, (
+                    assert unquote(href.split("?", 1)[0]) == MAILTO, (
                         f"{relative_path}: email CTA {visible!r} resolves to {href!r}"
                     )
+                    if visible.startswith(PRIMARY_CTA):
+                        draft = parse_qs(urlparse(href).query)
+                        assert draft["subject"] == ["One-tool paid pilot enquiry"]
+                        assert (
+                            "4. Cost of one duplicate or unproven call"
+                            in draft["body"][0]
+                        )
+                        assert (
+                            "5. Budget owner and target decision date:"
+                            in draft["body"][0]
+                        )
                 if visible.startswith("Book a"):
                     assert with_booking, (
                         f"{relative_path}: booking CTA {visible!r} rendered without a booking URL"
@@ -761,9 +836,14 @@ def test_cta_aria_labels_preserve_visible_text_and_contact_targets(tmp_path) -> 
                 href == MAILTO for _visible, _label, href in collector.labeled_links
             ), f"{relative_path}: no CTA resolved to the configured email address"
             assert (
-                any(href == booking_url for _visible, _label, href in collector.labeled_links)
+                any(
+                    href == booking_url
+                    for _visible, _label, href in collector.labeled_links
+                )
                 is with_booking
-            ), f"{relative_path}: optional booking link presence does not match configuration"
+            ), (
+                f"{relative_path}: optional booking link presence does not match configuration"
+            )
             assert 'href=""' not in page
             assert "booking:start" not in page and "booking:end" not in page
             if not with_booking:
@@ -1454,9 +1534,9 @@ def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
     collector = _LabeledLinkCollector()
     collector.feed(page)
     collector.close()
-    assert any(
-        href == MAILTO for _visible, _label, href in collector.labeled_links
-    ), "concept page CTA does not resolve to the configured email address"
+    assert any(href == MAILTO for _visible, _label, href in collector.labeled_links), (
+        "concept page CTA does not resolve to the configured email address"
+    )
     assert VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"] not in page
     for visible, label, _href in collector.labeled_links:
         assert visible and visible in label, (

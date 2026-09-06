@@ -148,6 +148,16 @@
       "permanent": true
     },
     {
+      "source": "/pilot",
+      "destination": "/#pilot",
+      "permanent": true
+    },
+    {
+      "source": "/pilot/",
+      "destination": "/#pilot",
+      "permanent": true
+    },
+    {
       "source": "/proof",
       "destination": "/proof/",
       "permanent": true
