@@ -59,11 +59,10 @@ KYCRequiredFactory = Callable[[str, str], Exception]
 
 logger = logging.getLogger(__name__)
 
-_NON_SPENDABLE_WALLET_STATUSES = frozenset(
+_SPENDABLE_WALLET_STATUSES = frozenset(
     {
-        WalletStatus.FROZEN.value,
-        WalletStatus.SUSPENDED.value,
-        WalletStatus.CLOSED.value,
+        WalletStatus.ACTIVE.value,
+        WalletStatus.PENDING_KYC.value,
     }
 )
 
@@ -339,7 +338,7 @@ class BillingEngine:
             )
             await session.refresh(wallet)
 
-        if wallet.status in _NON_SPENDABLE_WALLET_STATUSES:
+        if wallet.status not in _SPENDABLE_WALLET_STATUSES:
             await reverse_velocity_record()
             return InsufficientFundsResponse(
                 error=(
@@ -473,8 +472,8 @@ class BillingEngine:
                 # freeze exists precisely to stop that.
                 cast(
                     ColumnElement[bool],
-                    cast(Any, WalletModel.status).notin_(
-                        tuple(_NON_SPENDABLE_WALLET_STATUSES)
+                    cast(Any, WalletModel.status).in_(
+                        tuple(_SPENDABLE_WALLET_STATUSES)
                     ),
                 ),
             )
@@ -492,9 +491,10 @@ class BillingEngine:
             # corresponding check above would have reported it.
             await session.refresh(wallet)
             await reverse_velocity_record()
-            if wallet.status in _NON_SPENDABLE_WALLET_STATUSES:
-                # A freeze landed between the read and the write. Report it as
-                # the freeze it is, not as an empty balance.
+            if wallet.status not in _SPENDABLE_WALLET_STATUSES:
+                # A non-spendable status landed between the read and the write.
+                # Report a real freeze specifically; every other control stays
+                # a fail-closed refusal rather than looking like empty balance.
                 return InsufficientFundsResponse(
                     error=(
                         "wallet_frozen"
