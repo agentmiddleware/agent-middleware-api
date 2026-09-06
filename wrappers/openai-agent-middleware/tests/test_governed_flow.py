@@ -592,3 +592,104 @@ async def test_maximum_length_printable_ascii_keys_are_accepted():
     await runner.run(call)
     assert len(plane.permit_requests[0].headers["idempotency-key"]) == 128
     assert len(plane.invoke_requests[0].headers["idempotency-key"]) == 128
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("idempotency_key", "oai-call_alternate"),
+        ("permit_idempotency_key", f"oai-permit-other-run-{TOOL}"),
+        ("tool_call_id", "call_alternate"),
+    ],
+)
+async def test_persisted_operation_identity_must_match_requested_call(tmp_path, field, value):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    runner = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    runner.register_tool(TOOL, description="Note")
+    await runner.run(_chat_tool_call("call_1"))
+    persisted = json.loads(store_path.read_text())
+    persisted["operations"]["call_1"][field] = value
+    store_path.write_text(json.dumps(persisted))
+    before = store_path.read_bytes()
+    plane.permit_requests.clear()
+    plane.invoke_requests.clear()
+
+    with pytest.raises(ValueError, match="identity"):
+        await runner.run(_chat_tool_call("call_1"))
+
+    assert store_path.read_bytes() == before
+    assert plane.permit_requests == [] and plane.invoke_requests == []
+
+
+async def test_resumed_call_cannot_silently_use_a_different_run_id(tmp_path):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    original = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    original.register_tool(TOOL, description="Note")
+    await original.run(_chat_tool_call("call_1"))
+    before = store_path.read_bytes()
+    plane.permit_requests.clear()
+    plane.invoke_requests.clear()
+    resumed = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-2",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    resumed.register_tool(TOOL, description="Note")
+
+    with pytest.raises(ValueError, match="identity"):
+        await resumed.run(_chat_tool_call("call_1"))
+
+    assert store_path.read_bytes() == before
+    assert plane.permit_requests == [] and plane.invoke_requests == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("permit_idempotency_key", "oai-permit-other-run-other_tool"),
+        ("tool_name", "other_tool"),
+    ],
+)
+@pytest.mark.parametrize("issued", [False, True])
+async def test_loaded_permit_identity_must_match_its_lookup_key_and_tool(
+    tmp_path, field, value, issued
+):
+    plane = FakeTrustPlane()
+    store_path = tmp_path / "operations.json"
+    runner = GovernedToolRunner(
+        _client(plane),
+        wallet_id=WALLET,
+        run_id="run-1",
+        key_store=JsonFileOperationKeyStore(store_path),
+    )
+    runner.register_tool(TOOL, description="Note")
+    await runner.run(_chat_tool_call("call_1"))
+    persisted = json.loads(store_path.read_text())
+    permit = persisted["permits"][f"oai-permit-run-1-{TOOL}"]
+    permit[field] = value
+    if not issued:
+        permit["permit_id"] = None
+    store_path.write_text(json.dumps(persisted))
+    before = store_path.read_bytes()
+    plane.permit_requests.clear()
+    plane.invoke_requests.clear()
+
+    # A new call exercises permit acquisition rather than a completed operation's fast path.
+    with pytest.raises(ValueError, match="identity"):
+        await runner.run(_chat_tool_call("call_2"))
+
+    assert store_path.read_bytes() == before
+    assert plane.permit_requests == [] and plane.invoke_requests == []

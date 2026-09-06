@@ -109,8 +109,10 @@ wallet**, register the same tools, and replay the transcript's tool calls:
 every call that already
 completed returns its original receipt, every call that was interrupted
 finishes as one action, and nothing is charged twice. A run resumed after its
-permits expired needs a new `run_id`. Changing the runner's permit budget or
-TTL does not alter a persisted permit request; use a new run for new limits.
+permits expired needs a new `run_id` and new tool-call IDs for new work;
+previously recorded calls remain bound to their original run. Changing the
+runner's permit budget or TTL does not alter a persisted permit request; use a
+new run for new limits.
 
 Older stores without request snapshots can reuse permits whose IDs were
 already saved. An incomplete legacy permit cannot safely reconstruct the
@@ -128,6 +130,7 @@ binding, including for completed-call replays.
 | blank, padded, non-ASCII, or non-printable run IDs or raw tool names; derived permit keys longer than 128 characters | invalid HTTP idempotency keys must fail before persistence or HTTP |
 | a function name that was not registered with this runner | the model cannot expand the application's allowed tool set |
 | a recorded tool call replayed under a different tool name | the operation identity is bound to one action |
+| a recorded call resumed under a different run ID, or stored record IDs/keys that disagree with the call, run, or tool | persisted identity must match the deterministic operation and permit key derivations |
 | a persisted operation or permit request reused with a different wallet | the original issuer and subject remain bound to the action |
 | an incomplete legacy permit without a request snapshot | rebuilding its body could change the request under the original key |
 | two MCP tools whose names collapse to the same OpenAI function name | the runner could not map the model's call back |

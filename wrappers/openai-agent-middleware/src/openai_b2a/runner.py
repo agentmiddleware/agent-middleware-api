@@ -332,7 +332,8 @@ class GovernedToolRunner:
         run_id: a stable identifier for this agent run (an OpenAI response id,
             thread id, or your own job id). It scopes the per-tool permit key,
             so it must be the *same* string when a crashed run is resumed. A
-            run resumed after its permits expired needs a new ``run_id``.
+            new run with new tool-call IDs is needed for work requiring fresh
+            permits after expiry; recorded calls remain bound to their run.
         key_store: where operation and permit records persist. Defaults to
             in-memory, which is only safe for runs that are never resumed.
         permit_budget / permit_ttl_minutes: the shape of each auto-issued permit.
@@ -416,14 +417,16 @@ class GovernedToolRunner:
         """
         call = normalize_tool_call(tool_call)
         tool_name = self.tool_name_for(call.name)
+        operation_key = operation_key_for(call.id)
+        permit_key = self.permit_key_for(tool_name)
 
         record = self._key_store.get_operation(call.id)
         if record is None:
             record = OperationRecord(
                 tool_call_id=call.id,
                 tool_name=tool_name,
-                idempotency_key=operation_key_for(call.id),
-                permit_idempotency_key=self.permit_key_for(tool_name),
+                idempotency_key=operation_key,
+                permit_idempotency_key=permit_key,
                 wallet_id=self._wallet_id,
             )
         elif record.tool_name != tool_name:
@@ -431,13 +434,19 @@ class GovernedToolRunner:
                 f"tool call {call.id!r} was first recorded for tool {record.tool_name!r}; "
                 f"refusing to replay it as {tool_name!r}"
             )
-        _validate_identifier(record.idempotency_key, "operation idempotency key")
-        _validate_identifier(record.permit_idempotency_key, "permit idempotency key")
+        if (
+            record.tool_call_id != call.id
+            or record.idempotency_key != operation_key
+            or record.permit_idempotency_key != permit_key
+        ):
+            raise ValueError("recorded operation identity does not match this call, run, and tool")
         if record.wallet_id is not None and record.wallet_id != self._wallet_id:
             raise ValueError("operation was recorded for a different wallet")
 
         permit = self._key_store.get_permit(record.permit_idempotency_key)
         if permit is not None:
+            if permit.permit_idempotency_key != permit_key or permit.tool_name != tool_name:
+                raise ValueError("recorded permit identity does not match this run and tool")
             if permit.request_payload is not None:
                 if any(
                     permit.request_payload.get(field) != self._wallet_id
