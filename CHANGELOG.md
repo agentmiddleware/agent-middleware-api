@@ -60,7 +60,20 @@ full release gate; do not backfill a final `v1.2.0` tag.
   whose whole answer is "retry this key", that was the difference between a
   retry that works and one denied `permit_max_calls_exceeded` for a call that
   never ran — on a cap of one, a single lost write conflict ended the permit.
-  The per-tool call is now released alongside the budget.
+  The per-tool call is now released alongside the budget, and so is every other
+  local reservation the governed MCP path hands back: the lost-quote denial and,
+  most damagingly, the insufficient-funds denial, whose whole point is to tell
+  the caller to fund the wallet and try again. All three now go through one
+  helper that releases both halves, each guarded on its own so a release that
+  loses its writes can neither replace the denial the caller actually needs nor
+  stop the other half from running.
+
+  Two neighbouring paths were checked and deliberately left alone. The remote
+  reservation never holds a per-tool use to give back — `authorize_reserve_and_prepare`
+  reserves credits alone, and a permit configuring `max_calls_per_tool` is
+  refused that backend outright as `permit_constraint_unsupported_for_upstream`.
+  And the refund-after-tool-error path keeps its use consumed on purpose: the
+  tool did run there, and the counter counts invocations, not charges.
 
 - **The AWI route closes the key it cannot safely reopen.** Freeing the
   idempotency key and inviting a retry is right on the governed MCP path, where

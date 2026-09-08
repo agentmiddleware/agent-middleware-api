@@ -1587,9 +1587,13 @@ async def _execute_registered_tool(
                     ) from None
                 dispatch_attempt = None
             elif governed_call and permit_model:
-                await get_permit_service().release_budget(
-                    permit_model.permit_id,
+                # The quote was lost before anything ran: the reservation taken
+                # just above is entirely unspent, so both halves of it go back.
+                await _release_local_permit_reservation(
+                    permit_model,
                     registered_cost,
+                    tool_name,
+                    reason=reason,
                 )
             await _audit_mcp_invocation(
                 decision=decision,
@@ -1706,34 +1710,15 @@ async def _execute_registered_tool(
         # Each compensation is guarded on its own: a failure to unwind must not
         # replace the contention error with a second, less informative one.
         if governed_call and permit_model is not None:
-            try:
-                await get_permit_service().release_budget(
-                    permit_model.permit_id,
-                    registered_cost,
-                )
-            except Exception:
-                logger.exception(
-                    "mcp_contended_release_budget_failed",
-                    extra={"permit_id": permit_model.permit_id},
-                )
-            try:
-                # authorize_and_reserve increments the per-tool call counter
-                # atomically with the budget, so giving back only the credits
-                # leaves the use consumed. On a path whose whole answer is
-                # "retry this key", that is the difference between a retry that
-                # works and one denied permit_max_calls_exceeded against a call
-                # that never happened -- on a max_calls_per_tool of 1, the first
-                # contended attempt would end the permit. Releasing it is a
-                # no-op when the permit carries no cap.
-                await get_permit_service().release_tool_call(
-                    permit_model.permit_id,
-                    tool_name,
-                )
-            except Exception:
-                logger.exception(
-                    "mcp_contended_release_tool_call_failed",
-                    extra={"permit_id": permit_model.permit_id, "tool": tool_name},
-                )
+            # Nothing ran and nothing was charged, and this path's whole answer
+            # is "retry this key" -- so a use left consumed here would deny the
+            # very retry being advised.
+            await _release_local_permit_reservation(
+                permit_model,
+                registered_cost,
+                tool_name,
+                reason="ledger_write_contended",
+            )
         try:
             await _audit_mcp_invocation(
                 decision=decision,
@@ -1810,9 +1795,16 @@ async def _execute_registered_tool(
                 dispatch_attempt.attempt_id
             )
         elif governed_call and permit_model:
-            await get_permit_service().release_budget(
-                permit_model.permit_id,
+            # The wallet could not cover the call, so it never ran. This is the
+            # denial the caller is expected to act on -- top up and try again --
+            # which makes leaving the per-tool use consumed the most damaging
+            # place to do it: on a cap of one, the retry the denial invites is
+            # refused for a call that never happened.
+            await _release_local_permit_reservation(
+                permit_model,
                 registered_cost,
+                tool_name,
+                reason=denial_reason,
             )
         audit_event = await _audit_mcp_invocation(
             decision=decision,
@@ -2868,6 +2860,56 @@ async def _complete_governed_denial_idempotency(
         response_json=_governed_error_payload(reason, None),
         status_code=status_code,
     )
+
+
+async def _release_local_permit_reservation(
+    permit_model: Any,
+    registered_cost: Decimal,
+    tool_name: str,
+    *,
+    reason: str,
+) -> None:
+    """Give a local governed reservation back in full: the credits and the call.
+
+    ``authorize_and_reserve`` increments the ``max_calls_per_tool`` counter
+    atomically with the budget reservation, so handing back only the credits
+    leaves the use consumed. A permit capped at one call is then finished, and
+    answers its holder's next attempt ``permit_max_calls_exceeded`` for a call
+    that never ran, never charged and never dispatched.
+    ``PermitService.release_tool_call`` is the documented compensation partner
+    and is a no-op on a permit that configures no cap for this tool.
+
+    Local reservations only. The upstream path reserves credits alone --
+    ``authorize_reserve_and_prepare`` never touches the counter -- and a permit
+    that configures ``max_calls_per_tool`` is refused that backend outright as
+    ``permit_constraint_unsupported_for_upstream``, so no remote reservation
+    can ever hold a per-tool use to give back. Remote budget goes back through
+    ``release_dispatch_budget_once`` instead, which is attempt-keyed.
+
+    Each half is guarded on its own. Compensation runs on paths whose real
+    answer to the caller is a denial or a failure, and a release that loses its
+    own writes must neither replace that answer with a less informative one nor
+    stop the other half from running.
+    """
+    permits = get_permit_service()
+    try:
+        await permits.release_budget(permit_model.permit_id, registered_cost)
+    except Exception:
+        logger.exception(
+            "mcp_release_budget_failed",
+            extra={"permit_id": permit_model.permit_id, "reason": reason},
+        )
+    try:
+        await permits.release_tool_call(permit_model.permit_id, tool_name)
+    except Exception:
+        logger.exception(
+            "mcp_release_tool_call_failed",
+            extra={
+                "permit_id": permit_model.permit_id,
+                "tool": tool_name,
+                "reason": reason,
+            },
+        )
 
 
 async def _finalize_governed_denial(
