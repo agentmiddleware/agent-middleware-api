@@ -48,7 +48,9 @@ from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
 
 OKTA_ISS = "https://example.okta.com/oauth2/default"
-ENTRA_ISS = "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+ENTRA_ISS = (
+    "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+)
 AUDIENCE = "api://agent-middleware"
 KID = "iga-test-kid"
 TOOL = "demo.tool"
@@ -70,9 +72,7 @@ def wrong_rsa_key():
 
 
 def _pem(private_key) -> bytes:
-    return private_key.private_bytes(
-        Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
-    )
+    return private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
 
 
 def _b64url_uint(value: int) -> str:
@@ -116,7 +116,9 @@ def _mint(
     }
     if extra:
         claims.update(extra)
-    return jwt.encode(claims, _pem(private_key), algorithm="RS256", headers={"kid": kid})
+    return jwt.encode(
+        claims, _pem(private_key), algorithm="RS256", headers={"kid": kid}
+    )
 
 
 def _okta_issuers(private_key) -> dict:
@@ -279,9 +281,7 @@ async def test_unauthorized_principal_without_required_role_is_blocked(
 async def test_entra_roles_claim_allows(iga_config, clean_database, rsa_key):
     wallet_id = await _make_wallet()
     policy_id = await _make_bundle(wallet_id, allowed_tools=[TOOL])
-    iga_config(
-        _entra_issuers(rsa_key), {"Payments.Operator": {"policy_id": policy_id}}
-    )
+    iga_config(_entra_issuers(rsa_key), {"Payments.Operator": {"policy_id": policy_id}})
 
     token = _mint(
         rsa_key, iss=ENTRA_ISS, sub="entra-user", extra={"roles": ["Payments.Operator"]}
@@ -336,9 +336,7 @@ async def test_unknown_issuer_rejected(iga_config, rsa_key):
     assert excinfo.value.reason == "iga_issuer_not_trusted"
 
 
-async def test_token_signed_with_wrong_key_rejected(
-    iga_config, rsa_key, wrong_rsa_key
-):
+async def test_token_signed_with_wrong_key_rejected(iga_config, rsa_key, wrong_rsa_key):
     iga_config(_okta_issuers(rsa_key))
     # Same kid so key selection succeeds and the signature check itself fails.
     with pytest.raises(IGAError) as excinfo:
@@ -749,8 +747,7 @@ async def test_get_enterprise_principal_none_when_disabled_or_headerless(rsa_key
     assert not get_settings().IGA_TRUSTED_ISSUERS
     assert await get_enterprise_principal(authorization=None) is None
     assert (
-        await get_enterprise_principal(authorization=f"Bearer {_mint(rsa_key)}")
-        is None
+        await get_enterprise_principal(authorization=f"Bearer {_mint(rsa_key)}") is None
     )
 
 
@@ -763,9 +760,9 @@ async def test_get_enterprise_principal_ignores_internal_issuer_tokens(
     # The internal EdDSA flow's issuer is not IGA-trusted: fall through (None)
     # so get_auth_context keeps owning those tokens.
     internal_token = _mint(rsa_key, iss="agent-middleware-api")
-    assert await get_enterprise_principal(
-        authorization=f"Bearer {internal_token}"
-    ) is None
+    assert (
+        await get_enterprise_principal(authorization=f"Bearer {internal_token}") is None
+    )
 
 
 async def test_get_enterprise_principal_401_on_bad_enterprise_token(
@@ -780,9 +777,7 @@ async def test_get_enterprise_principal_401_on_bad_enterprise_token(
     assert excinfo.value.detail["error"] == "iga_token_expired"
 
 
-async def test_get_enterprise_principal_returns_verified_principal(
-    iga_config, rsa_key
-):
+async def test_get_enterprise_principal_returns_verified_principal(iga_config, rsa_key):
     iga_config(_okta_issuers(rsa_key))
     token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
     principal = await get_enterprise_principal(authorization=f"Bearer {token}")
@@ -1101,6 +1096,76 @@ async def test_insufficient_funds_denial_releases_iga_use(
         assert payload["result"]["receipt"]["outcome"] == "success"
         assert calls == [{"message": "hello"}]
         # The dispatched call keeps its committed use.
+        assert sum(oidc_iga._lifetime_uses.values()) == 1
+    finally:
+        registry.unregister_local(E2E_TOOL)
+
+
+async def test_ledger_contention_releases_iga_use(
+    iga_config, clean_database, rsa_key, client, monkeypatch
+):
+    """A lost write conflict is the same kind of refusal as insufficient funds.
+
+    The charge exhausted its retries, so nothing was charged and nothing was
+    dispatched -- and unlike the funds denial, this one explicitly tells the
+    caller to retry the same key. A ``max_uses=1`` principal whose use stayed
+    consumed would find that advised retry refused ``iga_max_uses_exceeded``
+    for a call the gateway never made.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    from app.services.billing_engine import BillingEngine
+
+    calls: list[dict] = []
+    registry = _register_e2e_tool(calls)
+    try:
+        setup = await _provision_for_e2e(client, idem_key="iga-e2e-contend-permit")
+        wallet_id = setup["agent_wallet_id"]
+        agent_headers = setup["agent_headers"]
+
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_TOOL])
+        iga_config(
+            _okta_issuers(rsa_key),
+            {"payments-ops": {"policy_id": policy_id, "max_uses": 1}},
+        )
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        headers = {**agent_headers, "Authorization": f"Bearer {token}"}
+
+        async def _always_contended(self, **_kwargs):
+            raise OperationalError(
+                "UPDATE wallets ...", {}, Exception("database is locked")
+            )
+
+        monkeypatch.setattr(BillingEngine, "_charge_once", _always_contended)
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=wallet_id,
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-contend-1",
+            headers=headers,
+        )
+        monkeypatch.undo()
+
+        assert "error" in payload, payload
+        assert payload["error"]["message"] == "ledger_write_contended", payload
+        assert calls == []
+        # The recorded use was compensated: nothing charged, nothing dispatched.
+        assert oidc_iga._lifetime_uses == {}
+        assert oidc_iga._window_calls == {}
+
+        # The retry this refusal advertises actually runs.
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=wallet_id,
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-contend-2",
+            headers=headers,
+        )
+        assert "result" in payload, payload
+        assert payload["result"]["receipt"]["outcome"] == "success"
+        assert calls == [{"message": "hello"}]
+        # And the call that did dispatch keeps its use.
         assert sum(oidc_iga._lifetime_uses.values()) == 1
     finally:
         registry.unregister_local(E2E_TOOL)

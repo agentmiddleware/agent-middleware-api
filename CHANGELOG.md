@@ -32,8 +32,11 @@ full release gate; do not backfill a final `v1.2.0` tag.
 
 - **The same defect is fixed on the AWI HTTP route**, where it was worse: any
   charge exception stored a terminal `charge_failed`, freezing a momentary lock
-  into a permanent denial that every later retry of that key replayed. It now
-  takes the abandon-and-503 path the route already used for a contended permit.
+  into a permanent denial that every later retry of that key replayed. Contention
+  there is now recorded as `ledger_write_contended`, so an operator can tell a
+  lost write conflict from a substantive failure of the charge. The key itself
+  stays closed on that route rather than being freed, for the reason set out
+  below — that route runs its action before the charge.
 
 - **`tests/test_adversarial_five_claims.py` was right and was dismissed.** That
   gate had been failing about one run in three and was written off as a flaky

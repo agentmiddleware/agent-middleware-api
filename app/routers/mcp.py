@@ -1570,6 +1570,11 @@ async def _execute_registered_tool(
             quote_id, idempotency_key=idempotency_key
         ):
             reason = QUOTE_REASON_CONSUMED
+            # The use the enterprise gate recorded is spent on a call that is
+            # about to be refused without charging or dispatching, so it goes
+            # back on either backend -- the gate runs before the local/remote
+            # split, so both reach here holding one.
+            await _release_iga_use(iga_granted_use, tool_name, reason=reason)
             if dispatch_service is not None and dispatch_attempt is not None:
                 try:
                     await dispatch_service.abandon_effect_free_prepared_attempt(
@@ -1696,6 +1701,9 @@ async def _execute_registered_tool(
         # idempotency_in_progress forever, against a reservation it can never
         # spend. Hand both back, on either backend, so that the retryable answer
         # this raises is one the caller can actually act on.
+        await _release_iga_use(
+            iga_granted_use, tool_name, reason="ledger_write_contended"
+        )
         if dispatch_service is not None and dispatch_attempt is not None:
             # Remote keeps its reservation on the prepared attempt, and that row
             # also holds a foreign key to the idempotency record, so neither can
@@ -1721,9 +1729,7 @@ async def _execute_registered_tool(
                 # means a durable owner may have advanced the attempt, so
                 # cleanup cannot prove it stayed effect-free and reconciliation
                 # owns the classification from here.
-                raise IdempotencyInProgressError(
-                    "idempotency_in_progress"
-                ) from None
+                raise IdempotencyInProgressError("idempotency_in_progress") from None
             dispatch_attempt = None
         # Local: nothing durable owns this reservation, so unwind it directly.
         # Each compensation is guarded on its own: a failure to unwind must not
@@ -1781,19 +1787,7 @@ async def _execute_registered_tool(
         # budget must not burn down on it (a max_uses=1 principal would
         # otherwise be locked out forever by one under-funded wallet).
         # Best-effort — compensation must never mask the funds denial.
-        if iga_granted_use is not None:
-            try:
-                await release_tool_use(
-                    iga_granted_use[0],
-                    tool_name,
-                    group=iga_granted_use[1],
-                    policy_id=iga_granted_use[2],
-                )
-            except Exception:
-                logger.exception(
-                    "iga_use_release_failed",
-                    extra={"tool": tool_name},
-                )
+        await _release_iga_use(iga_granted_use, tool_name, reason=charge_result.error)
         denial_reason = charge_result.error
         denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:
@@ -2879,6 +2873,40 @@ async def _complete_governed_denial_idempotency(
         response_json=_governed_error_payload(reason, None),
         status_code=status_code,
     )
+
+
+async def _release_iga_use(
+    iga_granted_use: tuple[Any, str, str] | None,
+    tool_name: str,
+    *,
+    reason: str,
+) -> None:
+    """Hand back the enterprise use consumed by an action that never happened.
+
+    ``enforce_tool_call`` records a use atomically with its ALLOW, before any
+    of the pre-dispatch gates run. A refusal that charges nothing and
+    dispatches nothing must therefore give that use back, or a ``max_uses``
+    budget and the velocity window burn down on an action nobody took --
+    ``release_tool_use`` names the worst case, a ``max_uses=1`` principal
+    locked out forever by a single refusal.
+
+    Best-effort: compensation must never replace the refusal the caller is
+    actually being given.
+    """
+    if iga_granted_use is None:
+        return
+    try:
+        await release_tool_use(
+            iga_granted_use[0],
+            tool_name,
+            group=iga_granted_use[1],
+            policy_id=iga_granted_use[2],
+        )
+    except Exception:
+        logger.exception(
+            "iga_use_release_failed",
+            extra={"tool": tool_name, "reason": reason},
+        )
 
 
 async def _release_local_permit_reservation(
