@@ -288,12 +288,15 @@
             A credit is a closed-loop metering unit for the pilot on an
             operator-provisioned wallet, not payment rails. The gateway
             reserves the tool's registered credit price against the permit
-            and writes at most one ledger debit under the accepted idempotency
-            key before the dispatch is claimed; a denied call is never
-            charged, and a call that never dispatched has its credits
-            returned. Turning credits into invoices, settlement, or payment
-            rails is out of scope by design, and the pilot is priced
-            separately, in writing.
+            before anything runs, and writes at most one ledger debit per
+            accepted idempotency key. A denied call is never charged. A call
+            that provably never reached the tool is refunded. A call that was
+            dispatched and then became unknowable — a timeout, a crash — stays
+            charged, and is never retried for you: refunding an ambiguous call
+            automatically would pay a caller to induce timeouts against a tool
+            that had already done the work. Turning credits into invoices,
+            settlement, or payment rails is out of scope by design, and the
+            pilot is priced separately, in writing.
           </p>
         </div>
 

@@ -243,15 +243,27 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     # What a credit is, in one place, because the page meters calls while its
     # own limitations section refuses production settlement. Without this the
     # two read as a contradiction rather than a deliberate boundary.
+    #
+    # It must name the case where the caller pays without a proven downstream
+    # effect. docs/failure-semantics.md is explicit that delivery_uncertain
+    # and response_rejected stay charged, and this page invites the reader to
+    # go and check the repository — so a paragraph that listed only the two
+    # ways a caller does not pay would read as shading on the one page whose
+    # differentiator is that it does not shade. The incentive argument is the
+    # honest reason and is also the stronger pitch.
     credit = (
         "A credit is a closed-loop metering unit for the pilot on an "
         "operator-provisioned wallet, not payment rails. The gateway reserves "
-        "the tool's registered credit price against the permit and writes at "
-        "most one ledger debit under the accepted idempotency key before the "
-        "dispatch is claimed; a denied call is never charged, and a call that "
-        "never dispatched has its credits returned. Turning credits into "
-        "invoices, settlement, or payment rails is out of scope by design, "
-        "and the pilot is priced separately, in writing."
+        "the tool's registered credit price against the permit before "
+        "anything runs, and writes at most one ledger debit per accepted "
+        "idempotency key. A denied call is never charged. A call that "
+        "provably never reached the tool is refunded. A call that was "
+        "dispatched and then became unknowable — a timeout, a crash — stays "
+        "charged, and is never retried for you: refunding an ambiguous call "
+        "automatically would pay a caller to induce timeouts against a tool "
+        "that had already done the work. Turning credits into invoices, "
+        "settlement, or payment rails is out of scope by design, and the "
+        "pilot is priced separately, in writing."
     )
     # The recording uses a stand-in tool. Naming a refund in the hero without
     # saying so would let the transcript be read as a customer's refund.
@@ -280,6 +292,13 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert wedge in text
     assert credit in text
     assert stand_in in text
+    # Belt and braces: the unfavourable half of the credit paragraph is the
+    # reason it exists, so it is pinned separately from the whole string.
+    assert "stays charged" in text, (
+        "the credit paragraph no longer says a caller can pay for a call whose "
+        "outcome was never established; that omission is the exact shading "
+        "this page refuses elsewhere"
+    )
     # The scenario is carried through: the pilot ask and the intake question
     # name the same kind of tool the hero opens with.
     assert "such as a refund tool, a deploy trigger, or a payout call" in text
