@@ -1716,6 +1716,24 @@ async def _execute_registered_tool(
                     "mcp_contended_release_budget_failed",
                     extra={"permit_id": permit_model.permit_id},
                 )
+            try:
+                # authorize_and_reserve increments the per-tool call counter
+                # atomically with the budget, so giving back only the credits
+                # leaves the use consumed. On a path whose whole answer is
+                # "retry this key", that is the difference between a retry that
+                # works and one denied permit_max_calls_exceeded against a call
+                # that never happened -- on a max_calls_per_tool of 1, the first
+                # contended attempt would end the permit. Releasing it is a
+                # no-op when the permit carries no cap.
+                await get_permit_service().release_tool_call(
+                    permit_model.permit_id,
+                    tool_name,
+                )
+            except Exception:
+                logger.exception(
+                    "mcp_contended_release_tool_call_failed",
+                    extra={"permit_id": permit_model.permit_id, "tool": tool_name},
+                )
         try:
             await _audit_mcp_invocation(
                 decision=decision,

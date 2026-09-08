@@ -353,29 +353,32 @@ async def complete_awi_http_governed(
             operation_key=ctx.record_id,
         )
     except LedgerWriteContendedError as exc:
-        # Same shape as the permit_write_contended branch above, and the same
-        # reasoning applies verbatim: the debit exhausted its retries, nothing
-        # was charged, so completing the record would freeze a momentary
-        # database conflict into a permanent stored charge_failed that every
-        # later retry of this key replays. Release the reservation and the key,
-        # and answer 503 so the caller retries rather than treating a lock as a
-        # verdict about its money.
-        await permits.release_budget(ctx.permit_id, ctx.credits)
-        await idem.abandon(
-            wallet_id=ctx.wallet_id,
-            endpoint=ctx.endpoint,
-            idempotency_key=ctx.idempotency_key,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "ledger_write_contended",
-                "message": "Wallet charge lost a write conflict; retry.",
-                "tool": ctx.tool_name,
-            },
-        ) from exc
+        # The governed MCP path frees the key here and tells the caller to
+        # retry. That is exactly wrong on this route, because the order is
+        # reversed: every governed AWI route runs its action BEFORE reaching
+        # this charge -- app/routers/awi.py drives manager.execute_action, which
+        # issues live Playwright DOM commands when a bridge is attached, and the
+        # enhanced routes execute browser commands, index RAG memories and
+        # consume WebAuthn challenges. None of them dedupe on the idempotency
+        # key. Freeing the key would therefore invite the caller to repeat a
+        # side effect that already happened, which is a worse outcome than the
+        # stored denial that freeing it was meant to avoid.
+        #
+        # So the record is completed, and the reason is carried through rather
+        # than flattened into charge_failed so an operator can still tell a lost
+        # write conflict from a substantive charge failure. The action ran and
+        # went unbilled; that cost is accepted deliberately, in preference to
+        # running it a second time.
+        detail = {
+            "error": "ledger_write_contended",
+            "message": "Wallet charge lost a write conflict after the action ran.",
+            "tool": ctx.tool_name,
+        }
+        await _release_reservation(permits, ctx)
+        await abort_awi_http_governed(ctx, status_code=500, error_payload=detail)
+        raise HTTPException(status_code=500, detail=detail) from exc
     except Exception as exc:
-        await permits.release_budget(ctx.permit_id, ctx.credits)
+        await _release_reservation(permits, ctx)
         detail = {
             "error": "charge_failed",
             "message": "Wallet charge failed for governed AWI action.",
@@ -387,7 +390,7 @@ async def complete_awi_http_governed(
         raise HTTPException(status_code=500, detail=detail) from exc
 
     if isinstance(charge_result, InsufficientFundsResponse):
-        await permits.release_budget(ctx.permit_id, ctx.credits)
+        await _release_reservation(permits, ctx)
         detail = {
             "error": "insufficient_funds",
             "message": "Wallet cannot cover governed AWI action.",
@@ -513,6 +516,27 @@ async def complete_awi_http_governed(
 
     assert response_with_receipt is not None
     return response_with_receipt
+
+
+async def _release_reservation(permits: Any, ctx: AwiHttpGovernedContext) -> None:
+    """Hand a governed AWI reservation back, never at the cost of the record.
+
+    ``release_budget`` runs its own guarded write and raises
+    ``PermitError("permit_write_contended")`` when that write exhausts its
+    retries. Called unguarded ahead of the idempotency completion, that failure
+    would do double damage: the record would never be closed, leaving the key
+    wedged in progress, and the ``PermitError`` would escape the route's typed
+    handling as an unclassified 500. The reservation is the recoverable half --
+    it lapses when the permit expires or is revoked -- so a failure here is
+    logged and the completion is allowed to proceed.
+    """
+    try:
+        await permits.release_budget(ctx.permit_id, ctx.credits)
+    except Exception:
+        logger.exception(
+            "awi_governed_release_budget_failed",
+            extra={"permit_id": ctx.permit_id, "endpoint": ctx.endpoint},
+        )
 
 
 async def abort_awi_http_governed(

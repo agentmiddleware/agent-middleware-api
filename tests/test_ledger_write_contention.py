@@ -25,6 +25,7 @@ or the retry would be a way to hide real faults.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -46,7 +47,11 @@ from app.services.mcp_dispatch_reconciliation import (
 from app.services.permits import get_permit_service
 from app.services.service_registry import get_service_registry
 from tests.test_mcp_upstream_governed import FakeUpstreamExecutor
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 TOOL_COST = 2.0
 
@@ -590,3 +595,68 @@ async def test_a_contended_remote_charge_releases_its_reservation_once(
         assert await _spent_credits(permit_id) == charged
     finally:
         get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_a_capped_permit_can_still_spend_its_call_after_contention(
+    client: AsyncClient, clean_database: None, governed_tool, monkeypatch
+) -> None:
+    """Giving back the credits is only half the reservation.
+
+    ``authorize_and_reserve`` increments the ``max_calls_per_tool`` counter
+    atomically with the budget, so a compensation that returns only the credits
+    leaves the use consumed. This path's whole answer is "retry this key", and
+    on a permit capped at one call that retry would be denied
+    ``permit_max_calls_exceeded`` for a call that never ran, never charged and
+    never dispatched -- one lost write conflict would end the permit.
+    """
+    tool_name, runs = governed_tool
+    ctx = await provision_agent_wallet(client)
+    permit_resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": ctx["agent_wallet_id"],
+            "subject_wallet_id": ctx["agent_wallet_id"],
+            "subject_key_id": ctx["key_id"],
+            "allowed_tools": [tool_name],
+            "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+            "max_credits": 10,
+            "max_calls_per_tool": {tool_name: 1},
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "contention-permit-capped"},
+    )
+    assert permit_resp.status_code == 201, permit_resp.text
+    permit_id = permit_resp.json()["permit_id"]
+
+    _FlushFault(None).patch(monkeypatch)
+    await client.post(
+        "/mcp/messages",
+        json=_call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit_id,
+            idempotency_key="contention-capped-1",
+        ),
+        headers=ctx["agent_headers"],
+    )
+    monkeypatch.undo()
+
+    assert runs["count"] == 0
+
+    retry = await client.post(
+        "/mcp/messages",
+        json=_call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit_id,
+            idempotency_key="contention-capped-1",
+        ),
+        headers=ctx["agent_headers"],
+    )
+    assert retry.status_code == 200, retry.text
+    body = retry.json()
+    assert "error" not in body, body
+    assert runs["count"] == 1

@@ -54,6 +54,26 @@ full release gate; do not backfill a final `v1.2.0` tag.
   repair every other failure there takes, and only the local path, where
   nothing durable owns the cleanup, unwinds by hand.
 
+- **A capped permit survives a contended call.** `authorize_and_reserve`
+  increments the `max_calls_per_tool` counter atomically with the budget, so a
+  compensation that returned only the credits left the use consumed. On a path
+  whose whole answer is "retry this key", that was the difference between a
+  retry that works and one denied `permit_max_calls_exceeded` for a call that
+  never ran — on a cap of one, a single lost write conflict ended the permit.
+  The per-tool call is now released alongside the budget.
+
+- **The AWI route closes the key it cannot safely reopen.** Freeing the
+  idempotency key and inviting a retry is right on the governed MCP path, where
+  the charge precedes execution. It is wrong on AWI, where every governed route
+  runs its action *first* — live Playwright DOM commands, RAG indexing, WebAuthn
+  challenge consumption — none of them deduped on the key. A contended charge
+  there now completes the record instead, carrying `ledger_write_contended`
+  through so contention stays distinguishable from a substantive charge failure.
+  The action ran unbilled; that cost is accepted deliberately, in preference to
+  running it twice. Reservation releases on this route are also guarded
+  individually, so a release that loses its own writes can no longer prevent the
+  record from being closed or escape as an unclassified 500.
+
 ### 🛎️ The public site answers the questions a buyer actually asks
 
 - **The landing page names one scenario, one brand, and one number, and says
