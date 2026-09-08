@@ -11,6 +11,38 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔒 A lost SQLite write conflict no longer wedges the governed money path
+
+- **A contended debit is now a reason the caller can act on, not an
+  unclassified failure.** Under genuine concurrency on the shipped SQLite
+  posture, the governed charge could lose its WAL snapshot at the velocity
+  write and escape as `-32603 internal_error` with only a correlation id. The
+  visible symptom was the least of it: nothing had been charged, but the permit
+  reservation and the `in_progress` idempotency record were both committed and
+  neither self-heals, so a caller that followed the retry advice in
+  `docs/failure-semantics.md` got `idempotency_in_progress` forever against a
+  reservation it could never spend. The governed charge transaction now
+  restarts on a transient conflict — the only cure SQLite offers, since
+  `SQLITE_BUSY_SNAPSHOT` deliberately bypasses `busy_timeout` — and on
+  exhaustion it hands back the reservation, frees the key, and answers
+  `-32005 ledger_write_contended`. The classifier and the retry move to
+  `app/core/resilience.py`, shared with the permit writes that already worked
+  this way. Retry is scoped to the governed path: standalone velocity commits
+  in its own transaction, and restarting that would double-count the spend cap.
+
+- **The same defect is fixed on the AWI HTTP route**, where it was worse: any
+  charge exception stored a terminal `charge_failed`, freezing a momentary lock
+  into a permanent denial that every later retry of that key replayed. It now
+  takes the abandon-and-503 path the route already used for a contended permit.
+
+- **`tests/test_adversarial_five_claims.py` was right and was dismissed.** That
+  gate had been failing about one run in three and was written off as a flaky
+  timing test; it was reporting this defect in the only vocabulary it had left,
+  after #402 correctly stopped echoing driver text and thereby blinded its
+  `"locked"` heuristic. It now names `ledger_write_contended` explicitly and
+  asserts that no response is ever `internal_error`, so the next reader widens
+  nothing and reads the traceback instead.
+
 ### 🛎️ The public site answers the questions a buyer actually asks
 
 - **The landing page names one scenario, one brand, and one number, and says

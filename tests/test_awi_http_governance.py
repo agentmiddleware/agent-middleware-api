@@ -491,3 +491,83 @@ async def test_valid_idempotency_key_at_store_width_replays_same_receipt(
         == second.json()["receipt"]["ledger_entry_id"]
     )
     assert await _rag_query_state(provisioned["agent_wallet_id"]) == ([key], 1)
+
+
+@pytest.mark.anyio
+async def test_awi_contended_charge_frees_the_key_instead_of_storing_a_denial(
+    client, clean_database, monkeypatch
+):
+    """A lost write conflict must not become a permanent stored verdict.
+
+    This route already reasons correctly about ``permit_write_contended``: it
+    abandons the key and answers 503, because *completing* the record would
+    freeze a momentary database conflict into a stored denial that every later
+    retry of that key replays, long after the contention cleared. The debit
+    below it had no such branch, so a contended charge fell into the generic
+    handler and stored ``charge_failed`` -- the exact outcome the comment
+    fifty lines above it warns against.
+    """
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="awi_rag_query",
+        max_credits=50,
+        idem_key="permit-awi-contended",
+    )
+
+    real_flush = AsyncSession.flush
+
+    async def locked_flush(session, *args, **kwargs):
+        raise OperationalError(
+            "UPDATE wallets ...", {}, Exception("database is locked")
+        )
+
+    monkeypatch.setattr(AsyncSession, "flush", locked_flush)
+    resp = await client.post(
+        "/v1/awi/rag/query",
+        json={"query": "laptops", "top_k": 3},
+        headers={
+            **provisioned["agent_headers"],
+            "X-Wallet-Id": provisioned["agent_wallet_id"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": "awi-contended-1",
+        },
+    )
+    monkeypatch.setattr(AsyncSession, "flush", real_flush)
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["error"] == "ledger_write_contended"
+
+    # The key is free, not carrying a stored charge_failed for all time.
+    factory = get_session_factory()
+    async with factory() as session:
+        remaining = (
+            await session.execute(
+                select(func.count())
+                .select_from(IdempotencyRecordModel)
+                .where(
+                    IdempotencyRecordModel.wallet_id
+                    == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.idempotency_key == "awi-contended-1",
+                )
+            )
+        ).scalar_one()
+    assert remaining == 0
+
+    # And the caller's retry of that same key goes through.
+    retry = await client.post(
+        "/v1/awi/rag/query",
+        json={"query": "laptops", "top_k": 3},
+        headers={
+            **provisioned["agent_headers"],
+            "X-Wallet-Id": provisioned["agent_wallet_id"],
+            "X-Permit-Id": permit["permit_id"],
+            "Idempotency-Key": "awi-contended-1",
+        },
+    )
+    assert retry.status_code == 200, retry.text

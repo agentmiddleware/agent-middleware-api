@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.config import Settings, get_settings
+from ..core.resilience import run_with_write_conflict_retry
 from ..core.time import utc_now
 from ..db.converters import billing_alert_model_to_schema, ledger_entry_model_to_schema
 from ..db.sql_expressions import clamped_decrement
@@ -63,6 +64,18 @@ logger = logging.getLogger(__name__)
 
 class DirectTopUpDisabledError(RuntimeError):
     """Raised when code attempts to mint credits without provider settlement."""
+
+
+class LedgerWriteContendedError(RuntimeError):
+    """The governed debit transaction lost repeated SQLite write conflicts.
+
+    Nothing was charged and nothing was dispatched: every attempt rolled back
+    whole. The caller may retry the same idempotency key, which is why this is
+    distinct from an unclassified failure -- a client that cannot tell the two
+    apart has to assume its money may have moved.
+    """
+
+    reason = "ledger_write_contended"
 
 
 class LedgerOperationConflictError(RuntimeError):
@@ -657,6 +670,121 @@ class BillingEngine:
                 raise ValueError("invalid_ledger_operation_key")
 
         velocity_monitor = get_velocity_monitor()
+
+        async def _attempt() -> (
+            LedgerEntry | InsufficientFundsResponse | SimulatedChargeResult
+        ):
+            return await self._charge_once(
+                wallet_id=wallet_id,
+                service_category=service_category,
+                units=units,
+                request_path=request_path,
+                description=description,
+                operation_key=operation_key,
+                charge_amount=charge_amount,
+                compute_cost=compute_cost,
+                margin=margin,
+                unit_name=unit_name,
+                credits_per_unit=credits_per_unit,
+                velocity_monitor=velocity_monitor,
+            )
+
+        if operation_key is None:
+            # Standalone velocity commits in its OWN transaction before this
+            # one does, and is compensated only on the way out. Restarting
+            # that path would double-count the spend cap and the auto-freeze
+            # counter, so a conflict here propagates as it always has.
+            return await _attempt()
+
+        # Governed: velocity shares this transaction and rolls back with it, the
+        # operation key dedupes the debit, and the unique (wallet, key) index
+        # makes a second debit structurally impossible -- so restarting the
+        # whole transaction is safe, and it is the only cure SQLite offers for
+        # a snapshot that went stale under a concurrent writer.
+        try:
+            return await run_with_write_conflict_retry(
+                _attempt,
+                on_exhausted=lambda exc: LedgerWriteContendedError(
+                    "ledger_write_contended"
+                ),
+            )
+        except LedgerWriteContendedError:
+            # One last read before answering "nothing moved". If the final
+            # attempt's COMMIT landed and only its acknowledgement was lost,
+            # the durable debit exists and this call did succeed; reporting a
+            # contention failure there would be the one way this retry could
+            # produce a double charge on the caller's retry. The operation key
+            # makes that question answerable, so ask it rather than assume.
+            adopted = await self._adopt_operation_debit_if_committed(
+                wallet_id=wallet_id,
+                operation_key=operation_key,
+                service_category=service_category,
+                charge_amount=charge_amount,
+                request_path=request_path,
+            )
+            if adopted is not None:
+                return adopted
+            raise
+
+    async def _adopt_operation_debit_if_committed(
+        self,
+        *,
+        wallet_id: str,
+        operation_key: str,
+        service_category: ServiceCategory,
+        charge_amount: Decimal,
+        request_path: str | None,
+    ) -> LedgerEntry | None:
+        """Return the durable debit for this operation key, if one committed.
+
+        Read-only. ``None`` means no debit exists, so the caller may truthfully
+        report that nothing moved. A debit that exists but does not match this
+        charge's invariants raises rather than being adopted -- silently
+        returning someone else's ledger entry would be worse than the failure
+        it was covering for.
+        """
+        async with self._session_factory()() as session:
+            existing = await self._get_operation_debit(
+                session,
+                wallet_id=wallet_id,
+                operation_key=operation_key,
+            )
+            if existing is None:
+                return None
+            self._assert_operation_debit_matches(
+                existing,
+                wallet_id=wallet_id,
+                operation_key=operation_key,
+                service_category=service_category,
+                charge_amount=charge_amount,
+                request_path=request_path,
+            )
+            return ledger_entry_model_to_schema(existing)
+
+    async def _charge_once(
+        self,
+        *,
+        wallet_id: str,
+        service_category: ServiceCategory,
+        units: Decimal,
+        request_path: str | None,
+        description: str,
+        operation_key: str | None,
+        charge_amount: Decimal,
+        compute_cost: Decimal,
+        margin: Decimal,
+        unit_name: str,
+        credits_per_unit: Decimal,
+        velocity_monitor: Any,
+    ) -> LedgerEntry | InsufficientFundsResponse | SimulatedChargeResult:
+        """One attempt at the debit transaction.
+
+        Separated from ``charge`` so a lost SQLite snapshot can restart it from
+        the top. Every piece of per-attempt state is local to this call: a retry
+        must not inherit a velocity marker or a freeze flag that a rolled-back
+        attempt set, or the compensation on the way out would fire for an
+        increment that no longer exists.
+        """
         # Only standalone velocity commits outside the billing transaction.
         # Hoist its period markers so an exception can compensate that one
         # external increment from a fresh transaction. Governed velocity uses
@@ -901,7 +1029,6 @@ class BillingEngine:
                 recorded=recorded_velocity,
             )
             raise
-
     async def _reverse_recorded_velocity(
         self,
         *,

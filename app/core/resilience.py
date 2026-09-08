@@ -8,6 +8,8 @@ import time
 from functools import wraps
 from typing import Any, Callable, TypeVar
 
+from sqlalchemy.exc import OperationalError
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -172,3 +174,72 @@ class CircuitBreakerOpen(Exception):
     """Raised when circuit breaker is open."""
 
     pass
+
+
+# --------------------------------------------------------------------------- #
+# SQLite write-conflict restart
+#
+# On PostgreSQL a contended row lock blocks until it is free, so a writer simply
+# waits and the helpers below run their operation exactly once. SQLite in WAL
+# mode cannot do that for a transaction that has already read: the read pins a
+# snapshot, and if anything committed since, upgrading that snapshot to a write
+# returns SQLITE_BUSY_SNAPSHOT *without consulting the busy handler* — waiting
+# could only deadlock, so `PRAGMA busy_timeout` is deliberately not applied. The
+# single cure the engine offers is to abandon the snapshot and run the whole
+# transaction again, which is what these two functions exist to do.
+#
+# That is why this is a transaction-restart helper and not a generic retry: the
+# operation handed in must own and rebuild its own transaction, because the one
+# that raised is already poisoned and nothing inside it can be replayed.
+# --------------------------------------------------------------------------- #
+
+#: Attempts before a contended writer gives up. Chosen with the ~20ms ceiling
+#: below for roughly 0.4s of worst-case contention, which is long enough to
+#: outlast a burst of concurrent writers and short enough that a caller blocked
+#: on it still gets an answer rather than a timeout.
+WRITE_CONFLICT_MAX_ATTEMPTS = 40
+
+
+def is_retryable_write_conflict(exc: BaseException) -> bool:
+    """Whether an ``OperationalError`` is a transient SQLite write conflict.
+
+    Both tokens matter: SQLITE_BUSY surfaces as "database is locked", while
+    SQLITE_BUSY_SNAPSHOT surfaces as one or the other depending on the build,
+    so matching both keeps the classifier independent of that difference. A
+    substantive fault — "disk I/O error", "no such table", a constraint — does
+    not match and must propagate on the first attempt.
+    """
+    message = str(exc).lower()
+    return "locked" in message or "snapshot" in message
+
+
+async def run_with_write_conflict_retry(
+    operation: Callable[[], Any],
+    *,
+    on_exhausted: Callable[[BaseException], BaseException],
+    max_attempts: int = WRITE_CONFLICT_MAX_ATTEMPTS,
+) -> Any:
+    """Run a full-transaction operation, restarting it on write conflicts.
+
+    ``operation`` must open and commit its own transaction: it is re-invoked
+    from the top, so anything it leaves committed from an earlier attempt is
+    its own to make idempotent.
+
+    ``on_exhausted`` builds the exception raised when the attempts run out. It
+    is a callable rather than a fixed class so each caller keeps its own reason
+    code — the contended permit and the contended ledger debit are different
+    facts about the system and a client can act differently on each.
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(max_attempts):
+        try:
+            return await operation()
+        except OperationalError as exc:
+            last_exc = exc
+            if not is_retryable_write_conflict(exc):
+                raise
+            # Linear, capped: enough jitter-free spacing to let the winning
+            # writer commit, without a backoff long enough to hold the caller.
+            await asyncio.sleep(min(0.02, 0.002 * (attempt + 1)))
+    assert last_exc is not None  # unreachable: max_attempts >= 1
+    raise on_exhausted(last_exc)

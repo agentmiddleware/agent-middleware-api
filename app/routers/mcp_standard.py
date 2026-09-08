@@ -80,6 +80,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import Message, Receive, Scope, Send
 
 from app.core.auth import AuthContext, get_auth_context
+from app.services.billing_engine import LedgerWriteContendedError
 from app.core.config import get_settings
 from app.core.time import utc_now
 from app.routers.mcp import (
@@ -443,6 +444,11 @@ async def _governed_tools_call(
         raise _mcp_error(e.jsonrpc_code, reason, pending_data or None) from e
     except IdempotencyInProgressError as e:
         raise _mcp_error(-32005, "idempotency_in_progress") from e
+    except LedgerWriteContendedError as e:
+        # Its own branch because the line above hardcodes its reason rather
+        # than passing str(e) through; sharing it would report contention as
+        # an in-progress winner that does not exist.
+        raise _mcp_error(-32005, "ledger_write_contended") from e
     except ToolPermissionDenied as e:
         denial_data: dict[str, Any] = {}
         if e.receipt:

@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.resilience import run_with_write_conflict_retry
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -811,6 +812,36 @@ class McpDispatchAttemptService:
             return replay_access, existing
 
     async def attach_charge(
+        self,
+        *,
+        attempt_id: str,
+        ledger_entry_id: str,
+        credits_charged: Decimal,
+    ) -> McpDispatchAttemptModel:
+        """Link the committed debit to its attempt, restarting on contention.
+
+        Runs after the debit commits, so this is where write conflicts land
+        once the debit itself stops losing them. Restarting is safe: the write
+        short-circuits when the attempt already carries this ledger entry. On
+        exhaustion the driver error is re-raised unchanged rather than
+        converted, because the money has moved and only the link is missing.
+        """
+
+        async def _once() -> McpDispatchAttemptModel:
+            return await self._attach_charge_once(
+                attempt_id=attempt_id,
+                ledger_entry_id=ledger_entry_id,
+                credits_charged=credits_charged,
+            )
+
+        return cast(
+            McpDispatchAttemptModel,
+            await run_with_write_conflict_retry(
+                _once, on_exhausted=lambda exc: exc
+            ),
+        )
+
+    async def _attach_charge_once(
         self,
         *,
         attempt_id: str,

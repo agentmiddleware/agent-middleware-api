@@ -575,15 +575,31 @@ async def test_claim2_concurrent_race_never_exceeds_cap(
                 succeeded.append(r)
             elif msg == "permit_budget_exceeded":
                 budget_denied.append(r)
-            elif msg == "idempotency_in_progress" or "locked" in msg.lower():
+            elif (
+                msg in {"idempotency_in_progress", "ledger_write_contended"}
+                or "locked" in msg.lower()
+            ):
                 transient.append(r)
             else:
                 unexpected.append(r)
 
-        # Only a lock-translated in-progress is tolerated; anything else (an auth
+        # Only a lock-translated transient is tolerated; anything else (an auth
         # failure, a malformed payload, an unrelated JSON-RPC error) fails here
         # rather than being silently absorbed into the count.
+        #
+        # The "locked" match above is legacy: the MCP surface stopped echoing
+        # driver text in #402, correctly, so a lost write no longer arrives
+        # with that word in it. It arrives as ledger_write_contended, which is
+        # named explicitly. Note what this gate is NOT allowed to tolerate --
+        # an unclassified internal_error on the money path means the caller
+        # cannot tell whether it was charged, and for roughly three weeks that
+        # is exactly what this test was failing on while being dismissed as
+        # flaky. Asserting it by name keeps the next reader from widening the
+        # bucket instead of reading the traceback.
         assert not unexpected, unexpected
+        assert all(
+            (r.get("error") or {}).get("message") != "internal_error" for r in results
+        ), [r.get("error") for r in results]
         # Every response is accounted for (no 200 slips through unasserted).
         assert len(succeeded) + len(budget_denied) + len(transient) == concurrency
 

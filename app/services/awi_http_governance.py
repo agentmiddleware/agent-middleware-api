@@ -20,6 +20,7 @@ from app.core.auth import AuthContext
 from app.db.models import PermitModel
 from app.schemas.billing import ServiceCategory
 from app.services.agent_money import AgentMoney, get_agent_money
+from app.services.billing_engine import LedgerWriteContendedError
 from app.services.governed_metering import (
     ChargeCreditMismatchError,
     aligned_credits_charged,
@@ -351,6 +352,28 @@ async def complete_awi_http_governed(
             # first durable debit instead of creating one.
             operation_key=ctx.record_id,
         )
+    except LedgerWriteContendedError as exc:
+        # Same shape as the permit_write_contended branch above, and the same
+        # reasoning applies verbatim: the debit exhausted its retries, nothing
+        # was charged, so completing the record would freeze a momentary
+        # database conflict into a permanent stored charge_failed that every
+        # later retry of this key replays. Release the reservation and the key,
+        # and answer 503 so the caller retries rather than treating a lock as a
+        # verdict about its money.
+        await permits.release_budget(ctx.permit_id, ctx.credits)
+        await idem.abandon(
+            wallet_id=ctx.wallet_id,
+            endpoint=ctx.endpoint,
+            idempotency_key=ctx.idempotency_key,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "ledger_write_contended",
+                "message": "Wallet charge lost a write conflict; retry.",
+                "tool": ctx.tool_name,
+            },
+        ) from exc
     except Exception as exc:
         await permits.release_budget(ctx.permit_id, ctx.credits)
         detail = {
