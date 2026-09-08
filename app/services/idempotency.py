@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
+from app.core.resilience import run_with_write_conflict_retry
 from app.core.config import get_settings
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
@@ -641,6 +642,38 @@ class IdempotencyService:
             await session.commit()
 
     async def mark_charged(
+        self,
+        *,
+        wallet_id: str,
+        endpoint: str,
+        idempotency_key: str,
+        ledger_entry_id: str,
+    ) -> None:
+        """Checkpoint the charge, restarting on a transient write conflict.
+
+        This runs after the debit has committed, so once the debit itself stops
+        losing the WAL snapshot race this is where contention lands -- and a
+        loss here costs the record its checkpoint while the money has already
+        moved. Restarting is safe because the underlying write is a
+        last-writer-wins field set on a single row.
+        """
+
+        async def _once() -> None:
+            await self._mark_charged_once(
+                wallet_id=wallet_id,
+                endpoint=endpoint,
+                idempotency_key=idempotency_key,
+                ledger_entry_id=ledger_entry_id,
+            )
+
+        # On exhaustion, re-raise the driver error unchanged. The debit has
+        # already committed and carries this operation key, so the reaper can
+        # still link it; inventing a new terminal reason here would claim more
+        # about the outcome than is known. The retry is a strict improvement on
+        # the previous behaviour, not a change to it.
+        await run_with_write_conflict_retry(_once, on_exhausted=lambda exc: exc)
+
+    async def _mark_charged_once(
         self,
         *,
         wallet_id: str,
