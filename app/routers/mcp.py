@@ -1613,6 +1613,41 @@ async def _execute_registered_tool(
                 reason=reason,
             )
             raise PermissionError(reason)
+
+    async def _repair_pre_dispatch(exc: BaseException) -> Any:
+        """Finalize a remote checkpoint that failed before dispatch.
+
+        Only valid when a prepared attempt exists. Reconciliation is the sole
+        owner of an attempt-keyed reservation: it drives the attempt terminal
+        and gives the budget back through ``release_dispatch_budget_once``.
+        Never release that reservation by hand alongside this -- the stale
+        sweep would finalize the attempt later and release it a second time.
+        """
+        assert dispatch_attempt is not None
+        assert idempotency_key
+        try:
+            await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+                dispatch_attempt.attempt_id,
+                prepared_error_code="upstream_pre_dispatch_failed",
+            )
+            replayed = await idem.begin_with_record(
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                request_payload=effective_request_payload,
+                operation_kind="upstream_mcp",
+            )
+        except Exception:
+            logger.exception(
+                "mcp_upstream_pre_dispatch_reconciliation_failed",
+                extra={"dispatch_attempt_id": dispatch_attempt.attempt_id},
+            )
+            raise exc
+        if replayed.replay is not None and replayed.replay.response_json is not None:
+            await _raise_replayed_error(replayed.replay)
+            return replayed.replay.response_json
+        raise exc
+
     try:
         (
             charge_result,
@@ -1646,16 +1681,27 @@ async def _execute_registered_tool(
         # this more often -- an attempt may advance during a backoff -- so the
         # mapping belongs with the retry, not after it.
         raise IdempotencyInProgressError("idempotency_in_progress") from None
-    except LedgerWriteContendedError:
+    except LedgerWriteContendedError as exc:
         # Every attempt at the debit rolled back whole, so no money moved and
         # nothing was dispatched. What IS committed is the permit reservation
-        # and the in-progress idempotency record, and neither heals itself: the
-        # reaper deliberately leaves a local record with no debit "exactly as
-        # found" (app/services/idempotency.py), and a reservation is reclaimed
-        # only when the permit expires or is revoked. Left alone, a caller that
-        # follows the documented advice and retries its key would get
-        # idempotency_in_progress forever, against a reservation it can never
-        # spend. Hand both back before answering.
+        # and the in-progress idempotency record, and on the local path neither
+        # heals itself: the reaper deliberately leaves a local record with no
+        # debit "exactly as found" (app/services/idempotency.py), and a
+        # reservation is reclaimed only when the permit expires or is revoked.
+        # Left alone, a caller that follows the documented advice and retries
+        # its key would get idempotency_in_progress forever, against a
+        # reservation it can never spend. Hand both back before answering.
+        if dispatch_attempt is not None and idem_begin is not None and idempotency_key:
+            # Remote is not that case. A prepared checkpoint already owns this
+            # reservation and this key, and its reservation is attempt-keyed:
+            # only release_dispatch_budget_once may give it back, and only once
+            # the attempt is terminal. Releasing it here as well would decrement
+            # the same reservation a second time when reconciliation -- or, if
+            # this call never ran, the stale sweep -- finalizes the attempt,
+            # handing the permit back credits nobody reserved and letting it
+            # spend past its cap. So take the repair path every other
+            # pre-dispatch failure takes and let it own both.
+            return await _repair_pre_dispatch(exc)
         #
         # Each compensation is guarded on its own: a failure to unwind must not
         # replace the contention error with a second, less informative one.
@@ -1701,28 +1747,7 @@ async def _execute_registered_tool(
     except Exception as exc:
         if dispatch_attempt is None or idem_begin is None or not idempotency_key:
             raise
-        try:
-            await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
-                dispatch_attempt.attempt_id,
-                prepared_error_code="upstream_pre_dispatch_failed",
-            )
-            replayed = await idem.begin_with_record(
-                wallet_id=wallet_id,
-                endpoint=idempotency_endpoint,
-                idempotency_key=idempotency_key,
-                request_payload=effective_request_payload,
-                operation_kind="upstream_mcp",
-            )
-        except Exception:
-            logger.exception(
-                "mcp_upstream_pre_dispatch_reconciliation_failed",
-                extra={"dispatch_attempt_id": dispatch_attempt.attempt_id},
-            )
-            raise exc
-        if replayed.replay is not None and replayed.replay.response_json is not None:
-            await _raise_replayed_error(replayed.replay)
-            return replayed.replay.response_json
-        raise exc
+        return await _repair_pre_dispatch(exc)
     if isinstance(charge_result, InsufficientFundsResponse):
         # The quote was consumed just above but no credits moved. Hand the
         # commitment back so a wallet top-up inside the window can still use

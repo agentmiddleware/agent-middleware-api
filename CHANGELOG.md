@@ -43,6 +43,17 @@ full release gate; do not backfill a final `v1.2.0` tag.
   asserts that no response is ever `internal_error`, so the next reader widens
   nothing and reads the traceback instead.
 
+- **A contended remote charge releases its reservation exactly once.** The
+  reservation a remote call holds is attempt-keyed: it belongs to the prepared
+  dispatch checkpoint, and the only legal release is
+  `release_dispatch_budget_once` after that attempt reaches a terminal state.
+  Releasing it by hand as well would decrement the same reservation a second
+  time when reconciliation — or, failing that, the stale sweep — finalizes the
+  attempt, handing a permit back credits nobody reserved and letting it spend
+  past its cap. The contended-charge path now takes the same pre-dispatch
+  repair every other failure there takes, and only the local path, where
+  nothing durable owns the cleanup, unwinds by hand.
+
 ### 🛎️ The public site answers the questions a buyer actually asks
 
 - **The landing page names one scenario, one brand, and one number, and says
