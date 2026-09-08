@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from httpx import ASGITransport, AsyncClient
 
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, LedgerEntryModel
+from app.db.models import IdempotencyRecordModel, LedgerEntryModel, PermitModel
 from app.main import app
 from app.services.idempotency import MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH
 from tests.test_trust_helpers import (
@@ -553,9 +553,23 @@ async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
     # write conflict and not a substantive failure of the charge itself.
     assert resp.json()["detail"]["error"] == "ledger_write_contended"
 
+    factory = get_session_factory()
+    # The reservation is the other half of this branch. Nothing was charged, so
+    # nothing may stay reserved against the permit -- and because the retry
+    # replays the stored answer rather than reserving again, an unreleased
+    # reservation here would sit on the permit until it expired.
+    async with factory() as session:
+        reserved = (
+            await session.execute(
+                select(PermitModel.spent_credits).where(
+                    PermitModel.permit_id == permit["permit_id"]
+                )
+            )
+        ).scalar_one()
+    assert Decimal(str(reserved)) == Decimal("0")
+
     # The key is closed, so the caller cannot be told to repeat an action that
     # already ran.
-    factory = get_session_factory()
     async with factory() as session:
         remaining = (
             await session.execute(
