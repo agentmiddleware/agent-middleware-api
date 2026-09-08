@@ -51,8 +51,15 @@ full release gate; do not backfill a final `v1.2.0` tag.
   time when reconciliation — or, failing that, the stale sweep — finalizes the
   attempt, handing a permit back credits nobody reserved and letting it spend
   past its cap. The contended-charge path now takes the same pre-dispatch
-  repair every other failure there takes, and only the local path, where
-  nothing durable owns the cleanup, unwinds by hand.
+  reservation back atomically with deleting the prepared row -- the one
+  primitive that re-proves the attempt never claimed, never dispatched and
+  never charged, which is exactly what this failure guarantees. Reconciling the
+  attempt instead would have been safe for the money and wrong for the caller:
+  it publishes a terminal outcome, so momentary contention became a permanent
+  verdict on the remote path while the local path answered the same fault as
+  retryable. Both paths now answer `ledger_write_contended` and leave the key
+  usable, and removing the prepared row also removes the foreign key that had
+  made the key impossible to free.
 
 - **A capped permit survives a contended call.** `authorize_and_reserve`
   increments the `max_calls_per_tool` counter atomically with the budget, so a

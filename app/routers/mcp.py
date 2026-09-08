@@ -1685,31 +1685,50 @@ async def _execute_registered_tool(
         # this more often -- an attempt may advance during a backoff -- so the
         # mapping belongs with the retry, not after it.
         raise IdempotencyInProgressError("idempotency_in_progress") from None
-    except LedgerWriteContendedError as exc:
+    except LedgerWriteContendedError:
         # Every attempt at the debit rolled back whole, so no money moved and
         # nothing was dispatched. What IS committed is the permit reservation
-        # and the in-progress idempotency record, and on the local path neither
-        # heals itself: the reaper deliberately leaves a local record with no
-        # debit "exactly as found" (app/services/idempotency.py), and a
-        # reservation is reclaimed only when the permit expires or is revoked.
-        # Left alone, a caller that follows the documented advice and retries
-        # its key would get idempotency_in_progress forever, against a
-        # reservation it can never spend. Hand both back before answering.
-        if dispatch_attempt is not None and idem_begin is not None and idempotency_key:
-            # Remote is not that case. A prepared checkpoint already owns this
-            # reservation and this key, and its reservation is attempt-keyed:
-            # only release_dispatch_budget_once may give it back, and only once
-            # the attempt is terminal. Releasing it here as well would decrement
-            # the same reservation a second time when reconciliation -- or, if
-            # this call never ran, the stale sweep -- finalizes the attempt,
-            # handing the permit back credits nobody reserved and letting it
-            # spend past its cap. So take the repair path every other
-            # pre-dispatch failure takes and let it own both.
-            return await _repair_pre_dispatch(exc)
-        #
+        # and the in-progress idempotency record, and neither heals itself: the
+        # reaper deliberately leaves a local record with no debit "exactly as
+        # found" (app/services/idempotency.py), and a reservation is reclaimed
+        # only when the permit expires or is revoked. Left alone, a caller that
+        # follows the documented advice and retries its key would get
+        # idempotency_in_progress forever, against a reservation it can never
+        # spend. Hand both back, on either backend, so that the retryable answer
+        # this raises is one the caller can actually act on.
+        if dispatch_service is not None and dispatch_attempt is not None:
+            # Remote keeps its reservation on the prepared attempt, and that row
+            # also holds a foreign key to the idempotency record, so neither can
+            # be unwound by hand from here. This is the primitive that fits:
+            # it re-proves the attempt never claimed, never dispatched and never
+            # charged -- exactly what this exception guarantees -- then deletes
+            # it and returns the reservation in a single transaction, so no
+            # later sweep can release the same reservation twice. With the row
+            # gone the foreign key is gone, and the key frees like a local one.
+            #
+            # Reconciling the attempt instead would be safe for the money but
+            # wrong for the caller: it publishes a terminal outcome, so a retry
+            # of this key could never run, and momentary contention would become
+            # a permanent verdict on the remote path while the local path
+            # answered the same fault as retryable.
+            try:
+                await dispatch_service.abandon_effect_free_prepared_attempt(
+                    attempt_id=dispatch_attempt.attempt_id,
+                    expected_updated_at=dispatch_attempt.updated_at,
+                )
+            except DispatchAttemptConflictError:
+                # Same reasoning as the lost quote above: any dispatch conflict
+                # means a durable owner may have advanced the attempt, so
+                # cleanup cannot prove it stayed effect-free and reconciliation
+                # owns the classification from here.
+                raise IdempotencyInProgressError(
+                    "idempotency_in_progress"
+                ) from None
+            dispatch_attempt = None
+        # Local: nothing durable owns this reservation, so unwind it directly.
         # Each compensation is guarded on its own: a failure to unwind must not
         # replace the contention error with a second, less informative one.
-        if governed_call and permit_model is not None:
+        elif governed_call and permit_model is not None:
             # Nothing ran and nothing was charged, and this path's whole answer
             # is "retry this key" -- so a use left consumed here would deny the
             # very retry being advised.

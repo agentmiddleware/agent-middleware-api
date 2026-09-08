@@ -570,7 +570,7 @@ async def test_a_contended_remote_charge_releases_its_reservation_once(
             raise _lock_error()
 
         monkeypatch.setattr(BillingEngine, "_charge_once", _always_contended)
-        await client.post(
+        contended = await client.post(
             "/mcp/messages",
             json=_call_body(
                 tool_name=tool_name,
@@ -584,15 +584,40 @@ async def test_a_contended_remote_charge_releases_its_reservation_once(
 
         # The charge precedes dispatch, so the contended call never sent.
         assert executor.dispatch_count == 1
+        # A lost write conflict is transient on either backend, so the remote
+        # answer matches the local one instead of publishing a terminal outcome
+        # that would make this key permanently unusable.
+        assert contended.status_code == 200, contended.text
+        error = contended.json()["error"]
+        assert error["message"] == "ledger_write_contended", error
         # Exactly one decrement: the contended call's own reservation, never
         # the one the first call is still holding.
         assert await _spent_credits(permit_id) == charged
 
-        # And nothing is left prepared for the sweep to release a second time.
+        # The prepared row is gone, not left terminal or awaiting a sweep, so
+        # there is no second reservation release pending anywhere.
+        assert len(await _all_attempt_ids()) == 1
         reconciler = get_mcp_dispatch_reconciliation_service()
         for attempt_id in await _all_attempt_ids():
             await reconciler.reconcile_attempt(attempt_id)
         assert await _spent_credits(permit_id) == charged
+
+        # The point of answering retryable: the same key runs once contention
+        # clears, rather than replaying a verdict about a call that never made
+        # it out of the gateway.
+        retry = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit_id,
+                idempotency_key="contention-remote-2",
+            ),
+            headers=ctx["agent_headers"],
+        )
+        assert retry.status_code == 200, retry.text
+        assert "error" not in retry.json(), retry.text
+        assert executor.dispatch_count == 2
     finally:
         get_service_registry().unregister_local(tool_name)
 
