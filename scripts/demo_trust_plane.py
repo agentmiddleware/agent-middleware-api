@@ -3,7 +3,9 @@
 
 The demo uses a throwaway local SQLite database and the real FastAPI routers.
 It proves a governed MCP call can be scoped, charged, receipted, audited,
-replayed safely, and denied when outside permit scope.
+replayed safely, and denied when outside permit scope. It also times a run of
+fresh governed calls, so the public site can publish the gateway's own
+per-call handler time with an honest local caveat.
 """
 
 from __future__ import annotations
@@ -11,8 +13,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +28,12 @@ ADMIN_KEY = "demo-admin-key"
 DEMO_PRIVATE_KEY_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 ALLOWED_TOOL = "trust-plane-echo"
 BLOCKED_TOOL = "trust-plane-admin-ledger"
+# Fresh governed calls timed for the public site's latency line. The loop runs
+# under its own wallet-bound key, so it shares nobody's rate-limit bucket, and
+# the count must stay below RATE_LIMIT_PER_MINUTE (120 by default): every
+# sample is one request inside a single sixty-second window.
+LATENCY_SAMPLES = 100
+LATENCY_TRANSPORT = "in-process ASGI client, local SQLite, no network"
 PRINT_STEPS = True
 
 
@@ -50,6 +60,7 @@ from decimal import Decimal  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
+from app.core.config import get_settings  # noqa: E402
 from app.db.database import close_db, get_session_factory, init_db  # noqa: E402
 from app.db.models import ControlPlaneAuditEventModel, ReceiptModel  # noqa: E402
 from app.main import app  # noqa: E402
@@ -210,6 +221,97 @@ def build_mcp_call(
                 "idempotency_key": idempotency_key,
             },
         },
+    }
+
+
+def _percentile_ms(sorted_ms: list[float], quantile: float) -> float:
+    """Nearest-rank percentile of already-sorted millisecond samples."""
+    rank = max(1, math.ceil(quantile * len(sorted_ms)))
+    return sorted_ms[rank - 1]
+
+
+async def sample_gateway_latency(
+    client: AsyncClient,
+    *,
+    admin_headers: dict[str, str],
+    agent_wallet_id: str,
+    samples: int,
+) -> dict[str, Any]:
+    """Time a run of fresh governed calls and summarise the distribution.
+
+    Every call carries a new idempotency key, so each one is a real permit
+    reservation, dispatch, debit, receipt and audit event rather than a
+    replay. The loop runs under its own wallet-bound key and its own permit,
+    so it neither shares the demo agent key's rate-limit bucket nor touches
+    the budget the recorded transcript narrates. The stopwatch wraps the raw
+    client post with no helper and no recording in between, so the number is
+    the gateway's handler time and nothing else. It is measured over the
+    in-process ASGI transport against local SQLite: a floor for what the
+    boundary adds, not a production latency.
+    """
+    key = await post_json(
+        client,
+        "/v1/api-keys",
+        headers=admin_headers,
+        expected_status=201,
+        json_body={
+            "wallet_id": agent_wallet_id,
+            "key_name": "trust-plane-demo-latency",
+            "expires_in_days": 30,
+        },
+    )
+    sample_headers = {"X-API-Key": key["api_key"]}
+    permit = await post_json(
+        client,
+        "/v1/permits",
+        headers={**admin_headers, "Idempotency-Key": "demo-permit-latency"},
+        expected_status=201,
+        json_body={
+            "issuer_wallet_id": agent_wallet_id,
+            "subject_wallet_id": agent_wallet_id,
+            "subject_key_id": key["key_id"],
+            "allowed_tools": [ALLOWED_TOOL],
+            "scopes": [f"tool:{ALLOWED_TOOL}:invoke", "billing:charge"],
+            # Two credits per call, plus headroom so the last sample does not
+            # land exactly on the ceiling and raise a budget-exhausted alert.
+            "max_credits": samples * 2 + 2,
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+    )
+
+    durations_ms: list[float] = []
+    for index in range(samples):
+        body = build_mcp_call(
+            request_id=f"demo-latency-{index}",
+            tool=ALLOWED_TOOL,
+            wallet_id=agent_wallet_id,
+            permit_id=permit["permit_id"],
+            idempotency_key=f"demo-latency-{index}",
+            arguments={"message": f"latency sample {index}"},
+        )
+        started = time.perf_counter()
+        response = await client.post("/mcp/messages", headers=sample_headers, json=body)
+        durations_ms.append((time.perf_counter() - started) * 1000.0)
+        require(
+            response.status_code == 200,
+            f"latency sample {index} returned {response.status_code}: {response.text}",
+        )
+        result = first_jsonrpc_result(response.json())
+        require(result["isError"] is False, f"latency sample {index} failed: {result}")
+
+    ordered = sorted(durations_ms)
+    return {
+        "samples": samples,
+        "path": "POST /mcp/messages",
+        "tool": ALLOWED_TOOL,
+        "transport": LATENCY_TRANSPORT,
+        "p50_ms": round(_percentile_ms(ordered, 0.50), 1),
+        "p95_ms": round(_percentile_ms(ordered, 0.95), 1),
+        "min_ms": round(ordered[0], 1),
+        "max_ms": round(ordered[-1], 1),
+        "mean_ms": round(sum(ordered) / len(ordered), 1),
     }
 
 
@@ -420,17 +522,6 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
             ]
             require(len(echo_debits) == 1, f"expected one debit, got {echo_debits}")
 
-            step("verifying audit chain")
-            audit_check = await post_json(
-                client,
-                "/v1/audit/verify-chain",
-                headers=agent_headers,
-                expected_status=200,
-                json_body={"wallet_id": agent_wallet_id},
-            )
-            require(audit_check["valid"] is True, f"audit invalid: {audit_check}")
-            require(audit_check["checked_events"] >= 1, "audit chain checked no events")
-
             step("inspecting wallet audit event")
             audit_events = await get_json(
                 client,
@@ -492,6 +583,20 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 len(echo_debits_after_replay) == 1,
                 "replay created a duplicate ledger debit",
             )
+
+            # Checked after the replay on purpose: the public transcript shows
+            # this step after the replay, so the count it prints covers every
+            # governed call the reader has seen by then.
+            step("verifying audit chain")
+            audit_check = await post_json(
+                client,
+                "/v1/audit/verify-chain",
+                headers=agent_headers,
+                expected_status=200,
+                json_body={"wallet_id": agent_wallet_id},
+            )
+            require(audit_check["valid"] is True, f"audit invalid: {audit_check}")
+            require(audit_check["checked_events"] >= 1, "audit chain checked no events")
 
             step("attempting out-of-scope MCP tool")
             denial_body = build_mcp_call(
@@ -663,6 +768,23 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 "a missing key was reported as tampering rather than unknown",
             )
 
+            step(f"timing {LATENCY_SAMPLES} fresh governed calls")
+            require(
+                LATENCY_SAMPLES < get_settings().RATE_LIMIT_PER_MINUTE,
+                "LATENCY_SAMPLES must stay below RATE_LIMIT_PER_MINUTE",
+            )
+            gateway_latency = await sample_gateway_latency(
+                client,
+                admin_headers=admin_headers,
+                agent_wallet_id=agent_wallet_id,
+                samples=LATENCY_SAMPLES,
+            )
+            step(
+                f"gateway latency over {gateway_latency['samples']} governed calls: "
+                f"p50 {gateway_latency['p50_ms']} ms · p95 {gateway_latency['p95_ms']} ms "
+                f"({gateway_latency['transport']})"
+            )
+
             # The remaining proofs mutate stored rows, so they run last on the
             # throwaway demo database.
             step("proving a tampered receipt fails verification")
@@ -724,6 +846,7 @@ async def run_demo(json_output: bool = False) -> dict[str, Any]:
                 "tampered_receipt_reason": tampered_receipt_check["reason"],
                 "tampered_audit_valid": tampered_audit_check["valid"],
                 "tampered_audit_reason": tampered_audit_check["reason"],
+                "gateway_latency": gateway_latency,
             }
 
         if json_output:

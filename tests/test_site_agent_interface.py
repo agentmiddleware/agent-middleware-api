@@ -230,10 +230,33 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     page = (output / "index.html").read_text(encoding="utf-8")
     text = _page_text(page)
     headline = "Authorize one agent action. Charge it once. Prove what happened."
+    # The hero names one concrete tool before it shows any JSON. A reader who
+    # does not already know they have this problem needs the scenario, not the
+    # abstraction, and "refund" is the action the calculator's example prices.
     failure = (
-        "When a retried agent call debits twice, someone pays in lost money, "
-        "recovery time, or a customer problem. Put a number on that cost. "
-        "If preventing it cannot justify this boundary, we will tell you."
+        "An agent issues a customer refund through an internal MCP tool. The "
+        "call times out, the agent retries, and without a boundary the refund "
+        "runs twice. Someone pays in lost money, recovery time, or a customer "
+        "problem. Put a number on that cost. If preventing it cannot justify "
+        "this boundary, we will tell you."
+    )
+    # What a credit is, in one place, because the page meters calls while its
+    # own limitations section refuses production settlement. Without this the
+    # two read as a contradiction rather than a deliberate boundary.
+    credit = (
+        "A credit is a closed-loop metering unit for the pilot on an "
+        "operator-provisioned wallet, not payment rails. The gateway reserves "
+        "the tool's registered credit price against the permit and writes at "
+        "most one ledger debit under the accepted idempotency key before the "
+        "dispatch is claimed; a denied call is never charged, and a call that "
+        "never dispatched has its credits returned. Turning credits into "
+        "invoices, settlement, or payment rails is out of scope by design, "
+        "and the pilot is priced separately, in writing."
+    )
+    # The recording uses a stand-in tool. Naming a refund in the hero without
+    # saying so would let the transcript be read as a customer's refund.
+    stand_in = (
+        "The tool in the recording is a stand-in echo tool, not a refund tool"
     )
     boundary = (
         "Agent Middleware API is a transaction boundary between your autonomous "
@@ -255,6 +278,12 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert failure in text
     assert boundary in text
     assert wedge in text
+    assert credit in text
+    assert stand_in in text
+    # The scenario is carried through: the pilot ask and the intake question
+    # name the same kind of tool the hero opens with.
+    assert "such as a refund tool, a deploy trigger, or a payout call" in text
+    assert "for example a refund tool, a deploy trigger, or a payout call" in text
     # The non-bypassability claim rides directly under the offer copy with its
     # diagram, before the numbered sections begin.
     assert only_path in text
@@ -298,18 +327,24 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
 
 
 @pytest.mark.parametrize(
-    ("booking_url", "names_regengine"),
+    "booking_url",
     [
-        ("https://calendly.com/regengine/30min", True),
-        ("https://cal.com/design-partner-labs/one-tool-pilot", False),
-        ("https://calendly.com/another-operator/regengine", False),
-        ("https://calendar.design-partner-labs.org/regengine/30min", False),
-        ("", False),
+        "https://calendly.com/regengine/30min",
+        "https://cal.com/design-partner-labs/one-tool-pilot",
+        "https://calendly.com/another-operator/regengine",
+        "https://calendar.design-partner-labs.org/regengine/30min",
+        "",
     ],
 )
-def test_booking_identity_matches_configured_calendar(
-    tmp_path, booking_url, names_regengine
-):
+def test_booking_identity_names_one_product_and_one_operator(tmp_path, booking_url):
+    """The booking note says who the call is with, and nothing else.
+
+    A buyer should never need a footnote to work out who they are booking
+    with. The scheduling host behind the link is plumbing: whatever calendar
+    the operator runs, the page names the product and the accountable
+    contact, so no second or third brand reaches the reader mid-pitch.
+    """
+
     contacts = {**VALID_TEST_CONTACTS, "PUBLIC_BOOKING_URL": booking_url}
     contacts["PUBLIC_DISPLAY_NAME"] = "Sellers & Partners <Operations>"
     output = tmp_path / "site"
@@ -317,12 +352,35 @@ def test_booking_identity_matches_configured_calendar(
     assert result.returncode == 0, result.stderr
     for relative in ("index.html", "proof/index.html", "compare/index.html"):
         page = (output / relative).read_text()
-        assert ("their RegEngine calendar" in page) is names_regengine
+        assert "RegEngine" not in page, (
+            f"{relative} names the calendar host; the page carries one "
+            "buyer-facing name"
+        )
         assert ('class="booking-context"' in page) is bool(booking_url)
         if booking_url:
             assert "Sellers &amp; Partners &lt;Operations&gt;" in page
             assert "Sellers & Partners <Operations>" not in page
         assert "@@BOOKING_CONTEXT@@" not in page
+
+
+def test_pages_name_no_second_brand_in_visible_copy(tmp_path) -> None:
+    """The hostnames belong in URLs, not in the reader's field of view.
+
+    The footer used to spell out the marketing and API hosts as visible
+    copy, which made a second name to remember out of what is only ever an
+    address. Links still carry both hosts; the prose names neither.
+    """
+
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+
+    for relative in ("index.html", "proof/index.html", "compare/index.html", "404.html"):
+        page = (output / relative).read_text(encoding="utf-8")
+        assert "Marketing:" not in page, (
+            f"{relative} still spells the hostnames out as visible copy"
+        )
+        assert "<code>www.thisisatest.tech</code>" not in page
+        assert "<code>api.thisisatest.tech</code>" not in page
 
 
 def test_pilot_draft_encodes_contact_without_adding_mail_headers(tmp_path):
@@ -657,7 +715,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
-        assert '<script defer src="/analytics.js?v=gateway-17"></script>' in page
+        assert '<script defer src="/analytics.js?v=gateway-18"></script>' in page
 
     enabled_output = tmp_path / "enabled"
     enabled_contacts = dict(VALID_TEST_CONTACTS)
@@ -667,7 +725,7 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
-        assert '<script src="/va-init.js?v=gateway-17"></script>' in page
+        assert '<script src="/va-init.js?v=gateway-18"></script>' in page
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -1577,9 +1635,10 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
 
     Every full page offers the same three directories with the same
     destinations, so where a visitor can go next never depends on which page
-    they happen to be reading. Only the waiting-room block differs — it is
-    landing-only by construction because ``arcade-boot.js`` loads on ``/`` alone —
-    and the 404 keeps its deliberately minimal footer.
+    they happen to be reading, and the 404 keeps its deliberately minimal
+    footer. The waiting room is not part of this chrome at all: it closes the
+    landing page's content above the footer, and ``arcade-boot.js`` loads on
+    ``/`` alone.
     """
 
     output = tmp_path / "site"
@@ -2234,6 +2293,24 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
     )
     assert 'type="button"' in launcher.group(0), (
         "a button inside no form still defaults to submit in some engines"
+    )
+
+    # The joke closes the page's own content, not the footer. A security
+    # buyer reading "Report a vulnerability" should not find an arcade
+    # cabinet in their peripheral vision: the two say opposite things about
+    # how seriously this page takes itself, and only one of them is the
+    # reason that reader is here.
+    assert markup.index('class="waiting-room"') < markup.index("<footer"), (
+        "the waiting room is back inside the footer chrome"
+    )
+    footer = markup[markup.index("<footer") : markup.index("</footer>")]
+    assert "arcade" not in footer, (
+        "the arcade launcher sits in the footer beside the policy links"
+    )
+    assert "PRESS START" not in footer
+    footer_links = re.findall(r'href="([^"]+)"', footer)
+    assert footer_links[-1] == "/.well-known/security.txt", (
+        "the security disclosure link is no longer the footer's last word"
     )
 
     # All three assets ship, are cached like every other static asset, and
@@ -3120,6 +3197,26 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
     full_steps = re.findall(r'data-step="([a-z]+)"', full.group(1))
     assert hero_steps == ["authorize", "invoke", "replay", "verify"]
     assert full_steps == [step["id"] for step in transcript["steps"]]
+    # Loop order, not run order. The section's whole job is demonstrating
+    # rigour, so its own step numbers have to climb: the demo denies the
+    # out-of-scope call before it checks the audit chain, and the page shows
+    # the offline receipt check (06), then the audit chain (07), then the
+    # denial (08). Pinned explicitly rather than against the recording alone,
+    # so a re-record cannot quietly reintroduce the jumble.
+    assert full_steps == [
+        "discover",
+        "authorize",
+        "invoke",
+        "replay",
+        "verify",
+        "audit",
+        "deny",
+    ]
+    labels = re.findall(r'<p class="console-loop">([^<]+)</p>', full.group(1))
+    numbers = [int(label.split(" ", 1)[0]) for label in labels]
+    assert numbers == sorted(numbers), (
+        f"the governed-path panel counts backwards: {labels}"
+    )
 
     for step_id, step in steps.items():
         for line in step["request"].splitlines():
@@ -3139,6 +3236,28 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
                 ), f"step {step_id}: {key}={value!r} is not on the page"
         assert html.escape(step["note"]) in full.group(1)
         assert html.escape(step["title"]) in full.group(1)
+
+    # A gateway in the execution path has to say what it costs in time. The
+    # figure is recorded by the demo and rendered from the transcript like
+    # every other number here, and it carries the caveat that makes it
+    # honest: a local reference point, not a production measurement.
+    build_module = runpy.run_path(str(SITE / "build_site.py"))
+    format_latency_ms = build_module["format_latency_ms"]
+    latency = transcript["latency"]
+    latency_line = re.search(
+        r'<p class="console-latency">([^<]+)</p>', full.group(1)
+    )
+    assert latency_line, "the governed-path panel publishes no latency figure"
+    rendered = latency_line.group(1)
+    assert f"p50 {format_latency_ms(latency['p50_ms'])} ms" in rendered
+    assert f"p95 {format_latency_ms(latency['p95_ms'])} ms" in rendered
+    assert f"{latency['samples']} fresh calls" in rendered
+    assert html.escape(latency["transport"]) in rendered
+    assert "not a production number" in rendered
+    assert latency["samples"] >= 1
+    assert 0 < latency["p50_ms"] <= latency["p95_ms"]
+    # The hero shows the loop's spine, not its instrumentation.
+    assert "console-latency" not in hero.group(1)
 
     # The panel says where it came from, and links the full recording, which
     # the build publishes beside the receipt with the same short cache life.
@@ -3274,6 +3393,21 @@ def test_live_verifier_output_matches_the_published_receipt(tmp_path) -> None:
     path.write_text(json.dumps(rekeyed), encoding="utf-8")
     with pytest.raises(launch_error, match="different trust-keys.json bytes"):
         load_transcript()
+
+    # A recording from before the demo timed itself cannot render the
+    # latency line, and a blank panel would be worse than a loud failure.
+    untimed = json.loads(original)
+    del untimed["latency"]
+    path.write_text(json.dumps(untimed), encoding="utf-8")
+    with pytest.raises(launch_error, match="gateway latency sample"):
+        load_transcript()
+
+    for broken in ({"samples": 0}, {"p50_ms": "fast"}, {"transport": ""}):
+        malformed = json.loads(original)
+        malformed["latency"].update(broken)
+        path.write_text(json.dumps(malformed), encoding="utf-8")
+        with pytest.raises(launch_error, match="gateway latency sample"):
+            load_transcript()
 
     failing = json.loads(original)
     failing["live_receipt_verification"]["exit_code"] = 1

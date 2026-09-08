@@ -8,11 +8,17 @@ and this script is the only thing that writes that file.
 
 It runs ``scripts/demo_trust_plane.py`` (the same proof ``make prove-trust-plane``
 runs) against a throwaway local SQLite gateway with the demo signing key,
-records every HTTP exchange the demo makes, and keeps the ones the page
-shows. It then runs the SDK's offline verifier twice: once on the portable
-receipt the demo produced, and once on the live receipt published at
-``site/proof/receipt.json`` — that second output is what the proof section
-prints, so it has to come from the real CLI too.
+records every HTTP exchange the demo makes through its helpers, and keeps
+the ones the page shows, in loop order rather than run order (the demo checks
+the audit chain and denies the out-of-scope call in a different sequence than
+the loop the page narrates; every line is still a real exchange). The demo's
+timed run of fresh governed calls is deliberately not recorded exchange by
+exchange: the demo times raw requests with nothing in between, and only its
+summary (sample count, p50, p95) lands in the transcript. It then runs the
+SDK's offline verifier twice: once on the portable receipt the demo produced,
+and once on the live receipt published at ``site/proof/receipt.json`` — that
+second output is what the proof section prints, so it has to come from the
+real CLI too.
 
     python scripts/record_site_transcript.py          # rewrite the transcript
     python scripts/record_site_transcript.py --check  # fail if it is stale
@@ -83,6 +89,13 @@ VOLATILE_KEYS = {
     "recorded_at",
     "balance_after",
     "balance_before",
+    # The timed run's numbers move with the machine that recorded them; the
+    # sample count and the transport label they describe do not.
+    "p50_ms",
+    "p95_ms",
+    "min_ms",
+    "max_ms",
+    "mean_ms",
 }
 
 
@@ -358,14 +371,16 @@ def build_transcript(recording: Recording, summary: dict[str, Any]) -> dict[str,
             + [["ledger debits for this tool", str(len(debits))]],
             "note": "Same receipt id, no second dispatch, no second debit. A timed-out client can retry without fear.",
         },
+        # Loop order, not run order: the page walks the eight-stage loop, so the
+        # offline receipt check (06) comes before the audit chain (07) and the
+        # governed denial (08). Every exchange shown is real either way.
         {
-            "id": "deny",
-            "loop": "08 · Govern",
-            "title": "An out-of-scope tool is refused at the boundary.",
-            "request": _request_line(denial),
-            "response": [["error", denial_error["message"]]]
-            + _pick(denial_receipt, ["receipt_id", "outcome", "ledger_entry_id"]),
-            "note": "The permit named one tool. Asking for another is denied before dispatch, receipted as a denial, and never charged.",
+            "id": "verify",
+            "loop": "06 · Receipt, offline",
+            "title": "The receipt verifies with no credential and no callback.",
+            "request": local_verification["command"],
+            "output": local_verification["output"],
+            "note": "The SDK verifier checks the Ed25519 signature against the published key set. It never imports the gateway.",
         },
         {
             "id": "audit",
@@ -376,12 +391,13 @@ def build_transcript(recording: Recording, summary: dict[str, Any]) -> dict[str,
             "note": "Every event is hash-chained to the one before it. Edit a stored row and the chain breaks, which the demo also proves.",
         },
         {
-            "id": "verify",
-            "loop": "06 · Receipt, offline",
-            "title": "The receipt verifies with no credential and no callback.",
-            "request": local_verification["command"],
-            "output": local_verification["output"],
-            "note": "The SDK verifier checks the Ed25519 signature against the published key set. It never imports the gateway.",
+            "id": "deny",
+            "loop": "08 · Govern",
+            "title": "An out-of-scope tool is refused at the boundary.",
+            "request": _request_line(denial),
+            "response": [["error", denial_error["message"]]]
+            + _pick(denial_receipt, ["receipt_id", "outcome", "ledger_entry_id"]),
+            "note": "The permit named one tool. Asking for another is denied before dispatch, receipted as a denial, and never charged.",
         },
     ]
 
@@ -403,7 +419,7 @@ def build_transcript(recording: Recording, summary: dict[str, Any]) -> dict[str,
     )
 
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "recorded_by": "python scripts/record_site_transcript.py",
         "source": {
@@ -420,6 +436,10 @@ def build_transcript(recording: Recording, summary: dict[str, Any]) -> dict[str,
             "offline_verified": summary["offline_verified"],
         },
         "steps": steps,
+        # The demo's timed run of fresh governed calls, summarised. The page
+        # renders these numbers beside the loop with the transport label, so
+        # a reader sees the local caveat next to the figure.
+        "latency": summary["gateway_latency"],
         "live_receipt_verification": {
             "receipt_id": live_claims["receipt_id"],
             # The exact bytes the verdict was produced from. The build checks
