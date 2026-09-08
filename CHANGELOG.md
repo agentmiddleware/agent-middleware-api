@@ -11,6 +11,44 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🛎️ The public site answers the questions a buyer actually asks
+
+- **The landing page names one scenario, one brand, and one number, and says
+  what a credit is.** The page metered calls while its own limitations section
+  refused production settlement, and never reconciled the two; it opened on a
+  permit payload before a cold reader knew why they should care; it exposed
+  three names (the product, the domain, and the calendar host named in a
+  footnote); and it published nothing at all about what a gateway sitting in
+  the execution path costs in time. So: the hero opens on a concrete action (an
+  agent retries a timed-out customer refund and the refund runs twice) before
+  any JSON; a paragraph beside the wedge line defines a credit as a closed-loop
+  metering unit on an operator-provisioned wallet and states plainly that
+  turning credits into invoices or settlement is out of scope by design; the
+  booking note names the product and the accountable contact and never the
+  calendar host behind the link; and the footer's hostname line is gone from
+  every page, so the domain lives in URLs where it belongs. The refusal strings
+  are untouched — the fix for a tension between two honest claims is a third
+  sentence, not a softer one.
+
+- **The governed-path panel counts forwards, and publishes its own latency.**
+  The recorded loop rendered its steps in run order while labelling them by
+  loop stage, so the one section whose job is demonstrating rigour read 05, 08,
+  07, 06. The transcript now keeps loop order — the offline receipt check (06),
+  then the audit chain (07), then the denial (08) — and a test pins the
+  rendered numbering so a re-record cannot reintroduce the jumble. Beside it,
+  `scripts/demo_trust_plane.py` times a hundred fresh governed calls under
+  their own key and permit, and the build renders the p50 and p95 from the
+  recording like every other number on the page. The caveat travels with the
+  figure: it is measured in-process against local SQLite with a stand-in echo
+  tool, so it is a reference point for the gateway's own handler time, not a
+  production latency, and the pilot still records the partner's own. The build
+  refuses a transcript without the block rather than shipping a blank panel.
+
+- **The arcade no longer sits under the security-disclosure link.** `HUMANS:
+  PRESS START` closes the page's content instead of the footer. The joke earns
+  its keep; landing it immediately beside `Report a vulnerability` told a
+  security reader two contradictory things at once.
+
 ### 🧩 OpenAI wrapper: the model's `tool_call.id` is the operation identity
 
 - **`wrappers/openai-agent-middleware` drives OpenAI function calling and the

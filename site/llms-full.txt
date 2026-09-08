@@ -35,6 +35,7 @@ logical action -> authorize -> reserve allowance -> debit -> claim dispatch
 - logical action: an accepted idempotency key is bound to one immutable payload.
 - authorize: a signed permit binds wallet, tool, budget, expiry, and nonce.
 - reserve/debit: configured credit or call allowance is consumed at most once.
+- credits: a closed-loop metering unit for the pilot, not payment rails.
 - claim dispatch: the supported upstream path permits at most one gateway send.
 - outcome: confirmed results are recorded; ambiguous delivery becomes durable
   `delivery_uncertain` and is not automatically redispatched.

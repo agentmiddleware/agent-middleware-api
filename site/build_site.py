@@ -80,7 +80,7 @@ ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
 # The queue shim lives in /va-init.js rather than an inline <script> so the
 # deployed Content-Security-Policy can stay script-src 'self' with no
 # 'unsafe-inline'. It must load before the insights script reads window.vaq.
-ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-17"></script>
+ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-18"></script>
     <script defer src="/_vercel/insights/script.js"></script>"""
 BUILD_DATE_TOKEN = "@@BUILD_DATE@@"
 FAQ_JSONLD_TOKEN = "@@FAQ_JSONLD@@"
@@ -607,7 +607,57 @@ def load_transcript() -> dict:
             "trust-keys.json bytes than the ones being published; re-run "
             "python scripts/record_site_transcript.py"
         )
+    # The latency line beside the loop is read from the recording like every
+    # other number on the page. A transcript without the demo's timed run is
+    # from an older recorder and must be re-recorded, not rendered blank.
+    latency = transcript.get("latency")
+    if not isinstance(latency, dict) or not (
+        _is_number(latency.get("samples"))
+        and latency["samples"] >= 1
+        and all(
+            _is_number(latency.get(key)) and latency[key] >= 0
+            for key in ("p50_ms", "p95_ms")
+        )
+        and all(
+            isinstance(latency.get(key), str) and latency[key]
+            for key in ("path", "tool", "transport")
+        )
+    ):
+        raise LaunchConfigurationError(
+            "transcript lacks the demo's gateway latency sample (samples, p50_ms, "
+            "p95_ms, path, tool, transport); re-run "
+            "python scripts/record_site_transcript.py"
+        )
     return transcript
+
+
+def _is_number(value: object) -> bool:
+    """True for an int or float that is not a bool (bool subclasses int)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def format_latency_ms(value: float) -> str:
+    """One decimal, the way the loop panel prints a millisecond figure.
+
+    Kept as one function so the tests can format the recorded value the same
+    way the page does instead of guessing at the rounding.
+    """
+    return f"{float(value):.1f}"
+
+
+def render_latency_line(transcript: dict) -> str:
+    """The demo's timed run, rendered beside the loop with its caveat."""
+    latency = transcript["latency"]
+    text = (
+        "Gateway time per governed call in this run: "
+        f"p50 {format_latency_ms(latency['p50_ms'])} ms, "
+        f"p95 {format_latency_ms(latency['p95_ms'])} ms over "
+        f"{latency['samples']} fresh calls ({latency['transport']}). "
+        "Recorded on one machine, on the local governed-tool path with a "
+        "stand-in echo tool and no upstream dispatch: a reference point, not "
+        "a production number. The pilot records yours."
+    )
+    return f'<p class="console-latency">{html.escape(text)}</p>'
 
 
 def published_receipt_issued_date() -> str:
@@ -695,6 +745,8 @@ def render_console(
         parts.append(f'<p class="console-note">{html.escape(step["note"])}</p>')
         parts.append("</li>")
     parts.append("</ol>")
+    if full:
+        parts.append(render_latency_line(transcript))
     parts.append(
         '<p class="console-foot">'
         + html.escape(transcript["source"]["label"])
@@ -802,13 +854,11 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
     markup_replacements = validated_contacts(environment)
     text_replacements = validated_contacts(environment, escape_markup=False)
     with_booking = booking_configured(environment)
-    booking = urlparse(text_replacements.get(BOOKING_TOKEN, ""))
     name = text_replacements["@@PUBLIC_DISPLAY_NAME@@"]
+    # One buyer-facing name. The note says who the call is with and which
+    # product it concerns; the calendar host behind the link is plumbing and
+    # is never named on the page.
     booking_context = f"Agent Middleware API calls are with {name}."
-    if booking.hostname == "calendly.com" and booking.path.split("/")[1:2] == [
-        "regengine"
-    ]:
-        booking_context += " The booking page uses their RegEngine calendar."
     markup_replacements[BOOKING_CONTEXT_TOKEN] = html.escape(
         booking_context, quote=True
     )
