@@ -32,8 +32,11 @@ full release gate; do not backfill a final `v1.2.0` tag.
 
 - **The same defect is fixed on the AWI HTTP route**, where it was worse: any
   charge exception stored a terminal `charge_failed`, freezing a momentary lock
-  into a permanent denial that every later retry of that key replayed. It now
-  takes the abandon-and-503 path the route already used for a contended permit.
+  into a permanent denial that every later retry of that key replayed. Contention
+  there is now recorded as `ledger_write_contended`, so an operator can tell a
+  lost write conflict from a substantive failure of the charge. The key itself
+  stays closed on that route rather than being freed, for the reason set out
+  below — that route runs its action before the charge.
 
 - **`tests/test_adversarial_five_claims.py` was right and was dismissed.** That
   gate had been failing about one run in three and was written off as a flaky
@@ -42,6 +45,57 @@ full release gate; do not backfill a final `v1.2.0` tag.
   `"locked"` heuristic. It now names `ledger_write_contended` explicitly and
   asserts that no response is ever `internal_error`, so the next reader widens
   nothing and reads the traceback instead.
+
+- **A contended remote charge releases its reservation exactly once.** The
+  reservation a remote call holds is attempt-keyed: it belongs to the prepared
+  dispatch checkpoint, and the only legal release is
+  `release_dispatch_budget_once` after that attempt reaches a terminal state.
+  Releasing it by hand as well would decrement the same reservation a second
+  time when reconciliation — or, failing that, the stale sweep — finalizes the
+  attempt, handing a permit back credits nobody reserved and letting it spend
+  past its cap. The contended-charge path now takes the same pre-dispatch
+  reservation back atomically with deleting the prepared row -- the one
+  primitive that re-proves the attempt never claimed, never dispatched and
+  never charged, which is exactly what this failure guarantees. Reconciling the
+  attempt instead would have been safe for the money and wrong for the caller:
+  it publishes a terminal outcome, so momentary contention became a permanent
+  verdict on the remote path while the local path answered the same fault as
+  retryable. Both paths now answer `ledger_write_contended` and leave the key
+  usable, and removing the prepared row also removes the foreign key that had
+  made the key impossible to free.
+
+- **A capped permit survives a contended call.** `authorize_and_reserve`
+  increments the `max_calls_per_tool` counter atomically with the budget, so a
+  compensation that returned only the credits left the use consumed. On a path
+  whose whole answer is "retry this key", that was the difference between a
+  retry that works and one denied `permit_max_calls_exceeded` for a call that
+  never ran — on a cap of one, a single lost write conflict ended the permit.
+  The per-tool call is now released alongside the budget, and so is every other
+  local reservation the governed MCP path hands back: the lost-quote denial and,
+  most damagingly, the insufficient-funds denial, whose whole point is to tell
+  the caller to fund the wallet and try again. All three now go through one
+  helper that releases both halves, each guarded on its own so a release that
+  loses its writes can neither replace the denial the caller actually needs nor
+  stop the other half from running.
+
+  Two neighbouring paths were checked and deliberately left alone. The remote
+  reservation never holds a per-tool use to give back — `authorize_reserve_and_prepare`
+  reserves credits alone, and a permit configuring `max_calls_per_tool` is
+  refused that backend outright as `permit_constraint_unsupported_for_upstream`.
+  And the refund-after-tool-error path keeps its use consumed on purpose: the
+  tool did run there, and the counter counts invocations, not charges.
+
+- **The AWI route closes the key it cannot safely reopen.** Freeing the
+  idempotency key and inviting a retry is right on the governed MCP path, where
+  the charge precedes execution. It is wrong on AWI, where every governed route
+  runs its action *first* — live Playwright DOM commands, RAG indexing, WebAuthn
+  challenge consumption — none of them deduped on the key. A contended charge
+  there now completes the record instead, carrying `ledger_write_contended`
+  through so contention stays distinguishable from a substantive charge failure.
+  The action ran unbilled; that cost is accepted deliberately, in preference to
+  running it twice. Reservation releases on this route are also guarded
+  individually, so a release that loses its own writes can no longer prevent the
+  record from being closed or escape as an unclassified 500.
 
 ### 🛎️ The public site answers the questions a buyer actually asks
 
