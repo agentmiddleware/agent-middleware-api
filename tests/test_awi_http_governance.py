@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from httpx import ASGITransport, AsyncClient
 
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, LedgerEntryModel
+from app.db.models import IdempotencyRecordModel, LedgerEntryModel, PermitModel
 from app.main import app
 from app.services.idempotency import MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH
 from tests.test_trust_helpers import (
@@ -494,18 +494,25 @@ async def test_valid_idempotency_key_at_store_width_replays_same_receipt(
 
 
 @pytest.mark.anyio
-async def test_awi_contended_charge_frees_the_key_instead_of_storing_a_denial(
+async def test_awi_contended_charge_closes_the_key_it_cannot_safely_reopen(
     client, clean_database, monkeypatch
 ):
-    """A lost write conflict must not become a permanent stored verdict.
+    """On AWI the action runs first, so a contended charge must not free the key.
 
-    This route already reasons correctly about ``permit_write_contended``: it
-    abandons the key and answers 503, because *completing* the record would
-    freeze a momentary database conflict into a stored denial that every later
-    retry of that key replays, long after the contention cleared. The debit
-    below it had no such branch, so a contended charge fell into the generic
-    handler and stored ``charge_failed`` -- the exact outcome the comment
-    fifty lines above it warns against.
+    The governed MCP path answers a lost write conflict by freeing the key and
+    telling the caller to retry, because there the charge precedes execution:
+    nothing ran, so a retry is free. Every governed AWI route is the other way
+    around -- ``app/routers/awi.py`` calls ``manager.execute_action`` (live
+    Playwright DOM commands when a bridge is attached) and the enhanced routes
+    execute browser commands, index RAG memories and consume WebAuthn
+    challenges before reaching this charge, none of them deduped on the key.
+    Freeing it there would invite the caller to repeat a side effect that had
+    already happened.
+
+    So the record is completed rather than abandoned, and the retry replays that
+    answer instead of running the action a second time. The reason survives into
+    the stored response so contention stays distinguishable from a substantive
+    charge failure.
     """
     from sqlalchemy.exc import OperationalError
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -519,6 +526,12 @@ async def test_awi_contended_charge_frees_the_key_instead_of_storing_a_denial(
         max_credits=50,
         idem_key="permit-awi-contended",
     )
+    headers = {
+        **provisioned["agent_headers"],
+        "X-Wallet-Id": provisioned["agent_wallet_id"],
+        "X-Permit-Id": permit["permit_id"],
+        "Idempotency-Key": "awi-contended-1",
+    }
 
     real_flush = AsyncSession.flush
 
@@ -531,43 +544,50 @@ async def test_awi_contended_charge_frees_the_key_instead_of_storing_a_denial(
     resp = await client.post(
         "/v1/awi/rag/query",
         json={"query": "laptops", "top_k": 3},
-        headers={
-            **provisioned["agent_headers"],
-            "X-Wallet-Id": provisioned["agent_wallet_id"],
-            "X-Permit-Id": permit["permit_id"],
-            "Idempotency-Key": "awi-contended-1",
-        },
+        headers=headers,
     )
     monkeypatch.setattr(AsyncSession, "flush", real_flush)
 
-    assert resp.status_code == 503, resp.text
+    assert resp.status_code == 500, resp.text
+    # Not flattened into charge_failed: an operator can still see it was a lost
+    # write conflict and not a substantive failure of the charge itself.
     assert resp.json()["detail"]["error"] == "ledger_write_contended"
 
-    # The key is free, not carrying a stored charge_failed for all time.
     factory = get_session_factory()
+    # The reservation is the other half of this branch. Nothing was charged, so
+    # nothing may stay reserved against the permit -- and because the retry
+    # replays the stored answer rather than reserving again, an unreleased
+    # reservation here would sit on the permit until it expired.
+    async with factory() as session:
+        reserved = (
+            await session.execute(
+                select(PermitModel.spent_credits).where(
+                    PermitModel.permit_id == permit["permit_id"]
+                )
+            )
+        ).scalar_one()
+    assert Decimal(str(reserved)) == Decimal("0")
+
+    # The key is closed, so the caller cannot be told to repeat an action that
+    # already ran.
     async with factory() as session:
         remaining = (
             await session.execute(
                 select(func.count())
                 .select_from(IdempotencyRecordModel)
                 .where(
-                    IdempotencyRecordModel.wallet_id
-                    == provisioned["agent_wallet_id"],
+                    IdempotencyRecordModel.wallet_id == provisioned["agent_wallet_id"],
                     IdempotencyRecordModel.idempotency_key == "awi-contended-1",
                 )
             )
         ).scalar_one()
-    assert remaining == 0
+    assert remaining == 1
 
-    # And the caller's retry of that same key goes through.
+    # And the retry replays that stored answer rather than re-executing.
     retry = await client.post(
         "/v1/awi/rag/query",
         json={"query": "laptops", "top_k": 3},
-        headers={
-            **provisioned["agent_headers"],
-            "X-Wallet-Id": provisioned["agent_wallet_id"],
-            "X-Permit-Id": permit["permit_id"],
-            "Idempotency-Key": "awi-contended-1",
-        },
+        headers=headers,
     )
-    assert retry.status_code == 200, retry.text
+    assert retry.status_code == 500, retry.text
+    assert retry.json()["detail"]["error"] == "ledger_write_contended"

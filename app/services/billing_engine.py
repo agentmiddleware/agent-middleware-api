@@ -1029,6 +1029,7 @@ class BillingEngine:
                 recorded=recorded_velocity,
             )
             raise
+
     async def _reverse_recorded_velocity(
         self,
         *,

@@ -1570,6 +1570,11 @@ async def _execute_registered_tool(
             quote_id, idempotency_key=idempotency_key
         ):
             reason = QUOTE_REASON_CONSUMED
+            # The use the enterprise gate recorded is spent on a call that is
+            # about to be refused without charging or dispatching, so it goes
+            # back on either backend -- the gate runs before the local/remote
+            # split, so both reach here holding one.
+            await _release_iga_use(iga_granted_use, tool_name, reason=reason)
             if dispatch_service is not None and dispatch_attempt is not None:
                 try:
                     await dispatch_service.abandon_effect_free_prepared_attempt(
@@ -1587,9 +1592,13 @@ async def _execute_registered_tool(
                     ) from None
                 dispatch_attempt = None
             elif governed_call and permit_model:
-                await get_permit_service().release_budget(
-                    permit_model.permit_id,
+                # The quote was lost before anything ran: the reservation taken
+                # just above is entirely unspent, so both halves of it go back.
+                await _release_local_permit_reservation(
+                    permit_model,
                     registered_cost,
+                    tool_name,
+                    reason=reason,
                 )
             await _audit_mcp_invocation(
                 decision=decision,
@@ -1613,6 +1622,41 @@ async def _execute_registered_tool(
                 reason=reason,
             )
             raise PermissionError(reason)
+
+    async def _repair_pre_dispatch(exc: BaseException) -> Any:
+        """Finalize a remote checkpoint that failed before dispatch.
+
+        Only valid when a prepared attempt exists. Reconciliation is the sole
+        owner of an attempt-keyed reservation: it drives the attempt terminal
+        and gives the budget back through ``release_dispatch_budget_once``.
+        Never release that reservation by hand alongside this -- the stale
+        sweep would finalize the attempt later and release it a second time.
+        """
+        assert dispatch_attempt is not None
+        assert idempotency_key
+        try:
+            await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
+                dispatch_attempt.attempt_id,
+                prepared_error_code="upstream_pre_dispatch_failed",
+            )
+            replayed = await idem.begin_with_record(
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                request_payload=effective_request_payload,
+                operation_kind="upstream_mcp",
+            )
+        except Exception:
+            logger.exception(
+                "mcp_upstream_pre_dispatch_reconciliation_failed",
+                extra={"dispatch_attempt_id": dispatch_attempt.attempt_id},
+            )
+            raise exc
+        if replayed.replay is not None and replayed.replay.response_json is not None:
+            await _raise_replayed_error(replayed.replay)
+            return replayed.replay.response_json
+        raise exc
+
     try:
         (
             charge_result,
@@ -1655,21 +1699,51 @@ async def _execute_registered_tool(
         # only when the permit expires or is revoked. Left alone, a caller that
         # follows the documented advice and retries its key would get
         # idempotency_in_progress forever, against a reservation it can never
-        # spend. Hand both back before answering.
-        #
+        # spend. Hand both back, on either backend, so that the retryable answer
+        # this raises is one the caller can actually act on.
+        await _release_iga_use(
+            iga_granted_use, tool_name, reason="ledger_write_contended"
+        )
+        if dispatch_service is not None and dispatch_attempt is not None:
+            # Remote keeps its reservation on the prepared attempt, and that row
+            # also holds a foreign key to the idempotency record, so neither can
+            # be unwound by hand from here. This is the primitive that fits:
+            # it re-proves the attempt never claimed, never dispatched and never
+            # charged -- exactly what this exception guarantees -- then deletes
+            # it and returns the reservation in a single transaction, so no
+            # later sweep can release the same reservation twice. With the row
+            # gone the foreign key is gone, and the key frees like a local one.
+            #
+            # Reconciling the attempt instead would be safe for the money but
+            # wrong for the caller: it publishes a terminal outcome, so a retry
+            # of this key could never run, and momentary contention would become
+            # a permanent verdict on the remote path while the local path
+            # answered the same fault as retryable.
+            try:
+                await dispatch_service.abandon_effect_free_prepared_attempt(
+                    attempt_id=dispatch_attempt.attempt_id,
+                    expected_updated_at=dispatch_attempt.updated_at,
+                )
+            except DispatchAttemptConflictError:
+                # Same reasoning as the lost quote above: any dispatch conflict
+                # means a durable owner may have advanced the attempt, so
+                # cleanup cannot prove it stayed effect-free and reconciliation
+                # owns the classification from here.
+                raise IdempotencyInProgressError("idempotency_in_progress") from None
+            dispatch_attempt = None
+        # Local: nothing durable owns this reservation, so unwind it directly.
         # Each compensation is guarded on its own: a failure to unwind must not
         # replace the contention error with a second, less informative one.
-        if governed_call and permit_model is not None:
-            try:
-                await get_permit_service().release_budget(
-                    permit_model.permit_id,
-                    registered_cost,
-                )
-            except Exception:
-                logger.exception(
-                    "mcp_contended_release_budget_failed",
-                    extra={"permit_id": permit_model.permit_id},
-                )
+        elif governed_call and permit_model is not None:
+            # Nothing ran and nothing was charged, and this path's whole answer
+            # is "retry this key" -- so a use left consumed here would deny the
+            # very retry being advised.
+            await _release_local_permit_reservation(
+                permit_model,
+                registered_cost,
+                tool_name,
+                reason="ledger_write_contended",
+            )
         try:
             await _audit_mcp_invocation(
                 decision=decision,
@@ -1701,28 +1775,7 @@ async def _execute_registered_tool(
     except Exception as exc:
         if dispatch_attempt is None or idem_begin is None or not idempotency_key:
             raise
-        try:
-            await get_mcp_dispatch_reconciliation_service().reconcile_attempt(
-                dispatch_attempt.attempt_id,
-                prepared_error_code="upstream_pre_dispatch_failed",
-            )
-            replayed = await idem.begin_with_record(
-                wallet_id=wallet_id,
-                endpoint=idempotency_endpoint,
-                idempotency_key=idempotency_key,
-                request_payload=effective_request_payload,
-                operation_kind="upstream_mcp",
-            )
-        except Exception:
-            logger.exception(
-                "mcp_upstream_pre_dispatch_reconciliation_failed",
-                extra={"dispatch_attempt_id": dispatch_attempt.attempt_id},
-            )
-            raise exc
-        if replayed.replay is not None and replayed.replay.response_json is not None:
-            await _raise_replayed_error(replayed.replay)
-            return replayed.replay.response_json
-        raise exc
+        return await _repair_pre_dispatch(exc)
     if isinstance(charge_result, InsufficientFundsResponse):
         # The quote was consumed just above but no credits moved. Hand the
         # commitment back so a wallet top-up inside the window can still use
@@ -1734,19 +1787,7 @@ async def _execute_registered_tool(
         # budget must not burn down on it (a max_uses=1 principal would
         # otherwise be locked out forever by one under-funded wallet).
         # Best-effort — compensation must never mask the funds denial.
-        if iga_granted_use is not None:
-            try:
-                await release_tool_use(
-                    iga_granted_use[0],
-                    tool_name,
-                    group=iga_granted_use[1],
-                    policy_id=iga_granted_use[2],
-                )
-            except Exception:
-                logger.exception(
-                    "iga_use_release_failed",
-                    extra={"tool": tool_name},
-                )
+        await _release_iga_use(iga_granted_use, tool_name, reason=charge_result.error)
         denial_reason = charge_result.error
         denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:
@@ -1767,9 +1808,16 @@ async def _execute_registered_tool(
                 dispatch_attempt.attempt_id
             )
         elif governed_call and permit_model:
-            await get_permit_service().release_budget(
-                permit_model.permit_id,
+            # The wallet could not cover the call, so it never ran. This is the
+            # denial the caller is expected to act on -- top up and try again --
+            # which makes leaving the per-tool use consumed the most damaging
+            # place to do it: on a cap of one, the retry the denial invites is
+            # refused for a call that never happened.
+            await _release_local_permit_reservation(
+                permit_model,
                 registered_cost,
+                tool_name,
+                reason=denial_reason,
             )
         audit_event = await _audit_mcp_invocation(
             decision=decision,
@@ -2825,6 +2873,90 @@ async def _complete_governed_denial_idempotency(
         response_json=_governed_error_payload(reason, None),
         status_code=status_code,
     )
+
+
+async def _release_iga_use(
+    iga_granted_use: tuple[Any, str, str] | None,
+    tool_name: str,
+    *,
+    reason: str,
+) -> None:
+    """Hand back the enterprise use consumed by an action that never happened.
+
+    ``enforce_tool_call`` records a use atomically with its ALLOW, before any
+    of the pre-dispatch gates run. A refusal that charges nothing and
+    dispatches nothing must therefore give that use back, or a ``max_uses``
+    budget and the velocity window burn down on an action nobody took --
+    ``release_tool_use`` names the worst case, a ``max_uses=1`` principal
+    locked out forever by a single refusal.
+
+    Best-effort: compensation must never replace the refusal the caller is
+    actually being given.
+    """
+    if iga_granted_use is None:
+        return
+    try:
+        await release_tool_use(
+            iga_granted_use[0],
+            tool_name,
+            group=iga_granted_use[1],
+            policy_id=iga_granted_use[2],
+        )
+    except Exception:
+        logger.exception(
+            "iga_use_release_failed",
+            extra={"tool": tool_name, "reason": reason},
+        )
+
+
+async def _release_local_permit_reservation(
+    permit_model: Any,
+    registered_cost: Decimal,
+    tool_name: str,
+    *,
+    reason: str,
+) -> None:
+    """Give a local governed reservation back in full: the credits and the call.
+
+    ``authorize_and_reserve`` increments the ``max_calls_per_tool`` counter
+    atomically with the budget reservation, so handing back only the credits
+    leaves the use consumed. A permit capped at one call is then finished, and
+    answers its holder's next attempt ``permit_max_calls_exceeded`` for a call
+    that never ran, never charged and never dispatched.
+    ``PermitService.release_tool_call`` is the documented compensation partner
+    and is a no-op on a permit that configures no cap for this tool.
+
+    Local reservations only. The upstream path reserves credits alone --
+    ``authorize_reserve_and_prepare`` never touches the counter -- and a permit
+    that configures ``max_calls_per_tool`` is refused that backend outright as
+    ``permit_constraint_unsupported_for_upstream``, so no remote reservation
+    can ever hold a per-tool use to give back. Remote budget goes back through
+    ``release_dispatch_budget_once`` instead, which is attempt-keyed.
+
+    Each half is guarded on its own. Compensation runs on paths whose real
+    answer to the caller is a denial or a failure, and a release that loses its
+    own writes must neither replace that answer with a less informative one nor
+    stop the other half from running.
+    """
+    permits = get_permit_service()
+    try:
+        await permits.release_budget(permit_model.permit_id, registered_cost)
+    except Exception:
+        logger.exception(
+            "mcp_release_budget_failed",
+            extra={"permit_id": permit_model.permit_id, "reason": reason},
+        )
+    try:
+        await permits.release_tool_call(permit_model.permit_id, tool_name)
+    except Exception:
+        logger.exception(
+            "mcp_release_tool_call_failed",
+            extra={
+                "permit_id": permit_model.permit_id,
+                "tool": tool_name,
+                "reason": reason,
+            },
+        )
 
 
 async def _finalize_governed_denial(

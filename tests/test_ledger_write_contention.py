@@ -25,20 +25,33 @@ or the retry would be a way to hide real faults.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.database import get_session_factory
+from app.db.models import McpDispatchAttemptModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
+from app.services.billing_engine import BillingEngine
 from app.services.idempotency import get_idempotency_service
+from app.services.mcp_dispatch_reconciliation import (
+    get_mcp_dispatch_reconciliation_service,
+)
 from app.services.permits import get_permit_service
 from app.services.service_registry import get_service_registry
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from tests.test_mcp_upstream_governed import FakeUpstreamExecutor
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
 
 TOOL_COST = 2.0
 
@@ -86,9 +99,7 @@ def _call_body(
 
 
 def _lock_error() -> OperationalError:
-    return OperationalError(
-        "UPDATE wallets ...", {}, Exception("database is locked")
-    )
+    return OperationalError("UPDATE wallets ...", {}, Exception("database is locked"))
 
 
 class _FlushFault:
@@ -196,9 +207,12 @@ async def test_transient_conflict_is_retried_and_charges_exactly_once(
     # Retried, not skipped: the fault has to have actually fired.
     assert fault.calls > 2
     # And the retry may not multiply anything the caller pays for.
-    assert await _debit_count(
-        client, ctx["agent_wallet_id"], ctx["agent_headers"], tool_name
-    ) == 1
+    assert (
+        await _debit_count(
+            client, ctx["agent_wallet_id"], ctx["agent_headers"], tool_name
+        )
+        == 1
+    )
     assert await _spent_credits(permit["permit_id"]) == Decimal(str(TOOL_COST))
     assert runs["count"] == 1
 
@@ -271,9 +285,12 @@ async def test_persistent_conflict_leaves_no_charge_and_frees_the_key(
     )
     monkeypatch.undo()
 
-    assert await _debit_count(
-        client, ctx["agent_wallet_id"], ctx["agent_headers"], tool_name
-    ) == 0
+    assert (
+        await _debit_count(
+            client, ctx["agent_wallet_id"], ctx["agent_headers"], tool_name
+        )
+        == 0
+    )
     # The reservation is handed back rather than left to expire with the permit.
     assert await _spent_credits(permit["permit_id"]) == Decimal("0")
     # The tool never ran: the charge precedes execution on the local path.
@@ -315,21 +332,20 @@ async def test_the_same_key_succeeds_once_contention_clears(
     )
 
     _FlushFault(None).patch(monkeypatch)
-    first = await client.post(
-        "/mcp/messages", json=body, headers=ctx["agent_headers"]
-    )
+    first = await client.post("/mcp/messages", json=body, headers=ctx["agent_headers"])
     monkeypatch.undo()
     assert first.json()["error"]["message"] == "ledger_write_contended"
 
-    second = await client.post(
-        "/mcp/messages", json=body, headers=ctx["agent_headers"]
-    )
+    second = await client.post("/mcp/messages", json=body, headers=ctx["agent_headers"])
     assert second.status_code == 200, second.text
     assert "error" not in second.json(), second.text
     assert second.json()["result"]["receipt"]["outcome"] == "success"
-    assert await _debit_count(
-        client, ctx["agent_wallet_id"], ctx["agent_headers"], tool_name
-    ) == 1
+    assert (
+        await _debit_count(
+            client, ctx["agent_wallet_id"], ctx["agent_headers"], tool_name
+        )
+        == 1
+    )
     assert runs["count"] == 1
 
 
@@ -463,6 +479,209 @@ async def test_another_wallet_cannot_reuse_the_freed_key(
     payload = resp.json()
     assert "error" in payload, payload
     assert payload["error"]["message"] != "internal_error"
-    assert await _debit_count(
-        client, other["agent_wallet_id"], other["agent_headers"], tool_name
-    ) == 0
+    assert (
+        await _debit_count(
+            client, other["agent_wallet_id"], other["agent_headers"], tool_name
+        )
+        == 0
+    )
+
+
+def _register_upstream_tool(tool_name: str, executor: Any) -> None:
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Contention upstream tool",
+        description="Ledger write-contention test tool, remote backend",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=executor,
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        credits_per_unit=TOOL_COST,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+    )
+
+
+async def _all_attempt_ids() -> list[str]:
+    async with get_session_factory()() as session:
+        rows = await session.execute(select(McpDispatchAttemptModel.attempt_id))
+        return [row[0] for row in rows.all()]
+
+
+@pytest.mark.anyio
+async def test_a_contended_remote_charge_releases_its_reservation_once(
+    client: AsyncClient, clean_database: None, monkeypatch
+) -> None:
+    """A remote reservation is attempt-keyed, so only reconciliation frees it.
+
+    On the local path nothing durable owns the reservation, so the contention
+    handler hands it back itself. Remote is the opposite: the prepared dispatch
+    attempt owns it, and the single legal release is
+    ``release_dispatch_budget_once``, once that attempt is terminal. Releasing
+    it by hand as well would decrement the same reservation twice -- once in
+    the handler, once when reconciliation or the stale sweep finalizes the
+    attempt -- giving the permit back credits nobody reserved and letting it
+    spend past its cap.
+
+    The charge left standing by the first call is what makes a second decrement
+    visible at all: ``release_budget`` clamps at zero, so against an otherwise
+    idle permit a double release looks exactly like a correct one.
+    """
+    tool_name = "contention-upstream-echo"
+    executor = FakeUpstreamExecutor(mode="success")
+    _register_upstream_tool(tool_name, executor)
+    try:
+        ctx = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=ctx["agent_wallet_id"],
+            key_id=ctx["key_id"],
+            tool_name=tool_name,
+            max_credits=10,
+            idem_key="contention-permit-remote",
+        )
+        permit_id = permit["permit_id"]
+
+        first = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit_id,
+                idempotency_key="contention-remote-1",
+            ),
+            headers=ctx["agent_headers"],
+        )
+        assert first.status_code == 200, first.text
+        assert "error" not in first.json(), first.text
+        charged = await _spent_credits(permit_id)
+        assert charged > Decimal("0"), (
+            "the permit must be holding one real reservation before the "
+            "contended call, or a double release cannot be told apart from "
+            "the correct single one"
+        )
+
+        async def _always_contended(self: Any, **_kwargs: Any) -> Any:
+            raise _lock_error()
+
+        monkeypatch.setattr(BillingEngine, "_charge_once", _always_contended)
+        contended = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit_id,
+                idempotency_key="contention-remote-2",
+            ),
+            headers=ctx["agent_headers"],
+        )
+        monkeypatch.undo()
+
+        # The charge precedes dispatch, so the contended call never sent.
+        assert executor.dispatch_count == 1
+        # A lost write conflict is transient on either backend, so the remote
+        # answer matches the local one instead of publishing a terminal outcome
+        # that would make this key permanently unusable.
+        assert contended.status_code == 200, contended.text
+        error = contended.json()["error"]
+        assert error["message"] == "ledger_write_contended", error
+        # Exactly one decrement: the contended call's own reservation, never
+        # the one the first call is still holding.
+        assert await _spent_credits(permit_id) == charged
+
+        # The prepared row is gone, not left terminal or awaiting a sweep, so
+        # there is no second reservation release pending anywhere.
+        assert len(await _all_attempt_ids()) == 1
+        reconciler = get_mcp_dispatch_reconciliation_service()
+        for attempt_id in await _all_attempt_ids():
+            await reconciler.reconcile_attempt(attempt_id)
+        assert await _spent_credits(permit_id) == charged
+
+        # The point of answering retryable: the same key runs once contention
+        # clears, rather than replaying a verdict about a call that never made
+        # it out of the gateway.
+        retry = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit_id,
+                idempotency_key="contention-remote-2",
+            ),
+            headers=ctx["agent_headers"],
+        )
+        assert retry.status_code == 200, retry.text
+        assert "error" not in retry.json(), retry.text
+        assert executor.dispatch_count == 2
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_a_capped_permit_can_still_spend_its_call_after_contention(
+    client: AsyncClient, clean_database: None, governed_tool, monkeypatch
+) -> None:
+    """Giving back the credits is only half the reservation.
+
+    ``authorize_and_reserve`` increments the ``max_calls_per_tool`` counter
+    atomically with the budget, so a compensation that returns only the credits
+    leaves the use consumed. This path's whole answer is "retry this key", and
+    on a permit capped at one call that retry would be denied
+    ``permit_max_calls_exceeded`` for a call that never ran, never charged and
+    never dispatched -- one lost write conflict would end the permit.
+    """
+    tool_name, runs = governed_tool
+    ctx = await provision_agent_wallet(client)
+    permit_resp = await client.post(
+        "/v1/permits",
+        json={
+            "issuer_wallet_id": ctx["agent_wallet_id"],
+            "subject_wallet_id": ctx["agent_wallet_id"],
+            "subject_key_id": ctx["key_id"],
+            "allowed_tools": [tool_name],
+            "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+            "max_credits": 10,
+            "max_calls_per_tool": {tool_name: 1},
+            "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=30)
+            ).isoformat(),
+        },
+        headers={**BOOTSTRAP_HEADERS, "Idempotency-Key": "contention-permit-capped"},
+    )
+    assert permit_resp.status_code == 201, permit_resp.text
+    permit_id = permit_resp.json()["permit_id"]
+
+    _FlushFault(None).patch(monkeypatch)
+    await client.post(
+        "/mcp/messages",
+        json=_call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit_id,
+            idempotency_key="contention-capped-1",
+        ),
+        headers=ctx["agent_headers"],
+    )
+    monkeypatch.undo()
+
+    assert runs["count"] == 0
+
+    retry = await client.post(
+        "/mcp/messages",
+        json=_call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit_id,
+            idempotency_key="contention-capped-1",
+        ),
+        headers=ctx["agent_headers"],
+    )
+    assert retry.status_code == 200, retry.text
+    body = retry.json()
+    assert "error" not in body, body
+    assert runs["count"] == 1
