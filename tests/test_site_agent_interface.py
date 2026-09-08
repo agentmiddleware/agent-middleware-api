@@ -223,6 +223,22 @@ def test_site_build_refuses_repo_and_existing_temp_delete_targets(tmp_path) -> N
 
 
 def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> None:
+    """The landing page's load-bearing sentences, pinned verbatim.
+
+    This is the funnel's contract with a reader: the promise in the headline,
+    the scenario that makes the problem concrete, what the boundary actually
+    does, what a credit is and when a caller pays for one, and the five things
+    an intake email has to carry. Each string is asserted whole rather than by
+    keyword, because the failure mode this guards against is not deletion —
+    it is a well-meaning edit that softens a claim by a word or two until the
+    page promises more than the gateway does.
+
+    The DOM-order assertions below it hold the argument in sequence: the
+    non-bypassability diagram before the thesis, the pilot ask before the
+    machine-discovery links, and the proof section before the page admits
+    what it has not established.
+    """
+
     output = tmp_path / "site"
     result = _render_site(output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
@@ -243,13 +259,34 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     # What a credit is, in one place, because the page meters calls while its
     # own limitations section refuses production settlement. Without this the
     # two read as a contradiction rather than a deliberate boundary.
+    #
+    # The boundary is stated as what the gateway can still prove, not as an
+    # event: before_dispatch commits the durable claim immediately before
+    # ClientSession.call_tool (app/services/upstream_mcp.py), so a worker that
+    # dies in between leaves delivery_uncertain — charged — without the send
+    # ever having happened. Saying the call "was dispatched" would claim
+    # evidence that does not exist, and would read as though that crash window
+    # were covered by the refund sentence above it.
+    #
+    # It must name the case where the caller pays without a proven downstream
+    # effect. docs/failure-semantics.md is explicit that delivery_uncertain
+    # and response_rejected stay charged, and this page invites the reader to
+    # go and check the repository — so a paragraph that listed only the two
+    # ways a caller does not pay would read as shading on the one page whose
+    # differentiator is that it does not shade. The incentive argument is the
+    # honest reason and is also the stronger pitch.
     credit = (
         "A credit is a closed-loop metering unit for the pilot on an "
         "operator-provisioned wallet, not payment rails. The gateway reserves "
-        "the tool's registered credit price against the permit and writes at "
-        "most one ledger debit under the accepted idempotency key before the "
-        "dispatch is claimed; a denied call is never charged, and a call that "
-        "never dispatched has its credits returned. Turning credits into "
+        "the tool's registered credit price against the permit before "
+        "anything runs, and writes at most one ledger debit per accepted "
+        "idempotency key. A denied call is never charged. A call the gateway "
+        "can prove never reached the tool is refunded. But once it has "
+        "committed to sending on the configured upstream path, it can no "
+        "longer prove the tool did not run: a timeout or a crash from that "
+        "point stays charged, and is never retried for you — refunding an "
+        "ambiguous call automatically would pay a caller to induce timeouts "
+        "against a tool that had already done the work. Turning credits into "
         "invoices, settlement, or payment rails is out of scope by design, "
         "and the pilot is priced separately, in writing."
     )
@@ -280,6 +317,13 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     assert wedge in text
     assert credit in text
     assert stand_in in text
+    # Belt and braces: the unfavourable half of the credit paragraph is the
+    # reason it exists, so it is pinned separately from the whole string.
+    assert "stays charged" in text, (
+        "the credit paragraph no longer says a caller can pay for a call whose "
+        "outcome was never established; that omission is the exact shading "
+        "this page refuses elsewhere"
+    )
     # The scenario is carried through: the pilot ask and the intake question
     # name the same kind of tool the hero opens with.
     assert "such as a refund tool, a deploy trigger, or a payout call" in text
