@@ -22,8 +22,13 @@ full release gate; do not backfill a final `v1.2.0` tag.
   the execution path costs in time. So: the hero opens on a concrete action (an
   agent retries a timed-out customer refund and the refund runs twice) before
   any JSON; a paragraph beside the wedge line defines a credit as a closed-loop
-  metering unit on an operator-provisioned wallet and states plainly that
-  turning credits into invoices or settlement is out of scope by design; the
+  metering unit on an operator-provisioned wallet, names the case where a
+  caller pays without a proven downstream effect (once the gateway has
+  committed to sending it can no longer prove the tool did not run, so a
+  timeout or crash from that point stays charged, for the incentive reason
+  given in `docs/failure-semantics.md`), and states plainly that turning
+  credits into
+  invoices or settlement is out of scope by design; the
   booking note names the product and the accountable contact and never the
   calendar host behind the link; and the footer's hostname line is gone from
   every page, so the domain lives in URLs where it belongs. The refusal strings
