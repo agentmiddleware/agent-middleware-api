@@ -56,15 +56,9 @@ coverage:
 prove-trust-plane:
 	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert
 
-# NOTE: despite the name, this does not run the assertions on PostgreSQL.
-# `alembic upgrade head` uses DATABASE_URL, but demo_trust_plane.py overwrites
-# DATABASE_URL with a throwaway SQLite file before importing the app, so every
-# assertion runs on SQLite. Treat this as a migration check. See the defect
-# note in docs/PROOF_MATRIX.md; real PostgreSQL coverage is prove-crash-recovery.
-prove-trust-plane-postgres:
-	# Requires DATABASE_URL=postgresql+asyncpg://... and STATE_BACKEND=postgres
-	alembic upgrade head
-	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py --assert
+# Use the real PostgreSQL process/crash proof, including its isolation guards.
+# The in-process demo deliberately owns a throwaway SQLite database.
+prove-trust-plane-postgres: prove-crash-recovery
 
 # Two-process crash-consistency proof. Starts independent Uvicorn workers
 # against one shared PostgreSQL database and kills a worker at durable commit

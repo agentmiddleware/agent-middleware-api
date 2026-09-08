@@ -357,33 +357,39 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio anyio httpx
 
-      - name: Run trust loop against Postgres (full suite)
-        # Run the full trust test suite against PostgreSQL/asyncpg.
-        # The module fixture handles alembic migration before tests run.
+      - name: Apply PostgreSQL trust migrations
         env:
-          TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+        run: alembic upgrade head
+
+      - name: Run trust primitives against Postgres
+        # DATABASE_URL controls the shared application fixtures. TEST_POSTGRES_URL
+        # alone only selects the dedicated datetime regression fixture below.
+        # Keep asyncpg's connection pool on one event loop across this suite.
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
           STATE_BACKEND: postgres
+          ENVIRONMENT: test
         run: |
-          pytest \
+          pytest -p no:anyio \
+            -o asyncio_default_fixture_loop_scope=session \
+            -o asyncio_default_test_loop_scope=session \
             tests/test_permits.py \
             tests/test_receipts.py \
             tests/test_mcp_trust.py \
             tests/test_audit_chain.py \
             tests/test_key_management.py \
             tests/test_idempotency.py \
-            tests/test_postgres_datetime_binding.py \
             -v --tb=short
 
-      - name: Run trust-plane demo against Postgres
+      - name: Run PostgreSQL datetime regressions
+        # This fixture deliberately rebuilds the app and owns its own loops.
+        # Run it separately from the session-scoped trust primitive suite.
         env:
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
+          TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/trust_ci
           STATE_BACKEND: postgres
-          TRUST_SIGNING_PRIVATE_KEY_B64: ${{ secrets.TRUST_SIGNING_PRIVATE_KEY_B64 }}
-          TRUST_MODE_ENABLED: true
-          VALID_API_KEYS: ci-test-key
-        run: |
-          alembic upgrade head
-          python scripts/demo_trust_plane.py --assert
+          ENVIRONMENT: test
+        run: pytest tests/test_postgres_datetime_binding.py -v --tb=short
 
       - name: Run wallet status guards against Postgres
         # Keep asyncpg's pool and test fixtures on one loop. The KYC race
@@ -614,7 +620,7 @@ jobs:
               echo "Server ready"
               break
             fi
-            if [ $i -eq 60 ]; then
+            if [ "$i" -eq 60 ]; then
               echo "Server failed to start"
               kill $SERVER_PID 2>/dev/null || true
               exit 1
