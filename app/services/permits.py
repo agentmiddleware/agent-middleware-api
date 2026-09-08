@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -10,10 +9,13 @@ from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import case, func, or_, select, update as sa_update
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.resilience import (
+    WRITE_CONFLICT_MAX_ATTEMPTS,
+    run_with_write_conflict_retry,
+)
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -89,12 +91,10 @@ def _stamp(value: datetime | None) -> str | None:
 # The rule this encodes: no ``spent_credits`` value may be written from a number
 # this process read in an earlier statement without the database re-checking
 # that the number still holds.
-_PERMIT_WRITE_MAX_ATTEMPTS = 40
-
-
-def _is_retryable_write_conflict(exc: BaseException) -> bool:
-    message = str(exc).lower()
-    return "locked" in message or "snapshot" in message
+#: Kept as a named alias so this module's comments above still read as written;
+#: the value and the loop now live in app/core/resilience.py, shared with the
+#: ledger debit, which loses the same WAL snapshot race for the same reason.
+_PERMIT_WRITE_MAX_ATTEMPTS = WRITE_CONFLICT_MAX_ATTEMPTS
 
 
 def _loads_list(value: str) -> list[str]:
@@ -668,20 +668,15 @@ class PermitService:
         return await self._run_with_write_retry(_once)
 
     async def _run_with_write_retry(self, operation):
-        """Run one full-transaction DB operation, retrying transient SQLite
-        write conflicts (WAL "database is locked"/"snapshot" errors a genuinely
-        concurrent writer raises). PostgreSQL blocks on the row lock instead of
-        raising, so this simply runs ``operation`` once there."""
-        last_exc: OperationalError | None = None
-        for attempt in range(_PERMIT_WRITE_MAX_ATTEMPTS):
-            try:
-                return await operation()
-            except OperationalError as exc:
-                last_exc = exc
-                if not _is_retryable_write_conflict(exc):
-                    raise
-                await asyncio.sleep(min(0.02, 0.002 * (attempt + 1)))
-        raise PermitError("permit_write_contended") from last_exc
+        """Run one full-transaction DB operation, restarting it on transient
+        SQLite write conflicts. The mechanism and the reason PostgreSQL never
+        needs it are documented on the shared helper; this keeps the permit's
+        own reason code, which callers match on."""
+        return await run_with_write_conflict_retry(
+            operation,
+            max_attempts=_PERMIT_WRITE_MAX_ATTEMPTS,
+            on_exhausted=lambda exc: PermitError("permit_write_contended"),
+        )
 
     async def _validate_model_for_action(
         self,

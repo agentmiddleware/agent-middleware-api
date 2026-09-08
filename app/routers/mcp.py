@@ -41,6 +41,10 @@ from ..core.oidc_iga import (
     parse_enterprise_token,
     release_tool_use,
 )
+from ..services.billing_engine import (
+    LedgerOperationConflictError,
+    LedgerWriteContendedError,
+)
 from ..services.service_registry import get_service_registry
 from ..services.mcp_generator import get_mcp_generator
 from ..services.dogfood_tool import sync_dogfood_tool_registration
@@ -513,7 +517,12 @@ async def handle_messages(
                     "error": error_payload,
                 }
             )
-        except IdempotencyInProgressError as e:
+        except (IdempotencyInProgressError, LedgerWriteContendedError) as e:
+            # Both mean the same thing to a caller: nothing terminal was
+            # recorded, retry the same idempotency key. -32005 is this
+            # surface's retryable code and str(e) carries which one it was, so
+            # a client can distinguish "a winner is mid-flight" from "the write
+            # lost its snapshot" without either landing as internal_error.
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -1628,6 +1637,67 @@ async def _execute_registered_tool(
             registered_cost=registered_cost,
             tool_name=tool_name,
         )
+    except LedgerOperationConflictError:
+        # A durable owner (a concurrent activation, or the reconciler) advanced
+        # this operation while we were working, so this activation may not
+        # classify its outcome. That is the same fact DispatchAttemptConflictError
+        # carries above, and it earns the same retryable envelope instead of the
+        # unclassified catch-all. Restarting the debit transaction can surface
+        # this more often -- an attempt may advance during a backoff -- so the
+        # mapping belongs with the retry, not after it.
+        raise IdempotencyInProgressError("idempotency_in_progress") from None
+    except LedgerWriteContendedError:
+        # Every attempt at the debit rolled back whole, so no money moved and
+        # nothing was dispatched. What IS committed is the permit reservation
+        # and the in-progress idempotency record, and neither heals itself: the
+        # reaper deliberately leaves a local record with no debit "exactly as
+        # found" (app/services/idempotency.py), and a reservation is reclaimed
+        # only when the permit expires or is revoked. Left alone, a caller that
+        # follows the documented advice and retries its key would get
+        # idempotency_in_progress forever, against a reservation it can never
+        # spend. Hand both back before answering.
+        #
+        # Each compensation is guarded on its own: a failure to unwind must not
+        # replace the contention error with a second, less informative one.
+        if governed_call and permit_model is not None:
+            try:
+                await get_permit_service().release_budget(
+                    permit_model.permit_id,
+                    registered_cost,
+                )
+            except Exception:
+                logger.exception(
+                    "mcp_contended_release_budget_failed",
+                    extra={"permit_id": permit_model.permit_id},
+                )
+        try:
+            await _audit_mcp_invocation(
+                decision=decision,
+                endpoint=endpoint,
+                transport=transport,
+                ok=False,
+                error="ledger_write_contended",
+                dispatch_attempt=dispatch_attempt,
+                extra_metadata=policy_metadata,
+            )
+        except Exception:
+            logger.exception("mcp_contended_audit_failed")
+        if governed_call and idem_begin is not None and idempotency_key:
+            try:
+                # abandon() refuses to delete a record carrying a response or a
+                # ledger entry, so this can never erase evidence that money
+                # moved. Here neither exists, by construction.
+                await idem.abandon(
+                    wallet_id=wallet_id,
+                    endpoint=idempotency_endpoint,
+                    idempotency_key=idempotency_key,
+                )
+            except Exception:
+                logger.exception(
+                    "mcp_contended_idempotency_abandon_failed",
+                    extra={"wallet_id": wallet_id},
+                )
+        raise
     except Exception as exc:
         if dispatch_attempt is None or idem_begin is None or not idempotency_key:
             raise
@@ -3354,7 +3424,7 @@ async def invoke_tool(
         if exc.data:
             detail["approval"] = exc.data
         raise HTTPException(status_code=exc.status_code, detail=detail)
-    except IdempotencyInProgressError as exc:
+    except (IdempotencyInProgressError, LedgerWriteContendedError) as exc:
         raise HTTPException(
             status_code=409,
             detail={"error": str(exc)},
