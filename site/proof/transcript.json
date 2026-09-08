@@ -1,4 +1,15 @@
 {
+  "latency": {
+    "max_ms": 100.0,
+    "mean_ms": 69.7,
+    "min_ms": 59.9,
+    "p50_ms": 67.3,
+    "p95_ms": 83.7,
+    "path": "POST /mcp/messages",
+    "samples": 100,
+    "tool": "trust-plane-echo",
+    "transport": "in-process ASGI client, local SQLite, no network"
+  },
   "live_receipt_verification": {
     "bundle_sha256": "7b43ee98a3526293723c3383c02fce0e9d2f9f3634378d569d6cc2ff756a7edc",
     "command": "b2a-verify-receipt --bundle receipt.json --keys trust-keys.json \\\n  --expect-issuer https://api.thisisatest.tech",
@@ -7,9 +18,9 @@
     "receipt_id": "rcpt-9daf745e477d45ab",
     "trust_document_sha256": "aa03192fb048e2c8fca5ba6feb7be0cf2ed6461f21f60a9a5673afe66398b92e"
   },
-  "recorded_at": "2026-09-02T03:39:26+00:00",
+  "recorded_at": "2026-09-08T07:33:25+00:00",
   "recorded_by": "python scripts/record_site_transcript.py",
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "source": {
     "gateway": "throwaway local SQLite gateway, real FastAPI routers",
     "label": "Recorded from a local gateway run, not the live API. Every line is a real request or a real response.",
@@ -50,7 +61,7 @@
       "response": [
         [
           "permit_id",
-          "permit-eadc63d9d5dd44ff"
+          "permit-74d8473ec86c4b42"
         ],
         [
           "allowed_tools",
@@ -62,7 +73,7 @@
         ],
         [
           "expires_at",
-          "2026-09-02T04:09:25"
+          "2026-09-08T08:03:18"
         ],
         [
           "key_id",
@@ -79,7 +90,7 @@
       "response": [
         [
           "receipt_id",
-          "rcpt-164b0b659bd44d2b"
+          "rcpt-038c84a3d94d4a34"
         ],
         [
           "outcome",
@@ -91,11 +102,11 @@
         ],
         [
           "ledger_entry_id",
-          "ccb413e9-d78e-40e4-b59a-a7e304001dd1"
+          "60055228-a465-4d11-84c2-16b72ea26e3c"
         ],
         [
           "permit_id",
-          "permit-eadc63d9d5dd44ff"
+          "permit-74d8473ec86c4b42"
         ]
       ],
       "title": "The call executes and is charged once."
@@ -108,7 +119,7 @@
       "response": [
         [
           "receipt_id",
-          "rcpt-164b0b659bd44d2b"
+          "rcpt-038c84a3d94d4a34"
         ],
         [
           "outcome",
@@ -126,29 +137,12 @@
       "title": "The same idempotency key comes back."
     },
     {
-      "id": "deny",
-      "loop": "08 \u00b7 Govern",
-      "note": "The permit named one tool. Asking for another is denied before dispatch, receipted as a denial, and never charged.",
-      "request": "POST /mcp/messages\nX-API-Key: $AGENT_API_KEY",
-      "response": [
-        [
-          "error",
-          "permit_tool_not_allowed"
-        ],
-        [
-          "receipt_id",
-          "rcpt-32c68d2ca5c24b2f"
-        ],
-        [
-          "outcome",
-          "denied"
-        ],
-        [
-          "ledger_entry_id",
-          "null"
-        ]
-      ],
-      "title": "An out-of-scope tool is refused at the boundary."
+      "id": "verify",
+      "loop": "06 \u00b7 Receipt, offline",
+      "note": "The SDK verifier checks the Ed25519 signature against the published key set. It never imports the gateway.",
+      "output": "VERIFIED  rcpt-038c84a3d94d4a34\n  signed by   demo-ed25519\n  permit      permit-74d8473ec86c4b42\n  tool        trust-plane-echo\n  outcome     success\n  credits     2 charged of 2 authorized\n  at          2026-09-08T07:33:18.252834+00:00",
+      "request": "b2a-verify-receipt --bundle receipt.json --keys trust-keys.json",
+      "title": "The receipt verifies with no credential and no callback."
     },
     {
       "id": "audit",
@@ -168,19 +162,36 @@
       "title": "The ledger's event chain still verifies."
     },
     {
-      "id": "verify",
-      "loop": "06 \u00b7 Receipt, offline",
-      "note": "The SDK verifier checks the Ed25519 signature against the published key set. It never imports the gateway.",
-      "output": "VERIFIED  rcpt-164b0b659bd44d2b\n  signed by   demo-ed25519\n  permit      permit-eadc63d9d5dd44ff\n  tool        trust-plane-echo\n  outcome     success\n  credits     2 charged of 2 authorized\n  at          2026-09-02T03:39:25.849139+00:00",
-      "request": "b2a-verify-receipt --bundle receipt.json --keys trust-keys.json",
-      "title": "The receipt verifies with no credential and no callback."
+      "id": "deny",
+      "loop": "08 \u00b7 Govern",
+      "note": "The permit named one tool. Asking for another is denied before dispatch, receipted as a denial, and never charged.",
+      "request": "POST /mcp/messages\nX-API-Key: $AGENT_API_KEY",
+      "response": [
+        [
+          "error",
+          "permit_tool_not_allowed"
+        ],
+        [
+          "receipt_id",
+          "rcpt-f9f49fdda0294493"
+        ],
+        [
+          "outcome",
+          "denied"
+        ],
+        [
+          "ledger_entry_id",
+          "null"
+        ]
+      ],
+      "title": "An out-of-scope tool is refused at the boundary."
     }
   ],
   "summary": {
     "denial_reason": "permit_tool_not_allowed",
     "offline_verified": true,
-    "permit_id": "permit-eadc63d9d5dd44ff",
-    "receipt_id": "rcpt-164b0b659bd44d2b",
-    "replay_receipt_id": "rcpt-164b0b659bd44d2b"
+    "permit_id": "permit-74d8473ec86c4b42",
+    "receipt_id": "rcpt-038c84a3d94d4a34",
+    "replay_receipt_id": "rcpt-038c84a3d94d4a34"
   }
 }

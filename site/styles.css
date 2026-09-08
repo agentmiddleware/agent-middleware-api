@@ -724,6 +724,16 @@ main,
   color: var(--text-dim);
 }
 
+/* What a credit is, in the reader's own units. It sits under the wedge line
+   because "metered calls" is the sentence that raises the question. */
+.offer-copy .offer-note {
+  margin: 1rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--text);
+  max-width: 60ch;
+}
+
 /* Boundary figure: the non-bypassability diagram, full width beneath the
    offer copy and pilot ticket. The scroll wrapper keeps the drawing legible
    on narrow screens instead of shrinking its type below readability. */
@@ -1547,26 +1557,26 @@ main,
   font-size: 0.88rem;
 }
 
-.footer-note {
-  grid-column: 1 / -1;
-  border-top: 1px solid var(--line);
-  padding-top: 1.25rem;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  max-width: none;
-  margin: 0;
-}
-
 /* Waiting-room launcher ---------------------------------------------------------------------
 
    The overlay itself is styled in arcade.css; these are the page-side pieces:
-   the footer control that opens it, and what the page does while it is open.
+   the control that opens it, and what the page does while it is open.
+
+   The launcher closes the page's content rather than the footer, so the joke
+   never sits beside the security-disclosure link. Its wrapper carries the
+   page gutter; the block inside is the same markup arcade-boot.js and
+   arcade.js look up, so it keeps its class and its hidden attribute.
 
    This control is the one place the page still wears the pixel face. It is a
    door into the arcade, so it is drawn like the arcade: pixel type, a square
    plate, a hard two-pixel drop. Everything around it stays on the page's own
    hairlines and soft corners. */
+
+.waiting-room {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 var(--pad-x);
+}
 
 .footer-arcade {
   grid-column: 1 / -1;
@@ -2204,6 +2214,19 @@ html[data-a11y-motion="reduce"] .arcade-launch:active {
 }
 
 .console-foot {
+  margin: 0;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: none;
+}
+
+/* The recorded run's own timing, rendered from the transcript like every
+   other number in this panel. Same treatment as the source footer it sits
+   above: this is provenance, not a headline figure. */
+.console-latency {
   margin: 0;
   padding: 0.7rem 1rem;
   border-top: 1px solid var(--line);

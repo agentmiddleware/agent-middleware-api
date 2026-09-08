@@ -20,6 +20,17 @@ Example proof artifact:
   "denial_reason": "permit_tool_not_allowed",
   "denial_replay_receipt_id": "rcpt-5c957b40350e4b3a",
   "denial_receipt_id": "rcpt-5c957b40350e4b3a",
+  "gateway_latency": {
+    "max_ms": 100.0,
+    "mean_ms": 69.7,
+    "min_ms": 59.9,
+    "p50_ms": 67.3,
+    "p95_ms": 83.7,
+    "path": "POST /mcp/messages",
+    "samples": 100,
+    "tool": "trust-plane-echo",
+    "transport": "in-process ASGI client, local SQLite, no network"
+  },
   "inspected_audit_events": 1,
   "inspected_receipts": 1,
   "ledger_entry_id": "543e21a1-5056-4df8-8773-fbf6ba9c720c",
@@ -43,6 +54,11 @@ What this proves:
 - An MCP call with no permit at all is denied with `permit_required`, proving
   the trust plane fails closed when `ALLOW_LEGACY_UNPERMITTED_MCP=false`.
 - The agent API key cannot read the sponsor wallet.
+- A run of fresh governed calls is timed, so the public site can publish what
+  the boundary costs in time. The numbers differ on every run and every
+  machine: they are measured in-process against local SQLite with a stand-in
+  echo tool, which makes them a reference point for the gateway's own handler
+  time, not a production latency.
 - The wallet-scoped audit chain verifies after the governed action, and the
   audit event links back to permit, idempotency key, request hash, and ledger
   entry.

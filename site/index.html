@@ -158,21 +158,21 @@
     />
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-17" />
+    <link rel="stylesheet" href="/styles.css?v=gateway-18" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
-    <script src="/a11y-preload.js?v=gateway-17"></script>
+    <script src="/a11y-preload.js?v=gateway-18"></script>
     @@VERCEL_ANALYTICS_SCRIPTS@@
-    <script defer src="/wave.js?v=gateway-17"></script>
+    <script defer src="/wave.js?v=gateway-18"></script>
     <!-- The arcade is fetched on demand by this bootstrap (on PRESS START,
          on hover/focus, or on a ?arcade= deep link); /arcade.js and
          /arcade.css are named on the launcher below, not loaded here. -->
-    <script defer src="/arcade-boot.js?v=gateway-17"></script>
-    <script defer src="/analytics.js?v=gateway-17"></script>
-    <script defer src="/proof/proof.js?v=gateway-17"></script>
+    <script defer src="/arcade-boot.js?v=gateway-18"></script>
+    <script defer src="/analytics.js?v=gateway-18"></script>
+    <script defer src="/proof/proof.js?v=gateway-18"></script>
     <script defer src="/pilot-fit.js?v=pilot-2"></script>
-    <script defer src="/a11y.js?v=gateway-17"></script>
+    <script defer src="/a11y.js?v=gateway-18"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -222,9 +222,11 @@
           </p>
           <h1>Authorize one agent action. Charge it once. Prove what happened.</h1>
           <p class="hero-body hero-body-lead">
-            When a retried agent call debits twice, someone pays in lost money,
-            recovery time, or a customer problem. Put a number on that cost.
-            If preventing it cannot justify this boundary, we will tell you.
+            An agent issues a customer refund through an internal MCP tool.
+            The call times out, the agent retries, and without a boundary the
+            refund runs twice. Someone pays in lost money, recovery time, or a
+            customer problem. Put a number on that cost. If preventing it
+            cannot justify this boundary, we will tell you.
           </p>
           <div class="cta-row">
             <a
@@ -281,6 +283,17 @@
           <p class="wedge-line">
             The wedge today is metered calls. The underlying primitive is
             bounded authority for machine actions.
+          </p>
+          <p class="offer-note">
+            A credit is a closed-loop metering unit for the pilot on an
+            operator-provisioned wallet, not payment rails. The gateway
+            reserves the tool's registered credit price against the permit
+            and writes at most one ledger debit under the accepted idempotency
+            key before the dispatch is claimed; a denied call is never
+            charged, and a call that never dispatched has its credits
+            returned. Turning credits into invoices, settlement, or payment
+            rails is out of scope by design, and the pilot is priced
+            separately, in writing.
           </p>
         </div>
 
@@ -432,9 +445,13 @@
           <h2 id="protocol-title">One control loop from intent to evidence.</h2>
           <p>
             Discover, authenticate, authorize, invoke, meter, receipt, audit,
-            govern. Here is the loop as the gateway actually ran it: every
-            request, every response, and the verifier's verdict, recorded from
-            <code>make prove-trust-plane</code> and reproducible from a clone.
+            govern. Here is the loop as the gateway actually ran it, shown in
+            loop order: every request, every response, and the verifier's
+            verdict, recorded from <code>make prove-trust-plane</code> and
+            reproducible from a clone. The tool in the recording is a stand-in
+            echo tool, not a refund tool; the permit, debit, receipt, and
+            replay steps are the same for any governed action, and a
+            configured upstream tool additionally gets a dispatch-claim record.
           </p>
         </div>
         <div class="section protocol-console">
@@ -503,7 +520,8 @@
         </div>
         <div class="pilot-copy">
           <p>
-            Bring one internal MCP tool with a real operator, permission
+            Bring one internal MCP tool, such as a refund tool, a deploy
+            trigger, or a payout call, with a real operator, permission
             boundary, and retry or audit concern. Send the scenario by email.
             You get a written answer on whether the boundary fits, and if it
             does, we define the one action and walk it through permit →
@@ -528,7 +546,8 @@
           <ol class="intake-list">
             <li>
               <strong>The tool or action.</strong> What the agent calls, and
-              what changes when it runs.
+              what changes when it runs, for example a refund tool, a deploy
+              trigger, or a payout call.
             </li>
             <li>
               <strong>What goes wrong on retry.</strong> What happens today
@@ -589,6 +608,8 @@
         <div class="pilot-fit" id="economic-fit" aria-labelledby="economic-fit-title">
           <h3 id="economic-fit-title">Does avoiding duplicates justify the cost?</h3>
           <p>
+            Take the refund example: each duplicate is one refund paid twice
+            plus the hours spent clawing it back.
             Monthly actions × baseline duplicate rate × loss per duplicate ×
             expected reduction = estimated monthly avoided loss.
             Use the loss you actually bear, including recovery labor, rather
@@ -794,6 +815,33 @@
           </div>
         </div>
       </section>
+
+      <!-- The waiting room. It closes the page's own content rather than the
+           footer, so the arcade never sits beside the security-disclosure
+           link. Hidden until /arcade-boot.js proves it can run, so a visitor
+           without JavaScript never sees a dead control. The bootstrap reads
+           the arcade's assets from the launcher's data attributes and
+           fetches them on first use. -->
+      <div class="waiting-room">
+        <div class="footer-arcade" hidden>
+          <button
+            type="button"
+            id="arcade-launch"
+            class="arcade-launch"
+            data-arcade-script="/arcade.js?v=gateway-18"
+            data-arcade-style="/arcade.css?v=gateway-18"
+            hidden
+          >
+            <span aria-hidden="true">▶</span> HUMANS: PRESS START
+          </button>
+          <p class="footer-arcade-note">
+            This product is built for agents. While they discover, authorize,
+            meter, and receipt, the human has nothing to do — so this fades the
+            page and opens an arcade of cabinets with no stakes. Nothing in
+            there is billed, metered, or real.
+          </p>
+        </div>
+      </div>
     </main>
 
     <footer class="site-footer">
@@ -858,32 +906,6 @@
         >
         <a href="/.well-known/security.txt">Report a vulnerability</a>
       </div>
-      <!-- The waiting room. Hidden until /arcade-boot.js proves it can run,
-           so a visitor without JavaScript never sees a dead control. The
-           bootstrap reads the arcade's assets from the launcher's data
-           attributes and fetches them on first use. -->
-      <div class="footer-arcade" hidden>
-        <button
-          type="button"
-          id="arcade-launch"
-          class="arcade-launch"
-          data-arcade-script="/arcade.js?v=gateway-17"
-          data-arcade-style="/arcade.css?v=gateway-17"
-          hidden
-        >
-          <span aria-hidden="true">▶</span> HUMANS: PRESS START
-        </button>
-        <p class="footer-arcade-note">
-          This product is built for agents. While they discover, authorize,
-          meter, and receipt, the human has nothing to do — so this fades the
-          page and opens an arcade of cabinets with no stakes. Nothing in
-          there is billed, metered, or real.
-        </p>
-      </div>
-      <p class="footer-note">
-        Marketing: <code>www.thisisatest.tech</code> · API:
-        <code>api.thisisatest.tech</code>
-      </p>
     </footer>
   </body>
 </html>

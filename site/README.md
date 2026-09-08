@@ -37,9 +37,10 @@ calendar works.
 
 Primary pilot links open a draft with the five intake questions; the builder
 URL-encodes the subject, body, and address. No email is sent by the site.
-Optional booking links identify the accountable contact and product. When the
-configured URL is on `calendly.com/regengine/`, the note explains the RegEngine
-calendar name. That note disappears with the booking block in email-only builds.
+Optional booking links identify the accountable contact and product, and
+nothing else: whatever calendar the operator runs, the note names the product
+and the person, so a buyer never has to hold a second or third brand in mind
+mid-pitch. That note disappears with the booking block in email-only builds.
 
 The offer is a paid, bounded one-tool staging pilot with setup and recurring
 service quoted separately after qualification. No fixed price is published.
@@ -96,7 +97,7 @@ Open `http://127.0.0.1:8765/`.
   a pixel-art treatment.
   Hovering a governed-loop card or the primary email CTA fires a pulse through
   the field. Reduced motion renders one still frame per field state;
-  high contrast hides the field entirely. The footer opens
+  high contrast hides the field entirely. The page closes with
   [the waiting room](#the-waiting-room), a hundred-cabinet arcade
   (`/arcade.js`, `/arcade.css`)
 - `/proof/` — portable receipt, matching key snapshot, and offline command
@@ -139,10 +140,34 @@ typed into the HTML. `build_site.py` expands three tokens from
 
 `transcript.json` is **generated**. `scripts/record_site_transcript.py` runs
 the same proof as `make prove-trust-plane` against a throwaway local SQLite
-gateway, records every HTTP exchange the demo makes, keeps the ones the page
-shows, and runs the SDK verifier twice — on the demo's portable receipt and on
-the live one. The operator key and the minted agent key are replaced with
-`$OPERATOR_API_KEY` and `$AGENT_API_KEY` before anything is written.
+gateway, records every HTTP exchange the demo makes through its helpers, keeps
+the ones the page shows, and runs the SDK verifier twice — on the demo's
+portable receipt and on the live one. The operator key and the minted agent
+key are replaced with `$OPERATOR_API_KEY` and `$AGENT_API_KEY` before anything
+is written.
+
+The steps are kept in **loop order, not run order**. The demo denies the
+out-of-scope call before it verifies the audit chain; the page walks the
+eight-stage loop, so it shows the offline receipt check (06), then the audit
+chain (07), then the denial (08). Every line is a real exchange either way,
+and a test pins the rendered numbering so it cannot drift back into counting
+backwards.
+
+The transcript also carries a `latency` block — `samples`, `p50_ms`, `p95_ms`,
+`min_ms`, `max_ms`, `mean_ms`, plus the `path`, `tool` and `transport` they
+describe. The demo times a hundred fresh governed calls (each a real
+reservation, dispatch, debit and receipt, under their own key and permit so
+they neither share a rate-limit bucket nor touch the budget the transcript
+narrates) and the build renders it under the loop as `.console-latency`. That
+run is deliberately *not* recorded exchange by exchange: the demo times raw
+requests with no helper in between, so only the summary is published. The
+figure is measured in-process against local SQLite with a stand-in echo tool,
+so the copy calls it a reference point rather than a production number — a
+gateway that sits in the execution path should say what it costs in time, and
+should say just as plainly what it has not measured. The build refuses a
+transcript without the block rather than rendering a blank panel, and the
+timing values are exempt from the staleness comparison because they
+legitimately differ on every run.
 
 ```bash
 make site-transcript          # re-record (≈30s; needs the app's requirements)
@@ -193,7 +218,7 @@ it and `test_pages_carry_no_inline_scripts` will fail. Put the code in a
 same-origin file instead.
 
 The shared CSS and JS assets are served with `max-age=604800`, so cache busting is a **manual
-query token**: every reference looks like `/styles.css?v=gateway-17`. When you
+query token**: every reference looks like `/styles.css?v=gateway-18`. When you
 change any of those files (including `/wave.js`, `/arcade-boot.js`,
 `/arcade.js`, and `/arcade.css`), bump the token in
 `index.html`, `proof/index.html`, `compare/index.html`, `concept/index.html`,
@@ -227,9 +252,12 @@ the offline verifier.
 ## The waiting room
 
 This product is built for agents. During the governed loop the human has
-nothing to do, so the landing page's footer offers a way to spend that time:
+nothing to do, so the landing page offers a way to spend that time:
 `HUMANS: PRESS START` fades the page and opens a full-screen arcade with one
-hundred cabinets. The whole feature lives in `/arcade.js` and `/arcade.css`,
+hundred cabinets. The launcher closes the page's own content rather than
+sitting in the footer, so the joke never lands beside `Report a vulnerability`
+— a security reader meeting both at once is being told two contradictory
+things about how seriously this page takes itself. The whole feature lives in `/arcade.js` and `/arcade.css`,
 and neither loads with the page: `/arcade-boot.js` (a few hundred bytes,
 landing page only) reveals the launcher and fetches both the first time
 someone presses START, hovers or focuses the control, or arrives on a
@@ -469,8 +497,8 @@ titles and Public Sans the body; both are variable, so one file each is
 enough. IBM Plex Mono carries every label, kicker, badge, code span and
 receipt row; it is static, so weights 400, 500 and 600 are three separate
 files and all three are preloaded. Press Start 2P is deliberately not
-preloaded: the page wears it only on the footer's `HUMANS: PRESS START`
-control and inside the arcade overlay, both far below the fold. A preload must carry `crossorigin` even
+preloaded: the page wears it only on the `HUMANS: PRESS START` control that
+closes the page and inside the arcade overlay, both far below the fold. A preload must carry `crossorigin` even
 same-origin, or the browser discards it and fetches the file twice. The `404`
 page preloads nothing on purpose — it is `noindex` and mostly serves scanners.
 
