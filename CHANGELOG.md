@@ -85,6 +85,23 @@ full release gate; do not backfill a final `v1.2.0` tag.
   And the refund-after-tool-error path keeps its use consumed on purpose: the
   tool did run there, and the counter counts invocations, not charges.
 
+- **An enterprise use is given back only once the refusal is proven to have
+  dispatched nothing.** `enforce_tool_call` records a use atomically with its
+  ALLOW, before every pre-dispatch gate, and `release_tool_use` is its
+  compensation partner — without it a `max_uses=1` principal is locked out
+  forever by a single refusal that charged nothing. Only the insufficient-funds
+  denial called it; the lost-quote and write-contention refusals did not, and the
+  contention one is the sharpest because its whole answer is "retry this key".
+  All three now release it.
+
+  Where in each path matters as much as whether. The release runs *after* the
+  local/remote split, never before: on the remote path a dispatch conflict means
+  another durable owner may still send the call, and handing the budget back at
+  that moment would let that invocation escape its `max_uses` and velocity caps
+  entirely. On the conflict path the use is deliberately left spent — cleanup
+  could not prove the attempt effect-free, so the conservative answer stands and
+  reconciliation owns the outcome.
+
 - **The AWI route closes the key it cannot safely reopen.** Freeing the
   idempotency key and inviting a retry is right on the governed MCP path, where
   the charge precedes execution. It is wrong on AWI, where every governed route
