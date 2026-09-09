@@ -1809,29 +1809,40 @@ async def _execute_registered_tool(
                 # advanced by its owner/reconciler; surface the retryable
                 # in-progress envelope instead of a generic internal error.
                 raise IdempotencyInProgressError("idempotency_in_progress") from None
+            # The attempt is now terminal and was never sent, and that is the
+            # whole proof the enterprise release needs -- so it runs here, not
+            # after the budget cleanup below. That cleanup is independently
+            # fallible (retry exhaustion, a permit or attempt row gone missing)
+            # and reconciliation answers for its reservation; nothing answers
+            # for the process-local use counters, so a use left spent behind a
+            # failed budget release would deny a max_uses=1 principal until
+            # restart for a call that provably never ran. Releasing any earlier
+            # than this -- before the attempt is driven terminal -- would hand
+            # the max_uses and velocity budget back for an invocation a
+            # conflicting owner may still send, letting that call escape the
+            # cap; the conflict path above keeps the use on purpose. The
+            # release is best-effort, so it cannot stop the budget going back.
+            await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
             await get_permit_service().release_dispatch_budget_once(
                 dispatch_attempt.attempt_id
             )
-        elif governed_call and permit_model:
-            # The wallet could not cover the call, so it never ran. This is the
-            # denial the caller is expected to act on -- top up and try again --
-            # which makes leaving the per-tool use consumed the most damaging
-            # place to do it: on a cap of one, the retry the denial invites is
-            # refused for a call that never happened.
-            await _release_local_permit_reservation(
-                permit_model,
-                registered_cost,
-                tool_name,
-                reason=denial_reason,
-            )
-        # Reached only once the refusal is proven to have dispatched nothing:
-        # remotely because complete_pre_dispatch_failure drove the attempt
-        # terminal without sending, locally because no durable owner exists.
-        # Releasing the enterprise use any earlier -- as this path did until now
-        # -- would return its max_uses and velocity budget for an invocation the
-        # conflicting owner may still send, letting that call escape the cap.
-        # The conflict path above keeps the use on purpose.
-        await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
+        else:
+            if governed_call and permit_model:
+                # The wallet could not cover the call, so it never ran. This is
+                # the denial the caller is expected to act on -- top up and try
+                # again -- which makes leaving the per-tool use consumed the
+                # most damaging place to do it: on a cap of one, the retry the
+                # denial invites is refused for a call that never happened.
+                await _release_local_permit_reservation(
+                    permit_model,
+                    registered_cost,
+                    tool_name,
+                    reason=denial_reason,
+                )
+            # Locally no durable owner exists, so the refusal is proven to have
+            # dispatched nothing the moment it is raised, and the reservation
+            # release above is guarded half by half and never raises.
+            await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
         audit_event = await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,

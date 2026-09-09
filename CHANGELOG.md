@@ -102,6 +102,14 @@ full release gate; do not backfill a final `v1.2.0` tag.
   could not prove the attempt effect-free, so the conservative answer stands and
   reconciliation owns the outcome.
 
+  And no later than the proof, either. On the remote insufficient-funds path
+  the proof is `complete_pre_dispatch_failure` driving the attempt terminal;
+  the budget release that follows is independently fallible, and its failure
+  is reconciliation's to repair. The enterprise counters are process-local and
+  nothing downstream repairs them, so the use is handed back between the two
+  steps — a budget release that then fails no longer leaves a `max_uses=1`
+  principal denied until restart for a call that provably never ran.
+
 - **The AWI route closes the key it cannot safely reopen.** Freeing the
   idempotency key and inviting a retry is right on the governed MCP path, where
   the charge precedes execution. It is wrong on AWI, where every governed route
