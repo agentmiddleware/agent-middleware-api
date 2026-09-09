@@ -238,6 +238,14 @@ async def append_chained_audit_event(
     # flat jitter (not growing) so contended writers reconverge quickly without
     # inflating tail latency on slow/CPU-bound runners.
     attempts = 64
+    # Both races an IntegrityError can represent -- two writers inserting the
+    # first head row for a wallet, or two writers inserting the same
+    # deterministic event id -- are resolved by the very next pass, which
+    # observes the winner's row and either returns it or updates against it. So
+    # a violation that survives a couple of retries is not a race at all, and
+    # spending the full budget on it only delays the real error.
+    integrity_race_attempts = 2
+    integrity_failures = 0
     for attempt in range(attempts):
         session = factory()
         try:
@@ -314,20 +322,29 @@ async def append_chained_audit_event(
                 session.add(model)
             return model
         except (_HeadConflict, IntegrityError, OperationalError) as exc:
-            if attempt == attempts - 1:
-                # Only a genuine contention loss is renamed. A persistent
-                # IntegrityError that is not the head race -- a real constraint
-                # violation the retry could never have cleared -- keeps its own
-                # type, because calling that "contended" would send a reader
-                # looking for a busy writer that never existed.
-                if isinstance(exc, _HeadConflict) or (
-                    isinstance(exc, OperationalError)
-                    and is_retryable_write_conflict(exc)
-                ):
-                    raise AuditChainContendedError(
-                        "audit_chain_head_contention"
-                    ) from exc
+            # Classify before spending any of the budget. A fault no retry could
+            # clear -- `no such table`, a disconnected pool -- used to burn all
+            # 64 attempts and their backoff before propagating unchanged, so a
+            # deterministic error arrived as a stall.
+            if isinstance(exc, OperationalError) and not is_retryable_write_conflict(
+                exc
+            ):
                 raise
+            if isinstance(exc, IntegrityError):
+                integrity_failures += 1
+                if integrity_failures > integrity_race_attempts:
+                    # Past the point where a race explains it. Re-raised with
+                    # its own type: calling a real constraint violation
+                    # "contended" would send a reader looking for a busy writer
+                    # that never existed.
+                    raise
+            if attempt == attempts - 1:
+                # Only a genuine contention loss is renamed, and by here the
+                # exception is either a head conflict or a retryable write
+                # conflict -- everything else left through the raises above.
+                if isinstance(exc, IntegrityError):
+                    raise
+                raise AuditChainContendedError("audit_chain_head_contention") from exc
             await asyncio.sleep(random.uniform(0.002, 0.02))
         finally:
             await session.close()
