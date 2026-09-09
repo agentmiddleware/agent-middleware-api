@@ -20,6 +20,7 @@ from decimal import Decimal
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from sqlalchemy.exc import OperationalError
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
     NoEncryption,
@@ -855,6 +856,42 @@ def _register_e2e_tool(calls: list[dict]):
     return registry
 
 
+E2E_UPSTREAM_TOOL = "iga-e2e-upstream"
+
+
+def _register_e2e_upstream_tool():
+    """Register a remote-backed tool so a prepared dispatch attempt exists.
+
+    The executor asserts rather than returning: every test using this drives a
+    refusal that happens before dispatch, so reaching it means the gateway sent
+    a call it had already decided to refuse.
+    """
+
+    class _NeverDispatched:
+        async def call_tool(self, arguments, **_kwargs):
+            raise AssertionError("upstream dispatched despite a pre-dispatch refusal")
+
+    registry = get_service_registry()
+    registry.register_upstream(
+        service_id=E2E_UPSTREAM_TOOL,
+        name="IGA E2E Upstream",
+        description="Throwaway remote tool for IGA compensation tests",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=_NeverDispatched(),
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        credits_per_unit=2.0,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+    )
+    return registry
+
+
 async def _invoke_tool_call(
     client: AsyncClient,
     *,
@@ -862,6 +899,7 @@ async def _invoke_tool_call(
     permit_id: str,
     idem_key: str,
     headers: dict[str, str],
+    tool_name: str = E2E_TOOL,
 ) -> dict:
     resp = await client.post(
         "/mcp/messages",
@@ -870,7 +908,7 @@ async def _invoke_tool_call(
             "id": f"iga-{idem_key}",
             "method": "tools/call",
             "params": {
-                "name": E2E_TOOL,
+                "name": tool_name,
                 "arguments": {"message": "hello"},
                 "mcpContext": {
                     "wallet_id": wallet_id,
@@ -885,14 +923,16 @@ async def _invoke_tool_call(
     return resp.json()
 
 
-async def _provision_for_e2e(client: AsyncClient, *, idem_key: str) -> dict:
-    """Wallet + wallet-scoped key + permit for E2E_TOOL, via the real routes."""
+async def _provision_for_e2e(
+    client: AsyncClient, *, idem_key: str, tool_name: str = E2E_TOOL
+) -> dict:
+    """Wallet + wallet-scoped key + permit for the tool, via the real routes."""
     setup = await provision_agent_wallet(client)
     permit = await create_tool_permit(
         client,
         wallet_id=setup["agent_wallet_id"],
         key_id=setup["key_id"],
-        tool_name=E2E_TOOL,
+        tool_name=tool_name,
         idem_key=idem_key,
     )
     return {**setup, "permit_id": permit["permit_id"]}
@@ -1154,12 +1194,16 @@ async def test_ledger_contention_releases_iga_use(
         assert oidc_iga._lifetime_uses == {}
         assert oidc_iga._window_calls == {}
 
-        # The retry this refusal advertises actually runs.
+        # The retry this refusal advertises actually runs -- and on the SAME
+        # key it refused, which is the key the caller was told to reuse. A fresh
+        # key would prove the IGA release alone; reusing this one also proves
+        # the record was abandoned rather than left in progress, since
+        # idem.begin runs ahead of the enterprise gate and would refuse first.
         payload = await _invoke_tool_call(
             client,
             wallet_id=wallet_id,
             permit_id=setup["permit_id"],
-            idem_key="iga-e2e-contend-2",
+            idem_key="iga-e2e-contend-1",
             headers=headers,
         )
         assert "result" in payload, payload
@@ -1169,6 +1213,78 @@ async def test_ledger_contention_releases_iga_use(
         assert sum(oidc_iga._lifetime_uses.values()) == 1
     finally:
         registry.unregister_local(E2E_TOOL)
+
+
+async def test_a_contended_remote_charge_keeps_the_use_it_cannot_prove_unspent(
+    iga_config, clean_database, rsa_key, client, monkeypatch
+):
+    """When cleanup cannot prove the attempt effect-free, the use stays spent.
+
+    ``abandon_effect_free_prepared_attempt`` raises a dispatch conflict when the
+    prepared attempt carries a claim, a dispatch, a debit or a charge -- meaning
+    another durable owner may still go on to send it. Handing the enterprise use
+    back at that moment would return the ``max_uses`` and velocity budget for an
+    invocation that then happens, letting it escape its cap entirely.
+
+    So the ordering is the point: the release must sit after the abandon, not
+    before it. This asserts the conservative half -- on the conflict path the
+    counter is left alone, and the caller gets the retryable in-progress
+    envelope while reconciliation owns the outcome.
+    """
+    from app.services.billing_engine import BillingEngine
+    from app.services.mcp_dispatch_attempts import (
+        DispatchClaimUnavailableError,
+        McpDispatchAttemptService,
+    )
+
+    registry = _register_e2e_upstream_tool()
+    try:
+        setup = await _provision_for_e2e(
+            client,
+            idem_key="iga-e2e-conflict-permit",
+            tool_name=E2E_UPSTREAM_TOOL,
+        )
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_UPSTREAM_TOOL])
+        iga_config(
+            _okta_issuers(rsa_key),
+            {"payments-ops": {"policy_id": policy_id, "max_uses": 1}},
+        )
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        headers = {**setup["agent_headers"], "Authorization": f"Bearer {token}"}
+
+        async def _always_contended(self, **_kwargs):
+            raise OperationalError(
+                "UPDATE wallets ...", {}, Exception("database is locked")
+            )
+
+        async def _conflicted_abandon(self, **_kwargs):
+            raise DispatchClaimUnavailableError("dispatch_attempt_advanced")
+
+        monkeypatch.setattr(BillingEngine, "_charge_once", _always_contended)
+        monkeypatch.setattr(
+            McpDispatchAttemptService,
+            "abandon_effect_free_prepared_attempt",
+            _conflicted_abandon,
+        )
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=setup["agent_wallet_id"],
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-conflict-1",
+            headers=headers,
+            tool_name=E2E_UPSTREAM_TOOL,
+        )
+        monkeypatch.undo()
+
+        # Reconciliation owns the outcome from here, so the caller is told the
+        # operation is still in flight rather than given a verdict.
+        assert "error" in payload, payload
+        assert payload["error"]["message"] == "idempotency_in_progress", payload
+        # And the use is NOT handed back: another owner may still spend it.
+        assert sum(oidc_iga._lifetime_uses.values()) == 1, oidc_iga._lifetime_uses
+    finally:
+        registry.unregister_local(E2E_UPSTREAM_TOOL)
 
 
 async def test_enterprise_shaped_bearer_still_401s_when_iga_disabled(
