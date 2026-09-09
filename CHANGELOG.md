@@ -136,6 +136,16 @@ full release gate; do not backfill a final `v1.2.0` tag.
   released before the `-32005` is answered; anything it could have carried means
   the loss was not pre-effect and never reaches that path.
 
+  That release is pinned to the record the invocation was actually granted, by
+  the id its begin returned. A call refused `idempotency_in_progress` never held
+  one and audits that refusal like any other, so releasing on (wallet, endpoint,
+  key) alone would delete the *winner's* live, uncharged row while the winner ran
+  on — freeing the key to execute and debit the same call a second time. Those
+  coordinates name whichever row holds them now; only the granted id names the
+  caller's. `IdempotencyService.abandon` takes an `expected_record_id` for this,
+  and treats a mismatch as a no-op: the row moved on and there is nothing left to
+  release.
+
   Classification also moved ahead of the retry budget. A fault no retry could
   clear — `no such table`, a real constraint violation — used to burn all 64
   attempts and their backoff before propagating unchanged, so a deterministic

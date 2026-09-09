@@ -43,6 +43,10 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services import audit_chain
+from app.services.idempotency import (
+    GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+    get_idempotency_service,
+)
 from app.services.service_registry import get_service_registry
 from app.services.upstream_mcp import UpstreamMcpResult
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
@@ -415,3 +419,81 @@ async def test_a_charged_upstream_call_is_never_told_to_retry(
     body = resp.json()
     if "error" in body:
         assert body["error"]["code"] != -32005, body
+
+
+@pytest.mark.anyio
+async def test_a_contended_refusal_does_not_free_another_calls_live_key(
+    client: AsyncClient, clean_database: None, audited_tool, monkeypatch
+) -> None:
+    """The unwind releases this invocation's record, never the winner's.
+
+    Two governed calls share an idempotency key. The first is granted the
+    record and runs on. The second is refused ``idempotency_in_progress`` --
+    and audits that refusal like any other refusal, so its audit write can lose
+    the chain head too.
+
+    Releasing by (wallet, endpoint, key) at that point deletes the *winner's*
+    live, uncharged row: those coordinates name whichever row holds them now,
+    and the loser never held one. The winner would then keep running with its
+    at-most-once protection gone, and the freed key would be available to
+    execute and debit the same call a second time -- a worse outcome than the
+    stranded key the unwind exists to prevent.
+
+    So the release is pinned to the record id the begin returned to *this*
+    invocation, and this test is the guard on that pin.
+    """
+    tool_name, runs = audited_tool
+    ctx = await provision_agent_wallet(client)
+    wallet_id = ctx["agent_wallet_id"]
+    permit = await create_tool_permit(
+        client,
+        wallet_id=wallet_id,
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="audit-contention-permit-5",
+    )
+    shared_key = "audit-contention-concurrent-1"
+
+    # The winner: hold the record open exactly as an in-flight call would.
+    idem = get_idempotency_service()
+    winner = await idem.begin_with_record(
+        wallet_id=wallet_id,
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key=shared_key,
+        request_payload={
+            "tool_name": tool_name,
+            "arguments": {"message": "hello"},
+            "wallet_id": wallet_id,
+            "permit_id": permit["permit_id"],
+        },
+        operation_kind="local",
+    )
+    assert winner.replay is None
+
+    _always_contended(monkeypatch)
+    loser = await client.post(
+        "/mcp/messages",
+        json=_call_body(
+            tool_name=tool_name,
+            wallet_id=wallet_id,
+            permit_id=permit["permit_id"],
+            idempotency_key=shared_key,
+        ),
+        headers=ctx["agent_headers"],
+    )
+    monkeypatch.undo()
+
+    assert loser.status_code == 200, loser.text
+    assert "error" in loser.json(), loser.text
+
+    # The winner still holds its record, and still the same one.
+    held = await idem.get_record(
+        wallet_id=wallet_id,
+        endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+        idempotency_key=shared_key,
+    )
+    assert held is not None, "the loser's unwind deleted the winner's record"
+    assert held.record_id == winner.record_id
+    # Nothing executed on either call.
+    assert runs["count"] == 0

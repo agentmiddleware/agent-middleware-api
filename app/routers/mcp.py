@@ -830,7 +830,16 @@ async def _execute_registered_tool(
     records, so a record left in progress would meet every retry of that key
     with ``idempotency_in_progress`` forever: the -32005 would name a retry the
     caller could never actually make.
+
+    Only a record this invocation was granted is released, identified by the id
+    the begin returned. A call refused with ``idempotency_in_progress`` never
+    held one and audits that refusal like any other, so releasing by (wallet,
+    endpoint, key) alone would delete the winner's live, uncharged row while
+    the winner ran on -- freeing the key to execute and debit a second time.
+    Those coordinates name whichever row holds them now; only the granted id
+    names ours.
     """
+    owned_record: dict[str, str] = {}
     try:
         return await _execute_registered_tool_inner(
             tool_name=tool_name,
@@ -845,21 +854,24 @@ async def _execute_registered_tool(
             quote_id=quote_id,
             idempotency_key=idempotency_key,
             request_payload=request_payload,
+            owned_record=owned_record,
         )
     except AuditChainContendedError:
-        if wallet_id and idempotency_key:
+        record_id = owned_record.get("record_id")
+        if record_id and wallet_id and idempotency_key:
             idem = get_idempotency_service()
             # The two endpoints a governed record can live under: the canonical
             # one, and the request's own when a pre-canonical legacy row was
-            # adopted. abandon() no-ops on a record that is absent, completed,
-            # or carries a ledger entry, so neither call can erase evidence
-            # that money moved.
+            # adopted. The record id is what makes trying both safe -- it pins
+            # the release to the row this invocation was granted, so a lookup
+            # that lands on another row is a no-op rather than a delete.
             for record_endpoint in {GOVERNED_MCP_IDEMPOTENCY_ENDPOINT, endpoint}:
                 try:
                     await idem.abandon(
                         wallet_id=wallet_id,
                         endpoint=record_endpoint,
                         idempotency_key=idempotency_key,
+                        expected_record_id=record_id,
                     )
                 except Exception:
                     logger.exception(
@@ -883,6 +895,7 @@ async def _execute_registered_tool_inner(
     quote_id: str | None = None,
     idempotency_key: str | None = None,
     request_payload: dict[str, Any] | None = None,
+    owned_record: dict[str, str] | None = None,
 ) -> dict:
     if not tool_name:
         raise ValueError("Missing tool name")
@@ -966,6 +979,8 @@ async def _execute_registered_tool_inner(
                 )
                 replay = idem_begin.replay
                 idem_started = True
+                if owned_record is not None:
+                    owned_record["record_id"] = idem_begin.record_id
             except IdempotencyInProgressError:
                 raise
             except IdempotencyConflictError as exc:
@@ -1162,6 +1177,8 @@ async def _execute_registered_tool_inner(
             )
             replay = idem_begin.replay
             idem_started = True
+            if owned_record is not None:
+                owned_record["record_id"] = idem_begin.record_id
         except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
             await _audit_mcp_invocation(
                 effects_committed=False,
