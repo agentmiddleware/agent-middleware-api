@@ -17,33 +17,31 @@ the claims the project deliberately does not make, see
 | Command | Proves | Backend |
 |---|---|---|
 | `make prove-trust-plane` | The full trust loop plus replay and tamper detection — see the breakdown below | Throwaway SQLite |
-| `make prove-trust-plane-postgres` | **Migrations only** — see the defect note below | Throwaway SQLite, after migrating PostgreSQL |
+| `make prove-trust-plane-postgres` | Alias for the guarded process/crash proof below | Dedicated, migrated PostgreSQL |
 | `make red-team-trust-plane` | Ten distinct attacks are each denied with a specific reason code and none produces a debit | Throwaway SQLite |
 | `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |
 | `make agent-ops-war-room` | The operator narrative: discovery, provisioning, invoke, replay, self-inspection, denial | Temp SQLite |
 
-### Known defect: `prove-trust-plane-postgres` does not prove PostgreSQL
+### PostgreSQL proof selection
 
-Recorded here rather than quietly omitted, because the target's name asserts
-something it does not do.
+`make prove-trust-plane-postgres` runs `make prove-crash-recovery`: the
+multi-process harness below, against a dedicated, empty PostgreSQL database.
+It does not run the SQLite demo. The demo intentionally controls its own
+throwaway database and signing seed, including destructive tamper checks;
+passing it a deployment database is not a supported proof mode.
 
-`scripts/demo_trust_plane.py` unconditionally sets `DATABASE_URL` to a
-throwaway SQLite file inside `configure_environment()`, which runs *before* the
-FastAPI app is imported. The operator's `DATABASE_URL` is therefore overwritten
-before the application reads it. What `make prove-trust-plane-postgres`
-actually does is apply `alembic upgrade head` to the supplied PostgreSQL
-database — a genuine and useful migration check — and then run every assertion
-on SQLite.
+CI's `postgres_trust` job migrates PostgreSQL first and sets `DATABASE_URL`
+for the permit, receipt, MCP, audit, key-management, and idempotency suites.
+Those suites share one event loop for asyncpg. The datetime regression suite
+runs separately with `TEST_POSTGRES_URL`, because its fixture rebuilds the
+application and owns its own connections. Wallet-status guards also run
+against PostgreSQL. The separate `postgres_permit_concurrency` job covers
+process crashes and real row-lock contention.
 
-The same defect makes CI's `postgres_trust` job a SQLite run.
-
-Real PostgreSQL coverage in this repository comes from `make
-prove-crash-recovery` (the two-process harness fails closed unless the URL is
-PostgreSQL) and from the CI suites parameterized by `TEST_POSTGRES_URL`, not
-from the demo script. **Fixing this means having `configure_environment()`
-respect a caller-supplied `DATABASE_URL` instead of overwriting it** — a small
-change, deliberately left out of the documentation change that discovered it,
-because it alters what a proof command proves and deserves its own review.
+Before this correction, the named Make target migrated PostgreSQL then
+silently ran the SQLite demo; most CI trust primitive tests also used SQLite
+because `TEST_POSTGRES_URL` only selects the datetime fixture. Historical green
+runs therefore do not establish PostgreSQL coverage for those primitives.
 
 ### What `make prove-trust-plane` asserts
 
@@ -289,11 +287,11 @@ Being explicit about the boundary is what makes the proofs worth anything.
   claim-boundary cases. What is still not proven is a kill at an *arbitrary*
   instruction — only at the instrumented boundaries.
 - **`make prove-trust-plane` runs on SQLite with a hardcoded demo signing
-  seed.** It proves the logic, not the production posture. No target re-runs
-  these assertions against PostgreSQL — see the defect note above. PostgreSQL
-  behavior is covered instead by `make prove-crash-recovery` and the
-  `TEST_POSTGRES_URL` suites in CI; production configuration is enforced
-  separately by the `production_trust` CI job.
+  seed.** It proves the logic, not the production posture. PostgreSQL behavior
+  is covered by the process/crash proof and the CI trust primitive, datetime,
+  wallet-status, and row-lock suites described above; production configuration
+  is enforced separately by the `production_trust` CI job. Local execution of
+  those checks does not establish hosted deployment readiness.
 - **Tenant isolation is application-layer.** PostgreSQL row-level security is
   not implemented and no public multi-tenant isolation guarantee is made.
 

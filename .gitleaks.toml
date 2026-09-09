@@ -51,6 +51,8 @@ regexes = [
   '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=''',
   # base64 of the literal string "test-signing-key-material-32byte".
   '''dGVzdC1zaWduaW5nLWtleS1tYXRlcmlhbC0zMmJ5dGU=''',
+  # Newer scanners also inspect the decoded value of that same public fixture.
+  '''^test-signing-key-material-32byte$''',
   # base64 of "test-signing-key-not-for-prod" — a historical CI test constant
   # (commented "Non-secret test material" at its use site); allowlisted so
   # full-history scans stay noise-free.
