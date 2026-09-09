@@ -1287,6 +1287,89 @@ async def test_a_contended_remote_charge_keeps_the_use_it_cannot_prove_unspent(
         registry.unregister_local(E2E_UPSTREAM_TOOL)
 
 
+async def test_remote_insufficient_funds_releases_the_use_before_the_fallible_budget_cleanup(
+    iga_config, clean_database, rsa_key, client, monkeypatch
+):
+    """The use goes back as soon as the refusal is proven effect-free -- not
+    after a later cleanup step that can fail on its own.
+
+    On the remote path an insufficient-funds denial proves the attempt never
+    dispatched by driving it terminal through ``complete_pre_dispatch_failure``.
+    That is the whole proof the release needs. ``release_dispatch_budget_once``
+    runs next, is independently fallible (retry exhaustion, a permit or attempt
+    row gone missing), and its failure is answered by reconciliation. The
+    enterprise counters are process-local: nothing downstream can repair them,
+    so a use left spent here denies a ``max_uses=1`` principal until restart for
+    a call that provably never ran.
+    """
+    from sqlmodel import select
+
+    from app.db.models import McpDispatchAttemptModel
+    from app.services.permits import PermitError, PermitService
+
+    registry = _register_e2e_upstream_tool()
+    try:
+        setup = await _provision_for_e2e(
+            client,
+            idem_key="iga-e2e-remote-funds-permit",
+            tool_name=E2E_UPSTREAM_TOOL,
+        )
+        wallet_id = setup["agent_wallet_id"]
+
+        # The tool costs 2 credits; a balance of 1 cannot cover it.
+        factory = get_session_factory()
+        async with factory() as session:
+            wallet = await session.get(WalletModel, wallet_id)
+            assert wallet is not None
+            wallet.balance = Decimal("1")
+            session.add(wallet)
+            await session.commit()
+
+        bundle_wallet = await _make_wallet()
+        policy_id = await _make_bundle(bundle_wallet, allowed_tools=[E2E_UPSTREAM_TOOL])
+        iga_config(
+            _okta_issuers(rsa_key),
+            {"payments-ops": {"policy_id": policy_id, "max_uses": 1}},
+        )
+        token = _mint(rsa_key, extra={"groups": ["payments-ops"]})
+        headers = {**setup["agent_headers"], "Authorization": f"Bearer {token}"}
+
+        async def _exhausted(self, attempt_id):
+            raise PermitError("permit_write_contended")
+
+        monkeypatch.setattr(PermitService, "release_dispatch_budget_once", _exhausted)
+        payload = await _invoke_tool_call(
+            client,
+            wallet_id=wallet_id,
+            permit_id=setup["permit_id"],
+            idem_key="iga-e2e-remote-funds-1",
+            headers=headers,
+            tool_name=E2E_UPSTREAM_TOOL,
+        )
+        monkeypatch.undo()
+
+        assert "error" in payload, payload
+        # The proof happened: the attempt is terminal, and it was never sent.
+        async with factory() as session:
+            attempts = (
+                await session.execute(
+                    select(McpDispatchAttemptModel).where(
+                        McpDispatchAttemptModel.wallet_id == wallet_id
+                    )
+                )
+            ).scalars().all()
+        assert len(attempts) == 1, attempts
+        assert attempts[0].state == "returned_error", attempts[0].state
+        assert attempts[0].dispatched_at is None
+        # The budget cleanup genuinely failed -- reconciliation owns that --
+        # and yet the use is back, because the release no longer waits on it.
+        assert attempts[0].budget_released_at is None
+        assert oidc_iga._lifetime_uses == {}, oidc_iga._lifetime_uses
+        assert oidc_iga._window_calls == {}, oidc_iga._window_calls
+    finally:
+        registry.unregister_local(E2E_UPSTREAM_TOOL)
+
+
 async def test_enterprise_shaped_bearer_still_401s_when_iga_disabled(
     clean_database, rsa_key, client
 ):
