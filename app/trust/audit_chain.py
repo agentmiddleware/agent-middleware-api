@@ -8,6 +8,7 @@ Re-exports the canonical audit-chain verification and signing helpers from
 from __future__ import annotations
 
 from app.services.audit_chain import (
+    AuditChainContendedError,
     AuditChainVerification,
     audit_payload,
     sign_audit_model,
@@ -21,6 +22,7 @@ from app.services.audit_log import (
 )
 
 __all__ = [
+    "AuditChainContendedError",
     "AuditChainVerification",
     "audit_payload",
     "sign_audit_model",

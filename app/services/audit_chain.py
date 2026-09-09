@@ -11,6 +11,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.resilience import is_retryable_write_conflict
 from app.core.time import to_naive_utc, utc_now
 from app.db.database import get_session_factory
 from app.db.models import AuditChainHeadModel, ControlPlaneAuditEventModel
@@ -135,6 +136,21 @@ class _HeadConflict(Exception):
 
 class AuditEventConflictError(RuntimeError):
     """A caller reused an audit event identity for different signed evidence."""
+
+
+class AuditChainContendedError(RuntimeError):
+    """The per-wallet chain head stayed contended for the whole retry budget.
+
+    Distinct from :class:`AuditEventConflictError`, which is a caller mistake.
+    This is a transient loss: the event is signed and valid, and an append that
+    reconverges on a quieter head would still record it. It exists so the
+    failure leaves this module as a named, public type -- ``_HeadConflict`` is
+    private and a bare ``OperationalError`` says nothing about which write lost
+    -- and so a caller can tell "the chain was busy" from a substantive
+    integrity fault, which is deliberately left to propagate as itself.
+    """
+
+    reason = "audit_chain_head_contention"
 
 
 def _assert_same_audit_intent(
@@ -297,13 +313,29 @@ async def append_chained_audit_event(
                         raise _HeadConflict()
                 session.add(model)
             return model
-        except (_HeadConflict, IntegrityError, OperationalError):
+        except (_HeadConflict, IntegrityError, OperationalError) as exc:
             if attempt == attempts - 1:
+                # Only a genuine contention loss is renamed. A persistent
+                # IntegrityError that is not the head race -- a real constraint
+                # violation the retry could never have cleared -- keeps its own
+                # type, because calling that "contended" would send a reader
+                # looking for a busy writer that never existed.
+                if isinstance(exc, _HeadConflict) or (
+                    isinstance(exc, OperationalError)
+                    and is_retryable_write_conflict(exc)
+                ):
+                    raise AuditChainContendedError(
+                        "audit_chain_head_contention"
+                    ) from exc
                 raise
             await asyncio.sleep(random.uniform(0.002, 0.02))
         finally:
             await session.close()
-    raise RuntimeError("audit_chain_head_contention")
+    # Unreachable: attempts is a positive constant, so the loop either returns
+    # or raises on its final pass. Kept as an assertion rather than the bare
+    # `raise RuntimeError("audit_chain_head_contention")` that stood here, which
+    # advertised a reason code no caller could ever actually receive.
+    raise AssertionError("audit_chain_retry_budget_invalid")
 
 
 @dataclass(frozen=True)

@@ -322,3 +322,85 @@ async def test_global_verify_detects_fully_deleted_wallet_via_head(clean_databas
     result = await verify_audit_chain(wallet_id=None)
     assert result.valid is False
     assert result.reason == "audit_chain_truncated"
+
+
+@pytest.mark.anyio
+async def test_exhausted_head_contention_raises_a_named_error(
+    client, clean_database, monkeypatch
+):
+    """A chain head that stays contended must not leave as a private type.
+
+    The append retries the optimistic head update 64 times. Before this the
+    final attempt re-raised whatever it caught -- ``_HeadConflict``, which is
+    private to the module, or a bare driver error -- so every caller saw an
+    unclassified failure and the trailing
+    ``raise RuntimeError("audit_chain_head_contention")`` was dead code,
+    advertising a reason nothing could emit.
+    """
+    from app.services import audit_chain
+
+    provisioned = await provision_agent_wallet(client)
+
+    calls = {"n": 0}
+
+    def _always_lost(*args, **kwargs):
+        # Stands in for the conditional head UPDATE matching zero rows, which is
+        # what a writer that keeps losing the race observes on every pass.
+        calls["n"] += 1
+        raise audit_chain._HeadConflict()
+
+    monkeypatch.setattr(audit_chain, "_sign_with_previous", _always_lost)
+
+    with pytest.raises(audit_chain.AuditChainContendedError) as excinfo:
+        await record_audit_event(
+            event="mcp.invoke",
+            wallet_id=provisioned["agent_wallet_id"],
+            tool="contended-tool",
+            endpoint="/mcp/messages",
+            ok=True,
+            error=None,
+        )
+
+    assert str(excinfo.value) == "audit_chain_head_contention"
+    assert audit_chain.AuditChainContendedError.reason == "audit_chain_head_contention"
+    # The whole budget was spent before giving up, not one attempt.
+    assert calls["n"] == 64, calls["n"]
+    # The private type is chained, not swallowed, so a log still shows the cause.
+    assert isinstance(excinfo.value.__cause__, audit_chain._HeadConflict)
+
+
+@pytest.mark.anyio
+async def test_a_substantive_integrity_fault_is_not_relabelled_as_contention(
+    client, clean_database, monkeypatch
+):
+    """Renaming a real constraint violation would send readers hunting a ghost.
+
+    Only a lost head race, or an ``OperationalError`` the shared classifier
+    recognises as a write conflict, becomes ``AuditChainContendedError``. A
+    persistent integrity fault that no amount of retrying could clear keeps its
+    own type.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services import audit_chain
+
+    provisioned = await provision_agent_wallet(client)
+
+    def _hard_integrity_fault(*args, **kwargs):
+        raise IntegrityError(
+            "INSERT INTO control_plane_audit_events ...",
+            {},
+            Exception("NOT NULL constraint failed: control_plane_audit_events.event"),
+        )
+
+    monkeypatch.setattr(audit_chain, "_sign_with_previous", _hard_integrity_fault)
+
+    with pytest.raises(IntegrityError):
+        await record_audit_event(
+            event="mcp.invoke",
+            wallet_id=provisioned["agent_wallet_id"],
+            tool="broken-tool",
+            endpoint="/mcp/messages",
+            ok=True,
+            error=None,
+        )
