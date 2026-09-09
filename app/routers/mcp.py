@@ -817,6 +817,73 @@ async def _execute_registered_tool(
     idempotency_key: str | None = None,
     request_payload: dict[str, Any] | None = None,
 ) -> dict:
+    """Run the governed tool call, freeing the key when the answer is "retry".
+
+    Only the unwind lives here; ``_execute_registered_tool_inner`` orchestrates.
+    An ``AuditChainContendedError`` that escapes it is provably pre-effect --
+    every audit site past the charge declares ``effects_committed=True`` and
+    converts its own loss to a non-retryable type -- so the in-progress
+    idempotency record, if one was begun, holds nothing terminal.
+
+    Releasing it is what makes the retryable answer true rather than merely
+    polite. Reconciliation deliberately does not delete uncharged local
+    records, so a record left in progress would meet every retry of that key
+    with ``idempotency_in_progress`` forever: the -32005 would name a retry the
+    caller could never actually make.
+    """
+    try:
+        return await _execute_registered_tool_inner(
+            tool_name=tool_name,
+            arguments=arguments,
+            wallet_id=wallet_id,
+            auth=auth,
+            money=money,
+            transport=transport,
+            endpoint=endpoint,
+            request_id=request_id,
+            permit_id=permit_id,
+            quote_id=quote_id,
+            idempotency_key=idempotency_key,
+            request_payload=request_payload,
+        )
+    except AuditChainContendedError:
+        if wallet_id and idempotency_key:
+            idem = get_idempotency_service()
+            # The two endpoints a governed record can live under: the canonical
+            # one, and the request's own when a pre-canonical legacy row was
+            # adopted. abandon() no-ops on a record that is absent, completed,
+            # or carries a ledger entry, so neither call can erase evidence
+            # that money moved.
+            for record_endpoint in {GOVERNED_MCP_IDEMPOTENCY_ENDPOINT, endpoint}:
+                try:
+                    await idem.abandon(
+                        wallet_id=wallet_id,
+                        endpoint=record_endpoint,
+                        idempotency_key=idempotency_key,
+                    )
+                except Exception:
+                    logger.exception(
+                        "mcp_audit_contended_idempotency_abandon_failed",
+                        extra={"wallet_id": wallet_id},
+                    )
+        raise
+
+
+async def _execute_registered_tool_inner(
+    *,
+    tool_name: str,
+    arguments: dict[str, Any],
+    wallet_id: str | None,
+    auth: AuthContext,
+    money: AgentMoney,
+    transport: str,
+    endpoint: str,
+    request_id: str | None,
+    permit_id: str | None = None,
+    quote_id: str | None = None,
+    idempotency_key: str | None = None,
+    request_payload: dict[str, Any] | None = None,
+) -> dict:
     if not tool_name:
         raise ValueError("Missing tool name")
     if not wallet_id:
@@ -839,6 +906,7 @@ async def _execute_registered_tool(
     )
     if not tenant_decision.allowed:
         await _audit_mcp_invocation(
+            effects_committed=False,
             decision=tenant_decision,
             endpoint=endpoint,
             transport=transport,
@@ -991,6 +1059,7 @@ async def _execute_registered_tool(
         if not quoted.allowed or quoted.quote is None:
             reason = quoted.reason or "quote_invalid"
             await _audit_mcp_invocation(
+                effects_committed=False,
                 decision=tenant_decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1028,6 +1097,7 @@ async def _execute_registered_tool(
     )
     if not decision.allowed:
         await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -1038,6 +1108,7 @@ async def _execute_registered_tool(
 
     if governed_call and not permit_id:
         await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -1059,6 +1130,7 @@ async def _execute_registered_tool(
         raise PermissionError("permit_required")
     if governed_call and not idempotency_key:
         await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -1092,6 +1164,7 @@ async def _execute_registered_tool(
             idem_started = True
         except (IdempotencyConflictError, IdempotencyInProgressError) as exc:
             await _audit_mcp_invocation(
+                effects_committed=False,
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1129,6 +1202,7 @@ async def _execute_registered_tool(
         permit_model = permit_validation.permit
         if not permit_validation.allowed:
             audit_event = await _audit_mcp_invocation(
+                effects_committed=False,
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1222,6 +1296,7 @@ async def _execute_registered_tool(
         iga_denial_reason = exc.reason
     if iga_denial_reason is not None:
         audit_event = await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -1308,6 +1383,7 @@ async def _execute_registered_tool(
             arguments=arguments,
         )
         audit_event = await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -1385,6 +1461,7 @@ async def _execute_registered_tool(
         origin_domain = parsed.hostname or upstream_origin
         if origin_domain != permit_model.recipient_domain:
             audit_event = await _audit_mcp_invocation(
+                effects_committed=False,
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1462,6 +1539,7 @@ async def _execute_registered_tool(
             except Exception as exc:
                 reason = "upstream_prepare_failed"
                 audit_event = await _audit_mcp_invocation(
+                    effects_committed=False,
                     decision=decision,
                     endpoint=endpoint,
                     transport=transport,
@@ -1517,6 +1595,7 @@ async def _execute_registered_tool(
         permit_model = permit_validation.permit
         if not permit_validation.allowed:
             audit_event = await _audit_mcp_invocation(
+                effects_committed=False,
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1616,6 +1695,7 @@ async def _execute_registered_tool(
             # effect-free, so leaving the budget spent is the safe answer.
             await _release_iga_use(iga_granted_use, tool_name, reason=reason)
             await _audit_mcp_invocation(
+                effects_committed=False,
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1768,6 +1848,7 @@ async def _execute_registered_tool(
         )
         try:
             await _audit_mcp_invocation(
+                effects_committed=False,
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1855,6 +1936,7 @@ async def _execute_registered_tool(
             # release above is guarded half by half and never raises.
             await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
         audit_event = await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -1990,6 +2072,7 @@ async def _execute_registered_tool(
             audit_event = None
             try:
                 audit_event = await _audit_mcp_invocation(
+                    effects_committed=True,
                     decision=decision,
                     endpoint=endpoint,
                     transport=transport,
@@ -2082,6 +2165,7 @@ async def _execute_registered_tool(
                 registered_cost,
             )
         audit_event = await _audit_mcp_invocation(
+            effects_committed=True,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -2149,6 +2233,7 @@ async def _execute_registered_tool(
         try:
             if audit_event is None:
                 audit_event = await _audit_mcp_invocation(
+                    effects_committed=True,
                     decision=decision,
                     endpoint=endpoint,
                     transport=transport,
@@ -2221,18 +2306,12 @@ async def _execute_registered_tool(
             wallet_id,
             last_exc,
         )
-        if isinstance(last_exc, AuditChainContendedError):
-            # A refusal that ran nothing answers audit contention as retryable,
-            # and this is the one place that must not. The tool already ran and
-            # the wallet is already charged, so "retry" would invite a second
-            # execution. It also cannot be softened into a success: the receipt
-            # is built from audit_event.event_id, so no audit event means no
-            # signed receipt either, and reconcile_stuck_records can only
-            # complete a stuck record when a receipt exists -- without one it
-            # counts the record for manual review rather than repairing it.
-            # Re-raised under a type the retryable handlers do not catch, so
-            # this keeps landing on the catch-all exactly as it did before.
-            raise RuntimeError("mcp_finalize_audit_chain_contended") from last_exc
+        # No AuditChainContendedError can reach here: this block's only chain
+        # append is the effects_committed=True audit above, which converts its
+        # own loss. Guarding it a second time would restate the rule in the one
+        # place it is already enforced, and leave the sites that actually
+        # needed it -- the upstream helpers, the local refund-success path --
+        # still uncovered. That was the original defect.
         raise last_exc
     return response_payload
 
@@ -2561,6 +2640,7 @@ async def _execute_upstream_after_charge(
         )
         raise AssertionError("unreachable")
     audit_event = await _audit_mcp_invocation(
+        effects_committed=True,
         decision=decision,
         endpoint=endpoint,
         transport=transport,
@@ -2651,6 +2731,7 @@ async def _raise_refunded_upstream_failure(
     except Exception as refund_exc:
         error = f"refund_failed; upstream_error:{reason}"
         audit_event = await _audit_mcp_invocation(
+            effects_committed=True,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -2700,6 +2781,7 @@ async def _raise_refunded_upstream_failure(
 
     await get_permit_service().release_dispatch_budget_once(dispatch_attempt.attempt_id)
     audit_event = await _audit_mcp_invocation(
+        effects_committed=True,
         decision=decision,
         endpoint=endpoint,
         transport=transport,
@@ -2784,6 +2866,7 @@ async def _raise_charged_upstream_failure(
 ) -> None:
     """Sign an ambiguous/rejected response without refunding or releasing budget."""
     audit_event = await _audit_mcp_invocation(
+        effects_committed=True,
         decision=decision,
         endpoint=endpoint,
         transport=transport,
@@ -3190,6 +3273,7 @@ async def _require_human_approval(
 
     async def _terminal_denial(reason: str, approval_id: str | None) -> NoReturn:
         audit_event = await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -3221,6 +3305,7 @@ async def _require_human_approval(
         reason: str, *, data: dict[str, Any], status_code: int
     ) -> NoReturn:
         await _audit_mcp_invocation(
+            effects_committed=False,
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -3441,9 +3526,22 @@ async def _audit_mcp_invocation(
     transport: str,
     ok: bool,
     error: str | None,
+    effects_committed: bool,
     extra_metadata: dict[str, Any] | None = None,
     dispatch_attempt: Any | None = None,
 ) -> Any:
+    """Write the invocation's audit event, answering contention by what ran.
+
+    ``effects_committed`` states whether anything irreversible has already
+    happened for this call -- the tool executed, the wallet was charged, or an
+    upstream dispatch went out. It has no default on purpose. An audit-chain
+    loss is retryable exactly when the answer is no, and every site that writes
+    one has to say which side of the charge it is on, so a site added later
+    cannot inherit the retryable answer by omission. That inheritance is the
+    defect this parameter exists to make unrepresentable: guarding the finalize
+    loop alone left the upstream helpers and the local refund-success path free
+    to hand a caller who had already run and paid a "retry".
+    """
     record_audit(
         "mcp.invoke",
         tool=decision.tool_name,
@@ -3456,31 +3554,45 @@ async def _audit_mcp_invocation(
         ok=ok,
         error=error,
     )
-    if dispatch_attempt is not None:
-        metadata_attempt_id = (extra_metadata or {}).get("dispatch_attempt_id")
-        if metadata_attempt_id != dispatch_attempt.attempt_id:
-            raise RuntimeError("dispatch_audit_identity_mismatch")
-        return await get_mcp_dispatch_reconciliation_service().get_or_create_terminal_audit(
-            dispatch_attempt.attempt_id
+    try:
+        if dispatch_attempt is not None:
+            metadata_attempt_id = (extra_metadata or {}).get("dispatch_attempt_id")
+            if metadata_attempt_id != dispatch_attempt.attempt_id:
+                raise RuntimeError("dispatch_audit_identity_mismatch")
+            # Its own append can lose the chain head too: the terminal-dispatch
+            # audit goes through record_audit_event like any other.
+            return await get_mcp_dispatch_reconciliation_service().get_or_create_terminal_audit(
+                dispatch_attempt.attempt_id
+            )
+        return await record_audit_event(
+            event="mcp.invoke",
+            wallet_id=decision.wallet_id,
+            tool=decision.tool_name,
+            endpoint=endpoint,
+            auth_source=decision.auth_source,
+            key_id=decision.key_id,
+            policy_decision_id=decision.decision_id,
+            request_id=decision.request_id,
+            ok=ok,
+            error=error,
+            metadata={
+                "transport": transport,
+                "estimated_cost": decision.estimated_cost,
+                "policy_reason": decision.reason,
+                **(extra_metadata or {}),
+            },
         )
-    return await record_audit_event(
-        event="mcp.invoke",
-        wallet_id=decision.wallet_id,
-        tool=decision.tool_name,
-        endpoint=endpoint,
-        auth_source=decision.auth_source,
-        key_id=decision.key_id,
-        policy_decision_id=decision.decision_id,
-        request_id=decision.request_id,
-        ok=ok,
-        error=error,
-        metadata={
-            "transport": transport,
-            "estimated_cost": decision.estimated_cost,
-            "policy_reason": decision.reason,
-            **(extra_metadata or {}),
-        },
-    )
+    except AuditChainContendedError as exc:
+        if not effects_committed:
+            raise
+        # The call already ran or the wallet already moved, so "retry" would
+        # invite a second execution of something the caller has paid for. It
+        # cannot be softened into a success either: the receipt is built from
+        # this event's id, so no audit event means no signed receipt, and
+        # reconcile_stuck_records can only complete a stuck record when a
+        # receipt exists -- without one it counts the record for manual review.
+        # Re-raised under a type the retryable handlers do not catch.
+        raise RuntimeError("mcp_audit_chain_contended_after_effects") from exc
 
 
 async def _handle_tools_call(
