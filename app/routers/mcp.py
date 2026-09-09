@@ -1570,11 +1570,6 @@ async def _execute_registered_tool(
             quote_id, idempotency_key=idempotency_key
         ):
             reason = QUOTE_REASON_CONSUMED
-            # The use the enterprise gate recorded is spent on a call that is
-            # about to be refused without charging or dispatching, so it goes
-            # back on either backend -- the gate runs before the local/remote
-            # split, so both reach here holding one.
-            await _release_iga_use(iga_granted_use, tool_name, reason=reason)
             if dispatch_service is not None and dispatch_attempt is not None:
                 try:
                     await dispatch_service.abandon_effect_free_prepared_attempt(
@@ -1600,6 +1595,15 @@ async def _execute_registered_tool(
                     tool_name,
                     reason=reason,
                 )
+            # Reached only once the refusal is proven to have dispatched
+            # nothing -- remotely because the abandon above succeeded, locally
+            # because no durable owner exists at all. Releasing the enterprise
+            # use any earlier would hand its max_uses and velocity budget back
+            # for an invocation another owner may still go on to send, letting
+            # that invocation escape the cap entirely. The conflict path above
+            # keeps the use on purpose: cleanup could not prove the attempt
+            # effect-free, so leaving the budget spent is the safe answer.
+            await _release_iga_use(iga_granted_use, tool_name, reason=reason)
             await _audit_mcp_invocation(
                 decision=decision,
                 endpoint=endpoint,
@@ -1701,9 +1705,6 @@ async def _execute_registered_tool(
         # idempotency_in_progress forever, against a reservation it can never
         # spend. Hand both back, on either backend, so that the retryable answer
         # this raises is one the caller can actually act on.
-        await _release_iga_use(
-            iga_granted_use, tool_name, reason="ledger_write_contended"
-        )
         if dispatch_service is not None and dispatch_attempt is not None:
             # Remote keeps its reservation on the prepared attempt, and that row
             # also holds a foreign key to the idempotency record, so neither can
@@ -1744,6 +1745,16 @@ async def _execute_registered_tool(
                 tool_name,
                 reason="ledger_write_contended",
             )
+        # Reached only once the refusal is proven to have dispatched nothing:
+        # remotely the abandon above re-proved it, locally no durable owner
+        # exists. Releasing the enterprise use any earlier would give its
+        # max_uses and velocity budget back for an invocation another owner may
+        # still send, letting that call escape the cap. The conflict path above
+        # keeps the use deliberately -- cleanup could not prove the attempt
+        # effect-free, so the budget stays spent.
+        await _release_iga_use(
+            iga_granted_use, tool_name, reason="ledger_write_contended"
+        )
         try:
             await _audit_mcp_invocation(
                 decision=decision,
@@ -1782,12 +1793,6 @@ async def _execute_registered_tool(
         # the price it was promised.
         if quoted is not None and quote_id:
             await get_quote_service().release(quote_id)
-        # Likewise the IGA use recorded at the enterprise gate: this refusal
-        # charges nothing and dispatches nothing, so a max_uses / velocity
-        # budget must not burn down on it (a max_uses=1 principal would
-        # otherwise be locked out forever by one under-funded wallet).
-        # Best-effort — compensation must never mask the funds denial.
-        await _release_iga_use(iga_granted_use, tool_name, reason=charge_result.error)
         denial_reason = charge_result.error
         denial_status = 402 if denial_reason == "insufficient_funds" else 403
         if dispatch_service is not None and dispatch_attempt is not None:
@@ -1819,6 +1824,14 @@ async def _execute_registered_tool(
                 tool_name,
                 reason=denial_reason,
             )
+        # Reached only once the refusal is proven to have dispatched nothing:
+        # remotely because complete_pre_dispatch_failure drove the attempt
+        # terminal without sending, locally because no durable owner exists.
+        # Releasing the enterprise use any earlier -- as this path did until now
+        # -- would return its max_uses and velocity budget for an invocation the
+        # conflicting owner may still send, letting that call escape the cap.
+        # The conflict path above keeps the use on purpose.
+        await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
         audit_event = await _audit_mcp_invocation(
             decision=decision,
             endpoint=endpoint,
