@@ -102,6 +102,25 @@ full release gate; do not backfill a final `v1.2.0` tag.
   could not prove the attempt effect-free, so the conservative answer stands and
   reconciliation owns the outcome.
 
+- **A contended audit chain is named, and answered differently depending on
+  whether the call ran.** `append_chained_audit_event` retries a contended
+  per-wallet head 64 times; its final attempt used to re-raise `_HeadConflict`,
+  private to that module, so every caller saw an unclassified failure, and the
+  trailing `raise RuntimeError("audit_chain_head_contention")` was dead code the
+  loop could never reach. Exhaustion now raises `AuditChainContendedError`,
+  chaining the cause. Only a genuine loss is renamed — a persistent
+  `IntegrityError` no retry could clear keeps its own type.
+
+  A refusal that ran nothing answers it as retryable `-32005`, alongside
+  `idempotency_in_progress` and `ledger_write_contended`. Finalization
+  deliberately does not: it audits after the tool ran and the wallet was
+  charged, so "retry" would invite a second execution, and it cannot be softened
+  into a success either — `create_receipt` takes the audit event's id, so no
+  audit event means no signed receipt, and `reconcile_stuck_records` can only
+  complete a stuck record when a receipt exists. That loss keeps failing
+  unclassified, which is the honest answer, and a test pins that the retryable
+  classification cannot leak into it.
+
   And no later than the proof, either. On the remote insufficient-funds path
   the proof is `complete_pre_dispatch_failure` driving the attempt terminal;
   the budget release that follows is independently fallible, and its failure

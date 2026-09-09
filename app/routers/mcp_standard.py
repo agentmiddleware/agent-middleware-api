@@ -80,6 +80,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import Message, Receive, Scope, Send
 
 from app.core.auth import AuthContext, get_auth_context
+from app.services.audit_chain import AuditChainContendedError
 from app.services.billing_engine import LedgerWriteContendedError
 from app.core.config import get_settings
 from app.core.time import utc_now
@@ -449,6 +450,11 @@ async def _governed_tools_call(
         # than passing str(e) through; sharing it would report contention as
         # an in-progress winner that does not exist.
         raise _mcp_error(-32005, "ledger_write_contended") from e
+    except AuditChainContendedError as e:
+        # Same shape again, and reachable only from a refusal that ran nothing:
+        # the finalize loop re-raises its own audit loss as a non-retryable
+        # type, because there the tool already ran and was charged.
+        raise _mcp_error(-32005, "audit_chain_head_contention") from e
     except ToolPermissionDenied as e:
         denial_data: dict[str, Any] = {}
         if e.receipt:

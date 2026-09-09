@@ -41,6 +41,7 @@ from ..core.oidc_iga import (
     parse_enterprise_token,
     release_tool_use,
 )
+from ..trust import AuditChainContendedError
 from ..services.billing_engine import (
     LedgerOperationConflictError,
     LedgerWriteContendedError,
@@ -517,12 +518,22 @@ async def handle_messages(
                     "error": error_payload,
                 }
             )
-        except (IdempotencyInProgressError, LedgerWriteContendedError) as e:
-            # Both mean the same thing to a caller: nothing terminal was
+        except (
+            IdempotencyInProgressError,
+            LedgerWriteContendedError,
+            AuditChainContendedError,
+        ) as e:
+            # All three mean the same thing to a caller: nothing terminal was
             # recorded, retry the same idempotency key. -32005 is this
             # surface's retryable code and str(e) carries which one it was, so
             # a client can distinguish "a winner is mid-flight" from "the write
-            # lost its snapshot" without either landing as internal_error.
+            # lost its snapshot" or "the audit chain stayed busy" without any of
+            # them landing as internal_error.
+            #
+            # Only a refusal that ran nothing reaches here as
+            # AuditChainContendedError: the finalize loop, which audits AFTER
+            # the tool ran and was charged, deliberately re-raises its loss as
+            # a non-retryable type so a charged call is never told to try again.
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -2210,6 +2221,18 @@ async def _execute_registered_tool(
             wallet_id,
             last_exc,
         )
+        if isinstance(last_exc, AuditChainContendedError):
+            # A refusal that ran nothing answers audit contention as retryable,
+            # and this is the one place that must not. The tool already ran and
+            # the wallet is already charged, so "retry" would invite a second
+            # execution. It also cannot be softened into a success: the receipt
+            # is built from audit_event.event_id, so no audit event means no
+            # signed receipt either, and reconcile_stuck_records can only
+            # complete a stuck record when a receipt exists -- without one it
+            # counts the record for manual review rather than repairing it.
+            # Re-raised under a type the retryable handlers do not catch, so
+            # this keeps landing on the catch-all exactly as it did before.
+            raise RuntimeError("mcp_finalize_audit_chain_contended") from last_exc
         raise last_exc
     return response_payload
 
@@ -3580,7 +3603,11 @@ async def invoke_tool(
         if exc.data:
             detail["approval"] = exc.data
         raise HTTPException(status_code=exc.status_code, detail=detail)
-    except (IdempotencyInProgressError, LedgerWriteContendedError) as exc:
+    except (
+        IdempotencyInProgressError,
+        LedgerWriteContendedError,
+        AuditChainContendedError,
+    ) as exc:
         raise HTTPException(
             status_code=409,
             detail={"error": str(exc)},
