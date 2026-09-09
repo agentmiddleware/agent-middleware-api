@@ -178,3 +178,64 @@ async def test_begin_translates_sqlite_lock_error_to_in_progress(
             idempotency_key="broken-key",
             request_payload={"amount": 1},
         )
+
+
+@pytest.mark.anyio
+async def test_abandon_pinned_to_a_record_id_ignores_a_row_it_does_not_own(
+    clean_database,
+):
+    """A caller may only release the row it was actually granted.
+
+    The coordinates (wallet, endpoint, key) name whichever row holds them at
+    the moment of the call, which is not necessarily the caller's: a request
+    refused ``idempotency_in_progress`` never held one, and a row can be
+    released and re-taken between a caller's begin and its unwind. Releasing on
+    coordinates alone would hand the current holder's at-most-once protection
+    to whoever asked next, so ``expected_record_id`` pins it.
+
+    A mismatch is a no-op rather than an error: it means the row moved on and
+    this caller has nothing left to release.
+    """
+    service = get_idempotency_service()
+    wallet = await get_agent_money().create_sponsor_wallet(
+        sponsor_name="Abandon Pin Sponsor",
+        email="abandon-pin@example.com",
+    )
+    held = await service.begin_with_record(
+        wallet_id=wallet.wallet_id,
+        endpoint="/v1/test",
+        idempotency_key="pinned-key",
+        request_payload={"amount": 1},
+        operation_kind="local",
+    )
+
+    # Someone else's id: the live row must survive.
+    await service.abandon(
+        wallet_id=wallet.wallet_id,
+        endpoint="/v1/test",
+        idempotency_key="pinned-key",
+        expected_record_id="idm-someone-elses-record",
+    )
+    survived = await service.get_record(
+        wallet_id=wallet.wallet_id,
+        endpoint="/v1/test",
+        idempotency_key="pinned-key",
+    )
+    assert survived is not None
+    assert survived.record_id == held.record_id
+
+    # The owner's own id releases it, so the key is retryable again.
+    await service.abandon(
+        wallet_id=wallet.wallet_id,
+        endpoint="/v1/test",
+        idempotency_key="pinned-key",
+        expected_record_id=held.record_id,
+    )
+    assert (
+        await service.get_record(
+            wallet_id=wallet.wallet_id,
+            endpoint="/v1/test",
+            idempotency_key="pinned-key",
+        )
+        is None
+    )

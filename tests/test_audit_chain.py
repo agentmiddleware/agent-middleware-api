@@ -404,3 +404,89 @@ async def test_a_substantive_integrity_fault_is_not_relabelled_as_contention(
             ok=True,
             error=None,
         )
+
+
+@pytest.mark.anyio
+async def test_a_fault_no_retry_can_clear_is_raised_without_spending_the_budget(
+    client, clean_database, monkeypatch
+):
+    """A deterministic driver error must not be retried 64 times first.
+
+    The retry budget is generous because a contended chain head reconverges,
+    and the classification that separates contention from everything else used
+    to run only on the final attempt. So a fault no retry could ever clear --
+    ``no such table``, a bad column -- burned all 64 passes and their backoff
+    before propagating unchanged, turning a deterministic error into a stall
+    on a request path that holds a charged wallet open.
+
+    The type is unchanged; only the delay is. Calling it "contended" would send
+    a reader looking for a busy writer that never existed.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    from app.services import audit_chain
+
+    provisioned = await provision_agent_wallet(client)
+
+    calls = {"n": 0}
+
+    def _hard_driver_fault(*args, **kwargs):
+        calls["n"] += 1
+        raise OperationalError(
+            "SELECT 1", {}, Exception("no such table: control_plane_audit_events")
+        )
+
+    monkeypatch.setattr(audit_chain, "_sign_with_previous", _hard_driver_fault)
+
+    with pytest.raises(OperationalError):
+        await record_audit_event(
+            event="mcp.invoke",
+            wallet_id=provisioned["agent_wallet_id"],
+            tool="broken-tool",
+            endpoint="/mcp/messages",
+            ok=True,
+            error=None,
+        )
+
+    assert calls["n"] == 1, calls["n"]
+
+
+@pytest.mark.anyio
+async def test_a_substantive_integrity_fault_stops_once_a_race_cannot_explain_it(
+    client, clean_database, monkeypatch
+):
+    """An IntegrityError is retried only as long as it could still be a race.
+
+    Two races produce one legitimately: two writers inserting a wallet's first
+    head row, and two inserting the same deterministic event id. Both are
+    resolved by the very next pass, which observes the winner's row and either
+    returns it or updates against it -- so a violation that outlives a couple
+    of retries is not a race, and spending the rest of the budget on it only
+    delays the real error. It keeps its own type either way.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services import audit_chain
+
+    provisioned = await provision_agent_wallet(client)
+
+    calls = {"n": 0}
+
+    def _hard_integrity_fault(*args, **kwargs):
+        calls["n"] += 1
+        raise IntegrityError("INSERT", {}, Exception("FOREIGN KEY constraint failed"))
+
+    monkeypatch.setattr(audit_chain, "_sign_with_previous", _hard_integrity_fault)
+
+    with pytest.raises(IntegrityError):
+        await record_audit_event(
+            event="mcp.invoke",
+            wallet_id=provisioned["agent_wallet_id"],
+            tool="violating-tool",
+            endpoint="/mcp/messages",
+            ok=True,
+            error=None,
+        )
+
+    # Bounded by the race window, not by the contention budget.
+    assert calls["n"] == 3, calls["n"]
