@@ -114,8 +114,7 @@ def validate_client_idempotency_key(value: object, *, source: str) -> str:
     if _CONTROL_CHARACTERS.search(value):
         raise InvalidIdempotencyKeyError(
             "idempotency_key_control_characters",
-            f"invalid_idempotency_key: {source} must not contain control "
-            "characters",
+            f"invalid_idempotency_key: {source} must not contain control characters",
             source=source,
         )
     return value
@@ -160,7 +159,9 @@ def resolve_client_idempotency_key(
     """
     validated: list[tuple[str, str]] = []
     for source, value in sources:
-        validated.append((source, validate_client_idempotency_key(value, source=source)))
+        validated.append(
+            (source, validate_client_idempotency_key(value, source=source))
+        )
     if not validated:
         return None
     first_source, first_key = validated[0]
@@ -615,6 +616,7 @@ class IdempotencyService:
         wallet_id: str,
         endpoint: str,
         idempotency_key: str,
+        expected_record_id: str | None = None,
     ) -> None:
         """Release an in-progress record so the caller may retry the key.
 
@@ -625,6 +627,15 @@ class IdempotencyService:
         ``idempotency_in_progress``. Only an uncharged, unfinished record is
         deleted — a completed response or a ``ledger_entry_id`` checkpoint
         means money moved, and the record must survive for replay/repair.
+
+        ``expected_record_id`` pins the release to the row the caller was
+        actually granted. Without it the coordinates (wallet, endpoint, key)
+        name whichever row holds them *now*, which is not necessarily the
+        caller's: a request refused with ``idempotency_in_progress`` never
+        owned that row, and releasing it there would hand the winner's
+        at-most-once protection to whoever asked next. Pass it whenever the
+        caller holds a record id; a mismatch is a no-op, not an error, since
+        it means the row moved on and nothing is left to release.
         """
         factory = get_session_factory()
         async with factory() as session:
@@ -635,6 +646,11 @@ class IdempotencyService:
             )
             record = result.scalar_one_or_none()
             if not record:
+                return
+            if (
+                expected_record_id is not None
+                and record.record_id != expected_record_id
+            ):
                 return
             if record.response_json is not None or record.ledger_entry_id:
                 return

@@ -112,14 +112,46 @@ full release gate; do not backfill a final `v1.2.0` tag.
   `IntegrityError` no retry could clear keeps its own type.
 
   A refusal that ran nothing answers it as retryable `-32005`, alongside
-  `idempotency_in_progress` and `ledger_write_contended`. Finalization
-  deliberately does not: it audits after the tool ran and the wallet was
-  charged, so "retry" would invite a second execution, and it cannot be softened
-  into a success either — `create_receipt` takes the audit event's id, so no
-  audit event means no signed receipt, and `reconcile_stuck_records` can only
-  complete a stuck record when a receipt exists. That loss keeps failing
-  unclassified, which is the honest answer, and a test pins that the retryable
-  classification cannot leak into it.
+  `idempotency_in_progress` and `ledger_write_contended`. No audit write past
+  the charge does: they audit after the tool ran and the wallet was charged, so
+  "retry" would invite a second execution, and it cannot be softened into a
+  success either — `create_receipt` takes the audit event's id, so no audit
+  event means no signed receipt, and `reconcile_stuck_records` can only complete
+  a stuck record when a receipt exists. Those losses keep failing unclassified,
+  which is the honest answer.
+
+  Which side a site is on is now stated at the site. `_audit_mcp_invocation`
+  takes a required `effects_committed`, with no default, and converts its own
+  loss when the answer is yes. Guarding the finalize loop alone had left the
+  upstream post-charge helpers and the local refund-succeeded path free to hand
+  a caller who had already run and paid a `-32005`; on the upstream path that
+  invites a second send of a call the partner had already executed. A parameter
+  every call site must answer makes inheriting the wrong side by omission
+  impossible rather than merely unlikely.
+
+  The retryable answer also has to name a retry the caller can make. A governed
+  refusal holds an open idempotency record, and reconciliation deliberately does
+  not delete uncharged local records, so a record left in progress met every
+  retry of that key with `idempotency_in_progress` — permanently. The record is
+  released before the `-32005` is answered; anything it could have carried means
+  the loss was not pre-effect and never reaches that path.
+
+  That release is pinned to the record the invocation was actually granted, by
+  the id its begin returned. A call refused `idempotency_in_progress` never held
+  one and audits that refusal like any other, so releasing on (wallet, endpoint,
+  key) alone would delete the *winner's* live, uncharged row while the winner ran
+  on — freeing the key to execute and debit the same call a second time. Those
+  coordinates name whichever row holds them now; only the granted id names the
+  caller's. `IdempotencyService.abandon` takes an `expected_record_id` for this,
+  and treats a mismatch as a no-op: the row moved on and there is nothing left to
+  release.
+
+  Classification also moved ahead of the retry budget. A fault no retry could
+  clear — `no such table`, a real constraint violation — used to burn all 64
+  attempts and their backoff before propagating unchanged, so a deterministic
+  error arrived as a stall on a request path holding a charged wallet open. An
+  `IntegrityError` is now retried only while a race could still explain it:
+  both races that produce one legitimately resolve on the very next pass.
 
   And no later than the proof, either. On the remote insufficient-funds path
   the proof is `complete_pre_dispatch_failure` driving the attempt terminal;
