@@ -114,7 +114,7 @@
     </script>
     @@FONT_PRELOADS@@
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-18" />
+    <link rel="stylesheet" href="/styles.css?v=@@STYLES_CSS_VERSION@@" />
     <!-- Blocking on purpose: saved accessibility preferences must apply before
          first paint. Kept in a file rather than inline so the Content-Security-
          Policy can be script-src 'self' with no 'unsafe-inline'. -->
@@ -125,24 +125,7 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <nav class="site-nav" aria-label="Primary">
-      <a class="nav-brand" href="/" aria-label="Agent Middleware API home">
-        <span>Agent Middleware API</span>
-      </a>
-      <div class="nav-links">
-        <a href="/#pilot">Pilot</a>
-        <a href="/#proof">Proof</a>
-        <a href="/compare/">Compare</a>
-        <a href="/#machine-discovery">Machine discovery</a>
-        <a
-          class="nav-agent"
-          href="@@PILOT_EMAIL_HREF@@"
-          data-analytics-event="email_click"
-          aria-label="Start a pilot by email (opens your mail app)"
-          >Start a pilot by email</a
-        >
-      </div>
-    </nav>
+    @@SITE_NAV@@
 
     <main id="main">
       <header class="section proof-page-header">
@@ -538,68 +521,6 @@
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="footer-branding">
-        <div class="footer-brand">Agent Middleware API</div>
-        <p>Authorize one agent action. Charge it once. Prove what happened.</p>
-      </div>
-      <div class="footer-directory">
-        <p>Human contact</p>
-        <a
-          class="button button-primary"
-          href="@@PILOT_EMAIL_HREF@@"
-          data-analytics-event="email_click"
-          aria-label="Start a pilot by email (opens your mail app)"
-          >Start a pilot by email</a
-        >
-        <a
-          href="mailto:@@PUBLIC_CONTACT_EMAIL@@"
-          data-analytics-event="email_click"
-          aria-label="Email @@PUBLIC_CONTACT_EMAIL@@"
-          >@@PUBLIC_CONTACT_EMAIL@@</a
-        >
-        <!-- booking:start -->
-        <a
-          href="@@PUBLIC_BOOKING_URL@@"
-          target="_blank"
-          rel="noopener noreferrer"
-          data-analytics-event="booking_click"
-          aria-label="Book a call if your scenario needs one (opens in a new tab)"
-          >Book a call if your scenario needs one</a
-        >
-        <span class="booking-context">@@BOOKING_CONTEXT@@</span>
-        <!-- booking:end -->
-        <span>Accountable contact: @@PUBLIC_DISPLAY_NAME@@</span>
-      </div>
-      <div class="footer-directory">
-        <p>Evidence and discovery</p>
-        <a href="/proof/" data-analytics-event="proof_click">Receipt proof</a>
-        <a href="https://api.thisisatest.tech/.well-known/agent.json" target="_blank" rel="noopener noreferrer">Agent manifest</a>
-        <a href="https://api.thisisatest.tech/openapi.json" target="_blank" rel="noopener noreferrer">OpenAPI</a>
-        <a href="https://api.thisisatest.tech/health/dependencies" target="_blank" rel="noopener noreferrer">Live dependency status</a>
-      </div>
-      <div class="footer-directory">
-        <p>Source and policy</p>
-        <a
-          href="https://github.com/PetrefiedThunder/agent-middleware-api"
-          target="_blank"
-          rel="noopener noreferrer"
-          >Source repository</a
-        >
-        <a
-          href="https://api.thisisatest.tech/DESIGN_PARTNER_GUIDE.md"
-          target="_blank"
-          rel="noopener noreferrer"
-          >Design partner guide</a
-        >
-        <a
-          href="https://api.thisisatest.tech/SECURITY_LIMITATIONS.md"
-          target="_blank"
-          rel="noopener noreferrer"
-          >Security limitations</a
-        >
-        <a href="/.well-known/security.txt">Report a vulnerability</a>
-      </div>
-    </footer>
+    @@SITE_FOOTER@@
   </body>
 </html>

@@ -8,6 +8,20 @@ The intended buyer is a platform engineering, AI infrastructure, or security
 team operating internal MCP tools. Machine discovery remains available below
 the one-tool pilot funnel and through the static pointer files.
 
+## Shared page design
+
+All five HTML pages use `styles.css` for colors, typography, spacing, buttons,
+focus states, and accessibility preferences. `partials/nav.html` and
+`partials/footer.html` render into every page during the build, so navigation
+and contact links also work without JavaScript. Edit those shared files once;
+do not duplicate their markup in a page. Proof always opens `/proof/`, and the
+Proof and Compare pages mark their current navigation link.
+
+The stylesheet URL includes a content hash generated at build time. A style
+change therefore refreshes consistently across cached pages. The archived
+`/concept/` study stays unlisted but uses the same brand and controls, with
+only its content width in `concept/concept.css`.
+
 ## Launch gate
 
 Pilot intake is email-first: a prospect emails the tool scenario (the tool or
@@ -67,6 +81,7 @@ building and serving `dist` locally:
 
 ```bash
 node tests/test_site_pilot_fit.mjs http://127.0.0.1:8765 /absolute/path/to/playwright/index.mjs
+node tests/test_site_design.mjs http://127.0.0.1:8765 /absolute/path/to/playwright/index.mjs
 ```
 
 Run this command from the repository root. The optional second argument locates
@@ -549,9 +564,8 @@ operator index) and `app/services/approval_card.py` (permit-approval email
 and hosted card, where mail clients drop `:root` and custom properties).
 When the palette moves, re-resolve both —
 `test_resolved_palette_surfaces_stay_within_the_stylesheet` fails on any
-literal hex or rgba hue the stylesheet does not itself use. `/concept/` is
-exempt on purpose: it is the archived design study, and its bespoke palette
-is part of what it archives.
+literal hex or rgba hue the stylesheet does not itself use. `/concept/` imports
+the shared design system directly, including the accessibility controls.
 
 ## Analytics
 
