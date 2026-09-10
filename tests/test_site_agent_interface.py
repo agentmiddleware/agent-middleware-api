@@ -754,10 +754,17 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
 def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     """The insights script 404s unless the Vercel project enables analytics."""
 
+    pages = (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "concept/index.html",
+        "404.html",
+    )
     default_output = tmp_path / "default"
     result = _render_site(default_output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in pages:
         page = (default_output / relative_path).read_text(encoding="utf-8")
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
@@ -769,10 +776,15 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     enabled_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = "true"
     result = _render_site(enabled_output, enabled_contacts)
     assert result.returncode == 0, result.stderr
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in pages:
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
         assert '<script src="/va-init.js?v=gateway-18"></script>' in page
+        assert (
+            page.index("/va-init.js?")
+            < page.index("/_vercel/insights/script.js")
+            < page.index("/analytics.js?")
+        )
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
