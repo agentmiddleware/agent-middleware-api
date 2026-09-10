@@ -380,14 +380,11 @@ html[data-a11y-contrast="high"] .site-nav {
     row-gap: 0.25rem;
   }
 
-  .nav-links {
-    flex-basis: 100%;
-  }
-
   /* Wrap the section links rather than hiding them: with no hamburger to fall
      back on, display:none removed the only way to reach Pilot, Proof, and
      Machine discovery on a phone. */
   .nav-links {
+    flex-basis: 100%;
     flex-wrap: wrap;
     gap: 0.35rem 0.85rem;
     font-size: 0.85rem;

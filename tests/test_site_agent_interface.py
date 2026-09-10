@@ -2235,10 +2235,18 @@ def test_all_pages_share_the_current_design_stylesheet(tmp_path) -> None:
         page = path.read_text(encoding="utf-8")
         assert f'href="/styles.css?v={digest}"' in page, path
         assert "@@" not in page, path
+    concept_digest = hashlib.sha256(
+        (SITE / "concept/concept.css").read_bytes()
+    ).hexdigest()[:8]
+    concept_page = (output / "concept/index.html").read_text(encoding="utf-8")
+    assert f'href="/concept/concept.css?v={concept_digest}"' in concept_page
     # Layout-specific study CSS cannot reintroduce a competing design system.
     concept = (SITE / "concept/concept.css").read_text(encoding="utf-8")
     assert ":root" not in concept
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", concept)
+    assert not re.search(
+        r"\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(", concept, re.IGNORECASE
+    )
 
 
 def test_font_filenames_are_content_hashed_so_immutable_is_safe() -> None:

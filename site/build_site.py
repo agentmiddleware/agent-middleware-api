@@ -88,6 +88,7 @@ SITE_PARTIALS = {
     "@@SITE_FOOTER@@": "partials/footer.html",
 }
 STYLES_CSS_VERSION_TOKEN = "@@STYLES_CSS_VERSION@@"
+CONCEPT_CSS_VERSION_TOKEN = "@@CONCEPT_CSS_VERSION@@"
 BUILD_DATE_TOKEN = "@@BUILD_DATE@@"
 FAQ_JSONLD_TOKEN = "@@FAQ_JSONLD@@"
 HERO_CONSOLE_TOKEN = "@@HERO_CONSOLE@@"
@@ -899,6 +900,9 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
     styles_version = hashlib.sha256(
         (SITE_ROOT / "styles.css").read_bytes()
     ).hexdigest()[:8]
+    concept_version = hashlib.sha256(
+        (SITE_ROOT / "concept/concept.css").read_bytes()
+    ).hexdigest()[:8]
     output = _validated_output_path(output)
 
     shutil.rmtree(output, ignore_errors=True)
@@ -912,19 +916,17 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
         if relative_path.endswith(".html"):
             for token, partial in partials.items():
                 rendered = rendered.replace(token, partial)
-            # The same Proof link always reaches the proof page; current-page
-            # state is the only navigation difference across rendered pages.
-            current = {
-                "proof/index.html": "/proof/",
-                "compare/index.html": "/compare/",
-            }.get(relative_path)
-            if current:
+            # Dedicated markers survive formatting and added link attributes.
+            for token, current_page in {
+                "@@NAV_PROOF_CURRENT@@": "proof/index.html",
+                "@@NAV_COMPARE_CURRENT@@": "compare/index.html",
+            }.items():
                 rendered = rendered.replace(
-                    f'<a href="{current}">',
-                    f'<a href="{current}" aria-current="page">',
-                    1,
+                    token,
+                    ' aria-current="page"' if relative_path == current_page else "",
                 )
             rendered = rendered.replace(STYLES_CSS_VERSION_TOKEN, styles_version)
+            rendered = rendered.replace(CONCEPT_CSS_VERSION_TOKEN, concept_version)
         if analytics_enabled:
             rendered = rendered.replace(ANALYTICS_TOKEN, ANALYTICS_SCRIPTS)
         else:
