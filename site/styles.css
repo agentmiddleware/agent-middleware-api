@@ -76,7 +76,7 @@
 html {
   font-size: calc(100% * var(--a11y-scale, 1));
   /* keep in-page anchor targets clear of the sticky nav */
-  scroll-padding-top: 5.5rem;
+  scroll-padding-top: 7rem;
 }
 
 html[data-a11y-contrast="high"] {
@@ -285,7 +285,7 @@ p a {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem var(--pad-x);
+  padding: 0.85rem max(var(--pad-x), calc((100% - var(--page-max)) / 2 + var(--pad-x)));
   background: rgba(11, 16, 32, 0.86);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -345,11 +345,17 @@ html[data-a11y-contrast="high"] .site-nav {
   text-decoration: none;
 }
 
+.nav-links a[aria-current="page"] {
+  color: var(--brass);
+  text-decoration: underline;
+  text-underline-offset: 0.35em;
+}
+
 .nav-links .nav-agent {
   color: var(--ink);
   background: var(--brass);
   padding: 0.5rem 0.95rem;
-  min-height: 40px;
+  min-height: 44px;
   font-weight: 600;
   border-radius: var(--radius-sm);
   transition: background 140ms ease;
@@ -361,7 +367,23 @@ html[data-a11y-contrast="high"] .site-nav {
   text-decoration: none;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 980px) {
+  html {
+    scroll-padding-top: 1.5rem;
+  }
+
+  .site-nav {
+    /* A wrapped header must scroll away so it cannot cover anchor targets
+       or consume most of a phone screen when text is enlarged. */
+    position: relative;
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+  }
+
+  .nav-links {
+    flex-basis: 100%;
+  }
+
   /* Wrap the section links rather than hiding them: with no hamburger to fall
      back on, display:none removed the only way to reach Pilot, Proof, and
      Machine discovery on a phone. */
@@ -373,16 +395,6 @@ html[data-a11y-contrast="high"] .site-nav {
 }
 
 @media (max-width: 560px) {
-  html {
-    /* the wrapped nav is taller at narrow widths */
-    scroll-padding-top: 8.5rem;
-  }
-
-  .site-nav {
-    flex-wrap: wrap;
-    row-gap: 0.25rem;
-  }
-
   .nav-brand {
     font-size: 0.85rem;
     letter-spacing: 0;
@@ -391,10 +403,6 @@ html[data-a11y-contrast="high"] .site-nav {
   .nav-links .nav-agent {
     white-space: nowrap;
     padding: 0.45rem 0.8rem;
-  }
-
-  .site-footer {
-    padding-bottom: 7rem;
   }
 }
 
@@ -473,6 +481,8 @@ main,
 
 .hero {
   position: relative;
+  max-width: var(--page-max);
+  margin: 0 auto;
   /* Sized to what it holds, with the field showing around it: the page's
      first frame should carry the headline and the start of the offer, not a
      viewport of empty ground. */
@@ -592,7 +602,8 @@ main,
 
 /* Buttons --------------------------------------------------------------------- */
 
-.button {
+.button,
+.button-wave-face {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -650,22 +661,13 @@ main,
    button's own edge. */
 .button-wave {
   display: inline-flex;
+  max-width: 100%;
   border-radius: var(--radius-sm);
   transition: transform 140ms ease, filter 140ms ease;
 }
 
 .button-wave-face {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  font-family: var(--font-body);
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.3;
-  padding: 0.95rem 1.6rem;
-  min-height: 48px;
-  color: #0b1020;
+  color: var(--ink);
   background: var(--brass);
   border-radius: var(--radius-sm);
   box-shadow:
@@ -691,7 +693,7 @@ main,
 }
 
 .button-wave:focus-visible {
-  outline-color: #ffffff;
+  outline-color: var(--brass);
 }
 
 /* Offer band: boundary copy beside the pilot ticket, first thing under the
@@ -910,7 +912,7 @@ main,
 
 .agent-entry-foot a {
   font-weight: 600;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* Thesis ------------------------------------------------------------------------ */
@@ -1512,6 +1514,7 @@ main,
 @media (max-width: 620px) {
   .site-footer {
     grid-template-columns: minmax(0, 1fr);
+    padding-bottom: 7rem;
   }
 }
 

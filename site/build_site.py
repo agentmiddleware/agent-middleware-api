@@ -82,6 +82,12 @@ ANALYTICS_FLAG_DISABLED = frozenset({"", "false"})
 # 'unsafe-inline'. It must load before the insights script reads window.vaq.
 ANALYTICS_SCRIPTS = """<script src="/va-init.js?v=gateway-18"></script>
     <script defer src="/_vercel/insights/script.js"></script>"""
+# Shared chrome is rendered at build time so it also works without JavaScript.
+SITE_PARTIALS = {
+    "@@SITE_NAV@@": "partials/nav.html",
+    "@@SITE_FOOTER@@": "partials/footer.html",
+}
+STYLES_CSS_VERSION_TOKEN = "@@STYLES_CSS_VERSION@@"
 BUILD_DATE_TOKEN = "@@BUILD_DATE@@"
 FAQ_JSONLD_TOKEN = "@@FAQ_JSONLD@@"
 HERO_CONSOLE_TOKEN = "@@HERO_CONSOLE@@"
@@ -137,6 +143,7 @@ COPY_ASSETS = (
     "wave.js",
 )
 REQUIRED_PUBLIC_ASSETS = (
+    *SITE_PARTIALS.values(),
     *TEXT_ASSETS,
     *COPY_ASSETS,
     "proof/receipt.json",
@@ -885,6 +892,13 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
             "missing required public assets: " + ", ".join(sorted(missing_assets))
         )
     _require_declared_fonts()
+    partials = {
+        token: (SITE_ROOT / path).read_text(encoding="utf-8").strip()
+        for token, path in SITE_PARTIALS.items()
+    }
+    styles_version = hashlib.sha256(
+        (SITE_ROOT / "styles.css").read_bytes()
+    ).hexdigest()[:8]
     output = _validated_output_path(output)
 
     shutil.rmtree(output, ignore_errors=True)
@@ -895,6 +909,22 @@ def render_site(output: Path, environment: dict[str, str]) -> None:
     for relative_path in TEXT_ASSETS:
         source = SITE_ROOT / relative_path
         rendered = source.read_text(encoding="utf-8")
+        if relative_path.endswith(".html"):
+            for token, partial in partials.items():
+                rendered = rendered.replace(token, partial)
+            # The same Proof link always reaches the proof page; current-page
+            # state is the only navigation difference across rendered pages.
+            current = {
+                "proof/index.html": "/proof/",
+                "compare/index.html": "/compare/",
+            }.get(relative_path)
+            if current:
+                rendered = rendered.replace(
+                    f'<a href="{current}">',
+                    f'<a href="{current}" aria-current="page">',
+                    1,
+                )
+            rendered = rendered.replace(STYLES_CSS_VERSION_TOKEN, styles_version)
         if analytics_enabled:
             rendered = rendered.replace(ANALYTICS_TOKEN, ANALYTICS_SCRIPTS)
         else:
