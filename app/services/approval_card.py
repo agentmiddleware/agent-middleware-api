@@ -28,12 +28,14 @@ from decimal import Decimal
 from html import escape
 
 # site/styles.css tokens, resolved. Mail clients need literals, not var():
-# shell/blockquote = --paper-shade, card face = --paper, text = --paper-ink,
+# email shell/blockquote = --paper-shade, hosted shell = --ink,
+# card face = --paper, text = --paper-ink,
 # muted = --paper-dim, accents = the on-paper brass link tone and the
 # .button-primary brass/ink pair, alert = --danger-on-paper (the plain
 # --danger terracotta falls below 4.5:1 on the paper card face).
 _PAPER = "#e8e3d2"
 _PAPER_LIGHT = "#f6f3e9"
+_SHELL = "#0b1020"
 _INK = "#121629"
 _INK_MUTED = "#4c526b"
 _INK_FAINT = "#4c526b"
@@ -42,12 +44,11 @@ _BRASS_DARK = "#8a6414"
 _BUTTON_BRASS = "#f0b43c"
 _BUTTON_INK = "#0b1020"
 _SIGNAL = "#b0281a"
-# The display face is the mono stack, not the site's pixel face: mail clients
-# do not load webfonts, so "Press Start 2P" here would resolve to a fallback
-# on every client that matters and name a face the card never actually shows.
-_MONO = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
-_BODY = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
-_DISPLAY = '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace'
+# Preserve the site's type roles with mail-client-safe fallbacks. Single
+# quotes keep each font stack inside its double-quoted HTML style attribute.
+_MONO = "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace"
+_BODY = "'Public Sans', 'Segoe UI', Arial, sans-serif"
+_DISPLAY = "'Instrument Serif', Georgia, 'Times New Roman', serif"
 
 
 @dataclass(frozen=True)
@@ -84,11 +85,11 @@ def _row(label: str, value: str, *, mono: bool = True) -> str:
     """Render one label/value row of the card's terms table."""
     value_font = _MONO if mono else _BODY
     return (
-        f'<tr><td style="padding:6px 0;vertical-align:top;font-family:{_BODY};'
-        f'font-size:11px;letter-spacing:0.08em;text-transform:uppercase;'
-        f'color:{_INK_FAINT};white-space:nowrap;">{escape(label)}</td>'
+        f'<tr><td style="width:36%;padding:6px 0;vertical-align:top;font-family:{_MONO};'
+        f"font-size:11px;letter-spacing:0.08em;text-transform:uppercase;"
+        f'color:{_INK_FAINT};">{escape(label)}</td>'
         f'<td style="padding:6px 0 6px 20px;vertical-align:top;'
-        f'font-family:{value_font};font-size:13px;color:{_INK};'
+        f"font-family:{value_font};font-size:13px;color:{_INK};"
         f'word-break:break-word;">{value}</td></tr>'
     )
 
@@ -98,17 +99,21 @@ def _banner(text: str, *, tone: str) -> str:
     color = _SIGNAL if tone == "alert" else _INK_MUTED
     return (
         f'<p style="margin:0 0 16px;padding:8px 12px;border:1px solid {color};'
-        f'font-family:{_MONO};font-size:11px;letter-spacing:0.06em;'
+        "border-radius:6px;"
+        f"font-family:{_MONO};font-size:11px;letter-spacing:0.06em;"
         f'text-transform:uppercase;color:{color};">{escape(text)}</p>'
     )
 
 
 def card_fragment_html(view: ApprovalCardView) -> str:
     """The card itself: identical markup in the email and on the page."""
-    tools = "".join(
-        f'<div style="padding:2px 0;">{escape(tool)}</div>'
-        for tool in view.allowed_tools
-    ) or '<div style="padding:2px 0;">(none)</div>'
+    tools = (
+        "".join(
+            f'<div style="padding:2px 0;">{escape(tool)}</div>'
+            for tool in view.allowed_tools
+        )
+        or '<div style="padding:2px 0;">(none)</div>'
+    )
     scopes = ", ".join(escape(scope) for scope in view.scopes) or "(none)"
 
     banners = ""
@@ -154,8 +159,9 @@ def card_fragment_html(view: ApprovalCardView) -> str:
         action = (
             f'<p style="margin:20px 0 0;"><a href="{escape(view.approval_url, quote=True)}" '
             f'style="display:inline-block;padding:12px 20px;background:{_BUTTON_BRASS};'
-            f'color:{_BUTTON_INK};text-decoration:none;font-family:{_BODY};'
-            f'font-size:13px;letter-spacing:0.08em;text-transform:uppercase;">'
+            "border-radius:6px;"
+            f"color:{_BUTTON_INK};text-decoration:none;font-family:{_BODY};"
+            'font-size:15px;font-weight:600;line-height:1.6;">'
             "Review &amp; decide</a></p>"
             f'<p style="margin:10px 0 0;font-family:{_BODY};font-size:12px;'
             f'color:{_INK_MUTED};">Approving mints exactly these terms. '
@@ -169,20 +175,23 @@ def card_fragment_html(view: ApprovalCardView) -> str:
         )
 
     return (
-        f'<div style="max-width:560px;margin:0 auto;padding:28px;'
-        f'background:{_PAPER_LIGHT};border:1px solid {_LINE};">'
+        f'<div style="box-sizing:border-box;width:100%;max-width:616px;'
+        f"margin:0 auto;padding:28px;font-family:{_BODY};line-height:1.65;"
+        f'background:{_PAPER_LIGHT};border:1px solid {_LINE};border-radius:10px;">'
         f'<p style="margin:0 0 4px;font-family:{_MONO};font-size:11px;'
         f'letter-spacing:0.18em;text-transform:uppercase;color:{_BRASS_DARK};">'
         "Permit request</p>"
-        f'<h1 style="margin:0 0 20px;font-family:{_DISPLAY};font-size:22px;'
-        f'font-weight:700;color:{_INK};">An agent is asking for authority</h1>'
+        f'<h1 style="margin:0 0 20px;font-family:{_DISPLAY};font-size:32px;'
+        f"font-weight:400;line-height:1.1;letter-spacing:-0.012em;"
+        f'color:{_INK};">An agent is asking for authority</h1>'
         f"{banners}"
         f'<blockquote style="margin:0 0 20px;padding:12px 16px;'
-        f'border-left:3px solid {_BRASS_DARK};background:{_PAPER};font-family:{_BODY};'
+        f"border-left:3px solid {_BRASS_DARK};border-radius:6px;"
+        f"background:{_PAPER};font-family:{_BODY};"
         f'font-size:14px;color:{_INK};">{escape(view.justification)}</blockquote>'
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
-        'style="width:100%;border-collapse:collapse;">'
-        f'{"".join(rows)}'
+        'style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        f"{''.join(rows)}"
         "</table>"
         f"{action}"
         "</div>"
@@ -206,11 +215,13 @@ def render_email_html(view: ApprovalCardView) -> str:
 def render_page_html(view: ApprovalCardView) -> str:
     """Full document served at the request's card URL."""
     return (
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         '<meta name="robots" content="noindex, nofollow">'
         f"<title>Permit request {escape(view.request_id)}</title>"
-        f"<style>body{{margin:0;padding:32px 16px;background:{_PAPER};}}</style>"
+        f"<style>body{{margin:0;padding:32px 16px;background:{_SHELL};}}"
+        f"a:focus-visible{{outline:2px solid {_BRASS_DARK};outline-offset:3px;}}"
+        "</style>"
         "</head><body>"
         f"{card_fragment_html(view)}"
         "</body></html>"

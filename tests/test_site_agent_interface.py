@@ -292,9 +292,7 @@ def test_rendered_landing_is_human_first_and_has_a_working_funnel(tmp_path) -> N
     )
     # The recording uses a stand-in tool. Naming a refund in the hero without
     # saying so would let the transcript be read as a customer's refund.
-    stand_in = (
-        "The tool in the recording is a stand-in echo tool, not a refund tool"
-    )
+    stand_in = "The tool in the recording is a stand-in echo tool, not a refund tool"
     boundary = (
         "Agent Middleware API is a transaction boundary between your autonomous "
         "agents and your consequential MCP (Model Context Protocol) tools. The "
@@ -418,7 +416,12 @@ def test_pages_name_no_second_brand_in_visible_copy(tmp_path) -> None:
     output = tmp_path / "site"
     assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
 
-    for relative in ("index.html", "proof/index.html", "compare/index.html", "404.html"):
+    for relative in (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "404.html",
+    ):
         page = (output / relative).read_text(encoding="utf-8")
         assert "Marketing:" not in page, (
             f"{relative} still spells the hostnames out as visible copy"
@@ -751,10 +754,17 @@ def test_search_social_and_analytics_contracts(tmp_path) -> None:
 def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     """The insights script 404s unless the Vercel project enables analytics."""
 
+    pages = (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "concept/index.html",
+        "404.html",
+    )
     default_output = tmp_path / "default"
     result = _render_site(default_output, VALID_TEST_CONTACTS)
     assert result.returncode == 0, result.stderr
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in pages:
         page = (default_output / relative_path).read_text(encoding="utf-8")
         assert "/_vercel/insights/script.js" not in page
         assert "/va-init.js" not in page
@@ -766,10 +776,15 @@ def test_vercel_insights_loader_requires_explicit_opt_in(tmp_path) -> None:
     enabled_contacts["PUBLIC_ENABLE_VERCEL_ANALYTICS"] = "true"
     result = _render_site(enabled_output, enabled_contacts)
     assert result.returncode == 0, result.stderr
-    for relative_path in ("index.html", "proof/index.html", "compare/index.html"):
+    for relative_path in pages:
         page = (enabled_output / relative_path).read_text(encoding="utf-8")
         assert '<script defer src="/_vercel/insights/script.js"></script>' in page
         assert '<script src="/va-init.js?v=gateway-18"></script>' in page
+        assert (
+            page.index("/va-init.js?")
+            < page.index("/_vercel/insights/script.js")
+            < page.index("/analytics.js?")
+        )
         assert "@@VERCEL_ANALYTICS_SCRIPTS@@" not in page
 
     # "1"/"yes"/"on" aliases are rejected: the documented contract is exactly
@@ -1639,7 +1654,8 @@ def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
     assert any(href == MAILTO for _visible, _label, href in collector.labeled_links), (
         "concept page CTA does not resolve to the configured email address"
     )
-    assert VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"] not in page
+    # The archived study shares the optional contact links in the site footer.
+    assert VALID_TEST_CONTACTS["PUBLIC_BOOKING_URL"] in page
     for visible, label, _href in collector.labeled_links:
         assert visible and visible in label, (
             f"concept page aria-label {label!r} does not contain the visible "
@@ -1647,28 +1663,39 @@ def test_concept_page_is_an_unlisted_design_study(tmp_path) -> None:
         )
 
 
-def test_navigation_is_identical_across_pages(tmp_path) -> None:
-    """A visitor on any subpage must reach the same places as one on /."""
-
+@pytest.mark.parametrize("contacts", [VALID_TEST_CONTACTS, EMAIL_ONLY_TEST_CONTACTS])
+def test_navigation_is_identical_across_pages(tmp_path, contacts) -> None:
+    """Every route keeps the same navigation, including 404 and the study."""
     output = tmp_path / "site"
-    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
-
-    landing = (output / "index.html").read_text(encoding="utf-8")
-    proof = (output / "proof" / "index.html").read_text(encoding="utf-8")
-    compare = (output / "compare" / "index.html").read_text(encoding="utf-8")
-
-    for label in ("Pilot", "Proof", "Compare", "Machine discovery"):
-        for page in (landing, proof, compare):
-            assert f">{label}</a>" in page
-    for anchor in ("/#pilot", "/#proof", "/compare/", "/#machine-discovery"):
-        for page in (proof, compare):
-            assert f'href="{anchor}"' in page
-
-    # 404 carries the same nav minus the email CTA, so a visitor who lands on
-    # a dead URL can still reach every real page.
-    not_found = (output / "404.html").read_text(encoding="utf-8")
-    for anchor in ("/#pilot", "/#proof", "/compare/", "/#machine-discovery"):
-        assert f'href="{anchor}"' in not_found, f"404.html cannot reach {anchor}"
+    assert _render_site(output, contacts).returncode == 0
+    paths = (
+        "index.html",
+        "proof/index.html",
+        "compare/index.html",
+        "concept/index.html",
+        "404.html",
+    )
+    navigation = []
+    for path in paths:
+        page = (output / path).read_text(encoding="utf-8")
+        nav = re.search(r'<nav class="site-nav".*?</nav>', page, re.DOTALL).group()
+        for destination in (
+            "/",
+            "/#pilot",
+            "/proof/",
+            "/compare/",
+            "/#machine-discovery",
+        ):
+            assert f'href="{destination}"' in nav, path
+        assert PRIMARY_CTA in nav
+        if path in ("proof/index.html", "compare/index.html"):
+            current = "/" + path.removesuffix("index.html")
+            assert f'href="{current}" aria-current="page"' in nav
+            assert nav.count('aria-current="page"') == 1
+        else:
+            assert "aria-current" not in nav
+        navigation.append(nav.replace(' aria-current="page"', ""))
+    assert len(set(navigation)) == 1
 
 
 FOOTER_DIRECTORIES = ["Human contact", "Evidence and discovery", "Source and policy"]
@@ -1677,10 +1704,8 @@ FOOTER_DIRECTORIES = ["Human contact", "Evidence and discovery", "Source and pol
 def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
     """The footer directory is shared chrome, not per-page content.
 
-    Every full page offers the same three directories with the same
-    destinations, so where a visitor can go next never depends on which page
-    they happen to be reading, and the 404 keeps its deliberately minimal
-    footer. The waiting room is not part of this chrome at all: it closes the
+    Every page offers the same three directories with the same destinations,
+    including the 404 and archived concept. The waiting room is not part of this chrome at all: it closes the
     landing page's content above the footer, and ``arcade-boot.js`` loads on
     ``/`` alone.
     """
@@ -1693,7 +1718,13 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
 
     pages = {
         relative_path: (output / relative_path).read_text(encoding="utf-8")
-        for relative_path in ("index.html", "proof/index.html", "compare/index.html")
+        for relative_path in (
+            "index.html",
+            "proof/index.html",
+            "compare/index.html",
+            "concept/index.html",
+            "404.html",
+        )
     }
 
     for relative_path, page in pages.items():
@@ -1704,8 +1735,9 @@ def test_footer_reaches_the_same_places_on_every_page(tmp_path) -> None:
             f"{relative_path} footer directories diverge from the shared chrome"
         )
 
+    assert len({footer(page) for page in pages.values()}) == 1
     landing_links = set(re.findall(r'href="([^"]+)"', footer(pages["index.html"])))
-    for relative_path in ("proof/index.html", "compare/index.html"):
+    for relative_path in pages:
         links = set(re.findall(r'href="([^"]+)"', footer(pages[relative_path])))
         assert links == landing_links, (
             f"{relative_path} footer reaches different places than the landing "
@@ -2195,6 +2227,28 @@ def test_stylesheet_cache_key_tracks_the_generated_css(tmp_path) -> None:
         assert 'href="/fonts.css?v=gateway' not in markup
 
 
+def test_all_pages_share_the_current_design_stylesheet(tmp_path) -> None:
+    output = tmp_path / "site"
+    assert _render_site(output, VALID_TEST_CONTACTS).returncode == 0
+    digest = hashlib.sha256((SITE / "styles.css").read_bytes()).hexdigest()[:8]
+    for path in output.rglob("*.html"):
+        page = path.read_text(encoding="utf-8")
+        assert f'href="/styles.css?v={digest}"' in page, path
+        assert "@@" not in page, path
+    concept_digest = hashlib.sha256(
+        (SITE / "concept/concept.css").read_bytes()
+    ).hexdigest()[:8]
+    concept_page = (output / "concept/index.html").read_text(encoding="utf-8")
+    assert f'href="/concept/concept.css?v={concept_digest}"' in concept_page
+    # Layout-specific study CSS cannot reintroduce a competing design system.
+    concept = (SITE / "concept/concept.css").read_text(encoding="utf-8")
+    assert ":root" not in concept
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", concept)
+    assert not re.search(
+        r"\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(", concept, re.IGNORECASE
+    )
+
+
 def test_font_filenames_are_content_hashed_so_immutable_is_safe() -> None:
     """Unhashed names plus a long max-age would serve a refreshed font stale.
 
@@ -2357,16 +2411,11 @@ def test_arcade_ships_as_progressive_enhancement(tmp_path) -> None:
         "the security disclosure link is no longer the footer's last word"
     )
 
-    # All three assets ship, are cached like every other static asset, and
-    # carry the *same* token the rest of the page does. Merely requiring some
-    # token would let the arcade sit on a stale one through a bump and serve
-    # week-old bytes to returning visitors — which is the exact failure the
-    # manual token exists to prevent. Comparing against styles.css rather than
-    # hard-coding the current value keeps this from being one more literal to
-    # bump. The bootstrap is a normal deferred script; the room's two files
-    # are named on the launcher for the bootstrap to fetch on demand.
-    shared_token = re.search(r'href="/styles\.css\?v=([^"]+)"', markup)
-    assert shared_token, "index.html no longer references /styles.css with a token"
+    # Arcade assets keep the same release token as the other scripts. The
+    # shared design stylesheet has its own content hash so CSS changes cannot
+    # leave a page with stale visual rules.
+    shared_token = re.search(r'src="/wave\.js\?v=([^"]+)"', markup)
+    assert shared_token, "index.html no longer references /wave.js with a token"
     token = shared_token.group(1)
     assert f'<script defer src="/arcade-boot.js?v={token}"></script>' in markup, (
         "index.html does not load the arcade bootstrap with the page's token"
@@ -3288,9 +3337,7 @@ def test_landing_console_renders_the_recorded_transcript_verbatim(tmp_path) -> N
     build_module = runpy.run_path(str(SITE / "build_site.py"))
     format_latency_ms = build_module["format_latency_ms"]
     latency = transcript["latency"]
-    latency_line = re.search(
-        r'<p class="console-latency">([^<]+)</p>', full.group(1)
-    )
+    latency_line = re.search(r'<p class="console-latency">([^<]+)</p>', full.group(1))
     assert latency_line, "the governed-path panel publishes no latency figure"
     rendered = latency_line.group(1)
     assert f"p50 {format_latency_ms(latency['p50_ms'])} ms" in rendered
