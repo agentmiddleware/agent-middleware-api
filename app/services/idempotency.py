@@ -592,23 +592,35 @@ class IdempotencyService:
         response_json: dict[str, Any] | None,
         status_code: int = 200,
     ) -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(IdempotencyRecordModel).where(
-                    *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
+        """Persist the replay response, restarting a contended transaction.
+
+        A receipt or charge may already be committed. Retry only this response
+        write, never the caller's action, and use a fresh session so a stale
+        SQLite WAL snapshot cannot poison the next attempt.
+        """
+
+        async def _once() -> None:
+            factory = get_session_factory()
+            async with factory() as session:
+                result = await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
+                    )
                 )
-            )
-            record = result.scalar_one_or_none()
-            if not record:
-                return
-            record.response_reference = response_reference
-            record.response_json = (
-                json.dumps(response_json, default=str) if response_json else None
-            )
-            record.status_code = status_code
-            session.add(record)
-            await session.commit()
+                record = result.scalar_one_or_none()
+                if not record:
+                    return
+                record.response_reference = response_reference
+                record.response_json = (
+                    json.dumps(response_json, default=str) if response_json else None
+                )
+                record.status_code = status_code
+                session.add(record)
+                await session.commit()
+
+        # Exhaustion must not invent a completed outcome or release the key:
+        # the caller may have already committed effects before reaching here.
+        await run_with_write_conflict_retry(_once, on_exhausted=lambda exc: exc)
 
     async def abandon(
         self,
