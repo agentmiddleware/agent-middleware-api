@@ -1,4 +1,4 @@
-.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
 
 # The governed-loop transcript the public site renders. Re-runs the
 # trust-plane demo on a throwaway SQLite gateway, records the exchanges the
@@ -77,6 +77,15 @@ prove-crash-recovery:
 	STATE_BACKEND=postgres ENVIRONMENT=test \
 	uv run --with-requirements requirements.txt \
 	  pytest tests/test_mcp_postgres_multiprocess.py -v --tb=short
+
+# The headline demo: one consequential payout, one lost response, one retry.
+# Without the boundary the vendor is paid twice; with it the retry moves no
+# money, debits nothing, and returns the confirmation the agent lost.
+demo-ambiguous-retry:
+	uv run --with-requirements requirements.txt python scripts/demo_ambiguous_retry.py
+
+demo-ambiguous-retry-check:
+	uv run --with-requirements requirements.txt python scripts/demo_ambiguous_retry.py --assert --json
 
 demo-trust-plane:
 	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py
