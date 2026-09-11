@@ -74,6 +74,53 @@ pip install -r requirements.txt
 pytest -q
 ```
 
+### Running the API locally
+
+`make quickstart` is the golden path — it boots the real strict-trust server on
+`127.0.0.1:8000`, generates and persists an Ed25519 signing seed, enables
+self-serve key minting and one governed tool, and matches
+[`docs/quickstart.md`](docs/quickstart.md) step for step.
+
+To launch `uvicorn` directly instead, keep strict trust mode on and use local
+SQLite files. Generate the signing seed once per database and reuse it on every
+restart — changing key material under an existing key ID is rejected so that
+historical receipts stay verifiable:
+
+```bash
+python3 -c 'import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'
+```
+
+```bash
+mkdir -p data
+export ENVIRONMENT=local
+export DATABASE_URL=sqlite+aiosqlite:///./data/local_api.db
+export STATE_BACKEND=sqlite
+export SQLITE_URL=./data/local_state.db
+export VALID_API_KEYS=local-bootstrap-key
+export TRUST_MODE_ENABLED=true
+export ALLOW_LEGACY_UNPERMITTED_MCP=false
+export ENABLE_PROOF_SURFACES=false
+export TRUST_SIGNING_KEY_ID=local-dev-ed25519
+export TRUST_SIGNING_PRIVATE_KEY_B64='<saved-base64-seed>'
+
+uv run --with-requirements requirements.txt \
+  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Without `TRUST_SIGNING_PRIVATE_KEY_B64` the server refuses to start in default
+strict-trust mode (`SigningKeyError: trust_signing_private_key_required`).
+Interactive OpenAPI docs are then at `http://localhost:8000/docs`. Do not reuse
+these local secrets anywhere shared.
+
+`VALID_API_KEYS` holds bootstrap **operator** credentials, not agent runtime
+keys — there is no public self-serve key mint. For a governed non-admin caller
+against a local instance, mint your own wallet-scoped key: set
+`ENABLE_DEV_KEY_SELF_PROVISION=true` and call
+`POST /v1/dev-keys/self-provision`, or use static `amw_dev_` keys from
+`python scripts/generate_static_dev_keys.py`. Both surfaces are refused at boot
+by production-like deployments; details in
+[`docs/static-dev-api-keys.md`](docs/static-dev-api-keys.md).
+
 ### Dependencies
 
 `requirements.txt` is the **single source of truth** for dependencies. CI,
