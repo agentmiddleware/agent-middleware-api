@@ -32,7 +32,7 @@ limitation, not a claim of full atomicity — see docs/pods.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from .agent_money import AgentMoney, WalletNotFoundError, get_agent_money
 from .api_key_service import APIKeyService, get_api_key_service
@@ -106,9 +106,20 @@ def _split_budget_evenly(
     remaining = total - already_allocated
     if unset_count == 0:
         return Decimal("0")
-    # Truncate to 8 decimal places (wallet precision) rather than round up,
-    # so an even split never over-allocates past the pod total.
-    share = (remaining / unset_count).quantize(Decimal("0.00000001"))
+    # ROUND_DOWN (truncate), not the Decimal default ROUND_HALF_EVEN: for a
+    # non-terminating division (e.g. 1 / 6 = 0.16666666...) the default
+    # rounds the 8th decimal place UP whenever the discarded remainder is
+    # more than half, so `share * unset_count` can exceed `remaining` by a
+    # few units of the smallest wallet denomination. With unset_count
+    # members each getting that rounded-up share, the last member(s) can
+    # then fail create_agent_wallet with InsufficientFundsError, turning a
+    # clean pod creation into a partial-provisioning 500. Truncating instead
+    # guarantees share * unset_count <= remaining always; any leftover
+    # (at most unset_count * 1e-8 credits) simply stays unallocated at the
+    # pod level, visible via GET /v1/pods/{pod_id}'s remaining_at_pod.
+    share = (remaining / unset_count).quantize(
+        Decimal("0.00000001"), rounding=ROUND_DOWN
+    )
     return share if share >= 0 else Decimal("0")
 
 

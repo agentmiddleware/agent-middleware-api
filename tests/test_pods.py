@@ -89,6 +89,37 @@ async def test_explicit_member_budgets_are_honored(client):
 
 
 @pytest.mark.anyio
+async def test_even_split_never_over_allocates_past_the_pod_total(client):
+    """A remainder that doesn't divide evenly must truncate, not round up.
+
+    Regression for a real bug (flagged by review on PetrefiedThunder/
+    agent-middleware-api#429): 1 / 6 = 0.16666666...repeating. Decimal's
+    default quantize rounding (ROUND_HALF_EVEN) rounds the 8th decimal
+    place up to 0.16666667 here, and 6 members at that share sum to
+    1.00000002 - over the pod's total budget. That drained the sponsor
+    wallet before the last member's create_agent_wallet call, which then
+    failed with InsufficientFundsError and turned a clean pod creation
+    into a partial-provisioning 500. Truncating (ROUND_DOWN) instead
+    guarantees the per-member shares can never sum past the total.
+    """
+    resp = await _create_pod(
+        client,
+        pod_name="remainder-pod",
+        budget_credits=1.0,
+        members=[{"agent_id": f"m{i}"} for i in range(6)],
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+
+    members = data["members"]
+    assert len(members) == 6
+    total_allocated = sum(m["budget_credits"] for m in members)
+    assert total_allocated <= 1.0
+    # Every member still gets a real, usable share, not zero.
+    assert all(m["budget_credits"] > 0 for m in members)
+
+
+@pytest.mark.anyio
 async def test_over_allocated_member_budgets_fail_before_creating_anything(client):
     """Requesting more than the pod total is rejected, and nothing is created."""
     resp = await _create_pod(
