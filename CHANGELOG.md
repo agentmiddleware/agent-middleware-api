@@ -21,6 +21,32 @@ full release gate; do not backfill a final `v1.2.0` tag.
   stays cacheable. The 120 req/min limiter was already on auth-gated routes;
   a 40-request burst drawing zero `429`s is the documented ceiling, advertised
   on counted responses including `401`s.
+- **The docs CSP allows what ReDoc actually loads.** `redoc.standalone.js`
+  parses the spec in a Web Worker built from a `blob:` URL, and `worker-src`
+  falls back to `script-src`, which does not allow `blob:` — so the first
+  policy left `/redoc` blank rather than merely unstyled. `worker-src blob:`
+  plus the Google Fonts origins FastAPI's stock ReDoc page links are now in
+  the policy, on those two HTML paths only.
+
+### 🔒 Rotating an invalid API key no longer mints a fresh rate-limit budget
+
+- **The pre-authentication bucket is now bounded.** `RateLimitMiddleware`
+  picks its bucket from the caller-supplied `X-API-Key` header, before
+  `verify_api_key` has had a chance to reject it, so a caller sending a
+  different invalid key on every request was handed a fresh 120-request
+  budget each time — an unbounded amount of authenticated-route traffic from
+  one client. Every response the app rejects as unauthenticated is now also
+  charged to one shared per-client bucket at ten times the per-key limit, read
+  (not spent) before the request runs. A key the deployment accepts never
+  touches it, and `403` — authenticated, then denied on scope — is not charged.
+  The in-memory fallback also sweeps buckets that have nothing left inside the
+  window, so rotated key values no longer leave a list behind per value for the
+  life of the process.
+- **Published rate-limit discovery no longer claims one backend's algorithm.**
+  The shared Redis limiter counts fixed 60-second buckets; the in-memory
+  fallback counts a rolling 60 seconds. `rate_limits` publishes the budget,
+  the window length, and now `window_accounting`, instead of a "fixed window"
+  that was only true on one of the two paths.
 
 ### 🔒 `aggregate_value_cap` now counts in-flight permit reservations
 

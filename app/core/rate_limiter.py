@@ -29,23 +29,53 @@ _PUBLIC_MCP_PATH = "/mcp/public"
 _PUBLIC_MCP_BUCKET_PREFIX = "route:mcp-public"
 _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER = 10
 
+# Shared ceiling on requests the app answered with 401. The per-key bucket is
+# chosen from a caller-supplied header before the key has been verified, so
+# without this a caller rotating a fresh invalid X-API-Key per request would
+# mint a fresh budget every time. Ten times the per-key limit, matching the
+# public-MCP global bucket: wide enough that a partner whose key is briefly
+# wrong is not throttled by it, narrow enough that key rotation is bounded.
+_PREAUTH_BUCKET_PREFIX = "preauth:rejected-credentials"
+_PREAUTH_LIMIT_MULTIPLIER = 10
+
+# In-memory fallback bookkeeping: bucket keys are caller-controlled, so the
+# dict is swept (at most once per window) once it grows past this many
+# buckets. Without it, every distinct key value ever presented keeps a list
+# for the life of the process.
+_MEMORY_BUCKET_SWEEP_THRESHOLD = 1024
+
 
 def rate_limit_discovery() -> dict[str, Any]:
     """Describe the limit ``RateLimitMiddleware`` actually enforces.
 
-    One fixed-window budget per minute, keyed by the ``X-API-Key`` header
-    value. Requests without a key share a single 'anonymous' bucket. There is
-    no burst allowance and no per-partner override; ``RATE_LIMIT_PER_MINUTE``
-    is the only knob, so this payload is derived from it rather than hardcoded.
-    A burst of 40 requests will not 429: the 121st request in a 60-second
+    One budget per 60-second window, keyed by the ``X-API-Key`` header value.
+    Requests without a key share a single 'anonymous' bucket. There is no burst
+    allowance and no per-partner override; ``RATE_LIMIT_PER_MINUTE`` is the
+    only knob, so this payload is derived from it rather than hardcoded. A
+    burst of 40 requests will not 429: the 121st counted request in a 60-second
     window (at the default of 120) is the first that does.
+
+    The budget and the window length are published; the counting algorithm is
+    not, because it is not the same on both backends. The shared Redis limiter
+    counts fixed 60-second buckets, and the in-memory fallback — reached only
+    where a Redis outage does not fail closed, i.e. never in a production-like
+    environment — counts a rolling 60 seconds, which is strictly tighter.
+    ``window_accounting`` names that difference rather than letting a reader
+    infer one algorithm from ``window_seconds``.
+
+    Responses the app rejects as unauthenticated are additionally charged to a
+    shared per-client bucket (``rejected_credentials_scope``); see
+    ``RateLimitMiddleware.dispatch``.
     """
     cfg = get_settings()
     return {
         "requests_per_minute": cfg.RATE_LIMIT_PER_MINUTE,
         "window_seconds": 60,
+        "window_accounting": "fixed_window_shared_rolling_window_in_memory",
         "scope": "per_api_key",
         "unauthenticated_scope": "shared_anonymous_bucket",
+        "rejected_credentials_scope": "shared_per_client_bucket",
+        "rejected_credentials_multiplier": _PREAUTH_LIMIT_MULTIPLIER,
         "burst_allowance": 0,
         "per_partner_override": False,
         "headers": [
@@ -56,7 +86,7 @@ def rate_limit_discovery() -> dict[str, Any]:
     }
 
 
-def _public_mcp_client_id(request: Request) -> str:
+def _client_id(request: Request) -> str:
     """Return a non-spoofable client identifier for the supported ingress.
 
     Railway documents ``X-Real-IP`` as an ingress-populated client address.
@@ -86,6 +116,26 @@ class RateLimiterUnavailable(RuntimeError):
     """Raised when Redis rate limiting is required but unavailable."""
 
 
+def _rate_limited_response(limit: int, reset_in: int, message: str) -> JSONResponse:
+    """Build the one 429 shape every exhausted bucket answers with."""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": {
+                "error": "rate_limited",
+                "message": message,
+                "retry_after_seconds": reset_in,
+            }
+        },
+        headers={
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(reset_in),
+            "Retry-After": str(reset_in),
+        },
+    )
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Sliding window rate limiter keyed by API key.
@@ -99,6 +149,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, requests_per_minute: int | None = None):
         super().__init__(app)
         self.limit = requests_per_minute or settings.RATE_LIMIT_PER_MINUTE
+        self.preauth_limit = self.limit * _PREAUTH_LIMIT_MULTIPLIER
         self.window = 60.0  # seconds
         self._redis_url = settings.REDIS_URL.strip()
         self._redis: redis.Redis | None = None
@@ -108,6 +159,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # key -> list of timestamps
         self._requests: dict[str, list[float]] = defaultdict(list)
         self._lock = asyncio.Lock()
+        self._last_sweep = 0.0
 
     def _fail_closed_on_redis_outage(self) -> bool:
         """Production-like + REDIS_URL configured → no silent memory fallback."""
@@ -183,6 +235,120 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limited = int(count) > effective_limit
         return limited, remaining, reset_in
 
+    def _preauth_bucket(self, request: Request) -> str:
+        """Name the shared bucket that rejected credentials are charged to."""
+        namespace = (
+            f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
+        )
+        return f"{namespace}:{_PREAUTH_BUCKET_PREFIX}:client:{_client_id(request)}"
+
+    async def _peek_limit(
+        self,
+        bucket_key: str,
+        now: float,
+        limit: int,
+        *,
+        force_memory: bool = False,
+    ) -> tuple[bool, int]:
+        """Read a bucket without spending from it.
+
+        Returns ``(exhausted, reset_in_seconds)``. Buckets charged after the
+        fact — the caller only knows whether to charge once the response
+        exists — must not consume budget merely by being asked whether they
+        are exhausted, so this is a read, never an increment.
+
+        ``force_memory`` is for the caller that has already seen Redis fail on
+        this request and fallen back, so the ceiling keeps applying instead of
+        disappearing for the duration of the outage.
+        """
+        window_size = int(self.window)
+        client = None if force_memory else await self._get_redis()
+        if client is None:
+            if not force_memory and self._fail_closed_on_redis_outage():
+                raise RateLimiterUnavailable("redis_rate_limiter_unavailable")
+            window_start = now - self.window
+            async with self._lock:
+                # .get, not [], so peeking never creates a bucket.
+                live = [
+                    ts for ts in self._requests.get(bucket_key, ()) if ts > window_start
+                ]
+            if len(live) < limit:
+                return False, window_size
+            return True, max(1, int(live[0] + self.window - now) + 1)
+
+        bucket_start = int(now // window_size) * window_size
+        reset_in = max(1, (bucket_start + window_size) - int(now))
+        raw = await client.get(f"rate_limit:{bucket_key}:{bucket_start}")
+        # decode_responses=True makes this a str, but the client is typed for
+        # either and a missing bucket is None.
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "ignore")
+        try:
+            count = int(raw) if raw is not None else 0
+        except ValueError:
+            count = 0
+        return count >= limit, reset_in
+
+    async def _preauth_rejection(
+        self,
+        preauth_bucket: str | None,
+        now: float,
+        *,
+        force_memory: bool = False,
+    ) -> JSONResponse | None:
+        """429 when this client has already spent its rejected-credential budget."""
+        if preauth_bucket is None:
+            return None
+        exhausted, reset_in = await self._peek_limit(
+            preauth_bucket,
+            now,
+            self.preauth_limit,
+            force_memory=force_memory,
+        )
+        if not exhausted:
+            return None
+        return _rate_limited_response(
+            self.preauth_limit,
+            reset_in,
+            (
+                "Rate limit exceeded. "
+                f"{self.preauth_limit} requests per minute with rejected "
+                "credentials allowed per client; presenting a different API "
+                "key does not reset it."
+            ),
+        )
+
+    async def _charge(self, bucket_key: str, now: float, limit: int) -> None:
+        """Spend one unit from a bucket and discard the verdict.
+
+        The verdict for this request was already taken from ``_peek_limit``
+        before it ran, and the response has already been produced: a limiter
+        failure here must not turn an answered request into an error.
+        """
+        try:
+            await self._check_limit_with_redis(bucket_key, now, limit=limit)
+        except Exception:
+            logger.warning(
+                "Could not charge rate-limit bucket %s.",
+                bucket_key,
+                exc_info=True,
+            )
+
+    def _sweep_expired_buckets(self, window_start: float) -> None:
+        """Drop in-memory buckets with nothing left inside the window.
+
+        Bucket keys are caller-controlled (an ``X-API-Key`` value), so a caller
+        rotating key values would otherwise leave one list per value behind for
+        the life of the process. Called under ``self._lock``.
+        """
+        stale = [
+            key
+            for key, timestamps in self._requests.items()
+            if not timestamps or timestamps[-1] <= window_start
+        ]
+        for key in stale:
+            del self._requests[key]
+
     async def _check_limit_in_memory(
         self,
         bucket_key: str,
@@ -197,6 +363,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window_start = now - self.window
 
         async with self._lock:
+            if (
+                len(self._requests) > _MEMORY_BUCKET_SWEEP_THRESHOLD
+                and now - self._last_sweep >= self.window
+            ):
+                self._last_sweep = now
+                self._sweep_expired_buckets(window_start)
+
             self._requests[bucket_key] = [
                 ts for ts in self._requests[bucket_key] if ts > window_start
             ]
@@ -225,7 +398,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # from the Internet).
         public_mcp_request = request.url.path.rstrip("/") == _PUBLIC_MCP_PATH
         if public_mcp_request:
-            client_id = _public_mcp_client_id(request)
+            client_id = _client_id(request)
             namespace = (
                 f"{settings.STATE_NAMESPACE}:{settings.PUBLIC_URL or settings.APP_NAME}"
             )
@@ -283,7 +456,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         applied_limit = self.limit
         header_remaining = self.limit
         header_reset = int(self.window)
+
+        # Pre-authentication ceiling. The per-key bucket above is selected from
+        # a header the caller controls, before verify_api_key has had a chance
+        # to reject it, so a caller sending a fresh invalid X-API-Key on every
+        # request would otherwise be handed a fresh 120-request budget each
+        # time — an unbounded amount of authenticated-route traffic from one
+        # client. Every response the app rejects as unauthenticated is charged
+        # to one shared per-client bucket instead, and that bucket is read (not
+        # spent) before the request runs, so rotation buys nothing past it. A
+        # request whose credentials the app accepts never touches it.
+        preauth_bucket = None if public_mcp_request else self._preauth_bucket(request)
+
         try:
+            rejection = await self._preauth_rejection(preauth_bucket, now)
+            if rejection is not None:
+                return rejection
             for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
                 limited, remaining, reset_in = await self._check_limit_with_redis(
                     bucket_key,
@@ -339,6 +527,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "Redis rate limiter failed; using in-memory rate limiter "
                 "for this request."
             )
+            rejection = await self._preauth_rejection(
+                preauth_bucket,
+                now,
+                force_memory=True,
+            )
+            if rejection is not None:
+                return rejection
             for index, (bucket_key, applied_limit) in enumerate(bucket_limits):
                 limited, remaining, reset_in = await self._check_limit_in_memory(
                     bucket_key,
@@ -352,28 +547,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     break
 
         if limited:
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "detail": {
-                        "error": "rate_limited",
-                        "message": (
-                            f"Rate limit exceeded. {applied_limit} requests "
-                            "per minute allowed."
-                        ),
-                        "retry_after_seconds": reset_in,
-                    }
-                },
-                headers={
-                    "X-RateLimit-Limit": str(applied_limit),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(reset_in),
-                    "Retry-After": str(reset_in),
-                },
+            return _rate_limited_response(
+                applied_limit,
+                reset_in,
+                (f"Rate limit exceeded. {applied_limit} requests per minute allowed."),
             )
 
         # Process request
         response = await call_next(request)
+
+        # 401 is the app saying it did not accept these credentials: charge the
+        # shared bucket. 403 is not — that caller authenticated and was denied
+        # on scope, so its traffic stays on its own per-key budget. The clock is
+        # re-read so a slow request lands in the window it was rejected in, not
+        # the one it arrived in.
+        if preauth_bucket is not None and response.status_code == 401:
+            await self._charge(preauth_bucket, time.time(), self.preauth_limit)
 
         response.headers["X-RateLimit-Limit"] = str(self.limit)
         response.headers["X-RateLimit-Remaining"] = str(header_remaining)

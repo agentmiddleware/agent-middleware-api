@@ -9,9 +9,10 @@ ignore it.
 
 Content-Security-Policy is path-aware: JSON has nothing to execute, first-party
 HTML (dashboard, approval cards) is inline-CSS only, and FastAPI's stock
-Swagger UI / ReDoc need jsDelivr plus an inline boot script. Cache-Control:
-no-store is the default on tenant-sensitive paths; public discovery stays
-cacheable so agents can keep OpenAPI and well-known documents.
+Swagger UI / ReDoc need jsDelivr plus an inline boot script, a blob: Web Worker,
+and Google Fonts. Cache-Control: no-store is the default on tenant-sensitive
+paths; public discovery stays cacheable so agents can keep OpenAPI and
+well-known documents.
 """
 
 from __future__ import annotations
@@ -54,12 +55,26 @@ FIRST_PARTY_HTML_CSP = (
 # FastAPI ships Swagger UI / ReDoc from jsDelivr with an inline window.onload
 # boot script and fetches /openapi.json from this origin. Restricted to the
 # two documentation HTML paths so the JSON API stays locked down.
+#
+# Two entries exist only because ReDoc's stock bundle needs them, and both are
+# load-bearing for /redoc rendering at all:
+#   - worker-src blob: — redoc.standalone.js starts its parser in a Web Worker
+#     built with `new Worker(URL.createObjectURL(new Blob([...])))`. worker-src
+#     falls back to script-src, which does not allow blob:, so without this the
+#     worker is blocked and the page never renders.
+#   - fonts.googleapis.com / fonts.gstatic.com — FastAPI's get_redoc_html emits
+#     a Google Fonts stylesheet (with_google_fonts defaults to True), and the
+#     stylesheet pulls its font files from gstatic.
+# Allowing blob: workers here costs nothing this policy was still holding back:
+# script-src on these two paths already allows 'unsafe-inline'.
 DOCS_HTML_CSP = (
     "default-src 'none'; "
     "script-src https://cdn.jsdelivr.net 'unsafe-inline'; "
-    "style-src https://cdn.jsdelivr.net 'unsafe-inline'; "
+    "worker-src blob:; "
+    "style-src https://cdn.jsdelivr.net https://fonts.googleapis.com "
+    "'unsafe-inline'; "
     "img-src 'self' data: https://fastapi.tiangolo.com; "
-    "font-src https://cdn.jsdelivr.net; "
+    "font-src https://cdn.jsdelivr.net https://fonts.gstatic.com; "
     "connect-src 'self'; "
     "frame-ancestors 'self'; "
     "base-uri 'none'; "

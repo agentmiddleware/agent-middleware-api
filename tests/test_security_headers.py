@@ -75,6 +75,21 @@ def test_swagger_and_redoc_use_the_cdn_compatible_csp() -> None:
     assert index == API_CSP
 
 
+def test_docs_csp_allows_what_redoc_actually_loads() -> None:
+    """ReDoc's bundle parses in a blob: Web Worker and pulls Google Fonts.
+
+    worker-src falls back to script-src, which allows neither, so a policy
+    without these directives leaves /redoc blank rather than merely unstyled.
+    """
+
+    assert "worker-src blob:" in DOCS_HTML_CSP
+    assert "https://fonts.googleapis.com" in DOCS_HTML_CSP
+    assert "https://fonts.gstatic.com" in DOCS_HTML_CSP
+    # Only the docs HTML pays for this; JSON responses stay locked down.
+    assert "blob:" not in API_CSP
+    assert "blob:" not in FIRST_PARTY_HTML_CSP
+
+
 def test_sensitive_paths_are_no_store() -> None:
     app = Starlette(
         routes=[
@@ -211,3 +226,26 @@ def test_full_app_docs_use_swagger_csp() -> None:
     assert response.status_code == 200
     assert response.headers["content-security-policy"] == DOCS_HTML_CSP
     assert response.headers["content-type"].startswith("text/html")
+
+
+def test_full_app_redoc_csp_covers_every_origin_its_html_references() -> None:
+    """Whatever FastAPI's stock ReDoc page loads, the policy has to allow."""
+
+    import re
+
+    from fastapi.testclient import TestClient as FastAPITestClient
+
+    from app.main import app
+
+    response = FastAPITestClient(app).get("/redoc")
+    assert response.status_code == 200
+    csp = response.headers["content-security-policy"]
+    assert csp == DOCS_HTML_CSP
+
+    origins = {
+        f"{match.group(1)}//{match.group(2)}"
+        for match in re.finditer(r"(https:)//([^/\"\' ]+)", response.text)
+    }
+    assert origins  # the page does reference third-party origins
+    for origin in origins:
+        assert origin in csp, f"{origin} is loaded by /redoc but not in the CSP"
