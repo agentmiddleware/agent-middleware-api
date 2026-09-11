@@ -157,9 +157,13 @@ authentication or permit checks.
 
 ### Governed call shape
 
-Protected routes use `X-API-Key`. There is **no public self-serve key mint**: an
-operator provisions a wallet-scoped key and transfers it through a secure
-channel ([docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md)).
+Protected routes use `X-API-Key`. On a production-like deployment there is
+**no self-serve key mint**: an operator provisions a wallet-scoped key and
+transfers it through a secure channel
+([docs/partner-api-key-bootstrap.md](docs/partner-api-key-bootstrap.md)). The
+self-provisioning the quickstart above uses is local-only — a production-like
+deployment refuses to boot with it enabled
+([docs/static-dev-api-keys.md](docs/static-dev-api-keys.md)).
 
 ```bash
 curl -sS -X POST "$API_URL/mcp/messages" \
