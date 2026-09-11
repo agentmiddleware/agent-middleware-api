@@ -88,18 +88,19 @@ capability bound to a wallet (and optionally an API key).
 | Scopes include both `tool:{tool}:invoke` and `billing:charge` | `permit_scope_missing` |
 | `spent_credits + estimated ≤ max_credits` | `permit_budget_exceeded` |
 | Per-tool call cap `max_calls_per_tool` (v2) — atomically reserved on local governed tools; configured upstream calls fail closed pending an equivalent remote lifecycle | `permit_max_calls_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
-| Cumulative `aggregate_value_cap` (v2) — checked against settled receipts on the local path but not a concurrent-reservation boundary; configured upstream calls fail closed | `permit_aggregate_value_cap_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
+| Cumulative `aggregate_value_cap` (v2) — enforced on the local MCP and AWI HTTP paths as a predicate of the atomic reservation against `spent_credits` floored to receipt history, so in-flight reservations and already-receipted charges both count; configured upstream calls fail closed | `permit_aggregate_value_cap_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
 | `forbidden_fields` (v2): deep scan of tool arguments for banned keys | `permit_forbidden_field:{field}` |
 | Ed25519 signature over the permit verifies — checked **last** | `permit_signature_invalid` |
 
 The local per-tool call limit is enforced with a persisted reservation counter,
 including an optimistic compare-and-swap when the database does not honor the
-requested row lock. The aggregate cap is computed from **settled permit
-charges**, so concurrent in-flight reservations can pass the same historical
-read; it must not be presented as a no-overshoot concurrency boundary. The
-configured upstream path rejects permits carrying either constraint before any
-reservation, attempt, debit, or dispatch. `max_credits` remains the atomic
-authorization ceiling on both local and configured-upstream paths.
+requested row lock. The aggregate cap is enforced in the `WHERE` clause of the
+same guarded reservation `UPDATE`, against `spent_credits` floored to the
+permit's receipt total, so concurrent in-flight reservations cannot overshoot
+it on any storage engine. The configured upstream path rejects permits carrying
+either constraint before any reservation, attempt, debit, or dispatch.
+`max_credits` remains the atomic authorization ceiling on both local and
+configured-upstream paths.
 
 ---
 

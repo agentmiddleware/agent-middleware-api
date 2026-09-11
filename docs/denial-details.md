@@ -65,7 +65,7 @@ revocation case.
 | Reason code | Details | Remediation |
 |-------------|---------|-------------|
 | `permit_budget_exceeded` | `required_credits`, `remaining_credits`, `spent_credits`, `max_credits` | Request a permit with enough remaining credits, then retry with a new idempotency key. |
-| `permit_aggregate_value_cap_exceeded` | `required_credits`, `charged_to_date`, `aggregate_value_cap` | Request a higher aggregate cap or a replacement permit. |
+| `permit_aggregate_value_cap_exceeded` | `required_credits`, `reserved_credits`, `aggregate_value_cap`; `charged_to_date` when the denial came from the read-time check | Request a higher aggregate cap or a replacement permit. `reserved_credits` includes in-flight reservations that have not yet produced a receipt, floored to the permit's receipt total so it is never below `charged_to_date`. |
 | `permit_max_calls_exceeded` | `tool`, `limit`, `calls_made` | Request a replacement permit with a higher per-tool call limit. |
 | `permit_constraint_unsupported_for_upstream` | `execution_backend`, `unsupported_constraints` | Request a replacement permit that omits the listed remote-unsupported constraints and uses `max_credits` as the atomic ceiling, then invoke with a new idempotency key. Replaying the denied key returns the stored denial. |
 | `permit_tool_not_allowed` | `requested_tool`, `allowed_tools` | Use an allowed tool or request a permit that names the requested tool. |
