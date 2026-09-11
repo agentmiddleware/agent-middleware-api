@@ -27,7 +27,7 @@ from ..services.pods import (
     PodError,
     PodMemberSpec,
     PodNotFoundError,
-    PodPartiallyProvisionedError,
+    PodProvisioningFailedError,
     PodService,
     get_pod_service,
 )
@@ -50,9 +50,11 @@ router = APIRouter(
     description=(
         "Bootstrap operator provisioning only. Creates one sponsor wallet "
         "holding the pod's shared budget, then provisions one agent wallet "
-        "and one wallet-scoped API key per member from that budget. Fails "
-        "before creating anything if the requested member budgets exceed "
-        "the pod total."
+        "and one wallet-scoped API key per member from that budget, all in "
+        "one database transaction: either every member is created, or (on "
+        "any failure) the whole pod is rolled back and nothing persists. "
+        "Also rejects up front, before opening that transaction, member "
+        "budgets that exceed the pod total."
     ),
 )
 async def create_pod(
@@ -86,23 +88,34 @@ async def create_pod(
             members=member_specs,
         )
     except PodBudgetError as exc:
+        # Raised before create_pod opens its transaction, so nothing was
+        # ever created — never wrapped in PodProvisioningFailedError.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "pod_budget_exceeded", "message": str(exc)},
         ) from exc
-    except InsufficientFundsError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={"error": "insufficient_funds", "message": str(exc)},
-        ) from exc
-    except PodPartiallyProvisionedError as exc:
+    except PodProvisioningFailedError as exc:
+        # Everything past the budget pre-check runs inside create_pod's one
+        # transaction, so any failure here is wrapped in this type. It
+        # always means nothing from the call persisted (no sponsor wallet,
+        # no member, no key) — never a partial pod. Insufficient funds mid-
+        # provisioning (which pre-validated budgets should make unreachable
+        # in practice, but a defense-in-depth guard inside the transaction
+        # can still raise it) is reported as 402; anything else as 500.
+        if isinstance(exc.original_error, InsufficientFundsError):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "error": "insufficient_funds",
+                    "message": str(exc.original_error),
+                    "failed_agent_id": exc.failed_agent_id,
+                },
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
-                "error": "pod_partially_provisioned",
+                "error": "pod_provisioning_failed",
                 "message": str(exc),
-                "pod_id": exc.pod_id,
-                "completed_agent_ids": exc.completed_agent_ids,
                 "failed_agent_id": exc.failed_agent_id,
             },
         ) from exc
