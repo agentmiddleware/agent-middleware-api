@@ -40,22 +40,32 @@ new key format.
 - **No email inboxes.** "Pod" here is strictly the budget/key grouping.
   It has no relationship to email, inbound or outbound.
 
-## Atomicity — read this before assuming "one call" means "one transaction"
+## Atomicity — one real transaction, not a saga
 
-Each underlying call (`create_sponsor_wallet`, `create_agent_wallet`,
-`create_key`) is its own database transaction; that's how the existing
-wallet engine already works, and this module does not add cross-call
-distributed-transaction machinery on top of it.
+`POST /v1/pods` runs as a single database transaction: the sponsor wallet
+and every member's agent wallet and key are all written through the same
+open session, committed once. `WalletEngine.create_sponsor_wallet`,
+`WalletEngine.create_agent_wallet`, and `APIKeyService.create_key` each
+accept an optional `session` parameter for exactly this — when given, they
+add/flush against it and never begin or commit it themselves, so
+`PodService.create_pod` (the caller) is the only place that decides commit
+vs. rollback. This is additive: every existing standalone caller of those
+three methods is unaffected, since omitting `session` preserves the
+original open-commit-close-your-own-session behavior unchanged.
 
 - The common failure mode — a caller requesting member budgets that don't
-  fit inside the pod total — is checked **before** anything is created, so
-  it never leaves partial state.
-- A genuine failure *during* member provisioning (a transient DB error
-  after member 1 of 3 succeeded, say) leaves a partial pod: the sponsor
-  wallet and the members already created are real, spendable wallets. The
-  error response (`pod_partially_provisioned`, 500) names the pod id, which
-  members completed, and which one failed, so an operator can inspect or
-  finish the pod rather than losing track of the partial state silently.
+  fit inside the pod total — is still checked **before** the transaction
+  even opens, so it never touches the database.
+- A genuine failure *during* member provisioning (a transient DB error, an
+  unexpected insufficient-funds race, anything) rolls the whole transaction
+  back automatically. There is no partial pod: not the sponsor wallet, not
+  any member wallet, not any key. The error response
+  (`pod_provisioning_failed` or `insufficient_funds`) says which member was
+  being provisioned when it failed, purely for diagnosis — an operator has
+  nothing to clean up or finish, because nothing was left behind.
+
+This was previously a documented limitation (application-level partial
+state on failure); it is now closed at the source, not worked around.
 
 ## Why this is a dormant trust surface, not a mounted one
 

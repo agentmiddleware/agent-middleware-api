@@ -140,6 +140,7 @@ class AgentMoney:
         currency: str = "USD",
         metadata: dict | None = None,
         require_kyc: bool | None = None,
+        session: AsyncSession | None = None,
     ) -> WalletResponse:
         return await self._wallet_engine.create_sponsor_wallet(
             sponsor_name=sponsor_name,
@@ -148,6 +149,7 @@ class AgentMoney:
             currency=currency,
             metadata=metadata,
             require_kyc=require_kyc,
+            session=session,
         )
 
     async def create_agent_wallet(
@@ -159,6 +161,7 @@ class AgentMoney:
         auto_refill: bool = False,
         auto_refill_threshold: Decimal = Decimal("100.0"),
         auto_refill_amount: Decimal = Decimal("1000.0"),
+        session: AsyncSession | None = None,
     ) -> WalletResponse:
         return await self._wallet_engine.create_agent_wallet(
             sponsor_wallet_id=sponsor_wallet_id,
@@ -168,6 +171,7 @@ class AgentMoney:
             auto_refill=auto_refill,
             auto_refill_threshold=auto_refill_threshold,
             auto_refill_amount=auto_refill_amount,
+            session=session,
         )
 
     async def create_child_wallet(

@@ -227,6 +227,72 @@ async def test_duplicate_member_agent_ids_rejected(client):
     assert resp.status_code == 422
 
 
+@pytest.mark.anyio
+async def test_mid_provisioning_failure_leaves_no_partial_pod(monkeypatch):
+    """A failure partway through provisioning rolls back the whole pod.
+
+    Regression for the pod-atomicity gap: create_pod now runs as one
+    database transaction (app/services/pods.py), so a failure on the
+    second of two members must leave neither the sponsor wallet nor the
+    first (already-"succeeded") member behind. This is checked directly
+    against the service layer so the test can inspect the database state
+    the HTTP response never exposes (no pod_id is returned on failure).
+    """
+    from decimal import Decimal
+
+    from app.services.pods import (
+        PodMemberSpec,
+        PodProvisioningFailedError,
+        get_pod_service,
+    )
+
+    pods_service = get_pod_service()
+    original_create_agent_wallet = pods_service._money.create_agent_wallet
+    original_create_sponsor_wallet = pods_service._money.create_sponsor_wallet
+    captured: dict[str, str] = {}
+
+    async def capturing_create_sponsor_wallet(*args, **kwargs):
+        result = await original_create_sponsor_wallet(*args, **kwargs)
+        captured["sponsor_id"] = result.wallet_id
+        return result
+
+    async def failing_create_agent_wallet(*args, **kwargs):
+        if kwargs.get("agent_id") == "boom":
+            raise RuntimeError("simulated transient failure mid-provisioning")
+        return await original_create_agent_wallet(*args, **kwargs)
+
+    monkeypatch.setattr(
+        pods_service._money, "create_sponsor_wallet", capturing_create_sponsor_wallet
+    )
+    monkeypatch.setattr(
+        pods_service._money, "create_agent_wallet", failing_create_agent_wallet
+    )
+
+    with pytest.raises(PodProvisioningFailedError) as exc_info:
+        await pods_service.create_pod(
+            pod_name="rollback-test",
+            budget_credits=Decimal("100"),
+            members=[
+                PodMemberSpec(
+                    agent_id="ok-1", key_name="k1", budget_credits=Decimal("50")
+                ),
+                PodMemberSpec(
+                    agent_id="boom", key_name="k2", budget_credits=Decimal("50")
+                ),
+            ],
+        )
+    assert exc_info.value.failed_agent_id == "boom"
+
+    assert "sponsor_id" in captured, "sponsor creation should still have run"
+    # The whole transaction rolled back: the sponsor wallet was never
+    # actually committed, even though create_sponsor_wallet "succeeded"
+    # inside it. If member ok-1 had leaked through, it would exist as a
+    # child of this same (nonexistent) sponsor, so this one check proves
+    # both: no orphaned sponsor and no orphaned first member.
+    wallet = await pods_service._money.get_wallet(captured["sponsor_id"])
+    assert wallet is None
+
+
 def test_pods_router_is_registered_as_dormant():
     """Pods is a dormant trust surface, not a core one.
 

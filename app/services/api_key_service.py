@@ -21,6 +21,7 @@ from typing import Any, Optional, cast
 from uuid import uuid4
 
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from ..core.time import to_naive_utc, utc_now
@@ -122,6 +123,7 @@ class APIKeyService:
         key_name: str = "default",
         expires_in_days: int | None = None,
         max_uses: int | None = None,
+        session: AsyncSession | None = None,
     ) -> dict:
         """
         Create a new API key for a wallet.
@@ -131,6 +133,15 @@ class APIKeyService:
             key_name: Human-readable name for the key
             expires_in_days: Optional expiration in days
             max_uses: Optional cap on successful authentications (None = unlimited)
+            session: When given, must already be inside a transaction the
+                CALLER owns end to end (an open ``async with
+                session.begin():`` block) — this method only adds/flushes
+                on it, never begins or commits. That lets a caller compose
+                key issuance with other wallet operations into one atomic
+                unit of work (see app/services/pods.py). Omit it (the
+                default) for the original standalone behavior: opens,
+                commits, and closes its own session for the lookup and for
+                the insert.
 
         Returns:
             {
@@ -145,13 +156,19 @@ class APIKeyService:
                 "max_uses": int | None,
             }
         """
-        async with self._session_factory()() as session:
+        if session is not None:
             result = await session.execute(
                 select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
             )
-            wallet = result.scalar_one_or_none()
-            if not wallet:
+            if result.scalar_one_or_none() is None:
                 raise WalletNotFoundError(wallet_id)
+        else:
+            async with self._session_factory()() as check_session:
+                result = await check_session.execute(
+                    select(WalletModel).where(col(WalletModel.wallet_id) == wallet_id)
+                )
+                if result.scalar_one_or_none() is None:
+                    raise WalletNotFoundError(wallet_id)
 
         full_key, key_hash, key_prefix = generate_api_key()
         key_id = f"key_{uuid4().hex[:12]}"
@@ -161,19 +178,24 @@ class APIKeyService:
         if expires_in_days:
             expires_at = now + timedelta(days=expires_in_days)
 
-        async with self._session_factory()() as session:
-            api_key = APIKeyModel(
-                key_id=key_id,
-                wallet_id=wallet_id,
-                key_hash=key_hash,
-                key_prefix=key_prefix,
-                status=APIKeyStatus.ACTIVE.value,
-                metadata_json=json.dumps({"name": key_name}),
-                expires_at=(to_naive_utc(expires_at) if expires_at else None),
-                max_uses=max_uses,
-            )
+        api_key = APIKeyModel(
+            key_id=key_id,
+            wallet_id=wallet_id,
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            status=APIKeyStatus.ACTIVE.value,
+            metadata_json=json.dumps({"name": key_name}),
+            expires_at=(to_naive_utc(expires_at) if expires_at else None),
+            max_uses=max_uses,
+        )
+
+        if session is not None:
             session.add(api_key)
-            await session.commit()
+            await session.flush()
+        else:
+            async with self._session_factory()() as write_session:
+                write_session.add(api_key)
+                await write_session.commit()
 
         logger.info(f"Created API key {key_id} for wallet {wallet_id}")
 
