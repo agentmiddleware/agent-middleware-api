@@ -180,6 +180,5 @@ tool. Risks that live in the model (ASI01, ASI06), the process (ASI05), or
 between agents (ASI07) need controls at those layers; this mapping marks them
 contained or out of scope rather than claiming coverage. Attacks on the
 documented gaps above are the most useful ones a reviewer can run — start from
-[SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md), the
-[security review path](../README.md#security-review-path), and the rules of
+[SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md) and the rules of
 engagement in [security-review-kit.md](security-review-kit.md).

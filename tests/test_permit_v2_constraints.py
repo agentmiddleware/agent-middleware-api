@@ -17,6 +17,8 @@ from app.db.database import get_session_factory
 from app.db.models import PermitModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
+from app.schemas.trust import PermitCreateRequest
+from app.services.permits import get_permit_service
 from app.services.service_registry import get_service_registry
 from tests.test_trust_helpers import (
     BOOTSTRAP_HEADERS,
@@ -238,6 +240,409 @@ async def test_aggregate_value_cap_denies_over_total(client, clean_database):
             assert model.spent_credits == Decimal("10")
     finally:
         get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_aggregate_value_cap_counts_in_flight_reservation(
+    client, clean_database
+):
+    """An in-flight reservation with no receipt yet still consumes the cap.
+
+    Attack path from the call-count audit: the first invoke reserves budget
+    and releases the permit lock, but its receipt does not exist yet. A second
+    distinct-key invoke that only summed receipts would see zero charged and
+    pass, letting a permit capped at one call's worth of value dispatch twice
+    as long as ``max_credits`` covers both. The reservation itself must be the
+    authority: with the cap at 1 and 10 credits of budget, the second
+    reservation is denied on the cap, not the budget.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    tool_name = "v2-test-agg-inflight"
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("10"),
+            aggregate_value_cap=Decimal("1"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    async def reserve_once():
+        return await service.authorize_and_reserve(
+            permit_id=permit.permit_id,
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            estimated_credits=Decimal("1"),
+            key_id=key_id,
+        )
+
+    first = await reserve_once()
+    assert first.allowed is True, first.reason
+
+    # No receipt has been written for the first call: it is still in flight.
+    second = await reserve_once()
+    assert second.allowed is False
+    assert second.reason == "permit_aggregate_value_cap_exceeded"
+    assert second.details is not None
+    assert Decimal(second.details["aggregate_value_cap"]) == Decimal("1")
+    assert Decimal(second.details["reserved_credits"]) == Decimal("1")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        # Only the first reservation moved budget; the denial moved nothing.
+        assert model.spent_credits == Decimal("1")
+
+
+@pytest.mark.anyio
+async def test_aggregate_value_cap_concurrent_reservations_never_exceed_cap(
+    client, clean_database
+):
+    """N parallel distinct-key reservations admit at most floor(cap / cost).
+
+    Same shape as the ``max_credits`` race regression: every reservation reads
+    the same receipt total (zero), so a read-time cap check admits all of
+    them. The cap must be a predicate of the guarded UPDATE that performs the
+    reservation, so it holds on SQLite where the row lock is a no-op.
+    """
+    import asyncio
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    tool_name = "v2-test-agg-race"
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("100"),
+            aggregate_value_cap=Decimal("6"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    async def reserve_once():
+        return await service.authorize_and_reserve(
+            permit_id=permit.permit_id,
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            estimated_credits=Decimal("2"),
+            key_id=key_id,
+        )
+
+    results = await asyncio.gather(*(reserve_once() for _ in range(12)))
+    allowed = [r for r in results if r.allowed]
+    denied = [r for r in results if not r.allowed]
+    assert len(allowed) == 3  # floor(6 / 2)
+    assert all(r.reason == "permit_aggregate_value_cap_exceeded" for r in denied)
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("6")
+
+
+@pytest.mark.anyio
+async def test_aggregate_value_cap_released_reservation_frees_cap(
+    client, clean_database
+):
+    """A reservation that is handed back (nothing ran) frees its cap share.
+
+    The cap counts reserved authority, so the compensation partner
+    ``release_budget`` must make a capped permit's legitimate retry admissible
+    again -- otherwise a pre-dispatch denial would permanently burn the cap.
+    """
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    tool_name = "v2-test-agg-release"
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("10"),
+            aggregate_value_cap=Decimal("1"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    async def reserve_once():
+        return await service.authorize_and_reserve(
+            permit_id=permit.permit_id,
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            estimated_credits=Decimal("1"),
+            key_id=key_id,
+        )
+
+    assert (await reserve_once()).allowed is True
+    assert (await reserve_once()).reason == "permit_aggregate_value_cap_exceeded"
+    await service.release_budget(permit.permit_id, Decimal("1"))
+    assert (await reserve_once()).allowed is True
+
+
+@pytest.mark.anyio
+async def test_aggregate_value_cap_receipt_history_floors_concurrent_reservations(
+    client, clean_database
+):
+    """Receipted charges that ``spent_credits`` no longer reflects still count.
+
+    A charged call can end with its reservation handed back but its receipt
+    kept (charge succeeded, refund failed, ``release_budget`` ran). The
+    permit then has receipt history above ``spent_credits``. If the atomic
+    guard only checked ``spent_credits``, N parallel reservations would each
+    see the same low counter and collectively exceed the cap; the receipt
+    floor must be part of the guarded predicate, not a separate read.
+
+    Setup: cap 5, one receipted charge of 2 with ``spent_credits`` back at 0.
+    Remaining authority is ``max(spent, receipt_total)``, so of six
+    concurrent reservations of 2 the guard admits at most two and never
+    lets ``spent_credits`` pass the cap. A task that snapshots the floor
+    while ``spent_credits`` is still 0 can admit only one; a task that
+    reads after that commit sees the floor already covered and may admit a
+    second reservation that still fits under the cap.
+    """
+    import asyncio
+
+    from app.services.receipts import get_receipt_service
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    tool_name = "v2-test-agg-floor"
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("100"),
+            aggregate_value_cap=Decimal("5"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    # Reserve, receipt the charge, then hand the reservation back: the shape
+    # the charge-then-refund-failure path leaves behind.
+    await service.reserve_budget(permit.permit_id, Decimal("2"))
+    await get_receipt_service().create_receipt(
+        permit_id=permit.permit_id,
+        wallet_id=wallet_id,
+        key_id=key_id,
+        tool=tool_name,
+        request_payload={"input": "history"},
+        response_payload={"error": "refund_failed"},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("2"),
+        credits_charged=Decimal("2"),
+        outcome="failed_unrefunded",
+        audit_event_id=None,
+    )
+    await service.release_budget(permit.permit_id, Decimal("2"))
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("0")
+
+    async def reserve_once():
+        return await service.authorize_and_reserve(
+            permit_id=permit.permit_id,
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            estimated_credits=Decimal("2"),
+            key_id=key_id,
+        )
+
+    results = await asyncio.gather(*(reserve_once() for _ in range(6)))
+    allowed = [r for r in results if r.allowed]
+    denied = [r for r in results if not r.allowed]
+    # The guard bounds cumulative authority, not one interleaving: a task
+    # that reads after an earlier commit sees a smaller receipt floor.
+    assert 1 <= len(allowed) <= 2
+    assert all(r.reason == "permit_aggregate_value_cap_exceeded" for r in denied)
+    for r in denied:
+        assert r.details is not None
+        # Reported authority includes the receipt floor, not just the counter.
+        assert Decimal(r.details["reserved_credits"]) >= Decimal("2")
+
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("2") * len(allowed)
+        # Cumulative authority never exceeds the cap.
+        assert max(model.spent_credits, Decimal("2")) <= Decimal("5")
+
+
+@pytest.mark.anyio
+async def test_aggregate_value_cap_receipt_history_floor_then_sequential_reservations(
+    client, clean_database
+):
+    """After the receipt floor is covered, spent_credits may rise to the cap.
+
+    The floor is ``max(spent_credits, receipt_total)``, not receipt plus
+    spent: once a new reservation has caught spent up to the receipt
+    total, further reservations are bounded by the cap against spent
+    alone. This is the serialization a PostgreSQL row lock produces, and
+    it must not be confused with the happy path where a settled receipt is
+    still reflected in ``spent_credits`` (that path is
+    ``test_aggregate_value_cap_denies_over_total``).
+    """
+    from app.services.receipts import get_receipt_service
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    tool_name = "v2-test-agg-floor-seq"
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("100"),
+            aggregate_value_cap=Decimal("5"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    await service.reserve_budget(permit.permit_id, Decimal("2"))
+    await get_receipt_service().create_receipt(
+        permit_id=permit.permit_id,
+        wallet_id=wallet_id,
+        key_id=key_id,
+        tool=tool_name,
+        request_payload={"input": "history"},
+        response_payload={"error": "refund_failed"},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("2"),
+        credits_charged=Decimal("2"),
+        outcome="failed_unrefunded",
+        audit_event_id=None,
+    )
+    await service.release_budget(permit.permit_id, Decimal("2"))
+
+    async def reserve_once():
+        return await service.authorize_and_reserve(
+            permit_id=permit.permit_id,
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            estimated_credits=Decimal("2"),
+            key_id=key_id,
+        )
+
+    first = await reserve_once()
+    assert first.allowed is True, first.reason
+    second = await reserve_once()
+    assert second.allowed is True, second.reason
+    third = await reserve_once()
+    assert third.allowed is False
+    assert third.reason == "permit_aggregate_value_cap_exceeded"
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("4")
+
+
+@pytest.mark.anyio
+async def test_reserve_budget_enforces_aggregate_value_cap(client, clean_database):
+    """``reserve_budget`` (the AWI governed reservation) honors the cap too.
+
+    ``authorize_and_reserve`` is not the only path that reserves against a
+    permit. If ``reserve_budget`` only checked ``max_credits``, a permit whose
+    cap is below its budget could be overshot through the AWI HTTP path even
+    though the MCP path denies. Cap 1, budget 10: the second reservation of 1
+    is refused on the cap, and the denial must be classified as the cap, not
+    the budget, so the operator is not told to top up.
+    """
+    import asyncio
+
+    from app.services.permits import PermitError
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    tool_name = "v2-test-agg-reserve-budget"
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("10"),
+            aggregate_value_cap=Decimal("1"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    await service.reserve_budget(permit.permit_id, Decimal("1"))
+    with pytest.raises(PermitError) as excinfo:
+        await service.reserve_budget(permit.permit_id, Decimal("1"))
+    assert excinfo.value.reason == "permit_aggregate_value_cap_exceeded"
+
+    # Releasing the in-flight reservation makes the cap share admissible again.
+    await service.release_budget(permit.permit_id, Decimal("1"))
+    await service.reserve_budget(permit.permit_id, Decimal("1"))
+
+    # Parallel reservations against a fresh capped permit admit at most
+    # floor(cap / amount), same guarantee as the MCP path.
+    permit2 = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("100"),
+            aggregate_value_cap=Decimal("4"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    async def reserve_or_reason() -> str:
+        try:
+            await service.reserve_budget(permit2.permit_id, Decimal("2"))
+        except PermitError as exc:
+            return exc.reason
+        return "allowed"
+
+    outcomes = await asyncio.gather(*(reserve_or_reason() for _ in range(8)))
+    assert outcomes.count("allowed") == 2
+    assert all(
+        o in {"allowed", "permit_aggregate_value_cap_exceeded"} for o in outcomes
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit2.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("4")
 
 
 @pytest.mark.anyio

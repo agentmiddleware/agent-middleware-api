@@ -8,56 +8,70 @@
   <title>Agent Middleware API — Public operator index</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%20shape-rendering='crispEdges'%3E%3Crect%20width='16'%20height='16'%20fill='%230b1020'/%3E%3Cpath%20fill='%23e9edf8'%20d='M6%203h4v1H6zM5%204h1v1H5zm5%200h1v1h-1zM4%205h1v4H4zm7%200h1v4h-1zM5%209h6v1H5zM4%2010h1v3H4zm7%200h1v3h-1z'/%3E%3Crect%20x='12'%20y='2'%20width='2'%20height='2'%20fill='%23f0b43c'/%3E%3C/svg%3E">
   <style>
-    /* Tokens resolved from site/styles.css so this self-contained page
-       cannot drift from the marketing surfaces. No webfonts: this page is
-       served straight off the API by app/routers/static.py with no font
-       route, so it uses the system sans and mono stacks. */
+    /* Keep the shared tokens in sync with site/styles.css. The API serves
+       this page without a font route, so the same type roles use their
+       local fallbacks instead of requesting assets from another origin. */
     :root {
       color-scheme: dark;
-      --bg: #0b1020;
-      --surface: #121a30;
-      --surface-strong: #1f2b4a;
-      --border: #34457a;
+      --ink: #0b1020;
+      --panel: #121a30;
+      --rule-soft: #1f2b4a;
       --line: rgba(156, 168, 203, 0.18);
       --line-strong: rgba(156, 168, 203, 0.34);
       --text: #e9edf8;
-      --muted: #9ca8cb;
+      --text-dim: #9ca8cb;
       --brass: #f0b43c;
       --brass-bright: #ffd166;
-      --green: #4ade80;
-      --radius: 12px;
-      --radius-sm: 8px;
-      --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+      --font-title: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
+      --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+      --radius: 10px;
+      --radius-sm: 6px;
+      --radius-xs: 3px;
+      --measure: 62ch;
+      --page-max: 1120px;
+      --pad-x: clamp(1.25rem, 4vw, 2.5rem);
+      --focus-ring: 2px solid var(--brass);
     }
 
-    * { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-padding-top: 5.5rem; }
 
     body {
       margin: 0;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at 12% 0%, rgba(240, 180, 60, 0.10), transparent 32rem),
-        var(--bg);
+      background: var(--ink);
       color: var(--text);
-      font: 16px/1.65 var(--sans);
+      font: 1.0625rem/1.65 var(--font-body);
       -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
 
-    a { color: var(--brass); }
-    a:hover { color: var(--brass-bright); }
+    ::selection { background: var(--brass); color: var(--ink); }
 
-    header, main, footer {
-      width: min(1120px, calc(100% - 2rem));
+    a { color: var(--brass); text-decoration: none; text-underline-offset: 0.18em; }
+    a:hover { color: var(--brass-bright); text-decoration: underline; }
+    p a { text-decoration: underline; }
+
+    main, footer {
+      width: 100%;
+      max-width: var(--page-max);
       margin-inline: auto;
     }
 
     header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 1rem;
-      padding: 1.25rem 0;
+      padding: 0.85rem max(var(--pad-x), calc((100% - var(--page-max)) / 2 + var(--pad-x)));
+      background: rgba(11, 16, 32, 0.86);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--line);
     }
 
@@ -66,11 +80,15 @@
       align-items: center;
       gap: 0.6rem;
       color: var(--text);
-      font-family: var(--mono);
+      min-height: 44px;
+      font-family: var(--font-mono);
       font-size: 0.92rem;
       font-weight: 600;
+      letter-spacing: 0.02em;
       text-decoration: none;
     }
+
+    .brand:hover { text-decoration: none; }
 
     .brand::before {
       content: "";
@@ -78,6 +96,7 @@
       height: 9px;
       border-radius: 2px;
       background: var(--brass);
+      flex: none;
     }
 
     .label {
@@ -86,33 +105,41 @@
       border: 1px solid var(--line-strong);
       border-radius: 999px;
       padding: 0.3rem 0.75rem;
-      color: var(--muted);
-      font-family: var(--mono);
-      font-size: 0.72rem;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
       font-weight: 500;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
     }
 
-    main { padding: 4rem 0 3rem; }
+    main { padding: clamp(3.5rem, 8vw, 6rem) var(--pad-x); }
 
-    h1, h2, h3 {
-      font-weight: 700;
-      letter-spacing: -0.015em;
-      line-height: 1.15;
+    h1, h2 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      letter-spacing: -0.012em;
+      line-height: 1.06;
+      text-wrap: balance;
     }
     h1 {
       max-width: 22ch;
       margin: 1rem 0 1.25rem;
-      font-size: clamp(2rem, 4.4vw, 3rem);
-      font-weight: 800;
-      letter-spacing: -0.02em;
+      font-size: clamp(2.5rem, 5.2vw, 3.9rem);
     }
-    h2 { margin: 0 0 0.6rem; font-size: clamp(1.4rem, 2.4vw, 1.8rem); }
-    h3 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+    h2 { margin: 0 0 1.25rem; font-size: clamp(1.9rem, 3.2vw, 2.7rem); }
+    h3 {
+      margin: 0 0 1rem;
+      font-family: var(--font-title);
+      font-size: clamp(1.05rem, 1.5vw, 1.2rem);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      line-height: 1.25;
+      text-wrap: balance;
+    }
 
-    p { margin: 0; }
-    .lede { max-width: 68ch; color: var(--muted); font-size: 1.1rem; }
+    p { margin: 0; max-width: var(--measure); }
+    .lede { color: var(--text-dim); font-size: 1.1rem; }
 
     .notice {
       margin-top: 1.5rem;
@@ -123,7 +150,7 @@
       color: var(--brass);
     }
 
-    section { margin-top: 4rem; }
+    section { margin-top: clamp(3.5rem, 8vw, 6rem); }
 
     .grid {
       display: grid;
@@ -137,16 +164,17 @@
       padding: 1.25rem;
       border: 1px solid var(--line);
       border-radius: var(--radius);
-      background: var(--surface);
+      background: var(--panel);
     }
 
-    .card p, .section-copy, li { color: var(--muted); }
+    .card p, .section-copy, li { color: var(--text-dim); }
     .card .scope {
       margin-top: 0.9rem;
       padding-top: 0.75rem;
       border-top: 1px solid var(--line);
-      color: var(--green);
-      font: 0.8rem/1.6 var(--mono);
+      color: var(--text-dim);
+      font: 0.8rem/1.6 var(--font-mono);
+      overflow-wrap: anywhere;
     }
 
     .links {
@@ -162,24 +190,26 @@
       padding: 1rem;
       border: 1px solid var(--line);
       border-radius: var(--radius);
-      background: var(--surface);
+      background: var(--panel);
       text-decoration: none;
       transition: border-color 140ms ease, background 140ms ease;
     }
 
     .links a:hover {
       border-color: var(--line-strong);
-      background: var(--surface-strong);
+      background: var(--rule-soft);
+      text-decoration: none;
     }
 
     .links strong {
       display: block;
       margin-bottom: 0.3rem;
       color: var(--text);
+      font-family: var(--font-title);
       font-size: 1rem;
       font-weight: 700;
     }
-    .links span { color: var(--muted); font-size: 0.88rem; }
+    .links span { color: var(--text-dim); font-size: 0.88rem; }
 
     pre {
       overflow-x: auto;
@@ -187,44 +217,78 @@
       padding: 1rem 1.15rem;
       border: 1px solid var(--line);
       border-radius: var(--radius);
-      background: rgba(0, 0, 0, 0.16);
+      background: var(--panel);
       color: var(--text);
-      font: 0.85rem/1.7 var(--mono);
+      font: 0.85rem/1.7 var(--font-mono);
     }
 
-    code { font-family: var(--mono); }
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xs);
+      padding: 0.1em 0.4em;
+      overflow-wrap: anywhere;
+    }
+    pre code { font-size: inherit; border: 0; padding: 0; overflow-wrap: normal; }
     ul { margin: 1rem 0 0; padding-left: 1.25rem; }
     li + li { margin-top: 0.5rem; }
 
     footer {
-      padding: 1.5rem 0 2.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      padding: 1.5rem var(--pad-x) 2.5rem;
       border-top: 1px solid var(--line);
-      color: var(--muted);
+      color: var(--text-dim);
       font-size: 0.9rem;
     }
 
-    footer a + a { margin-left: 1rem; }
+    footer a { display: inline-flex; align-items: center; min-height: 44px; }
 
     :focus-visible {
-      outline: 2px solid var(--brass);
+      outline: var(--focus-ring);
       outline-offset: 3px;
     }
 
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: 0;
+      z-index: 100;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0 0 var(--radius-sm) 0;
+      background: var(--brass);
+      color: var(--ink);
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .skip-link:focus { left: 0; color: var(--ink); }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+
     @media (max-width: 760px) {
-      main { padding-top: 2.75rem; }
-      header { align-items: flex-start; flex-direction: column; }
       .grid, .links { grid-template-columns: 1fr; }
-      section { margin-top: 3rem; }
+    }
+
+    @media (max-width: 560px) {
+      html { scroll-padding-top: 8.5rem; }
+      header { flex-wrap: wrap; row-gap: 0.25rem; }
+      .brand { font-size: 0.85rem; letter-spacing: 0; }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header>
     <a class="brand" href="https://www.thisisatest.tech/">Agent Middleware API</a>
     <span class="label">Public evidence only</span>
   </header>
 
-  <main>
+  <main id="main-content" tabindex="-1">
     <div class="label">Operator index</div>
     <h1>Inspect the trust plane without invented telemetry.</h1>
     <p class="lede">

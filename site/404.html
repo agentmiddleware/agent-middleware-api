@@ -9,23 +9,15 @@
     <meta name="theme-color" content="#0b1020" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/fonts.css?v=@@FONTS_CSS_VERSION@@" />
-    <link rel="stylesheet" href="/styles.css?v=gateway-18" />
+    <link rel="stylesheet" href="/styles.css?v=@@STYLES_CSS_VERSION@@" />
     <script src="/a11y-preload.js?v=gateway-18"></script>
+    @@VERCEL_ANALYTICS_SCRIPTS@@
+    <script defer src="/analytics.js?v=gateway-18"></script>
     <script defer src="/a11y.js?v=gateway-18"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <nav class="site-nav" aria-label="Primary">
-      <a class="nav-brand" href="/" aria-label="Agent Middleware API home">
-        <span>Agent Middleware API</span>
-      </a>
-      <div class="nav-links">
-        <a href="/#pilot">Pilot</a>
-        <a href="/#proof">Proof</a>
-        <a href="/compare/">Compare</a>
-        <a href="/#machine-discovery">Machine discovery</a>
-      </div>
-    </nav>
+    @@SITE_NAV@@
 
     <main id="main">
       <section class="section" aria-labelledby="notfound-title">
@@ -50,11 +42,6 @@
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="footer-branding">
-        <div class="footer-brand">Agent Middleware API</div>
-        <p>Authorize one agent action. Charge it once. Prove what happened.</p>
-      </div>
-    </footer>
+    @@SITE_FOOTER@@
   </body>
 </html>
