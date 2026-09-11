@@ -1,0 +1,11 @@
+{
+  "name": "agent-middleware-api",
+  "install": "bash ./.cursor/install.sh",
+  "terminals": [
+    {
+      "name": "quickstart-trust-plane",
+      "command": ".venv/bin/python scripts/quickstart.py",
+      "description": "Boots the strict-trust quickstart server on http://127.0.0.1:8000 (loopback only) with self-serve key minting and the partner.notes.write governed tool. Logs stream here; state persists under data/quickstart/."
+    }
+  ]
+}
