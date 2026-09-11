@@ -96,6 +96,7 @@ from .routers import (
     well_known,
     static,
     planner,
+    pods,
     policies,
     x402,
 )
@@ -643,6 +644,10 @@ CORE_TRUST_ROUTERS = (
 #     production and /v1/discover already omits the capability without it.
 #   - planner: budget optimizer, adjacent to but outside the
 #     permit→invoke→receipt loop.
+#   - pods: a named group of agent API keys under one shared budget
+#     (composition of existing sponsor/agent wallets + keys, see
+#     docs/pods.md); a new core capability with no named-customer evidence
+#     yet, so it stays dormant per the invariant above.
 #   - x402: settlement facilitation — a real trust surface (permit-governed
 #     402 payment authorization, shadow-ledger metering, signed receipts)
 #     with no active customer demand; the docs/settlement-rails.md freeze
@@ -655,6 +660,7 @@ DORMANT_TRUST_ROUTERS = (
     auth,
     kyc,
     planner,
+    pods,
     x402,
 )
 
