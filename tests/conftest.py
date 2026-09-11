@@ -80,6 +80,7 @@ DORMANT_SURFACE_TEST_MODULES = frozenset(
         "test_mcp_trust_mode",
         "test_mcp_upstream_governed",
         "test_planner_constraints",
+        "test_pods",
         "test_policy_bundles",
         "test_revocation_containment",
         "test_secret_persistence",
