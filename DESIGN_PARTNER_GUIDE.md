@@ -72,7 +72,10 @@ For the live engagement checklist that replaces `trust-plane-echo` /
 The deployed limit is `RATE_LIMIT_PER_MINUTE` (default and production value:
 120). `RateLimitMiddleware` counts it in a fixed 60-second Redis window and
 returns `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
-on every counted response; the 121st request in a window gets `429`.
+on every counted response, including `401`s; the 121st request in a window
+gets `429`. A burst of a few dozen requests will not `429` — that is the
+120/min ceiling working as designed, not a missing limiter. Look at
+`X-RateLimit-Remaining` to see the budget without waiting for `429`.
 
 - **Authenticated requests:** one bucket per `X-API-Key` value. Two agents
   sharing one key share the 120; two keys get 120 each.

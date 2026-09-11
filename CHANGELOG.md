@@ -11,6 +11,17 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔒 API origin now sends CSP and `Cache-Control: no-store`
+
+- **Reviewer nits from the second black-box battery, closed.** The API origin
+  already sent HSTS, `nosniff`, and `SAMEORIGIN`. It now also sends a
+  `Content-Security-Policy` (`default-src 'none'` on JSON; inline-CSS-only on
+  first-party HTML; jsDelivr plus inline boot script on `/docs` and `/redoc`)
+  and `Cache-Control: no-store` on tenant-sensitive paths. Public discovery
+  stays cacheable. The 120 req/min limiter was already on auth-gated routes;
+  a 40-request burst drawing zero `429`s is the documented ceiling, advertised
+  on counted responses including `401`s.
+
 ### 🔒 `aggregate_value_cap` now counts in-flight permit reservations
 
 - **A local cap is no longer a settled-receipt check that concurrent

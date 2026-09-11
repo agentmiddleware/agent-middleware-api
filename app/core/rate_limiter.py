@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from typing import Any
 
 import redis.asyncio as redis
 from fastapi import Request, Response
@@ -27,6 +28,32 @@ logger = logging.getLogger(__name__)
 _PUBLIC_MCP_PATH = "/mcp/public"
 _PUBLIC_MCP_BUCKET_PREFIX = "route:mcp-public"
 _PUBLIC_MCP_GLOBAL_LIMIT_MULTIPLIER = 10
+
+
+def rate_limit_discovery() -> dict[str, Any]:
+    """Describe the limit ``RateLimitMiddleware`` actually enforces.
+
+    One fixed-window budget per minute, keyed by the ``X-API-Key`` header
+    value. Requests without a key share a single 'anonymous' bucket. There is
+    no burst allowance and no per-partner override; ``RATE_LIMIT_PER_MINUTE``
+    is the only knob, so this payload is derived from it rather than hardcoded.
+    A burst of 40 requests will not 429: the 121st request in a 60-second
+    window (at the default of 120) is the first that does.
+    """
+    cfg = get_settings()
+    return {
+        "requests_per_minute": cfg.RATE_LIMIT_PER_MINUTE,
+        "window_seconds": 60,
+        "scope": "per_api_key",
+        "unauthenticated_scope": "shared_anonymous_bucket",
+        "burst_allowance": 0,
+        "per_partner_override": False,
+        "headers": [
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Reset",
+        ],
+    }
 
 
 def _public_mcp_client_id(request: Request) -> str:

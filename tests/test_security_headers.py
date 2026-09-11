@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from starlette.applications import Starlette
-from starlette.responses import PlainTextResponse
+from starlette.responses import HTMLResponse, PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from app.middleware.security_headers import HSTS_VALUE, SecurityHeadersMiddleware
+from app.middleware.security_headers import (
+    API_CSP,
+    DOCS_HTML_CSP,
+    FIRST_PARTY_HTML_CSP,
+    HSTS_VALUE,
+    SecurityHeadersMiddleware,
+)
 
 
 def _client() -> TestClient:
@@ -22,6 +28,106 @@ def test_baseline_headers_are_always_present() -> None:
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "SAMEORIGIN"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+
+
+def test_json_responses_use_a_lockdown_csp() -> None:
+    """JSON has nothing to execute; default-src 'none' is the whole policy."""
+
+    response = _client().get("/probe")
+    assert response.headers["content-security-policy"] == API_CSP
+    assert "'unsafe-inline'" not in response.headers["content-security-policy"]
+    assert "cdn.jsdelivr.net" not in response.headers["content-security-policy"]
+
+
+def test_first_party_html_allows_inline_css_but_no_scripts() -> None:
+    app = Starlette(
+        routes=[Route("/dashboard", lambda request: HTMLResponse("<html></html>"))]
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    csp = TestClient(app).get("/dashboard").headers["content-security-policy"]
+    assert csp == FIRST_PARTY_HTML_CSP
+    assert "script-src 'none'" in csp
+    assert "style-src 'unsafe-inline'" in csp
+
+
+def test_swagger_and_redoc_use_the_cdn_compatible_csp() -> None:
+    """FastAPI's stock docs load jsDelivr plus an inline boot script."""
+
+    app = Starlette(
+        routes=[
+            Route("/docs", lambda request: HTMLResponse("<html>docs</html>")),
+            Route("/redoc", lambda request: HTMLResponse("<html>redoc</html>")),
+            Route("/docs/index", lambda request: PlainTextResponse("{}")),
+        ]
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+    client = TestClient(app)
+
+    docs = client.get("/docs").headers["content-security-policy"]
+    redoc = client.get("/redoc").headers["content-security-policy"]
+    index = client.get("/docs/index").headers["content-security-policy"]
+
+    assert docs == DOCS_HTML_CSP
+    assert redoc == DOCS_HTML_CSP
+    assert "cdn.jsdelivr.net" in docs
+    # The JSON doc index is not Swagger HTML, so it stays locked down.
+    assert index == API_CSP
+
+
+def test_sensitive_paths_are_no_store() -> None:
+    app = Starlette(
+        routes=[
+            Route("/v1/wallets", lambda request: PlainTextResponse("denied")),
+            Route("/v1/permits", lambda request: PlainTextResponse("denied")),
+            Route("/mcp/messages", lambda request: PlainTextResponse("denied")),
+        ]
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+    client = TestClient(app)
+
+    for path in ("/v1/wallets", "/v1/permits", "/mcp/messages"):
+        assert client.get(path).headers["cache-control"] == "no-store"
+
+
+def test_public_discovery_is_not_forced_no_store() -> None:
+    """Agents may cache OpenAPI and well-known documents."""
+
+    app = Starlette(
+        routes=[
+            Route("/openapi.json", lambda request: PlainTextResponse("{}")),
+            Route("/v1/discover", lambda request: PlainTextResponse("{}")),
+            Route(
+                "/.well-known/agent.json",
+                lambda request: PlainTextResponse("{}"),
+            ),
+        ]
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+    client = TestClient(app)
+
+    for path in ("/openapi.json", "/v1/discover", "/.well-known/agent.json"):
+        assert "cache-control" not in client.get(path).headers
+
+
+def test_explicit_cache_control_is_not_overridden() -> None:
+    app = Starlette(
+        routes=[
+            Route(
+                "/v1/permits/req/card",
+                lambda request: HTMLResponse(
+                    "<html></html>",
+                    headers={"Cache-Control": "no-store, private"},
+                ),
+            )
+        ]
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    assert (
+        TestClient(app).get("/v1/permits/req/card").headers["cache-control"]
+        == "no-store, private"
+    )
 
 
 def test_hsts_is_sent_only_for_requests_that_arrived_over_tls() -> None:
@@ -67,3 +173,41 @@ def test_middleware_is_registered_on_the_application() -> None:
     from app.main import app
 
     assert any(entry.cls is SecurityHeadersMiddleware for entry in app.user_middleware)
+
+
+def test_full_app_auth_gated_401_has_csp_and_no_store() -> None:
+    """The reviewer's auth-gated probe should see both nits closed."""
+
+    from fastapi.testclient import TestClient as FastAPITestClient
+
+    from app.main import app
+
+    response = FastAPITestClient(app).get("/v1/permits")
+    assert response.status_code == 401
+    assert response.headers["content-security-policy"] == API_CSP
+    assert response.headers["cache-control"] == "no-store"
+    # Rate limiting is on this path: 40 requests will not 429, but the
+    # budget is advertised on every counted response, including 401s.
+    assert "x-ratelimit-limit" in response.headers
+
+
+def test_full_app_openapi_has_csp_without_no_store() -> None:
+    from fastapi.testclient import TestClient as FastAPITestClient
+
+    from app.main import app
+
+    response = FastAPITestClient(app).get("/openapi.json")
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == API_CSP
+    assert "cache-control" not in response.headers
+
+
+def test_full_app_docs_use_swagger_csp() -> None:
+    from fastapi.testclient import TestClient as FastAPITestClient
+
+    from app.main import app
+
+    response = FastAPITestClient(app).get("/docs")
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == DOCS_HTML_CSP
+    assert response.headers["content-type"].startswith("text/html")

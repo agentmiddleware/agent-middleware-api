@@ -148,6 +148,45 @@ Operators who put a credentialed browser app in front of this API must set
 `CORS_ORIGINS` to an explicit comma-separated origin list. Startup logs
 `cors_wildcard_active` whenever the wildcard posture is in effect.
 
+## Rate Limit Posture
+
+The application-layer limiter is present on auth-gated routes. A burst of
+a few dozen requests drawing zero `429`s is the intended threshold, not a
+missing control.
+
+- Default and production value: `RATE_LIMIT_PER_MINUTE=120`, fixed 60-second
+  window, no burst allowance. The 121st counted request in that window is the
+  first that returns `429` with `Retry-After`.
+- **Authenticated:** one bucket per `X-API-Key` value.
+- **No key:** one shared `anonymous` bucket for the whole deployment.
+- **Counted responses** — including `401`s — carry `X-RateLimit-Limit`,
+  `X-RateLimit-Remaining`, and `X-RateLimit-Reset`. Remaining dropping from
+  119 toward 80 with no `429` means the budget has not been reached.
+- **Exempt paths** (no count, no `429`): `/`, `/health`, `/docs`, `/redoc`,
+  `/openapi.json`, `/.well-known/agent.json`, `/llms.txt`, and the served
+  markdown docs. `/health/dependencies` is counted.
+- This is a request-count ceiling, not a connection or bandwidth limit. An
+  edge request-count/connection cap remains the operator's job, as noted
+  under inbound body bounding above.
+- Redis outage in production-like environments fails closed (`503`), never
+  silently wider than declared.
+
+`GET /` and `GET /v1/discover` both publish this as `rate_limits`.
+
+## Response Hardening Headers
+
+Every response gets `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, and a
+`Content-Security-Policy`. JSON is `default-src 'none'`. First-party HTML
+(dashboard, approval cards) allows inline CSS and no scripts. `/docs` and
+`/redoc` additionally allow jsDelivr plus an inline boot script because that
+is how FastAPI's stock Swagger UI / ReDoc load. HSTS (`max-age=63072000;
+includeSubDomains`, no `preload`) is emitted only on requests that arrived
+over TLS. Tenant-sensitive paths (`/v1/*` except `/v1/discover`, `/mcp`
+except the public tools manifest) send `Cache-Control: no-store`. Public
+discovery is left cacheable so agents can keep OpenAPI and well-known
+documents.
+
 ## One Auth Story, One Invoke Story (Dormant Surfaces)
 
 The wedge contract is **send the API key** (`X-API-Key`). Surfaces that told
