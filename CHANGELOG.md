@@ -35,13 +35,23 @@ full release gate; do not backfill a final `v1.2.0` tag.
   `verify_api_key` has had a chance to reject it, so a caller sending a
   different invalid key on every request was handed a fresh 120-request
   budget each time — an unbounded amount of authenticated-route traffic from
-  one client. Every response the app rejects as unauthenticated is now also
-  charged to one shared per-client bucket at ten times the per-key limit, read
-  (not spent) before the request runs. A key the deployment accepts never
-  touches it, and `403` — authenticated, then denied on scope — is not charged.
-  The in-memory fallback also sweeps buckets that have nothing left inside the
-  window, so rotated key values no longer leave a list behind per value for the
-  life of the process.
+  one client. Every request whose credentials the app refuses is now also
+  charged to one shared per-client bucket at ten times the per-key limit.
+  - **Refused is `401` or `403`.** An unknown but well-formed key — what a
+    rotating caller actually sends — is answered `403 invalid_api_key`, so
+    counting only `401`s would have missed the vector it was written for. The
+    auth layer marks its authentication failures with an internal header that
+    the limiter reads and strips, which keeps an authenticated caller denied
+    on scope (`wallet_access_denied`, `insufficient_scope`) out of the bucket:
+    in a trust plane, denials are ordinary traffic, not abuse.
+  - **The budget is reserved before the request runs** and handed back unless
+    the credentials were refused. Reading it and charging afterwards would let
+    every request already in flight pass the same read, bounding only callers
+    who arrive one at a time.
+  - A key the deployment accepts leaves the bucket exactly as it found it. The
+    in-memory fallback also sweeps buckets that have nothing left inside the
+    window, so rotated key values no longer leave a list behind per value for
+    the life of the process.
 - **Published rate-limit discovery no longer claims one backend's algorithm.**
   The shared Redis limiter counts fixed 60-second buckets; the in-memory
   fallback counts a rolling 60 seconds. `rate_limits` publishes the budget,

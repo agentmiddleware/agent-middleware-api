@@ -82,11 +82,14 @@ gets `429`. A burst of a few dozen requests will not `429` — that is the
 - **Requests without a key:** one `anonymous` bucket shared by every
   unauthenticated caller of the deployment. `/health/dependencies` is counted
   here.
-- **Rejected credentials:** a `401` is also charged to one shared per-client
-  bucket at ten times the limit, because the per-key bucket is chosen from a
-  header before the key is verified. Sending a different invalid `X-API-Key`
-  on every request does not hand you a fresh 120. A key the deployment accepts
-  never touches that bucket.
+- **Rejected credentials:** a request whose key the deployment refuses — a
+  `401`, or the `403 invalid_api_key` an unknown key gets — is also charged to
+  one shared per-client bucket at ten times the limit, because the per-key
+  bucket is chosen from a header before the key is verified. Sending a
+  different invalid `X-API-Key` on every request does not hand you a fresh
+  120. A key the deployment accepts never touches that bucket, and neither
+  does a permit denial: being refused on scope is normal governed traffic, not
+  a bad credential.
 - **Window accounting:** the shared Redis limiter counts fixed 60-second
   buckets; the in-memory fallback (never used in a production-like
   environment, which fails closed) counts a rolling 60 seconds. Budget and

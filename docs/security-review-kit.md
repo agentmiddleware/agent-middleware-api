@@ -108,10 +108,12 @@ the containment around one is a finding.**
 - Application-layer rate limiting is 120 requests per minute per API-key
   value (shared `anonymous` bucket without a key). A burst of 40 will not
   `429`. Counted responses, including `401`s, carry `X-RateLimit-*` headers.
-  Discovery, docs, and `/health` are exempt. Rejected credentials are also
-  charged to one shared per-client bucket at ten times the limit, so rotating
-  invalid `X-API-Key` values does not mint fresh budgets — but client identity
-  is an address, so a distributed flood and an edge connection limit are still
+  Discovery, docs, and `/health` are exempt. Requests whose credentials are refused
+  (`401`, and the `403` an unknown key gets) are also charged to one shared
+  per-client bucket at ten times the limit, reserved before the request runs,
+  so neither rotating `X-API-Key` values nor concurrency mints fresh budgets.
+  Scope denials against a valid key are not charged there. Client identity is
+  an address, so a distributed flood and an edge connection limit are still
   the operator's job.
 
 The full list is [SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md), with

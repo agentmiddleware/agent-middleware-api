@@ -167,16 +167,29 @@ missing control.
 - **Authenticated:** one bucket per `X-API-Key` value.
 - **No key:** one shared `anonymous` bucket for the whole deployment.
 - **Rejected credentials:** the per-key bucket is selected from a
-  caller-supplied header before the key has been verified, so every response
-  the app rejects as unauthenticated (`401`) is additionally charged to one
-  shared per-client bucket at ten times the per-key limit. Rotating a fresh
-  invalid `X-API-Key` per request therefore buys no extra budget; the client is
-  bounded by that bucket no matter how many key values it invents. A request
-  whose credentials the app accepts never touches it. Client identity is the
-  ingress peer address (Railway's `X-Real-IP` only where the platform marker is
-  present, per the public-MCP rule above), so callers sharing one egress
-  address share that bucket — and callers spread across many source addresses
-  get one such bucket each. A distributed flood is still the edge's job.
+  caller-supplied header before the key has been verified, so every request
+  whose credentials the app refuses is additionally charged to one shared
+  per-client bucket at ten times the per-key limit. Rotating a fresh invalid
+  `X-API-Key` per request therefore buys no extra budget; the client is bounded
+  by that bucket no matter how many key values it invents.
+  - **Refused means `401` *or* `403`.** An unknown but well-formed key — what
+    a rotating caller actually sends — is answered `403 invalid_api_key`, not
+    `401`, so counting only `401`s would miss the vector entirely.
+  - **A denial is not a refusal.** An authenticated caller denied on scope
+    (`wallet_access_denied`, `insufficient_scope`, an IGA decision) is
+    ordinary governed-loop traffic and is never charged here. The two are told
+    apart by an internal marker the auth layer sets, stripped before the
+    response leaves the innermost middleware.
+  - **The budget is reserved before the request runs**, and handed back unless
+    the credentials were refused. Reading the bucket and charging it after the
+    response would let every request already in flight pass the same read, so
+    the ceiling would only bound callers who arrive one request at a time.
+  - A request whose credentials the app accepts leaves the bucket exactly as
+    it found it. Client identity is the ingress peer address (Railway's
+    `X-Real-IP` only where the platform marker is present, per the public-MCP
+    rule above), so callers sharing one egress address share that bucket — and
+    callers spread across many source addresses get one such bucket each. A
+    distributed flood is still the edge's job.
 - **Counted responses** — including `401`s — carry `X-RateLimit-Limit`,
   `X-RateLimit-Remaining`, and `X-RateLimit-Reset`. Remaining dropping from
   119 toward 80 with no `429` means the budget has not been reached.

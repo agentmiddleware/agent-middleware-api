@@ -6,6 +6,7 @@ limiter. Auth-gated paths are counted. Discovery/docs/health are exempt.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -14,6 +15,7 @@ from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
+from app.core.auth import CREDENTIAL_REJECTED_HEADER
 from app.core.rate_limiter import (
     _MEMORY_BUCKET_SWEEP_THRESHOLD,
     RateLimitMiddleware,
@@ -168,26 +170,165 @@ async def test_accepted_credentials_never_touch_the_shared_bucket() -> None:
 
 
 @pytest.mark.anyio
-async def test_shared_bucket_reads_are_not_charged() -> None:
-    """Asking whether the bucket is spent must not spend from it."""
+async def test_accepted_credentials_hand_their_reservation_back() -> None:
+    """A reservation is taken before the request and returned unless refused."""
 
-    async def ok(_request):
-        return PlainTextResponse("ok")
-
-    starlette_app = Starlette(routes=[Route("/v1/wallets", ok)])
-    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+    limited = RateLimitMiddleware(Starlette(routes=[]), requests_per_minute=2)
     bucket = "probe-bucket"
     now = time.time()
 
-    for _ in range(limited.preauth_limit + 1):
-        exhausted, _reset = await limited._peek_limit(bucket, now, 1)
+    for _ in range(limited.preauth_limit + 5):
+        exhausted, _reset = await limited._reserve(bucket, now, limited.preauth_limit)
         assert exhausted is False
-    assert bucket not in limited._requests
+        await limited._release(bucket, now)
 
-    await limited._charge(bucket, now, limited.preauth_limit)
-    exhausted, reset_in = await limited._peek_limit(bucket, now, 1)
+    assert limited._requests.get(bucket) in (None, [])
+
+    for _ in range(limited.preauth_limit):
+        exhausted, _reset = await limited._reserve(bucket, now, limited.preauth_limit)
+        assert exhausted is False
+    exhausted, reset_in = await limited._reserve(bucket, now, limited.preauth_limit)
     assert exhausted is True
     assert reset_in >= 1
+
+
+@pytest.mark.anyio
+async def test_rejected_credential_403_is_charged() -> None:
+    """An unknown API key is refused with 403, not 401 — count it either way.
+
+    ``get_auth_context`` answers a well-formed but unknown key with 403, which
+    is exactly what a key-rotating caller sends. The app marks those as
+    authentication failures; the limiter charges them and strips the marker.
+    """
+
+    async def deny(_request):
+        return PlainTextResponse(
+            "no",
+            status_code=403,
+            headers={CREDENTIAL_REJECTED_HEADER: "1"},
+        )
+
+    starlette_app = Starlette(routes=[Route("/v1/wallets", deny)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+    ceiling = limited.preauth_limit
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        responses = [
+            await http.get(
+                "/v1/wallets",
+                headers={"X-API-Key": f"unknown-key-{index}"},
+            )
+            for index in range(ceiling + 1)
+        ]
+
+    assert [r.status_code for r in responses[:ceiling]] == [403] * ceiling
+    assert responses[ceiling].status_code == 429
+    # The marker is internal: it must not reach the caller.
+    assert CREDENTIAL_REJECTED_HEADER.lower() not in responses[0].headers
+
+
+@pytest.mark.anyio
+async def test_authorization_403_is_not_charged() -> None:
+    """A denial is ordinary governed traffic, not a credential rejection.
+
+    An authenticated caller refused on scope (``wallet_access_denied``,
+    ``insufficient_scope``) carries no marker, so its denials must not spend
+    the shared abuse budget that co-located callers depend on.
+    """
+
+    async def denied_on_scope(_request):
+        return PlainTextResponse("denied", status_code=403)
+
+    starlette_app = Starlette(routes=[Route("/v1/wallets", denied_on_scope)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=2)
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        responses = [
+            await http.get(
+                "/v1/wallets",
+                headers={"X-API-Key": f"authenticated-key-{index}"},
+            )
+            for index in range(limited.preauth_limit + 5)
+        ]
+
+    assert [r.status_code for r in responses] == [403] * len(responses)
+
+
+@pytest.mark.anyio
+async def test_the_real_unknown_key_path_is_bounded() -> None:
+    """End to end through the actual dependency, not a stub that returns 401."""
+
+    from fastapi import Depends, FastAPI
+
+    from app.core.auth import get_auth_context
+
+    api = FastAPI()
+
+    @api.get("/v1/wallets")
+    async def _wallets(auth=Depends(get_auth_context)):  # pragma: no cover - denied
+        return {"ok": True}
+
+    limited = RateLimitMiddleware(api, requests_per_minute=2)
+    ceiling = limited.preauth_limit
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        responses = [
+            await http.get(
+                "/v1/wallets",
+                headers={"X-API-Key": f"unknown-but-well-formed-{index}"},
+            )
+            for index in range(ceiling + 1)
+        ]
+
+    assert responses[0].status_code == 403
+    assert responses[0].json()["detail"]["error"] == "invalid_api_key"
+    assert CREDENTIAL_REJECTED_HEADER.lower() not in responses[0].headers
+    assert responses[ceiling].status_code == 429
+
+
+@pytest.mark.anyio
+async def test_concurrent_rejections_cannot_exceed_the_ceiling() -> None:
+    """The budget is reserved before the request, not charged after it.
+
+    Reading the bucket and charging it after the response would let every
+    request already in flight pass the same read, so a caller with enough
+    concurrency would walk straight past the ceiling.
+    """
+
+    entered = 0
+    gate = asyncio.Event()
+
+    async def slow_deny(_request):
+        nonlocal entered
+        entered += 1
+        await gate.wait()
+        return PlainTextResponse("no", status_code=401)
+
+    starlette_app = Starlette(routes=[Route("/v1/wallets", slow_deny)])
+    limited = RateLimitMiddleware(starlette_app, requests_per_minute=1)
+    ceiling = limited.preauth_limit
+    attempts = ceiling + 5
+
+    transport = ASGITransport(app=limited)
+    async with AsyncClient(transport=transport, base_url="http://test") as http:
+        tasks = [
+            asyncio.create_task(
+                http.get("/v1/wallets", headers={"X-API-Key": f"distinct-key-{index}"})
+            )
+            for index in range(attempts)
+        ]
+        for _ in range(500):
+            await asyncio.sleep(0)
+            if entered + sum(task.done() for task in tasks) >= attempts:
+                break
+        gate.set()
+        responses = await asyncio.gather(*tasks)
+
+    assert entered == ceiling
+    assert sum(r.status_code == 429 for r in responses) == attempts - ceiling
 
 
 @pytest.mark.anyio
