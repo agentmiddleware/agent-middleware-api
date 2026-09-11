@@ -62,22 +62,48 @@ occurred. When a send is claimed and no trustworthy result comes back, the call
 is receipted `delivery_uncertain` and never silently redispatched. See
 [docs/failure-semantics.md](docs/failure-semantics.md).
 
-## Prove it in five minutes
+## See it in sixty seconds
 
 Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), and `make`.
 
 ```bash
 git clone https://github.com/PetrefiedThunder/agent-middleware-api.git
 cd agent-middleware-api
+make demo-ambiguous-retry
+```
+
+An accounts-payable agent pays invoice `INV-4417` — $250.00 to a vendor. The
+payout succeeds. **The response never reaches the agent.** The agent, correctly,
+retries.
+
+The same tool runs twice, once without the boundary and once behind it:
+
+```text
+WITHOUT a transaction boundary        WITH Agent Middleware
+  PAY-0001  INV-4417  $250.00           PAY-0001  INV-4417  $250.00
+  PAY-0002  INV-4417  $250.00
+  2 payouts, $500.00                    1 payout, $250.00
+                                        1 debit · same receipt on both
+                                        retry returned PAY-0001
+```
+
+The payout count is not a claim — it counts executions of the tool body. The
+demo then reuses that spent key for a $9,500.00 payout (refused,
+`idempotency_key_reused`, no money moved) and verifies the receipt offline
+against the published key set with no credentials.
+
+Then prove the rest of the loop asserts correctly:
+
+```bash
 make prove-trust-plane
 ```
 
-One command boots a local instance against a throwaway SQLite database and
-walks the whole loop — discover, authenticate, authorize, invoke, meter,
-receipt, audit, govern. It **asserts** rather than prints: the call charges
-once, the replay returns the same receipt with no second debit, the audit chain
-verifies, the out-of-scope call is denied, and a tampered receipt fails
-verification. It exits non-zero the moment any invariant breaks.
+That boots a local instance against a throwaway SQLite database and walks
+discover, authenticate, authorize, invoke, meter, receipt, audit, govern. It
+**asserts** rather than prints: the call charges once, the replay returns the
+same receipt with no second debit, the audit chain verifies, the out-of-scope
+call is denied, and a tampered receipt fails verification. It exits non-zero the
+moment any invariant breaks.
 
 To drive the loop yourself instead of watching it:
 
