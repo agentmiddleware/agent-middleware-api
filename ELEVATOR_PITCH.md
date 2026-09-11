@@ -48,7 +48,7 @@ budget, and expiry. The gateway records one accepted request key, returns the
 original result and signed receipt on an identical replay, and rejects changed
 input under that key. Out-of-scope and over-budget calls fail before a debit.
 
-Run the [executable proof](README.md#quick-start-prove-the-trust-loop) locally,
+Run the [executable proof](README.md#prove-it-in-five-minutes) locally,
 then evaluate the supported vendor-managed, single-tenant pilot with one real
 internal tool.
 
