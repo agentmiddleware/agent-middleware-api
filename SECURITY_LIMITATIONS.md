@@ -53,8 +53,11 @@ Keep these out of the wedge until a design partner requires them:
   ceiling. It rejects permits carrying `max_calls_per_tool` or
   `aggregate_value_cap` before reservation or dispatch because it does not yet
   implement an atomic remote counter-and-release lifecycle for those fields.
-  On the local path, `aggregate_value_cap` is a settled-receipt check, not a
-  concurrent-reservation boundary; use `max_credits` for a no-overshoot total.
+  On the local path, `aggregate_value_cap` is a predicate of the same
+  guarded reservation `UPDATE` as `max_credits`, against `spent_credits`
+  (settled charges plus in-flight reservations) floored to the permit's
+  receipt total. The configured upstream path still rejects it before
+  reservation or dispatch.
 - URL validation rejects unsafe destinations and redirects, then pins one
   validated resolved address through the later connection while preserving the
   configured HTTP Host and TLS SNI. Production should still enforce a network

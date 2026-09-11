@@ -11,6 +11,20 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🔒 `aggregate_value_cap` now counts in-flight permit reservations
+
+- **A local cap is no longer a settled-receipt check that concurrent
+  reservations can walk around.** The reservation `UPDATE` that already
+  bounds `max_credits` now also requires
+  `spent_credits + floor_excess + amount <= aggregate_value_cap`, so a
+  first invoke that has reserved budget but not yet written its receipt
+  is visible to a second distinct-key invoke. A miss classifies as
+  `permit_aggregate_value_cap_exceeded` ahead of `permit_budget_exceeded`.
+  `reserve_budget` (the AWI HTTP path) applies the same predicate. Receipt
+  history remains a floor so a charged call whose reservation was later
+  released is not forgotten. The configured upstream path still refuses
+  the constraint before reserving or dispatching.
+
 ### 🔒 A lost SQLite write conflict no longer wedges the governed money path
 
 - **A contended debit is now a reason the caller can act on, not an
