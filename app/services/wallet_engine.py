@@ -284,54 +284,91 @@ class WalletEngine:
         currency: str = "USD",
         metadata: dict | None = None,
         require_kyc: bool | None = None,
+        session: AsyncSession | None = None,
     ) -> WalletResponse:
-        """Create a human sponsor (liability sink) root wallet."""
+        """Create a human sponsor (liability sink) root wallet.
+
+        ``session``, when given, must already be inside a transaction the
+        CALLER owns end to end (an open ``async with session.begin():``
+        block) — this method only ``flush()``es on it, never begins or
+        commits. That lets a caller compose this with other wallet/key
+        operations into one atomic unit of work instead of each call
+        committing independently (see app/services/pods.py). Omit it (the
+        default) for the original standalone behavior: opens, commits, and
+        closes its own session.
+        """
         kyc_required = (
             require_kyc
             if require_kyc is not None
             else self._settings.KYC_REQUIRED_FOR_TOPUP
         )
 
+        if session is not None:
+            return await self._create_sponsor_wallet_in(
+                session, sponsor_name, email, initial_credits, currency,
+                metadata, kyc_required,
+            )
+
         async with self._session_factory()() as session:
             async with session.begin():
-                wallet_id = f"spn-{uuid.uuid4().hex[:12]}"
-
-                wallet = WalletModel(
-                    wallet_id=wallet_id,
-                    wallet_type=WalletType.SPONSOR.value,
-                    owner_name=sponsor_name,
-                    email=email,
-                    balance=initial_credits,
-                    lifetime_credits=initial_credits,
-                    currency=currency,
-                    metadata_json=self._metadata_to_json(metadata),
-                    kyc_status=(
-                        KYCStatus.PENDING.value
-                        if kyc_required
-                        else KYCStatus.NOT_REQUIRED.value
-                    ),
-                    status="pending_kyc" if kyc_required else "active",
+                result = await self._create_sponsor_wallet_in(
+                    session, sponsor_name, email, initial_credits, currency,
+                    metadata, kyc_required,
                 )
-                session.add(wallet)
-                # Flush before ledger insert: with autoflush=False the UOW can
-                # INSERT ledger_entries before wallets, violating
-                # ledger_entries_wallet_id_fkey on Postgres.
-                await session.flush()
-
-                if initial_credits > Decimal("0"):
-                    entry = LedgerEntryModel(
-                        entry_id=str(uuid.uuid4()),
-                        wallet_id=wallet_id,
-                        action=LedgerAction.CREDIT.value,
-                        amount=initial_credits,
-                        balance_after=initial_credits,
-                        description="Initial sponsor deposit",
-                    )
-                    session.add(entry)
-
             await session.commit()
-            logger.info(f"Created sponsor wallet {wallet_id} for {sponsor_name}")
-            return wallet_model_to_response(wallet)
+            logger.info(
+                f"Created sponsor wallet {result.wallet_id} for {sponsor_name}"
+            )
+            return result
+
+    async def _create_sponsor_wallet_in(
+        self,
+        session: AsyncSession,
+        sponsor_name: str,
+        email: str,
+        initial_credits: Decimal,
+        currency: str,
+        metadata: dict | None,
+        kyc_required: bool,
+    ) -> WalletResponse:
+        """Core sponsor-creation logic against an already-open session.
+
+        No BEGIN/COMMIT here — the caller's transaction owns those.
+        """
+        wallet_id = f"spn-{uuid.uuid4().hex[:12]}"
+
+        wallet = WalletModel(
+            wallet_id=wallet_id,
+            wallet_type=WalletType.SPONSOR.value,
+            owner_name=sponsor_name,
+            email=email,
+            balance=initial_credits,
+            lifetime_credits=initial_credits,
+            currency=currency,
+            metadata_json=self._metadata_to_json(metadata),
+            kyc_status=(
+                KYCStatus.PENDING.value if kyc_required else KYCStatus.NOT_REQUIRED.value
+            ),
+            status="pending_kyc" if kyc_required else "active",
+        )
+        session.add(wallet)
+        # Flush before ledger insert: with autoflush=False the UOW can
+        # INSERT ledger_entries before wallets, violating
+        # ledger_entries_wallet_id_fkey on Postgres.
+        await session.flush()
+
+        if initial_credits > Decimal("0"):
+            entry = LedgerEntryModel(
+                entry_id=str(uuid.uuid4()),
+                wallet_id=wallet_id,
+                action=LedgerAction.CREDIT.value,
+                amount=initial_credits,
+                balance_after=initial_credits,
+                description="Initial sponsor deposit",
+            )
+            session.add(entry)
+
+        return wallet_model_to_response(wallet)
 
     async def create_agent_wallet(
         self,
@@ -342,8 +379,14 @@ class WalletEngine:
         auto_refill: bool = False,
         auto_refill_threshold: Decimal = Decimal("100.0"),
         auto_refill_amount: Decimal = Decimal("1000.0"),
+        session: AsyncSession | None = None,
     ) -> WalletResponse:
-        """Provision a pre-paid agent wallet from a sponsor's balance."""
+        """Provision a pre-paid agent wallet from a sponsor's balance.
+
+        ``session``, when given, must already be inside a transaction the
+        CALLER owns end to end — same contract as ``create_sponsor_wallet``.
+        Omit it for the original standalone behavior.
+        """
         if budget_credits < Decimal("0"):
             # A negative budget inverts the debit into a credit: the guard
             # ``balance >= budget_credits`` is trivially true for a negative
@@ -355,103 +398,130 @@ class WalletEngine:
             # SelfProvisionRequest.budget_credits (ge=0) offers callers.
             raise ValueError("budget_credits cannot be negative")
 
+        if session is not None:
+            return await self._create_agent_wallet_in(
+                session, sponsor_wallet_id, agent_id, budget_credits,
+                daily_limit, auto_refill, auto_refill_threshold, auto_refill_amount,
+            )
+
         async with self._session_factory()() as session:
             async with session.begin():
-                # Lock sponsor wallet for update
-                result = await session.execute(
-                    select(WalletModel)
-                    .where(
-                        cast(
-                            ColumnElement[bool],
-                            WalletModel.wallet_id == sponsor_wallet_id,
-                        )
-                    )
-                    .with_for_update()
+                result = await self._create_agent_wallet_in(
+                    session, sponsor_wallet_id, agent_id, budget_credits,
+                    daily_limit, auto_refill, auto_refill_threshold, auto_refill_amount,
                 )
-                sponsor = result.scalar_one_or_none()
-
-                if not sponsor:
-                    raise self._wallet_not_found_error(sponsor_wallet_id)
-                if sponsor.wallet_type != WalletType.SPONSOR.value:
-                    raise ValueError(
-                        "Can only provision agent wallets from sponsor wallets"
-                    )
-                if sponsor.status not in SPENDABLE_WALLET_STATUSES:
-                    raise ValueError(
-                        f"Sponsor wallet is {sponsor.status} and cannot provision "
-                        "agent wallets"
-                    )
-                # Deduct from sponsor. The balance and status checks above are
-                # a fast path; the guarded UPDATE is what makes them hold, so
-                # two concurrent provisions cannot hand out the same credits
-                # and a freeze landing in between is not outrun.
-                if not await self._apply_balance_delta(
-                    session,
-                    sponsor,
-                    balance_delta=-budget_credits,
-                    lifetime_debits_delta=budget_credits,
-                    require_balance=budget_credits,
-                    require_spendable=True,
-                ):
-                    if sponsor.status not in SPENDABLE_WALLET_STATUSES:
-                        raise ValueError(
-                            f"Sponsor wallet is {sponsor.status} and cannot "
-                            "provision agent wallets"
-                        )
-                    raise self._insufficient_funds_error(
-                        sponsor_wallet_id,
-                        sponsor.balance,
-                        budget_credits,
-                    )
-
-                # Create agent wallet
-                agent_wallet_id = f"agt-{uuid.uuid4().hex[:12]}"
-                agent_wallet = WalletModel(
-                    wallet_id=agent_wallet_id,
-                    wallet_type=WalletType.AGENT.value,
-                    owner_name=f"Agent: {agent_id}",
-                    balance=budget_credits,
-                    lifetime_credits=budget_credits,
-                    parent_wallet_id=sponsor_wallet_id,
-                    agent_id=agent_id,
-                    daily_limit=daily_limit,
-                    auto_refill=auto_refill,
-                    auto_refill_threshold=auto_refill_threshold,
-                    auto_refill_amount=auto_refill_amount,
-                )
-                session.add(agent_wallet)
-                # Persist new wallet before ledger rows that FK to it.
-                await session.flush()
-
-                # Ledger entries
-                session.add(
-                    LedgerEntryModel(
-                        entry_id=str(uuid.uuid4()),
-                        wallet_id=sponsor_wallet_id,
-                        action=LedgerAction.TRANSFER.value,
-                        amount=-budget_credits,
-                        balance_after=sponsor.balance,
-                        description=(
-                            f"Provision agent wallet {agent_wallet_id} for {agent_id}"
-                        ),
-                    )
-                )
-                session.add(
-                    LedgerEntryModel(
-                        entry_id=str(uuid.uuid4()),
-                        wallet_id=agent_wallet_id,
-                        action=LedgerAction.TRANSFER.value,
-                        amount=budget_credits,
-                        balance_after=budget_credits,
-                        description=f"Provisioned from sponsor {sponsor_wallet_id}",
-                    )
-                )
-
             await session.commit()
             logger.info(
-                f"Created agent wallet {agent_wallet_id} with {budget_credits} credits"
+                f"Created agent wallet {result.wallet_id} with {budget_credits} credits"
             )
-            return wallet_model_to_response(agent_wallet)
+            return result
+
+    async def _create_agent_wallet_in(
+        self,
+        session: AsyncSession,
+        sponsor_wallet_id: str,
+        agent_id: str,
+        budget_credits: Decimal,
+        daily_limit: Decimal | None,
+        auto_refill: bool,
+        auto_refill_threshold: Decimal,
+        auto_refill_amount: Decimal,
+    ) -> WalletResponse:
+        """Core agent-provisioning logic against an already-open session.
+
+        No BEGIN/COMMIT here — the caller's transaction owns those.
+        """
+        # Lock sponsor wallet for update
+        result = await session.execute(
+            select(WalletModel)
+            .where(
+                cast(
+                    ColumnElement[bool],
+                    WalletModel.wallet_id == sponsor_wallet_id,
+                )
+            )
+            .with_for_update()
+        )
+        sponsor = result.scalar_one_or_none()
+
+        if not sponsor:
+            raise self._wallet_not_found_error(sponsor_wallet_id)
+        if sponsor.wallet_type != WalletType.SPONSOR.value:
+            raise ValueError(
+                "Can only provision agent wallets from sponsor wallets"
+            )
+        if sponsor.status not in SPENDABLE_WALLET_STATUSES:
+            raise ValueError(
+                f"Sponsor wallet is {sponsor.status} and cannot provision "
+                "agent wallets"
+            )
+        # Deduct from sponsor. The balance and status checks above are
+        # a fast path; the guarded UPDATE is what makes them hold, so
+        # two concurrent provisions cannot hand out the same credits
+        # and a freeze landing in between is not outrun.
+        if not await self._apply_balance_delta(
+            session,
+            sponsor,
+            balance_delta=-budget_credits,
+            lifetime_debits_delta=budget_credits,
+            require_balance=budget_credits,
+            require_spendable=True,
+        ):
+            if sponsor.status not in SPENDABLE_WALLET_STATUSES:
+                raise ValueError(
+                    f"Sponsor wallet is {sponsor.status} and cannot "
+                    "provision agent wallets"
+                )
+            raise self._insufficient_funds_error(
+                sponsor_wallet_id,
+                sponsor.balance,
+                budget_credits,
+            )
+
+        # Create agent wallet
+        agent_wallet_id = f"agt-{uuid.uuid4().hex[:12]}"
+        agent_wallet = WalletModel(
+            wallet_id=agent_wallet_id,
+            wallet_type=WalletType.AGENT.value,
+            owner_name=f"Agent: {agent_id}",
+            balance=budget_credits,
+            lifetime_credits=budget_credits,
+            parent_wallet_id=sponsor_wallet_id,
+            agent_id=agent_id,
+            daily_limit=daily_limit,
+            auto_refill=auto_refill,
+            auto_refill_threshold=auto_refill_threshold,
+            auto_refill_amount=auto_refill_amount,
+        )
+        session.add(agent_wallet)
+        # Persist new wallet before ledger rows that FK to it.
+        await session.flush()
+
+        # Ledger entries
+        session.add(
+            LedgerEntryModel(
+                entry_id=str(uuid.uuid4()),
+                wallet_id=sponsor_wallet_id,
+                action=LedgerAction.TRANSFER.value,
+                amount=-budget_credits,
+                balance_after=sponsor.balance,
+                description=(
+                    f"Provision agent wallet {agent_wallet_id} for {agent_id}"
+                ),
+            )
+        )
+        session.add(
+            LedgerEntryModel(
+                entry_id=str(uuid.uuid4()),
+                wallet_id=agent_wallet_id,
+                action=LedgerAction.TRANSFER.value,
+                amount=budget_credits,
+                balance_after=budget_credits,
+                description=f"Provisioned from sponsor {sponsor_wallet_id}",
+            )
+        )
+
+        return wallet_model_to_response(agent_wallet)
 
     # --- Child Wallet Management (Swarm Delegation) ---
 
