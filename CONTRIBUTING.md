@@ -113,12 +113,20 @@ Interactive OpenAPI docs are then at `http://localhost:8000/docs`. Do not reuse
 these local secrets anywhere shared.
 
 `VALID_API_KEYS` holds bootstrap **operator** credentials, not agent runtime
-keys — there is no public self-serve key mint. For a governed non-admin caller
-against a local instance, mint your own wallet-scoped key: set
-`ENABLE_DEV_KEY_SELF_PROVISION=true` and call
-`POST /v1/dev-keys/self-provision`, or use static `amw_dev_` keys from
-`python scripts/generate_static_dev_keys.py`. Both surfaces are refused at boot
-by production-like deployments; details in
+keys. Two local-only credential surfaces exist, and they are **not**
+interchangeable:
+
+- **Wallet-scoped, non-admin.** Set `ENABLE_DEV_KEY_SELF_PROVISION=true` and
+  call `POST /v1/dev-keys/self-provision`. This is the credential class that
+  exercises the real permit → invoke → receipt loop as a governed non-admin
+  caller, and the one to reach for by default.
+- **Static `amw_dev_` keys** from `python scripts/generate_static_dev_keys.py`
+  authenticate as **bootstrap admin** (`is_bootstrap_admin=True`), never
+  wallet-scoped. They are for admin-shaped local testing and training material
+  needing a credential that never rotates — they do not exercise wallet scoping
+  and must not stand in for a governed caller.
+
+Both surfaces are refused at boot by production-like deployments; details in
 [`docs/static-dev-api-keys.md`](docs/static-dev-api-keys.md).
 
 ### Dependencies

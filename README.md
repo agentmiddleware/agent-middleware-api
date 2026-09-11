@@ -19,9 +19,11 @@ permit → execute → receipt
 A scoped, signed permit says what the agent may do and what it may spend. One
 accepted idempotency key buys at most one dispatch to the configured upstream
 tool and at most one wallet debit. A replay returns the original result and
-receipt; a changed payload under the same key fails closed. Every outcome —
-success, denial, failure, or genuine ambiguity — is an Ed25519-signed receipt
-you can verify offline.
+receipt; a changed payload under the same key fails closed with an error and no
+new receipt. Once a call establishes a valid permit and an executable tool,
+every terminal outcome — success, denial, failure, or genuine ambiguity — is an
+Ed25519-signed receipt you can verify offline. Requests rejected before that
+point can terminate without one.
 
 This is **not a full agent middleware platform**, a payment network, an IAM
 replacement, or a compliance platform. It is a transaction control plane for
@@ -113,8 +115,9 @@ invariant it asserts — and to what it does not prove.
 - **Not universal exactly-once.** Gateway replay safety makes the *remote* side
   effect exactly once only if the upstream tool also honors the forwarded
   idempotency key.
-- **Not proof of downstream effect.** A dispatch claim records that the gateway
-  sent; it never proves the tool acted.
+- **Not proof of downstream effect.** The dispatch claim is committed *before*
+  the network send, so it records the authority to send — not that a send
+  happened, and never that the tool acted.
 - **Not settlement or compliance.** An internal credit ledger, not merchant
   settlement, dispute handling, or a certified compliance record.
 - **Not an IAM replacement.** Wallet isolation is application-layer
