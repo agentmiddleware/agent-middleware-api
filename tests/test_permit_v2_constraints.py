@@ -412,8 +412,12 @@ async def test_aggregate_value_cap_receipt_history_floors_concurrent_reservation
     floor must be part of the guarded predicate, not a separate read.
 
     Setup: cap 5, one receipted charge of 2 with ``spent_credits`` back at 0.
-    Remaining authority is 3, so of six concurrent reservations of 2 exactly
-    one may be admitted.
+    Remaining authority is ``max(spent, receipt_total)``, so of six
+    concurrent reservations of 2 the guard admits at most two and never
+    lets ``spent_credits`` pass the cap. A task that snapshots the floor
+    while ``spent_credits`` is still 0 can admit only one; a task that
+    reads after that commit sees the floor already covered and may admit a
+    second reservation that still fits under the cap.
     """
     import asyncio
 
@@ -473,7 +477,9 @@ async def test_aggregate_value_cap_receipt_history_floors_concurrent_reservation
     results = await asyncio.gather(*(reserve_once() for _ in range(6)))
     allowed = [r for r in results if r.allowed]
     denied = [r for r in results if not r.allowed]
-    assert len(allowed) == 1  # floor((5 - 2) / 2)
+    # The guard bounds cumulative authority, not one interleaving: a task
+    # that reads after an earlier commit sees a smaller receipt floor.
+    assert 1 <= len(allowed) <= 2
     assert all(r.reason == "permit_aggregate_value_cap_exceeded" for r in denied)
     for r in denied:
         assert r.details is not None
@@ -483,7 +489,83 @@ async def test_aggregate_value_cap_receipt_history_floors_concurrent_reservation
     async with factory() as session:
         model = await session.get(PermitModel, permit.permit_id)
         assert model is not None
-        assert model.spent_credits == Decimal("2")
+        assert model.spent_credits == Decimal("2") * len(allowed)
+        # Cumulative authority never exceeds the cap.
+        assert max(model.spent_credits, Decimal("2")) <= Decimal("5")
+
+
+@pytest.mark.anyio
+async def test_aggregate_value_cap_receipt_history_floor_then_sequential_reservations(
+    client, clean_database
+):
+    """After the receipt floor is covered, spent_credits may rise to the cap.
+
+    The floor is ``max(spent_credits, receipt_total)``, not receipt plus
+    spent: once a new reservation has caught spent up to the receipt
+    total, further reservations are bounded by the cap against spent
+    alone. This is the serialization a PostgreSQL row lock produces, and
+    it must not be confused with the happy path where a settled receipt is
+    still reflected in ``spent_credits`` (that path is
+    ``test_aggregate_value_cap_denies_over_total``).
+    """
+    from app.services.receipts import get_receipt_service
+
+    provisioned = await provision_agent_wallet(client)
+    wallet_id = provisioned["agent_wallet_id"]
+    key_id = provisioned["key_id"]
+    tool_name = "v2-test-agg-floor-seq"
+    service = get_permit_service()
+    permit = await service.create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=wallet_id,
+            subject_wallet_id=wallet_id,
+            subject_key_id=key_id,
+            allowed_tools=[tool_name],
+            scopes=[f"tool:{tool_name}:invoke", "billing:charge"],
+            max_credits=Decimal("100"),
+            aggregate_value_cap=Decimal("5"),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+
+    await service.reserve_budget(permit.permit_id, Decimal("2"))
+    await get_receipt_service().create_receipt(
+        permit_id=permit.permit_id,
+        wallet_id=wallet_id,
+        key_id=key_id,
+        tool=tool_name,
+        request_payload={"input": "history"},
+        response_payload={"error": "refund_failed"},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("2"),
+        credits_charged=Decimal("2"),
+        outcome="failed_unrefunded",
+        audit_event_id=None,
+    )
+    await service.release_budget(permit.permit_id, Decimal("2"))
+
+    async def reserve_once():
+        return await service.authorize_and_reserve(
+            permit_id=permit.permit_id,
+            wallet_id=wallet_id,
+            tool_name=tool_name,
+            estimated_credits=Decimal("2"),
+            key_id=key_id,
+        )
+
+    first = await reserve_once()
+    assert first.allowed is True, first.reason
+    second = await reserve_once()
+    assert second.allowed is True, second.reason
+    third = await reserve_once()
+    assert third.allowed is False
+    assert third.reason == "permit_aggregate_value_cap_exceeded"
+
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert model.spent_credits == Decimal("4")
 
 
 @pytest.mark.anyio

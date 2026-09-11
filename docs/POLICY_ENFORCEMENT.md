@@ -94,12 +94,13 @@ capability bound to a wallet (and optionally an API key).
 
 The local per-tool call limit is enforced with a persisted reservation counter,
 including an optimistic compare-and-swap when the database does not honor the
-requested row lock. The aggregate cap is computed from **settled permit
-charges**, so concurrent in-flight reservations can pass the same historical
-read; it must not be presented as a no-overshoot concurrency boundary. The
-configured upstream path rejects permits carrying either constraint before any
-reservation, attempt, debit, or dispatch. `max_credits` remains the atomic
-authorization ceiling on both local and configured-upstream paths.
+requested row lock. The aggregate cap is enforced in the `WHERE` clause of the
+same guarded reservation `UPDATE`, against `spent_credits` floored to the
+permit's receipt total, so concurrent in-flight reservations cannot overshoot
+it on any storage engine. The configured upstream path rejects permits carrying
+either constraint before any reservation, attempt, debit, or dispatch.
+`max_credits` remains the atomic authorization ceiling on both local and
+configured-upstream paths.
 
 ---
 

@@ -921,10 +921,14 @@ class PermitService:
         the reconciler rebuilds ``spent_credits`` from a subset of outcomes.
         The cap is a bound on cumulative value, so that history must still
         count. Read inside the reservation transaction, the excess is folded
-        into the guarded UPDATE as a constant. A stale ``spent_credits`` read
-        (SQLite, where the row lock is a no-op) can only make the excess
-        larger, never smaller, so the predicate is conservative under
-        contention.
+        into the guarded UPDATE as a constant. A stale ``spent_credits``
+        read (SQLite, where the row lock is a no-op) can only make the
+        excess larger, never smaller, so the predicate is conservative
+        under contention from the same snapshot. A later transaction that
+        observes ``spent_credits`` already covering the receipt total computes
+        a zero floor and is then bounded by ``spent_credits + amount``
+        against the cap — the same arithmetic as a settled receipt that
+        was never released.
         """
         total_charged = await self._sum_permit_charges(
             model.permit_id, session=session
