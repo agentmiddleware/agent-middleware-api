@@ -566,6 +566,22 @@ class PermitService:
                             <= PermitModel.max_credits,
                         ),
                     ]
+                    # aggregate_value_cap is enforced against spent_credits in
+                    # the same guarded write, so an in-flight reservation that
+                    # has not yet produced a receipt already counts toward the
+                    # cap. The receipt-sum check in _validate_model_for_action
+                    # is the advisory read; this predicate is the authority,
+                    # and it is what holds under concurrency where the row
+                    # lock is a no-op.
+                    aggregate_cap = model.aggregate_value_cap
+                    if aggregate_cap is not None:
+                        where_conditions.append(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits + estimated_credits
+                                <= cast(Any, PermitModel.aggregate_value_cap),
+                            )
+                        )
 
                     if updated_counts_json is not None:
                         # Optimistic lock: only UPDATE if tool_call_counts_json
@@ -648,6 +664,25 @@ class PermitService:
                                         "calls_made": refreshed_count,
                                     },
                                 )
+                        # Classified before max_credits: a permit whose cap is
+                        # below its budget is out of delegated value, not out
+                        # of money, and the two reasons send the holder to
+                        # different remedies.
+                        if (
+                            aggregate_cap is not None
+                            and model.spent_credits + estimated_credits
+                            > aggregate_cap
+                        ):
+                            return PermitValidation(
+                                False,
+                                "permit_aggregate_value_cap_exceeded",
+                                model,
+                                self._aggregate_cap_details(
+                                    model,
+                                    estimated_credits=estimated_credits,
+                                    total_charged=None,
+                                ),
+                            )
                         return PermitValidation(
                             False,
                             "permit_budget_exceeded",
@@ -794,16 +829,25 @@ class PermitService:
                 model.permit_id,
                 session=session,
             )
-            if total_charged + estimated_credits > model.aggregate_value_cap:
+            # Reserved authority counts, not only receipted charges. A call
+            # that has reserved budget but not yet written its receipt is in
+            # flight against this cap; summing receipts alone let a second
+            # distinct-key call pass while the first had not finished. The
+            # receipt total is kept as a floor so a charge recorded outside
+            # the reservation path is never overlooked. This read is
+            # advisory; the guarded UPDATE in authorize_and_reserve is the
+            # authority for the same predicate.
+            reserved_total = max(total_charged, model.spent_credits)
+            if reserved_total + estimated_credits > model.aggregate_value_cap:
                 return PermitValidation(
                     False,
                     "permit_aggregate_value_cap_exceeded",
                     model,
-                    {
-                        "required_credits": _num(estimated_credits),
-                        "charged_to_date": _num(total_charged),
-                        "aggregate_value_cap": _num(model.aggregate_value_cap),
-                    },
+                    self._aggregate_cap_details(
+                        model,
+                        estimated_credits=estimated_credits,
+                        total_charged=total_charged,
+                    ),
                 )
 
         # 3. forbidden_fields
@@ -829,41 +873,28 @@ class PermitService:
             )
         return PermitValidation(True, None, model)
 
-    async def _count_tool_calls(
-        self,
-        permit_id: str,
-        tool_name: str,
-        session: Any | None = None,
-    ) -> int:
-        """Count successful receipts for (permit_id, tool_name).
+    @staticmethod
+    def _aggregate_cap_details(
+        model: PermitModel,
+        *,
+        estimated_credits: Decimal,
+        total_charged: Decimal | None,
+    ) -> dict[str, Any]:
+        """Denial details for ``permit_aggregate_value_cap_exceeded``.
 
-        When called with an existing session, reads within that transaction's
-        isolation level (e.g., to re-check a constraint before commit).
+        ``reserved_credits`` is the authority the cap is enforced against
+        (``spent_credits``: receipted charges plus in-flight reservations);
+        ``charged_to_date`` is the receipt total when the caller has it.
         """
-        if session:
-            result = await session.execute(
-                select(func.count())
-                .select_from(ReceiptModel)
-                .where(
-                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
-                    cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
-                    cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
-                )
-            )
-            return int(result.scalar() or 0)
-
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(func.count())
-                .select_from(ReceiptModel)
-                .where(
-                    cast(ColumnElement[bool], ReceiptModel.permit_id == permit_id),
-                    cast(ColumnElement[bool], ReceiptModel.tool == tool_name),
-                    cast(ColumnElement[bool], ReceiptModel.outcome == "success"),
-                )
-            )
-            return int(result.scalar() or 0)
+        assert model.aggregate_value_cap is not None
+        details: dict[str, Any] = {
+            "required_credits": _num(estimated_credits),
+            "reserved_credits": _num(model.spent_credits),
+            "aggregate_value_cap": _num(model.aggregate_value_cap),
+        }
+        if total_charged is not None:
+            details["charged_to_date"] = _num(total_charged)
+        return details
 
     async def _sum_permit_charges(
         self,

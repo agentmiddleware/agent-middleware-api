@@ -88,7 +88,7 @@ capability bound to a wallet (and optionally an API key).
 | Scopes include both `tool:{tool}:invoke` and `billing:charge` | `permit_scope_missing` |
 | `spent_credits + estimated ≤ max_credits` | `permit_budget_exceeded` |
 | Per-tool call cap `max_calls_per_tool` (v2) — atomically reserved on local governed tools; configured upstream calls fail closed pending an equivalent remote lifecycle | `permit_max_calls_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
-| Cumulative `aggregate_value_cap` (v2) — checked against settled receipts on the local path but not a concurrent-reservation boundary; configured upstream calls fail closed | `permit_aggregate_value_cap_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
+| Cumulative `aggregate_value_cap` (v2) — enforced on the local path as a predicate of the atomic reservation against `spent_credits`, so in-flight reservations count; configured upstream calls fail closed | `permit_aggregate_value_cap_exceeded` locally; `permit_constraint_unsupported_for_upstream` remotely |
 | `forbidden_fields` (v2): deep scan of tool arguments for banned keys | `permit_forbidden_field:{field}` |
 | Ed25519 signature over the permit verifies — checked **last** | `permit_signature_invalid` |
 
