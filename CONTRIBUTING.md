@@ -104,7 +104,7 @@ export TRUST_SIGNING_KEY_ID=local-dev-ed25519
 export TRUST_SIGNING_PRIVATE_KEY_B64='<saved-base64-seed>'
 
 uv run --with-requirements requirements.txt \
-  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+  uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Without `TRUST_SIGNING_PRIVATE_KEY_B64` the server refuses to start in default
