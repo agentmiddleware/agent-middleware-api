@@ -566,20 +566,26 @@ class PermitService:
                             <= PermitModel.max_credits,
                         ),
                     ]
-                    # aggregate_value_cap is enforced against spent_credits in
-                    # the same guarded write, so an in-flight reservation that
-                    # has not yet produced a receipt already counts toward the
-                    # cap. The receipt-sum check in _validate_model_for_action
-                    # is the advisory read; this predicate is the authority,
-                    # and it is what holds under concurrency where the row
-                    # lock is a no-op.
+                    # aggregate_value_cap is enforced in the same guarded write
+                    # against spent_credits plus any receipt history that
+                    # spent_credits no longer reflects, so an in-flight
+                    # reservation that has not yet produced a receipt already
+                    # counts toward the cap and a settled charge whose
+                    # reservation was released is never forgotten. The
+                    # receipt-sum check in _validate_model_for_action is the
+                    # advisory read; this predicate is the authority, and it
+                    # is what holds under concurrency where the row lock is a
+                    # no-op.
                     aggregate_cap = model.aggregate_value_cap
+                    floor_excess = Decimal("0")
                     if aggregate_cap is not None:
+                        floor_excess = await self._aggregate_cap_floor_excess(
+                            session, model
+                        )
                         where_conditions.append(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.spent_credits + estimated_credits
-                                <= cast(Any, PermitModel.aggregate_value_cap),
+                            self._aggregate_cap_predicate(
+                                floor_excess=floor_excess,
+                                amount=estimated_credits,
                             )
                         )
 
@@ -670,7 +676,7 @@ class PermitService:
                         # different remedies.
                         if (
                             aggregate_cap is not None
-                            and model.spent_credits + estimated_credits
+                            and model.spent_credits + floor_excess + estimated_credits
                             > aggregate_cap
                         ):
                             return PermitValidation(
@@ -681,6 +687,7 @@ class PermitService:
                                     model,
                                     estimated_credits=estimated_credits,
                                     total_charged=None,
+                                    floor_excess=floor_excess,
                                 ),
                             )
                         return PermitValidation(
@@ -833,12 +840,15 @@ class PermitService:
             # that has reserved budget but not yet written its receipt is in
             # flight against this cap; summing receipts alone let a second
             # distinct-key call pass while the first had not finished. The
-            # receipt total is kept as a floor so a charge recorded outside
-            # the reservation path is never overlooked. This read is
-            # advisory; the guarded UPDATE in authorize_and_reserve is the
-            # authority for the same predicate.
-            reserved_total = max(total_charged, model.spent_credits)
-            if reserved_total + estimated_credits > model.aggregate_value_cap:
+            # receipt total is kept as a floor so a settled charge whose
+            # reservation was later released is never overlooked. This read
+            # is advisory; the guarded UPDATE in authorize_and_reserve and
+            # reserve_budget is the authority for the same arithmetic.
+            floor_excess = max(total_charged - model.spent_credits, Decimal("0"))
+            if (
+                model.spent_credits + floor_excess + estimated_credits
+                > model.aggregate_value_cap
+            ):
                 return PermitValidation(
                     False,
                     "permit_aggregate_value_cap_exceeded",
@@ -847,6 +857,7 @@ class PermitService:
                         model,
                         estimated_credits=estimated_credits,
                         total_charged=total_charged,
+                        floor_excess=floor_excess,
                     ),
                 )
 
@@ -879,22 +890,59 @@ class PermitService:
         *,
         estimated_credits: Decimal,
         total_charged: Decimal | None,
+        floor_excess: Decimal = Decimal("0"),
     ) -> dict[str, Any]:
         """Denial details for ``permit_aggregate_value_cap_exceeded``.
 
-        ``reserved_credits`` is the authority the cap is enforced against
-        (``spent_credits``: receipted charges plus in-flight reservations);
+        ``reserved_credits`` is the authority the cap is enforced against:
+        ``spent_credits`` (receipted charges plus in-flight reservations)
+        raised to the receipt total wherever history exceeds it.
         ``charged_to_date`` is the receipt total when the caller has it.
         """
         assert model.aggregate_value_cap is not None
         details: dict[str, Any] = {
             "required_credits": _num(estimated_credits),
-            "reserved_credits": _num(model.spent_credits),
+            "reserved_credits": _num(model.spent_credits + floor_excess),
             "aggregate_value_cap": _num(model.aggregate_value_cap),
         }
         if total_charged is not None:
             details["charged_to_date"] = _num(total_charged)
         return details
+
+    async def _aggregate_cap_floor_excess(
+        self,
+        session: AsyncSession,
+        model: PermitModel,
+    ) -> Decimal:
+        """Receipt history that ``spent_credits`` no longer reflects.
+
+        ``spent_credits`` can fall below the receipt total: a charged call
+        whose reservation was later handed back still has its receipt, and
+        the reconciler rebuilds ``spent_credits`` from a subset of outcomes.
+        The cap is a bound on cumulative value, so that history must still
+        count. Read inside the reservation transaction, the excess is folded
+        into the guarded UPDATE as a constant. A stale ``spent_credits`` read
+        (SQLite, where the row lock is a no-op) can only make the excess
+        larger, never smaller, so the predicate is conservative under
+        contention.
+        """
+        total_charged = await self._sum_permit_charges(
+            model.permit_id, session=session
+        )
+        return max(total_charged - model.spent_credits, Decimal("0"))
+
+    @staticmethod
+    def _aggregate_cap_predicate(
+        *,
+        floor_excess: Decimal,
+        amount: Decimal,
+    ) -> ColumnElement[bool]:
+        """WHERE term enforcing ``aggregate_value_cap`` inside a reservation."""
+        return cast(
+            ColumnElement[bool],
+            PermitModel.spent_credits + floor_excess + amount
+            <= cast(Any, PermitModel.aggregate_value_cap),
+        )
 
     async def _sum_permit_charges(
         self,
@@ -928,6 +976,15 @@ class PermitService:
             async with factory() as session:
                 async with session.begin():
                     now = utc_now()
+                    # Locked read first: aggregate_value_cap needs the receipt
+                    # floor computed inside this transaction (see
+                    # _aggregate_cap_floor_excess). A missing permit is
+                    # classified here, before any write is attempted.
+                    model = await session.get(
+                        PermitModel, permit_id, with_for_update=True
+                    )
+                    if model is None:
+                        raise PermitError("permit_not_found")
                     # Atomic guarded reserve (see authorize_and_reserve): the cap
                     # *and the expiry* are enforced by the WHERE clause, not a
                     # read-then-write. The expiry term matters for the same
@@ -935,27 +992,43 @@ class PermitService:
                     # keeps status="active" in storage because the sweeper flips
                     # it lazily, so without this term a second reservation path
                     # still spends against a permit that has crossed expires_at.
+                    where_conditions: list[ColumnElement[bool]] = [
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.permit_id == permit_id,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.status == "active",
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.expires_at > now,
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            PermitModel.spent_credits + amount
+                            <= PermitModel.max_credits,
+                        ),
+                    ]
+                    # Same aggregate_value_cap authority as authorize_and_reserve:
+                    # this is the reservation the AWI governed path takes, and a
+                    # cap that only one reservation path honored would be no cap.
+                    aggregate_cap = model.aggregate_value_cap
+                    floor_excess = Decimal("0")
+                    if aggregate_cap is not None:
+                        floor_excess = await self._aggregate_cap_floor_excess(
+                            session, model
+                        )
+                        where_conditions.append(
+                            self._aggregate_cap_predicate(
+                                floor_excess=floor_excess,
+                                amount=amount,
+                            )
+                        )
                     reserved = await session.execute(
                         sa_update(PermitModel)
-                        .where(
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.permit_id == permit_id,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.status == "active",
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.expires_at > now,
-                            ),
-                            cast(
-                                ColumnElement[bool],
-                                PermitModel.spent_credits + amount
-                                <= PermitModel.max_credits,
-                            ),
-                        )
+                        .where(*where_conditions)
                         .values(
                             spent_credits=PermitModel.spent_credits + amount,
                             updated_at=now,
@@ -963,25 +1036,29 @@ class PermitService:
                         .execution_options(synchronize_session=False)
                     )
                     if (cast(Any, reserved).rowcount or 0) != 1:
-                        exists = await session.get(PermitModel, permit_id)
-                        if exists is None:
-                            raise PermitError("permit_not_found")
                         # Classify in the same order as authorize_and_reserve:
-                        # status, then expiry, then budget. Reporting an expired
-                        # or revoked permit as "out of money" sends the operator
-                        # to top up a permit that more money cannot revive.
-                        await session.refresh(exists)
-                        if exists.status != "active":
-                            raise PermitError(f"permit_{exists.status}")
-                        if to_naive_utc(exists.expires_at) <= now:
+                        # status, then expiry, then aggregate cap, then budget.
+                        # Reporting an expired or revoked permit as "out of
+                        # money" sends the operator to top up a permit that more
+                        # money cannot revive.
+                        await session.refresh(model)
+                        if model.status != "active":
+                            raise PermitError(f"permit_{model.status}")
+                        if to_naive_utc(model.expires_at) <= now:
                             raise PermitError("permit_expired")
+                        if (
+                            aggregate_cap is not None
+                            and model.spent_credits + floor_excess + amount
+                            > aggregate_cap
+                        ):
+                            raise PermitError("permit_aggregate_value_cap_exceeded")
                         raise PermitError("permit_budget_exceeded")
 
                     # Budget percentage alerts, recomputed from the committed
                     # ``spent_credits`` so a concurrent reservation cannot skew
                     # the threshold arithmetic.
-                    model = await session.get(PermitModel, permit_id)
-                    if model is not None and model.max_credits > 0:
+                    await session.refresh(model)
+                    if model.max_credits > 0:
                         pct = (model.spent_credits / model.max_credits) * 100
                         thresholds = [
                             (Decimal("100"), "critical", "permit_budget_exhausted"),
