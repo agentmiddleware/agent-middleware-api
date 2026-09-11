@@ -1,9 +1,10 @@
 # Security Review Kit — Rules of Engagement
 
 This kit is for an external reviewer who has agreed to attack this trust
-plane. The [security review path](../README.md#security-review-path) says
-what to read; this says what to attack, with which credentials, what already
-counts as known, and what turns an observation into a finding worth filing.
+plane. [SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md) and
+[TRUST_MODEL.md](../TRUST_MODEL.md) say what to read; this says what to
+attack, with which credentials, what already counts as known, and what turns
+an observation into a finding worth filing.
 
 This kit does not require an NDA for ordinary repository observations.
 Report security vulnerabilities privately under §6 and [SECURITY.md](../SECURITY.md).
