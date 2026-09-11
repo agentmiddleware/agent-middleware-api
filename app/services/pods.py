@@ -13,20 +13,29 @@ Every money movement here is an existing, tested operation
 new spend-authorization path, and no new key format. If those primitives are
 correct, a pod is correct.
 
-Atomicity, honestly scoped
----------------------------
-Each underlying call is its own DB transaction (that's how
-``AgentMoney``/``WalletEngine`` already work — see
-``app/services/wallet_engine.py``). This module does not add cross-call
-distributed-transaction machinery. Instead it fails *before* creating
-anything if the requested member budgets cannot possibly succeed (over-
-allocation against the pod total), which is the failure mode a caller will
-actually hit. A failure *during* member provisioning (e.g. a transient DB
-error after member 1 of 3 succeeded) leaves a partial pod: the sponsor
-wallet and any already-created members are real and spendable, and the
-error response names which members were completed so a caller can inspect
-or extend the pod rather than silently losing state. This is a documented
-limitation, not a claim of full atomicity — see docs/pods.md.
+Atomicity: one real database transaction, not a saga
+-------------------------------------------------------
+Pod creation runs as a single database transaction: the sponsor wallet,
+every member's agent wallet, and every member's API key are all written
+through the same open ``AsyncSession``, which this module opens and
+commits exactly once. ``WalletEngine.create_sponsor_wallet``,
+``WalletEngine.create_agent_wallet``, and ``APIKeyService.create_key`` each
+accept an optional ``session`` parameter for exactly this: when given, they
+add/flush against it and never begin or commit it themselves, so the
+caller's transaction is the only one that decides commit vs. rollback (see
+each method's docstring in ``app/services/wallet_engine.py`` and
+``app/services/api_key_service.py``). If any member fails partway — a
+transient DB error, an unexpected insufficient-funds race, anything — the
+``async with session.begin():`` block rolls back automatically and nothing
+from this call persists: no sponsor wallet, no member wallets, no keys.
+There is no partial pod to report or recover from. The pre-flight budget
+check (over-allocation against the pod total) still runs first, purely so
+the common mistake gets a clean 422 instead of a rollback.
+
+This is not a new distributed-transaction primitive: it is one ordinary
+transaction spanning calls that were already written to support being
+composed this way. Every write inside it is still, individually, the exact
+same tested code path standalone callers use.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
+from ..db.database import get_session_factory
 from .agent_money import AgentMoney, WalletNotFoundError, get_agent_money
 from .api_key_service import APIKeyService, get_api_key_service
 
@@ -54,24 +64,23 @@ class PodBudgetError(PodError):
     """Requested member budgets cannot fit inside the pod's total budget."""
 
 
-class PodPartiallyProvisionedError(PodError):
-    """A member failed mid-provisioning; earlier members were already created."""
+class PodProvisioningFailedError(PodError):
+    """The pod transaction rolled back; nothing from this call was created.
 
-    def __init__(
-        self,
-        pod_id: str,
-        completed_agent_ids: list[str],
-        failed_agent_id: str,
-        original_error: Exception,
-    ):
-        self.pod_id = pod_id
-        self.completed_agent_ids = completed_agent_ids
+    Because create_pod runs as one database transaction, there is no
+    partial-pod case to describe: either every member was provisioned, or
+    (on any error) the whole transaction rolled back and no sponsor wallet,
+    member wallet, or key exists from this call. This wraps whatever the
+    underlying failure was, for a clean, single error surface to the caller.
+    """
+
+    def __init__(self, failed_agent_id: str | None, original_error: Exception):
         self.failed_agent_id = failed_agent_id
         self.original_error = original_error
+        where = f" while provisioning {failed_agent_id!r}" if failed_agent_id else ""
         super().__init__(
-            f"Pod {pod_id} partially provisioned: "
-            f"{len(completed_agent_ids)} member(s) succeeded before "
-            f"{failed_agent_id!r} failed ({original_error})."
+            f"Pod creation failed{where} and was rolled back in full: "
+            f"{original_error}"
         )
 
 
@@ -167,47 +176,60 @@ class PodService:
         budget_credits: Decimal,
         members: list[PodMemberSpec],
     ) -> ProvisionedPod:
+        """Provision a pod as one atomic transaction.
+
+        Either every member's wallet and key gets created, or (on any
+        failure) the whole transaction rolls back and nothing — not the
+        sponsor wallet, not any member — persists. See the module docstring
+        for how the session is shared across the underlying calls.
+        """
         member_budgets = _resolve_member_budgets(budget_credits, members)
 
-        sponsor = await self._money.create_sponsor_wallet(
-            sponsor_name=f"pod:{pod_name}",
-            email=f"pod+{pod_name}@pods.local",
-            initial_credits=budget_credits,
-            require_kyc=False,
-            metadata={"kind": POD_METADATA_KIND, "pod_name": pod_name},
-        )
-
-        provisioned: list[ProvisionedMember] = []
-        for member, member_budget in zip(members, member_budgets):
-            agent_id = member.agent_id or f"pod-member-{len(provisioned)}"
+        agent_id_in_flight: str | None = None
+        session_factory = get_session_factory()
+        async with session_factory() as session:
             try:
-                agent_wallet = await self._money.create_agent_wallet(
-                    sponsor_wallet_id=sponsor.wallet_id,
-                    agent_id=agent_id,
-                    budget_credits=member_budget,
-                )
-                key = await self._keys.create_key(
-                    wallet_id=agent_wallet.wallet_id,
-                    key_name=member.key_name,
-                )
-            except Exception as exc:  # noqa: BLE001 - re-raised typed, with context
-                raise PodPartiallyProvisionedError(
-                    pod_id=sponsor.wallet_id,
-                    completed_agent_ids=[m.agent_id for m in provisioned],
-                    failed_agent_id=agent_id,
-                    original_error=exc,
-                ) from exc
+                async with session.begin():
+                    sponsor = await self._money.create_sponsor_wallet(
+                        sponsor_name=f"pod:{pod_name}",
+                        email=f"pod+{pod_name}@pods.local",
+                        initial_credits=budget_credits,
+                        require_kyc=False,
+                        metadata={"kind": POD_METADATA_KIND, "pod_name": pod_name},
+                        session=session,
+                    )
 
-            provisioned.append(
-                ProvisionedMember(
-                    agent_id=agent_id,
-                    wallet_id=agent_wallet.wallet_id,
-                    budget_credits=member_budget,
-                    key_id=key["key_id"],
-                    key_prefix=key["key_prefix"],
-                    api_key=key["api_key"],
-                )
-            )
+                    provisioned: list[ProvisionedMember] = []
+                    for member, member_budget in zip(members, member_budgets):
+                        agent_id_in_flight = (
+                            member.agent_id or f"pod-member-{len(provisioned)}"
+                        )
+                        agent_wallet = await self._money.create_agent_wallet(
+                            sponsor_wallet_id=sponsor.wallet_id,
+                            agent_id=agent_id_in_flight,
+                            budget_credits=member_budget,
+                            session=session,
+                        )
+                        key = await self._keys.create_key(
+                            wallet_id=agent_wallet.wallet_id,
+                            key_name=member.key_name,
+                            session=session,
+                        )
+                        provisioned.append(
+                            ProvisionedMember(
+                                agent_id=agent_id_in_flight,
+                                wallet_id=agent_wallet.wallet_id,
+                                budget_credits=member_budget,
+                                key_id=key["key_id"],
+                                key_prefix=key["key_prefix"],
+                                api_key=key["api_key"],
+                            )
+                        )
+            except Exception as exc:  # noqa: BLE001 - re-raised typed, with context
+                # `async with session.begin():` already rolled back on this
+                # exception: no sponsor wallet, member wallet, or key from
+                # this call persisted anywhere.
+                raise PodProvisioningFailedError(agent_id_in_flight, exc) from exc
 
         return ProvisionedPod(
             pod_id=sponsor.wallet_id,
