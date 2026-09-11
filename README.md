@@ -21,9 +21,10 @@ accepted idempotency key buys at most one dispatch to the configured upstream
 tool and at most one wallet debit. A replay returns the original result and
 receipt; a changed payload under the same key fails closed with an error and no
 new receipt. Once a call establishes a valid permit and an executable tool,
-every terminal outcome — success, denial, failure, or genuine ambiguity — is an
-Ed25519-signed receipt you can verify offline. Requests rejected before that
-point can terminate without one.
+terminal outcomes on that path — success, denial, failure, or genuine
+ambiguity — are Ed25519-signed receipts you can verify offline. Requests
+rejected before that point (`permit_required`, `permit_not_found`, unknown
+tool) can terminate without one.
 
 This is **not a full agent middleware platform**, a payment network, an IAM
 replacement, or a compliance platform. It is a transaction control plane for
@@ -101,9 +102,9 @@ this server.
 |---|---|---|
 | **Charge-once under retry** | Same idempotency key → same receipt, no second dispatch, no second debit. A changed payload under that key conflicts. | `tests/test_adversarial_five_claims.py` |
 | **Budget containment** | A permit's `max_credits` is reserved by one atomic guarded `UPDATE`; concurrent invocations cannot over-spend it, including on SQLite. | `tests/test_permits.py`, `postgres_permit_concurrency` CI job |
-| **Interrupted-call accounting** | One persisted chain links idempotency record, reservation, debit, dispatch attempt, receipt, and audit event. Ambiguity becomes a receipted state, not a silent retry. | [docs/failure-semantics.md](docs/failure-semantics.md) |
+| **Interrupted-call accounting** | For the configured upstream tool, one persisted chain links the idempotency record, reservation, debit, dispatch attempt, receipt, and audit event. Ambiguity after the send claim is receipted `delivery_uncertain`, never silently redispatched. Local governed tools have no dispatch state machine and fail closed into manual review. | [docs/failure-semantics.md](docs/failure-semantics.md) |
 | **Offline-verifiable receipts** | Ed25519-signed; verifiable with no credentials and no network access to the issuer, using the SDK verifier or any JOSE tooling. | `GET /v1/receipts/{id}/portable`, `/.well-known/jwks.json` |
-| **Authority before money** | Out-of-scope, unpermitted, expired, revoked, or tampered permits are denied with a reason code *before* any charge — and the refusal is itself a signed receipt. | `tests/test_adversarial_five_claims.py` |
+| **Authority before money** | Out-of-scope, expired, revoked, or tampered permits are denied with a reason code *before* any charge. When a valid permit was present, that refusal is itself a signed receipt. Unpermitted and unknown-tool calls fail closed without one. | `tests/test_adversarial_five_claims.py` |
 
 CI runs the full release gate as one required check (`trust_release_gate`), so
 these claims cannot regress into `main` unproven.
