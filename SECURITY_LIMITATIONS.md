@@ -41,6 +41,15 @@ Keep these out of the wedge until a design partner requires them:
   arrive over TLS from the same origin being audited, so a compromised origin
   can serve a key set that validates forged receipts. Out-of-band key pinning
   is not implemented.
+- Wrap-and-anchor evidence is not implemented. The intended later
+  composition for the two limits above is: wrap today's receipt claims as
+  an in-toto/DSSE predicate, sign under a Sigstore or SPIFFE gateway
+  identity, and submit the statement hash to Rekor or a SCITT log.
+  Unfreeze only when a named partner names issuer-origin key trust or
+  receipt equivocation as a pilot blocker. A log inclusion proof can show
+  a published receipt was not equivocated; it still does not prove an
+  action did not occur, and it does not replace the ledger. See
+  [`WEDGE.md`](WEDGE.md) § What To Freeze.
 - Audit chains are wallet-scoped, but database administrators can still delete
   rows unless append-only storage or external anchoring is added.
 - Multi-protocol governed adapters beyond MCP are not implemented (MCP only).
