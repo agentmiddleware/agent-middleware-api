@@ -321,3 +321,12 @@ Ordered by how much each would strengthen the differentiator per unit of work.
 
 Items 4 and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a design partner
 requires them. They belong on a roadmap, not in product copy.
+
+If a partner unfreezes item 2 (out-of-band keys) or item 4 (external
+anchoring), the intended composition is wrap-and-anchor: existing receipt
+claims as an in-toto/DSSE predicate, signed under a gateway identity
+(Sigstore or SPIFFE), with the statement hash submitted to Rekor or a
+SCITT transparency service. Unfreeze only when that partner cannot trust
+`/.well-known/trust-keys.json` on this origin, or needs non-equivocation of
+issued receipts. Inclusion proofs address equivocation, not completeness.
+Do not treat the log as the ledger.

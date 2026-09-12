@@ -221,6 +221,19 @@ agent rules.
 - KMS, settlement, transparency logs, and non-MCP adapters (see
   [`SECURITY_LIMITATIONS.md`](SECURITY_LIMITATIONS.md)).
 
+Wrap-and-anchor evidence is frozen with that transparency-log line. The
+intended later slice — if a named partner requires it — wraps the existing
+receipt claims as an in-toto/DSSE predicate, signs under a Sigstore or
+SPIFFE **gateway** identity (not the agent wallet), and appends the
+statement hash to Rekor or a SCITT transparency service. Unfreeze only when
+that partner cannot trust `/.well-known/trust-keys.json` on this origin, or
+needs Alice and Bob to see the same receipt for the same id. Inclusion
+proofs address equivocation, not completeness: a log does not prove an
+unpublished action did not occur, and it does not make a dishonest gateway
+honest. Lead with the debit; cite that stack as supporting evidence, never as
+the product. The ledger stays the source of truth; a log is not a second
+debit system.
+
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
 Deploy SOP (single path: `railway up` from this Dockerfile):
 [`docs/deploy-railway.md`](docs/deploy-railway.md).
