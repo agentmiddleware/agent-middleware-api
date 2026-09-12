@@ -91,7 +91,7 @@ async def create_pod(
         # Raised before create_pod opens its transaction, so nothing was
         # ever created — never wrapped in PodProvisioningFailedError.
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"error": "pod_budget_exceeded", "message": str(exc)},
         ) from exc
     except PodProvisioningFailedError as exc:
