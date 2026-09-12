@@ -148,6 +148,77 @@ Operators who put a credentialed browser app in front of this API must set
 `CORS_ORIGINS` to an explicit comma-separated origin list. Startup logs
 `cors_wildcard_active` whenever the wildcard posture is in effect.
 
+## Rate Limit Posture
+
+The application-layer limiter is present on auth-gated routes. A burst of
+a few dozen requests drawing zero `429`s is the intended threshold, not a
+missing control.
+
+- Default and production value: `RATE_LIMIT_PER_MINUTE=120`, 60-second window,
+  no burst allowance. The 121st counted request in that window is the first
+  that returns `429` with `Retry-After`.
+- **Window accounting differs by backend, so the published contract states the
+  budget and the window length, not an algorithm.** The shared Redis limiter
+  counts fixed 60-second buckets, so a caller straddling a bucket boundary can
+  land up to twice the budget inside one arbitrary 60-second span. The
+  in-memory fallback counts a rolling 60 seconds and is strictly tighter; it is
+  never reached in a production-like environment, which fails closed instead.
+  `rate_limits.window_accounting` in discovery names this difference.
+- **Authenticated:** one bucket per `X-API-Key` value.
+- **No key:** one shared `anonymous` bucket for the whole deployment.
+- **Rejected credentials:** the per-key bucket is selected from a
+  caller-supplied header before the key has been verified, so every request
+  whose credentials the app refuses is additionally charged to one shared
+  per-client bucket at ten times the per-key limit. Rotating a fresh invalid
+  `X-API-Key` per request therefore buys no extra budget; the client is bounded
+  by that bucket no matter how many key values it invents.
+  - **Refused means `401` *or* `403`.** An unknown but well-formed key — what
+    a rotating caller actually sends — is answered `403 invalid_api_key`, not
+    `401`, so counting only `401`s would miss the vector entirely.
+  - **A denial is not a refusal.** An authenticated caller denied on scope
+    (`wallet_access_denied`, `insufficient_scope`, an IGA decision) is
+    ordinary governed-loop traffic and is never charged here. The two are told
+    apart by an internal marker the auth layer sets, stripped before the
+    response leaves the innermost middleware.
+  - **The budget is reserved before the request runs**, and handed back unless
+    the credentials were refused. Reading the bucket and charging it after the
+    response would let every request already in flight pass the same read, so
+    the ceiling would only bound callers who arrive one request at a time.
+  - A request whose credentials the app accepts leaves the bucket exactly as
+    it found it. Client identity is the ingress peer address (Railway's
+    `X-Real-IP` only where the platform marker is present, per the public-MCP
+    rule above), so callers sharing one egress address share that bucket — and
+    callers spread across many source addresses get one such bucket each. A
+    distributed flood is still the edge's job.
+- **Counted responses** — including `401`s — carry `X-RateLimit-Limit`,
+  `X-RateLimit-Remaining`, and `X-RateLimit-Reset`. Remaining dropping from
+  119 toward 80 with no `429` means the budget has not been reached.
+- **Exempt paths** (no count, no `429`): `/`, `/health`, `/docs`, `/redoc`,
+  `/openapi.json`, `/.well-known/agent.json`, `/llms.txt`, and the served
+  markdown docs. `/health/dependencies` is counted.
+- This is a request-count ceiling, not a connection or bandwidth limit. An
+  edge request-count/connection cap remains the operator's job, as noted
+  under inbound body bounding above.
+- Redis outage in production-like environments fails closed (`503`), never
+  silently wider than declared.
+
+`GET /` and `GET /v1/discover` both publish this as `rate_limits`.
+
+## Response Hardening Headers
+
+Every response gets `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, and a
+`Content-Security-Policy`. JSON is `default-src 'none'`. First-party HTML
+(dashboard, approval cards) allows inline CSS and no scripts. `/docs` and
+`/redoc` additionally allow jsDelivr plus an inline boot script, a `blob:` Web
+Worker, and Google Fonts, because that is how FastAPI's stock Swagger UI /
+ReDoc load. HSTS (`max-age=63072000;
+includeSubDomains`, no `preload`) is emitted only on requests that arrived
+over TLS. Tenant-sensitive paths (`/v1/*` except `/v1/discover`, `/mcp`
+except the public tools manifest) send `Cache-Control: no-store`. Public
+discovery is left cacheable so agents can keep OpenAPI and well-known
+documents.
+
 ## One Auth Story, One Invoke Story (Dormant Surfaces)
 
 The wedge contract is **send the API key** (`X-API-Key`). Surfaces that told
