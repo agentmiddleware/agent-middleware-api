@@ -70,17 +70,33 @@ For the live engagement checklist that replaces `trust-plane-echo` /
 ### Rate limits
 
 The deployed limit is `RATE_LIMIT_PER_MINUTE` (default and production value:
-120). `RateLimitMiddleware` counts it in a fixed 60-second Redis window and
-returns `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
-on every counted response; the 121st request in a window gets `429`.
+120). `RateLimitMiddleware` counts it in a 60-second window and returns
+`X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
+on every counted response, including `401`s; the 121st request in a window
+gets `429`. A burst of a few dozen requests will not `429` — that is the
+120/min ceiling working as designed, not a missing limiter. Look at
+`X-RateLimit-Remaining` to see the budget without waiting for `429`.
 
 - **Authenticated requests:** one bucket per `X-API-Key` value. Two agents
   sharing one key share the 120; two keys get 120 each.
 - **Requests without a key:** one `anonymous` bucket shared by every
   unauthenticated caller of the deployment. `/health/dependencies` is counted
   here.
+- **Rejected credentials:** a request whose key the deployment refuses — a
+  `401`, or the `403 invalid_api_key` an unknown key gets — is also charged to
+  one shared per-client bucket at ten times the limit, because the per-key
+  bucket is chosen from a header before the key is verified. Sending a
+  different invalid `X-API-Key` on every request does not hand you a fresh
+  120. A key the deployment accepts never touches that bucket, and neither
+  does a permit denial: being refused on scope is normal governed traffic, not
+  a bad credential.
+- **Window accounting:** the shared Redis limiter counts fixed 60-second
+  buckets; the in-memory fallback (never used in a production-like
+  environment, which fails closed) counts a rolling 60 seconds. Budget and
+  window length are the contract — `rate_limits.window_accounting` in
+  discovery says which backend counts how.
 - **Exempt paths:** `/`, `/health`, `/.well-known/agent.json`, `/llms.txt`,
-  `/docs`, `/openapi.json`, and the served markdown docs.
+  `/docs`, `/redoc`, `/openapi.json`, and the served markdown docs.
 - **`POST /mcp/public` (when enabled):** per client IP at the same limit, plus
   a global cap of ten times the limit.
 - **No burst allowance and no per-key override.** Raising the limit for one

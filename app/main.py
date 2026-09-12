@@ -37,7 +37,7 @@ from .core.product_positioning import (
     POSITIONING_DESCRIPTION,
     POSITIONING_TAGLINE,
 )
-from .core.rate_limiter import RateLimitMiddleware
+from .core.rate_limiter import RateLimitMiddleware, rate_limit_discovery
 from .core.runtime_mode import get_simulation_modes
 from .middleware.head_method import HeadMethodMiddleware
 from .middleware.request_body_limit import RequestBodyLimitMiddleware
@@ -595,10 +595,10 @@ if "*" in cors_origins:
         "explicit list to change it (see SECURITY_LIMITATIONS.md)"
     )
 
-# Baseline response hardening (nosniff, framing, referrer, HSTS over TLS).
-# Registered near-last so it wraps almost everything: Starlette builds the
-# stack in reverse registration order, and stamping rate-limit 429s and CORS
-# preflights too is the point.
+# Baseline response hardening (nosniff, framing, referrer, CSP, no-store
+# on sensitive paths, HSTS over TLS). Registered near-last so it wraps
+# almost everything: Starlette builds the stack in reverse registration order,
+# and stamping rate-limit 429s and CORS preflights too is the point.
 app.add_middleware(SecurityHeadersMiddleware)
 
 # HEAD → GET translation, outermost. FastAPI's APIRoute does not auto-register
@@ -1090,14 +1090,7 @@ async def root(request: Request):
                 "Pass your API key in the X-API-Key header on every request."
             ),
         },
-        "rate_limits": {
-            "requests_per_minute": settings.RATE_LIMIT_PER_MINUTE,
-            "headers": [
-                "X-RateLimit-Limit",
-                "X-RateLimit-Remaining",
-                "X-RateLimit-Reset",
-            ],
-        },
+        "rate_limits": rate_limit_discovery(),
         "docs": {
             "openapi": "/openapi.json",
             "interactive": "/docs",

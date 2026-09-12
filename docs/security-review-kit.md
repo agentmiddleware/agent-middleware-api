@@ -105,6 +105,16 @@ the containment around one is a finding.**
   weakness reachable *only* behind those flags is a known-dormant surface; the
   same weakness reachable on a production-posture boot is a real finding,
   because it means the gate leaked.
+- Application-layer rate limiting is 120 requests per minute per API-key
+  value (shared `anonymous` bucket without a key). A burst of 40 will not
+  `429`. Counted responses, including `401`s, carry `X-RateLimit-*` headers.
+  Discovery, docs, and `/health` are exempt. Requests whose credentials are refused
+  (`401`, and the `403` an unknown key gets) are also charged to one shared
+  per-client bucket at ten times the limit, reserved before the request runs,
+  so neither rotating `X-API-Key` values nor concurrency mints fresh budgets.
+  Scope denials against a valid key are not charged there. Client identity is
+  an address, so a distributed flood and an edge connection limit are still
+  the operator's job.
 
 The full list is [SECURITY_LIMITATIONS.md](../SECURITY_LIMITATIONS.md), with
 the boundary itself in [TRUST_MODEL.md](../TRUST_MODEL.md) and

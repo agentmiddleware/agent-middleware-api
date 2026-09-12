@@ -87,6 +87,18 @@ class AuthContext:
         )
 
 
+# Internal marker on a response that failed *authentication* rather than
+# authorization. RateLimitMiddleware charges those to its shared
+# rejected-credential bucket and strips the header before the response leaves
+# the innermost middleware, so it is never a public surface. It exists because
+# an unknown-but-well-formed key is refused with 403, not 401, and the limiter
+# must not confuse that with an authenticated caller denied on scope
+# (wallet_access_denied, insufficient_scope), whose denials are ordinary
+# governed-loop traffic.
+CREDENTIAL_REJECTED_HEADER = "X-Credential-Rejected"
+_CREDENTIAL_REJECTED = {CREDENTIAL_REJECTED_HEADER: "1"}
+
+
 async def get_auth_context(
     api_key: str | None = Security(api_key_header),
     authorization: Annotated[str | None, Header()] = None,
@@ -232,6 +244,7 @@ async def get_auth_context(
                 "error": "invalid_api_key",
                 "message": "The provided API key is not authorized.",
             },
+            headers=dict(_CREDENTIAL_REJECTED),
         )
 
     if is_production_like_environment(settings.ENVIRONMENT):
@@ -241,6 +254,7 @@ async def get_auth_context(
                 "error": "invalid_api_key",
                 "message": "The provided API key is not authorized.",
             },
+            headers=dict(_CREDENTIAL_REJECTED),
         )
 
     return AuthContext(

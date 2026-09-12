@@ -11,6 +11,7 @@ from typing import Any, Optional
 from ..core.auth import verify_api_key
 from ..core.config import get_settings
 from ..core.product_positioning import POSITIONING_DESCRIPTION
+from ..core.rate_limiter import rate_limit_discovery
 from .well_known import get_agent_first_metadata
 
 router = APIRouter(
@@ -437,22 +438,8 @@ def _build_awi_endpoints() -> list[AWIEndpoint]:
 
 
 def _build_rate_limits() -> dict[str, Any]:
-    """Describe the limit ``RateLimitMiddleware`` actually enforces.
-
-    One fixed-window budget per minute, keyed by the ``X-API-Key`` header value.
-    Requests without a key share a single 'anonymous' bucket. There is no
-    burst allowance and no per-partner override; ``RATE_LIMIT_PER_MINUTE`` is
-    the only knob, so this payload is derived from it rather than hardcoded.
-    """
-    return {
-        "requests_per_minute": get_settings().RATE_LIMIT_PER_MINUTE,
-        "window_seconds": 60,
-        "scope": "per_api_key",
-        "unauthenticated_scope": "shared_anonymous_bucket",
-        "burst_allowance": 0,
-        "per_partner_override": False,
-        "headers": ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
-    }
+    """Describe the limit ``RateLimitMiddleware`` actually enforces."""
+    return rate_limit_discovery()
 
 
 def _build_pricing() -> list[PricingTier]:
