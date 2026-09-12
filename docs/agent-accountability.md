@@ -156,8 +156,8 @@ keep verifying. A verifier must not require optional fields it does not see.
   the key set through an independent channel, is the mitigation; this
   repository does not implement one. Use `--expect-issuer` to at least bind a
   bundle to the origin you meant to audit. The intended later wrap-and-anchor
-  composition (in-toto/DSSE + Sigstore/SPIFFE + Rekor or SCITT) stays frozen
-  until a named partner requires it; see [`WEDGE.md`](../WEDGE.md) § What To
+  composition stays frozen and is anchoring/publication, not a substitute
+  for pinning keys out of band; see [`WEDGE.md`](../WEDGE.md) § What To
   Freeze.
 
 See also [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md) and
