@@ -46,8 +46,12 @@ Keep these out of the wedge until a design partner requires them:
   an in-toto/DSSE predicate, sign under a Sigstore or SPIFFE gateway
   identity, and submit the statement hash to Rekor or a SCITT log.
   Unfreeze only when a named partner names issuer-origin key trust or
-  receipt equivocation as a pilot blocker. A log inclusion proof can show
-  a published receipt was not equivocated; it still does not prove an
+  independently timestamped publication of a receipt hash as a pilot
+  blocker. An inclusion proof shows that a particular statement is in a
+  particular log tree; it does not, by itself, prove the absence of a
+  conflicting receipt for the same id. Non-equivocation would still need
+  a registration policy, conflict monitoring, or log consistency/gossip,
+  none of which this freeze specifies. A log still does not prove an
   action did not occur, and it does not replace the ledger. See
   [`WEDGE.md`](WEDGE.md) § What To Freeze.
 - Audit chains are wallet-scoped, but database administrators can still delete

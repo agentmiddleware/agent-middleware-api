@@ -227,12 +227,16 @@ receipt claims as an in-toto/DSSE predicate, signs under a Sigstore or
 SPIFFE **gateway** identity (not the agent wallet), and appends the
 statement hash to Rekor or a SCITT transparency service. Unfreeze only when
 that partner cannot trust `/.well-known/trust-keys.json` on this origin, or
-needs Alice and Bob to see the same receipt for the same id. Inclusion
-proofs address equivocation, not completeness: a log does not prove an
-unpublished action did not occur, and it does not make a dishonest gateway
-honest. Lead with the debit; cite that stack as supporting evidence, never as
-the product. The ledger stays the source of truth; a log is not a second
-debit system.
+needs a receipt hash published with an independent timestamp that does not
+depend on this origin. An inclusion proof shows that a particular statement
+is in a particular log tree. It does not, by itself, stop two different
+receipts for the same id from both being logged, each with a valid
+inclusion proof. Non-equivocation would still need a registration policy
+(unique subject), conflict monitoring, or log consistency/gossip — none of
+which this freeze specifies. A log also does not prove an unpublished action
+did not occur, and it does not make a dishonest gateway honest. Lead with
+the debit; cite that stack as supporting evidence, never as the product.
+The ledger stays the source of truth; a log is not a second debit system.
 
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
 Deploy SOP (single path: `railway up` from this Dockerfile):

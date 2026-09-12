@@ -80,8 +80,9 @@ Verified from repo:
 - Use audit/evidence sources to justify signed receipts and hash-linked audit
   chains, while keeping regulated-compliance claims out of product copy.
 - Treat in-toto, Sigstore, SCITT, and Rekor as a later wrap-and-anchor
-  composition for key distribution and non-equivocation, not as the product
-  wedge. See [`WEDGE.md`](../WEDGE.md) § What To Freeze.
+  composition for key distribution and independently timestamped
+  publication of receipt hashes, not as the product wedge and not as a
+  claim of non-equivocation. See [`WEDGE.md`](../WEDGE.md) § What To Freeze.
 - Use threat-model sources to keep prompt injection, protocol exploit, replay,
   confused deputy, unsafe tool execution, and cross-tenant leakage in scope.
 - Use NIST as governance vocabulary, not as proof of certification or

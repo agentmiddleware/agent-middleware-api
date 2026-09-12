@@ -327,6 +327,9 @@ anchoring), the intended composition is wrap-and-anchor: existing receipt
 claims as an in-toto/DSSE predicate, signed under a gateway identity
 (Sigstore or SPIFFE), with the statement hash submitted to Rekor or a
 SCITT transparency service. Unfreeze only when that partner cannot trust
-`/.well-known/trust-keys.json` on this origin, or needs non-equivocation of
-issued receipts. Inclusion proofs address equivocation, not completeness.
-Do not treat the log as the ledger.
+`/.well-known/trust-keys.json` on this origin, or needs independently
+timestamped publication of a receipt hash. An inclusion proof is
+anchoring/publication evidence for one statement in one log tree. It
+does not close equivocation unless a registration policy, conflict monitor,
+or log consistency/gossip is also specified — this freeze names none of
+those. Do not treat the log as the ledger.
