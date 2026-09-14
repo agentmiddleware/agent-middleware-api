@@ -517,3 +517,35 @@ async def test_receipt_evidence_does_not_expose_cross_wallet_artifacts(
     assert checks["audit_event_linkage"]["reason"] == "audit_event_not_found"
     assert checks["ledger_linkage"]["status"] == "failed"
     assert checks["ledger_linkage"]["reason"] == "ledger_not_found"
+
+
+# Reading a receipt — and especially exporting its portable, offline-verifiable
+# bundle — is tenant data behind authentication. These read surfaces must fail
+# closed before any receipt lookup: the credential decides the status (missing
+# or malformed -> 401, well-formed but unknown -> 403), and an unknown receipt
+# id must never 404 for an anonymous caller, which would leak existence. See
+# app/core/auth.get_auth_context and app/routers/receipts.py.
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/v1/receipts/rcpt-does-not-exist",
+        "/v1/receipts/rcpt-does-not-exist/portable",
+        "/v1/receipts/rcpt-does-not-exist/evidence",
+    ),
+)
+@pytest.mark.parametrize(
+    "headers,expected_status",
+    (
+        ({}, 401),
+        ({"X-API-Key": "short"}, 401),
+        ({"X-API-Key": "not-a-real-key"}, 403),
+    ),
+)
+async def test_receipt_read_surfaces_require_authentication(
+    client, clean_database, path, headers, expected_status
+):
+    resp = await client.get(path, headers=headers)
+    assert resp.status_code == expected_status, resp.text
+    # Auth is enforced before the lookup: no existence disclosure to anon callers.
+    assert resp.status_code != 404, resp.text
