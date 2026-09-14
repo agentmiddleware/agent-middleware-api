@@ -270,3 +270,28 @@ async def test_evidence_bundle_denies_cross_wallet_access(client, clean_database
         headers=other_headers,
     )
     assert resp.status_code == 403
+
+
+# The evidence bundle is the buyer-facing artifact an auditor verifies, so its
+# read endpoint must fail closed for unauthenticated callers before any receipt
+# lookup. The credential decides the status, not whether the receipt exists: a
+# missing or malformed key is 401, a well-formed but unknown key is 403 — and an
+# unknown receipt id must not 404 for an anonymous caller (that would leak
+# existence). See app/core/auth.get_auth_context.
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "headers,expected_status",
+    (
+        ({}, 401),
+        ({"X-API-Key": "short"}, 401),
+        ({"X-API-Key": "not-a-real-key"}, 403),
+    ),
+)
+async def test_evidence_bundle_requires_authentication(
+    client, clean_database, headers, expected_status
+):
+    resp = await client.get(
+        "/v1/evidence/rcpt-does-not-exist", headers=headers
+    )
+    assert resp.status_code == expected_status, resp.text
+    assert resp.status_code != 404, resp.text
