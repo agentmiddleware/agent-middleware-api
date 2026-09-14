@@ -321,3 +321,18 @@ Ordered by how much each would strengthen the differentiator per unit of work.
 
 Items 4 and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a design partner
 requires them. They belong on a roadmap, not in product copy.
+
+If a partner unfreezes item 4 (external anchoring), the intended composition
+is wrap-and-anchor: existing receipt claims as an in-toto/DSSE predicate,
+with the statement hash submitted to Rekor or a SCITT transparency service.
+That is independently timestamped publication of one statement in one log
+tree. It is not item 2. Wrapping origin-signed claims under a Sigstore or
+SPIFFE identity does not provision independently trusted issuer keys; item 2
+still requires naming a trust root that is not this origin (Fulcio/TUF,
+pinned SPIFFE, or an out-of-band pin) and verifying the receipt against it.
+Unfreeze item 4 when a named partner needs that independent timestamp.
+Unfreeze item 2 only when that partner cannot trust this origin for keys and
+that key source is named. This freeze does not specify `receipt_id` as a
+log subject, conflict detection, or trusted-checkpoint consistency/witness
+evidence, so it does not claim non-equivocation. Do not treat the log as
+the ledger.
