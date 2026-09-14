@@ -387,3 +387,40 @@ async def test_rotated_metadata_preserves_historical_trust_artifact_verification
         assert statuses[rotated_key_id] == "active"
     finally:
         await service.rotate_active_key_metadata(original_key_id)
+
+
+# The signing-key metadata endpoints are the surface a verifier trusts to learn
+# which public key signed a receipt. They must fail closed for every
+# unauthenticated or unrecognized caller, before any key lookup runs. The
+# credential decides the status, never the target: a missing or malformed key is
+# 401, a well-formed but unknown key is 403 (see app/core/auth.get_auth_context).
+_UNAUTHORIZED_CREDENTIALS = (
+    ({}, 401),
+    ({"X-API-Key": "short"}, 401),
+    ({"X-API-Key": "not-a-real-key"}, 403),
+)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("headers,expected_status", _UNAUTHORIZED_CREDENTIALS)
+async def test_active_signing_key_requires_authentication(
+    client, clean_database, headers, expected_status
+):
+    resp = await client.get("/v1/signing-keys/active", headers=headers)
+    assert resp.status_code == expected_status, resp.text
+    # A refused caller learns nothing about the active key.
+    assert "public_key_b64" not in resp.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("headers,expected_status", _UNAUTHORIZED_CREDENTIALS)
+async def test_signing_key_by_id_requires_authentication(
+    client, clean_database, headers, expected_status
+):
+    # Auth is enforced before the key lookup: an unknown key_id with no valid
+    # credential is a credential failure (401/403), never a 404 that would
+    # confirm or deny the id's existence to an anonymous caller.
+    resp = await client.get(
+        "/v1/signing-keys/key-does-not-exist", headers=headers
+    )
+    assert resp.status_code == expected_status, resp.text
