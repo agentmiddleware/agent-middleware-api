@@ -5,7 +5,7 @@ any change to the field set, key ordering, Decimal/datetime normalization,
 or the payload_hash derivation changes what an offline verifier must
 reconstruct, and silently invalidates every receipt already issued.
 
-This test freezes four representative receipts to byte-exact canonical
+This test freezes five representative receipts to byte-exact canonical
 JSON, and freezes the Ed25519 signature over those bytes under a fixed
 test seed (Ed25519 is deterministic, so the signature is a second pin on
 the same bytes).
@@ -85,6 +85,16 @@ CASES = {
             approval_id="apr_golden_0001",
         ),
         True,
+    ),
+    # Same approval field on a linkage-stripped (legacy) signature. approval_id
+    # is not gated on include_linkage; a backfilled 023 receipt that later
+    # gained an idempotency row must still export the approval id.
+    "success_legacy_approval": (
+        _base_model(
+            receipt_id="rcpt_golden_0004",
+            approval_id="apr_golden_0001",
+        ),
+        False,
     ),
     # Signed denial with reason_code and permit-v2 constraints_evaluated.
     "denial_constraints": (
@@ -248,6 +258,7 @@ async def test_signing_input_for_model_uses_legacy_payload_when_current_fails(
         idempotency_record_id=idempotency_record_id,
         dispatch_attempt_id=None,
         request_hash=request_hash,
+        approval_id="apr_golden_legacy_0001",
     )
 
     signing_keys = get_signing_key_service()
@@ -291,4 +302,6 @@ async def test_signing_input_for_model_uses_legacy_payload_when_current_fails(
             ReceiptService._verification_payload(model, include_linkage=False)
         )
         assert signing_input == expected
-        assert "idempotency_record_id" not in json.loads(signing_input)
+        parsed = json.loads(signing_input)
+        assert "idempotency_record_id" not in parsed
+        assert parsed["approval_id"] == "apr_golden_legacy_0001"
