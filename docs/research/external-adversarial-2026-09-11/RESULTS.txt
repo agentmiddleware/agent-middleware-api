@@ -1,0 +1,300 @@
+EXTERNAL UNAUTHENTICATED PROBE RUN — RAW RESULTS
+Target: https://api.thisisatest.tech (v1.3.0, live production)
+Run timestamp: 2026-09-14T10:03:54Z (regeneration run; original run 2026-09-11/12, same harness)
+Posture: no credentials, external network position
+
+
+================================================================================================
+BATTERY 1 — BASELINE ADVERSARIAL
+================================================================================================
+noauth /v1/receipts/verify                            401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+noauth /v1/wallets                                    404  {"detail":"Not Found"}
+noauth /v1/charges                                    404  {"detail":"Not Found"}
+noauth /v1/agents                                     404  {"detail":"Not Found"}
+noauth /v1/permits                                    401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+noauth /v1/ledger                                     404  {"detail":"Not Found"}
+noauth /v1/admin                                      404  {"detail":"Not Found"}
+noauth /v1/keys                                       404  {"detail":"Not Found"}
+noauth /v1/mcp                                        404  {"detail":"Not Found"}
+noauth /admin                                         404  {"detail":"Not Found"}
+noauth /internal                                      404  {"detail":"Not Found"}
+noauth /debug                                         404  {"detail":"Not Found"}
+noauth /.env                                          404  {"detail":"Not Found"}
+badtoken 'garbage'                                    401  {"detail":{"error":"invalid_token","message":"invalid_token:
+badtoken 'sk_live_AAAA'                               401  {"detail":{"error":"invalid_token","message":"invalid_token:
+badtoken ''                                           401  {"detail":{"error":"invalid_token","message":"Authorization 
+badtoken 'Bearer'                                     401  {"detail":{"error":"invalid_token","message":"invalid_token:
+badtoken 'null'                                       401  {"detail":{"error":"invalid_token","message":"invalid_token:
+badtoken "' OR 1=1--"                                 401  {"detail":{"error":"invalid_token","message":"Authorization 
+deep-nest-500                                         422  {"detail":[{"type":"json_invalid","loc":["body",2501],"msg":
+injection-fields                                      401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+negative-amount                                       401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+overflow                                              401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+wrong-types                                           401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+empty-body                                            401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+not-json                                              422  {"detail":[{"type":"json_invalid","loc":["body",0],"msg":"JS
+------------------------------------------------------------------------------------------------
+26 experiments · 0 findings
+
+
+================================================================================================
+BATTERY 2 — SURFACE & TRANSPORT
+================================================================================================
+discover /openapi.json                                200  {"openapi":"3.1.0","info":{"title":"Agent Middleware API","d
+discover /docs                                        200  
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta name="v
+discover /redoc                                       200  
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <title>Agent 
+discover /.well-known/ai-plugin.json                  404  {"detail":"Not Found"}
+discover /.well-known/mcp                             404  {"detail":"Not Found"}
+discover /mcp                                         401  {"detail":{"error":"missing_credentials","message":"X-API-Ke
+discover /v1                                          404  {"detail":"Not Found"}
+method PUT                                            405  {"detail":"Method Not Allowed"}
+method DELETE                                         405  {"detail":"Method Not Allowed"}
+method PATCH                                          405  {"detail":"Method Not Allowed"}
+method OPTIONS                                        405  {"detail":"Method Not Allowed"}
+method TRACE                                          405  {"detail":"Method Not Allowed"}
+header strict-transport-security                  present  
+header x-content-type-options                     present  
+header x-frame-options                            present  
+header content-security-policy                    MISSING  
+header cache-control                              MISSING  
+rate-limit 40x rapid                            {401: 40}  no 429 at 40 sequential
+traversal /v1/../admin                                404  {"detail":"Not Found"}
+traversal /v1/%2e%2e/admin                            404  {"detail":"Not Found"}
+traversal //v1//receipts//verify                      404  {"detail":"Not Found"}
+------------------------------------------------------------------------------------------------
+21 experiments · 0 findings
+
+
+================================================================================================
+BATTERY 3 — CREATIVE RED TEAM
+================================================================================================
+agent-injection reflection                            401  reflected=False
+agent-injection reflection                            401  reflected=False
+INJECTION CHANNEL                                  CLOSED  
+route oracle                                            3  gated routes discoverable: ['/v1/receipts', '/v1/receipts/ve
+timing gap                                           81ms  significant if >80ms
+xfh-inject                                            401  reflected=False
+xff-trick                                             401  reflected=False
+jwt alg-none                                          401  {"detail":{"error":"invalid_token","message":"invalid_token:
+jwt kid-traversal                                     401  {"detail":{"error":"invalid_token","message":"invalid_token:
+jwt kid-sqli                                          401  {"detail":{"error":"invalid_token","message":"invalid_token:
+------------------------------------------------------------------------------------------------
+10 experiments · 0 findings
+
+Swarm: 50 agents × 4 attacks = 200 experiments, 25-way concurrency...
+completed in 27.6s
+
+================================================================================================
+BATTERY 4 — AGENT SWARM
+================================================================================================
+agent00 DELETE /v1/receipts/verify                    405  2282ms 
+agent00 POST /v1/receipts/verify                      429  698ms 
+agent00 POST /v1/receipts/verify                      429  735ms 
+agent00 GET /config                                   429  697ms 
+agent01 POST /mcp                                     401  1001ms 
+agent01 GET /config                                   404  709ms 
+agent01 GET /v1/receipts/verify                       401  690ms 
+agent01 GET /v1/permits                               429  692ms 
+agent02 PATCH /v1/receipts/verify                     405  1127ms 
+agent02 GET /.git                                     404  666ms 
+agent02 GET /v1/receipts/verify                       401  678ms 
+agent02 POST /mcp                                     429  1903ms 
+agent03 GET /v1/receipts/verify                       401  932ms 
+agent03 PATCH /v1/receipts/verify                     405  681ms 
+agent03 GET /v1/permits                               401  672ms 
+agent03 POST /v1/receipts/verify                      429  701ms 
+agent04 GET /v1/receipts/verify                       401  1004ms 
+agent04 GET /v1/permits                               401  706ms 
+agent04 POST /mcp                                     401  902ms 
+agent04 POST /v1/receipts/verify                      429  1851ms 
+agent05 POST /v1/receipts/verify                      401  1665ms 
+agent05 GET /v1/receipts/5                            401  697ms 
+agent05 GET /v1/wallets                               429  910ms 
+agent05 GET /v1/receipts/verify                       429  672ms 
+agent06 GET /secrets                                  404  991ms 
+agent06 POST /mcp                                     401  732ms 
+agent06 GET /v1/receipts/6                            401  733ms 
+agent06 POST /v1/receipts/verify                      429  701ms 
+agent07 GET /v1/receipts/verify                       401  853ms 
+agent07 POST /v1/receipts/verify                      401  699ms 
+agent07 PUT /v1/receipts/verify                       405  693ms 
+agent07 GET /v1/wallets                               429  853ms 
+agent08 POST /v1/receipts/verify                      503  1372ms   <<< FINDING
+agent08 POST /mcp                                     401  1512ms 
+agent08 PUT /v1/receipts/verify                       429  723ms 
+agent08 GET /v1/receipts/verify                       429  720ms 
+agent09 GET /v1/receipts/9                            401  836ms 
+agent09 PUT /v1/receipts/verify                       405  702ms 
+agent09 POST /v1/receipts/verify                      401  677ms 
+agent09 POST /mcp                                     429  640ms 
+agent10 GET /config                                   404  783ms 
+agent10 POST /mcp                                     401  656ms 
+agent10 POST /v1/receipts/verify                      401  640ms 
+agent10 GET /v1/receipts/verify                       429  703ms 
+agent11 POST /v1/receipts/verify                      401  820ms 
+agent11 POST /mcp                                     401  732ms 
+agent11 PATCH /v1/receipts/verify                     405  695ms 
+agent11 POST /v1/receipts/verify                      429  650ms 
+agent12 GET /v1/ledger                                404  745ms 
+agent12 POST /v1/receipts/verify                      401  630ms 
+agent12 POST /v1/receipts/verify                      429  1841ms 
+agent12 POST /mcp                                     429  686ms 
+agent13 POST /v1/receipts/verify                      401  689ms 
+agent13 POST /mcp                                     401  723ms 
+agent13 GET /v1/receipts/verify                       401  692ms 
+agent13 GET /v1/receipts/13                           429  702ms 
+agent14 GET /admin                                    404  755ms 
+agent14 POST /v1/receipts/verify                      401  1801ms 
+agent14 POST /v1/receipts/verify                      429  688ms 
+agent14 GET /v1/receipts/14                           429  1433ms 
+agent15 GET /v1/permits                               401  739ms 
+agent15 GET /internal                                 404  1210ms 
+agent15 GET /v1/receipts/15                           429  699ms 
+agent15 GET /v1/receipts/verify                       429  670ms 
+agent16 GET /v1/wallets                               404  723ms 
+agent16 POST /v1/receipts/verify                      401  693ms 
+agent16 GET /v1/receipts/16                           401  922ms 
+agent16 POST /v1/receipts/verify                      429  668ms 
+agent17 PUT /v1/receipts/verify                       503  698ms   <<< FINDING
+agent17 GET /v1/ledger                                404  709ms 
+agent17 POST /mcp                                     401  787ms 
+agent17 GET /v1/receipts/verify                       429  695ms 
+agent18 GET /internal                                 404  718ms 
+agent18 GET /v1/receipts/18                           401  712ms 
+agent18 POST /v1/receipts/verify                      401  671ms 
+agent18 GET /v1/receipts/verify                       429  1817ms 
+agent19 DELETE /v1/receipts/verify                    405  758ms 
+agent19 GET /.git                                     404  667ms 
+agent19 GET /v1/receipts/verify                       401  700ms 
+agent19 POST /mcp                                     429  676ms 
+agent20 POST /v1/receipts/verify                      503  705ms   <<< FINDING
+agent20 GET /v1/permits                               401  919ms 
+agent20 POST /v1/receipts/verify                      401  692ms 
+agent20 GET /v1/receipts/20                           429  1799ms 
+agent21 POST /v1/receipts/verify                      401  675ms 
+agent21 DELETE /v1/receipts/verify                    405  699ms 
+agent21 POST /mcp                                     429  1536ms 
+agent21 GET /v1/receipts/verify                       429  664ms 
+agent22 GET /v1/receipts/22                           401  670ms 
+agent22 POST /mcp                                     401  671ms 
+agent22 GET /v1/permits                               401  726ms 
+agent22 GET /v1/receipts/verify                       429  664ms 
+agent23 GET /v1/receipts/23                           401  710ms 
+agent23 GET /v1/receipts/verify                       401  637ms 
+agent23 GET /config                                   404  730ms 
+agent23 POST /mcp                                     429  644ms 
+agent24 POST /v1/receipts/verify                      401  741ms 
+agent24 POST /mcp                                     401  875ms 
+agent24 GET /v1/receipts/24                           401  673ms 
+agent24 GET /admin                                    429  661ms 
+agent25 GET /v1/ledger                                429  890ms 
+agent25 POST /mcp                                     429  699ms 
+agent25 POST /v1/receipts/verify                      429  661ms 
+agent25 GET /config                                   429  669ms 
+agent26 GET /internal                                 429  666ms 
+agent26 GET /v1/permits                               429  884ms 
+agent26 GET /v1/receipts/26                           429  644ms 
+agent26 PUT /v1/receipts/verify                       429  704ms 
+agent27 PUT /v1/receipts/verify                       429  937ms 
+agent27 POST /mcp                                     429  929ms 
+agent27 GET /admin                                    429  1448ms 
+agent27 POST /v1/receipts/verify                      429  665ms 
+agent28 POST /v1/receipts/verify                      429  670ms 
+agent28 GET /v1/receipts/verify                       429  703ms 
+agent28 GET /v1/receipts/28                           429  692ms 
+agent28 GET /internal                                 429  705ms 
+agent29 GET /v1/receipts                              429  674ms 
+agent29 GET /config                                   429  629ms 
+agent29 POST /mcp                                     429  722ms 
+agent29 POST /v1/receipts/verify                      429  644ms 
+agent30 POST /mcp                                     429  699ms 
+agent30 POST /v1/receipts/verify                      429  680ms 
+agent30 GET /v1/receipts/30                           429  660ms 
+agent30 GET /v1/receipts/verify                       429  662ms 
+agent31 POST /v1/receipts/verify                      429  839ms 
+agent31 GET /v1/receipts                              429  699ms 
+agent31 PUT /v1/receipts/verify                       429  1751ms 
+agent31 GET /v1/receipts/verify                       429  1479ms 
+agent32 GET /internal                                 429  695ms 
+agent32 GET /v1/receipts                              429  677ms 
+agent32 GET /v1/receipts/32                           429  706ms 
+agent32 POST /mcp                                     429  690ms 
+agent33 POST /v1/receipts/verify                      429  699ms 
+agent33 GET /v1/receipts/33                           429  664ms 
+agent33 DELETE /v1/receipts/verify                    429  888ms 
+agent33 POST /mcp                                     429  844ms 
+agent34 GET /v1/receipts/34                           429  1334ms 
+agent34 GET /v1/wallets                               429  664ms 
+agent34 POST /v1/receipts/verify                      429  1361ms 
+agent34 POST /v1/receipts/verify                      429  662ms 
+agent35 POST /mcp                                     429  699ms 
+agent35 POST /v1/receipts/verify                      429  696ms 
+agent35 PUT /v1/receipts/verify                       429  695ms 
+agent35 GET /v1/wallets                               429  893ms 
+agent36 POST /mcp                                     429  658ms 
+agent36 POST /v1/receipts/verify                      429  673ms 
+agent36 PUT /v1/receipts/verify                       429  722ms 
+agent36 GET /.git                                     429  1201ms 
+agent37 GET /admin                                    ERR  20644ms   <<< FINDING
+agent37 PATCH /v1/receipts/verify                     405  734ms 
+agent37 POST /v1/receipts/verify                      401  675ms 
+agent37 POST /v1/receipts/verify                      401  1045ms 
+agent38 GET /v1/receipts/38                           429  665ms 
+agent38 GET /v1/ledger                                429  732ms 
+agent38 PATCH /v1/receipts/verify                     429  1138ms 
+agent38 GET /v1/receipts/verify                       429  722ms 
+agent39 GET /v1/permits                               429  941ms 
+agent39 GET /v1/receipts/39                           429  673ms 
+agent39 POST /v1/receipts/verify                      429  681ms 
+agent39 POST /mcp                                     429  678ms 
+agent40 POST /v1/receipts/verify                      429  1695ms 
+agent40 POST /mcp                                     429  685ms 
+agent40 GET /internal                                 429  691ms 
+agent40 GET /v1/receipts/40                           429  816ms 
+agent41 PATCH /v1/receipts/verify                     429  666ms 
+agent41 POST /v1/receipts/verify                      429  636ms 
+agent41 GET /v1/receipts/41                           429  667ms 
+agent41 GET /.git                                     429  642ms 
+agent42 GET /v1/receipts/verify                       429  693ms 
+agent42 GET /v1/receipts/42                           429  890ms 
+agent42 POST /mcp                                     429  671ms 
+agent42 PUT /v1/receipts/verify                       429  672ms 
+agent43 GET /v1/receipts/verify                       429  702ms 
+agent43 POST /v1/receipts/verify                      429  839ms 
+agent43 DELETE /v1/receipts/verify                    429  701ms 
+agent43 POST /mcp                                     429  697ms 
+agent44 POST /v1/receipts/verify                      429  673ms 
+agent44 GET /v1/ledger                                429  702ms 
+agent44 DELETE /v1/receipts/verify                    429  704ms 
+agent44 POST /mcp                                     429  692ms 
+agent45 GET /v1/wallets                               429  745ms 
+agent45 GET /.git                                     429  703ms 
+agent45 POST /v1/receipts/verify                      429  681ms 
+agent45 POST /mcp                                     429  686ms 
+agent46 POST /v1/receipts/verify                      429  674ms 
+agent46 PUT /v1/receipts/verify                       429  671ms 
+agent46 POST /mcp                                     429  669ms 
+agent46 GET /v1/receipts                              429  2108ms 
+agent47 PATCH /v1/receipts/verify                     429  678ms 
+agent47 GET /.git                                     429  709ms 
+agent47 POST /v1/receipts/verify                      429  660ms 
+agent47 GET /v1/receipts/47                           429  670ms 
+agent48 POST /v1/receipts/verify                      429  679ms 
+agent48 GET /v1/receipts/48                           429  1900ms 
+agent48 GET /secrets                                  429  665ms 
+agent48 GET /v1/receipts/verify                       429  697ms 
+agent49 GET /v1/receipts                              429  704ms 
+agent49 GET /v1/receipts/49                           429  678ms 
+agent49 GET /secrets                                  429  1660ms 
+agent49 POST /v1/receipts/verify                      429  1187ms 
+------------------------------------------------------------------------------------------------
+200 experiments · 4 findings
+

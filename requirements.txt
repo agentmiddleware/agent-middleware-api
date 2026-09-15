@@ -32,7 +32,7 @@ mcp>=1.29.0,<3         # MCP SDK; >=1.29.0 provides the pre-parse request-body g
 
 # --- Database ---
 sqlmodel>=0.0.42        # SQLAlchemy + Pydantic hybrid ORM
-alembic>=1.19.1        # Database migrations
+alembic>=1.19.2        # Database migrations
 aiosqlite>=0.22.1      # Async SQLite driver for testing
 
 # --- Development ---
