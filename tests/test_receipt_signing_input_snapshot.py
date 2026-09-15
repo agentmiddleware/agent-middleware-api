@@ -5,7 +5,7 @@ any change to the field set, key ordering, Decimal/datetime normalization,
 or the payload_hash derivation changes what an offline verifier must
 reconstruct, and silently invalidates every receipt already issued.
 
-This test freezes three representative receipts to byte-exact canonical
+This test freezes four representative receipts to byte-exact canonical
 JSON, and freezes the Ed25519 signature over those bytes under a fixed
 test seed (Ed25519 is deterministic, so the signature is a second pin on
 the same bytes).
@@ -28,10 +28,14 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from httpx import ASGITransport, AsyncClient
 
-from app.db.models import ReceiptModel
-from app.services.receipts import ReceiptService
-from app.services.signing_keys import canonical_json, sha256_hex
+from app.db.database import get_session_factory
+from app.db.models import IdempotencyRecordModel, ReceiptModel
+from app.main import app
+from app.services.receipts import ReceiptService, get_receipt_service
+from app.services.signing_keys import canonical_json, get_signing_key_service, sha256_hex
+from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
 GOLDEN_DIR = Path(__file__).parent / "fixtures" / "receipt_signing_golden"
 # Fixed 32-byte seed; NOT a production key. Exists only to make the
@@ -72,6 +76,16 @@ CASES = {
     "success_linked": (_base_model(), True),
     # Legacy-format signature: linkage fields excluded from signing input.
     "success_legacy": (_base_model(), False),
+    # Current-format success with a human-approval id. approval_id is signed
+    # whenever set, on both current and legacy paths; omitting it from the
+    # goldens would let a refactor drop the field while this suite stayed green.
+    "success_approval": (
+        _base_model(
+            receipt_id="rcpt_golden_0003",
+            approval_id="apr_golden_0001",
+        ),
+        True,
+    ),
     # Signed denial with reason_code and permit-v2 constraints_evaluated.
     "denial_constraints": (
         _base_model(
@@ -136,3 +150,145 @@ def test_payload_hash_is_over_payload_without_itself() -> None:
     payload = ReceiptService._verification_payload(model, include_linkage=True)
     stripped = {k: v for k, v in payload.items() if k != "payload_hash"}
     assert payload["payload_hash"] == sha256_hex(stripped)
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.anyio
+async def test_signing_input_for_model_covers_approval_id(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """Production export must include approval_id when the model has one."""
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="golden-approval-echo",
+        idem_key="permit-golden-approval",
+    )
+    receipt = await get_receipt_service().create_receipt(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool="golden-approval-echo",
+        request_payload={"value": "request"},
+        response_payload={"value": "response"},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("2"),
+        credits_charged=Decimal("0"),
+        outcome="denied",
+        reason_code="human_approval_required",
+        audit_event_id=None,
+        approval_id="apr_golden_0001",
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(ReceiptModel, receipt.receipt_id)
+        assert model is not None
+        signing_input = await ReceiptService().signing_input_for_model(
+            model, session=session
+        )
+        assert signing_input is not None
+        expected = canonical_json(
+            ReceiptService._verification_payload(model, include_linkage=True)
+        )
+        assert signing_input == expected
+        assert json.loads(signing_input)["approval_id"] == "apr_golden_0001"
+
+
+@pytest.mark.anyio
+async def test_signing_input_for_model_uses_legacy_payload_when_current_fails(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """A pre-linkage signature must export the bytes that actually verify."""
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name="golden-legacy-echo",
+        idem_key="permit-golden-legacy",
+    )
+    request_hash = "a" * 64
+    idempotency_record_id = "idm_golden_legacy_0001"
+    factory = get_session_factory()
+    async with factory() as session:
+        session.add(
+            IdempotencyRecordModel(
+                record_id=idempotency_record_id,
+                wallet_id=provisioned["agent_wallet_id"],
+                endpoint="/mcp/invoke",
+                idempotency_key="golden-legacy-key",
+                request_hash=request_hash,
+            )
+        )
+        await session.commit()
+
+    receipt = await get_receipt_service().create_receipt(
+        permit_id=permit["permit_id"],
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool="golden-legacy-echo",
+        request_payload=None,
+        response_payload={"value": "response"},
+        ledger_entry_id=None,
+        credits_authorized=Decimal("2"),
+        credits_charged=Decimal("0"),
+        outcome="denied",
+        reason_code="permit_budget_exceeded",
+        audit_event_id=None,
+        idempotency_record_id=idempotency_record_id,
+        dispatch_attempt_id=None,
+        request_hash=request_hash,
+    )
+
+    signing_keys = get_signing_key_service()
+    async with factory() as session:
+        model = await session.get(ReceiptModel, receipt.receipt_id)
+        assert model is not None
+        idempotency = await session.get(IdempotencyRecordModel, idempotency_record_id)
+        assert idempotency is not None
+        idempotency.response_reference = model.receipt_id
+        session.add(idempotency)
+
+        unsigned_legacy = {
+            k: v
+            for k, v in ReceiptService._verification_payload(
+                model, include_linkage=False
+            ).items()
+            if k not in {"alg", "kid", "payload_hash"}
+        }
+        signature, key_id, _payload_hash = await signing_keys.sign_payload(
+            unsigned_legacy
+        )
+        model.signature = signature
+        model.signature_key_id = key_id
+        session.add(model)
+        await session.commit()
+        await session.refresh(model)
+
+        current_payload = ReceiptService._verification_payload(
+            model, include_linkage=True
+        )
+        assert not await signing_keys.verify_payload(
+            current_payload,
+            signature=model.signature,
+            key_id=model.signature_key_id,
+            session=session,
+        )
+        signing_input = await ReceiptService().signing_input_for_model(
+            model, session=session
+        )
+        expected = canonical_json(
+            ReceiptService._verification_payload(model, include_linkage=False)
+        )
+        assert signing_input == expected
+        assert "idempotency_record_id" not in json.loads(signing_input)
