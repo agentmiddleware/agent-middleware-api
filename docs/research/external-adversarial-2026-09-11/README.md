@@ -1,0 +1,3 @@
+# External Adversarial Probe — 2026-09-11/12
+
+External unauthenticated probe run, 2026-09-11/12: 200 requests across 4 attack classes (baseline adversarial, surface/transport, creative red team, 50-agent concurrent swarm) against the live unauthenticated surface. No bypass of the auth boundary; no information leakage. Under swarm load with the rate limiter engaged, 3 requests returned 503 and 1 timed out — availability observation, no execution. Harness: gauntlet.py; raw output: RESULTS.txt (the committed RESULTS.txt is a 2026-09-14 regeneration run of the same harness; the original 2026-09-11/12 output was not retained). This probes the unauthenticated layer only — see docs/invariant-attack-report.md for the internal invariant results.
