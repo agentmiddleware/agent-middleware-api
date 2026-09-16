@@ -35,11 +35,13 @@ partner-owned pilot gate in
 
 Either target works; pick one and stay on it.
 
-- **Live:** the published origin. Bootstrap in the documented order:
-  `GET /.well-known/agent.json` → `GET /llms.txt` → `GET /mcp/tools.json` →
-  `GET /openapi.json`, then `GET /health/dependencies` before assuming real
-  side effects. Live keys are operator-issued; the stranger uses a key they
-  were handed, nothing self-minted.
+- **Live:** the published origin is a **private experiment** after the
+  Narrow lockdown. Anonymous callers cannot list tools. A stranger with no
+  key cannot bootstrap from `GET /mcp/tools.json`. Use a key C.Lee issued,
+  then `GET /.well-known/agent.json` → `GET /health/dependencies` before
+  assuming real side effects. Receipt keys at
+  `/.well-known/trust-keys.json` stay unauthenticated. The stranger test as a
+  *no-key discovery* exercise is **local only**.
 - **Local:** clone the repo and run `make quickstart`, then follow
   [docs/quickstart.md](quickstart.md) — it boots a real server with
   self-serve key minting and one invokable governed tool, so every step

@@ -149,6 +149,10 @@ def validate_trust_mode_config(
     """
     production_like = is_production_like_environment(environment)
     violations: list[str] = []
+    # redis_url / public_url used to gate anonymous public MCP. That surface is
+    # now refused outright in production-like boots, but the parameters stay so
+    # existing call sites keep working.
+    _ = redis_url, public_url
 
     if production_like:
         if not trust_mode_enabled:
@@ -199,11 +203,12 @@ def validate_trust_mode_config(
                 "production-like environments (self-serve dev key minting "
                 "is local-only — see docs/static-dev-api-keys.md)"
             )
-        if enable_public_mcp_endpoint and not (redis_url or "").strip():
+        if enable_public_mcp_endpoint:
             violations.append(
-                "REDIS_URL is required when ENABLE_PUBLIC_MCP_ENDPOINT is true "
-                "in production-like environments (anonymous verification must "
-                "use shared rate-limit state)"
+                "ENABLE_PUBLIC_MCP_ENDPOINT must be false in production-like "
+                "environments (anonymous MCP discovery and verification is "
+                "local-only; receipt keys stay on "
+                "/.well-known/trust-keys.json)"
             )
         configured_database_url = (database_url or "").strip()
         if not configured_database_url:
@@ -234,13 +239,6 @@ def validate_trust_mode_config(
                 "(postgresql+asyncpg://...). This is a separate control from "
                 "STATE_BACKEND, which governs the key/value state store rather "
                 "than the ORM engine"
-            )
-
-        if enable_public_mcp_endpoint and not (public_url or "").strip():
-            violations.append(
-                "PUBLIC_URL is required when ENABLE_PUBLIC_MCP_ENDPOINT is true "
-                "in production-like environments (browser origin and Host "
-                "validation must use the operator-configured public origin)"
             )
 
     if violations:

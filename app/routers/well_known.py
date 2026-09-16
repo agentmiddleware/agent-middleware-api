@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
+from ..core.auth import reject_anonymous_production_catalog
 from ..core.config import get_settings, public_api_origin
 from ..core.product_positioning import (
     LEGACY_PRODUCT_LOOP,
@@ -156,8 +157,9 @@ def get_agent_first_metadata() -> dict[str, Any]:
             "interactive_docs_url": "/docs",
             "redoc_url": "/redoc",
             "note": (
-                "The public /dashboard is a status and evidence index. "
-                "Authenticated tenant inspection remains API-only."
+                "The /dashboard is a status and evidence index. "
+                "Authenticated tenant inspection remains API-only. "
+                "On production-like boots, tool catalogs require a key."
             ),
         },
     }
@@ -229,6 +231,25 @@ def _authentication_manifest() -> dict[str, Any]:
         }
 
     return manifest
+
+
+def _try_it_manifest() -> dict[str, Any]:
+    """Local proof path, or a private-experiment notice on hosted origins."""
+    if is_production_like_environment(get_settings().ENVIRONMENT):
+        return {
+            "mode": "private_experiment",
+            "live_access": "operator_issued",
+            "requires_live_credentials": True,
+            "public_self_serve": False,
+            "public_tool_catalog": False,
+            "note": (
+                "This hosted origin is a private experiment, not a public "
+                "product. Tool catalogs, invoke, and key minting require an "
+                "operator-issued key. Receipt verification keys stay public at "
+                "/.well-known/trust-keys.json."
+            ),
+        }
+    return _local_try_it_manifest()
 
 
 def _local_try_it_manifest() -> dict[str, Any]:
@@ -346,10 +367,10 @@ class AgentPluginManifest(BaseModel):
     authentication: dict = Field(default_factory=_authentication_manifest)
 
     try_it: dict[str, Any] = Field(
-        default_factory=_local_try_it_manifest,
+        default_factory=_try_it_manifest,
         description=(
-            "Credential-free local proof for autonomous clients evaluating "
-            "the logical-action transaction loop."
+            "Local credential-free proof, or a private-experiment notice on "
+            "production-like boots."
         ),
     )
 
@@ -482,6 +503,7 @@ def _build_agent_manifest() -> AgentPluginManifest:
         proof_surfaces=proof_surfaces,
         endpoints=endpoints,
         authentication=_authentication_manifest(),
+        try_it=_try_it_manifest(),
         documentation=documentation,
         agent_first=get_agent_first_metadata(),
     )
@@ -758,13 +780,15 @@ async def get_jwks_json():
     summary="MCP Tools Manifest",
     description="Compatibility mirror of the project's public MCP-shaped tool list.",
 )
-async def get_mcp_tools_json():
+async def get_mcp_tools_json(request: Request):
     """
     Serve a compatibility mirror of the project's tool metadata.
 
     Conformant MCP servers expose tool discovery through ``tools/list`` rather
-    than through a well-known JSON document.
+    than through a well-known JSON document. Production-like boots require
+    the same credentials as invoke.
     """
+    await reject_anonymous_production_catalog(request)
     from .mcp import build_mcp_tools_manifest
 
     return JSONResponse(content=await build_mcp_tools_manifest())

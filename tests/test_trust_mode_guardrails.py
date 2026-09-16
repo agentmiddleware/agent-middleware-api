@@ -160,37 +160,8 @@ def test_settings_wrapper_uses_environment_field():
     validate_trust_mode_guardrails(settings)
 
 
-def test_public_mcp_requires_shared_rate_limiter_in_production():
-    with pytest.raises(TrustModeGuardrailError) as exc_info:
-        validate_trust_mode_config(
-            environment="production",
-            trust_mode_enabled=True,
-            signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
-            allow_legacy_unpermitted_mcp=False,
-            enable_proof_surfaces=False,
-            enable_public_mcp_endpoint=True,
-            redis_url="",
-            public_url="https://api.example.com",
-        )
-
-    assert "REDIS_URL" in str(exc_info.value)
-
-
-def test_public_mcp_accepts_shared_rate_limiter_in_production():
-    validate_trust_mode_config(
-        environment="production",
-        trust_mode_enabled=True,
-        signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
-        allow_legacy_unpermitted_mcp=False,
-        enable_proof_surfaces=False,
-        enable_public_mcp_endpoint=True,
-        redis_url="redis://redis.internal:6379/0",
-        public_url="https://api.example.com",
-        database_url=VALID_PRODUCTION_DATABASE_URL,
-    )
-
-
-def test_public_mcp_requires_public_origin_in_production():
+def test_production_refuses_anonymous_public_mcp_endpoint():
+    """Anonymous MCP discovery is local-only; production must not boot it."""
     with pytest.raises(TrustModeGuardrailError) as exc_info:
         validate_trust_mode_config(
             environment="production",
@@ -200,10 +171,23 @@ def test_public_mcp_requires_public_origin_in_production():
             enable_proof_surfaces=False,
             enable_public_mcp_endpoint=True,
             redis_url="redis://redis.internal:6379/0",
-            public_url="",
+            public_url="https://api.example.com",
+            database_url=VALID_PRODUCTION_DATABASE_URL,
         )
 
-    assert "PUBLIC_URL" in str(exc_info.value)
+    assert "ENABLE_PUBLIC_MCP_ENDPOINT" in str(exc_info.value)
+
+
+def test_production_accepts_public_mcp_disabled():
+    validate_trust_mode_config(
+        environment="production",
+        trust_mode_enabled=True,
+        signing_private_key_b64=VALID_SIGNING_PRIVATE_KEY_B64,
+        allow_legacy_unpermitted_mcp=False,
+        enable_proof_surfaces=False,
+        enable_public_mcp_endpoint=False,
+        database_url=VALID_PRODUCTION_DATABASE_URL,
+    )
 
 
 
