@@ -22,7 +22,9 @@ Transport mirrors the standard endpoint: each POST gets a fresh stateless
 SDK transport in JSON mode, GET/DELETE answer 405, and cross-origin browser
 calls are refused. Disabled by default — ``ENABLE_PUBLIC_MCP_ENDPOINT`` must
 be set explicitly, so the surface cannot appear before an operator turns it
-on.
+on. Production-like environments refuse to boot with the flag set, and the
+handler 404s there even if the flag is on; receipt verification stays on
+``/.well-known/trust-keys.json``.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
 
 from app.core.config import get_settings, public_api_origin
+from app.core.trust_mode import is_production_like_environment
 from app.core.product_positioning import (
     POSITIONING_DESCRIPTION,
     get_product_positioning,
@@ -665,7 +668,10 @@ _public_mcp_server = _build_public_mcp_server()
 
 
 def _require_enabled() -> None:
-    if not get_settings().ENABLE_PUBLIC_MCP_ENDPOINT:
+    settings = get_settings()
+    if is_production_like_environment(settings.ENVIRONMENT):
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not settings.ENABLE_PUBLIC_MCP_ENDPOINT:
         raise HTTPException(status_code=404, detail="Not Found")
 
 

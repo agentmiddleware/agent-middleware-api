@@ -110,9 +110,15 @@ repo; do not Redeploy from GitHub source).
 - Configure `TRUST_SIGNING_PRIVATE_KEY_B64` from a secret manager or KMS-backed
   runtime injection.
 - Production-like boots also refuse `DEBUG=true`, `WEBAUTHN_ALLOW_MOCK=true`,
-  and `ENABLE_PROOF_SURFACES=true`. Set `ENABLE_PROOF_SURFACES=false` so only
-  core trust routers and MCP are mounted. Leave proof surfaces frozen unless a
-  partner demo explicitly needs them.
+  `ENABLE_PROOF_SURFACES=true`, and `ENABLE_PUBLIC_MCP_ENDPOINT=true`. Set
+  `ENABLE_PROOF_SURFACES=false` so only core trust routers and MCP are mounted.
+  Leave proof surfaces frozen unless a partner demo explicitly needs them.
+  Anonymous MCP (`POST /mcp/public`) is local-only; receipt verification stays
+  on `/.well-known/trust-keys.json`.
+- On production-like boots, tool catalogs (`/mcp/tools.json`, `/mcp/tools`,
+  `/v1/discover`, `/.well-known/mcp/tools.json`) require the same credentials
+  as invoke. A stranger must not learn which tools exist. Local-compatible
+  environments keep anonymous discovery for quickstart.
 - Set `PUBLIC_URL` to the public HTTPS API origin (Railway host or custom
   domain). Agents and `/llm.txt` use it; do not leave production pointing at
   localhost.
@@ -151,10 +157,10 @@ The default `CORS_ORIGINS=*` is a deliberate decision, not an oversight:
   credentialed CORS: under `*`, `Access-Control-Allow-Credentials` is never
   emitted. An explicit origin list is required before credentialed
   cross-origin requests are possible at all.
-- What the wildcard actually grants is cross-origin *reads of public
-  discovery surfaces* (`/.well-known/*`, `/health*`, `/llms.txt`,
-  `/openapi.json`) — the same material any non-browser client already gets —
-  which is standard posture for a public, header-authenticated API.
+- What the wildcard actually grants is cross-origin *reads of remaining
+  public surfaces* (`/.well-known/trust-keys.json`, `/.well-known/jwks.json`,
+  `/.well-known/agent.json`, `/health*`, `/llms.txt`, `/openapi.json`) — not
+  tool catalogs, which require a key on production-like boots.
 - The one route that is unauthenticated yet returns a secret
   (`/v1/dev-keys/self-provision`, local-only) independently rejects
   cross-origin browser calls by `Origin` check, and production-like

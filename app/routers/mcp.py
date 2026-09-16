@@ -32,7 +32,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..audit.lightweight import record_audit
 from ..core.config import get_settings
-from ..core.auth import AuthContext, get_auth_context
+from ..core.auth import AuthContext, get_auth_context, reject_anonymous_production_catalog
 from ..core.oidc_iga import (
     EnterprisePrincipal,
     IGAError,
@@ -359,15 +359,19 @@ class ToolCallResponse(BaseModel):
 
 @router.get("/tools.json", name="MCP Tools Manifest")
 async def get_tools_json(
+    request: Request,
     category: ServiceCategory | None = None,
 ) -> JSONResponse:
     """
     Return the MCP tools.json manifest.
 
-    This is an unauthenticated HTTP mirror of tool metadata exposed by this
-    project's governed JSON-RPC subset. Clients can obtain the same list by
+    This is an HTTP mirror of tool metadata exposed by this project's
+    governed JSON-RPC subset. Clients can obtain the same list by
     sending ``tools/list`` to ``/mcp/messages``; that endpoint does not
     implement the complete MCP initialization lifecycle.
+
+    On production-like boots the catalog requires the same credentials as
+    invoke. Local-compatible environments keep it anonymous for quickstart.
 
     Query Parameters:
         category: Optional service category filter
@@ -375,6 +379,7 @@ async def get_tools_json(
     Returns:
         MCP tools.json manifest with tool definitions
     """
+    await reject_anonymous_production_catalog(request)
     manifest = await build_mcp_tools_manifest(category=category)
     return JSONResponse(content=manifest)
 
@@ -3790,6 +3795,7 @@ async def invoke_tool(
     summary="List all available MCP tools (paginated)",
 )
 async def list_tools(
+    request: Request,
     category: ServiceCategory | None = None,
     limit: int = Query(default=100, ge=1, le=500, description="Max tools to return"),
     offset: int = Query(default=0, ge=0, description="Number of tools to skip"),
@@ -3805,6 +3811,7 @@ async def list_tools(
     Returns:
         Paginated list of tool definitions with schemas
     """
+    await reject_anonymous_production_catalog(request)
     manifest = await build_mcp_tools_manifest(category=category)
     tools = manifest["tools"]
     total = len(tools)
@@ -3827,7 +3834,7 @@ async def list_tools(
     name="Get MCP Tool",
     summary="Get a specific MCP tool definition",
 )
-async def get_tool(service_id: str) -> dict[str, Any]:
+async def get_tool(service_id: str, request: Request) -> dict[str, Any]:
     """
     Get the MCP tool definition for a specific service.
 
@@ -3836,6 +3843,7 @@ async def get_tool(service_id: str) -> dict[str, Any]:
     - output schema availability metadata
     - pricing and category annotations
     """
+    await reject_anonymous_production_catalog(request)
     _ensure_local_mcp_tools_registered()
     registry = get_service_registry()
 
