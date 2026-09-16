@@ -1,8 +1,8 @@
 # 30-Day Customer Validation Sprint
 
-> **Status: active from 2026-08-12 through 2026-09-11.** This is the
-> company-level milestone. It supersedes new core capability work until the
-> day-30 decision is recorded.
+> **Status: Narrow. Recorded 2026-09-16.** The sprint window was 2026-08-12
+> through 2026-09-11. This is no longer an open milestone. New core capability
+> stays frozen. The live origin is a private experiment, not a public product.
 
 ## Decision To Make
 
@@ -154,6 +154,46 @@ record secrets, customer payloads, or sensitive production data.
 
 Do not create another feature roadmap until one of these decisions is recorded
 with its evidence.
+
+### Recorded decision: Narrow (2026-09-16)
+
+**Choice:** Narrow. Stop new features. Keep the existing one-tool loop
+correct and locked. Treat `https://api.thisisatest.tech` as a private
+experiment until one trusted team is on it, with C.Lee watching.
+
+**Why this is not Continue.** Continue required a partner-owned pilot: partner
+agent, partner staging tool, partner engineer, and a receipt that engineer
+verified independently, plus paid or written commercial pull. This repository
+has none of that.
+
+**Evidence actually in this repository (as of 2026-09-16):**
+
+- Sprint window ended **2026-09-11**. This write-up is five days late.
+- **No interview log** in this repository. The Evidence Log section above
+  remains a template. Confidential names belong in the private customer
+  system; even prospect identifiers are absent here.
+- **No named partner-owned tool.** Live upstream is the operator-owned echo
+  fixture `partner.echo`, not a design-partner tool.
+- Local proofs, CI's trust gate, and self-issued public proof remain real as
+  *gateway* evidence. They are not customer validation. `AGENTS.md` already
+  says local demos, self-issued public proof, and the stranger test do not
+  count.
+
+**What Narrow means for engineering:**
+
+- Security, correctness, reliability of the existing one-tool loop,
+  documentation needed for a real pilot, and keeping release gates green.
+- No new core capability, including pods, extra MCP tools, standard `/mcp`
+  auto-mint, proof surfaces, or public anonymous MCP, until a named prospect,
+  one consequential tool, a workflow blocker, an owner, and a date exist.
+
+**Live origin lockdown (code in this change; apply on Railway after merge):**
+anonymous callers must not list tools, invoke tools, or mint keys. Receipt
+verification keys at `/.well-known/trust-keys.json` stay public. Operator
+`VALID_API_KEYS` and wallet-scoped keys keep working. Exact Railway clicks:
+[`deploy-railway.md`](deploy-railway.md#applying-the-narrow-lockdown-to-the-live-origin).
+GitHub visibility is **not** changed by this change; C.Lee makes the
+repository private themselves.
 
 ## Existing Implementation Documents
 

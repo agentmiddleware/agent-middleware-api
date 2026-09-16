@@ -181,7 +181,10 @@ class Settings(BaseSettings):
     # apps). Serves only verification and discovery tools; nothing behind
     # it can create signing authority, mint permits, debit wallets, change
     # governed tool registration, or reach the governed invoke path. Off by
-    # default like every other transport surface.
+    # default. Production-like environments refuse to boot with this true
+    # (and the handler 404s there even if the flag is set): a stranger must
+    # not list governed tools. Receipt verification stays on
+    # /.well-known/trust-keys.json.
     ENABLE_PUBLIC_MCP_ENDPOINT: bool = False
 
     # --- Stripe Payment Processing ---

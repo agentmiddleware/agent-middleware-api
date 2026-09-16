@@ -84,7 +84,9 @@ DOCS_HTML_CSP = (
 _DOCS_HTML_PATHS = frozenset({"/docs", "/redoc", "/docs/oauth2-redirect"})
 
 # Public discovery is intentionally credential-less and agent-cacheable.
-# Everything else — wallets, permits, receipts, keys, invoke — is no-store.
+# Tool catalogs are not: on production-like boots they require a key, so they
+# must not be CDN-cached as anonymous documents. Receipt verification keys
+# stay cacheable.
 _PUBLIC_DISCOVERY_PATHS = frozenset(
     {
         "/",
@@ -104,12 +106,14 @@ _PUBLIC_DISCOVERY_PATHS = frozenset(
         "/docs/partner-api-key-bootstrap.md",
         "/docs/agent-accountability.md",
         "/dashboard",
-        "/v1/discover",
-        "/mcp/tools.json",
-        "/mcp/tools",
     }
 )
 _PUBLIC_DISCOVERY_PREFIXES = ("/.well-known/",)
+_NON_CACHEABLE_WELL_KNOWN_PATHS = frozenset(
+    {
+        "/.well-known/mcp/tools.json",
+    }
+)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -150,6 +154,8 @@ def _content_security_policy(request: Request, response: Response) -> str:
 
 def _is_public_discovery(path: str) -> bool:
     normalized = _normalized_path(path)
+    if normalized in _NON_CACHEABLE_WELL_KNOWN_PATHS:
+        return False
     if normalized in _PUBLIC_DISCOVERY_PATHS:
         return True
     return normalized.startswith(_PUBLIC_DISCOVERY_PREFIXES)

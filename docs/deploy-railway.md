@@ -327,6 +327,8 @@ in committed defaults.
 | `ENVIRONMENT` | `production` (or other production-like) | Engages trust guardrails. Must be set explicitly: on Railway (detected via the injected `RAILWAY_*` variables) an empty `ENVIRONMENT` refuses to boot rather than silently running with local-compatible defaults |
 | `DEBUG` | `false` | Empty-key auth bootstrap is forbidden in prod-like |
 | `ENABLE_PROOF_SURFACES` | `false` | Mount only core trust routers + MCP |
+| `ENABLE_PUBLIC_MCP_ENDPOINT` | `false` | Anonymous MCP discovery is local-only. Production-like boots **refuse to start** if this is true. Live `api.thisisatest.tech` historically had it on; set it false **before** deploying the Narrow lockdown commit or the new image will not boot. Receipt verification stays on `/.well-known/trust-keys.json`. |
+| `ENABLE_STANDARD_MCP_ENDPOINT` | `false` or unset | Auto-minted permits on `POST /mcp`. Do not turn this on. |
 | `ENABLE_DOGFOOD_TOOL` | `false` | The simulated `partner.notes.write` tool is local proof infrastructure, not a production integration. The live posture gate fails unless this is explicitly false. |
 | `TRUST_MODE_ENABLED` | `true` | Shipped default; keep it |
 | `ALLOW_LEGACY_UNPERMITTED_MCP` | `false` | Shipped default; keep it |
@@ -355,6 +357,45 @@ no values: every name, including `VALID_API_KEYS`, signing material, and
 `RUN_MIGRATIONS_ON_START`, must map to `preserve()`. Set or rotate values only
 in Railway or the approved external vault. Enable migration-on-start only after
 confirming Alembic stamp state.
+
+## Applying the Narrow lockdown to the live origin
+
+Do this after the Narrow lockdown commit is on `main`, **before or as** that
+commit is deployed to `https://api.thisisatest.tech`. This change does **not**
+deploy itself. It does **not** make the GitHub repository private — C.Lee
+does that in GitHub.
+
+The live origin was serving anonymous tool catalogs (`/mcp/tools.json`,
+`/v1/discover`, `/mcp/tools`) and an unauthenticated `POST /mcp/public` that
+listed `partner.echo`. Invoke and key-mint were already closed (401 / 404).
+After this commit:
+
+1. **Railway → project `agent-middleware-api` → service `api-service` →
+   Variables.** Set `ENABLE_PUBLIC_MCP_ENDPOINT` to `false`. If this stays
+   `true`, the new image **will not boot** (`TrustModeGuardrailError`). No
+   other new flag is required: production-like boots already require a key
+   for tool catalogs.
+2. Confirm these stay false or unset: `ENABLE_PROOF_SURFACES`,
+   `ENABLE_DEV_KEY_SELF_PROVISION`, `ENABLE_STANDARD_MCP_ENDPOINT`,
+   `DEBUG`, `STATIC_DEV_API_KEYS`. Keep `ENVIRONMENT=production`. Do **not**
+   rotate or remove `VALID_API_KEYS` — those are C.Lee's operator keys.
+3. **Deploy the merged commit** the same way this service is usually shipped
+   (`railway up` from that SHA, or the GitHub → Railway integration if it is
+   what currently ships). Do **not** click **Redeploy from GitHub source**
+   if that would roll back to an older image. This agent must not run that
+   deploy.
+4. **Check, from a terminal, with no API key:**
+   - `curl -sS -o /dev/null -w '%{http_code}\n' https://api.thisisatest.tech/mcp/tools.json` → `401`
+   - `curl -sS -o /dev/null -w '%{http_code}\n' https://api.thisisatest.tech/v1/discover` → `401`
+   - `curl -sS -X POST https://api.thisisatest.tech/mcp/public -H 'Content-Type: application/json' -H 'Accept: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'` → `404`
+   - `curl -sS -o /dev/null -w '%{http_code}\n' https://api.thisisatest.tech/.well-known/trust-keys.json` → `200`
+   - the same `curl` of `/mcp/tools.json` **with** `X-API-Key: <your operator key>` → `200`
+5. **GitHub → this repository → Settings → General → Danger zone → Change
+   repository visibility → Private.** Only C.Lee does this. The lockdown
+   commit does not change visibility.
+
+Until step 3 lands, strangers can still read the live tool catalog and talk
+to `/mcp/public`. Until step 5, the source stays world-readable.
 
 ## Preflight — before you ship
 

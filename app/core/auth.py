@@ -10,7 +10,7 @@ import hmac
 from dataclasses import dataclass, replace
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Security, status
+from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from .config import get_settings
 from .oidc_iga import EnterprisePrincipal, IGADecision, IGAError, is_iga_issuer_token
@@ -261,6 +261,26 @@ async def get_auth_context(
         source="env",
         raw_key=stripped,
         is_bootstrap_admin=True,
+    )
+
+
+async def reject_anonymous_production_catalog(request: Request) -> None:
+    """Refuse unauthenticated tool catalogs on production-like boots.
+
+    Local-compatible environments keep anonymous discovery so quickstart
+    and the in-repo stranger test can bootstrap. A hosted production-like
+    origin must not advertise invokable tools (or their schemas) to a
+    stranger: the same credentials that authorize invoke are required to
+    list them. Receipt verification keys stay on the unauthenticated
+    well-known documents.
+    """
+    settings = get_settings()
+    if not is_production_like_environment(settings.ENVIRONMENT):
+        return
+    await get_auth_context(
+        api_key=request.headers.get(settings.API_KEY_HEADER.lower())
+        or request.headers.get("x-api-key"),
+        authorization=request.headers.get("authorization"),
     )
 
 
