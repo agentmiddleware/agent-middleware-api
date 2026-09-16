@@ -84,6 +84,10 @@ Verified from repo:
   hashes, not as the product wedge, not as independent key distribution
   unless a trust root other than this origin is named, and not as a
   claim of non-equivocation. See [`WEDGE.md`](../WEDGE.md) § What To Freeze.
+- Treat a new portable permit envelope and a portable audit-chain export
+  the same way: frozen until a named partner cannot use the shipped
+  `GET /v1/permits/{id}` + `LocalPermitValidator` path, or cannot trust
+  first-party audit verification. Existing receipt portable export stays.
 - Use threat-model sources to keep prompt injection, protocol exploit, replay,
   confused deputy, unsafe tool execution, and cross-tenant leakage in scope.
 - Use NIST as governance vocabulary, not as proof of certification or

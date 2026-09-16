@@ -57,6 +57,19 @@ Keep these out of the wedge until a design partner requires them:
   evidence, so it does not claim non-equivocation. A log still does not
   prove an action did not occur, and it does not replace the ledger. See
   [`WEDGE.md`](WEDGE.md) § What To Freeze.
+- A new portable permit envelope and a portable audit-chain API are not
+  implemented. Receipts already export (`GET /v1/receipts/{id}/portable`).
+  Permits already return signed fields plus `signature` and `key_id` from
+  `GET /v1/permits/{id}`, and SDK `LocalPermitValidator` verifies those
+  bytes without importing the application. What is frozen is a receipt-style
+  permit envelope around that existing verifier, and a public export of
+  audit-chain signed bytes plus an SDK verifier that imports none of the
+  application. Unfreeze the permit envelope only when a named partner cannot
+  use the shipped permit verifier. Unfreeze the audit export only when that
+  partner cannot trust this origin's first-party audit verification
+  (`/v1/audit/verify-chain`, `GET /v1/receipts/{id}/evidence`). That slice
+  is not wrap-and-anchor, not out-of-band key distribution, and not an
+  audit-log product. See [`WEDGE.md`](WEDGE.md) § What To Freeze.
 - Audit chains are wallet-scoped, but database administrators can still delete
   rows unless append-only storage or external anchoring is added.
 - Multi-protocol governed adapters beyond MCP are not implemented (MCP only).
