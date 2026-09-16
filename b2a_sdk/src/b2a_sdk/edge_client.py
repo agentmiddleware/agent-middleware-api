@@ -292,7 +292,7 @@ class LocalPermitValidator:
         """Rebuild the exact payload the trust plane signed for this permit.
 
         Byte-for-byte mirror of the server's reconstruction
-        (``app/services/permits.py::PermitService.verify_signature``), with
+        (``app/services/permits.py::PermitService._verification_payload``), with
         Decimal/datetime canonicalization matching the server's
         ``canonical_json`` and the ``alg``/``kid``/``payload_hash`` fields
         folded in the way ``sign_payload`` does. Load-bearing properties:
