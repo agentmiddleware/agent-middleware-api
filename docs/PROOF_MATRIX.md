@@ -297,14 +297,16 @@ Being explicit about the boundary is what makes the proofs worth anything.
 
 ## Where provability goes next
 
-Ordered by how much each would strengthen the differentiator per unit of work.
+These would strengthen claims. They are not a build queue under Narrow.
 
 1. **Extend the offline verifier to permits and audit events.** Receipts are
    done — `b2a_sdk.receipt_verifier` verifies an exported receipt against the
    published key document with no running server, and `make prove-trust-plane`
    asserts it. Permits and audit-chain events are still checked only by the
-   operator, so the same treatment for them is now the highest-leverage item:
-   an export carrying the exact signed bytes, plus verifier support.
+   operator. The in-process pin is already real: `PermitService.verify_signature`,
+   SDK `LocalPermitValidator`, and the signing goldens. A new public export
+   of those bytes plus an SDK verifier that imports none of the application
+   is a new API, not a debit-wedge fix.
 2. **Out-of-band key distribution.** Offline signature verification is only as
    strong as the key set it runs against, and today that is fetched from the
    origin being audited. Key pinning, or publication through an independent
@@ -319,8 +321,15 @@ Ordered by how much each would strengthen the differentiator per unit of work.
 5. **KMS-backed signing custody**, designed in
    [`docs/key-management.md`](key-management.md) but not implemented.
 
-Items 4 and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a design partner
-requires them. They belong on a roadmap, not in product copy.
+Items 1, 4, and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a named
+partner is blocked without them. They belong on a roadmap, not in product
+copy. Stay on the one-tool economic loop.
+
+Unfreeze item 1 only when a named partner cannot trust this origin's
+first-party permit or audit verification and needs independently
+reconstructable export of the bytes already signed today. That slice is
+not wrap-and-anchor (item 4), not out-of-band keys (item 2), and not an
+audit-log product.
 
 If a partner unfreezes item 4 (external anchoring), the intended composition
 is wrap-and-anchor: existing receipt claims as an in-toto/DSSE predicate,
