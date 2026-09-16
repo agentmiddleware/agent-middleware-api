@@ -26,7 +26,7 @@ from app.db.models import (
     WalletModel,
 )
 from app.schemas.trust import PermitCreateRequest, PermitResponse
-from app.services.signing_keys import get_signing_key_service
+from app.services.signing_keys import get_signing_key_service, sha256_hex
 
 logger = logging.getLogger(__name__)
 
@@ -1577,12 +1577,16 @@ class PermitService:
             )
         return corrected
 
-    async def verify_signature(
-        self,
-        model: PermitModel,
-        *,
-        session: AsyncSession | None = None,
-    ) -> bool:
+    @staticmethod
+    def _verification_payload(model: PermitModel) -> dict[str, Any]:
+        """Rebuild the exact dict the permit signature covers.
+
+        Mirrors :meth:`create_permit`'s payload plus the ``alg`` / ``kid`` /
+        ``payload_hash`` fields ``sign_payload`` folds in. Additive fields
+        enter only when set so pre-existing signatures keep verifying.
+        ``status`` is hardcoded ``\"active\"`` — revocation is enforced by
+        validation, not by breaking the signature.
+        """
         payload: dict[str, Any] = {
             "permit_id": model.permit_id,
             "issuer_wallet_id": model.issuer_wallet_id,
@@ -1598,12 +1602,8 @@ class PermitService:
             "alg": "Ed25519",
             "kid": model.key_id,
         }
-        # Mirror of create_permit: the key is present in the signed payload
-        # only when true. Flipping the stored flag in either direction breaks
-        # the rebuilt payload and fails verification.
         if model.requires_human_approval:
             payload["requires_human_approval"] = True
-        # Permit schema v2 constraints — mirrored from create_permit
         max_calls = _loads_dict(model.max_calls_per_tool_json or "{}")
         if max_calls:
             payload["max_calls_per_tool"] = max_calls
@@ -1614,9 +1614,16 @@ class PermitService:
             payload["forbidden_fields"] = forbidden
         if model.recipient_domain:
             payload["recipient_domain"] = model.recipient_domain
-        from app.services.signing_keys import sha256_hex
-
         payload["payload_hash"] = sha256_hex(payload)
+        return payload
+
+    async def verify_signature(
+        self,
+        model: PermitModel,
+        *,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        payload = self._verification_payload(model)
         return await get_signing_key_service().verify_payload(
             payload,
             signature=model.signature,
