@@ -4,11 +4,11 @@ Provides project-defined endpoints clients can use to discover the governed MCP
 gateway, its currently available tools, pricing, and integration guidance.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 
-from ..core.auth import verify_api_key
+from ..core.auth import reject_anonymous_production_catalog, verify_api_key
 from ..core.config import get_settings
 from ..core.product_positioning import POSITIONING_DESCRIPTION
 from ..core.rate_limiter import rate_limit_discovery
@@ -518,13 +518,16 @@ def _build_integration_guides() -> dict[str, str]:
         "those hints)."
     ),
 )
-async def get_discovery_manifest():
+async def get_discovery_manifest(request: Request):
     """
     Aggregated discovery manifest for autonomous agents.
 
     Prefer `GET /.well-known/agent.json` first for `agent_first` metadata, then
-    this payload for a fuller catalog when needed.
+    this payload for a fuller catalog when needed. Production-like boots
+    require the same credentials as invoke; the catalog names the configured
+    tool.
     """
+    await reject_anonymous_production_catalog(request)
     # Ensure local tools are registered (lazy registration, respects flags)
     from ..routers.mcp import _ensure_local_mcp_tools_registered
 

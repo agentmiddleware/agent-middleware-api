@@ -189,18 +189,131 @@ async def test_agent_json_reports_proof_surfaces_off(client, production_trust_fl
     assert body.get("proof_surfaces") == []
 
 
+_OPERATOR_KEY_HEADERS = {"X-API-Key": "test-key"}
+
+
 @pytest.mark.production_trust
 @pytest.mark.anyio
 async def test_tools_json_omits_proof_stubs_under_prod_flags(
     client, production_trust_flags
 ):
-    resp = await client.get("/mcp/tools.json")
+    resp = await client.get("/mcp/tools.json", headers=_OPERATOR_KEY_HEADERS)
     assert resp.status_code == 200
     names = {tool["name"] for tool in resp.json()["tools"]}
     assert names.isdisjoint(PROOF_SURFACE_MCP_STUB_IDS)
     assert names.isdisjoint(DEFAULT_MCP_STUB_SERVICE_IDS)
     assert not any(name.startswith("awi_") for name in names)
     assert "partner.notes.write" not in names
+
+
+@pytest.mark.production_trust
+@pytest.mark.anyio
+async def test_anonymous_tool_catalogs_are_401_in_production(
+    client, production_trust_flags
+):
+    for path in (
+        "/mcp/tools.json",
+        "/mcp/tools",
+        "/mcp/tools/partner.echo",
+        "/v1/discover",
+        "/.well-known/mcp/tools.json",
+    ):
+        resp = await client.get(path)
+        assert resp.status_code == 401, path
+        body = resp.json()["detail"]
+        assert body["error"] == "missing_credentials"
+
+
+@pytest.mark.production_trust
+@pytest.mark.anyio
+async def test_unknown_key_cannot_read_tool_catalog(client, production_trust_flags):
+    resp = await client.get(
+        "/mcp/tools.json", headers={"X-API-Key": "bogusbogus-not-a-real-key"}
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error"] == "invalid_api_key"
+
+
+@pytest.mark.production_trust
+@pytest.mark.anyio
+async def test_operator_key_can_read_tool_catalog(client, production_trust_flags):
+    resp = await client.get("/v1/discover", headers=_OPERATOR_KEY_HEADERS)
+    assert resp.status_code == 200
+    assert "mcp_tools" in resp.json()
+
+
+@pytest.mark.production_trust
+@pytest.mark.anyio
+async def test_anonymous_cannot_invoke_or_mint_in_production(
+    client, production_trust_flags
+):
+    messages = await client.post(
+        "/mcp/messages", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    )
+    assert messages.status_code == 401
+    invoke = await client.post(
+        "/mcp/tools/partner.echo/invoke", json={"arguments": {"message": "hi"}}
+    )
+    assert invoke.status_code == 401
+    minted = await client.post("/v1/dev-keys/self-provision", json={})
+    assert minted.status_code in {403, 404}
+
+
+@pytest.mark.production_trust
+@pytest.mark.anyio
+async def test_public_mcp_is_404_in_production_even_if_flag_on(
+    client, production_trust_flags, monkeypatch
+):
+    monkeypatch.setenv("ENABLE_PUBLIC_MCP_ENDPOINT", "true")
+    get_settings.cache_clear()
+    resp = await client.post(
+        "/mcp/public",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "lockdown-test", "version": "0"},
+            },
+        },
+        headers={
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        },
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.production_trust
+@pytest.mark.anyio
+async def test_receipt_keys_remain_public_in_production(
+    client, production_trust_flags
+):
+    keys = await client.get("/.well-known/trust-keys.json")
+    assert keys.status_code != 401
+    assert keys.status_code != 403
+    assert keys.status_code in {200, 503}
+    jwks = await client.get("/.well-known/jwks.json")
+    assert jwks.status_code != 401
+    assert jwks.status_code != 403
+    assert jwks.status_code in {200, 503}
+    health = await client.get("/health")
+    assert health.status_code == 200
+
+
+@pytest.mark.production_trust
+@pytest.mark.anyio
+async def test_agent_json_does_not_invite_public_use(client, production_trust_flags):
+    resp = await client.get("/.well-known/agent.json")
+    assert resp.status_code == 200
+    try_it = resp.json()["try_it"]
+    assert try_it["mode"] == "private_experiment"
+    assert try_it["requires_live_credentials"] is True
+    assert try_it["public_tool_catalog"] is False
+    assert try_it["public_self_serve"] is False
+    assert "repository_access" not in try_it
 
 
 @pytest.mark.production_trust

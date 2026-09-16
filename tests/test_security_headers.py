@@ -121,8 +121,28 @@ def test_public_discovery_is_not_forced_no_store() -> None:
     app.add_middleware(SecurityHeadersMiddleware)
     client = TestClient(app)
 
-    for path in ("/openapi.json", "/v1/discover", "/.well-known/agent.json"):
+    for path in ("/openapi.json", "/.well-known/agent.json"):
         assert "cache-control" not in client.get(path).headers
+
+
+def test_tool_catalogs_are_forced_no_store() -> None:
+    """Authenticated catalogs must not be CDN-cached as public discovery."""
+
+    app = Starlette(
+        routes=[
+            Route("/v1/discover", lambda request: PlainTextResponse("{}")),
+            Route("/mcp/tools.json", lambda request: PlainTextResponse("{}")),
+            Route(
+                "/.well-known/mcp/tools.json",
+                lambda request: PlainTextResponse("{}"),
+            ),
+        ]
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+    client = TestClient(app)
+
+    for path in ("/v1/discover", "/mcp/tools.json", "/.well-known/mcp/tools.json"):
+        assert client.get(path).headers["cache-control"] == "no-store"
 
 
 def test_explicit_cache_control_is_not_overridden() -> None:

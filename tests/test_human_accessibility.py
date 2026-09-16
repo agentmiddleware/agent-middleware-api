@@ -26,7 +26,7 @@ async def test_root_content_negotiation_browser_html(client):
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     assert "Agent Middleware API" in resp.text
-    assert "Public operator index" in resp.text
+    assert "Private experiment" in resp.text
     assert "No tenant records or aggregate customer counts" in resp.text
 
 
@@ -49,7 +49,7 @@ async def test_dashboard_endpoint_returns_html(client):
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     assert "Agent Middleware API" in resp.text
-    assert "Public operator index" in resp.text
+    assert "Private experiment" in resp.text
     assert "self-issued live gateway proof, not customer traction" in resp.text
 
 
@@ -96,6 +96,8 @@ async def test_public_operator_index_has_no_fake_data_or_browser_key_handling(
     assert "https://www.thisisatest.tech/proof/" in page
     assert "https://api.thisisatest.tech/health/dependencies" in page
     assert "Keep the key in your environment" in page
+    assert "Public governed-tool catalog" not in page
+    assert 'href="https://api.thisisatest.tech/mcp/tools.json"' not in page
 
 
 @pytest.mark.anyio
