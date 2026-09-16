@@ -242,17 +242,21 @@ debit; cite that stack as supporting evidence, never as the product. The
 ledger stays the source of truth; a log is not a second debit system.
 
 A portable permit/audit API is frozen with the same Narrow rule. Receipts
-already export (`GET /v1/receipts/{id}/portable`). Permits already sign and
-verify in-process, and the signing goldens pin those bytes. What is frozen
-is a new public export of permit or audit-chain signed bytes plus an SDK
-verifier that imports none of the application ([`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md)
-item 1). That expands the demoted signed-evidence surface; it is not the
-debit wedge. Unfreeze only when a named partner cannot trust this origin's
-first-party permit or audit verification and needs independently
-reconstructable export of the bytes already signed today. That slice is not
-wrap-and-anchor, not out-of-band key distribution, and not an audit-log
-product. `LocalPermitValidator` and first-party
-`GET /v1/receipts/{id}/evidence` stay.
+already export (`GET /v1/receipts/{id}/portable`). Permits already return
+every signed field plus `signature` and `key_id` from `GET /v1/permits/{id}`,
+and `LocalPermitValidator` reconstructs and verifies those bytes without
+importing the application; the signing goldens pin that reconstruction.
+What is frozen is a receipt-style permit envelope around that existing
+verifier, and a public export of audit-chain signed bytes plus an SDK
+verifier that imports none of the application
+([`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md) item 1). That expands the
+demoted signed-evidence surface; it is not the debit wedge. Unfreeze the
+permit envelope only when a named partner cannot use the shipped permit
+verifier. Unfreeze the audit export only when that partner cannot trust
+this origin's first-party audit verification
+(`/v1/audit/verify-chain`, `GET /v1/receipts/{id}/evidence`). That slice
+is not wrap-and-anchor, not out-of-band key distribution, and not an
+audit-log product.
 
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
 Deploy SOP (single path: `railway up` from this Dockerfile):
