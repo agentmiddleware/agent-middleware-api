@@ -299,14 +299,18 @@ Being explicit about the boundary is what makes the proofs worth anything.
 
 These would strengthen claims. They are not a build queue under Narrow.
 
-1. **Extend the offline verifier to permits and audit events.** Receipts are
-   done — `b2a_sdk.receipt_verifier` verifies an exported receipt against the
-   published key document with no running server, and `make prove-trust-plane`
-   asserts it. Permits and audit-chain events are still checked only by the
-   operator. The in-process pin is already real: `PermitService.verify_signature`,
-   SDK `LocalPermitValidator`, and the signing goldens. A new public export
-   of those bytes plus an SDK verifier that imports none of the application
-   is a new API, not a debit-wedge fix.
+1. **A receipt-style permit envelope, and a portable audit-chain verifier.**
+   Receipts are done — `b2a_sdk.receipt_verifier` verifies an exported receipt
+   against the published key document with no running server, and
+   `make prove-trust-plane` asserts it. Permits are already independently
+   verifiable: `GET /v1/permits/{id}` returns every signed field plus
+   `signature` and `key_id`, and `LocalPermitValidator` reconstructs those
+   bytes without importing the application; the signing goldens pin that
+   match. Audit-chain events are still first-party
+   (`/v1/audit/verify-chain`). What is frozen is a convenience permit
+   envelope around the shipped verifier, plus a public audit-chain export
+   and an SDK verifier that imports none of the application. That is a new
+   API, not a debit-wedge fix.
 2. **Out-of-band key distribution.** Offline signature verification is only as
    strong as the key set it runs against, and today that is fetched from the
    origin being audited. Key pinning, or publication through an independent
@@ -325,11 +329,11 @@ Items 1, 4, and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a named
 partner is blocked without them. They belong on a roadmap, not in product
 copy. Stay on the one-tool economic loop.
 
-Unfreeze item 1 only when a named partner cannot trust this origin's
-first-party permit or audit verification and needs independently
-reconstructable export of the bytes already signed today. That slice is
-not wrap-and-anchor (item 4), not out-of-band keys (item 2), and not an
-audit-log product.
+Unfreeze the permit envelope in item 1 only when a named partner cannot
+use the shipped `GET /v1/permits/{id}` + `LocalPermitValidator` path.
+Unfreeze the audit export only when that partner cannot trust this
+origin's first-party audit verification. That slice is not wrap-and-anchor
+(item 4), not out-of-band keys (item 2), and not an audit-log product.
 
 If a partner unfreezes item 4 (external anchoring), the intended composition
 is wrap-and-anchor: existing receipt claims as an in-toto/DSSE predicate,
