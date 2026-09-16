@@ -241,6 +241,19 @@ not occur, and it does not make a dishonest gateway honest. Lead with the
 debit; cite that stack as supporting evidence, never as the product. The
 ledger stays the source of truth; a log is not a second debit system.
 
+A portable permit/audit API is frozen with the same Narrow rule. Receipts
+already export (`GET /v1/receipts/{id}/portable`). Permits already sign and
+verify in-process, and the signing goldens pin those bytes. What is frozen
+is a new public export of permit or audit-chain signed bytes plus an SDK
+verifier that imports none of the application ([`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md)
+item 1). That expands the demoted signed-evidence surface; it is not the
+debit wedge. Unfreeze only when a named partner cannot trust this origin's
+first-party permit or audit verification and needs independently
+reconstructable export of the bytes already signed today. That slice is not
+wrap-and-anchor, not out-of-band key distribution, and not an audit-log
+product. `LocalPermitValidator` and first-party
+`GET /v1/receipts/{id}/evidence` stay.
+
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
 Deploy SOP (single path: `railway up` from this Dockerfile):
 [`docs/deploy-railway.md`](docs/deploy-railway.md).

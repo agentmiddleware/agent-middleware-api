@@ -184,7 +184,8 @@ has none of that.
 - Security, correctness, reliability of the existing one-tool loop,
   documentation needed for a real pilot, and keeping release gates green.
 - No new core capability, including pods, extra MCP tools, standard `/mcp`
-  auto-mint, proof surfaces, or public anonymous MCP, until a named prospect,
+  auto-mint, proof surfaces, public anonymous MCP, wrap-and-anchor evidence,
+  or a portable permit/audit export API, until a named prospect,
   one consequential tool, a workflow blocker, an owner, and a date exist.
 
 **Live origin lockdown (code in this change; apply on Railway after merge):**
