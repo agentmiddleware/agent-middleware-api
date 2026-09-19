@@ -378,6 +378,22 @@ class Observation:
             counts[key] = counts.get(key, 0) + 1
         return counts
 
+    def dispatches_by_key(self) -> dict[str, int]:
+        """The larger of the two independent counts, per key.
+
+        The fault layer records a crossing only once it has finished handling
+        the request, so a caller that disconnects mid-delay leaves an
+        execution the layer never logged. The effect ledger has it. Taking
+        the maximum closes that hole in the direction that cannot invent a
+        dispatch: both sources are outside the gateway.
+        """
+        crossings = self.crossings_by_key()
+        executions = self.executions_by_key()
+        return {
+            key: max(crossings.get(key, 0), executions.get(key, 0))
+            for key in set(crossings) | set(executions)
+        }
+
     def refused_only_operations(self) -> list[str]:
         """Operations where every attempt the client made was refused."""
         by_operation: dict[str, list[str]] = {}
@@ -580,14 +596,16 @@ class AtMostOneDispatchPerKey(Invariant):
     )
 
     def check(self, observation: Observation) -> Violation | None:
-        for key, count in sorted(observation.crossings_by_key().items()):
+        for key, count in sorted(observation.dispatches_by_key().items()):
             if count > 1:
                 return self._violation(
-                    f"idempotency key {key!r} crossed the fault layer {count} times; "
-                    "the documented guarantee is at most one dispatch per accepted key",
+                    f"idempotency key {key!r} produced {count} dispatches; the "
+                    "documented guarantee is at most one per accepted key",
                     {
                         "idempotency_key": key,
                         "dispatches": count,
+                        "fault_layer_crossings": observation.crossings_by_key().get(key, 0),
+                        "downstream_executions": observation.executions_by_key().get(key, 0),
                         "crossings": [
                             row
                             for row in observation.crossings
@@ -923,8 +941,6 @@ def _draw_params(kind: CommandKind, rng: random.Random) -> dict[str, Any]:
         return {"fanout": rng.choice([2, 3, 4])}
     if kind is CommandKind.CONCURRENT_BUDGET_RACE:
         return {"fanout": rng.choice([3, 4, 5])}
-    if kind is CommandKind.RECONCILE:
-        return {"backdate_seconds": rng.choice([0, 20_000])}
     return {}
 
 
@@ -960,6 +976,12 @@ class _SequenceRunner:
         self.sequence_index = sequence_index
         self.credits_per_call = credits_per_call
         self.call_timeout_seconds = call_timeout_seconds
+        # Long enough for the gateway to finish its own upstream timeout and
+        # answer; short enough that a same-key retry parked behind an
+        # in-progress record (the gateway polls for the winner's result) does
+        # not stall the whole exploration. Giving up here is recorded as a
+        # client timeout, which is what it is.
+        self.attempt_timeout = call_timeout_seconds + 2.0
 
         self.permit_id: str | None = None
         self.permit_active = False
@@ -1019,9 +1041,7 @@ class _SequenceRunner:
         timeout_seconds: float | None = None,
     ) -> AttemptOutcome:
         agent = self.target.gateway_agent(self.permit_id)
-        kwargs: dict[str, Any] = {}
-        if timeout_seconds is not None:
-            kwargs["timeout_seconds"] = timeout_seconds
+        kwargs = {"timeout_seconds": timeout_seconds or self.attempt_timeout}
         with contextlib.ExitStack() as stack:
             crash_state: dict[str, Any] | None = None
             if self.pending_crash is not None:
@@ -1277,12 +1297,11 @@ class _SequenceRunner:
         return None, {"status": outcome.status, "new_key_ordinal": self.new_key_ordinal}
 
     async def _do_reconcile(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-        backdate_seconds = int(params.get("backdate_seconds", 0))
-        aged = 0
-        if backdate_seconds:
-            aged = await self.gateway.backdate_attempts(
-                self.tenant, seconds=backdate_seconds
-            )
+        # The idle window is set to zero rather than waited out, and the
+        # attempt rows are deliberately NOT backdated: ageing them writes a
+        # `dispatched_at` onto attempts that never dispatched, which is a row
+        # shape the product cannot produce and which its reconciler then
+        # refuses -- a finding about the harness, not about the gateway.
         summary = await self.gateway.reconcile(idle_seconds=0)
         self.reconciled = True
         for operation_id, state in list(self.states.items()):
@@ -1294,12 +1313,7 @@ class _SequenceRunner:
             ):
                 self.states[operation_id] = OperationState.RECONCILED
         self.state = self.states.get(self.primary_operation, self.state)
-        return None, {
-            "attempts_backdated": aged,
-            "clock_moved_seconds": backdate_seconds,
-            "simulated_clock": bool(backdate_seconds),
-            "summary": summary,
-        }
+        return None, {"idle_seconds": 0, "summary": summary}
 
 
 def _dominant(outcomes: Sequence[AttemptOutcome]) -> AttemptOutcome:
