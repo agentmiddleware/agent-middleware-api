@@ -475,6 +475,9 @@ class Violation:
     minimized: bool = False
     shrink_attempts: int = 0
     observation: dict[str, Any] = field(default_factory=dict)
+    #: Which run ``observation`` came from: the minimized sequence when the
+    #: shrinker reproduced the violation, the original otherwise.
+    observation_of: str = "original"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -496,6 +499,7 @@ class Violation:
             ],
             "minimized": self.minimized,
             "shrink_attempts": self.shrink_attempts,
+            "observation_of": self.observation_of,
             "observation": self.observation,
         }
 
@@ -1174,7 +1178,9 @@ class _SequenceRunner:
         commands therefore run uninjected, and the result says so.
         """
         agent = self.target.gateway_agent(self.permit_id)
-        return await agent.submit(identity, self._refund(operation_id))
+        return await agent.submit(
+            identity, self._refund(operation_id), timeout_seconds=self.attempt_timeout
+        )
 
     async def _do_inject_lost_response(
         self, params: dict[str, Any]
@@ -1224,7 +1230,7 @@ class _SequenceRunner:
             )
         )
         self.identity = self._identity_for(self.primary_operation)
-        timeout = 0.35 if where == "client" else self.call_timeout_seconds + 6.0
+        timeout = 0.35 if where == "client" else self.attempt_timeout
         outcome = await self._submit(
             self.identity, self.primary_operation, timeout_seconds=timeout
         )
@@ -1569,9 +1575,16 @@ LIMITATIONS = (
     "instrumented durable boundary, not by killing an OS process. Committed "
     "state stays committed and uncommitted state rolls back, which is the "
     "footprint a SIGKILL leaves, but it is not a SIGKILL.",
-    "Reconciliation is exercised by moving the attempt clock backwards past "
-    "the idle window rather than by waiting it out. Commands that do so "
-    "record clock_moved_seconds.",
+    "Reconciliation is invoked with the reconciler's own idle window set to "
+    "zero rather than waited out. Attempt rows are deliberately not "
+    "backdated: ageing them writes a dispatched_at onto attempts that never "
+    "dispatched, a row shape the product cannot produce and whose "
+    "unreconcilability is a fact about the harness, not the gateway.",
+    "A same-key retry issued while the first attempt's idempotency record is "
+    "still in progress is answered by a poll-and-wait inside the gateway. "
+    "The harness gives up on it after the gateway's upstream timeout plus "
+    "two seconds and records a client timeout, rather than waiting out the "
+    "gateway's full wait window.",
     "Concurrent bursts run without crash injection: a class-level crash hook "
     "with several calls in flight fires on whichever arrives first, and the "
     "harness could not afterwards say which.",
@@ -1744,6 +1757,9 @@ async def explore(
                 ),
                 minimized=report.reproduced,
                 shrink_attempts=report.attempts,
+                observation_of=(
+                    "minimized" if report.observation is not None else "original"
+                ),
                 observation=redact(final.as_dict()),
             )
         )
