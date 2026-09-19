@@ -441,6 +441,11 @@ class PermitRevocationRace(Scenario):
             "and the authorize/reserve/prepare commit, so this test brackets "
             "the authorization point to 'at or before after_prepare' rather "
             "than pinpointing it inside that transaction.",
+            "The reason a control refusal is attributed to revocation is the "
+            "gateway's own reason code, which is not an independent "
+            "observation. What is independent is that the fault layer saw no "
+            "dispatch and the effect ledger no execution, and that a live "
+            "permit submitted at the same point was still admitted.",
         ]
         if first_admitted is not None:
             remaining_risks.append(

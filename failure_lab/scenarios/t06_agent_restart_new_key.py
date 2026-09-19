@@ -652,7 +652,20 @@ class AgentRestartNewKey(Scenario):
         # whichever half this configuration's verdict rule happens to gate on.
         executed_once = ledger_count == 1
         paid_once = debits == 1 if debits is not None else None
-        property_held = executed_once and paid_once is True
+        # True, False, or None. A run that duplicated either the effect or the
+        # charge violated the property. A run that recorded one effect and one
+        # debit upheld it. Anything else -- the refund never executed, so the
+        # premise was not reproduced, or an instrument could not be read --
+        # leaves the property UNESTABLISHED, which is neither "held" nor
+        # "violated" and is never rendered as either.
+        duplicated = ledger_count > 1 or (debits is not None and debits > 1)
+        property_held: bool | None
+        if duplicated:
+            property_held = False
+        elif executed_once and paid_once:
+            property_held = True
+        else:
+            property_held = None
         extra["business_property_held"] = property_held
 
         dedup = extra["deduplicated_by"]
@@ -692,6 +705,13 @@ class AgentRestartNewKey(Scenario):
                 "before the restart)."
             )
 
+        property_word = (
+            "held"
+            if property_held is True
+            else "NOT held"
+            if property_held is False
+            else "NOT ESTABLISHED"
+        )
         if debits is None:
             charge_sentence = (
                 "The gateway's own debit count could not be read from its "
@@ -728,32 +748,40 @@ class AgentRestartNewKey(Scenario):
             f"{layer_sentence} Deduplicated by: {dedup}. {charge_sentence} "
             f"The business-level property under test -- one intended refund, "
             f"executed at most once and paid for at most once -- is therefore "
-            f"{'held' if property_held else 'NOT held'} here "
+            f"{property_word} here "
             f"(executed once: {executed_once}; paid once: {paid_once})."
         )
         if failures:
             observation += " Verdict rule not met: " + "; ".join(failures) + "."
-        if verdict is Verdict.PASS and not property_held:
+        if verdict is Verdict.PASS and property_held is not True:
             observation += (
                 " NOTE: this configuration's documented verdict rule gates only "
                 "on downstream executions, so the verdict reads PASS while the "
-                "business-level property above did NOT hold. The verdict is the "
-                "narrower statement; the claim is the wider one, and it failed."
+                f"business-level property above was {property_word}. The verdict "
+                "is the narrower statement; the claim is the wider one."
             )
-        if property_held:
+        if property_held is True:
             observation += (
                 " Scope note: no business-level gap was observed in this run. "
                 "The guarantee the product states is per idempotency key, not "
                 "per business operation, so a run that holds here holds by more "
                 "than that guarantee promises."
             )
-        else:
+        elif property_held is False:
             observation += (
                 " Scope note: this gap is outside the guarantee the product "
                 "states, which is per idempotency key, not per business "
                 "operation. It is reported as a real business-level gap and as "
                 "an out-of-scope one at the same time; neither half should be "
                 "dropped."
+            )
+        else:
+            observation += (
+                " Scope note: this run says nothing either way about the "
+                "business-level property -- the refund did not execute once and "
+                "get charged once, so there was no duplicate to prevent and no "
+                "clean pass to record. The guarantee the product states is in "
+                "any case per idempotency key, not per business operation."
             )
 
         risks = [
