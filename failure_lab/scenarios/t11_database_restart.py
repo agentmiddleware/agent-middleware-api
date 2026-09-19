@@ -277,13 +277,14 @@ async def _restore_never_dispatched(attempt_ids: list[str]) -> int:
 def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
     """Classify one sub-case and count the PRD's damage measures.
 
-    The four counted measures are: duplicate dispatches (fault-layer
-    crossings beyond the first for one key), duplicate downstream executions
+    The counted measures are: duplicate dispatches (fault-layer crossings
+    beyond the first for one key), duplicate downstream executions
     (effect-ledger rows beyond the first), inconsistent debits (a debit with
-    neither a receipt nor a refund after recovery), and corrupted state (an
-    attempt row in no valid state). ``lost_accepted_operations`` is the
-    fifth: an operation the gateway durably admitted that recovery left with
-    no terminal state and no safe way to retry.
+    neither a receipt nor a refund after recovery), corrupted state (an
+    attempt row in no valid state), ``admitted_without_terminal_state`` (the
+    PRD's phrase counted literally), and ``lost_accepted_operations`` -- the
+    subset of those the same-key retry could not resolve either, which is
+    what makes an admitted operation actually lost.
     """
     dispatches = int(case["dispatches_total"])
     executions = int(case["executions_total"])
@@ -367,13 +368,15 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
     elif not admitted and case["dispatches_during_outage"] == 0:
         disposition = "failed_closed"
     else:
-        disposition = "safely_retryable" if safely_retryable else "lost"
-        if disposition == "lost" and "lost" not in str(problems):
-            problems.append(
-                f"status {case['outage_status']!r} with "
-                f"{case['dispatches_during_outage']} dispatch(es) during the "
-                "outage is neither a clean failure nor a recovered operation"
-            )
+        # Everything else is excluded above, so this is the one remaining
+        # shape: nothing durable was admitted, yet something crossed the
+        # fault layer. The gateway sent and kept no record of having sent.
+        disposition = "unrecorded_dispatch"
+        problems.append(
+            f"{case['dispatches_during_outage']} dispatch(es) crossed the "
+            f"fault layer (status {case['outage_status']!r}) for a key the "
+            "gateway kept no durable record of"
+        )
 
     measures = {
         "duplicate_dispatches": duplicate_dispatches,
@@ -941,7 +944,7 @@ class DatabaseRestart(Scenario):
                 "Per-case 'dispatches_total' and 'executions_total' are that "
                 "key's own counts across the outage, recovery and the retry. "
                 "The configuration-level counters cover all three sub-cases "
-                "together, so they are deliberately larger.",
+                "together, so they are deliberately larger."
             ),
             "verdict_failures": failures,
             "wallet_balance": snapshot.wallet_balance if snapshot else None,
