@@ -1,97 +1,115 @@
-"""The self-serve diagnostic: "Agent Action Safety Check".
+"""The HTTP surface: one page, one run at a time, on the loopback only.
 
-A visitor opens a page, runs a failure against a sandboxed agent integration,
-and reads what the instruments counted. The page can tell them they do not need
-the product, and does, because :mod:`failure_lab.diagnostic.answer` computes
-that result from the same comparison objects the evidence bundle is built from.
+Every refusal below is structural. A warning in the copy is a warning somebody
+reads after the thing has already happened.
 
-What this server will not do, and why each refusal is structural rather than a
-warning in the copy:
+**Loopback only, and production refuses to boot at all.** :func:`serve` will
+not bind anything but a loopback address, and :func:`create_app` calls
+:func:`~failure_lab.diagnostic.runs.assert_not_production_like` against the
+``ENVIRONMENT`` this process started with -- captured before
+:func:`~failure_lab.gateway.boot_standalone_environment` can overwrite it with
+``local``. A diagnostic that mints its own admin key, enables ``create_all``
+and signs with an ephemeral seed has no business in a production process, and
+the check that says so runs at construction, not at first request.
 
-**It never talks to anything the operator did not explicitly allow.** The
-sandbox is the only target. An external target requires two independent
-authorizations that cannot substitute for one another: the operator starts the
-server with ``allow_external_targets=True``, *and* the individual request
-carries ``external_target_acknowledged``. Either alone is refused. The PRD's
-"explicit opt-in" is not one flag, because one flag is a thing somebody turns
-on once and forgets.
+**The external-target code path is absent, not hidden.** With
+``allow_external_targets`` false -- the default -- no handler object for it is
+constructed and no route for it is registered, so the endpoint 404s because
+there is nothing there. Turning the flag on does not enable an adapter either:
+none is shipped, and the route that appears says so and sends nothing. The
+choice to point failure traffic at somebody's system should cost more than a
+boolean.
 
-**It never accepts a credential.** The check endpoint has no field for one. The
-verify endpoint takes a receipt bundle and a key document, and refuses a
-submission whose content is credential-shaped before parsing it, because a
-secret that reaches the parser has already been in memory, in a log buffer and
-possibly in an error message.
+**One run at a time, and the second caller is told so.** The guard is a
+synchronous check-and-set before the first ``await``, and a second run gets 429
+rather than a queue slot. A diagnostic that queues is a diagnostic that can be
+made to queue.
 
-**It never returns a document that has not been redacted.** Every response body
-built from a run goes through :func:`failure_lab.evidence.redact`, the same
-pass the evidence bundle uses. One pass, used twice, cannot drift.
+**No credential is accepted anywhere.** There is no field for one. A submission
+whose bytes look like a credential is refused before it reaches ``json.loads``,
+because a secret that reaches the parser has already been in memory, in a
+buffer, and possibly in an error message.
 
-**It bounds what one visitor can consume.** Runs are serialized behind a
-semaphore, each visitor gets a token bucket, and the scenario selection is
-capped -- a visitor cannot ask this server to run the slow tier.
-
-**It never counts itself as a customer.** :class:`TrafficSource` is fixed at
-construction and defaults to ``unknown``. ``human_customer`` has to be typed by
-an operator who means it, and the PRD forbids synthetic traffic from ever
-reaching conversion metrics.
+**Nothing leaves without the redaction pass, and then a second look.** Every
+run-derived body goes through :func:`failure_lab.evidence.redact`, and then
+:meth:`DiagnosticService.guard` scans the finished bytes for the sandbox's own
+secret values and refuses to serve the response if one survived. The bundle is
+scanned a third time, by the evidence module, before it is written.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
 import re
+import tempfile
 import time
 from collections import OrderedDict, deque
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Route
 
 from failure_lab import TEST_DEFINITION_VERSION, __version__
-from failure_lab.diagnostic import pages
-from failure_lab.diagnostic.answer import DiagnosticAnswer, build_answer
-from failure_lab.diagnostic.steps import Step, translate_all
+from failure_lab.configurations import Configuration
+from failure_lab.diagnostic import pages, runs
+from failure_lab.diagnostic.runs import RunRecord, RunRefused
 from failure_lab.evidence import REDACTED_KEY_PATTERN, redact
-from failure_lab.telemetry import EventName, TelemetryClient, TelemetryRejected, TrafficSource
-from failure_lab.verifier import KeySource, parse_key_document, verify
+from failure_lab.report import Comparison
+from failure_lab.scenarios import SCENARIOS_BY_ID
+from failure_lab.telemetry import (
+    EventName,
+    TelemetryClient,
+    TelemetryRejected,
+    TrafficSource,
+    pseudonymous_subject,
+)
 
-#: Scenarios a visitor may run. The fast tier only: a public endpoint that can
-#: be made to run the slow tier is a public endpoint that can be made to burn a
-#: machine. An operator who wants the whole suite runs the CLI.
-PUBLIC_SCENARIOS: tuple[str, ...] = ("T01", "T02", "T03", "T06")
+logger = logging.getLogger("failure_lab.diagnostic")
 
-#: The default check, chosen because it is the one failure every agent
-#: integration meets and the one where a correct baseline can win outright.
-DEFAULT_SCENARIOS: tuple[str, ...] = ("T03", "T06")
+#: Addresses this server will bind. Not a default -- a whitelist. The check is
+#: in :func:`serve` so a wrapper cannot pass ``--host 0.0.0.0`` through.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
-#: How many results are kept addressable. Old ones fall off the end; nothing
-#: here is a system of record.
-MAX_RETAINED_RESULTS = 32
-
-#: Requests per window, per client, for the endpoint that actually runs a lab.
-RUN_RATE_LIMIT = 4
+#: Run requests per client per window. Low, because one run occupies the whole
+#: machine's sandbox for its duration.
+RUN_RATE_LIMIT = 6
 RUN_RATE_WINDOW_SECONDS = 300.0
 
-#: Requests per window, per client, for the cheap endpoints.
-READ_RATE_LIMIT = 120
+#: Cheap endpoints: the page, the report, the stream.
+READ_RATE_LIMIT = 240
 READ_RATE_WINDOW_SECONDS = 60.0
 
-#: Nothing submitted to /verify may be larger than this. A receipt bundle is a
-#: few kilobytes; a megabyte of it is somebody else's problem being made ours.
-MAX_SUBMISSION_BYTES = 256 * 1024
+#: Nothing posted here is bigger than a scenario list.
+MAX_REQUEST_BYTES = 16 * 1024
 
-#: How long one check may run before it is abandoned.
-RUN_TIMEOUT_SECONDS = 600.0
+#: How many finished runs stay addressable. Results live in memory and are not
+#: a system of record; the evidence bundle is.
+MAX_RETAINED_RUNS = 8
 
-#: Text that must never be accepted from a visitor, whatever it is labelled as.
-#: This is the *submission* guard, and it is deliberately stricter than the
-#: redaction pass: redaction exists to keep a secret out of an artifact after
-#: the fact, and this exists so the secret never arrives.
+#: How long an event stream may stay open before the server closes it, even if
+#: the run is somehow still going. Bounds a connection a client can hold.
+STREAM_DEADLINE_SECONDS = runs.RUN_TIMEOUT_SECONDS + 60.0
+#: How long the stream waits for a new step before writing a keep-alive.
+STREAM_HEARTBEAT_SECONDS = 10.0
+
+#: Refused before parsing, whatever it is labelled as. Deliberately stricter
+#: than the redaction pass: redaction keeps a secret out of an artifact after
+#: the fact, this keeps it from arriving.
 _CREDENTIAL_SHAPED = re.compile(
     r"(?i)"
     r"(?:-----BEGIN [A-Z ]*PRIVATE KEY-----)"
@@ -103,7 +121,7 @@ _CREDENTIAL_SHAPED = re.compile(
 
 
 class SubmissionRefused(ValueError):
-    """A visitor's submission was refused before it was parsed."""
+    """A request was refused before anything was parsed or executed."""
 
     def __init__(self, reason: str, *, status_code: int = 400) -> None:
         super().__init__(reason)
@@ -111,50 +129,40 @@ class SubmissionRefused(ValueError):
         self.status_code = status_code
 
 
-@dataclass
-class DiagnosticSettings:
-    """How this instance is allowed to behave.
+class ResponseWithheld(RuntimeError):
+    """A finished response still contained a known secret, so it was not sent.
 
-    Every field that widens what the server may do defaults to the narrow
-    value. There is no configuration file and no environment override: an
-    operator who wants an external target has to pass it at construction, where
-    it is visible in the command that started the process.
+    The message never contains the value. This should be unreachable -- every
+    document has already been through :func:`~failure_lab.evidence.redact` --
+    and it exists because "should be unreachable" is not a guarantee.
     """
 
-    #: Whether an external target may be named at all. Off by default. On its
-    #: own it still is not enough -- see :meth:`external_target_allowed`.
+
+@dataclass
+class DiagnosticSettings:
+    """How this instance behaves. Every widening field defaults to narrow."""
+
+    #: Whether an external-target route is constructed at all. See the module
+    #: docstring: false means the handler does not exist, not that it is hidden.
     allow_external_targets: bool = False
-    #: The traffic source stamped on every telemetry event. Never inferred
-    #: from a request: a visitor cannot make themselves count as a customer,
-    #: and an internal agent driving this server cannot either.
-    traffic_source: TrafficSource = TrafficSource.UNKNOWN
-    #: Where telemetry and run directories go. A temporary directory when
-    #: unset, which is the right default for a machine somebody is trying out.
+    #: The traffic source for anything that is not a genuine browser session --
+    #: the CLI, a test, a script. The PRD's rule is that synthetic traffic never
+    #: reaches a conversion metric, so this is the default and it is not
+    #: ``human_customer``.
+    traffic_source: TrafficSource = TrafficSource.INTERNAL_TEST
+    #: The source used when the request carries browser fetch metadata. Set to
+    #: ``None`` to record every request under :attr:`traffic_source`.
+    browser_traffic_source: TrafficSource | None = TrafficSource.HUMAN_CUSTOMER
+    #: Where run directories, the telemetry log and the audit log go. A
+    #: temporary directory when unset.
     state_dir: Path | None = None
-    #: Whether to record telemetry at all.
     telemetry: bool = True
-    #: Scenario ids a visitor may select.
-    allowed_scenarios: tuple[str, ...] = PUBLIC_SCENARIOS
-    #: Concurrent lab runs. One, because a run boots a gateway and a sandbox
-    #: and the honest answer to "can this serve a crowd" is "it is a
-    #: diagnostic, not a service".
-    max_concurrent_runs: int = 1
-
-    def external_target_allowed(self, acknowledged: bool) -> bool:
-        """Both authorizations, or no external request.
-
-        The operator's flag says this deployment *may* be pointed outward. The
-        request's acknowledgement says this particular call was meant to be.
-        Requiring both means neither a forgotten flag nor a copied request body
-        is sufficient on its own.
-        """
-        return bool(self.allow_external_targets and acknowledged)
+    allowed_scenarios: tuple[str, ...] = runs.PUBLIC_SCENARIOS
+    max_retained_runs: int = MAX_RETAINED_RUNS
 
 
 @dataclass
 class _Bucket:
-    """One client's recent requests, for a fixed window."""
-
     hits: deque[float] = field(default_factory=deque)
 
     def allow(self, *, limit: int, window: float, now: float) -> bool:
@@ -167,18 +175,22 @@ class _Bucket:
 
 
 class _RateLimiter:
-    """Fixed-window counters per client, bounded in size.
+    """Fixed windows per client, bounded in size.
 
-    The bound matters as much as the limit: a per-client dict that grows
-    without one is itself the resource a visitor exhausts.
+    One instance per endpoint class, never one shared by all of them: a
+    visitor reading their own report must not be able to spend the budget that
+    lets them start another run, and a budget shared between a cheap endpoint
+    and an expensive one is the cheap endpoint's budget.
+
+    The size bound matters as much as the rate: a per-client dict with no
+    ceiling is itself the resource a visitor exhausts.
     """
 
-    def __init__(self, *, max_clients: int = 4096) -> None:
+    def __init__(self, *, max_clients: int = 2048) -> None:
         self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
         self._max_clients = max_clients
 
     def allow(self, client: str, *, limit: int, window: float) -> bool:
-        now = time.monotonic()
         bucket = self._buckets.get(client)
         if bucket is None:
             bucket = _Bucket()
@@ -186,64 +198,293 @@ class _RateLimiter:
             while len(self._buckets) > self._max_clients:
                 self._buckets.popitem(last=False)
         self._buckets.move_to_end(client)
-        return bucket.allow(limit=limit, window=window, now=now)
+        return bucket.allow(limit=limit, window=window, now=time.monotonic())
 
 
-@dataclass
-class _StoredResult:
-    """One completed check, kept only long enough to be read back."""
-
-    result_id: str
-    created_at: float
-    answer: DiagnosticAnswer
-    environment: dict[str, Any]
-    document: dict[str, Any]
-    exit_status: int
-    #: The experiment narrated from the harness's own event log. Every line
-    #: is derived from an event a scenario actually wrote, so this cannot
-    #: describe a step that did not happen.
-    steps: list[Step] = field(default_factory=list)
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _client_key(request: Request) -> str:
-    """A coarse client identity for rate limiting.
-
-    The address is used for counting and is never written to telemetry, a log
-    line or a result document. The PRD's privacy rule is that this surface does
-    not collect who somebody is; a counter that forgets is not collection.
-    """
     client = request.client
     return client.host if client and client.host else "unknown"
 
 
-def _check_submission_text(raw: str) -> None:
-    """Refuse anything credential-shaped before it is parsed."""
-    if len(raw.encode("utf-8", "ignore")) > MAX_SUBMISSION_BYTES:
-        raise SubmissionRefused(
-            f"submission larger than {MAX_SUBMISSION_BYTES} bytes was refused "
-            "without being read",
-            status_code=413,
+def _looks_like_browser(request: Request) -> bool:
+    """Whether this request came from a browser actually rendering the page.
+
+    Browsers send ``Sec-Fetch-*`` on every request and no HTTP client library
+    does unless it is made to. That is the whole test, and it is deliberately
+    the conservative direction: a browser misclassified as a script costs a
+    funnel row, and a script misclassified as a human customer corrupts the one
+    number the PRD says must never be corrupted.
+    """
+    headers = request.headers
+    fetch_metadata = "sec-fetch-site" in headers or "sec-fetch-mode" in headers
+    agent = headers.get("user-agent", "")
+    return fetch_metadata and "mozilla" in agent.lower()
+
+
+class DiagnosticService:
+    """The state one running diagnostic server owns."""
+
+    def __init__(self, settings: DiagnosticSettings | None = None) -> None:
+        self.settings = settings or DiagnosticSettings()
+        self.state_dir = Path(
+            self.settings.state_dir
+            or tempfile.mkdtemp(prefix="failure-lab-diagnostic-state-")
         )
-    if _CREDENTIAL_SHAPED.search(raw):
-        raise SubmissionRefused(
-            "this submission looks like it contains a credential, so it was "
-            "refused without being parsed. This check never needs an API key, "
-            "a token or a private key. Send the receipt bundle only."
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.audit_path = self.state_dir / "diagnostic-audit.jsonl"
+        self._runs: OrderedDict[str, RunRecord] = OrderedDict()
+        self._read_limiter = _RateLimiter()
+        self._run_limiter = _RateLimiter()
+        self._active_run_id: str | None = None
+        self._task: asyncio.Task[Any] | None = None
+        self._telemetry: dict[TrafficSource, TelemetryClient] = {}
+        self.notes: list[str] = []
+
+    # -- telemetry ---------------------------------------------------------
+
+    def traffic_source_for(self, request: Request) -> TrafficSource:
+        browser = self.settings.browser_traffic_source
+        if browser is not None and _looks_like_browser(request):
+            return browser
+        return self.settings.traffic_source
+
+    def record(self, source: TrafficSource, name: EventName, **properties: Any) -> None:
+        """Record one event under the source the request established.
+
+        A rejected event is noted and surfaced, never swallowed and never
+        fatal: throwing away a completed diagnostic to protect the metric about
+        the diagnostic is the wrong trade.
+        """
+        if not self.settings.telemetry:
+            return
+        client = self._telemetry.get(source)
+        if client is None:
+            client = TelemetryClient(self.state_dir, source)
+            self._telemetry[source] = client
+        try:
+            client.record(name, **properties)
+        except TelemetryRejected as exc:
+            note = f"telemetry event {name.value!r} refused: {exc}"
+            self.notes.append(note)
+            logger.warning("%s", note)
+
+    # -- audit -------------------------------------------------------------
+
+    def audit(self, **entry: Any) -> None:
+        """Append one line to the diagnostic's own execution log.
+
+        "Who" is a pseudonym, not an address. This surface has no reason to
+        learn who anybody is, and a trail that can only say "the same caller as
+        the previous line" answers every operational question a loopback
+        diagnostic actually has.
+        """
+        line = {"at": _now(), **entry}
+        rendered = json.dumps(line, sort_keys=True, default=str)
+        logger.info("diagnostic audit %s", rendered)
+        try:
+            with self.audit_path.open("a", encoding="utf-8") as handle:
+                handle.write(rendered + "\n")
+        except OSError as exc:  # pragma: no cover - the log is not the product
+            self.notes.append(f"audit log could not be written: {exc}")
+
+    def caller(self, request: Request) -> str:
+        return pseudonymous_subject(
+            _client_key(request), namespace="failure-lab-diagnostic"
         )
-    if REDACTED_KEY_PATTERN.search(raw):
-        raise SubmissionRefused(
-            "this submission contains a field whose name marks it as secret, "
-            "so it was refused without being parsed. Remove it and resend; "
-            "nothing here needs it."
+
+    # -- rate limiting -----------------------------------------------------
+
+    def allow_read(self, request: Request) -> bool:
+        return self._read_limiter.allow(
+            _client_key(request), limit=READ_RATE_LIMIT, window=READ_RATE_WINDOW_SECONDS
         )
+
+    def allow_run(self, request: Request) -> bool:
+        return self._run_limiter.allow(
+            _client_key(request), limit=RUN_RATE_LIMIT, window=RUN_RATE_WINDOW_SECONDS
+        )
+
+    # -- the response guard ------------------------------------------------
+
+    def guard(self, body: str) -> str:
+        """Refuse to serve a body that still contains a known secret."""
+        for value in runs.known_secret_values():
+            if len(value) >= 8 and value in body:
+                raise ResponseWithheld(
+                    "a response still contained a secret value of length "
+                    f"{len(value)} after redaction and was not sent"
+                )
+        return body
+
+    def html(self, body: str, *, status_code: int = 200) -> Response:
+        return HTMLResponse(self.guard(body), status_code=status_code)
+
+    def json(self, document: Any, *, status_code: int = 200) -> Response:
+        text = json.dumps(redact(document), indent=2, sort_keys=True, default=str)
+        return Response(
+            self.guard(text), status_code=status_code, media_type="application/json"
+        )
+
+    # -- runs --------------------------------------------------------------
+
+    @property
+    def busy(self) -> bool:
+        return self._active_run_id is not None
+
+    def get(self, run_id: str) -> RunRecord | None:
+        return self._runs.get(run_id)
+
+    def begin(self, scenarios: list[str]) -> RunRecord:
+        """Claim the single run slot. Synchronous, so there is no race to lose."""
+        if self._active_run_id is not None:
+            raise SubmissionRefused(
+                "a check is already running on this machine. It boots a gateway, "
+                "a downstream tool and a fault layer, and this surface runs one "
+                "at a time on purpose. Wait for it to finish.",
+                status_code=429,
+            )
+        record = RunRecord(
+            run_id=runs.new_run_id(),
+            scenarios=list(scenarios),
+            seed=runs.new_seed(),
+            created_at=time.monotonic(),
+        )
+        self._active_run_id = record.run_id
+        self._runs[record.run_id] = record
+        while len(self._runs) > self.settings.max_retained_runs:
+            self._runs.popitem(last=False)
+        return record
+
+    def start(self, record: RunRecord, request: Request) -> None:
+        caller = self.caller(request)
+        source = self.traffic_source_for(request)
+        self.audit(
+            event="diagnostic_started",
+            run_id=record.run_id,
+            caller=caller,
+            traffic_source=source.value,
+            scenarios=list(record.scenarios),
+            seed=record.seed,
+        )
+        self.record(
+            source,
+            EventName.DIAGNOSTIC_STARTED,
+            surface="web",
+            scenario_count=len(record.scenarios),
+            definition_version=TEST_DEFINITION_VERSION,
+            lab_version=__version__,
+        )
+        self._task = asyncio.create_task(self._drive(record, source, caller))
+
+    async def _drive(
+        self, record: RunRecord, source: TrafficSource, caller: str
+    ) -> None:
+        started = time.monotonic()
+        try:
+            await runs.execute(record, state_dir=self.state_dir)
+        except asyncio.CancelledError:
+            record.state = "failed"
+            record.error = record.error or "the run was cancelled."
+            raise
+        except Exception as exc:  # noqa: BLE001 - reported, never raised at a visitor
+            record.state = "failed"
+            record.error = f"{type(exc).__name__}: {exc}"
+            logger.exception("diagnostic run %s failed", record.run_id)
+        finally:
+            self._active_run_id = None
+            record.wake()
+            duration_ms = round((time.monotonic() - started) * 1000)
+            self.audit(
+                event="diagnostic_completed",
+                run_id=record.run_id,
+                caller=caller,
+                scenarios=list(record.scenarios),
+                state=record.state,
+                exit_status=record.exit_status,
+                answer=record.answer.answer.value if record.answer else None,
+                duration_ms=duration_ms,
+                error=record.error,
+            )
+            self._report_comparisons(source, record)
+            self.record(
+                source,
+                EventName.DIAGNOSTIC_COMPLETED,
+                surface="web",
+                scenario_count=len(record.scenarios),
+                outcome="success" if record.state == "complete" else "failure",
+                duration_ms=duration_ms,
+                **(
+                    {"conclusion_kind": record.answer.answer.value}
+                    if record.answer
+                    else {}
+                ),
+            )
+
+    def _report_comparisons(self, source: TrafficSource, record: RunRecord) -> None:
+        """One comparison event per scenario, plus the baseline's own result.
+
+        ``baseline_passed`` / ``baseline_failed`` are derived from the naive
+        column's duplicate count -- the caller's kind of integration -- because
+        that is the thing the PRD's funnel is actually asking about.
+        """
+        for comparison in record.comparisons:
+            self.record(
+                source,
+                EventName.GATEWAY_COMPARISON_COMPLETED,
+                test_id=comparison.test_id,
+                verdict=comparison.verdict,
+                conclusion_kind=comparison.conclusion.kind.value,
+                matches_expectation=comparison.matches_expectation,
+                surface="web",
+            )
+            baseline = _baseline_column(comparison)
+            if baseline is None:
+                continue
+            self.record(
+                source,
+                EventName.BASELINE_FAILED
+                if baseline.duplicate_effects > 0
+                else EventName.BASELINE_PASSED,
+                test_id=comparison.test_id,
+                duplicate_effects=baseline.duplicate_effects,
+                downstream_executions=baseline.downstream_effects,
+                surface="web",
+            )
+
+
+def _baseline_column(comparison: Comparison) -> Any:
+    for column in comparison.columns:
+        if column.configuration == Configuration.DIRECT_NAIVE.value and column.ran:
+            return column
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Request helpers                                                               #
+# --------------------------------------------------------------------------- #
 
 
 async def _read_json(request: Request) -> dict[str, Any]:
     body = await request.body()
+    if len(body) > MAX_REQUEST_BYTES:
+        raise SubmissionRefused(
+            f"a body larger than {MAX_REQUEST_BYTES} bytes was refused without "
+            "being read. Nothing this surface accepts is that big.",
+            status_code=413,
+        )
     raw = body.decode("utf-8", "replace")
     if not raw.strip():
         return {}
-    _check_submission_text(raw)
+    if _CREDENTIAL_SHAPED.search(raw) or REDACTED_KEY_PATTERN.search(raw):
+        raise SubmissionRefused(
+            "this submission looks like it carries a credential, so it was "
+            "refused without being parsed. This check never needs an API key, a "
+            "token or a private key; the sandbox mints its own."
+        )
     try:
         parsed = json.loads(raw)
     except ValueError as exc:
@@ -253,188 +494,13 @@ async def _read_json(request: Request) -> dict[str, Any]:
     return parsed
 
 
-class DiagnosticService:
-    """The state one running diagnostic server owns."""
-
-    def __init__(self, settings: DiagnosticSettings | None = None) -> None:
-        self.settings = settings or DiagnosticSettings()
-        self._results: OrderedDict[str, _StoredResult] = OrderedDict()
-        self._limiter = _RateLimiter()
-        self._runs = asyncio.Semaphore(max(1, self.settings.max_concurrent_runs))
-        self._telemetry: TelemetryClient | None = None
-        self._notes: list[str] = []
-
-    # -- telemetry ---------------------------------------------------------
-
-    def _telemetry_client(self) -> TelemetryClient | None:
-        """Built lazily so a server that is never used writes nothing."""
-        if not self.settings.telemetry:
-            return None
-        if self._telemetry is None:
-            import tempfile
-
-            directory = self.settings.state_dir or Path(
-                tempfile.mkdtemp(prefix="failure-lab-diagnostic-")
-            )
-            directory.mkdir(parents=True, exist_ok=True)
-            self._telemetry = TelemetryClient(directory, self.settings.traffic_source)
-        return self._telemetry
-
-    def record(self, name: EventName, **properties: Any) -> None:
-        """Record an event, or record that the collector refused it.
-
-        A telemetry write is never allowed to fail a visitor's request: the
-        point of the surface is the measurement it returns, not the metric the
-        vendor gets from it.
-        """
-        client = self._telemetry_client()
-        if client is None:
-            return
-        try:
-            client.record(name, **properties)
-        except TelemetryRejected as exc:
-            self._notes.append(f"telemetry event {name.value!r} refused: {exc}")
-
-    # -- rate limiting -----------------------------------------------------
-
-    def allow_read(self, request: Request) -> bool:
-        return self._limiter.allow(
-            _client_key(request), limit=READ_RATE_LIMIT, window=READ_RATE_WINDOW_SECONDS
-        )
-
-    def allow_run(self, request: Request) -> bool:
-        return self._limiter.allow(
-            _client_key(request), limit=RUN_RATE_LIMIT, window=RUN_RATE_WINDOW_SECONDS
-        )
-
-    # -- results -----------------------------------------------------------
-
-    def store(self, stored: _StoredResult) -> None:
-        self._results[stored.result_id] = stored
-        while len(self._results) > MAX_RETAINED_RESULTS:
-            self._results.popitem(last=False)
-
-    def get(self, result_id: str) -> _StoredResult | None:
-        return self._results.get(result_id)
-
-    # -- the check itself --------------------------------------------------
-
-    def select_scenarios(self, requested: Any) -> list[str]:
-        """Validate a requested scenario list against the allowlist."""
-        if requested is None:
-            return list(DEFAULT_SCENARIOS)
-        if isinstance(requested, str):
-            requested = [requested]
-        if not isinstance(requested, list) or not requested:
-            raise SubmissionRefused("'scenarios' must be a non-empty list of test ids")
-        allowed = set(self.settings.allowed_scenarios)
-        chosen: list[str] = []
-        for item in requested:
-            if not isinstance(item, str):
-                raise SubmissionRefused("'scenarios' must contain test ids as strings")
-            test_id = item.strip().upper()
-            if test_id not in allowed:
-                raise SubmissionRefused(
-                    f"{test_id} is not available on this surface. This server "
-                    f"offers {', '.join(sorted(allowed))}; the full suite runs "
-                    "from the command line."
-                )
-            if test_id not in chosen:
-                chosen.append(test_id)
-        return chosen
-
-    def check_target(self, payload: dict[str, Any]) -> None:
-        """Refuse an external target unless both authorizations are present."""
-        target = payload.get("target") or payload.get("target_url")
-        if target in (None, "", "sandbox"):
-            return
-        acknowledged = payload.get("external_target_acknowledged") is True
-        if not self.settings.allow_external_targets:
-            raise SubmissionRefused(
-                "this server runs against its own sandbox only. It was not "
-                "started with external targets enabled, so it will not send a "
-                "request to a system you name here. Start it with "
-                "allow_external_targets=True if you own the target and intend "
-                "that.",
-                status_code=403,
-            )
-        if not acknowledged:
-            raise SubmissionRefused(
-                "an external target also needs this request to carry "
-                "'external_target_acknowledged': true, confirming you are "
-                "authorized to send failure traffic at that system. The "
-                "server-side flag alone is not treated as authorization for an "
-                "individual request.",
-                status_code=403,
-            )
-        raise SubmissionRefused(
-            "external targets are authorized on this server but no external "
-            "adapter is implemented, so nothing was sent. The check ran "
-            "nothing rather than falling back to the sandbox and reporting a "
-            "sandbox result under your target's name.",
-            status_code=501,
-        )
-
-    async def run_check(self, scenarios: list[str]) -> _StoredResult:
-        """Run the selected scenarios in the sandbox and build the answer."""
-        from failure_lab.runner import run_lab
-
-        async with self._runs:
-            run = await asyncio.wait_for(
-                run_lab(
-                    test_ids=scenarios,
-                    traffic_source=self.settings.traffic_source,
-                    telemetry=False,
-                    reproduction_command=(
-                        "python -m failure_lab run --test " + " --test ".join(scenarios)
-                    ),
-                ),
-                timeout=RUN_TIMEOUT_SECONDS,
-            )
-
-        answer = build_answer(run.comparisons)
-        # Narrated from the harness's own event log rather than printed on a
-        # timer: a line exists only where an event exists to derive it from.
-        events: list[dict[str, Any]] = []
-        for result in run.results:
-            events.extend(result.events)
-        steps = translate_all(events)
-        document = redact(
-            {
-                "result_id": run.run_id,
-                "answer": answer.as_dict(),
-                "environment": run.environment,
-                "scenarios": run.verdict_rows(),
-                "steps": [step.as_dict() for step in steps],
-                "notes": run.notes,
-                "errors": run.errors,
-            }
-        )
-        stored = _StoredResult(
-            result_id=run.run_id,
-            created_at=time.time(),
-            answer=answer,
-            environment=dict(run.environment),
-            document=document,
-            exit_status=run.exit_status,
-            steps=steps,
-        )
-        self.store(stored)
-        return stored
-
-
-# --------------------------------------------------------------------------- #
-# Routes                                                                        #
-# --------------------------------------------------------------------------- #
-
-
-def _refusal(exc: SubmissionRefused) -> JSONResponse:
+def _refusal(exc: SubmissionRefused | RunRefused) -> JSONResponse:
     return JSONResponse(
         {"error": "refused", "reason": exc.reason}, status_code=exc.status_code
     )
 
 
-def _too_many(what: str) -> JSONResponse:
+def _rate_limited(what: str) -> JSONResponse:
     return JSONResponse(
         {
             "error": "rate_limited",
@@ -444,160 +510,237 @@ def _too_many(what: str) -> JSONResponse:
     )
 
 
+def _not_found() -> JSONResponse:
+    return JSONResponse(
+        {
+            "error": "not_found",
+            "reason": (
+                "no such run. Results are held in memory only, are not a system "
+                "of record, and fall off the end as new ones arrive. Run the "
+                "check again, or read the evidence bundle you downloaded."
+            ),
+        },
+        status_code=404,
+    )
+
+
+def _sse(event: str, data: str) -> bytes:
+    return f"event: {event}\ndata: {data}\n\n".encode()
+
+
+def _refuse_target(payload: dict[str, Any]) -> None:
+    """Refuse a target on the sandbox endpoint, whatever the server allows.
+
+    This endpoint runs the sandbox. It does not grow an external mode because
+    somebody put a URL in the body, even on an instance where external targets
+    are permitted -- that is a different route, with a different authorization.
+    """
+    if payload.get("target") or payload.get("target_url"):
+        raise SubmissionRefused(
+            "this endpoint runs the built-in sandbox and has no target to "
+            "choose. It will not send a request to a system you name here.",
+            status_code=403,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# The application                                                               #
+# --------------------------------------------------------------------------- #
+
+
 def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
-    """Build the diagnostic application."""
+    """Build the diagnostic application, refusing a production-like process."""
+    runs.assert_not_production_like()
     service = DiagnosticService(settings)
+    scenario_titles = {
+        test_id: getattr(SCENARIOS_BY_ID[test_id], "title", "")
+        for test_id in service.settings.allowed_scenarios
+        if test_id in SCENARIOS_BY_ID
+    }
+
+    async def root(request: Request) -> Response:
+        return RedirectResponse("/diagnostic", status_code=307)
 
     async def index(request: Request) -> Response:
         if not service.allow_read(request):
-            return _too_many("requests")
-        service.record(EventName.REPORT_VIEWED, surface="web", page="index")
-        return HTMLResponse(
+            return _rate_limited("requests")
+        service.record(
+            service.traffic_source_for(request),
+            EventName.REPORT_VIEWED,
+            surface="web",
+            page="diagnostic",
+        )
+        return service.html(
             pages.render_index(
                 scenarios=list(service.settings.allowed_scenarios),
-                defaults=list(DEFAULT_SCENARIOS),
+                defaults=[
+                    test_id
+                    for test_id in runs.DEFAULT_SCENARIOS
+                    if test_id in service.settings.allowed_scenarios
+                ],
+                scenario_titles=scenario_titles,
                 external_targets_enabled=service.settings.allow_external_targets,
             )
         )
 
-    async def start_check(request: Request) -> Response:
+    async def start_run(request: Request) -> Response:
         if not service.allow_run(request):
-            return _too_many("checks")
+            return _rate_limited("checks")
         try:
             payload = await _read_json(request)
-            service.check_target(payload)
-            scenarios = service.select_scenarios(payload.get("scenarios"))
-        except SubmissionRefused as exc:
+            _refuse_target(payload)
+            scenarios = runs.select_web_scenarios(
+                payload.get("scenarios"), allowed=service.settings.allowed_scenarios
+            )
+            record = service.begin(scenarios)
+        except (SubmissionRefused, RunRefused) as exc:
             return _refusal(exc)
-
-        started = time.monotonic()
-        service.record(
-            EventName.DIAGNOSTIC_STARTED,
-            surface="web",
-            scenario_count=len(scenarios),
-            definition_version=TEST_DEFINITION_VERSION,
-        )
-        try:
-            stored = await service.run_check(scenarios)
-        except TimeoutError:
-            service.record(
-                EventName.DIAGNOSTIC_COMPLETED,
-                surface="web",
-                outcome="failure",
-                error_kind="timeout",
-            )
-            return JSONResponse(
-                {
-                    "error": "timed_out",
-                    "reason": (
-                        "the check did not finish in time and was abandoned. "
-                        "Nothing is reported, because a partial run is not a "
-                        "result."
-                    ),
-                },
-                status_code=504,
-            )
-        service.record(
-            EventName.DIAGNOSTIC_COMPLETED,
-            surface="web",
-            outcome="success",
-            scenario_count=len(scenarios),
-            conclusion_kind=stored.answer.answer.value,
-            duration_ms=round((time.monotonic() - started) * 1000),
-        )
-
-        wants_html = "text/html" in (request.headers.get("accept") or "")
-        if wants_html:
-            return HTMLResponse(
-                pages.render_result(
-                    stored.answer,
-                    environment=stored.environment,
-                    steps=stored.steps,
-                )
-            )
+        service.start(record, request)
         return JSONResponse(
-            {"result_id": stored.result_id, "url": f"/check/{stored.result_id}"},
-            status_code=201,
+            {
+                "run_id": record.run_id,
+                "scenarios": record.scenarios,
+                "events_url": f"/diagnostic/run/{record.run_id}/events",
+                "result_url": f"/diagnostic/run/{record.run_id}",
+            },
+            status_code=202,
         )
 
-    async def read_result(request: Request) -> Response:
+    async def stream_run(request: Request) -> Response:
         if not service.allow_read(request):
-            return _too_many("requests")
-        # Starlette matches routes in order and ``{result_id}`` happily
-        # swallows a dotted suffix, so ``/check/<id>.json`` can arrive here
-        # with the extension still attached to the id. Stripping it means the
-        # two routes cannot shadow one another whatever order they are
-        # declared in.
-        result_id = request.path_params["result_id"]
-        if result_id.endswith(".json"):
-            result_id = result_id[: -len(".json")]
-        stored = service.get(result_id)
-        if stored is None:
-            return JSONResponse(
-                {
-                    "error": "not_found",
-                    "reason": (
-                        "this result is not held any more. Results live in "
-                        "memory only and are not a system of record; run the "
-                        "check again."
-                    ),
-                },
-                status_code=404,
+            return _rate_limited("requests")
+        record = service.get(request.path_params["run_id"])
+        if record is None:
+            return _not_found()
+
+        async def body() -> AsyncIterator[bytes]:
+            deadline = time.monotonic() + STREAM_DEADLINE_SECONDS
+            sent = 0
+            yield b": open\n\n"
+            while True:
+                while sent < len(record.steps):
+                    payload = pages.step_payload(record.steps[sent])
+                    sent += 1
+                    yield _sse("step", service.guard(payload))
+                if record.finished:
+                    event = "complete" if record.state == "complete" else "failed"
+                    yield _sse(event, json.dumps(record.status_document()))
+                    return
+                if time.monotonic() > deadline:
+                    yield _sse(
+                        "failed",
+                        json.dumps(
+                            {
+                                "run_id": record.run_id,
+                                "state": "abandoned",
+                                "error": (
+                                    "the stream exceeded its deadline and was "
+                                    "closed. The run has its own timeout."
+                                ),
+                            }
+                        ),
+                    )
+                    return
+                await record.wait_for_change(
+                    after=sent, timeout=STREAM_HEARTBEAT_SECONDS
+                )
+                if sent >= len(record.steps) and not record.finished:
+                    yield b": keep-alive\n\n"
+
+        return StreamingResponse(
+            body(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
+    async def read_run(request: Request) -> Response:
+        if not service.allow_read(request):
+            return _rate_limited("requests")
+        raw_id = request.path_params["run_id"]
+        wants_json = raw_id.endswith(".json")
+        record = service.get(raw_id.removesuffix(".json"))
+        if record is None:
+            return _not_found()
+        if not record.finished:
+            if wants_json:
+                return service.json(record.status_document(), status_code=409)
+            return service.html(
+                pages.render_error(
+                    "Still running",
+                    "This check has not finished. The page that started it is "
+                    "streaming the run; reload when it says the run is complete.",
+                    status=409,
+                ),
+                status_code=409,
             )
         service.record(
+            service.traffic_source_for(request),
             EventName.REPORT_VIEWED,
             surface="web",
             page="result",
-            report_format="json" if request.url.path.endswith(".json") else "html",
+            report_format="json" if wants_json else "html",
         )
-        if request.url.path.endswith(".json"):
-            return JSONResponse(stored.document)
-        return HTMLResponse(
-            pages.render_result(
-                    stored.answer,
-                    environment=stored.environment,
-                    steps=stored.steps,
-                )
+        if wants_json:
+            return service.json(record.document or record.status_document())
+        fragment = request.query_params.get("fragment") == "1"
+        return service.html(pages.render_result(record, fragment=fragment))
+
+    async def read_report(request: Request) -> Response:
+        if not service.allow_read(request):
+            return _rate_limited("requests")
+        record = service.get(request.path_params["run_id"])
+        if record is None or not record.report_html:
+            return _not_found()
+        service.record(
+            service.traffic_source_for(request),
+            EventName.REPORT_VIEWED,
+            surface="web",
+            page="comparison",
+            report_format="html",
         )
+        return service.html(pages.render_report(record))
 
-    async def verify_page(request: Request) -> Response:
+    async def read_bundle(request: Request) -> Response:
         if not service.allow_read(request):
-            return _too_many("requests")
-        service.record(EventName.REPORT_VIEWED, surface="web", page="verify")
-        return HTMLResponse(pages.render_verify_form())
-
-    async def verify_receipt(request: Request) -> Response:
-        if not service.allow_read(request):
-            return _too_many("requests")
-        try:
-            payload = await _read_json(request)
-        except SubmissionRefused as exc:
-            return _refusal(exc)
-
-        bundle = payload.get("bundle") or payload.get("receipt")
-        if not isinstance(bundle, dict):
-            return _refusal(
-                SubmissionRefused("send the portable receipt bundle as 'bundle'")
+            return _rate_limited("requests")
+        record = service.get(request.path_params["run_id"])
+        if record is None:
+            return _not_found()
+        if record.archive is None:
+            return service.json(
+                {
+                    "error": "no_bundle",
+                    "reason": record.archive_note
+                    or "this run produced no evidence bundle.",
+                },
+                status_code=404,
             )
-        key_document = payload.get("keys")
-        try:
-            keys = parse_key_document(key_document) if key_document is not None else {}
-        except ValueError as exc:
-            return _refusal(SubmissionRefused(f"key document was not usable: {exc}"))
-
-        pinned = payload.get("keys_are_pinned_out_of_band") is True
-        observation = payload.get("downstream_observation")
-        report = verify(
-            bundle,
-            keys,
-            key_source=KeySource.OUT_OF_BAND_PIN if pinned else KeySource.ISSUER_ORIGIN,
-            expected_issuer=payload.get("expected_issuer"),
-            downstream_observation=observation if isinstance(observation, dict) else None,
+        service.audit(
+            event="evidence_downloaded",
+            run_id=record.run_id,
+            caller=service.caller(request),
+            bytes=len(record.archive),
         )
-        document = redact(report.as_dict())
-        if "text/html" in (request.headers.get("accept") or ""):
-            return HTMLResponse(pages.render_verification(report))
-        return JSONResponse(document)
+        return Response(
+            record.archive,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{record.archive_name}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    async def deployment(request: Request) -> Response:
+        if not service.allow_read(request):
+            return _rate_limited("requests")
+        service.record(
+            service.traffic_source_for(request),
+            EventName.PRICING_VIEWED,
+            surface="web",
+            page="deployment",
+        )
+        service.audit(event="deployment_page_viewed", caller=service.caller(request))
+        return service.html(pages.render_deployment())
 
     async def healthz(request: Request) -> Response:
         return JSONResponse(
@@ -605,31 +748,112 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
                 "status": "ok",
                 "lab_version": __version__,
                 "test_definition_version": TEST_DEFINITION_VERSION,
+                "startup_environment": runs.STARTUP_ENVIRONMENT,
                 "external_targets_enabled": service.settings.allow_external_targets,
-                "traffic_source": service.settings.traffic_source.value,
+                "scenarios": list(service.settings.allowed_scenarios),
+                "busy": service.busy,
+                "notes": list(service.notes),
             }
         )
 
-    app = Starlette(
-        routes=[
-            Route("/", index, methods=["GET"]),
-            Route("/check", start_check, methods=["POST"]),
-            # The .json route is declared first because Starlette matches in
-            # order; the handler strips the suffix as well, so neither route
-            # depends on the other's position.
-            Route("/check/{result_id}.json", read_result, methods=["GET"]),
-            Route("/check/{result_id}", read_result, methods=["GET"]),
-            Route("/verify", verify_page, methods=["GET"]),
-            Route("/verify", verify_receipt, methods=["POST"]),
-            Route("/healthz", healthz, methods=["GET"]),
-        ]
-    )
+    @contextlib.asynccontextmanager
+    async def lifespan(_: Starlette) -> AsyncIterator[None]:
+        # Nothing to do on the way up: the sandbox boots on the first run, so
+        # a server nobody uses never imports the application under test.
+        yield
+        await runs.shutdown_sandbox()
+
+    routes = [
+        Route("/", root, methods=["GET"]),
+        Route("/diagnostic", index, methods=["GET"]),
+        Route("/diagnostic/run", start_run, methods=["POST"]),
+        Route("/diagnostic/run/{run_id}/events", stream_run, methods=["GET"]),
+        Route("/diagnostic/run/{run_id}/report", read_report, methods=["GET"]),
+        Route("/diagnostic/run/{run_id}/evidence.zip", read_bundle, methods=["GET"]),
+        Route("/diagnostic/run/{run_id}", read_run, methods=["GET"]),
+        Route("/diagnostic/deployment", deployment, methods=["GET"]),
+        Route("/healthz", healthz, methods=["GET"]),
+    ]
+
+    if service.settings.allow_external_targets:
+        # Constructed only on this branch. With the flag off there is no handler
+        # object and no route, so the endpoint is absent rather than disabled --
+        # which is the difference between a refusal and a feature flag.
+        routes.append(
+            Route("/diagnostic/external", _external_route(service), methods=["POST"])
+        )
+
+    app = Starlette(routes=routes, lifespan=lifespan)
     app.state.service = service
     return app
 
 
+def _external_route(service: DiagnosticService) -> Any:
+    """The external-target endpoint, which exists only when it was asked for.
+
+    It still sends nothing. No external adapter is shipped in this build, and
+    the honest answer to a request for one is an error naming what is missing --
+    not a quiet fall back to the sandbox, which would report a sandbox result
+    under somebody else's system's name.
+    """
+
+    async def external(request: Request) -> Response:
+        if not service.allow_run(request):
+            return _rate_limited("checks")
+        try:
+            payload = await _read_json(request)
+        except SubmissionRefused as exc:
+            return _refusal(exc)
+        # The field is NOT called ``authorization_acknowledged``. This
+        # surface refuses any submission whose text matches
+        # ``REDACTED_KEY_PATTERN``, and that pattern matches "authorization" --
+        # correctly, since an ``Authorization:`` header in a request body is
+        # exactly what it exists to catch. Naming the field that way made this
+        # endpoint unreachable: the only value that satisfied it was one the
+        # guard refused first, so a caller following the error message below
+        # got a contradiction. The guard is right; the name was wrong.
+        if payload.get("external_target_acknowledged") is not True:
+            return _refusal(
+                SubmissionRefused(
+                    "an external target needs this request to carry "
+                    "'external_target_acknowledged': true, confirming you are "
+                    "authorized to send failure traffic at that system. The "
+                    "server-side flag is not treated as authorization for an "
+                    "individual request.",
+                    status_code=403,
+                )
+            )
+        service.audit(
+            event="external_target_refused",
+            caller=service.caller(request),
+            reason="no adapter in this build",
+        )
+        return _refusal(
+            SubmissionRefused(
+                "external targets are permitted on this server but no external "
+                "adapter is compiled into this build, so nothing was sent. The "
+                "check ran nothing rather than running the sandbox and reporting "
+                "the result under your system's name.",
+                status_code=501,
+            )
+        )
+
+    return external
+
+
+# --------------------------------------------------------------------------- #
+# Entry points                                                                  #
+# --------------------------------------------------------------------------- #
+
+
 def serve(*, host: str = "127.0.0.1", port: int = 8080, **kwargs: Any) -> int:
-    """Run the diagnostic server until interrupted."""
+    """Run the diagnostic until interrupted. Loopback addresses only."""
+    if host not in LOOPBACK_HOSTS:
+        raise ValueError(
+            f"refusing to bind {host!r}: this diagnostic boots a gateway with an "
+            "ephemeral signing key and an admin credential it mints itself, and "
+            f"serves it unauthenticated. Bind one of {sorted(LOOPBACK_HOSTS)}."
+        )
     import uvicorn
 
     settings = DiagnosticSettings(**kwargs) if kwargs else DiagnosticSettings()
@@ -639,51 +863,67 @@ def serve(*, host: str = "127.0.0.1", port: int = 8080, **kwargs: Any) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(
         prog="python -m failure_lab serve",
-        description="Run the Agent Action Safety Check locally.",
+        description="Run the Agent Action Safety Check on this machine.",
     )
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="127.0.0.1", help="loopback addresses only")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument(
         "--allow-external-targets",
         action="store_true",
         help=(
-            "Permit a request to name a target outside the sandbox. Each such "
-            "request must ALSO carry external_target_acknowledged; this flag on "
-            "its own authorizes nothing."
+            "Construct the external-target endpoint. Off by default, in which "
+            "case no such handler exists. No external adapter is shipped, so "
+            "turning this on still sends nothing."
         ),
     )
     parser.add_argument(
         "--traffic-source",
         choices=[source.value for source in TrafficSource],
-        default=TrafficSource.UNKNOWN.value,
+        default=TrafficSource.INTERNAL_TEST.value,
         help=(
-            "Recorded on every telemetry event. 'human_customer' is never "
-            "inferred from a request and has to be typed here."
+            "The source recorded for anything that is not a browser session. "
+            "Defaults to internal_test so a script cannot count as a customer."
+        ),
+    )
+    parser.add_argument(
+        "--no-human-customer",
+        action="store_true",
+        help=(
+            "Record browser sessions under --traffic-source too. Use it when "
+            "the only browser pointed at this instance is yours."
         ),
     )
     parser.add_argument("--state-dir", type=Path, default=None)
     parser.add_argument("--no-telemetry", action="store_true")
     args = parser.parse_args(argv)
 
-    return serve(
-        host=args.host,
-        port=args.port,
-        allow_external_targets=args.allow_external_targets,
-        traffic_source=TrafficSource(args.traffic_source),
-        state_dir=args.state_dir,
-        telemetry=not args.no_telemetry,
-    )
+    try:
+        return serve(
+            host=args.host,
+            port=args.port,
+            allow_external_targets=args.allow_external_targets,
+            traffic_source=TrafficSource(args.traffic_source),
+            browser_traffic_source=(
+                None if args.no_human_customer else TrafficSource.HUMAN_CUSTOMER
+            ),
+            state_dir=args.state_dir,
+            telemetry=not args.no_telemetry,
+        )
+    except (ValueError, runs.ProductionRefused) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
 
 
 __all__ = [
-    "DEFAULT_SCENARIOS",
+    "LOOPBACK_HOSTS",
+    "MAX_RETAINED_RUNS",
     "DiagnosticService",
     "DiagnosticSettings",
-    "MAX_SUBMISSION_BYTES",
-    "PUBLIC_SCENARIOS",
+    "ResponseWithheld",
     "SubmissionRefused",
     "create_app",
     "main",

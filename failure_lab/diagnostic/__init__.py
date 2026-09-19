@@ -1,62 +1,81 @@
-"""The self-serve diagnostic surface: "Agent Action Safety Check".
+"""The self-serve diagnostic: **Agent Action Safety Check**.
 
-Three modules, split along the line that matters for reviewing this code:
+A developer opens one page on their own machine, presses one button, and the
+harness runs a real failure against a disposable sandbox: an agent calls a
+tool, the tool executes and commits, the response is discarded on the way back,
+the agent retries. The page then shows what the downstream system's own ledger
+counted, in that configuration and in three others, and says plainly which of
+them needed a gateway.
 
-:mod:`failure_lab.diagnostic.answer`
-    Decides *what the run means for the visitor* -- which of six answers, in a
-    fixed precedence, derived from the same comparison objects the evidence
-    bundle is built from. This is where "you may not need us" is a branch with
-    a test behind it rather than a sentence somebody promises to keep in.
+The interesting design constraint is not the page. It is that the page has to
+be able to tell the visitor they do not need the product, in the same type
+size, without a pitch underneath.
+:mod:`failure_lab.diagnostic.answer` computes that outcome from the same
+:class:`~failure_lab.report.Comparison` objects the evidence bundle is built
+from, and :mod:`failure_lab.diagnostic.pages` gives it the same accent as the
+outcome that favours the product. The offer block is rendered from
+:attr:`~failure_lab.diagnostic.answer.DiagnosticAnswer.recommends_the_product`,
+which has exactly one true case, so there is no branch in the renderer that can
+put a sales pitch under a result that did not point at one.
 
-:mod:`failure_lab.diagnostic.pages`
-    Decides *how it is said*. Plain HTML with no slot a persuasive string could
-    be threaded into, and no score anywhere.
+Layout:
 
-:mod:`failure_lab.diagnostic.server`
-    Decides *what the surface is allowed to do*: sandbox-only by default, two
-    independent authorizations before any external request, no credential
-    accepted, every response redacted, every visitor rate-limited, and a
-    traffic source that can never label itself a customer.
+``answer``  the one visitor-facing outcome, by precedence, and what it does and
+            does not establish.
+``offer``   the commercial offer, defined once, with no price invented for it.
+``pages``   server-rendered HTML: one template, one stylesheet, one script, no
+            CDN and no framework.
+``runs``    booting the sandbox once per process, executing one run, streaming
+            its event log live, and deleting everything it touched.
+``server``  the Starlette application: loopback only, one run at a time, no
+            credential accepted anywhere, every body redacted and then scanned
+            again before it is sent.
+``steps``   translating the harness's own event log into the PRD's six lines,
+            with the instrument reading that produced each one.
 
-``python -m failure_lab serve`` reaches this through
-:func:`failure_lab.cli.command_serve`, which looks for :func:`main` by name.
+Entry point: ``python -m failure_lab serve``, which reaches :func:`main` here.
 """
 
 from __future__ import annotations
 
 from failure_lab.diagnostic.answer import (
-    ANSWER_DETAIL,
-    ANSWER_HEADLINES,
-    STANDING_LIMITATIONS,
     Answer,
     DiagnosticAnswer,
-    ScenarioRow,
     build_answer,
     headline_for,
 )
-from failure_lab.diagnostic.server import (
+from failure_lab.diagnostic.offer import OFFER, Offer, OfferItem
+from failure_lab.diagnostic.runs import (
     DEFAULT_SCENARIOS,
     PUBLIC_SCENARIOS,
+    ProductionRefused,
+    RunRecord,
+    RunRefused,
+)
+from failure_lab.diagnostic.server import (
     DiagnosticService,
     DiagnosticSettings,
-    SubmissionRefused,
     create_app,
     main,
     serve,
 )
+from failure_lab.diagnostic.steps import Step, StepStream
 
 __all__ = [
-    "ANSWER_DETAIL",
-    "ANSWER_HEADLINES",
     "DEFAULT_SCENARIOS",
+    "OFFER",
     "PUBLIC_SCENARIOS",
-    "STANDING_LIMITATIONS",
     "Answer",
     "DiagnosticAnswer",
     "DiagnosticService",
     "DiagnosticSettings",
-    "ScenarioRow",
-    "SubmissionRefused",
+    "Offer",
+    "OfferItem",
+    "ProductionRefused",
+    "RunRecord",
+    "RunRefused",
+    "Step",
+    "StepStream",
     "build_answer",
     "create_app",
     "headline_for",
