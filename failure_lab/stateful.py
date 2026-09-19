@@ -82,6 +82,15 @@ DEFAULT_SHRINK_BUDGET = 40
 #: not from gateway internals. Kept deliberately small: every status left out
 #: is treated as "the key may have been accepted", which weakens the bounds
 #: below rather than inventing violations.
+#:
+#: ``http_error`` is deliberately **not** here. It is what the client sees
+#: when the gateway answered with a non-200 status, which tells the caller
+#: nothing about whether a dispatch happened -- ``_gateway_visible_state``
+#: in :mod:`failure_lab.configurations` classifies it ``no_information`` for
+#: exactly that reason. Counting it as a refusal would let a 500 that
+#: followed a real execution be read as "every attempt was refused, yet the
+#: ledger holds an execution", which is an accusation built out of the
+#: harness's own guess.
 PRE_DISPATCH_REFUSALS = frozenset(
     {
         "denied",
@@ -89,7 +98,6 @@ PRE_DISPATCH_REFUSALS = frozenset(
         "invalid_params",
         "key_conflict",
         "rejected",
-        "http_error",
     }
 )
 
@@ -120,20 +128,66 @@ PRE_DISPATCH_MODES = (
 
 _SENSITIVE_FIELDS = frozenset(
     {
-        "api_key",
         "admin_api_key",
+        "api_key",
+        "apikey",
+        "authorization",
         "bearer_token",
         "control_token",
+        "credentials",
         "key_prefix",
+        "password",
+        "private_key",
+        "secret",
         "signing_seed",
         "sponsor_wallet_id",
         "wallet",
         "wallet_id",
+        "x-api-key",
+        "x_api_key",
     }
+)
+_SENSITIVE_SUFFIXES = (
+    "_api_key",
+    "_credential",
+    "_password",
+    "_private_key",
+    "_secret",
+    "_token",
+    "_wallet",
+    "_wallet_id",
 )
 _CREDENTIAL_RE = re.compile(r"(?<![A-Za-z0-9])(?:b2a|amw)_[A-Za-z0-9_-]{12,}")
 _LAB_ADMIN_RE = re.compile(r"(?<![A-Za-z0-9])lab-admin-[A-Za-z0-9_-]{8,}")
 _WALLET_RE = re.compile(r"(?<![A-Za-z0-9])(?:agt|spn)-[A-Za-z0-9_-]{6,}")
+
+#: Literal secret values this process minted, scrubbed by value wherever they
+#: appear. Field names and prefix patterns cannot catch everything: the
+#: downstream bearer token and the control token are bare
+#: ``secrets.token_urlsafe`` strings with no prefix, so a copy of one inside a
+#: free-text exception message would otherwise travel intact. Registered by
+#: :func:`run_sequence` from the environment it was handed.
+_LITERAL_SECRETS: set[str] = set()
+
+#: Below this length a "secret" is too short to scrub by value without
+#: mangling unrelated text.
+_MIN_LITERAL_SECRET = 12
+
+
+def register_secret(value: str | None) -> None:
+    """Add a literal secret to the by-value scrub set. Idempotent."""
+    if isinstance(value, str) and len(value) >= _MIN_LITERAL_SECRET:
+        _LITERAL_SECRETS.add(value)
+
+
+def _scrub_text(value: str) -> str:
+    cleaned = value
+    for secret in _LITERAL_SECRETS:
+        if secret in cleaned:
+            cleaned = cleaned.replace(secret, "<redacted-credential>")
+    cleaned = _CREDENTIAL_RE.sub("<redacted-credential>", cleaned)
+    cleaned = _LAB_ADMIN_RE.sub("<redacted-credential>", cleaned)
+    return _WALLET_RE.sub("<redacted-wallet>", cleaned)
 
 
 def redact(value: Any) -> Any:
@@ -142,28 +196,41 @@ def redact(value: Any) -> Any:
     Same shape as ``scripts/invariant_attacks/redact_evidence.py``: field
     names first, then a pass over every string for credential and wallet
     patterns, so a token that arrives under an unexpected key is still caught.
+
+    Three additions over that file, each closing a hole a real document
+    reached through: dict *keys* are scrubbed as well as values, because a
+    mapping keyed by credential leaks through a key; ``set`` and ``bytes``
+    are recursed into rather than passed through to ``json.dumps(...,
+    default=str)``, which would have stringified them unredacted; and
+    literal secrets registered for this run are removed by value, which is
+    the only thing that catches an unprefixed token quoted inside an error
+    message.
+
+    What it does **not** do is guess at entropy. A string that is secret but
+    matches no pattern, carries no telltale field name and was never
+    registered survives -- which is why the emitted documents are built from
+    hashes and ids rather than payloads in the first place.
     """
     if isinstance(value, dict):
         out: dict[Any, Any] = {}
         for key, item in value.items():
             normalized = str(key).lower()
-            if (
-                normalized in _SENSITIVE_FIELDS
-                or normalized.endswith("_api_key")
-                or normalized.endswith("_token")
-                or normalized.endswith("_wallet")
-                or normalized.endswith("_wallet_id")
-            ):
-                out[key] = "<redacted>"
+            safe_key = _scrub_text(key) if isinstance(key, str) else key
+            if normalized in _SENSITIVE_FIELDS or normalized.endswith(_SENSITIVE_SUFFIXES):
+                out[safe_key] = "<redacted>"
             else:
-                out[key] = redact(item)
+                out[safe_key] = redact(item)
         return out
     if isinstance(value, (list, tuple)):
         return [redact(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        # Sorted, because a set's iteration order would make the emitted
+        # document differ between runs of the same seed.
+        return sorted((redact(item) for item in value), key=str)
     if isinstance(value, str):
-        cleaned = _CREDENTIAL_RE.sub("<redacted-credential>", value)
-        cleaned = _LAB_ADMIN_RE.sub("<redacted-credential>", cleaned)
-        return _WALLET_RE.sub("<redacted-wallet>", cleaned)
+        return _scrub_text(value)
+    if isinstance(value, (bytes, bytearray)):
+        return _scrub_text(bytes(value).decode("utf-8", "replace"))
     return value
 
 
@@ -218,13 +285,17 @@ _STATUS_STATES: dict[str, OperationState] = {
     "failed_unrefunded": OperationState.FAILED,
     "response_rejected": OperationState.FAILED,
     "rejected": OperationState.FAILED,
-    "http_error": OperationState.FAILED,
     "delivery_uncertain": OperationState.OUTCOME_UNKNOWN,
     "timeout": OperationState.OUTCOME_UNKNOWN,
     "transport_error": OperationState.OUTCOME_UNKNOWN,
     "gateway_process_died": OperationState.OUTCOME_UNKNOWN,
     "internal_error": OperationState.OUTCOME_UNKNOWN,
     "error": OperationState.OUTCOME_UNKNOWN,
+    # A non-200 from the gateway and an exception inside it both leave the
+    # caller unable to say whether the action happened. FAILED would be the
+    # flattering reading of an answer that carries no information.
+    "http_error": OperationState.OUTCOME_UNKNOWN,
+    "gateway_error": OperationState.OUTCOME_UNKNOWN,
     "in_progress": OperationState.DISPATCH_PENDING,
 }
 
@@ -416,6 +487,20 @@ class Observation:
         if not self.gateway:
             return []
         return [str(row.get("outcome")) for row in self.gateway.get("receipts", [])]
+
+    def signature_check_errors(self) -> list[str]:
+        """Receipts whose signature could not be checked at all.
+
+        A receipt the gateway would not export, or a trust key document that
+        would not parse, leaves ``SIGNED_RECEIPTS_RESIST_MUTATION`` with
+        nothing to check. Silence would read as "checked, and fine", so the
+        gap is reported as a run error.
+        """
+        return [
+            f"receipt {check.get('receipt_id')}: signature not checked: {check['error']}"
+            for check in self.signature_checks
+            if check.get("error")
+        ]
 
     def gateway_counts(self) -> dict[str, int]:
         """Wallet totals from the gateway's own tables, for custom invariants.
@@ -687,6 +772,15 @@ class SignedReceiptsResistMutation(Invariant):
 
     def check(self, observation: Observation) -> Violation | None:
         for check in observation.signature_checks:
+            if check.get("error"):
+                # The receipt would not export, or the trust key document
+                # would not parse. That is the harness failing to obtain the
+                # evidence, not the gateway failing to sign: reading it as a
+                # signature failure would accuse the product of the one thing
+                # this invariant is least entitled to guess at. It travels
+                # out as a run error instead -- see
+                # ``Observation.signature_check_errors``.
+                continue
             if check.get("pristine") != ClaimStatus.ESTABLISHED.value:
                 return self._violation(
                     f"receipt {check.get('receipt_id')} was issued by the gateway but "
@@ -1010,6 +1104,9 @@ class _SequenceRunner:
         self.accepted_keys: dict[str, list[str]] = {}
         self.presented_keys: dict[str, list[str]] = {}
         self.permits: dict[str, dict[str, Any]] = {}
+        #: idempotency key -> the first permit that admitted it. An execution
+        #: is bought once, by one permit; see :meth:`_record_attempt`.
+        self.key_permit: dict[str, str] = {}
 
     # -- helpers ---------------------------------------------------------
 
@@ -1031,10 +1128,25 @@ class _SequenceRunner:
         operation_id = str(identity.get("business_operation_id"))
         key = str(identity.get("idempotency_key"))
         self.presented_keys.setdefault(operation_id, []).append(key)
-        if outcome.status not in PRE_DISPATCH_REFUSALS:
+        refused = outcome.status in PRE_DISPATCH_REFUSALS
+        if not refused:
             self.accepted_keys.setdefault(operation_id, []).append(key)
-        if permit_id is not None and permit_id in self.permits:
-            self.permits[permit_id]["keys"].append(key)
+        if permit_id is None or permit_id not in self.permits:
+            return
+        # BUDGET_NOT_EXCEEDED charges a permit for the downstream executions
+        # of the keys recorded against it, so a key may be attributed to at
+        # most one permit, and only when this permit did not refuse it
+        # outright. Attributing a key to every permit it was ever presented
+        # under manufactures violations: present a key that already executed
+        # under a large permit to a fresh one-call permit, watch the gateway
+        # correctly refuse it with `key_conflict`, and the arithmetic would
+        # still bill the new permit for the old permit's execution. That is
+        # an accusation against the gateway assembled entirely out of the
+        # harness's own bookkeeping. First permit to admit a key owns it.
+        if refused or key in self.key_permit:
+            return
+        self.key_permit[key] = permit_id
+        self.permits[permit_id]["keys"].append(key)
 
     def _advance(self, operation_id: str, outcome: AttemptOutcome) -> OperationState:
         state = _STATUS_STATES.get(outcome.status, OperationState.OUTCOME_UNKNOWN)
@@ -1445,9 +1557,18 @@ async def run_sequence(
     """
     credits_per_call = Decimal(env.credits_per_call)
     error: str | None = None
+    # The environment's own tokens are bare `secrets.token_urlsafe` strings:
+    # no prefix for a regex to find and no field name of their own once they
+    # have been quoted into an exception message. Registering them by value
+    # is the only thing that removes them from free text.
+    register_secret(env.admin_api_key)
+    register_secret(env.downstream_bearer_token)
+    register_secret(env.control_token)
     async with configured_target(
         env, EXPLORED_CONFIGURATION, ledger_suffix=f"-{label}"
     ) as target:
+        if target.tenant is not None:
+            register_secret(target.tenant.api_key)
         runner = _SequenceRunner(
             target,
             seed=seed,
@@ -1632,6 +1753,12 @@ LIMITATIONS = (
     "Findings that rest on them carry source 'gateway-reported'; only the "
     "effect ledger and the fault layer are independent of the system under "
     "test.",
+    "Redaction of the emitted documents is by field name, by credential and "
+    "wallet pattern, and by the literal value of the secrets this run minted. "
+    "A secret that matches no pattern, carries no telltale field name and was "
+    "never registered would survive; the documents are built from ids and "
+    "hashes rather than payloads so that there is nothing of that kind in "
+    "them to begin with.",
 )
 
 
@@ -1648,12 +1775,27 @@ class StatefulResult:
     shrink_budget: int
     max_length: int
     invariants: tuple[dict[str, str], ...]
+    #: Commands that were legal and that the harness then failed to carry
+    #: out. Counted apart from the inapplicable ones, because "the model
+    #: proposed a command the real system had no room for" and "the harness
+    #: broke" are different facts and only one of them is about the product.
+    commands_failed: int = 0
     errors: tuple[str, ...] = ()
     limitations: tuple[str, ...] = LIMITATIONS
 
     @property
     def clean(self) -> bool:
-        return not self.violations
+        """No invariant contradicted, and nothing stopped the run observing.
+
+        Errors count against cleanliness on purpose. An invariant that reads
+        the gateway's tables cannot fire when the snapshot failed: with no
+        receipts to compare against, ``RECEIPTS_DO_NOT_OUTRUN_EVIDENCE``
+        compares zero with zero and says nothing was contradicted. That is
+        absence of evidence wearing the costume of evidence of absence, and
+        it is the failure mode this tool exists to avoid, so a run that lost
+        an observation is not clean however few violations it reported.
+        """
+        return not self.violations and not self.errors
 
     def as_dict(self) -> dict[str, Any]:
         return redact(
@@ -1663,6 +1805,8 @@ class StatefulResult:
                 "sequences_run": self.sequences_run,
                 "commands_executed": self.commands_executed,
                 "commands_skipped": self.commands_skipped,
+                "commands_failed": self.commands_failed,
+                "clean": self.clean,
                 "violations": [violation.as_dict() for violation in self.violations],
                 "violation_count": len(self.violations),
                 "wall_clock_seconds": round(self.wall_clock_seconds, 3),
@@ -1677,11 +1821,45 @@ class StatefulResult:
         )
 
     def conclusion(self) -> str:
+        """What this run is entitled to say. Never more than that.
+
+        Four readings, in decreasing order of what they establish: violations
+        found; nothing found but the run could not observe itself; nothing
+        found because nothing ran; nothing found across work that did happen.
+        Only the last one is evidence, and it says how far it reaches.
+        """
+        damage = ""
+        if self.errors:
+            failed = ""
+            if self.commands_failed:
+                failed = (
+                    f", including {self.commands_failed} command(s) the harness "
+                    "could not carry out"
+                )
+            damage = (
+                f" {len(self.errors)} error(s) occurred during the run{failed}; an "
+                "invariant that reads the gateway's tables cannot fire on an "
+                "observation that failed, so the checks covered less than the "
+                "command counts suggest."
+            )
         if self.violations:
             names = sorted({violation.invariant for violation in self.violations})
             return (
                 f"{len(self.violations)} violation(s) across {self.sequences_run} "
-                f"sequence(s) at seed {self.seed}: {', '.join(names)}."
+                f"sequence(s) at seed {self.seed}: {', '.join(names)}.{damage}"
+            )
+        if self.errors:
+            return (
+                f"No invariant was contradicted across {self.sequences_run} "
+                f"sequence(s) at seed {self.seed}, but this run is not evidence "
+                f"that none would have been.{damage}"
+            )
+        if self.sequences_run <= 0 or self.commands_executed <= 0:
+            return (
+                f"Nothing was exercised at seed {self.seed}: {self.sequences_run} "
+                f"sequence(s) ran and {self.commands_executed} command(s) applied. "
+                "No invariant could have been contradicted, and none was. This "
+                "result says nothing about the gateway."
             )
         return (
             f"No invariant was contradicted by {self.sequences_run} sequence(s) "
@@ -1698,6 +1876,8 @@ class StatefulResult:
                 "sequences_run": self.sequences_run,
                 "commands_executed": self.commands_executed,
                 "commands_skipped": self.commands_skipped,
+                "commands_failed": self.commands_failed,
+                "clean": self.clean,
                 "violation_count": len(self.violations),
                 "violations": [
                     {
@@ -1753,6 +1933,7 @@ async def explore(
     errors: list[str] = []
     executed = 0
     skipped = 0
+    failed = 0
     shrink_spent = 0
 
     for index in range(sequences):
@@ -1767,7 +1948,19 @@ async def explore(
             label=f"seq{index}",
         )
         executed += sum(1 for item in observation.commands if item.applied)
-        skipped += sum(1 for item in observation.commands if not item.applied)
+        # A command the model proposed and the system had no room for is
+        # inapplicable. A command that raised is a harness failure wearing
+        # the same `applied: false`. Counting them together would let a run
+        # in which nothing worked report itself as a run in which nothing
+        # was applicable.
+        skipped += sum(
+            1
+            for item in observation.commands
+            if not item.applied and "error" not in item.detail
+        )
+        failed += sum(
+            1 for item in observation.commands if not item.applied and "error" in item.detail
+        )
         if observation.error:
             errors.append(f"sequence {index}: {observation.error}")
         errors.extend(
@@ -1775,6 +1968,9 @@ async def explore(
             f"({item.command['kind']}): {item.detail['error']}"
             for item in observation.commands
             if "error" in item.detail
+        )
+        errors.extend(
+            f"sequence {index}: {message}" for message in observation.signature_check_errors()
         )
         violation = first_violation(observation, checks)
         if violation is None:
@@ -1822,6 +2018,7 @@ async def explore(
         shrink_budget=shrink_budget,
         max_length=max_length,
         invariants=tuple(invariant.describe() for invariant in checks),
+        commands_failed=failed,
         errors=tuple(errors),
     )
 
@@ -1838,13 +2035,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Property-based, stateful exploration of the governed-call "
             "lifecycle. Reproducible from --seed alone."
         ),
+        epilog=(
+            "Exit 0 means the run completed and no invariant was "
+            "contradicted. Exit 1 means a violation was found, or the run "
+            "hit an error and so cannot claim to have checked anything. "
+            "Exit 2 is a bad invocation."
+        ),
     )
     parser.add_argument("--seed", type=int, default=0, help="Master seed (default: 0).")
     parser.add_argument(
         "--sequences",
         type=int,
         default=DEFAULT_SEQUENCES,
-        help=f"Command sequences to run (default: {DEFAULT_SEQUENCES}).",
+        help=f"Command sequences to run, at least 1 (default: {DEFAULT_SEQUENCES}).",
     )
     parser.add_argument(
         "--max-length",
@@ -1880,12 +2083,15 @@ async def _run(args: argparse.Namespace, run_dir: Path) -> StatefulResult:
     from failure_lab.gateway import boot_standalone_environment
 
     admin_key = boot_standalone_environment(run_dir)
+    register_secret(admin_key)
 
     from app.db.database import close_db, init_db
     from app.main import app
 
-    await init_db()
+    # init_db is inside the try: a half-built engine still has to be closed,
+    # and a boot that fails part-way is exactly when cleanup matters.
     try:
+        await init_db()
         env = LabEnvironment(
             run_dir=run_dir,
             app=app,
@@ -1905,6 +2111,11 @@ async def _run(args: argparse.Namespace, run_dir: Path) -> StatefulResult:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.sequences < 1:
+        # A zero-sequence run would otherwise print a fully-formed clean
+        # document and exit 0 without touching the gateway.
+        print("--sequences must be at least 1", file=sys.stderr)
+        return 2
     if not args.verbose:
         # The gateway, the MCP SDK and httpx all narrate at INFO. The result
         # document is the output; the narration would bury it.
@@ -1923,7 +2134,11 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(run_dir, ignore_errors=True)
     document = result.as_dict() if args.full else result.summary()
     print(json.dumps(document, indent=2, sort_keys=True, default=str))
-    return 1 if result.violations else 0
+    # Exit 0 means the run completed and contradicted nothing. A run that
+    # lost an observation reports no violations for the same reason a
+    # switched-off smoke detector reports no smoke, so it does not get to
+    # exit 0 either.
+    return 0 if result.clean else 1
 
 
 if __name__ == "__main__":
@@ -1957,5 +2172,6 @@ __all__ = [
     "generate_sequence",
     "main",
     "redact",
+    "register_secret",
     "run_sequence",
 ]

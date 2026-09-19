@@ -42,9 +42,13 @@ DEFAULT_CONCURRENCY = 20
 #: what is recorded is the gateway's answer, not the harness's impatience.
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
-#: Statuses that can mean the harness itself buckled under the requested
-#: concurrency (in-process asyncio over SQLite) rather than the product.
-HARNESS_STRAIN_STATUSES = frozenset({"timeout", "transport_error"})
+#: Statuses that mean the client never got a gateway answer at all. These can
+#: be the harness buckling under the requested concurrency (in-process asyncio
+#: over SQLite) rather than the product -- but an attempt with no answer is an
+#: attempt whose refusal guarantee this scenario did not observe, and the
+#: framework calls an unobserved protection a FAIL. They are counted, named in
+#: the failure text as possible harness contention, and never silently excused.
+UNANSWERED_STATUSES = frozenset({"timeout", "transport_error"})
 
 #: Marks the failure strings that mean the budget was actually overrun, as
 #: opposed to some other breach of the case's conditions.
@@ -204,7 +208,7 @@ class ConcurrentBudgetRace(Scenario):
             for item in case["failures"]
             if item.startswith(OVERSPEND_PREFIX)
         ]
-        strain = sum(int(case["harness_strain_attempts"]) for case in cases)
+        unanswered = sum(int(case["unanswered_attempts"]) for case in cases)
         verdict = Verdict.PASS if not failures else Verdict.FAIL
 
         extra: dict[str, Any] = {
@@ -215,7 +219,7 @@ class ConcurrentBudgetRace(Scenario):
             "cases": cases,
             "verdict_failures": failures,
             "over_authorizations": over_authorization,
-            "harness_strain_attempts": strain,
+            "unanswered_attempts": unanswered,
             "wallet_balance": (
                 measurements.snapshot.wallet_balance
                 if measurements.snapshot is not None
@@ -231,7 +235,7 @@ class ConcurrentBudgetRace(Scenario):
             ),
         }
 
-        observation = self._observation(cases, credits_per_call, measurements, strain)
+        observation = self._observation(cases, credits_per_call, measurements, unanswered)
         if failures:
             observation += " Guarantee not met: " + "; ".join(failures) + "."
 
@@ -243,14 +247,17 @@ class ConcurrentBudgetRace(Scenario):
             "Whether a refused call left no trace downstream is asserted from the "
             "independent effect ledger and fault layer for these operation ids only.",
         ]
-        if strain:
+        if unanswered:
             risks.append(
-                f"{strain} attempt(s) ended in a client timeout or transport error "
-                f"rather than a gateway answer. Those attempts carry no verdict of "
-                f"their own; the budget arithmetic below still stands because it is "
-                f"read from the permit, the ledger and the effect ledger, not from "
-                f"the client's view. Re-run with --option concurrency=<lower> to "
-                f"separate harness contention from product behaviour."
+                f"{unanswered} attempt(s) ended in a client timeout or transport error "
+                f"rather than a gateway answer, and each one failed its case: a call "
+                f"whose outcome the client never learned is a call whose refusal "
+                f"guarantee this run did not observe. The budget arithmetic still "
+                f"stands on its own because it is read from the permit, the gateway "
+                f"ledger and the effect ledger, not from the client's view -- so read "
+                f"extra['over_authorizations'] before reading this as an overspend. "
+                f"Re-run with --option concurrency=<lower> to separate in-process "
+                f"harness contention from product behaviour."
             )
         slowest_refusal = max(
             (case["refused_latency_p50_ms"] or 0.0 for case in cases), default=0.0
@@ -270,9 +277,17 @@ class ConcurrentBudgetRace(Scenario):
                     f"{case['budget_capacity_calls']} call(s) and "
                     f"{case['authorized']} were charged, so "
                     f"{case['budget_capacity_calls'] - case['authorized']} call(s) that "
-                    f"fit the budget were refused anyway. That is safe in the direction "
+                    f"fit the budget were not charged. That is safe in the direction "
                     f"the claim cares about and wasteful in the other; it is reported "
                     f"here, not counted as a breach."
+                )
+            if case["charged_but_unanswered"]:
+                risks.append(
+                    f"{case['case']}: {case['charged_but_unanswered']} call(s) were "
+                    f"charged against the permit but the client never received the "
+                    f"matching success response, so the payer cannot tell from its own "
+                    f"view what it paid for. The charge is real; only the client's "
+                    f"knowledge of it is missing."
                 )
             if case["refunded_credits"] != "0":
                 risks.append(
@@ -391,25 +406,27 @@ class ConcurrentBudgetRace(Scenario):
         budget_denied = [a for a in denied if a.reason == BUDGET_DENIAL_REASON]
         refused = [a for a in attempts if a.status in REFUSED_STATUSES]
         misrefused = [a for a in refused if a.reason != BUDGET_DENIAL_REASON]
-        strained = [a for a in attempts if a.status in HARNESS_STRAIN_STATUSES]
+        strained = [a for a in attempts if a.status in UNANSWERED_STATUSES]
         unclassified = [
             a
             for a in attempts
             if a.status not in REFUSED_STATUSES
             and a.status != "success"
-            and a.status not in HARNESS_STRAIN_STATUSES
+            and a.status not in UNANSWERED_STATUSES
         ]
 
         executions = {op: target.ledger.execution_count(op) for op in operation_ids}
         total_executions = sum(executions.values())
         dispatches = sum(target.injector.dispatch_count(op) for op in operation_ids)
-        refused_with_effect = sorted(
-            {
-                str(a.identity["business_operation_id"])
-                for a in refused
-                if executions.get(str(a.identity["business_operation_id"]), 0) > 0
-            }
-        )
+        refused_ops = sorted({str(a.identity["business_operation_id"]) for a in refused})
+        refused_with_effect = [op for op in refused_ops if executions.get(op, 0) > 0]
+        #: The effect ledger says whether a refused call CHANGED anything; the
+        #: fault layer says whether it was ever sent. A refused call that was
+        #: dispatched but whose effect the tool happened to drop is still the
+        #: gateway deciding after it dispatched, so both are asked.
+        refused_with_dispatch = [
+            op for op in refused_ops if target.injector.dispatch_count(op) > 0
+        ]
 
         failures: list[str] = []
         if debited > max_credits:
@@ -449,10 +466,27 @@ class ConcurrentBudgetRace(Scenario):
                 f"{len(refused_with_effect)} refused call(s) left a downstream effect: "
                 f"{refused_with_effect}"
             )
+        if refused_with_dispatch:
+            failures.append(
+                f"{len(refused_with_dispatch)} refused call(s) were dispatched past the "
+                f"fault layer toward the tool, so the budget decision did not land "
+                f"before dispatch for them: {refused_with_dispatch}"
+            )
         if unclassified:
             failures.append(
                 f"{len(unclassified)} call(s) ended neither charged nor refused: "
                 f"{_status_tally(unclassified)}"
+            )
+        if strained:
+            failures.append(
+                f"no gateway answer for {len(strained)} of {calls} call(s) "
+                f"({_status_tally(strained)}), so this case cannot say whether they were "
+                f"admitted or refused and the refusal guarantee went unobserved for them. "
+                f"The budget arithmetic above is unaffected -- it is read from the permit, "
+                f"the gateway ledger and the effect ledger, not from the client -- so this "
+                f"is NOT an over-authorization. It may be in-process harness contention "
+                f"rather than the product; re-run with --option concurrency=<lower> to "
+                f"tell the two apart."
             )
 
         record: dict[str, Any] = {
@@ -481,7 +515,8 @@ class ConcurrentBudgetRace(Scenario):
             "denial_reasons": _reason_tally(refused),
             "receipt_outcomes": sorted(str(row["outcome"]) for row in case_receipts),
             "refused_with_downstream_effect": refused_with_effect,
-            "harness_strain_attempts": len(strained),
+            "refused_with_downstream_dispatch": refused_with_dispatch,
+            "unanswered_attempts": len(strained),
             "under_authorized": authorized < capacity,
             "distinct_idempotency_keys": len(distinct_keys),
             "failures": failures,
@@ -506,7 +541,7 @@ class ConcurrentBudgetRace(Scenario):
         cases: list[dict[str, Any]],
         credits_per_call: Decimal,
         measurements: Measurements,
-        strain: int,
+        unanswered: int,
     ) -> str:
         parts = [
             (
@@ -527,9 +562,11 @@ class ConcurrentBudgetRace(Scenario):
                 f"{case['permit_spent_credits']}. Independently observed: the effect "
                 f"ledger recorded {case['downstream_executions']} downstream execution(s) "
                 f"and the fault layer counted {case['downstream_requests']} request(s) "
-                f"crossing into the tool, with "
-                f"{len(case['refused_with_downstream_effect'])} refused call(s) leaving "
-                f"any trace downstream."
+                f"crossing it on the way to the tool, with "
+                f"{len(case['refused_with_downstream_dispatch'])} refused call(s) "
+                f"reaching that layer and "
+                f"{len(case['refused_with_downstream_effect'])} leaving any effect "
+                f"behind."
             )
         parts.append(
             f"Across all cases the client saw p50 {measurements.counters.latency_p50_ms} ms "
@@ -537,9 +574,10 @@ class ConcurrentBudgetRace(Scenario):
             f"was left holding {measurements.gateway['wallet_balance'] if measurements.gateway else 'unknown'} "
             f"credit(s)."
         )
-        if strain:
+        if unanswered:
             parts.append(
-                f"{strain} attempt(s) ended in a client timeout or transport error and "
-                f"carry no gateway answer of their own."
+                f"{unanswered} attempt(s) ended in a client timeout or transport error "
+                f"with no gateway answer at all, which fails the case they belong to: "
+                f"their outcome is unobserved, not benign."
             )
         return " ".join(parts)
