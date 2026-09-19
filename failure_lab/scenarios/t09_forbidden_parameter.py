@@ -382,7 +382,7 @@ class ForbiddenParameter(Scenario):
 
         # 0 -- before anything is refused, prove a permitted call is admitted,
         # reaches the tool, changes the world and is paid for.
-        await control("control_before")
+        await control(CONTROL_CALLS[0])
 
         # 1 -- the permit's credit cap is below what one call costs.
         cap_permit = await gateway.issue_permit(
@@ -489,7 +489,7 @@ class ForbiddenParameter(Scenario):
         # 10 -- and prove the same thing again on the way out, so that a
         # pipeline which stopped working halfway through the matrix cannot
         # masquerade as a wall of well-earned refusals.
-        await control("control_after")
+        await control(CONTROL_CALLS[1])
 
         measurements = await self.measure(target, attempts, operation_ids=operation_ids)
 

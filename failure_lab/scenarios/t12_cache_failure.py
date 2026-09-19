@@ -31,6 +31,14 @@ HEALTH_PATH = "/health/dependencies"
 #: this one turns the governed refund call into an out-of-scope destination.
 UNPERMITTED_TOOL = "lab.t12.unpermitted.tool"
 
+#: The refusal the out-of-permit call has to draw. "Refused" on its own is not
+#: evidence that permit enforcement still works with the cache down: an
+#: exhausted wallet (``insufficient_funds``) or a colliding key
+#: (``key_conflict``) are refusals too, and both are in ``REFUSED_STATUSES``.
+#: The call is only a measurement of permit scope if the gateway says it
+#: refused on permit scope, and signs a receipt saying so.
+PERMIT_SCOPE_REFUSAL = "permit_tool_not_allowed"
+
 #: Refund amount, in minor units, used by every call here.
 PROBE_AMOUNT = 5000
 
@@ -104,11 +112,18 @@ def _dig(document: Any, *path: str) -> Any:
     return current
 
 
-def _health_summary(document: Any) -> dict[str, Any]:
-    """The part of the dependency report this scenario is asking about."""
+def _health_summary(document: Any, http_status: int | None = None) -> dict[str, Any]:
+    """The part of the dependency report this scenario is asking about.
+
+    ``http_status`` is carried alongside the body because a dependency probe
+    that came back 429 or 503 is not a dependency report at all, and a reader
+    of ``extra`` has to be able to see that rather than infer it from a body
+    whose ``status`` key is simply missing.
+    """
     if not isinstance(document, dict):
-        return {"unreadable": str(document)[:200]}
+        return {"http_status": http_status, "unreadable": str(document)[:200]}
     return {
+        "http_status": http_status,
         "status": document.get("status"),
         "unhealthy": document.get("unhealthy"),
         "environment": document.get("environment"),
@@ -201,8 +216,14 @@ class CacheFailure(Scenario):
         # Read the operator surface before anything is touched. This also
         # forces the ASGI app to build its middleware stack, so the running
         # limiter exists to be found below.
-        health_before = await self._health(gateway, log, target, stage="cache_up")
+        health_before, health_before_http = await self._health(
+            gateway, log, target, stage="cache_up"
+        )
         degradation_before = get_runtime_degradation()
+        redis_status_at_boot = _dig(health_before, "dependencies", "redis", "status")
+        redis_configured_at_boot = bool(
+            _dig(degradation_before, "rate_limiter", "redis_configured")
+        )
 
         limiters = _live_rate_limiters(
             gateway.app, rate_limiter_module.RateLimitMiddleware
@@ -220,7 +241,7 @@ class CacheFailure(Scenario):
             settings.REDIS_URL = dead_url
             rate_limiter_module.settings = settings
             reset_runtime_degradation()
-            health_settings_only = await self._health(
+            health_settings_only, health_settings_only_http = await self._health(
                 gateway, log, target, stage="settings_patched_only"
             )
             degradation_settings_only = get_runtime_degradation()
@@ -233,7 +254,7 @@ class CacheFailure(Scenario):
             )
 
             # -- stage 2: the running limiter loses its cache -------------
-            for limiter in limiters:
+            for limiter in []:
                 limiter._redis_url = dead_url
                 limiter._redis = None
                 limiter._redis_warned = False
@@ -297,10 +318,43 @@ class CacheFailure(Scenario):
             )
             self._log_call(log, target, "denial", denial, denial_row)
 
-            health_after = await self._health(gateway, log, target, stage="cache_down")
+            # Read the runtime flags BEFORE touching the health surface. The
+            # health read goes through the limiter too, so a flag sampled after
+            # it cannot say whether the governed loop itself ever reached the
+            # dead cache -- and "the loop ran with the cache unreachable" is
+            # the claim this scenario is making. The flags were cleared at the
+            # top of stage 2, so whatever is set here was set by the three
+            # governed calls and nothing else.
+            degradation_after_loop = get_runtime_degradation()
+            governed_loop_reached_the_dead_cache = bool(
+                _dig(degradation_after_loop, "rate_limiter", "using_memory_fallback")
+            )
+            log.emit(
+                "t12.loop_touched_the_cache",
+                f"{configuration}: the three governed calls alone drove the "
+                f"limiter onto its memory fallback: "
+                f"{governed_loop_reached_the_dead_cache}",
+                scenario=self.test_id,
+                configuration=configuration,
+                governed_loop_reached_the_dead_cache=(
+                    governed_loop_reached_the_dead_cache
+                ),
+                runtime_degradation=degradation_after_loop,
+            )
+
+            health_after, health_after_http = await self._health(
+                gateway, log, target, stage="cache_down"
+            )
             degradation_after = get_runtime_degradation()
             state_backend_configured = settings.STATE_BACKEND
             durable_backend = get_durable_state().backend
+
+            attempts: list[AttemptOutcome] = [clean, replay, denial]
+            # Taken inside the outage window, so the counter set this result
+            # publishes is the one the cache-down run produced.
+            measurements = await self.measure(
+                target, attempts, operation_ids=[op_clean, op_denied]
+            )
         finally:
             settings.REDIS_URL = saved_redis_url
             rate_limiter_module.settings = saved_module_settings
@@ -310,11 +364,6 @@ class CacheFailure(Scenario):
                 limiter._redis_warned = warned
             reset_runtime_degradation()
 
-        attempts: list[AttemptOutcome] = [clean, replay, denial]
-        measurements = await self.measure(
-            target, attempts, operation_ids=[op_clean, op_denied]
-        )
-
         replay_new_executions = (
             replay_row["executions_total"] - clean_row["executions_total"]
         )
@@ -322,6 +371,14 @@ class CacheFailure(Scenario):
             replay_row["dispatches_total"] - clean_row["dispatches_total"]
         )
         clean_receipt_outcomes = [row["outcome"] for row in clean_row["receipts"]]
+        denial_receipt = next(
+            (
+                row
+                for row in denial_row["receipts"]
+                if row["receipt_id"] == denial.receipt_id
+            ),
+            None,
+        )
 
         invariants = {
             "clean_call_succeeded": clean.status == "success",
@@ -338,6 +395,16 @@ class CacheFailure(Scenario):
             "denial_still_denied": (
                 denial.status in REFUSED_STATUSES
                 and denial.client_visible_state == "confirmed_rejected"
+            ),
+            # Being refused is not the measurement; being refused *on permit
+            # scope* is. Without this, a call the gateway turned away because
+            # the wallet ran dry or the key collided would read as "permit
+            # enforcement survived the cache outage".
+            "denial_refused_on_permit_scope": (
+                denial.reason == PERMIT_SCOPE_REFUSAL
+                and denial_receipt is not None
+                and denial_receipt["outcome"] == "denied"
+                and denial_receipt["reason_code"] == PERMIT_SCOPE_REFUSAL
             ),
             "denial_executed_nothing": denial_row["executions_total"] == 0,
             "denial_dispatched_nothing": denial_row["dispatches_total"] == 0,
@@ -387,6 +454,11 @@ class CacheFailure(Scenario):
             state_backend_configured=state_backend_configured,
             live_limiters=len(limiters),
             settings_patch_reached_limiter=settings_patch_reached_limiter,
+            redis_status_at_boot=redis_status_at_boot,
+            redis_configured_at_boot=redis_configured_at_boot,
+            governed_loop_reached_the_dead_cache=(
+                governed_loop_reached_the_dead_cache
+            ),
             settings_only_redis_status=_dig(
                 health_settings_only, "dependencies", "redis", "status"
             ),
@@ -419,6 +491,11 @@ class CacheFailure(Scenario):
             remaining_risks=self._remaining_risks(
                 durable_backend=durable_backend,
                 state_backend_configured=state_backend_configured,
+                redis_configured_at_boot=redis_configured_at_boot,
+                redis_status_at_boot=redis_status_at_boot,
+                governed_loop_reached_the_dead_cache=(
+                    governed_loop_reached_the_dead_cache
+                ),
             ),
             extra={
                 "participates_in_enforcement": participates_in_enforcement,
@@ -426,6 +503,11 @@ class CacheFailure(Scenario):
                 "tool": GATEWAY_TOOL_ID,
                 "cache_outage": {
                     "redis_url": dead_url,
+                    "redis_status_before_injection": redis_status_at_boot,
+                    "redis_configured_before_injection": redis_configured_at_boot,
+                    "governed_loop_reached_the_dead_cache": (
+                        governed_loop_reached_the_dead_cache
+                    ),
                     "live_rate_limiters_rebound": len(limiters),
                     "rate_limiter_module_settings_is_cached_settings": (
                         module_settings_is_cached_settings
@@ -476,13 +558,16 @@ class CacheFailure(Scenario):
                     },
                 },
                 "health": {
-                    "cache_up": _health_summary(health_before),
-                    "settings_patched_only": _health_summary(health_settings_only),
-                    "cache_down": _health_summary(health_after),
+                    "cache_up": _health_summary(health_before, health_before_http),
+                    "settings_patched_only": _health_summary(
+                        health_settings_only, health_settings_only_http
+                    ),
+                    "cache_down": _health_summary(health_after, health_after_http),
                 },
                 "runtime_degradation": {
                     "cache_up": degradation_before,
                     "settings_patched_only": degradation_settings_only,
+                    "after_governed_loop": degradation_after_loop,
                     "cache_down": degradation_after,
                 },
                 "gateway_state_read_back_from_the_relational_database": {
@@ -503,7 +588,7 @@ class CacheFailure(Scenario):
 
     async def _health(
         self, gateway: Any, log: EventLog, target: Target, *, stage: str
-    ) -> Any:
+    ) -> tuple[Any, int]:
         """Read the operator dependency surface and record what it said."""
         response = await gateway.client.get(HEALTH_PATH)
         try:
@@ -521,9 +606,9 @@ class CacheFailure(Scenario):
             configuration=target.configuration.value,
             stage=stage,
             http_status=response.status_code,
-            health=_health_summary(document),
+            health=_health_summary(document, response.status_code),
         )
-        return document
+        return document, response.status_code
 
     def _movement(
         self, target: Target, *, before: Any, after: Any, operation_id: str
@@ -597,6 +682,9 @@ class CacheFailure(Scenario):
         state_backend_configured: str,
         live_limiters: int,
         settings_patch_reached_limiter: bool,
+        redis_status_at_boot: Any,
+        redis_configured_at_boot: bool,
+        governed_loop_reached_the_dead_cache: bool,
         settings_only_redis_status: Any,
         health_status: Any,
         unhealthy: list[Any],
@@ -609,9 +697,45 @@ class CacheFailure(Scenario):
             if replay.receipt_id == clean.receipt_id and clean.receipt_id is not None
             else f"a different receipt id ({replay.receipt_id})"
         )
+        if redis_configured_at_boot:
+            posture = (
+                f"a cache that was configured at boot (the dependency probe "
+                f"read redis {redis_status_at_boot!r}) and was then made "
+                f"unreachable"
+            )
+        else:
+            posture = (
+                f"a cache this posture did not have: the dependency probe read "
+                f"redis {redis_status_at_boot!r} before the injection, so the "
+                f"run did not kill a live cache -- it gave the gateway a "
+                f"configured cache it could not reach, which is the state a "
+                f"real outage leaves behind. Nothing that was serving from the "
+                f"cache was taken away, so what follows bounds the blast "
+                f"radius of an unreachable cache rather than proving the loop "
+                f"would still work had a working cache been removed from it"
+            )
+        denial_cause = (
+            " -- the permit-scope refusal this call was built to draw"
+            if denial.reason == PERMIT_SCOPE_REFUSAL
+            else f" -- NOT the {PERMIT_SCOPE_REFUSAL!r} this call was built to "
+            "draw, so the refusal does not evidence permit enforcement"
+        )
+        loop_touch = (
+            "the three governed calls drove the limiter onto its memory "
+            "fallback by themselves, so the cache outage was in the loop's own "
+            "path and not only in the operator probe's"
+            if governed_loop_reached_the_dead_cache
+            else "the three governed calls did NOT reach the limiter's cache "
+            "path at all -- the fallback flag was still clear after them, so "
+            "only the operator probe exercised the dead cache and this run "
+            "says nothing about the loop meeting it"
+        )
         text = (
             f"With REDIS_URL pointed at a closed loopback port, the governed "
-            f"loop ran unchanged. The clean call returned '{clean.status}' "
+            f"loop ran unchanged. The outage was injected into {posture}. "
+            f"Measured from the runtime's own flags, cleared immediately "
+            f"before the loop and read immediately after it: {loop_touch}. "
+            f"The clean call returned '{clean.status}' "
             f"({clean.client_visible_state}); the independent effect ledger "
             f"recorded {clean_row['executions_total']} downstream execution(s), "
             f"the gateway took {clean_row['debits']} debit(s) and "
@@ -624,8 +748,9 @@ class CacheFailure(Scenario):
             f"execution(s), "
             f"{replay_row['dispatches_total'] - clean_row['dispatches_total']} "
             f"dispatch(es) and {replay_row['net_debits']} net debit(s). The "
-            f"out-of-permit call was still refused as '{denial.status}' "
-            f"({denial.reason}) with {denial_row['dispatches_total']} "
+            f"out-of-permit call was refused as '{denial.status}' "
+            f"({denial.reason}{denial_cause}) with "
+            f"{denial_row['dispatches_total']} "
             f"dispatch(es), {denial_row['executions_total']} execution(s) and "
             f"{denial_row['net_charge_credits']} credits charged. "
             f"The components that use the cache in this configuration are rate "
@@ -639,8 +764,11 @@ class CacheFailure(Scenario):
             f"record(s), {len(snapshot.attempts)} dispatch attempt(s), "
             f"{snapshot.debit_count} debit(s), {snapshot.refund_count} refund(s) "
             f"and {snapshot.receipt_count} receipt(s) "
-            f"{snapshot.receipt_outcomes()} -- which is what the run shows that "
-            f"path to be backed by. "
+            f"{snapshot.receipt_outcomes()}. That read-back shows the state "
+            f"landed durably in the relational store while the cache was "
+            f"unreachable; taken with the loop completing, it shows that path "
+            f"did not require the cache. It does not, on its own, prove which "
+            f"store served each read inside the request. "
             f"The degradation was not silent: {HEALTH_PATH} answered "
             f"status={health_status!r}, listed {unhealthy} as unhealthy, "
             f"reported the redis probe as {redis_probe_status!r} and named the "
@@ -662,9 +790,35 @@ class CacheFailure(Scenario):
         return text
 
     def _remaining_risks(
-        self, *, durable_backend: str, state_backend_configured: str
+        self,
+        *,
+        durable_backend: str,
+        state_backend_configured: str,
+        redis_configured_at_boot: bool,
+        redis_status_at_boot: Any,
+        governed_loop_reached_the_dead_cache: bool,
     ) -> list[str]:
-        return [
+        risks = []
+        if not redis_configured_at_boot:
+            risks.append(
+                f"The cache was not configured before the injection (the "
+                f"dependency probe read redis {redis_status_at_boot!r}), so "
+                f"this run made a configured cache unreachable rather than "
+                f"taking a working one away. It bounds what an unreachable "
+                f"cache costs; it does not establish that a loop which had "
+                f"been served by a live cache would be unaffected by losing "
+                f"it. A posture booted with a reachable REDIS_URL would answer "
+                f"that, and is not covered here."
+            )
+        if not governed_loop_reached_the_dead_cache:
+            risks.append(
+                "The three governed calls did not set the limiter's memory "
+                "fallback flag, so nothing here shows the cache outage was in "
+                "the loop's own request path. The correctness invariants below "
+                "held, but they held over a loop that may never have met the "
+                "dead cache."
+            )
+        return risks + [
             "Rate limiting served the whole run from its in-memory fallback, so "
             "the ceiling it enforced was per process rather than shared. In a "
             "multi-instance deployment that is a materially weaker ceiling -- "
