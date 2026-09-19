@@ -132,19 +132,25 @@ class CrashBeforeDispatch(Scenario):
     title = "Crash before dispatch"
     claim = (
         "A gateway that dies before its one-shot dispatch claim provably sent "
-        "nothing, so recovery leaves no net charge and a retry of the same key "
-        "cannot produce a second downstream effect."
+        "nothing, so recovery refunds the operation and a retry of the same "
+        "key never reaches the downstream tool."
     )
     tier = "slow"
     configurations = GATEWAY_CONFIGURATIONS
     inapplicable_reason = (
         "a direct integration has no gateway to crash between a debit and a send"
     )
+    #: FAIL on the gateway paths, and the reason is a defect in the claim
+    #: rather than in the product. See the last entry in :attr:`limitations`.
+    #: Recorded here so observation and documentation agree, which is the
+    #: invariant the whole suite is built on -- and so the claims manifest
+    #: refuses to publish this claim, which is the correct outcome for a
+    #: claim that asserts more than safety requires.
     expected = {
         Configuration.DIRECT_NAIVE.value: Verdict.NOT_APPLICABLE.value,
         Configuration.DIRECT_NATIVE.value: Verdict.NOT_APPLICABLE.value,
-        Configuration.GATEWAY_NATIVE.value: Verdict.PASS.value,
-        Configuration.GATEWAY_NAIVE.value: Verdict.PASS.value,
+        Configuration.GATEWAY_NATIVE.value: Verdict.FAIL.value,
+        Configuration.GATEWAY_NAIVE.value: Verdict.FAIL.value,
     }
     limitations = (
         "The crash is a simulated process death raised at an instrumented "
@@ -155,13 +161,22 @@ class CrashBeforeDispatch(Scenario):
         "Attempt rows are backdated so reconciliation treats them as "
         "abandoned; the real idle window is far longer.",
         "Runs against SQLite, not the PostgreSQL row-lock path.",
-        "At the earliest boundary the same-key retry DOES reach the tool. A "
-        "crash before any reservation, debit, attempt or receipt leaves "
-        "nothing to compensate, so the effect-free sweep releases the key and "
-        "the retry performs an operation that never happened -- one execution "
-        "in total, not two. This scenario asserts the absence of a duplicate, "
-        "not the absence of a dispatch, because only the former is a safety "
-        "property. Anyone quoting this result should quote this line with it.",
+        "THIS SCENARIO FAILS, AND THE PRODUCT IS NOT WHAT FAILED. The claim "
+        "asserts that a same-key retry never reaches the tool. At "
+        "after_idempotency_begin it does, and that is correct, documented "
+        "behaviour: the crash landed before any reservation, debit, attempt "
+        "or receipt, so there is nothing to compensate and the effect-free "
+        "sweep releases the key (docs/failure-semantics.md, window E -- 'the "
+        "record is deleted so the same key can genuinely retry... Nothing "
+        "ever moved'). The retry then performs an operation that never "
+        "happened: the effect ledger shows one execution in total and none "
+        "before it. Holding the claim as written would mean refusing that "
+        "refund for ever because a crashed attempt once wrote a row, which "
+        "is strictly worse for the customer than performing it once. The "
+        "claim is too strong and wants rewriting by whoever owns it, "
+        "together with this expectation. Until then the measurement is "
+        "reported as it stands rather than softened, because a rule that "
+        "cannot fire is not a weaker assertion -- it is no assertion.",
     )
 
     async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
@@ -413,6 +428,11 @@ class CrashBeforeDispatch(Scenario):
         )
 
         row = {
+            # ``case`` is the suite-wide name for a sub-case row, so a report
+            # that renders all fourteen scenarios side by side can key on one
+            # field. ``boundary`` is kept because this scenario's
+            # specification names it.
+            "case": boundary,
             "boundary": boundary,
             "description": description,
             "operation_id": operation_id,
@@ -531,19 +551,30 @@ class CrashBeforeDispatch(Scenario):
                     "operation that never left the gateway, want 0 (refunded "
                     "or never charged)"
                 )
-            # A same-key retry that DISPATCHES is not by itself a failure,
-            # and a rule that treated it as one would be demanding harm. At
-            # `after_idempotency_begin` the crash landed before any
-            # reservation, debit, attempt or receipt, so there is nothing to
-            # compensate and the effect-free sweep releases the key
-            # (docs/failure-semantics.md, window E: "the record is deleted so
-            # the same key can genuinely retry... Nothing ever moved"). The
-            # retry then performs an operation that never happened. Holding
-            # the stronger property would mean permanently refusing a refund
-            # the customer is owed, because a crashed attempt once wrote a
-            # row -- a stranded operation with no compensating record
-            # anywhere, which is strictly worse than performing it once.
-            # What must never happen is a SECOND effect for the operation.
+            # The rule this scenario's specification states, implemented as
+            # stated: "FAIL on ... a same-key retry that dispatches."
+            #
+            # A previous revision replaced this with
+            # `executions_after_same_key_retry > 1`. That condition cannot
+            # produce a failure of its own: the loop already fails whenever
+            # `executions != 0`, so with zero executions through recovery a
+            # single same-key retry can add at most one, and any run that
+            # could trip it has already failed above. Swapping a rule for a
+            # condition that can never change a verdict is not relocating the
+            # assertion -- it is deleting it. Whether the claim SHOULD assert
+            # the absence of a dispatch (window E of
+            # docs/failure-semantics.md makes a real argument that it should
+            # not) is a question for whoever owns the claim; it is not a
+            # question this file may answer by rewriting its own claim to
+            # match what it measured.
+            if row["same_key_retry_dispatched"]:
+                failures.append(
+                    f"{boundary}: the same-key retry reached the downstream "
+                    f"tool (status '{row['same_key_retry_status']}'), and the "
+                    "claim says it never does"
+                )
+            # Kept as a second, independent condition: even where a dispatch
+            # is arguably safe, a DUPLICATE effect never is.
             if row["executions_after_same_key_retry"] > 1:
                 failures.append(
                     f"{boundary}: the operation has "
@@ -583,8 +614,17 @@ class CrashBeforeDispatch(Scenario):
         snapshot: GatewaySnapshot | None = measurements.snapshot
 
         extra: dict[str, Any] = {
+            # Same list under both names: "cases" is the suite-wide key for a
+            # per-sub-case table, "boundaries" is the name this scenario's
+            # specification uses.
+            "cases": rows,
             "boundaries": rows,
             "boundary_order": list(PRE_DISPATCH_BOUNDARIES),
+            # Named so failure_lab.evidence._FAULT_KEYS_IN_EXTRA can find the
+            # injected failures. A gateway crash never crosses the fault
+            # layer, so without this the evidence bundle's fault-injection
+            # table would show nothing at all for this scenario.
+            "crash_boundary": list(PRE_DISPATCH_BOUNDARIES),
             "backdate_seconds": backdate_seconds,
             "crashed_operations_dispatches_total": crashed_dispatch_total,
             "crashed_operations_executions_total": crashed_execution_total,
@@ -659,20 +699,24 @@ class CrashBeforeDispatch(Scenario):
         )
         if same_key_dispatched:
             observation += (
-                " The same-key retry DID reach the downstream tool at "
-                f"{', '.join(same_key_dispatched)}, and that is reported "
-                "first rather than buried, because it surprises most readings "
-                "of 'the key is spent'. The product documents this window "
-                "(docs/failure-semantics.md, window E): a crash before any "
-                "reservation, debit, attempt or receipt leaves nothing to "
-                "compensate, so the effect-free sweep deletes the idempotency "
-                "record and the key is genuinely free. The retry then performs "
-                "an operation that never happened -- one execution in total, "
-                "and the effect ledger shows none before it. This scenario "
-                "therefore asserts the absence of a DUPLICATE effect, not the "
-                "absence of a dispatch. Only the former is a safety property: "
-                "a rule that failed here would be demanding that the gateway "
-                "permanently strand a refund nobody had performed."
+                " DIVERGENCE FROM THE CLAIM: the claim states that a retry of "
+                "the same key never reaches the downstream tool, but at "
+                f"{', '.join(same_key_dispatched)} it did. The product "
+                "documents this window (docs/failure-semantics.md, window E): "
+                "a crash before any reservation, debit, attempt or receipt "
+                "leaves nothing to compensate, so the effect-free sweep "
+                "deletes the idempotency record and the same key is genuinely "
+                "free to run the operation. That is a safe retry of an "
+                "operation that never happened, not a duplicate -- the effect "
+                "ledger shows no execution before it, and the operation ends "
+                "with one execution in total. There is a real argument that "
+                "the claim as written asks for more than safety requires, and "
+                "a real argument that a key a caller has already spent should "
+                "not silently become spendable again. Adjudicating that is a "
+                "job for whoever owns the claim and the expectation map. What "
+                "this instrument may not do is rewrite its own claim to match "
+                "its own measurement, so the divergence is recorded as a "
+                "failure of the claim as written rather than hidden."
             )
         if failures:
             observation += " Guarantee not met: " + "; ".join(failures) + "."
