@@ -611,7 +611,9 @@ class BudgetNotExceeded(Invariant):
         executions_by_key = observation.executions_by_key()
         for permit_id, info in sorted(observation.permits.items()):
             limit = Decimal(str(info.get("max_credits", "0")))
-            keys = list(info.get("keys", []))
+            # One key presented many times is still one key's worth of work;
+            # the ledger already counts executions, not presentations.
+            keys = list(dict.fromkeys(info.get("keys", [])))
             executions = sum(executions_by_key.get(key, 0) for key in keys)
             consumed = per_call * executions
             if consumed > limit:
@@ -760,30 +762,147 @@ _WEIGHTS: tuple[tuple[CommandKind, int], ...] = (
 )
 
 
-def generate_sequence(rng: random.Random, max_length: int) -> tuple[Command, ...]:
-    """Draw one command sequence. Legality is not considered here.
+#: How often the generator ignores its own model and draws from everything.
+#: Purely random sequences almost never reach an invoke -- a permit has to
+#: exist before authority can be granted before a call can be made -- so a
+#: generator with no model tests the skip path and nothing else. A generator
+#: with a model and no wildcard never tests the skip path at all. This is the
+#: mixture.
+WILDCARD_RATE = 0.25
 
-    The generator is free to emit a revoke before a permit exists or a retry
-    before anything was invoked. Those are the sequences worth generating:
-    they are what an agent under load actually does, and the runner records
-    them as skipped rather than pretending the run failed.
+
+@dataclass
+class _GeneratorModel:
+    """A cheap, optimistic guess at where the sequence has got to.
+
+    It exists only to bias generation toward sequences that reach an invoke.
+    It cannot know whether a call will be denied, exhaust a budget or die at a
+    boundary, so it assumes the happy path -- which is why even a
+    model-guided sequence still produces skipped commands against the real
+    system, and why the runner records them rather than failing.
+    """
+
+    permit_active: bool = False
+    authorizable: bool = True
+    authorized: bool = False
+    invoked: bool = False
+    crash_armed: bool = False
+    crash_expected: bool = False
+
+    def enabled(self, kind: CommandKind) -> bool:
+        if kind is CommandKind.CREATE_PERMIT:
+            return not self.permit_active
+        if kind is CommandKind.AUTHORIZE:
+            return self.permit_active and self.authorizable and not self.authorized
+        if kind in (
+            CommandKind.INVOKE,
+            CommandKind.CONCURRENT_SAME_KEY,
+            CommandKind.TIME_OUT,
+        ):
+            return self.authorized and not self.invoked
+        if kind is CommandKind.CONCURRENT_BUDGET_RACE:
+            return self.permit_active and (self.authorized or self.invoked)
+        if kind is CommandKind.REVOKE_PERMIT:
+            return self.permit_active
+        if kind is CommandKind.CRASH_AT:
+            return not self.crash_armed
+        if kind is CommandKind.RESTART:
+            return self.crash_armed or self.crash_expected
+        if kind in (CommandKind.RETRY_SAME_KEY, CommandKind.RETRY_NEW_KEY):
+            return self.invoked
+        return True
+
+    def advance(self, command: Command) -> None:
+        kind = command.kind
+        if kind is CommandKind.CREATE_PERMIT:
+            self.permit_active = True
+        elif kind is CommandKind.AUTHORIZE:
+            self.authorized = True
+            self.authorizable = False
+        elif kind in (
+            CommandKind.INVOKE,
+            CommandKind.CONCURRENT_SAME_KEY,
+            CommandKind.TIME_OUT,
+        ):
+            self.invoked = True
+            self.authorized = False
+            self.crash_armed = False
+        elif kind is CommandKind.REVOKE_PERMIT:
+            self.permit_active = False
+            self.authorized = False
+            # A revoked operation can be re-authorized under a fresh permit.
+            self.authorizable = not self.invoked
+        elif kind is CommandKind.CRASH_AT:
+            self.crash_armed = True
+        elif kind is CommandKind.RESTART:
+            self.crash_armed = False
+            self.crash_expected = False
+        elif kind is CommandKind.INJECT_LOST_RESPONSE:
+            if command.params.get("mode") == FaultMode.CRASH_AFTER_EXECUTION.value:
+                self.crash_expected = True
+        elif kind in (CommandKind.RETRY_SAME_KEY, CommandKind.RETRY_NEW_KEY):
+            self.crash_armed = False
+
+
+#: Commands that move the operation toward a call actually being made.
+_LIFECYCLE_KINDS = frozenset(
+    {
+        CommandKind.CREATE_PERMIT,
+        CommandKind.AUTHORIZE,
+        CommandKind.INVOKE,
+        CommandKind.CONCURRENT_SAME_KEY,
+        CommandKind.CONCURRENT_BUDGET_RACE,
+        CommandKind.TIME_OUT,
+    }
+)
+
+
+def _progress_boost(kind: CommandKind, model: _GeneratorModel) -> int:
+    """Weight lifecycle commands up until something has been invoked.
+
+    Without this, a sequence spends its whole length arming faults and
+    reconciling an empty wallet: arming commands are always applicable, so an
+    unweighted draw finds them far more often than the three-step climb from
+    permit to authority to call. The boost buys the sequence a dispatch, and
+    the remaining draws are then spent on what happens around it.
+    """
+    if model.invoked or kind not in _LIFECYCLE_KINDS:
+        return 1
+    return 4
+
+
+def generate_sequence(rng: random.Random, max_length: int) -> tuple[Command, ...]:
+    """Draw one command sequence from the seeded source.
+
+    Most draws come from the commands a rough model believes are currently
+    applicable; one in four ignores the model entirely, so a revoke before any
+    permit exists and a retry before anything was invoked both still occur.
+    The runner decides legality against the real system, not this function.
     """
     kinds = [kind for kind, _ in _WEIGHTS]
     weights = [weight for _, weight in _WEIGHTS]
     length = rng.randint(3, max(3, max_length))
+    model = _GeneratorModel()
     commands: list[Command] = []
-    for position in range(length):
-        if position == 0:
-            # A sequence that never obtains authority is legal to generate but
-            # tests nothing, so the first draw is tilted toward obtaining it.
-            position_weights = [
-                weight * (5 if kind is CommandKind.CREATE_PERMIT else 1)
-                for kind, weight in _WEIGHTS
-            ]
-            kind = rng.choices(kinds, weights=position_weights, k=1)[0]
-        else:
+    for _ in range(length):
+        if rng.random() < WILDCARD_RATE:
             kind = rng.choices(kinds, weights=weights, k=1)[0]
-        commands.append(Command(kind=kind, params=_draw_params(kind, rng)))
+        else:
+            allowed = [
+                (kind, weight * _progress_boost(kind, model))
+                for kind, weight in _WEIGHTS
+                if model.enabled(kind)
+            ]
+            if not allowed:
+                allowed = list(_WEIGHTS)
+            kind = rng.choices(
+                [kind for kind, _ in allowed],
+                weights=[weight for _, weight in allowed],
+                k=1,
+            )[0]
+        command = Command(kind=kind, params=_draw_params(kind, rng))
+        model.advance(command)
+        commands.append(command)
     return tuple(commands)
 
 
@@ -954,8 +1073,8 @@ class _SequenceRunner:
     async def _do_authorize(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
         if not self.permit_active:
             return "no active permit to authorize against", {}
-        if self.state is not OperationState.CREATED:
-            return f"operation is {self.state.value}, not CREATED", {}
+        if self.state not in (OperationState.CREATED, OperationState.REVOKED):
+            return f"operation is {self.state.value}, not awaiting authority", {}
         self.state = OperationState.AUTHORIZED
         self.states[self.primary_operation] = self.state
         return None, {"permit_id": self.permit_id}
@@ -1069,10 +1188,10 @@ class _SequenceRunner:
         return None, {"mode": plan.mode.value}
 
     async def _do_time_out(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-        if self.state is not OperationState.AUTHORIZED or self.identity is not None:
-            if self.identity is None:
-                return f"operation is {self.state.value}, not AUTHORIZED", {}
+        if self.identity is not None:
             return "already invoked; use a retry command", {}
+        if self.state is not OperationState.AUTHORIZED:
+            return f"operation is {self.state.value}, not AUTHORIZED", {}
         where = str(params.get("where", "upstream"))
         delay_ms = int(self.call_timeout_seconds * 1000) + 600
         self.target.injector.arm(
@@ -1716,7 +1835,11 @@ def main(argv: list[str] | None = None) -> int:
         logging.disable(logging.CRITICAL - 1)
     run_dir = Path(tempfile.mkdtemp(prefix=f"failure-lab-stateful-{args.seed}-"))
     try:
-        result = asyncio.run(_run(args, run_dir))
+        # A few startup lines are written straight to stdout rather than
+        # through logging. Stdout is the result document; narration goes to
+        # stderr so the document stays machine-readable.
+        with contextlib.redirect_stdout(sys.stderr):
+            result = asyncio.run(_run(args, run_dir))
     finally:
         if args.keep:
             print(f"run directory kept at {run_dir}", file=sys.stderr)

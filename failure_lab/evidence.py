@@ -885,8 +885,14 @@ def build_evidence_bundle(
             ),
         )
         receipt_index: list[dict[str, str]] = []
+        used_filenames: set[str] = set()
         for index, (receipt_id, bundle) in enumerate(receipt_pairs):
             filename = _receipt_filename(receipt_id, index)
+            if filename in used_filenames:
+                # Two receipt ids that differ only in characters the filename
+                # rules strip would otherwise silently overwrite each other.
+                filename = f"{filename[:-5]}-{index:04d}.json"
+            used_filenames.add(filename)
             write_bytes(f"{RECEIPTS_DIRECTORY}/{filename}", _json_bytes(redact(bundle)))
             receipt_index.append(
                 {"receipt_id": receipt_id, "path": f"{RECEIPTS_DIRECTORY}/{filename}"}

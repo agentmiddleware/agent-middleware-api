@@ -55,6 +55,9 @@ class ConfigurationView:
     label: str
     verdict: str
     requests: int
+    #: Requests that crossed the fault layer into the tool. Independently
+    #: observed for every configuration, including the direct ones.
+    downstream_requests: int
     gateway_dispatches: int | None
     downstream_effects: int
     duplicate_effects: int
@@ -130,14 +133,26 @@ class Comparison:
         }
 
 
+def _verdict_text(value: Any) -> str:
+    """Normalise a verdict to its bare name.
+
+    ``Verdict`` subclasses ``str``, so a raw enum compares equal to its own
+    value but formats as ``Verdict.PASS``. Rendering that into a report would
+    leak Python into an artifact meant for a reader who does not have the
+    source, and would produce CSS class names like ``v-Verdict.PASS``.
+    """
+    return value.value if isinstance(value, Verdict) else str(value)
+
+
 def _view(entry: ConfigurationResult) -> ConfigurationView:
     counters = entry.counters
     duplicates = max(0, counters.downstream_executions - INTENDED_EXECUTIONS)
     return ConfigurationView(
         configuration=entry.configuration,
         label=entry.label,
-        verdict=entry.verdict,
+        verdict=_verdict_text(entry.verdict),
         requests=counters.incoming_requests,
+        downstream_requests=counters.downstream_requests,
         gateway_dispatches=counters.gateway_dispatches,
         downstream_effects=counters.downstream_executions,
         duplicate_effects=duplicates,
@@ -186,6 +201,17 @@ def _differences(
         added.append(
             f"{governed.explicit_uncertain} attempt(s) ended in an explicit "
             "uncertain state rather than an unexplained timeout"
+        )
+
+    if governed.downstream_requests < native.downstream_requests:
+        absorbed = native.downstream_requests - governed.downstream_requests
+        added.append(
+            f"{absorbed} request(s) were absorbed before reaching the tool at "
+            f"all: {native.downstream_requests} crossed into the downstream in "
+            f"the baseline against {governed.downstream_requests} behind the "
+            "gateway. The baseline reaches the same effect count by letting "
+            "every request in and collapsing them inside the tool's own "
+            "transaction, which is load the downstream has to absorb"
         )
 
     if (governed.receipts or 0) > 0:
@@ -420,6 +446,7 @@ def render_comparison_text(comparison: Comparison) -> str:
 
     rows = (
         ("Requests", "requests"),
+        ("Reached the tool", "downstream_requests"),
         ("Gateway dispatches", "gateway_dispatches"),
         ("Downstream effects", "downstream_effects"),
         ("Duplicate effects", "duplicate_effects"),
@@ -611,6 +638,7 @@ def _verdict_span(verdict: str) -> str:
 def _comparison_html(comparison: Comparison) -> str:
     rows = (
         ("Requests", "requests"),
+        ("Reached the tool", "downstream_requests"),
         ("Gateway dispatches", "gateway_dispatches"),
         ("Downstream effects", "downstream_effects"),
         ("Duplicate effects", "duplicate_effects"),

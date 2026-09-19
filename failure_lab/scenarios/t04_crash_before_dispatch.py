@@ -55,6 +55,42 @@ def _added(
     return [row for row in after if row[key] not in seen]
 
 
+async def _restore_never_dispatched(attempt_ids: list[str]) -> int:
+    """Undo the one field ``backdate_attempts`` must not have written.
+
+    ``GatewayUnderTest.backdate_attempts`` ages a wallet's attempts by writing
+    ``updated_at``, ``created_at`` **and** ``dispatched_at``. The first two are
+    the clock; the third is durable evidence that the send boundary was
+    crossed. Pre-dispatch crash recovery refuses, correctly, to compensate an
+    attempt whose ``dispatched_at`` is set (``dispatch_claim_unavailable`` in
+    ``complete_pre_dispatch_failure``), so aging a ``prepared`` row with that
+    helper makes the product look as though it failed to refund a call that
+    never left the building.
+
+    This restores ``dispatched_at = NULL`` on exactly the rows that had it
+    NULL immediately before the helper ran, so the aging stands and the forged
+    evidence does not. The count is reported in ``extra`` for every sub-case.
+    A fix in :mod:`failure_lab.gateway` is requested rather than made here,
+    because that module is shared.
+    """
+    if not attempt_ids:
+        return 0
+    from sqlalchemy import update as sa_update
+
+    from app.db.database import get_session_factory
+    from app.db.models import McpDispatchAttemptModel
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            sa_update(McpDispatchAttemptModel)
+            .where(McpDispatchAttemptModel.attempt_id.in_(attempt_ids))
+            .values(dispatched_at=None)
+        )
+        await session.commit()
+        return int(result.rowcount or 0)
+
+
 class CrashBeforeDispatch(Scenario):
     """Kill the gateway between the debit and the send. Nothing left the building.
 
@@ -234,7 +270,13 @@ class CrashBeforeDispatch(Scenario):
         )
 
         # 2. Restart: what a restarted gateway runs is reconciliation.
+        never_dispatched = [
+            row["attempt_id"]
+            for row in after_crash.attempts
+            if row["dispatched_at"] is None
+        ]
         backdated = await gateway.backdate_attempts(tenant, seconds=backdate_seconds)
+        restored = await _restore_never_dispatched(never_dispatched)
         reconciliation = await gateway.reconcile(idle_seconds=0)
         after_reconcile = await gateway.snapshot(tenant)
         dispatches_after_reconcile = target.injector.dispatch_count(operation_id)
@@ -281,6 +323,7 @@ class CrashBeforeDispatch(Scenario):
             boundary=boundary,
             attempts_backdated=backdated,
             backdate_seconds=backdate_seconds,
+            dispatched_at_restored=restored,
             reconciliation=reconciliation,
             attempt_state=attempt_state,
             attempt_marked_sent=attempt_sent_after,
@@ -408,6 +451,16 @@ class CrashBeforeDispatch(Scenario):
             ],
             "reconciliation": reconciliation,
             "attempts_backdated": backdated,
+            "dispatched_at_restored_after_backdating": restored,
+            "backdating_note": (
+                "gateway.backdate_attempts writes dispatched_at on every "
+                "attempt of the wallet, including rows that never dispatched. "
+                "This sub-case restores dispatched_at=NULL on exactly the rows "
+                "that had it NULL before the helper ran; without that, "
+                "pre-dispatch recovery refuses to compensate with "
+                "dispatch_claim_unavailable and the product is blamed for a "
+                "harness artifact."
+            ),
             "same_key_retry_status": same_key.status,
             "same_key_retry_client_visible_state": same_key.client_visible_state,
             "same_key_retry_reason": same_key.reason,

@@ -487,6 +487,13 @@ class CrashAfterDispatch(Scenario):
             "receipt_outcomes_total": all_outcomes,
             "receipts_claiming_success": len(overclaimed_total),
             "downstream_executions_total": counters.downstream_executions,
+            "sent_flag_note": (
+                "backdate_attempts writes dispatched_at on every attempt row of "
+                "the wallet, so the snapshot's 'sent' flag is not evidence after "
+                "the lab ages the clock. Both attempts here genuinely committed "
+                "the one-shot claim; the verdict rests on attempt state, the "
+                "effect ledger and the fault layer, not on that flag."
+            ),
             "wallet_balance": (
                 measurements.snapshot.wallet_balance
                 if measurements.snapshot is not None
