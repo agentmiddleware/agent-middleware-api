@@ -210,11 +210,12 @@ class SameKeyDifferentArguments(Scenario):
             "downstream_executions": control_executions,
             "executed": control_executed,
             "interpretation": (
-                "the same rejected payload executes under a fresh key, so the refusal "
-                "above is about the reused key, not a broken tool"
+                "the same amount executes under a fresh key and a fresh business "
+                "operation, so the refusal above is about the reused identity rather "
+                "than a tool that rejects this amount or is simply broken"
                 if control_executed
-                else "the payload did not execute even under a fresh key; the refusal "
-                "above cannot be attributed to key reuse"
+                else "the amount did not execute even under a fresh key; the refusal "
+                "above cannot be attributed to the reused identity"
             ),
         }
 
