@@ -251,6 +251,10 @@ class ForbiddenParameter(Scenario):
                 mutate=mutate,
             )
             record["probe"] = name
+            #: ``case`` is the suite-wide name for a sub-case row, so one
+            #: report can render all fourteen scenarios' tables on one key.
+            #: ``probe`` is kept because this scenario's specification names it.
+            record["case"] = name
             record["probe_kind"] = "permit" if name in PERMIT_PROBES else "schema"
             record["intent"] = PROBE_INTENT[name]
             record["permit_id"] = permit_id
@@ -497,6 +501,29 @@ class ForbiddenParameter(Scenario):
         schema_rows = [row for row in probes if row["probe"] in SCHEMA_PROBES]
         problems: list[str] = []
 
+        # Both row sets above are selected by NAME out of `probes`. Every
+        # assertion this scenario makes is a loop over one of them, and a loop
+        # over an empty list asserts nothing: a probe renamed here but not in
+        # PERMIT_PROBES/SCHEMA_PROBES would silently drop out of the matrix
+        # and the run would still report PASS over the probes that remained.
+        # The spec names these probes, so the run must show it made all of
+        # them.
+        missing_permit = [name for name in PERMIT_PROBES if name not in {
+            row["probe"] for row in permit_rows
+        }]
+        missing_schema = [name for name in SCHEMA_PROBES if name not in {
+            row["probe"] for row in schema_rows
+        }]
+        if missing_permit or missing_schema:
+            problems.append(
+                f"instrument: the probe matrix is incomplete -- "
+                f"{len(permit_rows)}/{len(PERMIT_PROBES)} permit probe(s) and "
+                f"{len(schema_rows)}/{len(SCHEMA_PROBES)} schema probe(s) were "
+                f"recorded (missing {sorted(missing_permit + missing_schema)}), "
+                f"so this verdict covers fewer cases than the scenario claims "
+                f"to test"
+            )
+
         for row in controls:
             problems.extend(row["problems"])
         for row in permit_rows:
@@ -599,6 +626,9 @@ class ForbiddenParameter(Scenario):
             extra={
                 "call_cost_credits": str(call_cost),
                 "tool": GATEWAY_TOOL_ID,
+                # Same list under both names: "cases" is the suite-wide key
+                # for a per-sub-case table, "probes" is this scenario's own.
+                "cases": probes,
                 "probes": probes,
                 "permit_probes": permit_rows,
                 "schema_probes": schema_rows,

@@ -456,6 +456,25 @@ class CacheFailure(Scenario):
                 "rate limiter(s) were found and none was verified rebound to "
                 f"{dead_url}, so nothing below measures a cache failure"
             )
+        if not governed_loop_reached_the_dead_cache:
+            # `rebound` above proves a limiter lost its cache; it does not
+            # prove the governed calls went through that limiter. This flag is
+            # read from the degradation state cleared immediately before the
+            # loop and sampled immediately after it and BEFORE any health
+            # probe, so it is the only reading attributable to the three
+            # governed calls alone. Without it in the verdict, a run in which
+            # only the operator health probe ever met the dead cache -- a
+            # limiter skip-list change is all it would take -- would report
+            # PASS on fourteen invariants that never met a cache failure, and
+            # `degradation_surfaced` below would be satisfied by the probe.
+            problems.append(
+                "the governed loop never met the dead cache: the three "
+                "governed calls did not drive any limiter onto its memory "
+                "fallback, so the invariants below held over a request path "
+                "that may never have touched the unreachable cache and this "
+                "run does not measure what a cache outage costs the governed "
+                "loop"
+            )
         if not degradation_surfaced:
             problems.append(
                 "the cache outage was not surfaced: "
@@ -848,9 +867,10 @@ class CacheFailure(Scenario):
             risks.append(
                 "The three governed calls did not set the limiter's memory "
                 "fallback flag, so nothing here shows the cache outage was in "
-                "the loop's own request path. The correctness invariants below "
-                "held, but they held over a loop that may never have met the "
-                "dead cache."
+                "the loop's own request path. That failed this run: whatever "
+                "the correctness invariants below report, they were measured "
+                "over a loop that may never have met the dead cache, so they "
+                "are not evidence about a cache failure."
             )
         return risks + [
             "Rate limiting served the whole run from its in-memory fallback, so "

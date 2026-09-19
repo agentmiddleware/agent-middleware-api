@@ -218,6 +218,10 @@ class StandardMcpClient(Scenario):
 
         def record(step: str, passed: bool, detail: str, **data: Any) -> None:
             steps[step] = {
+                # ``case`` is the suite-wide name for a sub-case row, so one
+                # report can key every scenario's table on the same field;
+                # ``step`` is this scenario's own name and is kept.
+                "case": step,
                 "step": step,
                 "passed": bool(passed),
                 "detail": detail,
@@ -265,14 +269,20 @@ class StandardMcpClient(Scenario):
 
             async with gateway.mcp_client_session(tenant, idempotency_key=None) as session:
                 init = await session.initialize()
-                protocol_version = str(init.protocolVersion)
+                negotiated = getattr(init, "protocolVersion", None)
+                protocol_version = str(negotiated) if negotiated else ""
                 server_info = init.serverInfo
                 record(
                     "initialize",
-                    bool(protocol_version),
-                    f"the reference SDK client initialized against "
-                    f"{STANDARD_ENDPOINT} and negotiated protocol version "
-                    f"{protocol_version}",
+                    bool(negotiated),
+                    (
+                        f"the reference SDK client initialized against "
+                        f"{STANDARD_ENDPOINT} and negotiated protocol version "
+                        f"{protocol_version}"
+                        if negotiated
+                        else f"the reference SDK client reached {STANDARD_ENDPOINT} "
+                        "but the initialize result carried no protocol version"
+                    ),
                     protocol_version=protocol_version,
                     server_name=getattr(server_info, "name", None),
                     server_version=getattr(server_info, "version", None),
@@ -316,13 +326,11 @@ class StandardMcpClient(Scenario):
                 except McpError as exc:
                     unknown_probe = {
                         "shape": "jsonrpc_error",
-                        "transport_broken": False,
                         **_jsonrpc_error(exc),
                     }
                 else:
                     unknown_probe = {
                         "shape": "tool_result",
-                        "transport_broken": False,
                         "is_error": bool(unknown_result.isError),
                         "message": str(unknown_result.content)[:300],
                     }
@@ -350,13 +358,11 @@ class StandardMcpClient(Scenario):
                 except McpError as exc:
                     malformed_probe = {
                         "shape": "jsonrpc_error",
-                        "transport_broken": False,
                         **_jsonrpc_error(exc),
                     }
                 else:
                     malformed_probe = {
                         "shape": "tool_result",
-                        "transport_broken": False,
                         "is_error": bool(malformed_result.isError),
                         "message": str(malformed_result.content)[:300],
                     }
@@ -410,7 +416,9 @@ class StandardMcpClient(Scenario):
                     f"(code {malformed_probe.get('jsonrpc_code')}); the session "
                     f"{'still spoke the protocol afterwards' if session_survived else 'could not be used afterwards'}; "
                     f"downstream executions added by the two probes: "
-                    f"{executions_from_errors}"
+                    f"{executions_from_errors} (effect ledger); downstream "
+                    f"requests reaching the upstream: {crossings_from_errors} "
+                    "(fault layer)"
                 ),
                 unknown_tool_probe=unknown_probe,
                 malformed_argument_probe=malformed_probe,
@@ -446,21 +454,53 @@ class StandardMcpClient(Scenario):
             )
 
             # -- a client with no credentials at all ----------------------
-            unauthenticated = await self._initialize_without_credentials(gateway)
+            # The control runs the SAME construction WITH credentials. Without
+            # it, "refused" is indistinguishable from "the probe is broken":
+            # any exception at all -- a wrong URL, a bad argument, an import
+            # error -- would otherwise be recorded as an authentication
+            # refusal and pass the step.
+            credentialed = await self._initialize_probe(
+                gateway, tenant, with_credentials=True
+            )
+            unauthenticated = await self._initialize_probe(
+                gateway, tenant, with_credentials=False
+            )
+            auth_refused = not unauthenticated["initialized"]
+            control_worked = bool(credentialed["initialized"])
+            if not control_worked:
+                auth_detail = (
+                    "INCONCLUSIVE: the control -- the same client construction "
+                    "WITH the API key -- did not initialize either "
+                    f"({credentialed['detail']}), so the credential-less "
+                    f"outcome ({unauthenticated['detail']}) is not evidence of "
+                    "a refusal"
+                )
+            elif auth_refused:
+                auth_detail = (
+                    "a client with the auth header stripped was refused at "
+                    f"initialize: {unauthenticated['detail']}; the identical "
+                    "construction WITH the API key initialized (control), so "
+                    "the refusal is attributable to the missing credential"
+                )
+            else:
+                auth_detail = (
+                    "a client with NO API key completed initialize against "
+                    f"{STANDARD_ENDPOINT}: {unauthenticated['detail']}"
+                )
             record(
                 "authentication",
-                not unauthenticated["initialized"],
-                (
-                    "a client with the auth header stripped was refused at "
-                    f"initialize: {unauthenticated['detail']}"
-                    if not unauthenticated["initialized"]
-                    else "a client with NO API key completed initialize against "
-                    f"{STANDARD_ENDPOINT}"
-                ),
+                control_worked and auth_refused,
+                auth_detail,
                 unauthenticated_initialized=unauthenticated["initialized"],
                 unauthenticated_refusal=unauthenticated["detail"],
                 unauthenticated_http_statuses=unauthenticated["http_statuses"],
                 unauthenticated_exception=unauthenticated["exception"],
+                credentialed_control_initialized=control_worked,
+                credentialed_control_detail=credentialed["detail"],
+                refusal_status_is_credential_denial=any(
+                    status in (401, 403)
+                    for status in unauthenticated["http_statuses"]
+                ),
             )
 
             # -- the governed call, over the standard transport -----------
@@ -600,9 +640,25 @@ class StandardMcpClient(Scenario):
                     target,
                     business_operation_id=op_call,
                     idempotency_key=call_key,
-                    status="success" if not retry_result.isError else "error",
+                    # "replayed" is a claim about what the gateway did, so it
+                    # is made only when the receipt id proves it; a retry that
+                    # came back with a new receipt is a second success, not a
+                    # replay, and must not be recorded as one.
+                    status=(
+                        "error"
+                        if retry_result.isError
+                        else "replayed"
+                        if retry_receipt_id is not None
+                        and retry_receipt_id == first_receipt_id
+                        else "success"
+                    ),
                     client_visible_state=(
-                        "confirmed_replay" if not retry_result.isError else "no_information"
+                        "no_information"
+                        if retry_result.isError
+                        else "confirmed_replay"
+                        if retry_receipt_id is not None
+                        and retry_receipt_id == first_receipt_id
+                        else "confirmed_success"
                     ),
                     latency_ms=retry_latency_ms,
                     receipt=retry_receipt,
@@ -653,7 +709,9 @@ class StandardMcpClient(Scenario):
                     "mcp.client.streamable_http), not this product's SDK"
                 ),
                 "exercised": True,
-                "protocol_version": steps["initialize"].get("protocol_version"),
+                "protocol_version": steps.get("initialize", {}).get(
+                    "protocol_version"
+                ),
                 "permit": "minted server-side by the endpoint",
                 "governed_calls": standard_calls,
             },
@@ -682,13 +740,23 @@ class StandardMcpClient(Scenario):
             operation_ids=[op_call, op_malformed, op_unknown, op_compat],
         )
 
+        for name in STEPS:
+            steps.setdefault(
+                name,
+                {
+                    "case": name,
+                    "step": name,
+                    "passed": False,
+                    "detail": "the step was never reached, so nothing was measured",
+                },
+            )
         failed_steps = [name for name in STEPS if not steps[name]["passed"]]
         verdict = Verdict.PASS if not failed_steps else Verdict.FAIL
 
         remaining_risks = [
             "One client implementation over one transport: the reference MCP "
             f"SDK speaking Streamable HTTP in JSON mode at protocol version "
-            f"{steps['initialize'].get('protocol_version')}. Other clients, "
+            f"{steps.get('initialize', {}).get('protocol_version')}. Other clients, "
             "SSE streaming and session resumption are not exercised here.",
             "The standard endpoint mints the permit itself from the caller's "
             "wallet, so this run says nothing about a caller-supplied permit "
@@ -697,6 +765,16 @@ class StandardMcpClient(Scenario):
             "records that both were driven, not that they behave identically "
             "under failure.",
         ]
+        if crossings_from_errors:
+            remaining_risks.append(
+                "The two error probes produced no downstream execution, but "
+                f"{crossings_from_errors} of them did reach the upstream over "
+                "the network (fault layer): the schema-invalid argument was "
+                "admitted, debited and dispatched, and was refused by the "
+                "upstream tool rather than by the governed manifest's "
+                "inputSchema at the gateway boundary. The charge was "
+                "compensated, so the net cost was zero."
+            )
         if compat.status != "success":
             remaining_risks.append(
                 "The compatibility-transport call recorded for coverage did "
@@ -728,6 +806,9 @@ class StandardMcpClient(Scenario):
             attempts=attempts,
             remaining_risks=remaining_risks,
             extra={
+                # Same list under both names: "cases" is the suite-wide key
+                # for a per-sub-case table, "steps" is this scenario's own.
+                "cases": [steps[name] for name in STEPS],
                 "steps": [steps[name] for name in STEPS],
                 "failed_steps": failed_steps,
                 "transports": transports,
@@ -741,12 +822,14 @@ class StandardMcpClient(Scenario):
 
     # -- helpers -----------------------------------------------------------
 
-    async def _initialize_without_credentials(
-        self, gateway: GatewayUnderTest
+    async def _initialize_probe(
+        self, gateway: GatewayUnderTest, tenant: Any, *, with_credentials: bool
     ) -> dict[str, Any]:
-        """Open the same kind of SDK session with the auth header stripped.
+        """Open an SDK session against ``POST /mcp``, with or without the key.
 
-        The refusal arrives as an exception out of ``initialize`` (the SDK
+        One code path serves both the credential-less probe and its control,
+        so the only difference between the two runs is the credential itself.
+        A refusal arrives as an exception out of ``initialize`` (the SDK
         raises the transport's HTTP error), so it is caught and described
         rather than allowed to end the run.
         """
@@ -756,6 +839,7 @@ class StandardMcpClient(Scenario):
         http_client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=gateway.app),
             base_url=GATEWAY_BASE_URL,
+            headers=dict(tenant.headers) if with_credentials else None,
             follow_redirects=False,
         )
         try:
@@ -767,8 +851,9 @@ class StandardMcpClient(Scenario):
             return {
                 "initialized": True,
                 "detail": (
-                    "initialize succeeded with no API key, negotiating "
-                    f"protocol version {result.protocolVersion}"
+                    "initialize succeeded "
+                    + ("with the API key" if with_credentials else "with NO API key")
+                    + f", negotiating protocol version {result.protocolVersion}"
                 ),
                 "http_statuses": [],
                 "exception": None,
@@ -813,12 +898,18 @@ class StandardMcpClient(Scenario):
             },
             status=status,
             client_visible_state=client_visible_state,
-            http_status=200,
+            # The reference SDK hands back a parsed protocol result, not the
+            # HTTP response, so the status of these calls is not observed
+            # here. Reporting one would be inventing a measurement.
+            http_status=None,
             latency_ms=latency_ms,
             reason=reason,
             refund=refund,
             receipt=receipt,
-            details=details or {},
+            details={
+                **(details or {}),
+                "http_status": "not exposed by the reference MCP SDK client",
+            },
         )
 
     def _observation(
@@ -835,20 +926,33 @@ class StandardMcpClient(Scenario):
             "An independent client -- the reference MCP SDK, not this "
             f"product's -- completed the lifecycle against {STANDARD_ENDPOINT}: "
             f"initialize at protocol version "
-            f"{steps['initialize'].get('protocol_version')}, tools capability "
+            f"{steps.get('initialize', {}).get('protocol_version')}, tools "
+            "capability "
             "advertised, the governed refund tool listed, one governed "
             f"tools/call carrying a signed receipt under "
             f'_meta["{RECEIPT_META_KEY}"], structured errors for an unserved '
             "tool and a malformed argument, and a retry on the same "
             "Idempotency-Key that returned the same receipt id."
         )
+        retry_step = steps.get("retry", {})
+        retry_movement = retry_step.get("gateway_movement") or {}
+        retry_executions_added = retry_step.get("downstream_executions", 0) - steps.get(
+            "tools_call", {}
+        ).get("downstream_executions", 0)
         numbers = (
             f"Across the whole run the independent effect ledger recorded "
             f"{counters.downstream_executions} downstream execution(s) for "
             f"{counters.incoming_requests} client call(s); the gateway reported "
             f"{counters.gateway_debits} debit(s), {counters.gateway_refunds} "
-            f"refund(s) and {counters.receipts} receipt(s). The retry added no "
-            "execution and no debit."
+            f"refund(s) and {counters.receipts} receipt(s). The retry added "
+            f"{retry_executions_added} downstream execution(s) (effect ledger) "
+            f"and {retry_movement.get('debits')} debit(s) (gateway-reported), "
+            "and came back with "
+            + (
+                "the same receipt id as the first call."
+                if retry_step.get("same_receipt_id")
+                else "a DIFFERENT receipt id from the first call."
+            )
         )
         coverage = (
             f"Both transports were driven: {STANDARD_ENDPOINT} by the SDK here, "

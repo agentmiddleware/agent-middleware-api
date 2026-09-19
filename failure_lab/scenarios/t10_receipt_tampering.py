@@ -317,6 +317,7 @@ class ReceiptTampering(Scenario):
             if name not in signed_payload:
                 rows.append(
                     {
+                        "case": f"signing_input.{name}",
                         "field": f"signing_input.{name}",
                         "side": "signed",
                         "edited": False,
@@ -620,6 +621,46 @@ class ReceiptTampering(Scenario):
                 "receipt_id": receipt_id,
                 "receipt_outcome": signed_payload.get("outcome"),
                 "downstream_executions": executions,
+                # -- handed to the runner's evidence harvester ---------------
+                # `failure_lab.runner.harvest_evidence` reads exactly these
+                # three keys off `ConfigurationResult.extra`, and nothing else
+                # can collect them: the runner closes every target before it
+                # builds the bundle, so a live gateway is gone by then. Until
+                # a scenario set them the bundle wrote "no portable receipt
+                # bundles were supplied" and "no independent verification
+                # results were supplied" on every run -- true of the bundle,
+                # and false about this scenario, which exported all three.
+                # (keys spelled literally rather than imported from
+                # failure_lab.runner, which imports the scenarios.)
+                "portable_receipts": {receipt_id: bundle},
+                "trust_keys": key_document,
+                "verification_results": [
+                    {
+                        "receipt_id": receipt_id,
+                        "subject": "the genuine exported bundle",
+                        "verifier": "failure_lab.verifier (independent: imports "
+                        "neither app nor b2a_sdk)",
+                        "key_source": KeySource.ISSUER_ORIGIN.value,
+                        "downstream_observation": observation,
+                        **genuine.as_dict(),
+                    },
+                    {
+                        "receipt_id": receipt_id,
+                        "subject": (
+                            "the same bundle with no downstream observation "
+                            "supplied"
+                        ),
+                        "verifier": "failure_lab.verifier (independent: imports "
+                        "neither app nor b2a_sdk)",
+                        "key_source": KeySource.ISSUER_ORIGIN.value,
+                        "downstream_observation": None,
+                        **genuine_no_observation.as_dict(),
+                    },
+                ],
+                # Same list under both names: "cases" is the suite-wide key
+                # for a per-sub-case table; "tamper_matrix" is this
+                # scenario's own name for it.
+                "cases": rows,
                 "downstream_observation": observation,
                 "genuine_verification": {
                     "claims": baseline_claims,
@@ -702,6 +743,9 @@ def _probe(
     classification = coverage.get(path, "absent_from_bundle")
     signature_valid = report.signature.status is ClaimStatus.ESTABLISHED
     row = {
+        # ``case`` is the suite-wide name for a sub-case row; ``field`` is
+        # this scenario's own and is kept.
+        "case": path,
         "field": path,
         "side": side or ("signed" if path.startswith("signing_input.") else "envelope"),
         "coverage": classification,

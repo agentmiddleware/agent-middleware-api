@@ -42,6 +42,19 @@ UNCERTAIN_OUTCOME = "delivery_uncertain"
 #: It cannot know that here, so recording it is a failure of the claim.
 OVERCLAIMED_OUTCOME = "success"
 
+#: The scope every configuration's result carries. The lost response here is
+#: produced by an in-process fault layer holding a response inside one event
+#: loop, against SQLite -- not a network partition, a load balancer dropping a
+#: connection, or a PostgreSQL deployment. The shape of the failure the caller
+#: sees is the same; the environment it is observed in is not production's.
+HARNESS_SCOPE_RISK = (
+    "The lost response is produced by an in-process fault layer that holds "
+    "the executed call's answer inside a single event loop, against SQLite. "
+    "That reproduces the shape a caller sees -- the tool ran, the answer "
+    "never came -- but not a real network partition, a proxy dropping a "
+    "connection mid-body, or the PostgreSQL deployment the product runs on."
+)
+
 
 class ExecuteThenLoseResponse(Scenario):
     """The headline failure: the tool ran, the answer vanished, the agent retried.
@@ -167,6 +180,16 @@ class ExecuteThenLoseResponse(Scenario):
         )
 
         first = await target.agent.submit(identity, refund, timeout_seconds=timeout_seconds)
+        # Read BEFORE the retry, because every observation below opens by
+        # saying the tool executed and its response was withheld. Arming a
+        # fault is not evidence that it fired, and a post-retry total cannot
+        # say which attempt produced the effect. These two numbers are what
+        # licence that sentence.
+        executions_after_first = target.ledger.execution_count(operation_id)
+        fault_applied = any(
+            crossing.fault == FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value
+            for crossing in target.injector.crossings(operation_id=operation_id)
+        )
         log.emit(
             "attempt.first",
             (
@@ -267,13 +290,24 @@ class ExecuteThenLoseResponse(Scenario):
                 retry_identity.idempotency_key == identity.idempotency_key
             ),
             "effect_ledger_execution_count": ledger_count,
+            "effect_ledger_executions_after_first_attempt": executions_after_first,
+            "first_attempt_fault_applied": fault_applied,
             "fault_layer_downstream_requests": layer_requests,
             "fault_layer_requests_reaching_tool": reached_tool,
+            # Named so failure_lab.evidence._FAULT_KEYS_IN_EXTRA finds the
+            # armed failure even on a run where it never fired.
+            "fault_plan": {
+                "mode": FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value,
+                "operation_id": operation_id,
+                "hold_seconds": hold_seconds,
+                "applied_to_first_attempt": fault_applied,
+            },
             "amount_minor_units_per_execution": amount,
             "liveness_control": control,
             "counters_measured_before_control": True,
         }
 
+        premise = self._premise(executions_after_first, fault_applied)
         if target.uses_gateway:
             return self._gateway_result(
                 target,
@@ -281,6 +315,7 @@ class ExecuteThenLoseResponse(Scenario):
                 attempts,
                 measurements,
                 extra,
+                premise=premise,
                 ledger_count=ledger_count,
                 layer_requests=layer_requests,
                 reached_tool=reached_tool,
@@ -295,6 +330,7 @@ class ExecuteThenLoseResponse(Scenario):
                 attempts,
                 measurements,
                 extra,
+                premise=premise,
                 ledger_count=ledger_count,
                 layer_requests=layer_requests,
                 control=control,
@@ -305,6 +341,7 @@ class ExecuteThenLoseResponse(Scenario):
             attempts,
             measurements,
             extra,
+            premise=premise,
             ledger_count=ledger_count,
             layer_requests=layer_requests,
             amount=amount,
@@ -424,6 +461,41 @@ class ExecuteThenLoseResponse(Scenario):
             f"separate {subject} from a path that had simply stopped working."
         )
 
+    # -- what the first attempt actually did ------------------------------
+
+    @staticmethod
+    def _premise(executions_after_first: int, fault_applied: bool) -> str:
+        """Open every observation with what the instruments support.
+
+        This scenario is about a call that ran and whose answer vanished. That
+        the fault was *armed* is not evidence that it fired, and a total taken
+        after the retry cannot say which attempt produced the effect. So the
+        opening sentence is chosen by the effect ledger and the fault layer,
+        read between the two attempts, rather than asserted from the plan.
+        """
+        if executions_after_first >= 1 and fault_applied:
+            return (
+                "The tool executed and committed (effect ledger, independent: "
+                f"{executions_after_first} execution(s) before the retry) and "
+                "the fault layer then withheld the response it had already "
+                "produced."
+            )
+        if executions_after_first >= 1:
+            return (
+                "The tool executed and committed (effect ledger, independent: "
+                f"{executions_after_first} execution(s) before the retry), but "
+                "the armed response-loss fault was NOT recorded on the first "
+                "attempt's crossing, so whatever the caller saw was not the "
+                "injected failure."
+            )
+        return (
+            "PREMISE NOT ESTABLISHED: the first attempt committed no "
+            "downstream effect at all (effect ledger, independent: 0 "
+            "executions before the retry), so this run did not reproduce the "
+            "executed-but-unacknowledged call the scenario is about, and "
+            "nothing below should be read as measuring it."
+        )
+
     # -- per-configuration verdicts --------------------------------------
 
     def _direct_naive_result(
@@ -434,6 +506,7 @@ class ExecuteThenLoseResponse(Scenario):
         measurements: Measurements,
         extra: dict[str, Any],
         *,
+        premise: str,
         ledger_count: int,
         layer_requests: int,
         amount: int,
@@ -445,7 +518,7 @@ class ExecuteThenLoseResponse(Scenario):
         extra["value_at_risk_minor_units"] = duplicates * amount
 
         observation = (
-            f"The tool executed and committed, then its response was withheld. "
+            f"{premise} "
             f"The agent saw '{first.status}' "
             f"({first.client_visible_state}) and retried the same business "
             f"operation with the same idempotency key and a new request id; the "
@@ -462,6 +535,7 @@ class ExecuteThenLoseResponse(Scenario):
             )
         )
         risks = [
+            HARNESS_SCOPE_RISK,
             "A lost response is indistinguishable from a lost request to this "
             "agent, so the only safe options are to retry (and duplicate) or to "
             "abandon (and possibly never refund). It has no third option.",
@@ -501,6 +575,7 @@ class ExecuteThenLoseResponse(Scenario):
         measurements: Measurements,
         extra: dict[str, Any],
         *,
+        premise: str,
         ledger_count: int,
         layer_requests: int,
         control: dict[str, Any],
@@ -533,8 +608,8 @@ class ExecuteThenLoseResponse(Scenario):
 
         retry_reached_tool = layer_requests >= 2
         observation = (
-            f"The tool executed and committed, then its response was withheld; "
-            f"the agent saw '{first.status}' "
+            f"{premise} "
+            f"The agent saw '{first.status}' "
             f"({first.client_visible_state}) and retried with the same business "
             f"operation id. The retry returned '{second.status}' "
             f"({second.client_visible_state}). The independent effect ledger "
@@ -559,6 +634,7 @@ class ExecuteThenLoseResponse(Scenario):
                 " The correct native baseline did NOT hold: " + "; ".join(failures) + "."
             )
         risks = [
+            HARNESS_SCOPE_RISK,
             "The agent still never learned the outcome of its first call; it "
             "recovered only because it was willing to retry a consequential "
             "operation blind. The tool made that safe, not the agent.",
@@ -594,6 +670,7 @@ class ExecuteThenLoseResponse(Scenario):
         measurements: Measurements,
         extra: dict[str, Any],
         *,
+        premise: str,
         ledger_count: int,
         layer_requests: int,
         reached_tool: int,
@@ -776,7 +853,7 @@ class ExecuteThenLoseResponse(Scenario):
             )
 
         observation = (
-            f"The tool executed and committed, then its response was withheld. "
+            f"{premise} "
             f"Independent instruments: the effect ledger recorded {ledger_count} "
             f"downstream execution(s) for this operation and the fault layer counted "
             f"{layer_requests} request(s) crossing into the tool across both "
@@ -806,6 +883,7 @@ class ExecuteThenLoseResponse(Scenario):
             observation += " Guarantee not met: " + "; ".join(failures) + "."
 
         risks = [
+            HARNESS_SCOPE_RISK,
             "The charge is retained on an uncertain outcome. A caller whose "
             "downstream silently dropped the call pays for a refund that may "
             "never have happened; reconciling that is the caller's job, not the "
