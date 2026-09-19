@@ -89,6 +89,7 @@ from app.routers.mcp import (
     _MAX_JSON_NESTING_DEPTH,
     GovernedToolError,
     HumanApprovalPendingSignal,
+    TerminalRecordContendedError,
     ToolPermissionDenied,
     _handle_tools_call,
     _handle_tools_list,
@@ -96,6 +97,7 @@ from app.routers.mcp import (
     _internal_error,
     _json_nesting_depth_exceeds,
     _loads_strict_json,
+    _terminal_record_contended_data,
     _value_error_jsonrpc_code,
 )
 from app.schemas.trust import PermitCreateRequest
@@ -463,6 +465,16 @@ async def _governed_tools_call(
         # non-retryable type, so what arrives is a refusal that ran nothing and
         # whose idempotency record has already been released.
         raise _mcp_error(-32005, ReceiptWriteContendedError.reason) from e
+    except TerminalRecordContendedError as e:
+        # The non-retryable half of both errors above: the audit event or the
+        # receipt was lost for a call that had already run or already paid.
+        # -32007 exists so this cannot be confused with either neighbour --
+        # not -32005, which would invite a second execution of a paid call, and
+        # not the unclassified -32603, which is for failures the pipeline did
+        # not classify rather than ones it classified and chose to refuse.
+        raise _mcp_error(
+            e.jsonrpc_code, e.reason, _terminal_record_contended_data(e.reason)
+        ) from e
     except ToolPermissionDenied as e:
         denial_data: dict[str, Any] = {}
         if e.receipt:

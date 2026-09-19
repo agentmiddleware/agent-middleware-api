@@ -39,10 +39,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 
+from app.core.config import get_settings
 from app.core.resilience import WRITE_CONFLICT_MAX_ATTEMPTS
 from app.db.database import get_session_factory
 from app.db.models import ReceiptModel
 from app.main import app
+from app.routers.mcp import RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS
 from app.schemas.billing import ServiceCategory
 from app.services import receipts as receipts_module
 from app.services.receipts import ReceiptWriteContendedError, get_receipt_service
@@ -57,6 +59,15 @@ async def client() -> AsyncClient:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as value:
         yield value
+
+
+@pytest.fixture
+def standard_mcp_enabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "true")
+    get_settings.cache_clear()
+    yield
+    monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "false")
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -337,8 +348,8 @@ async def test_a_charged_call_is_never_told_to_retry_its_receipt(
     before the receipt is written. Answering ``-32005`` would invite a second
     execution of something already paid for, and it cannot be softened into a
     success either -- without a receipt there is no terminal outcome to publish
-    and reconciliation owns the record from here. So it stays unclassified,
-    deliberately, exactly as a post-charge audit-chain loss does.
+    and reconciliation owns the record from here. So it answers ``-32007``,
+    the non-retryable name a post-charge audit-chain loss also carries.
     """
     tool_name, runs = echo_tool
     ctx = await provision_agent_wallet(client)
@@ -369,6 +380,8 @@ async def test_a_charged_call_is_never_told_to_retry_its_receipt(
     assert "error" in body, body
     assert body["error"]["code"] != -32005, body
     assert body["error"]["message"] != ReceiptWriteContendedError.reason, body
+    assert body["error"]["code"] == -32007, body
+    assert body["error"]["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, body
     # The hazard the assertion above guards is real: the tool did run.
     assert runs["count"] == 1
 
@@ -434,6 +447,8 @@ async def test_a_refunded_call_that_already_ran_is_never_told_to_retry(
         error = resp.json()["error"]
         assert error["code"] != -32005, error
         assert error["message"] != ReceiptWriteContendedError.reason, error
+        assert error["code"] == -32007, error
+        assert error["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, error
         assert runs["count"] == 1
 
         # The key was not freed, so the retry this call was NOT invited to make
@@ -445,3 +460,53 @@ async def test_a_refunded_call_that_already_ran_is_never_told_to_retry(
         assert runs["count"] == 1, again.json()
     finally:
         get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_the_standard_surface_answers_the_same_named_outcome(
+    client: AsyncClient, clean_database: None, standard_mcp_enabled, echo_tool
+) -> None:
+    """``/mcp`` classifies in its own handler, so the name has to be added there too.
+
+    The two transports do not share an exception ladder: ``/mcp/messages``
+    matches types itself and ``/mcp`` maps them into ``McpError``. A name on one
+    is not a name on the other, and ``/mcp`` is the surface new integrations are
+    pointed at.
+
+    It also pins the body. Refusing a retry without saying what to do instead
+    leaves the caller to guess, and the wrong guess -- a fresh idempotency key --
+    is a second charged execution of a call that already ran. So the answer
+    carries its reason code and the one correct action.
+    """
+    tool_name, runs = echo_tool
+    ctx = await provision_agent_wallet(client)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _lose_receipt_commits(monkeypatch, failures=None)
+        resp = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": {"message": "hello"}},
+            },
+            headers={
+                **ctx["agent_headers"],
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+                "Idempotency-Key": "receipt-contention-standard-1",
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32007, error
+    assert error["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, error
+    data = error["data"]
+    assert data["reason_code"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, data
+    assert data["error"] == "manual_review_required", data
+    assert data["remediation"]["type"] == "reconcile_out_of_band", data
+    # The tool ran and no receipt landed: exactly the state the name describes.
+    assert runs["count"] == 1
+    assert await _count_receipts() == 0

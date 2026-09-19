@@ -65,6 +65,36 @@ typed denials, tool failures, or reason-coded errors above — is reported as
 `-32603` / `internal_error` with a `correlation_id` in `data`. The exception
 text is logged server-side under that id and never returned.
 
+## When no terminal accounting can be written
+
+One state produces neither a receipt nor an unclassified failure: the audit
+event or the receipt itself is lost to write contention **after** the call has
+already run or the wallet has already moved. The receipt is built from the
+audit event's id, so a lost audit event means no receipt is possible; a lost
+receipt insert means the same thing one step later. Either way the invocation
+has effects and no terminal accounting, and `reconcile_stuck_records` counts
+it for manual review rather than completing it — this is the "local post-effect
+crash" the invariant above carves out.
+
+It answers `-32007` (HTTP 500) with `reason_code` `audit_chain_contended_after_effects`
+or `receipt_write_contended_after_effects`, and a `remediation` of
+`reconcile_out_of_band`. It is **not** `-32005`: a retry would invite a second
+execution of a call the caller has paid for. It is **not** `-32603` either,
+which is reserved above for failures the pipeline *did not* classify — these
+two sites classify deliberately, checking whether effects were committed before
+choosing non-retryability, and reporting that decision through the unclassified
+channel hid a known state among genuine bugs.
+
+What the code claims is the situation, not the outcome. Whether the tool's
+effect landed is exactly as unknowable as before; what is now stated is that
+effects are committed, no receipt exists, the record is held for manual review,
+and the caller must not mint a fresh idempotency key. A governed record, where
+one was opened, stays held by the invocation that ran and answers
+`idempotency_in_progress` on the same key until an operator resolves it.
+Proven by `tests/test_audit_chain_contention_surface.py` and
+`tests/test_receipt_write_contention_surface.py`, which also pin that an
+ordinary bug in the same window still returns `-32603`.
+
 ## Why `delivery_uncertain` cannot be "fixed"
 
 The durable dispatch claim is written immediately before the network
