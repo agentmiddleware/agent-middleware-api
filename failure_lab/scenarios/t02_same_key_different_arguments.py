@@ -164,7 +164,13 @@ class SameKeyDifferentArguments(Scenario):
         )
 
         # Measured BEFORE the control runs, so the gateway-reported debit and
-        # receipt columns describe the reuse probe alone.
+        # receipt columns describe the reuse probe alone. That also means the
+        # wallet-scoped columns in this result (counters.receipts,
+        # counters.gateway_debits, the receipts list) are the state as of this
+        # line, not the end state of the configuration: the fresh-key control
+        # below is a real governed call and adds its own attempt, debit and
+        # receipt afterwards. ``gateway_state_after_control`` in extra records
+        # where the wallet actually ended up.
         measurements = await self.measure(
             target, [first, second], operation_ids=[operation_id]
         )
@@ -191,6 +197,7 @@ class SameKeyDifferentArguments(Scenario):
             reason=control.reason,
             executed=control_executed,
         )
+        after_control = await self._gateway_state(target)
         fresh_key_control = {
             "operation_id": control_operation_id,
             "idempotency_key": control_identity.idempotency_key,
@@ -221,6 +228,7 @@ class SameKeyDifferentArguments(Scenario):
                 "client_visible_state": first.client_visible_state,
                 "http_status": first.http_status,
                 "receipt_outcome": (first.receipt or {}).get("outcome"),
+                "downstream_executions_after": executions_after_first,
             },
             "conflict_reason": conflict_reason,
             "expected_conflict_reason": expected_reason,
@@ -233,7 +241,12 @@ class SameKeyDifferentArguments(Scenario):
                 "http_status": second.http_status,
                 "refused": refused,
                 "receipt_outcome": (second.receipt or {}).get("outcome"),
+                # Whatever the enforcement point put in the error payload. The
+                # JSON-RPC error *code* is not here: GatewayOutcome carries it,
+                # AttemptOutcome drops it (see shared_module_requests).
+                "details": second.details,
             },
+            "downstream_executions_after_first_attempt": executions_after_first,
             "downstream_executions_for_operation": executions,
             "executed_amounts": amounts,
             "dispatches_before_conflict": dispatches_before,
@@ -242,15 +255,60 @@ class SameKeyDifferentArguments(Scenario):
             "gateway_state_before_conflict": before,
             "gateway_state_after_conflict": after,
             "gateway_deltas_across_conflict": deltas,
+            "gateway_state_after_control": after_control,
             "fresh_key_control": fresh_key_control,
+            "measurement_window": (
+                "counters, receipts and the gateway view in this result were "
+                "captured after the reuse probe and BEFORE the fresh-key "
+                "control, so they describe the probe alone. The control is a "
+                "real governed call; gateway_state_after_control is where the "
+                "wallet ended up once it had run."
+            ),
         }
 
+        further_effects = executions - executions_after_first
+        # Observed at the fault layer, which sits outside the gateway; this is
+        # not read back from any gateway table.
+        if dispatch_delta == 0:
+            dispatch_clause = (
+                " Nothing crossed the fault layer toward the tool for that request "
+                "(0 additional dispatches, observed at the fault layer)."
+            )
+        else:
+            dispatch_clause = (
+                f" That request crossed the fault layer toward the tool "
+                f"{dispatch_delta} time(s) (observed at the fault layer)."
+            )
+
         if configuration is Configuration.DIRECT_NAIVE:
+            if further_effects > 0:
+                landed = (
+                    f"The changed payload landed as {further_effects} further business "
+                    f"effect(s) under the spent key."
+                )
+                naive_risk = (
+                    f"A reused key bought a further refund of {conflicting_refund.amount} "
+                    f"against payment {conflicting_refund.payment_id} that no caller "
+                    "authorised; this configuration has no mechanism that could have "
+                    "stopped it."
+                )
+            else:
+                landed = (
+                    "No further business effect landed for this operation, which is not "
+                    "a guarantee this configuration makes -- the measured numbers, not "
+                    "the absence, are the finding."
+                )
+                naive_risk = (
+                    "Nothing in this configuration refused the reuse; that no further "
+                    "effect landed here is unexplained by any mechanism it has, so it "
+                    "must not be read as protection."
+                )
             observation = (
-                f"No idempotency anywhere: the spent key was ignored and the changed "
-                f"payload executed as a second business effect. Downstream executions "
-                f"for {operation_id}: {executions} (amounts {amounts}). The second "
-                f"attempt returned {second.status}."
+                f"No idempotency at the tool and none in front of it. Refund A returned "
+                f"{first.status} and left {executions_after_first} execution(s) for "
+                f"{operation_id}; refund B (amount {conflicting_refund.amount}) under the "
+                f"same key returned {second.status} and the ledger then held {executions} "
+                f"execution(s) (amounts {amounts}).{dispatch_clause} {landed}"
             )
             return self.result(
                 target,
@@ -260,7 +318,8 @@ class SameKeyDifferentArguments(Scenario):
                 attempts=[first, second],
                 remaining_risks=[
                     "The naive downstream has no guarantee to hold here; the numbers "
-                    "are the finding. A reused key is a free second refund of any amount.",
+                    "are the finding.",
+                    naive_risk,
                 ],
                 extra=extra,
             )
@@ -292,18 +351,21 @@ class SameKeyDifferentArguments(Scenario):
         gateway_clause = ""
         if target.uses_gateway:
             gateway_clause = (
-                f" Gateway-reported: +{deltas.get('debits', 0)} debit(s), "
-                f"+{deltas.get('receipts', 0)} receipt(s) across the refused request; "
-                f"{dispatch_delta} additional dispatch(es) observed at the fault layer."
+                f" Gateway-reported across that request: +{deltas.get('debits', 0)} "
+                f"debit(s), +{deltas.get('net_debits', 0)} net debit(s), "
+                f"+{deltas.get('receipts', 0)} receipt(s), "
+                f"+{deltas.get('idempotency_records', 0)} idempotency record(s)."
             )
 
         if problems:
             observation = (
                 f"The documented refusal did not hold: {'; '.join(problems)}. "
-                f"Refund A settled, then refund B under the same key "
+                f"Refund A returned {first.status} and left {executions_after_first} "
+                f"execution(s) for {operation_id}; refund B under the same key "
                 f"(amount {conflicting_refund.amount}) returned {second.status}"
-                f"{f' ({conflict_reason})' if conflict_reason else ''}. "
-                f"Executed amounts for {operation_id}: {amounts}.{gateway_clause}"
+                f"{f' ({conflict_reason})' if conflict_reason else ''} and the ledger "
+                f"then held {executions} execution(s), amounts {amounts}."
+                f"{dispatch_clause}{gateway_clause}"
             )
             return self.result(
                 target,
@@ -324,8 +386,9 @@ class SameKeyDifferentArguments(Scenario):
                 f"{f': {conflict_reason}' if conflict_reason else ''}) and downstream "
                 f"executions for {operation_id} stayed at {executions} -- but the "
                 f"fresh-key control ({control.status}) did not execute either, so the "
-                "refusal cannot be attributed to key reuse rather than to a tool that "
-                f"refuses this payload outright.{gateway_clause}"
+                "refusal cannot be attributed to the reused identity rather than to a "
+                f"tool that refuses amount {conflicting_refund.amount} outright."
+                f"{dispatch_clause}{gateway_clause}"
             )
             return self.result(
                 target,
@@ -347,18 +410,27 @@ class SameKeyDifferentArguments(Scenario):
                 f"{expected_reason!r}."
             )
         observation = (
-            f"Refund A (amount {settled_refund.amount}) settled; refund B "
+            f"Refund A (amount {settled_refund.amount}) returned {first.status} and "
+            f"left {executions_after_first} execution(s) for {operation_id}; refund B "
             f"(amount {conflicting_refund.amount}) under the same key was refused "
             f"({second.status}"
-            f"{f': {conflict_reason}' if conflict_reason else ''}) and left the "
-            f"downstream at {executions} execution for {operation_id} "
-            f"(amounts {amounts}).{gateway_clause} The same payload under a fresh "
-            f"key executed normally ({control.status}), so the refusal is about the "
-            f"reused key, not the payload.{reason_note}"
+            f"{f': {conflict_reason}' if conflict_reason else ''}) and the ledger still "
+            f"holds {executions} execution(s) for that operation, amounts {amounts}."
+            f"{dispatch_clause}{gateway_clause} The same amount under a fresh key and a "
+            f"fresh business operation executed normally ({control.status}), so the "
+            f"refusal is not the tool rejecting amount {conflicting_refund.amount} "
+            f"outright.{reason_note}"
         )
         risks = [
             "Only the amount field was changed; payload equality is a canonical hash, "
             "so other fields are argued to behave the same way but are not measured here.",
+            "The control varies the key and the business operation id together, so it "
+            "rules out a tool that refuses this amount outright but does not by itself "
+            "separate 'the key was reused' from 'the operation id was reused'.",
+            "This scenario does not itself submit the same key with an UNCHANGED "
+            "payload, so it does not establish that the refusal is caused by the "
+            "payload difference rather than by any second use of a spent key; that "
+            "replay behaviour is measured elsewhere, not here.",
         ]
         if reason_note:
             risks.append(
