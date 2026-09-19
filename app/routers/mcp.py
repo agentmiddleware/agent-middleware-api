@@ -204,6 +204,74 @@ class HumanApprovalPendingSignal(RuntimeError):
         self.status_code = status_code
 
 
+AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS = "audit_chain_contended_after_effects"
+RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS = "receipt_write_contended_after_effects"
+
+
+class TerminalRecordContendedError(RuntimeError):
+    """A terminal record was lost to contention after the call had effects.
+
+    The audit event or the receipt could not be written for a call that had
+    already run or already moved the wallet. Both losses are deliberately
+    non-retryable, and this type is what carries that: it is not a subclass of
+    ``AuditChainContendedError`` or ``ReceiptWriteContendedError``, so neither
+    the routers' ``-32005`` handlers nor the idempotency unwind in
+    ``_execute_registered_tool`` can catch it and hand a charged caller a
+    "retry".
+
+    It exists because ``-32603``/``internal_error`` was the wrong answer, not
+    because the outcome is knowable. ``-32603`` is this pipeline's *unclassified*
+    channel -- `docs/failure-semantics.md` defines it as "a failure the pipeline
+    did not classify" -- and these two sites are the opposite of unclassified:
+    each caught a typed contention error, asked whether effects were committed,
+    and chose non-retryability on purpose. Reporting a deliberated state through
+    the unclassified channel left operators unable to separate it from a genuine
+    bug without grepping correlation ids, and left a client free to read
+    "internal error" as "try again", which with a *fresh* idempotency key runs
+    and charges the call a second time.
+
+    What the name claims is only the situation, never the outcome: effects are
+    committed, no receipt exists, the record is counted for manual review, and
+    the caller must not retry. Whether the tool's effect landed downstream stays
+    exactly as unknowable as it was. This is therefore not wedge #2 -- that wedge
+    turns an ambiguous outcome into a distinct *receipted* state, and the
+    defining feature here is that no receipt could be written at all. It is the
+    honest name for falling out of the receipted state machine.
+    """
+
+    jsonrpc_code = -32007
+    status_code = 500
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _terminal_record_contended_data(reason: str) -> dict[str, Any]:
+    """The machine-actionable body for a ``-32007``, shared by every surface.
+
+    Shaped like the other remediation-carrying errors on this path so a client
+    reads one convention: what went wrong, the specific reason code, and the
+    one action that is correct.
+    """
+    return {
+        "error": "manual_review_required",
+        "reason_code": reason,
+        "remediation": {
+            "type": "reconcile_out_of_band",
+            "detail": (
+                "The call's effects are committed and no receipt was written. "
+                "Do not retry with a new idempotency key: that would run and "
+                "charge the call a second time. A governed record, where one "
+                "was opened, stays held by the invocation that ran and answers "
+                "idempotency_in_progress until an operator resolves it. This "
+                "record is counted for manual review; reconcile from the "
+                "ledger entry and the audit chain."
+            ),
+        },
+    }
+
+
 def _header_idempotency_key_sources(request: Request) -> list[tuple[str, object]]:
     """Every ``Idempotency-Key`` header the caller sent, in wire order.
 
@@ -553,6 +621,22 @@ async def handle_messages(
                     "error": {
                         "code": -32005,
                         "message": str(e),
+                    },
+                }
+            )
+        except TerminalRecordContendedError as e:
+            # The same contention, on the other side of the charge. Its own
+            # code so a client cannot read it as either neighbour: -32005 would
+            # invite the retry that runs a paid call again, and -32603 would
+            # bury a deliberated state in the unclassified channel.
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": e.jsonrpc_code,
+                        "message": e.reason,
+                        "data": _terminal_record_contended_data(e.reason),
                     },
                 }
             )
@@ -3562,7 +3646,7 @@ def _value_error_jsonrpc_code(message: str) -> int | None:
     return None
 
 
-def _receipt_contention_after_effects() -> RuntimeError:
+def _receipt_contention_after_effects() -> TerminalRecordContendedError:
     """Re-type a receipt-write loss that happened after the call had effects.
 
     The mirror of ``_audit_mcp_invocation``'s ``effects_committed`` branch, and
@@ -3574,7 +3658,7 @@ def _receipt_contention_after_effects() -> RuntimeError:
     protect. A charged call with no receipt has no terminal outcome to publish,
     so reconciliation owns the record from here.
     """
-    return RuntimeError("mcp_receipt_write_contended_after_effects")
+    return TerminalRecordContendedError(RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS)
 
 
 INTERNAL_ERROR_MESSAGE = "internal_error"
@@ -3689,8 +3773,10 @@ async def _audit_mcp_invocation(
         # this event's id, so no audit event means no signed receipt, and
         # reconcile_stuck_records can only complete a stuck record when a
         # receipt exists -- without one it counts the record for manual review.
-        # Re-raised under a type the retryable handlers do not catch.
-        raise RuntimeError("mcp_audit_chain_contended_after_effects") from exc
+        # Re-raised under a type the retryable handlers do not catch, which
+        # names the state on the wire instead of spending the unclassified
+        # -32603 on a case the code classified deliberately.
+        raise TerminalRecordContendedError(AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS) from exc
 
 
 async def _handle_tools_call(
@@ -3821,6 +3907,16 @@ async def invoke_tool(
         raise HTTPException(
             status_code=409,
             detail={"error": str(exc)},
+        ) from exc
+    except TerminalRecordContendedError as exc:
+        # Stays 500 -- the server did fail to record the call, and this surface
+        # has no better status for "effects committed, outcome indeterminate".
+        # What changes is the body: a named reason and its remediation instead
+        # of an opaque internal_error, matching the -32007 the JSON-RPC
+        # surfaces return for the identical state.
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=_terminal_record_contended_data(exc.reason),
         ) from exc
     except ToolPermissionDenied as exc:
         detail = {"error": str(exc)}
