@@ -15,7 +15,10 @@ it be softened into a success: ``create_receipt`` takes
 ``audit_event_id=audit_event.event_id``, so no audit event means no signed
 receipt either, and ``reconcile_stuck_records`` repairs a stuck record only when
 a receipt exists -- without one it counts the record for manual review instead.
-The honest answer there is the unclassified failure it has always been.
+The honest answer there is its own non-retryable code, ``-32007``: the state is
+one the pipeline classified deliberately, so spending the unclassified
+``-32603`` on it hid a known outcome among genuine bugs and left a client free
+to read "internal error" as "try again".
 
 Finalization is only the most obvious of those sites. The local
 refund-succeeded path and the upstream post-charge helpers audit after
@@ -40,7 +43,9 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import get_settings
 from app.main import app
+from app.routers.mcp import AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS
 from app.schemas.billing import ServiceCategory
 from app.services import audit_chain
 from app.services.idempotency import (
@@ -59,6 +64,15 @@ async def client() -> AsyncClient:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as value:
         yield value
+
+
+@pytest.fixture
+def standard_mcp_enabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "true")
+    get_settings.cache_clear()
+    yield
+    monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "false")
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -192,7 +206,10 @@ async def test_finalization_never_tells_a_charged_caller_to_retry(
     second run of a call the caller already paid for, and reporting success
     would hand back a charged call with no receipt -- the receipt is built from
     the audit event's id -- and a record reconciliation can only flag for
-    manual review. It keeps failing unclassified, deliberately.
+    manual review. It fails non-retryably under its own name, ``-32007``:
+    named because the code classified this state on purpose, and separate from
+    ``-32603`` so an operator no longer has to grep correlation ids to tell it
+    from a genuine bug.
     """
     tool_name, runs = audited_tool
     ctx = await provision_agent_wallet(client)
@@ -250,6 +267,8 @@ async def test_finalization_never_tells_a_charged_caller_to_retry(
     assert "error" in body, body
     # Never the retryable code: the tool ran once and the wallet was charged.
     assert body["error"]["code"] != -32005, body
+    assert body["error"]["code"] == -32007, body
+    assert body["error"]["message"] == AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS, body
     assert runs["count"] == 1
 
 
@@ -321,6 +340,8 @@ async def test_a_local_call_that_ran_and_refunded_is_never_told_to_retry(
     body = resp.json()
     assert "error" in body, body
     assert body["error"]["code"] != -32005, body
+    assert body["error"]["code"] == -32007, body
+    assert body["error"]["message"] == AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS, body
     assert runs["count"] == 1
 
 
@@ -419,6 +440,8 @@ async def test_a_charged_upstream_call_is_never_told_to_retry(
     body = resp.json()
     if "error" in body:
         assert body["error"]["code"] != -32005, body
+        assert body["error"]["code"] == -32007, body
+        assert body["error"]["message"] == AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS, body
 
 
 @pytest.mark.anyio
@@ -497,3 +520,158 @@ async def test_a_contended_refusal_does_not_free_another_calls_live_key(
     assert held.record_id == winner.record_id
     # Nothing executed on either call.
     assert runs["count"] == 0
+
+
+@pytest.mark.anyio
+async def test_a_genuine_bug_in_the_same_window_stays_unclassified(
+    client: AsyncClient, clean_database: None, audited_tool, monkeypatch
+) -> None:
+    """The discriminator the name is for: -32007 is not the new internal_error.
+
+    Same tool, same charge, same post-execution window as the test above. The
+    only difference is the cause -- the chain signer raises an ordinary
+    exception instead of losing the head -- and that is a fault the pipeline
+    genuinely did not classify. It must still land on ``-32603`` with a
+    correlation id.
+
+    Without this, ``-32007`` would prove nothing. A named code that every
+    post-charge failure returns is the same undifferentiated bucket as
+    ``internal_error``, just spelled differently, and an operator would be back
+    to grepping correlation ids to find the real bug.
+    """
+    tool_name, runs = audited_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="audit-contention-permit-6",
+    )
+
+    real_sign = audit_chain._sign_with_previous
+    state = {"executed": False}
+
+    def _explode_only_after_the_tool_ran(*args: Any, **kwargs: Any) -> None:
+        if state["executed"]:
+            # Not a _HeadConflict: nothing about this is contention, so the
+            # chain's retry budget never sees it and no site re-types it.
+            raise RuntimeError("chain_signer_exploded")
+        return real_sign(*args, **kwargs)
+
+    def echo_then_arm(message: str = "ok") -> dict[str, Any]:
+        runs["count"] += 1
+        state["executed"] = True
+        return {"message": message}
+
+    get_service_registry().register_local(
+        service_id=tool_name,
+        name="Audit contention echo",
+        description="Audit-chain contention surface test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=echo_then_arm,
+        credits_per_unit=TOOL_COST,
+        unit_name="call",
+    )
+    monkeypatch.setattr(
+        audit_chain, "_sign_with_previous", _explode_only_after_the_tool_ran
+    )
+
+    resp = await client.post(
+        "/mcp/messages",
+        json=_call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key="audit-contention-bug-1",
+        ),
+        headers=ctx["agent_headers"],
+    )
+    monkeypatch.undo()
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32603, error
+    assert error["message"] == "internal_error", error
+    # The unclassified channel keeps its correlation id, and the exception text
+    # stays server-side.
+    assert error["data"]["correlation_id"], error
+    assert "chain_signer_exploded" not in resp.text
+    assert runs["count"] == 1
+
+
+@pytest.mark.anyio
+async def test_the_standard_surface_answers_the_same_named_outcome(
+    client: AsyncClient, clean_database: None, standard_mcp_enabled, monkeypatch
+) -> None:
+    """``/mcp`` and ``/mcp/messages`` agree, and the answer is actionable.
+
+    The two transports classify in separate handlers, so a name added to one is
+    not a name on the other -- and ``/mcp`` is the surface new integrations are
+    told to use. It also pins the body: a caller that is refused a retry has to
+    be told what to do instead, which here is "do not mint a new key, reconcile
+    out of band". A bare code would leave the correct action to guesswork, and
+    the wrong guess is a second charged execution.
+    """
+    tool_name = "audit-contention-standard"
+    runs = {"count": 0}
+    state = {"executed": False}
+
+    def echo_then_arm(message: str = "ok") -> dict[str, Any]:
+        runs["count"] += 1
+        state["executed"] = True
+        return {"message": message}
+
+    get_service_registry().register_local(
+        service_id=tool_name,
+        name="Audit contention standard",
+        description="Audit-chain contention surface test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=echo_then_arm,
+        credits_per_unit=TOOL_COST,
+        unit_name="call",
+    )
+    try:
+        ctx = await provision_agent_wallet(client)
+        real_sign = audit_chain._sign_with_previous
+
+        def _lose_only_after_the_tool_ran(*args: Any, **kwargs: Any) -> None:
+            # The permit is auto-minted on this surface, and that mint audits
+            # too -- so losing from the start would refuse the call before it
+            # ever reached the window under test.
+            if state["executed"]:
+                raise audit_chain._HeadConflict()
+            return real_sign(*args, **kwargs)
+
+        monkeypatch.setattr(
+            audit_chain, "_sign_with_previous", _lose_only_after_the_tool_ran
+        )
+        resp = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": {"message": "hello"}},
+            },
+            headers={
+                **ctx["agent_headers"],
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+                "Idempotency-Key": "audit-contention-standard-1",
+            },
+        )
+        monkeypatch.undo()
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32007, error
+    assert error["message"] == AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS, error
+    data = error["data"]
+    assert data["reason_code"] == AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS, data
+    assert data["error"] == "manual_review_required", data
+    assert data["remediation"]["type"] == "reconcile_out_of_band", data
+    assert runs["count"] == 1
