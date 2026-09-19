@@ -43,6 +43,7 @@ a report with a credential in it.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
 import logging
 import os
@@ -53,6 +54,7 @@ import tempfile
 import time
 import traceback
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -144,8 +146,9 @@ def assert_not_production_like(environment: str | None = None) -> None:
 def select_web_scenarios(requested: Any, *, allowed: tuple[str, ...] = PUBLIC_SCENARIOS) -> list[str]:
     """Validate a requested selection against the public allowlist."""
     if requested in (None, "", []):
-        return [test_id for test_id in DEFAULT_SCENARIOS if test_id in allowed] or list(
-            allowed[:1]
+        return _refuse_empty(
+            [test_id for test_id in DEFAULT_SCENARIOS if test_id in allowed]
+            or list(allowed[:1])
         )
     if isinstance(requested, str):
         requested = [requested]
@@ -168,6 +171,28 @@ def select_web_scenarios(requested: Any, *, allowed: tuple[str, ...] = PUBLIC_SC
         raise RunRefused(
             f"at most {MAX_SCENARIOS_PER_RUN} scenarios may be requested in one "
             f"run; {len(chosen)} were asked for"
+        )
+    return _refuse_empty(chosen)
+
+
+def _refuse_empty(chosen: list[str]) -> list[str]:
+    """An empty selection is a refusal, never a run.
+
+    :func:`~failure_lab.scenarios.select_scenarios` treats a falsy selection as
+    *every* scenario -- including the slow tier -- so an empty list handed to
+    :func:`execute` does not run nothing, it runs all fourteen from one web
+    request. The allowlist can legitimately empty out (it is
+    ``CURATED_WEB_SCENARIOS`` intersected with ``FAST_SCENARIO_IDS``, so
+    re-tiering all three empties it), which is exactly the case where the
+    failure has to be loud.
+    """
+    if not chosen:
+        raise RunRefused(
+            "no scenario on this surface's allowlist is currently offered, so "
+            "there is nothing to run. The allowlist is the curated web set "
+            "intersected with the fast tier; if every curated scenario has been "
+            "re-tiered as slow it is empty. Run the suite from the command line.",
+            status_code=503,
         )
     return chosen
 
@@ -213,6 +238,23 @@ class Sandbox:
 
 
 _SANDBOX: Sandbox | None = None
+#: Set once :func:`shutdown_sandbox` has run. A retired sandbox cannot be
+#: replaced -- see :func:`sandbox` -- and saying so is better than letting the
+#: next caller hit ``boot_standalone_environment``'s own refusal, which names
+#: an import order rather than the thing that actually happened.
+_SANDBOX_RETIRED = False
+
+
+def _destroy_sandbox_at_exit() -> None:
+    """Remove the sandbox directory when the process ends.
+
+    Registered at boot rather than run from an application's shutdown, because
+    the directory's lifetime is the process's: it holds the only gateway this
+    process will ever be able to boot. See :func:`release_sandbox`.
+    """
+    box = _SANDBOX
+    if box is not None:
+        box.destroy()
 
 
 async def sandbox() -> Sandbox:
@@ -223,6 +265,12 @@ async def sandbox() -> Sandbox:
     the second boot is not slow -- it is impossible.
     """
     global _SANDBOX
+    if _SANDBOX is None and _SANDBOX_RETIRED:
+        raise RuntimeError(
+            "this process's sandbox was shut down and cannot be rebuilt: "
+            "boot_standalone_environment refuses to run once app.main has been "
+            "imported, which it has. Start a new process to run another check."
+        )
     if _SANDBOX is None:
         assert_not_production_like()
         from failure_lab.evidence import environment_secret_values
@@ -241,6 +289,7 @@ async def sandbox() -> Sandbox:
             gateway_version=str(getattr(app, "version", "unknown")),
             secret_values=tuple({admin_api_key, *environment_secret_values()}),
         )
+        atexit.register(_destroy_sandbox_at_exit)
         logger.info(
             "diagnostic sandbox booted in %s (gateway version %s)",
             directory,
@@ -250,18 +299,71 @@ async def sandbox() -> Sandbox:
     return _SANDBOX
 
 
+#: Per-run credentials the response guard must also know about. The sandbox's
+#: own secrets are booted once and live on :class:`Sandbox`; the downstream
+#: bearer token and the control token are minted fresh per
+#: :class:`~failure_lab.configurations.LabEnvironment`, are
+#: ``secrets.token_urlsafe(24)`` -- shapeless, so no value-shape rule in
+#: :func:`~failure_lab.evidence.redact_text` can recognise one in free text --
+#: and were being handed to the evidence bundle's leak scan but not to the
+#: guard on the HTTP bodies. That held the downloadable artifact to a stricter
+#: standard than the page, which is backwards: the page is the thing a visitor
+#: sees without asking for it.
+#:
+#: Bounded, and deliberately larger than :data:`MAX_RETAINED_RUNS` times two,
+#: so no retained result can outlive the guard entry for its own run.
+RETAINED_RUN_SECRETS = 64
+_RUN_SECRETS: deque[str] = deque(maxlen=RETAINED_RUN_SECRETS)
+
+
+def remember_run_secrets(*values: str) -> None:
+    """Register per-run credential values with the response guard."""
+    for value in values:
+        if value and len(value) >= 8 and value not in _RUN_SECRETS:
+            _RUN_SECRETS.append(value)
+
+
 def known_secret_values() -> tuple[str, ...]:
     """Secret-shaped values this process holds, for the response guard.
 
     Empty before the first run, which is correct: nothing served before a
     sandbox exists can contain a sandbox credential.
     """
-    return _SANDBOX.secret_values if _SANDBOX is not None else ()
+    sandbox_values = _SANDBOX.secret_values if _SANDBOX is not None else ()
+    return (*sandbox_values, *_RUN_SECRETS)
+
+
+async def release_sandbox() -> None:
+    """Let go of the sandbox's database without retiring the sandbox.
+
+    What one application's shutdown owns and what the process owns are not the
+    same thing, and conflating them is unrecoverable here.
+    ``boot_standalone_environment`` refuses to run once ``app.main`` is in
+    ``sys.modules``, so a sandbox destroyed on the way down cannot be rebuilt
+    on the way up: any process that constructs a second application -- a test
+    module, an embedder, a supervisor that restarts the surface in place --
+    would get ``boot_standalone_environment must run before app.main is
+    imported`` on its first run and stay broken for the life of the process.
+
+    The database engine is the only part that is genuinely reopenable
+    (``close_db`` drops it, ``init_db`` builds it again on the next run), so
+    that is the only part released here. The directory is removed at process
+    exit by :func:`_destroy_sandbox_at_exit`, which is when it is actually
+    finished with.
+    """
+    if _SANDBOX is not None:
+        await _SANDBOX.close()
 
 
 async def shutdown_sandbox() -> None:
-    """Close the database and delete the sandbox directory."""
-    global _SANDBOX
+    """Close the database, delete the sandbox directory, retire the singleton.
+
+    Final for the life of the process: see :func:`sandbox`. Called by a caller
+    that knows nothing else will run here, never from an application lifespan.
+    """
+    global _SANDBOX, _SANDBOX_RETIRED
+    _RUN_SECRETS.clear()
+    _SANDBOX_RETIRED = True
     if _SANDBOX is None:
         return
     await _SANDBOX.close()
@@ -379,6 +481,19 @@ async def execute(
     """
     from failure_lab.configurations import LabEnvironment
 
+    if not record.scenarios:
+        # ``select_scenarios`` reads a falsy selection as "every scenario", so
+        # an empty list here is not an empty run -- it is the whole suite,
+        # slow tier included, off one request. Refused rather than expanded.
+        record.state = "failed"
+        record.error = (
+            "this run was started with no scenarios selected, so nothing ran. "
+            "An empty selection is refused rather than expanded into the whole "
+            "suite."
+        )
+        record.wake()
+        return record
+
     box = await sandbox()
     started_at = _now()
     run_dir = Path(tempfile.mkdtemp(prefix=f"run-{record.run_id[:8]}-", dir=state_dir))
@@ -410,6 +525,12 @@ async def execute(
             environment.downstream_bearer_token,
             environment.control_token,
         ]
+        # Registered before the first scenario event can be streamed, so the
+        # guard on every served body knows this run's credentials for as long
+        # as its result is addressable -- not just when the bundle is written.
+        remember_run_secrets(
+            environment.downstream_bearer_token, environment.control_token
+        )
         try:
             # Some of the machinery under test writes startup lines straight to
             # stdout. In a server that is the response stream's neighbour, so it
@@ -433,8 +554,16 @@ async def execute(
             raise
         except Exception as exc:  # noqa: BLE001 - a harness failure is a result
             record.state = "failed"
-            record.error = f"{type(exc).__name__}: {exc}"
-            record.notes.append(traceback.format_exc()[-2000:])
+            # Redacted where it is captured, not where it is rendered. An
+            # exception message and a traceback are the one part of a run that
+            # nobody wrote on purpose: they quote whatever string the failing
+            # call had in its hand, which on this harness includes an
+            # ``Authorization`` header and a minted admin key. ``record.error``
+            # and ``record.notes`` reach the result page, the JSON document and
+            # the SSE terminal event, so redacting at any one of those three
+            # would leave the other two.
+            record.error = redact_text(f"{type(exc).__name__}: {exc}")
+            record.notes.append(redact_text(traceback.format_exc()[-2000:]))
             logger.exception("diagnostic run %s failed", record.run_id)
             return record
 
@@ -573,6 +702,7 @@ __all__ = [
     "MAX_ARCHIVE_BYTES",
     "MAX_SCENARIOS_PER_RUN",
     "PUBLIC_SCENARIOS",
+    "RETAINED_RUN_SECRETS",
     "RUN_TIMEOUT_SECONDS",
     "STARTUP_ENVIRONMENT",
     "ProductionRefused",
@@ -584,6 +714,8 @@ __all__ = [
     "execute",
     "new_run_id",
     "new_seed",
+    "release_sandbox",
+    "remember_run_secrets",
     "reproduction_command",
     "sandbox",
     "select_web_scenarios",

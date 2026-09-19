@@ -31,10 +31,15 @@ because a secret that reaches the parser has already been in memory, in a
 buffer, and possibly in an error message.
 
 **Nothing leaves without the redaction pass, and then a second look.** Every
-run-derived body goes through :func:`failure_lab.evidence.redact`, and then
-:meth:`DiagnosticService.guard` scans the finished bytes for the sandbox's own
-secret values and refuses to serve the response if one survived. The bundle is
-scanned a third time, by the evidence module, before it is written.
+run-derived body goes through :func:`failure_lab.evidence.redact` -- including
+the SSE terminal event, which carries the one text on this surface nobody
+composed, an exception message and a traceback -- and then
+:meth:`DiagnosticService.guard` scans the finished bytes for every secret
+value this process holds, the sandbox's own and each run's minted downstream
+tokens, and refuses to serve the response if one survived. The bundle is
+scanned a third time, by the evidence module, before it is written. A stream
+substitutes rather than raises, because an exception out of a
+``StreamingResponse`` truncates a body whose headers are already sent.
 """
 
 from __future__ import annotations
@@ -68,7 +73,7 @@ from failure_lab import TEST_DEFINITION_VERSION, __version__
 from failure_lab.configurations import Configuration
 from failure_lab.diagnostic import pages, runs
 from failure_lab.diagnostic.runs import RunRecord, RunRefused
-from failure_lab.evidence import REDACTED_KEY_PATTERN, redact
+from failure_lab.evidence import REDACTED_KEY_PATTERN, redact, redact_text
 from failure_lab.report import Comparison
 from failure_lab.scenarios import SCENARIOS_BY_ID
 from failure_lab.telemetry import (
@@ -236,6 +241,14 @@ class DiagnosticService:
         )
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.audit_path = self.state_dir / "diagnostic-audit.jsonl"
+        # Named out loud. Without ``--state-dir`` this is a temporary directory
+        # that outlives the process holding the audit trail and the telemetry
+        # log, and an audit trail nobody can find is not an audit trail.
+        logger.info(
+            "diagnostic state directory: %s (audit log: %s)",
+            self.state_dir,
+            self.audit_path.name,
+        )
         self._runs: OrderedDict[str, RunRecord] = OrderedDict()
         self._read_limiter = _RateLimiter()
         self._run_limiter = _RateLimiter()
@@ -360,25 +373,41 @@ class DiagnosticService:
         return record
 
     def start(self, record: RunRecord, request: Request) -> None:
+        """Drive the run that :meth:`begin` claimed the slot for.
+
+        Everything between the claim and the task existing is wrapped, because
+        only :meth:`_drive`'s ``finally`` releases the slot and only the task
+        reaches it. A telemetry client that cannot open its sink, or a loop
+        that refuses a task, would otherwise leave ``_active_run_id`` set with
+        nothing running: a server that answers 429 to every caller, for ever,
+        with a healthz that reports ``busy`` and no run to point at.
+        """
         caller = self.caller(request)
         source = self.traffic_source_for(request)
-        self.audit(
-            event="diagnostic_started",
-            run_id=record.run_id,
-            caller=caller,
-            traffic_source=source.value,
-            scenarios=list(record.scenarios),
-            seed=record.seed,
-        )
-        self.record(
-            source,
-            EventName.DIAGNOSTIC_STARTED,
-            surface="web",
-            scenario_count=len(record.scenarios),
-            definition_version=TEST_DEFINITION_VERSION,
-            lab_version=__version__,
-        )
-        self._task = asyncio.create_task(self._drive(record, source, caller))
+        try:
+            self.audit(
+                event="diagnostic_started",
+                run_id=record.run_id,
+                caller=caller,
+                traffic_source=source.value,
+                scenarios=list(record.scenarios),
+                seed=record.seed,
+            )
+            self.record(
+                source,
+                EventName.DIAGNOSTIC_STARTED,
+                surface="web",
+                scenario_count=len(record.scenarios),
+                definition_version=TEST_DEFINITION_VERSION,
+                lab_version=__version__,
+            )
+            self._task = asyncio.create_task(self._drive(record, source, caller))
+        except BaseException:
+            self._active_run_id = None
+            record.state = "failed"
+            record.error = "this run was never started, so nothing ran."
+            record.wake()
+            raise
 
     async def _drive(
         self, record: RunRecord, source: TrafficSource, caller: str
@@ -392,7 +421,11 @@ class DiagnosticService:
             raise
         except Exception as exc:  # noqa: BLE001 - reported, never raised at a visitor
             record.state = "failed"
-            record.error = f"{type(exc).__name__}: {exc}"
+            # Redacted here for the same reason ``runs.execute`` redacts its
+            # own: this string is quoted from a failing call, reaches three
+            # different bodies, and is the one text on this surface nobody
+            # wrote deliberately.
+            record.error = redact_text(f"{type(exc).__name__}: {exc}")
             logger.exception("diagnostic run %s failed", record.run_id)
         finally:
             self._active_run_id = None
@@ -528,6 +561,40 @@ def _sse(event: str, data: str) -> bytes:
     return f"event: {event}\ndata: {data}\n\n".encode()
 
 
+#: What a stream sends in place of a payload the guard refused. The stream
+#: cannot raise: an exception out of a ``StreamingResponse`` body truncates a
+#: response whose headers are already on the wire, so the browser sees a
+#: half-finished run rather than a refusal.
+_WITHHELD_STEP = json.dumps(
+    {
+        "index": 0,
+        "text": (
+            "One line of this run was withheld: it still contained a value "
+            "this process holds as a secret after the redaction pass."
+        ),
+        "detail": "",
+        "source_step": "diagnostic.withheld",
+        "phase": "setup",
+        "phase_label": "Setting up",
+        "configuration": "",
+        "label": "harness",
+        "evidence_text": "",
+    }
+)
+
+
+def _guarded(service: DiagnosticService, text: str, *, instead: str) -> str:
+    """Scan a streamed payload, and substitute rather than tear the stream."""
+    try:
+        return service.guard(text)
+    except ResponseWithheld:
+        logger.error(
+            "a streamed diagnostic payload still contained a secret and was "
+            "replaced; the value is not logged"
+        )
+        return instead
+
+
 def _refuse_target(payload: dict[str, Any]) -> None:
     """Refuse a target on the sandbox endpoint, whatever the server allows.
 
@@ -621,10 +688,35 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
                 while sent < len(record.steps):
                     payload = pages.step_payload(record.steps[sent])
                     sent += 1
-                    yield _sse("step", service.guard(payload))
+                    yield _sse("step", _guarded(service, payload, instead=_WITHHELD_STEP))
                 if record.finished:
                     event = "complete" if record.state == "complete" else "failed"
-                    yield _sse(event, json.dumps(record.status_document()))
+                    # Redacted and guarded like every other body. This one
+                    # carries ``error`` and ``notes`` -- an exception message
+                    # and a traceback, the only text on this surface that
+                    # nobody composed -- and it was the one document leaving
+                    # the process through neither pass.
+                    document = json.dumps(
+                        redact(record.status_document()), sort_keys=True, default=str
+                    )
+                    yield _sse(
+                        event,
+                        _guarded(
+                            service,
+                            document,
+                            instead=json.dumps(
+                                {
+                                    "run_id": record.run_id,
+                                    "state": record.state,
+                                    "error": (
+                                        "this run's outcome was withheld: it "
+                                        "still contained a secret value after "
+                                        "the redaction pass."
+                                    ),
+                                }
+                            ),
+                        ),
+                    )
                     return
                 if time.monotonic() > deadline:
                     yield _sse(
@@ -761,7 +853,12 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         # Nothing to do on the way up: the sandbox boots on the first run, so
         # a server nobody uses never imports the application under test.
         yield
-        await runs.shutdown_sandbox()
+        # Released, not destroyed. The sandbox's lifetime is the process's --
+        # it can only be booted before ``app.main`` is imported, so tearing it
+        # down here would leave any process that builds a second application
+        # permanently unable to run a check. The directory is removed at
+        # process exit. See :func:`failure_lab.diagnostic.runs.release_sandbox`.
+        await runs.release_sandbox()
 
     routes = [
         Route("/", root, methods=["GET"]),
@@ -783,7 +880,34 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
             Route("/diagnostic/external", _external_route(service), methods=["POST"])
         )
 
-    app = Starlette(routes=routes, lifespan=lifespan)
+    async def withheld(request: Request, exc: Exception) -> Response:
+        """A guarded body that still held a secret becomes a page, not a 500.
+
+        :meth:`DiagnosticService.guard` raising is the correct outcome -- the
+        response is not sent -- but an unhandled exception out of a route hands
+        the visitor a blank framework error and hands the operator nothing but
+        a traceback. The refusal is worth saying out loud, and it is said
+        without any run-derived text in it.
+        """
+        logger.error("a diagnostic response was withheld: %s", exc)
+        return HTMLResponse(
+            pages.render_error(
+                "Response withheld",
+                "This page still contained a value this process holds as a "
+                "secret after the redaction pass, so it was not sent. That is "
+                "a defect in this diagnostic, not in the run: the run's own "
+                "evidence bundle is scanned by the same rule before it is "
+                "written. Report it with the run id.",
+                status=500,
+            ),
+            status_code=500,
+        )
+
+    app = Starlette(
+        routes=routes,
+        lifespan=lifespan,
+        exception_handlers={ResponseWithheld: withheld},
+    )
     app.state.service = service
     return app
 

@@ -72,6 +72,9 @@ EVIDENCE_FIELDS: tuple[str, ...] = (
     "downstream_requests_so_far",
     "downstream_executions",
     "downstream_requests",
+    # The fault layer counts two different things and they are not the same
+    # number. See :meth:`StepStream._measurement`.
+    "downstream_requests_reaching_tool",
     "gateway_dispatches",
     "gateway_debits",
     "gateway_refunds",
@@ -306,15 +309,33 @@ class StepStream:
         return lines
 
     def _measurement(self, data: dict[str, Any]) -> list[str]:
+        """What the two independent instruments counted, named as themselves.
+
+        ``downstream_requests`` is
+        :meth:`~failure_lab.faults.FaultInjector.dispatch_count`, which is
+        every execution request that reached the *fault layer* -- including
+        the ones the layer refused before the tool ever saw them, which is
+        precisely what ``initialize_failure``,
+        ``http_error_before_execution``, ``connection_failure_before_execution``
+        and a crashed downstream all record. Printing it as requests that
+        "crossed into the tool" overstates it in the direction that makes the
+        injected failure look more thorough than it was. The layer records
+        ``reached_tool`` per crossing for exactly this distinction, so both
+        numbers are shown when the scenario reports both.
+        """
         executions = data.get("downstream_executions")
         requests = data.get("downstream_requests")
+        reached = data.get("downstream_requests_reaching_tool")
         if executions is None and requests is None:
             return []
         parts: list[str] = []
         if executions is not None:
             parts.append(f"{executions} downstream execution(s) in the effect ledger")
         if requests is not None:
-            parts.append(f"{requests} request(s) observed crossing into the tool")
+            observed = f"{requests} execution request(s) observed at the fault layer"
+            if reached is not None:
+                observed += f", {reached} of which reached the tool"
+            parts.append(observed)
         return ["Measured: " + "; ".join(parts) + "."]
 
 

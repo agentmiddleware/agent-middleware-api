@@ -1042,6 +1042,7 @@ def _elapsed_ms(started_at: str, finished_at: str) -> float | None:
 def summary_lines(run: LabRun) -> list[str]:
     """The short, factual stdout summary: what ran, what it concluded, where it went."""
     lines: list[str] = []
+    rows = run.verdict_rows()
     lines.append(f"run {run.run_id}  definitions {TEST_DEFINITION_VERSION}  seed {run.environment['seed']}")
     # Tri-state on purpose. ``dirty`` is None when git status could not be
     # run, and printing nothing for that case renders a tree nobody inspected
@@ -1064,7 +1065,7 @@ def summary_lines(run: LabRun) -> list[str]:
         lines.append("NO SCENARIOS WERE SELECTED. This run establishes nothing.")
     else:
         lines.append(f"{'TEST':<6}{'VERDICT':<16}{'CONCLUSION':<34}TITLE")
-        for row in run.verdict_rows():
+        for row in rows:
             flag = "" if row["matches_expectation"] else "  <- differs from documented expectation"
             lines.append(
                 f"{row['test_id']:<6}{row['verdict']:<16}{row['conclusion_kind']:<34}"
@@ -1076,11 +1077,11 @@ def summary_lines(run: LabRun) -> list[str]:
         # that test. Printed bare next to a PASS they read as wins. The gloss
         # is report.py's own sentence for each kind, so the terminal cannot
         # drift from the bundle.
-        kinds = sorted({row["conclusion_kind"] for row in run.verdict_rows()})
+        kinds = sorted({row["conclusion_kind"] for row in rows})
         for kind in kinds:
             lines.append(f"  {kind:<34}{CONCLUSION_GLOSS.get(kind, '')}")
     lines.append("")
-    for row in run.verdict_rows():
+    for row in rows:
         for mismatch in row["mismatches"]:
             lines.append(
                 f"  {row['test_id']} {mismatch['configuration']}: documented "
@@ -1088,7 +1089,7 @@ def summary_lines(run: LabRun) -> list[str]:
             )
     for error in run.errors:
         lines.append(f"  {error['test_id']} raised: {error['error']}")
-    if run.errors or any(row["mismatches"] for row in run.verdict_rows()):
+    if run.errors or any(row["mismatches"] for row in rows):
         lines.append("")
     if run.bundle is not None:
         lines.append(f"evidence bundle:  {run.bundle.directory}")

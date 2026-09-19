@@ -679,6 +679,18 @@ def render_result(
         else f"<p class='sub'>{_esc(record.archive_note)}</p>"
     )
     command = _esc(record.environment.get("reproduction_command", "not recorded"))
+    # NOT ``seed_note``. :func:`failure_lab.runner.collect_environment` calls
+    # this field ``reproducibility_note`` on purpose -- a key containing
+    # ``seed`` is replaced wholesale by ``REDACTED_KEY_PATTERN`` -- and reading
+    # the old name here rendered an empty paragraph under the reproduction
+    # command on every single run. The caveat that a seeded run is not a
+    # byte-identical run has exactly one place it has to appear, and that is
+    # beside the command that claims to reproduce it. Missing, it reads as a
+    # replay; the fallback below says so rather than staying silent.
+    reproducibility = record.environment.get("reproducibility_note") or (
+        "this run recorded no reproducibility note. Treat the command above as "
+        "a fresh run of the same scenarios, not a replay of this one."
+    )
 
     body = f"""
 {failures}
@@ -701,7 +713,7 @@ in its own tab.</a></p>
 {archive}
 <p>Reproduce this run from the command line:</p>
 <pre>{command}</pre>
-<p class="sub">{_esc(record.environment.get('seed_note', ''))}</p>
+<p class="sub">Reproducibility: {_esc(reproducibility)}</p>
 <p class="sub">Machine-readable result:
 <a href="/diagnostic/run/{run_id}.json">/diagnostic/run/{run_id}.json</a></p>
 
