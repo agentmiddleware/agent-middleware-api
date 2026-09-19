@@ -24,7 +24,49 @@ removes it from neither git history nor existing clones.
 
 | Date | Key | Exposure | Action |
 | --- | --- | --- | --- |
-| 2026-08-06 | `agent-middleware-secret-99` | Hardcoded in `scripts/stress_test_live.py`, reachable on public `main` (removed from HEAD in #201; `main`'s flattened history no longer contains it, but an all-refs gitleaks scan on 2026-08-24 confirmed it remains reachable on stale unmerged branches that preserve the pre-flatten history, and in old clones — prune those branches before or when making the repository public) | 2026-08-07: `VALID_API_KEYS` fully replaced on Railway and cutover completed via dashboard Redeploy of the last good deployment (variable-triggered rebuilds were crash-looping on the stale `master` trigger — see warning below). Verified with `rotate_api_keys.py verify`: retired key rejected (403), replacement accepted (200) |
+| 2026-08-06 | `agent-middleware-secret-99` | Hardcoded in `scripts/stress_test_live.py`, reachable on public `main`. Removed from HEAD in #201. **Still reachable from `main`'s own history** — see the correction below | 2026-08-07: `VALID_API_KEYS` fully replaced on Railway and cutover completed via dashboard Redeploy of the last good deployment (variable-triggered rebuilds were crash-looping on the stale `master` trigger — see warning below). Verified with `rotate_api_keys.py verify`: retired key rejected (403), replacement accepted (200) |
+
+### Correction (2026-09-19): the key is still reachable from `main`
+
+An earlier version of this record, and the scope note in `.gitleaks.toml`,
+said `main`'s flattened history no longer contained the retired key and that
+pruning stale unmerged branches would remove the reachable copies. **Both
+claims were wrong**, and the second one would have made a repository-visibility
+change look safer than it was. Verified on 2026-09-19 against `origin/main`:
+
+```console
+$ git merge-base --is-ancestor 9e45009 origin/main && echo reachable
+reachable
+$ git log origin/main --oneline -S'agent-middleware-secret-99' | wc -l
+3
+```
+
+The flattening did not remove the blob from `main`'s ancestry: commit
+`9e45009` is an ancestor of `origin/main`, and the value is recoverable from a
+plain clone with one `git log -S`. It is additionally reachable from 155 refs
+in total, so branch pruning alone was never sufficient.
+
+What this does and does not mean:
+
+- **It does not change the remediation.** Rotation was and is the only real
+  fix, and it completed on 2026-08-07 — the retired key is dead at the
+  provider and `rotate_api_keys.py verify` confirms it is refused (403).
+  A dead credential becoming publicly readable costs nothing.
+- **It does change what to claim.** Do not tell a reviewer, a design partner,
+  or a security questionnaire that the leak is gone from history. It is not.
+  The honest statement is: leaked, rotated within a day, verified dead, and
+  still present in history because rewriting 1,280 commits across 155 refs to
+  hide a dead key is not worth breaking every clone and fork.
+- **History rewriting would not even be sufficient.** This table names the
+  retired key in plaintext on purpose, so the value stays published in `main`'s
+  tree regardless of what its history contains. That is a deliberate choice —
+  an incident record that redacts the incident is not evidence — but it means
+  purging the blob would buy nothing.
+
+Pruning the stale branches is still worth doing before the repository is made
+public, for signal rather than secrecy: 200 branches, most of them abandoned
+agent sessions, is not what a reader should find in a project whose
+credibility is the product.
 
 ## Rotation procedure (Railway)
 
