@@ -284,3 +284,69 @@ def test_the_json_rendering_round_trips(rendered):
     assert document["environment"]["run_id"] == "test-run"
     assert document["comparisons"][0]["conclusion"]["kind"]
     assert "gateway_disadvantages" in document["comparisons"][0]["conclusion"]
+
+
+def test_a_baseline_that_never_ran_is_never_reported_as_one_that_succeeded():
+    """The mirror image of an advertisement, and just as false.
+
+    Nine of the fourteen P0 scenarios exercise a component only the gateway
+    has -- a permit, a budget, a durable dispatch claim -- so both direct
+    configurations are NOT_APPLICABLE and no baseline column runs. Reporting
+    those as ``native_controls_sufficient`` told a reader that their own
+    controls already cover crash recovery and permit revocation, on the
+    strength of a comparison that never happened. Zero duplicates prevented
+    against a baseline that did not run is an absence of data, not a finding.
+    """
+    result = _result(
+        [
+            ConfigurationResult(
+                configuration=Configuration.DIRECT_NAIVE.value,
+                label=CONFIGURATION_LABELS[Configuration.DIRECT_NAIVE],
+                verdict=Verdict.NOT_APPLICABLE,
+                expectation=Verdict.NOT_APPLICABLE.value,
+                observation="a direct integration has no gateway to crash",
+                counters=Counters(),
+            ),
+            ConfigurationResult(
+                configuration=Configuration.DIRECT_NATIVE.value,
+                label=CONFIGURATION_LABELS[Configuration.DIRECT_NATIVE],
+                verdict=Verdict.NOT_APPLICABLE,
+                expectation=Verdict.NOT_APPLICABLE.value,
+                observation="a direct integration has no gateway to crash",
+                counters=Counters(),
+            ),
+            _entry(
+                Configuration.GATEWAY_NATIVE,
+                verdict=Verdict.PASS,
+                executions=1,
+                dispatches=1,
+                downstream_requests=1,
+                known=2,
+                receipts=1,
+                debits=1,
+            ),
+        ]
+    )
+    conclusion = build_comparison(result).conclusion
+
+    assert conclusion.kind is ConclusionKind.NO_BASELINE_COMPARISON
+    assert conclusion.kind is not ConclusionKind.NATIVE_CONTROLS_SUFFICIENT
+    assert conclusion.kind is not ConclusionKind.EXISTING_INTEGRATION_SUFFICIENT
+    # It must say what it does not establish, in both directions.
+    assert "no comparison was made" in conclusion.text
+    assert "would have handled this failure" in conclusion.text
+    assert "would not" in conclusion.text
+    # And it must not smuggle in a prevention count from unmeasured columns.
+    assert conclusion.duplicates_prevented_vs_native == 0
+    assert conclusion.duplicates_prevented_vs_existing == 0
+    assert conclusion.non_prevention_differences == []
+
+
+def test_every_conclusion_kind_has_a_plain_english_gloss():
+    """A summary table that names a kind must be able to explain it."""
+    from failure_lab.report import CONCLUSION_GLOSS
+
+    for kind in ConclusionKind:
+        gloss = CONCLUSION_GLOSS.get(kind.value, "")
+        assert gloss, f"{kind.value} has no gloss for the summary block"
+        assert not gloss.endswith("."), f"{kind.value} gloss should be a fragment"

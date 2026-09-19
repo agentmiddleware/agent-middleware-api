@@ -43,8 +43,47 @@ class ConclusionKind(str, Enum):
     GATEWAY_ADDED_EVIDENCE_ONLY = "gateway_added_evidence_only"
     #: The gateway did not hold its own documented guarantee here.
     GATEWAY_DID_NOT_HOLD = "gateway_did_not_hold"
+    #: The test exercises a component only the gateway has, so no baseline
+    #: column ran and no comparison was possible. The gateway's own verdict
+    #: still stands; what cannot be said is whether the caller needs it.
+    #: Distinct from :attr:`INCONCLUSIVE`, where the gateway did not run
+    #: either and the report knows nothing at all.
+    NO_BASELINE_COMPARISON = "no_baseline_comparison"
     #: Not enough configurations ran to say anything.
     INCONCLUSIVE = "inconclusive"
+
+
+#: One line per conclusion kind, for the summary block. A reader should never
+#: have to infer what a kind means from its name -- least of all the two that
+#: say the product was not needed or was not compared.
+CONCLUSION_GLOSS: dict[str, str] = {
+    ConclusionKind.EXISTING_INTEGRATION_SUFFICIENT.value: (
+        "the existing integration handled it; the gateway prevented no "
+        "additional duplicate effect"
+    ),
+    ConclusionKind.NATIVE_CONTROLS_SUFFICIENT.value: (
+        "correct native controls handled it on their own; the gateway "
+        "prevented no additional duplicate effect"
+    ),
+    ConclusionKind.GATEWAY_PREVENTED_DUPLICATES.value: (
+        "duplicate business effects occurred in a measured baseline and did "
+        "not occur behind the gateway"
+    ),
+    ConclusionKind.GATEWAY_ADDED_EVIDENCE_ONLY.value: (
+        "no additional duplicate effect was prevented; what changed is what "
+        "the caller can know and prove"
+    ),
+    ConclusionKind.GATEWAY_DID_NOT_HOLD.value: (
+        "the gateway did not hold the property this test checks"
+    ),
+    ConclusionKind.NO_BASELINE_COMPARISON.value: (
+        "only the gateway has the component under test, so no baseline ran "
+        "and no comparison was made either way"
+    ),
+    ConclusionKind.INCONCLUSIVE.value: (
+        "too few configurations ran for this test to say anything"
+    ),
+}
 
 
 @dataclass
@@ -283,6 +322,30 @@ def _conclude(
             ConclusionKind.GATEWAY_DID_NOT_HOLD,
             "The gateway did not hold the property this test checks. "
             f"{governed.observation}",
+            prevented_vs_native,
+            prevented_vs_existing,
+            differences,
+            disadvantages,
+        )
+
+    existing_ran = existing is not None and existing.ran
+    native_ran = native is not None and native.ran
+    if not existing_ran and not native_ran:
+        # Neither baseline column ran, so there is nothing to compare the
+        # gateway against. Every "sufficient" conclusion below is a statement
+        # about a baseline, and asserting one from a column that never ran
+        # would tell a reader their own controls cover a failure mode this run
+        # never put them through. The gateway's own verdict is reported; the
+        # comparison is not invented.
+        return Conclusion(
+            ConclusionKind.NO_BASELINE_COMPARISON,
+            "This test exercises a component only the gateway has, so neither "
+            "baseline configuration ran and no comparison was made. The "
+            f"gateway's own verdict for this test is {governed.verdict}, and "
+            "that is all this test establishes. It does not show that your "
+            "existing integration or correct native controls would have "
+            "handled this failure, and it does not show that they would not. "
+            "Read a test with a baseline column for that question.",
             prevented_vs_native,
             prevented_vs_existing,
             differences,
@@ -562,10 +625,12 @@ def render_run_text(
     lines.append("-----------")
     for kind, count in sorted(counts.items()):
         lines.append(f"  {count:>3}  {kind}")
+        lines.append(f"       {CONCLUSION_GLOSS.get(kind, '')}")
     lines.append("")
     lines.append("This run reports what its instruments counted. It does not assign a")
     lines.append("risk score, and a scenario in which the gateway added nothing is")
-    lines.append("reported as exactly that.")
+    lines.append("reported as exactly that. A scenario with no baseline column is")
+    lines.append("reported as no comparison, never as a baseline that succeeded.")
     lines.append("")
     for comparison in comparisons:
         lines.append("=" * 74)
@@ -774,8 +839,9 @@ the gateway in front of them.</p>
 <div class="note">Every number on this page was counted by an instrument. Downstream
 effects come from the simulated tool's own ledger, which the gateway cannot
 reach; dispatch counts come from the fault-injection layer between them. There
-is no risk score, and a scenario in which the gateway added nothing is reported
-as exactly that.</div>
+is no risk score, a scenario in which the gateway added nothing is reported as
+exactly that, and a scenario whose baseline columns did not run is reported as
+<em>no comparison</em> rather than as a baseline that succeeded.</div>
 {sections}
 <footer>Generated by the Agent Gateway Failure Lab. Test definitions
 {_esc(environment.get("test_definition_version", "unknown"))}. Reproduce with
@@ -798,6 +864,7 @@ def render_run_json(
 
 
 __all__ = [
+    "CONCLUSION_GLOSS",
     "Comparison",
     "ConclusionKind",
     "ConfigurationView",
