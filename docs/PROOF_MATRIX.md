@@ -20,6 +20,7 @@ the claims the project deliberately does not make, see
 | `make prove-trust-plane-postgres` | Alias for the guarded process/crash proof below | Dedicated, migrated PostgreSQL |
 | `make red-team-trust-plane` | Ten distinct attacks are each denied with a specific reason code and none produces a debit | Throwaway SQLite |
 | `make dogfood-trust-plane` | Exactly-once against a **real durable side effect** (a file on disk), not just a ledger row | Throwaway SQLite |
+| `make failure-lab` | The lost-response fault (downstream executed, response lost) measured across the existing integration, a **correctly used native idempotency baseline**, and the gateway at both hops, through the real upstream adapter against an in-process MCP server: effects counted by an independent record, one dispatch and one debit per key, `delivery_uncertain` receipted and never redispatched, the baseline's own success reported, and the agent-restart limitation every configuration shares — see [failure-lab.md](failure-lab.md) | Throwaway SQLite, in-process MCP server |
 | `make agent-ops-war-room` | The operator narrative: discovery, provisioning, invoke, replay, self-inspection, denial | Temp SQLite |
 
 ### PostgreSQL proof selection
