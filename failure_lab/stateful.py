@@ -206,10 +206,6 @@ class OperationState(str, Enum):
     REVOKED = "REVOKED"
 
 
-_TERMINAL_STATES = frozenset(
-    {OperationState.SUCCEEDED, OperationState.FAILED, OperationState.OUTCOME_UNKNOWN}
-)
-
 #: Client-visible status -> the state the model moves the operation to.
 _STATUS_STATES: dict[str, OperationState] = {
     "success": OperationState.SUCCEEDED,
@@ -348,8 +344,15 @@ class Observation:
     crossings: tuple[dict[str, Any], ...]
     gateway: dict[str, Any] | None
     signature_checks: tuple[dict[str, Any], ...]
-    reconciled: bool
+    #: The wallet's books as they stood the moment each reconciliation
+    #: finished. A debit opened *after* a sweep has not been offered to one,
+    #: so "reconciliation has run" is only meaningful as of a point in time.
+    reconcile_checkpoints: tuple[dict[str, Any], ...]
     error: str | None = None
+
+    @property
+    def reconciled(self) -> bool:
+        return bool(self.reconcile_checkpoints)
 
     # -- independent instruments -----------------------------------------
 
@@ -415,6 +418,13 @@ class Observation:
         return [str(row.get("outcome")) for row in self.gateway.get("receipts", [])]
 
     def gateway_counts(self) -> dict[str, int]:
+        """Wallet totals from the gateway's own tables, for custom invariants.
+
+        Nothing in the default set reads this -- they use the per-sweep
+        checkpoints instead, because an end-of-sequence total says nothing
+        about whether a reconciler ever saw the rows. It is here because
+        ``explore(invariants=...)`` takes a caller's own checks.
+        """
         if not self.gateway:
             return {"debits": 0, "refunds": 0, "receipts": 0}
         return {
@@ -446,6 +456,7 @@ class Observation:
             },
             "gateway": self.gateway,
             "signature_checks": [dict(s) for s in self.signature_checks],
+            "reconcile_checkpoints": [dict(c) for c in self.reconcile_checkpoints],
             "reconciled": self.reconciled,
             "error": self.error,
         }
@@ -695,29 +706,24 @@ class SignedReceiptsResistMutation(Invariant):
 class EveryDebitAccountedFor(Invariant):
     name = "EVERY_DEBIT_ACCOUNTED_FOR"
     statement = (
-        "Once reconciliation has run, no debit stands alone: each one is "
-        "either matched by a receipt stating the outcome it paid for, or "
-        "reversed by a refund."
+        "At the moment a reconciliation sweep finishes, no debit stands "
+        "alone: each one is either matched by a receipt stating the outcome "
+        "it paid for, or reversed by a refund. Debits opened after that sweep "
+        "are not its business."
     )
 
     def check(self, observation: Observation) -> Violation | None:
-        if not observation.reconciled or observation.gateway is None:
-            return None
-        counts = observation.gateway_counts()
-        standing = counts["debits"] - counts["refunds"]
-        if standing > counts["receipts"]:
-            return self._violation(
-                f"{standing} debit(s) stand unrefunded after reconciliation against "
-                f"{counts['receipts']} receipt(s)",
-                {
-                    "debits": counts["debits"],
-                    "refunds": counts["refunds"],
-                    "receipts": counts["receipts"],
-                    "receipt_outcomes": observation.receipt_outcomes(),
-                    "ledger_debits": observation.gateway.get("debits", []),
-                },
-                source="gateway-reported",
-            )
+        for checkpoint in observation.reconcile_checkpoints:
+            standing = int(checkpoint["debits"]) - int(checkpoint["refunds"])
+            receipts = int(checkpoint["receipts"])
+            if standing > receipts:
+                return self._violation(
+                    f"{standing} debit(s) stood unrefunded when the sweep after "
+                    f"command {checkpoint['after_command']} finished, against "
+                    f"{receipts} receipt(s)",
+                    {"checkpoint": checkpoint},
+                    source="gateway-reported",
+                )
         return None
 
 
@@ -994,7 +1000,7 @@ class _SequenceRunner:
         self.new_key_ordinal = 0
         self.pending_crash: str | None = None
         self.gateway_crashed = False
-        self.reconciled = False
+        self.reconcile_checkpoints: list[dict[str, Any]] = []
 
         self.primary_operation = f"refund:pay-s{seed}-q{sequence_index}"
         self.race_ordinal = 0
@@ -1313,7 +1319,16 @@ class _SequenceRunner:
         # shape the product cannot produce and which its reconciler then
         # refuses -- a finding about the harness, not about the gateway.
         summary = await self.gateway.reconcile(idle_seconds=0)
-        self.reconciled = True
+        settled = await self.gateway.snapshot(self.tenant)
+        checkpoint = {
+            "after_command": len(self.outcomes),
+            "debits": settled.debit_count,
+            "refunds": settled.refund_count,
+            "receipts": settled.receipt_count,
+            "receipt_outcomes": settled.receipt_outcomes(),
+            "source": "gateway-reported",
+        }
+        self.reconcile_checkpoints.append(checkpoint)
         for operation_id, state in list(self.states.items()):
             if state in (
                 OperationState.ACCEPTED,
@@ -1323,7 +1338,7 @@ class _SequenceRunner:
             ):
                 self.states[operation_id] = OperationState.RECONCILED
         self.state = self.states.get(self.primary_operation, self.state)
-        return None, {"idle_seconds": 0, "summary": summary}
+        return None, {"idle_seconds": 0, "summary": summary, "checkpoint": checkpoint}
 
 
 def _dominant(outcomes: Sequence[AttemptOutcome]) -> AttemptOutcome:
@@ -1450,7 +1465,7 @@ async def run_sequence(
             crossings=tuple(row.as_dict() for row in target.injector.crossings()),
             gateway=gateway_view,
             signature_checks=tuple(checks),
-            reconciled=runner.reconciled,
+            reconcile_checkpoints=tuple(runner.reconcile_checkpoints),
             error=error,
         )
 

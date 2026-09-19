@@ -142,10 +142,30 @@ downstream you do not control and cannot modify. Whether that is worth anything
 depends entirely on whether you can change your downstream. If you can, change
 it; that is cheaper and it gives you a better answer.
 
-Where the gateway does prevent duplicates that a correct baseline cannot is in
-the cases the baseline has no visibility into at all: a gateway process that
-dies between charging and dispatching, a budget two concurrent calls race for,
-a permit revoked mid-flight. Those are `T04`, `T05`, `T07` and `T08`.
+### Where the gateway does something the baseline cannot
+
+Two other measured results are worth putting beside that one.
+
+**Under a retry storm the two are not equivalent.** At a hundred identical
+concurrent requests for one operation (`T01`), the naive integration paid out
+a hundred refunds. The correct native baseline paid one — but all hundred
+requests reached the tool and were collapsed inside its own transaction. The
+gateway also produced one effect, and let **one** request cross into the tool.
+Same effect count, very different load on a downstream you may not control,
+and it costs roughly four seconds of p50 latency to the ninety-nine callers
+who wait for the winner. Both halves are in the report.
+
+**Budgets and revocation have no baseline at all.** A downstream idempotency
+key cannot stop two *distinct* business operations from racing for one
+authorisation. `T07` sizes a permit one credit below two calls and races two
+concurrent refunds for it: one is authorised, one is refused
+`permit_budget_exceeded`, and the downstream executes once. At twenty-way
+concurrency against a permit sized for three, three are authorised and
+seventeen refused. `T08` revokes a permit while a call is held at each durable
+boundary and reports where revocation stops being effective.
+
+Those cases — plus the crash boundaries in `T04` and `T05` — are where the
+gateway is doing work nothing downstream of it could do.
 
 ---
 
