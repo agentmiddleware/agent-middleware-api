@@ -503,6 +503,8 @@ class ReceiptTampering(Scenario):
                 f"{len(silent_survivors)} of those raised no envelope disagreement "
                 f"({', '.join(silent_survivors) or 'none'})."
             )
+        if not observation_text.endswith("."):
+            observation_text += "."
         if gateway_surface.get("ignores_supplied_evidence"):
             observation_text += (
                 " POST /v1/receipts/verify answered valid=true for the tampered bundle: "
