@@ -46,6 +46,7 @@ test.db
 data/dogfood_partner_notes.jsonl
 data/dogfood_trust_plane.db*
 data/demo_trust_plane.db*
+data/failure-lab/
 data/quickstart/
 data/live-loop-proof/
 # live_loop_proof.py --output-dir target used for the 2026-08-25 rerun

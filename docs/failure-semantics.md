@@ -313,4 +313,8 @@ uv run --with-requirements requirements.txt python -m pytest -q \
 
 # The whole trust-plane gate, including all of the above:
 make trust-coverage-gate
+
+# The lost-response fault, measured against a correctly used native
+# idempotency key as well as the naive integration (docs/failure-lab.md):
+make failure-lab
 ```
