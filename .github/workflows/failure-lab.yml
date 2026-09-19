@@ -69,8 +69,10 @@ jobs:
       - name: Lint the lab
         run: ruff check failure_lab
 
-      - name: Harness, verifier and scenario-contract tests
-        run: pytest tests/test_failure_lab_harness.py tests/test_failure_lab_verifier.py tests/test_failure_lab_scenarios.py -v --tb=short
+      # Instruments, verifier isolation, redaction, conversion metrics,
+      # report honesty, claims traceability, and the scenario contracts.
+      - name: Harness, verifier, evidence and contract tests
+        run: pytest tests/test_failure_lab_*.py -v --tb=short
 
   scenarios:
     name: Scenarios (${{ matrix.tier }})
@@ -164,12 +166,26 @@ jobs:
       # The seed is derived from the run number so nightly runs explore
       # different sequences over time, and any violation is reproducible from
       # the seed printed in its result.
+      # The explorer writes its result document to stdout and its application
+      # logging to stderr, so a redirect is all the capture this needs.
       - name: Explore
         run: |
           python -m failure_lab explore \
             --seed "${{ github.run_number }}" \
             --sequences 12 \
-            --output "$RUNNER_TEMP/failure-lab-explore.json"
+            > "$RUNNER_TEMP/failure-lab-explore.json"
+
+      - name: Report any invariant violation
+        if: always()
+        run: |
+          python - "$RUNNER_TEMP/failure-lab-explore.json" <<'PY'
+          import json, sys
+          document = json.load(open(sys.argv[1]))
+          print(document["conclusion"])
+          for violation in document["violations"]:
+              print("::error::invariant violated:", json.dumps(violation)[:800])
+          sys.exit(1 if document["violation_count"] else 0)
+          PY
 
       - name: Upload exploration result
         if: always()

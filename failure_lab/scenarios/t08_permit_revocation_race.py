@@ -2,8 +2,159 @@
 
 from __future__ import annotations
 
-from failure_lab.configurations import GATEWAY_CONFIGURATIONS, Configuration, Target
-from failure_lab.scenarios.base import ConfigurationResult, EventLog, Scenario, Verdict
+import asyncio
+import contextlib
+from decimal import Decimal
+from typing import Any
+
+from failure_lab.configurations import (
+    GATEWAY_CONFIGURATIONS,
+    AttemptOutcome,
+    Configuration,
+    Target,
+)
+from failure_lab.gateway import BoundaryHold, GatewaySnapshot
+from failure_lab.identity import OperationIdentity
+from failure_lab.scenarios.base import (
+    REFUSED_STATUSES,
+    ConfigurationResult,
+    EventLog,
+    Scenario,
+    Verdict,
+)
+
+#: The four interleavings, ordered by how far the in-flight call has travelled
+#: when the revocation lands. ``None`` means "revoke before submitting", which
+#: is the control: nothing is in flight, so revocation must bite.
+INTERLEAVINGS: tuple[tuple[str, str | None], ...] = (
+    ("before_request", None),
+    ("after_prepare", "after_prepare"),
+    ("after_attach_charge", "after_attach_charge"),
+    ("after_claim", "after_claim"),
+)
+
+#: What the call has durably achieved by the time each interleaving revokes.
+BOUNDARY_MEANING: dict[str, str] = {
+    "before_request": "nothing; the call has not been submitted",
+    "after_prepare": "permit authorized, budget reserved, attempt row prepared",
+    "after_attach_charge": "wallet debit committed and linked to the attempt",
+    "after_claim": "one-shot dispatch claim committed; network send not started",
+}
+
+#: Receipt outcomes the product documents as RETAINING the charge.
+CHARGE_RETAINED_OUTCOMES = frozenset(
+    {"success", "delivery_uncertain", "response_rejected", "failed_unrefunded"}
+)
+#: Receipt outcomes the product documents as leaving no net charge.
+CHARGE_RELEASED_OUTCOMES = frozenset({"denied", "insufficient_funds", "failed_refunded"})
+
+#: Ceiling on the wait for an instrumented boundary to be reached. The held
+#: call only has to get as far as a local database commit, so anything near
+#: this means the harness stalled rather than the product being slow.
+HOLD_TIMEOUT_SECONDS = 20.0
+
+#: Client patience. The hold is released after one revoke round-trip, so this
+#: only has to be generous enough that the harness is never the thing timing
+#: out and being mistaken for a product behaviour.
+SUBMIT_TIMEOUT_SECONDS = 30.0
+
+#: Budget for each single-call permit. One governed call costs 5 credits.
+PERMIT_MAX_CREDITS = Decimal("50")
+
+
+def _added(
+    before: list[dict[str, Any]], after: list[dict[str, Any]], key: str
+) -> list[dict[str, Any]]:
+    """Rows in ``after`` that were not in ``before``, matched on ``key``."""
+    seen = {row[key] for row in before}
+    return [row for row in after if row[key] not in seen]
+
+
+def _credits(rows: list[dict[str, Any]]) -> Decimal:
+    """Signed credit total of a set of ledger rows (debits are negative)."""
+    total = Decimal("0")
+    for row in rows:
+        amount = row.get("amount")
+        if amount is not None:
+            total += Decimal(str(amount))
+    return total
+
+
+async def _wait_for_boundary(
+    hold: BoundaryHold, task: asyncio.Task[AttemptOutcome], timeout: float
+) -> bool:
+    """Wait until the held call reaches the boundary, or until it finishes.
+
+    Returning on task completion matters: a call that is refused *before* the
+    instrumented boundary never pauses, and blocking for the full timeout
+    would turn that real observation into a harness stall.
+    """
+    waiter = asyncio.create_task(hold.reached.wait())
+    try:
+        await asyncio.wait(
+            {waiter, task}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        waiter.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await waiter
+    return hold.reached.is_set()
+
+
+def _evaluate(record: dict[str, Any]) -> tuple[str, list[str]]:
+    """Classify one interleaving as a coherent disposition, or say why not.
+
+    Coherent (a) ``denied``: nothing dispatched, nothing executed, no net
+    charge. Coherent (b) ``admitted_once``: at most one dispatch, at most one
+    execution, exactly one receipt, and a charge that matches what that
+    receipt says about the money.
+    """
+    dispatches = int(record["dispatches"])
+    executions = int(record["downstream_executions"])
+    outcomes = [str(o) for o in record["receipt_outcomes"]]
+    net_credits = Decimal(str(record["net_charge_credits"]))
+    net_count = int(record["net_debit_count"])
+    problems: list[str] = []
+
+    if dispatches > 1:
+        problems.append(f"{dispatches} dispatches for one key")
+    if executions > 1:
+        problems.append(f"{executions} downstream executions for one key")
+    if len(outcomes) > 1:
+        problems.append(f"{len(outcomes)} receipts for one key")
+    if net_credits > 0 and not outcomes:
+        problems.append(f"net charge of {net_credits} credits with no receipt")
+    for outcome in outcomes:
+        if outcome in CHARGE_RETAINED_OUTCOMES and net_credits <= 0:
+            problems.append(
+                f"receipt outcome {outcome!r} retains the charge but the net "
+                f"charge is {net_credits} credits"
+            )
+        if outcome in CHARGE_RELEASED_OUTCOMES and net_credits > 0:
+            problems.append(
+                f"receipt outcome {outcome!r} leaves no charge but "
+                f"{net_credits} credits stand debited"
+            )
+    if problems:
+        return "incoherent", problems
+
+    refused = str(record["status"]) in REFUSED_STATUSES
+    if (
+        refused
+        and dispatches == 0
+        and executions == 0
+        and net_count == 0
+        and net_credits == 0
+    ):
+        return "denied", []
+    if dispatches <= 1 and executions <= 1 and len(outcomes) == 1:
+        return "admitted_once", []
+    return "incoherent", [
+        f"status {record['status']!r} with {dispatches} dispatch(es), "
+        f"{executions} execution(s), {len(outcomes)} receipt(s) and a net "
+        f"charge of {net_credits} credits is neither a clean denial nor a "
+        f"single admitted call"
+    ]
 
 
 class PermitRevocationRace(Scenario):
@@ -79,4 +230,394 @@ class PermitRevocationRace(Scenario):
     )
 
     async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
-        raise NotImplementedError
+        gateway, tenant, _ = target.require_gateway()
+        attempts: list[AttemptOutcome] = []
+        operation_ids: list[str] = []
+        records: list[dict[str, Any]] = []
+        permits: list[tuple[str, str]] = []
+
+        for index, (name, boundary) in enumerate(INTERLEAVINGS, start=1):
+            record, outcome = await self._run_interleaving(
+                target, log, index=index, name=name, boundary=boundary
+            )
+            records.append(record)
+            attempts.append(outcome)
+            operation_ids.append(str(record["operation_id"]))
+            permits.append((name, str(record["permit_id"])))
+
+        control, control_attempts, control_ops = await self._post_revocation_control(
+            target, log, permits
+        )
+        attempts.extend(control_attempts)
+        operation_ids.extend(control_ops)
+
+        measurements = await self.measure(target, attempts, operation_ids=operation_ids)
+
+        incoherent = [r for r in records if r["disposition"] == "incoherent"]
+        admitted = [r for r in records if r["disposition"] == "admitted_once"]
+        denied = [r for r in records if r["disposition"] == "denied"]
+
+        first_admitted = admitted[0]["interleaving"] if admitted else None
+        last_denied = denied[-1]["interleaving"] if denied else None
+        if first_admitted is None:
+            authoritative_point = "after_claim_or_later"
+            point_sentence = (
+                "revocation was still effective at every instrumented "
+                "boundary, so the authorization point is at or after "
+                "after_claim"
+            )
+        else:
+            authoritative_point = first_admitted
+            point_sentence = (
+                f"revocation stopped being effective once the call had passed "
+                f"{first_admitted} ({BOUNDARY_MEANING[first_admitted]}); a "
+                f"revocation landing at or after that boundary did not stop "
+                f"the in-flight call"
+            )
+
+        control_ok = bool(control["all_refused"])
+        verdict = Verdict.PASS if not incoherent and control_ok else Verdict.FAIL
+
+        disposition_text = ", ".join(
+            f"{r['interleaving']}={r['disposition']}" for r in records
+        )
+        parts = [
+            f"Four interleavings, each with its own permit, payment id and "
+            f"key: {disposition_text}.",
+            f"Authorization point: {point_sentence}.",
+            (
+                f"Post-revocation control: "
+                f"{control['refused']}/{control['submitted']} fresh operations "
+                f"submitted under an already-revoked permit were refused "
+                f"({control['dispatches']} dispatch(es), "
+                f"{control['downstream_executions']} execution(s))."
+            ),
+        ]
+        if incoherent:
+            for record in incoherent:
+                parts.append(
+                    f"INCOHERENT at {record['interleaving']}: "
+                    + "; ".join(record["problems"])
+                    + "."
+                )
+        if not control_ok:
+            parts.append(
+                "INCOHERENT: a revoked permit admitted a second, distinct "
+                "operation after revocation had completed."
+            )
+        if verdict is Verdict.PASS:
+            parts.append(
+                "No interleaving produced a second dispatch, a second "
+                "execution, a charge without a receipt, or a receipt whose "
+                "accounting did not match it."
+            )
+        observation = " ".join(parts)
+
+        log.emit(
+            "t08.verdict",
+            f"{target.configuration.value} -> {verdict.value}",
+            scenario=self.test_id,
+            configuration=target.configuration.value,
+            authoritative_point=authoritative_point,
+            dispositions={r["interleaving"]: r["disposition"] for r in records},
+            control_refused=control["refused"],
+            control_submitted=control["submitted"],
+        )
+
+        remaining_risks = [
+            "The boundaries are instrumented pause points, not a natural "
+            "race: they prove where authorization is evaluated, not how "
+            "likely each interleaving is in production.",
+        ]
+        if first_admitted is not None:
+            remaining_risks.append(
+                f"A revocation issued while a call is past {first_admitted} "
+                f"does not stop that call. Revocation bounds what can be "
+                f"newly admitted, not what is already admitted."
+            )
+
+        return self.result(
+            target,
+            verdict=verdict,
+            observation=observation,
+            measurements=measurements,
+            attempts=attempts,
+            remaining_risks=remaining_risks,
+            extra={
+                "authoritative_point": authoritative_point,
+                "authoritative_point_detail": {
+                    "boundary": authoritative_point,
+                    "boundary_meaning": BOUNDARY_MEANING.get(
+                        authoritative_point, "at or after the dispatch claim"
+                    ),
+                    "last_interleaving_revocation_denied": last_denied,
+                    "first_interleaving_revocation_did_not_stop": first_admitted,
+                    "summary": point_sentence,
+                },
+                "interleavings": records,
+                "post_revocation_control": control,
+            },
+        )
+
+    # -- one interleaving -------------------------------------------------
+
+    async def _run_interleaving(
+        self,
+        target: Target,
+        log: EventLog,
+        *,
+        index: int,
+        name: str,
+        boundary: str | None,
+    ) -> tuple[dict[str, Any], AttemptOutcome]:
+        gateway, tenant, _ = target.require_gateway()
+        permit = await gateway.issue_permit(tenant, max_credits=PERMIT_MAX_CREDITS)
+        permit_id = str(permit["permit_id"])
+        payment_id = f"pay_t08_{index}_{name}"
+        operation_id, refund = self.refund(payment_id)
+        identity = OperationIdentity.first_attempt(operation_id)
+        agent = target.gateway_agent(permit_id)
+
+        log.emit(
+            "t08.interleaving.start",
+            f"{name}: permit {permit_id} issued for {operation_id}",
+            scenario=self.test_id,
+            configuration=target.configuration.value,
+            interleaving=name,
+            boundary=boundary,
+            permit_id=permit_id,
+            operation_id=operation_id,
+            idempotency_key=identity.idempotency_key,
+        )
+
+        before = await gateway.snapshot(tenant)
+        boundary_reached: bool | None = None
+        revoked_while_in_flight = False
+
+        if boundary is None:
+            revoke = await gateway.revoke_permit(tenant, permit_id)
+            log.emit(
+                "t08.revoke",
+                f"{name}: permit revoked before the call was submitted",
+                scenario=self.test_id,
+                configuration=target.configuration.value,
+                interleaving=name,
+                permit_id=permit_id,
+                revoke_status=revoke.get("status"),
+            )
+            outcome = await agent.submit(
+                identity, refund, timeout_seconds=SUBMIT_TIMEOUT_SECONDS
+            )
+        else:
+            with gateway.hold_at(boundary) as hold:
+                task = asyncio.create_task(
+                    agent.submit(
+                        identity, refund, timeout_seconds=SUBMIT_TIMEOUT_SECONDS
+                    )
+                )
+                boundary_reached = await _wait_for_boundary(
+                    hold, task, HOLD_TIMEOUT_SECONDS
+                )
+                if boundary_reached:
+                    revoke = await gateway.revoke_permit(tenant, permit_id)
+                    revoked_while_in_flight = True
+                    log.emit(
+                        "t08.revoke",
+                        f"{name}: permit revoked while the call was paused at {boundary}",
+                        scenario=self.test_id,
+                        configuration=target.configuration.value,
+                        interleaving=name,
+                        permit_id=permit_id,
+                        boundary=boundary,
+                        revoke_status=revoke.get("status"),
+                    )
+                else:
+                    log.emit(
+                        "t08.boundary_not_reached",
+                        f"{name}: the call finished without pausing at {boundary}",
+                        scenario=self.test_id,
+                        configuration=target.configuration.value,
+                        interleaving=name,
+                        boundary=boundary,
+                    )
+                hold.release.set()
+                outcome = await task
+            if not revoked_while_in_flight:
+                await gateway.revoke_permit(tenant, permit_id)
+
+        after = await gateway.snapshot(tenant)
+        record = self._accounting(
+            target,
+            before=before,
+            after=after,
+            operation_id=operation_id,
+            outcome=outcome,
+        )
+        record.update(
+            {
+                "interleaving": name,
+                "boundary": boundary,
+                "boundary_meaning": BOUNDARY_MEANING[name],
+                "boundary_reached": boundary_reached,
+                "revoked_while_in_flight": revoked_while_in_flight,
+                "permit_id": permit_id,
+                "operation_id": operation_id,
+                "idempotency_key": identity.idempotency_key,
+                "payment_id": payment_id,
+            }
+        )
+        permit_after = await gateway.get_permit(tenant, permit_id)
+        record["permit_final_status"] = permit_after.get("status")
+        record["permit_revoked_at"] = permit_after.get("revoked_at")
+        record["permit_spent_credits"] = (
+            str(permit_after["spent_credits"])
+            if permit_after.get("spent_credits") is not None
+            else None
+        )
+
+        disposition, problems = _evaluate(record)
+        record["disposition"] = disposition
+        record["problems"] = problems
+
+        log.emit(
+            "t08.interleaving.finish",
+            f"{name}: status={outcome.status} -> {disposition}",
+            scenario=self.test_id,
+            configuration=target.configuration.value,
+            interleaving=name,
+            status=outcome.status,
+            client_visible_state=outcome.client_visible_state,
+            dispatches=record["dispatches"],
+            downstream_executions=record["downstream_executions"],
+            net_debit_count=record["net_debit_count"],
+            net_charge_credits=record["net_charge_credits"],
+            receipt_outcomes=record["receipt_outcomes"],
+            permit_final_status=record["permit_final_status"],
+            disposition=disposition,
+            problems=problems,
+        )
+        return record, outcome
+
+    # -- accounting -------------------------------------------------------
+
+    def _accounting(
+        self,
+        target: Target,
+        *,
+        before: GatewaySnapshot,
+        after: GatewaySnapshot,
+        operation_id: str,
+        outcome: AttemptOutcome,
+    ) -> dict[str, Any]:
+        """Attribute the gateway rows this one call added, plus ground truth."""
+        added_debits = _added(before.debits, after.debits, "entry_id")
+        added_refunds = _added(before.refunds, after.refunds, "entry_id")
+        added_receipts = _added(before.receipts, after.receipts, "receipt_id")
+        added_attempts = _added(before.attempts, after.attempts, "attempt_id")
+        net_charge = -(_credits(added_debits) + _credits(added_refunds))
+        return {
+            "status": outcome.status,
+            "client_visible_state": outcome.client_visible_state,
+            "reason": outcome.reason,
+            "http_status": outcome.http_status,
+            "dispatches": target.injector.dispatch_count(operation_id=operation_id),
+            "downstream_executions": target.ledger.execution_count(
+                operation_id=operation_id
+            ),
+            "debit_count": len(added_debits),
+            "refund_count": len(added_refunds),
+            "net_debit_count": len(added_debits) - len(added_refunds),
+            "net_charge_credits": str(net_charge),
+            "receipt_outcomes": [str(r["outcome"]) for r in added_receipts],
+            "receipt_ids": [str(r["receipt_id"]) for r in added_receipts],
+            "receipt_credits_charged": [
+                r.get("credits_charged") for r in added_receipts
+            ],
+            "gateway_attempt_states": [
+                {
+                    "state": a["state"],
+                    "sent": a["sent"],
+                    "claim_hash_present": a["claim_hash_present"],
+                    "credits_charged": a.get("credits_charged"),
+                    "debit_refunded_at": a.get("debit_refunded_at"),
+                }
+                for a in added_attempts
+            ],
+        }
+
+    # -- the control ------------------------------------------------------
+
+    async def _post_revocation_control(
+        self,
+        target: Target,
+        log: EventLog,
+        permits: list[tuple[str, str]],
+    ) -> tuple[dict[str, Any], list[AttemptOutcome], list[str]]:
+        """A fresh operation under each already-revoked permit must be refused."""
+        gateway, tenant, _ = target.require_gateway()
+        entries: list[dict[str, Any]] = []
+        outcomes: list[AttemptOutcome] = []
+        operation_ids: list[str] = []
+
+        for name, permit_id in permits:
+            payment_id = f"pay_t08_control_{name}"
+            operation_id, refund = self.refund(payment_id)
+            identity = OperationIdentity.first_attempt(operation_id)
+            agent = target.gateway_agent(permit_id)
+            before = await gateway.snapshot(tenant)
+            outcome = await agent.submit(
+                identity, refund, timeout_seconds=SUBMIT_TIMEOUT_SECONDS
+            )
+            after = await gateway.snapshot(tenant)
+            record = self._accounting(
+                target,
+                before=before,
+                after=after,
+                operation_id=operation_id,
+                outcome=outcome,
+            )
+            refused = (
+                outcome.status in REFUSED_STATUSES
+                and record["dispatches"] == 0
+                and record["downstream_executions"] == 0
+                and Decimal(record["net_charge_credits"]) == 0
+            )
+            entry = {
+                "permit_from_interleaving": name,
+                "permit_id": permit_id,
+                "operation_id": operation_id,
+                "idempotency_key": identity.idempotency_key,
+                "refused": refused,
+                **record,
+            }
+            entries.append(entry)
+            outcomes.append(outcome)
+            operation_ids.append(operation_id)
+            log.emit(
+                "t08.post_revocation_control",
+                f"fresh operation under revoked permit from {name}: "
+                f"status={outcome.status} refused={refused}",
+                scenario=self.test_id,
+                configuration=target.configuration.value,
+                interleaving=name,
+                permit_id=permit_id,
+                operation_id=operation_id,
+                status=outcome.status,
+                reason=outcome.reason,
+                dispatches=record["dispatches"],
+                downstream_executions=record["downstream_executions"],
+                net_charge_credits=record["net_charge_credits"],
+                refused=refused,
+            )
+
+        control = {
+            "submitted": len(entries),
+            "refused": sum(1 for e in entries if e["refused"]),
+            "all_refused": all(e["refused"] for e in entries) if entries else False,
+            "dispatches": sum(int(e["dispatches"]) for e in entries),
+            "downstream_executions": sum(
+                int(e["downstream_executions"]) for e in entries
+            ),
+            "attempts": entries,
+        }
+        return control, outcomes, operation_ids
