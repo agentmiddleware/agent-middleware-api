@@ -314,6 +314,13 @@ def command_run(args: argparse.Namespace) -> int:
         # get_scenario raises KeyError with the known ids in its message.
         sys.stderr.write(f"{exc.args[0] if exc.args else exc}\n")
         return EXIT_USAGE
+    except RuntimeError as exc:
+        # The run never started: a sandbox directory that is not ours to
+        # delete, or an application already imported under another posture.
+        # Both are setup problems with a readable message; a traceback here
+        # would bury it.
+        sys.stderr.write(f"{exc}\n")
+        return EXIT_USAGE
 
     if args.as_json:
         _dump(run.redacted_document())
