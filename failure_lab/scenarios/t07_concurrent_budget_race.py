@@ -21,6 +21,7 @@ from failure_lab.scenarios.base import (
     Measurements,
     Scenario,
     Verdict,
+    percentile,
 )
 
 #: The reason code a permit out of budget must refuse with. Any other refusal
@@ -48,6 +49,9 @@ HARNESS_STRAIN_STATUSES = frozenset({"timeout", "transport_error"})
 #: Marks the failure strings that mean the budget was actually overrun, as
 #: opposed to some other breach of the case's conditions.
 OVERSPEND_PREFIX = "over-authorization: "
+
+#: Above this median, the price of being refused is worth reporting on its own.
+SLOW_REFUSAL_MS = 1000.0
 
 
 def _amount(row: dict[str, Any]) -> Decimal:
@@ -248,6 +252,17 @@ class ConcurrentBudgetRace(Scenario):
                 f"the client's view. Re-run with --option concurrency=<lower> to "
                 f"separate harness contention from product behaviour."
             )
+        slowest_refusal = max(
+            (case["refused_latency_p50_ms"] or 0.0 for case in cases), default=0.0
+        )
+        if slowest_refusal >= SLOW_REFUSAL_MS:
+            risks.append(
+                f"Refusing a call is not free: the median refused call took "
+                f"{round(slowest_refusal)} ms, because every racer queues behind the "
+                f"same guarded reservation. The budget decision itself is settled "
+                f"before any dispatch, but a caller whose patience is shorter than "
+                f"that learns nothing and may retry a call the gateway already refused."
+            )
         for case in cases:
             if case["under_authorized"]:
                 risks.append(
@@ -442,6 +457,8 @@ class ConcurrentBudgetRace(Scenario):
 
         record: dict[str, Any] = {
             "case": name,
+            "charged_latency_p50_ms": percentile([a.latency_ms for a in succeeded], 0.5),
+            "refused_latency_p50_ms": percentile([a.latency_ms for a in refused], 0.5),
             "note": note,
             "permit_id": permit_id,
             "max_credits": str(max_credits),

@@ -328,6 +328,10 @@ class PermitRevocationRace(Scenario):
             "The boundaries are instrumented pause points, not a natural "
             "race: they prove where authorization is evaluated, not how "
             "likely each interleaving is in production.",
+            "There is no instrumented boundary between the request arriving "
+            "and the authorize/reserve/prepare commit, so this test brackets "
+            "the authorization point to 'at or before after_prepare' rather "
+            "than pinpointing it inside that transaction.",
         ]
         if first_admitted is not None:
             remaining_risks.append(
