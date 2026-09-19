@@ -537,6 +537,32 @@ class GatewayUnderTest:
                     latency_ms=(time.perf_counter() - started) * 1000,
                     details={"client_view": "connection dropped; no response"},
                 )
+            if isinstance(exc, Exception):
+                # An unhandled exception inside the application. Over a real
+                # socket uvicorn would turn this into a 500 and the client
+                # would see a failed request; the in-process ASGI transport
+                # re-raises it into the caller instead. Classifying it as an
+                # outcome rather than letting it escape is what makes an
+                # induced infrastructure failure measurable at all -- a
+                # scenario that takes the database away needs the resulting
+                # request failure to be a row in its table, not a crash of
+                # the harness that was measuring it.
+                #
+                # SimulatedProcessDeath is deliberately a BaseException and is
+                # handled above, so this never swallows a crash injection.
+                return GatewayOutcome(
+                    status="gateway_error",
+                    http_status=None,
+                    jsonrpc_code=None,
+                    reason=f"{type(exc).__name__}: {exc}"[:300],
+                    receipt=None,
+                    structured=None,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    details={
+                        "client_view": "the gateway failed to answer",
+                        "exception_type": type(exc).__name__,
+                    },
+                )
             raise
         latency_ms = (time.perf_counter() - started) * 1000
         if response.status_code != 200:

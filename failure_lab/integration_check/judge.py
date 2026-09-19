@@ -36,7 +36,8 @@ mis-handles a lost response is caught rather than covered for.
 What this does not establish
 ----------------------------
 That a candidate passing here is safe in production. Six assertions over one
-tool, one tenant and four injected failures is a floor, not a certificate.
+tool, one tenant, two injected failures and one deliberate refusal is a floor,
+not a certificate.
 The crash is a simulated in-process death at an instrumented durable
 boundary, not a ``SIGKILL`` of a separate OS process. And a judge that has
 never failed anything is not a judge, which is why
@@ -71,9 +72,11 @@ import httpx
 from failure_lab.gateway import GATEWAY_BASE_URL, GATEWAY_TOOL_ID, is_process_death
 from failure_lab.integration_check.sample_app import RefundIntent
 
-#: Schema id for the metrics document. Bump when the metric set changes so a
-#: published number cannot silently come to mean something else.
-METRICS_SCHEMA = "failure_lab.integration_check/metrics/1"
+#: Schema id for the result document, whose ``metrics`` object carries exactly
+#: the eight metrics and whose ``metric_provenance`` object says where each one
+#: came from. Bump it when either set changes, so a published number cannot
+#: silently come to mean something else.
+RESULT_SCHEMA = "failure_lab.integration_check/result/1"
 
 #: The argument the permit forbids. Naming the settlement currency is a
 #: privileged choice, so an agent that sends it is asking for an operation its
@@ -818,7 +821,7 @@ class JudgeResult:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "schema": METRICS_SCHEMA,
+            "schema": RESULT_SCHEMA,
             "candidate": self.candidate,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -836,8 +839,9 @@ class JudgeResult:
 
 
 LIMITATIONS = (
-    "Six assertions over one governed tool, one tenant and four injected "
-    "failures. A pass is a floor, not a certificate of production readiness.",
+    "Six assertions over one governed tool, one tenant, two injected failures "
+    "and one deliberate refusal. A pass is a floor, not a certificate of "
+    "production readiness.",
     "The crash is a simulated in-process death at an instrumented durable "
     "boundary, not a SIGKILL of a separate OS process.",
     "Attempt rows are backdated past the reconciler's idle window rather than "
@@ -1757,13 +1761,13 @@ __all__ = [
     "IntegrationContext",
     "JudgeResult",
     "LoadedCandidate",
-    "METRICS_SCHEMA",
     "METRIC_PROVENANCE",
     "OperationReport",
     "ReceiptVerificationReport",
     "RecordingTransport",
     "RecoveryStage",
     "RequestLog",
+    "RESULT_SCHEMA",
     "RequestRecord",
     "StepRecord",
     "TERMINAL_UNDERSTANDINGS",
