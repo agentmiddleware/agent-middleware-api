@@ -266,7 +266,9 @@ def find_leaked_secrets(
 
     Returns records, never the offending value. Values shorter than
     :data:`MIN_SCANNABLE_SECRET_LENGTH` are skipped and reported separately by
-    the caller, because scanning for them produces only false positives.
+    the caller, because scanning for them produces only false positives. A
+    file that cannot be read raises rather than being skipped: "I could not
+    look" and "there is nothing there" are different answers.
     """
     candidates = [
         value
@@ -277,10 +279,10 @@ def find_leaked_secrets(
         return []
     leaks: list[dict[str, Any]] = []
     for path in paths:
-        try:
-            text = path.read_bytes().decode("utf-8", errors="ignore")
-        except OSError:
-            continue
+        # A file that cannot be read is not a file that is clean. Swallowing
+        # the error here would let an unreadable file pass the backstop and
+        # count towards "scanned".
+        text = path.read_bytes().decode("utf-8", errors="ignore")
         for index, value in enumerate(candidates):
             occurrences = text.count(value)
             if occurrences:
@@ -545,19 +547,40 @@ def _definition_entries(
     return entries, notes
 
 
+def _event_order(event: Mapping[str, Any]) -> tuple[str, float]:
+    """Order by scenario then sequence, without trusting either's type.
+
+    A malformed ``sequence`` sorts last instead of aborting the bundle: losing
+    a whole run's evidence at the write step because one row carried a string
+    is a worse failure than an event log in an odd order.
+    """
+    sequence = event.get("sequence", 0)
+    if isinstance(sequence, bool) or not isinstance(sequence, (int, float)):
+        try:
+            sequence = float(str(sequence))
+        except ValueError:
+            sequence = float("inf")
+    return (str(event.get("scenario", "")), float(sequence))
+
+
 def _events(
     documents: Sequence[Mapping[str, Any]], event_log: Any
 ) -> list[dict[str, Any]]:
     if event_log is not None:
         raw = getattr(event_log, "events", event_log)
-        entries = [dict(event) for event in raw]
     else:
-        entries = [
-            dict(event)
-            for document in documents
-            for event in (document.get("events") or [])
+        raw = [
+            event for document in documents for event in (document.get("events") or [])
         ]
-    entries.sort(key=lambda event: (str(event.get("scenario", "")), event.get("sequence", 0)))
+    entries: list[dict[str, Any]] = []
+    for event in raw:
+        if isinstance(event, Mapping):
+            entries.append(dict(event))
+        else:
+            # Kept, labelled, and not dropped: a row the log could not parse is
+            # information about the run.
+            entries.append({"malformed_event": event})
+    entries.sort(key=_event_order)
     return entries
 
 
@@ -1140,12 +1163,21 @@ def build_evidence_bundle(
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
-    if target.exists():
-        if not overwrite:
-            shutil.rmtree(staging, ignore_errors=True)
-            raise FileExistsError(f"{target} already exists and overwrite=False")
-        shutil.rmtree(target)
-    os.replace(staging, target)
+    # Every exit from here also removes the staging directory. A half-moved
+    # bundle that survives as a hidden sibling is a bundle someone finds later
+    # with no manifest telling them it was never finished.
+    try:
+        if target.exists() or target.is_symlink():
+            if not overwrite:
+                raise FileExistsError(f"{target} already exists and overwrite=False")
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        os.replace(staging, target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
 
     archive_path: Path | None = None
     if archive:

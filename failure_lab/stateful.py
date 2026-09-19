@@ -1794,8 +1794,11 @@ class StatefulResult:
         absence of evidence wearing the costume of evidence of absence, and
         it is the failure mode this tool exists to avoid, so a run that lost
         an observation is not clean however few violations it reported.
+
+        A run in which no command applied is not clean either, for the same
+        reason: zero violations out of zero work is arithmetic, not evidence.
         """
-        return not self.violations and not self.errors
+        return bool(self.commands_executed) and not self.violations and not self.errors
 
     def as_dict(self) -> dict[str, Any]:
         return redact(

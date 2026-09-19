@@ -541,12 +541,28 @@ def _cell(text: str) -> str:
 def write_claims_manifest(
     path: Path | str, manifest: ClaimsManifest | Mapping[str, Any]
 ) -> Path:
-    """Write the manifest as JSON, and the Markdown table beside it."""
+    """Write the manifest as JSON, and the Markdown table beside it.
+
+    Both files go through :func:`failure_lab.evidence.redact` on the way out.
+    A claims manifest is a published artifact, and the free text it carries --
+    limitations, remaining risks, an environment label the caller composed --
+    comes from the same run as the evidence bundle, which redacts everything
+    it writes. Nothing in the record shape matches the key rule, so redaction
+    here can only rewrite a value that is shaped like a credential.
+    """
+    from failure_lab.evidence import redact, redact_text
+
     resolved = _as_manifest(manifest)
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(resolved.to_json(), encoding="utf-8")
-    target.with_suffix(".md").write_text(render_markdown(resolved), encoding="utf-8")
+    document = redact(resolved.as_dict())
+    target.write_text(
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    target.with_suffix(".md").write_text(
+        redact_text(render_markdown(resolved)), encoding="utf-8"
+    )
     return target
 
 

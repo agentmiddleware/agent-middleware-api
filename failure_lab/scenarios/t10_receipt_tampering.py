@@ -729,8 +729,10 @@ def _probe(
             )
         ),
         field=path,
+        side=row["side"],
         coverage=classification,
         signature=report.signature.status.value,
+        failure_mode=row["failure_mode"],
         claims_changed=changed,
         envelope_disagreements=row["envelope_disagreements"],
         detected=row["detected"],
