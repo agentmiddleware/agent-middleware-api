@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit is switched off for this repository.
+#
+# Until now it was configured entirely from the CodeRabbit organization UI,
+# with nothing in the repo recording that choice. This file makes the decision
+# reviewable in the same place as the code it applies to, and takes effect
+# without waiting on a dashboard.
+#
+# What this does NOT do: it does not revoke the app's access. Repository
+# configuration only governs behaviour; the installation still has read and
+# write scopes on this repo until it is removed at
+# github.com/settings/installations. Treat that as the actual off switch and
+# this file as the statement of intent.
+#
+# Manual invocation (`@coderabbitai review` in a PR comment) still works while
+# the app is installed. That is deliberate: it keeps a second opinion one
+# comment away on a change where it is wanted, without a bot commenting on
+# every PR.
+#
+# Cost of this, recorded so it is a decision and not a drift: on #433
+# CodeRabbit was the only reviewer to catch the read-then-charge race in the
+# pre-authentication rate limiter, and one of two to catch that an unknown API
+# key is refused with 403 rather than 401 — a bug that made that PR's own
+# regression test pass against a stub while the real path stayed open. With
+# one maintainer and no second human reviewer, that coverage was doing real
+# work. Vercel's agent and Codex still review; they are not interchangeable.
+
+reviews:
+  auto_review:
+    enabled: false
+    drafts: false
+  review_status: false
+  high_level_summary: false
+  poem: false
+
+chat:
+  auto_reply: false
