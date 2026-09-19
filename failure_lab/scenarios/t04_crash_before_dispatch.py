@@ -140,12 +140,18 @@ class CrashBeforeDispatch(Scenario):
     inapplicable_reason = (
         "a direct integration has no gateway to crash between a debit and a send"
     )
-    #: FAIL on the gateway paths, and the reason is a defect in the claim
-    #: rather than in the product. See the last entry in :attr:`limitations`.
-    #: Recorded here so observation and documentation agree, which is the
-    #: invariant the whole suite is built on -- and so the claims manifest
-    #: refuses to publish this claim, which is the correct outcome for a
-    #: claim that asserts more than safety requires.
+    #: FAIL, and it is the claim that fails rather than the product. The rule
+    #: in :meth:`_verdict` fires at ``after_idempotency_begin`` because the
+    #: same-key retry does reach the tool there -- correctly, per window E of
+    #: docs/failure-semantics.md. The last entry in :attr:`limitations` makes
+    #: the whole argument.
+    #:
+    #: THIS VALUE AND THAT RULE MOVE TOGETHER. Setting these back to PASS
+    #: while the rule still fires makes observation and documentation
+    #: disagree on every run, which reds the suite; deleting the rule to
+    #: justify PASS removes the only assertion this scenario makes about the
+    #: retry. Changing the claim is a decision for whoever owns it, taken in
+    #: the open, and it changes both sites at once.
     expected = {
         Configuration.DIRECT_NAIVE.value: Verdict.NOT_APPLICABLE.value,
         Configuration.DIRECT_NATIVE.value: Verdict.NOT_APPLICABLE.value,
@@ -174,7 +180,7 @@ class CrashBeforeDispatch(Scenario):
         "refund for ever because a crashed attempt once wrote a row, which "
         "is strictly worse for the customer than performing it once. The "
         "claim is too strong and wants rewriting by whoever owns it, "
-        "together with this expectation. Until then the measurement is "
+        "together with the expectation above. Until then the measurement is "
         "reported as it stands rather than softened, because a rule that "
         "cannot fire is not a weaker assertion -- it is no assertion.",
     )
@@ -567,6 +573,8 @@ class CrashBeforeDispatch(Scenario):
             # not) is a question for whoever owns the claim; it is not a
             # question this file may answer by rewriting its own claim to
             # match what it measured.
+            # If this rule is ever removed or relaxed, `expected` above has to
+            # change in the same commit -- see the note on it.
             if row["same_key_retry_dispatched"]:
                 failures.append(
                     f"{boundary}: the same-key retry reached the downstream "
