@@ -105,6 +105,21 @@ same receipt with no second debit, the audit chain verifies, the out-of-scope
 call is denied, and a tampered receipt fails verification. It exits non-zero the
 moment any invariant breaks.
 
+To measure the same fault against a correct baseline instead of a naive one:
+
+```bash
+make failure-lab
+```
+
+That runs the lost-response fault against three integrations of one
+simulated payment rail — no idempotency key, a correctly used native
+idempotency key, and the gateway — with downstream effects counted by a
+record the gateway cannot reach. It reports when the native control already
+handles the fault (it does, for a client that keeps its key), what the
+gateway adds and does not add, and the one failure every configuration
+shares: an agent that restarts with a new key pays twice. Mechanism, report
+layout, and limits: [docs/failure-lab.md](docs/failure-lab.md).
+
 To drive the loop yourself instead of watching it:
 
 ```bash
@@ -301,6 +316,7 @@ matter most:
 | Run the loop yourself | [docs/quickstart.md](docs/quickstart.md) |
 | Govern one real internal tool | [docs/partner-first-tool-runbook.md](docs/partner-first-tool-runbook.md) |
 | Understand retry, crash, and ambiguity outcomes | [docs/failure-semantics.md](docs/failure-semantics.md) |
+| Measure the lost-response fault against a native-idempotency baseline | [docs/failure-lab.md](docs/failure-lab.md) |
 | Attack it | [docs/security-review-kit.md](docs/security-review-kit.md), [docs/invariant-attack-report.md](docs/invariant-attack-report.md) |
 | Check what is proven vs. claimed | [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md) |
 | See the hardening record | [docs/tech-debt-remediation-plan.md](docs/tech-debt-remediation-plan.md) (complete; a historical record, not a backlog) |
