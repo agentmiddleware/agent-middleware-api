@@ -479,7 +479,9 @@ class RetentionExpiration(Scenario):
             for row in after_reconcile.idempotency_records
             if row["record_id"] in wanted_records
         ]
-        record_survived = bool(record_ids) and bool(surviving)
+        # Every record the call created must still be there. "Any of them
+        # survived" would call a partial sweep a survival.
+        record_survived = bool(record_ids) and len(surviving) == len(record_ids)
         record_completed = [row["completed"] for row in surviving]
 
         log.emit(
@@ -955,6 +957,26 @@ class RetentionExpiration(Scenario):
                 f"'{aged['first_call_status']}', so there was no completed "
                 "record to age"
             )
+        # The control for this case: the call being aged must really have
+        # dispatched and really have landed downstream. Without it, "the
+        # replay produced no new execution" is a statement about an operation
+        # that never happened, and the gateway's own 'success' is the only
+        # thing vouching for it. Both counts below come from instruments the
+        # gateway cannot reach -- the fault layer and the effect ledger.
+        if aged["dispatches_after_first_call"] < 1:
+            failures.append(
+                "aged_record: the fault layer saw "
+                f"{aged['dispatches_after_first_call']} crossing(s) for the "
+                "call being aged, so nothing was ever dispatched for the aged "
+                "record to go on suppressing"
+            )
+        if aged["executions_after_first_call"] != 1:
+            failures.append(
+                "aged_record: the effect ledger recorded "
+                f"{aged['executions_after_first_call']} downstream "
+                "execution(s) for the call being aged, want 1 -- there was no "
+                "single real effect for the replay to be a replay of"
+            )
         if not aged["record_survived_sweep"]:
             failures.append(
                 "aged_record: the completed idempotency record was gone after "
@@ -1006,6 +1028,26 @@ class RetentionExpiration(Scenario):
                 f"and {release['receipts_left_by_crash']} receipt(s) behind -- "
                 "a release is only safe when there is provably nothing to "
                 "compensate"
+            )
+        # The check above reads the gateway's own attempt, debit and receipt
+        # rows. "Nothing happened" is exactly the claim a governed system
+        # cannot be trusted to make about itself, so the same question is put
+        # to the two instruments outside it. A crash that already crossed the
+        # fault layer, or already landed an effect, was not effect-free -- and
+        # releasing its key is then unsafe whatever the gateway's tables say.
+        if release["dispatches_at_crash"] != 0:
+            failures.append(
+                "effect_free_release: the fault layer saw "
+                f"{release['dispatches_at_crash']} crossing(s) before the key "
+                f"was released, so the crash at {CRASH_BOUNDARY} was not the "
+                "pre-dispatch, effect-free crash this case requires"
+            )
+        if release["executions_at_crash"] != 0:
+            failures.append(
+                "effect_free_release: the effect ledger recorded "
+                f"{release['executions_at_crash']} downstream execution(s) "
+                "before the key was released, so the released key had a real "
+                "effect behind it and the release was not provably safe"
             )
         release_executions = release["executions_total_for_operation"]
         if release_executions > 1:
@@ -1083,10 +1125,17 @@ class RetentionExpiration(Scenario):
                 f"{release['record_released_by_sweep']} with "
                 f"{release['attempt_rows_left_by_crash']} attempt row(s), "
                 f"{release['debits_left_by_crash']} debit(s) and "
-                f"{release['receipts_left_by_crash']} receipt(s) to compensate"
+                f"{release['receipts_left_by_crash']} receipt(s) to compensate "
+                "in the gateway's own tables, and -- from the two instruments "
+                "outside it -- "
+                f"{release['dispatches_at_crash']} fault-layer crossing(s) and "
+                f"{release['executions_at_crash']} downstream execution(s) "
+                "before the release"
             ),
             "guarantee_lifetime": (
-                "as long as the idempotency record row lives, and no longer"
+                "as long as the idempotency record row lives; this run "
+                "exercised one sweep (reconcile) and saw nothing shorten that, "
+                "which is not the same as proving no other mechanism could"
             ),
         }
 
@@ -1110,7 +1159,14 @@ class RetentionExpiration(Scenario):
                 "Per-case dispatch and execution counts are scoped to that "
                 "case's own operation id. The configuration-level counters "
                 "cover all three operations and all six submissions, so they "
-                "are deliberately larger."
+                "are deliberately larger. Provenance: every 'dispatch'/"
+                "'crossing' count comes from the fault layer and every "
+                "'execution' count from the effect ledger -- both outside the "
+                "gateway. The debit, refund, receipt and attempt counts, the "
+                "wallet balance and every row in the three case dictionaries "
+                "that names an idempotency record, attempt or receipt are "
+                "the gateway's own report of itself and prove only what it "
+                "wrote down."
             ),
             "wallet_balance": (
                 measurements.snapshot.wallet_balance if measurements.snapshot else None
@@ -1146,13 +1202,15 @@ class RetentionExpiration(Scenario):
             f"the sweep the record was released "
             f"({release['record_released_by_sweep']}), the same-key retry "
             f"returned '{release['retry_status']}' and dispatched "
-            f"({release['retry_dispatched']}), and the effect ledger shows "
-            f"{release['executions_total_for_operation']} downstream "
-            "execution(s) for that operation in total -- the operation "
-            "happened one time, on the retry, and never before it. "
-            f"record_removed (descriptive, outside the verdict): after the "
-            "idempotency record was deleted by hand, the same key returned "
-            f"'{removed['retry_status']}', dispatched "
+            f"({release['retry_dispatched']}), and the effect ledger counted "
+            f"{release['executions_at_crash']} downstream execution(s) for "
+            "that operation before the release and "
+            f"{release['executions_total_for_operation']} in total after the "
+            "retry. "
+            f"record_removed (descriptive, outside the verdict): the "
+            "idempotency record was deleted by hand (record gone: "
+            f"{removed['record_gone_after_purge']}); the same key then "
+            f"returned '{removed['retry_status']}', dispatched "
             f"({removed['retry_dispatched']}), produced a second downstream "
             f"effect ({removed['second_downstream_effect']}), and left "
             f"{len(removed['new_debits_from_retry'])} further debit(s) and "
@@ -1161,44 +1219,79 @@ class RetentionExpiration(Scenario):
             f"(direct DELETE accepted: "
             f"{removed['purge']['direct_delete_succeeded']}), and the signed "
             f"receipt(s) {removed['receipts_surviving_purge']} outlived it. "
-            "The answer to what remains after expiration is therefore: the "
-            "replay guarantee lasts as long as the idempotency record row and "
-            "not one moment longer, and this run observed no mechanism that "
-            "ages such a row out."
+            + (
+                "The answer to what remains after expiration is therefore: "
+                "the replay guarantee lasts as long as the idempotency record "
+                "row and not one moment longer, and the one sweep this run "
+                "exercised did not age such a row out."
+                if not automatic_expiry_observed
+                else (
+                    "The aged record did NOT survive the sweep, so an "
+                    "automatic expiry does exist and the claim this scenario "
+                    "tests -- that the only automatic release is a provably "
+                    "effect-free one -- does not hold as written."
+                )
+            )
         )
-        if not removed["second_downstream_effect"] and target.configuration.native_idempotency:
+        if (
+            target.configuration.native_idempotency
+            and removed["retry_dispatched"]
+            and not removed["second_downstream_effect"]
+        ):
             observation += (
                 " In this configuration the second dispatch did not become a "
                 "second downstream effect, because the tool itself honours the "
                 "business operation_id. That protection is the downstream's, "
-                "not the gateway's: the gateway still dispatched again and "
-                "still charged again, which is what the debit and receipt "
-                "counts above show."
+                "not the gateway's: the gateway dispatched again -- the fault "
+                "layer counted the crossing -- and charged again, leaving "
+                f"{len(removed['new_debits_from_retry'])} further debit(s) and "
+                f"{len(removed['new_receipts_from_retry'])} further receipt(s)."
             )
         if failures:
             observation += " Guarantee not met: " + "; ".join(failures) + "."
 
         risks = [
             "The replay guarantee lasts exactly as long as the idempotency "
-            "record does, and no automatic expiry currently shortens that. "
-            "This run aged a completed record "
-            f"{aged['age_days']} days and the sweep left it alone, so the "
-            "guarantee is durable -- but its lifetime is a property of a "
-            "database row, not of a published retention policy. Nothing in "
-            "the product states how long that row is kept, and the day an "
-            "operator adds a purge job, a TTL index or a table trim, every "
-            "key it touches silently becomes replayable again with no "
-            "corresponding change to any documented promise.",
+            "record does. This run aged a completed record "
+            f"{aged['age_days']} days and the sweep "
+            + (
+                "left it alone"
+                if aged["record_survived_sweep"]
+                else "removed it"
+            )
+            + ", so the lifetime observed here is a property of a database "
+            "row, not of a published retention policy. Nothing in the product "
+            "states how long that row is kept, and the day an operator adds a "
+            "purge job, a TTL index or a table trim, every key it touches "
+            "silently becomes replayable again with no corresponding change "
+            "to any documented promise.",
             "The record-removal case shows what that day looks like: with the "
-            "record gone the same key is a new operation. The gateway "
-            "dispatched again and charged again, and whether a second "
-            "downstream effect landed depended entirely on whether the "
-            "downstream tool had idempotency of its own -- not on anything "
-            "the gateway did.",
-            "The signed receipt outlives the record that made the key "
-            "unrepeatable. Evidence that the call happened therefore persists "
-            "longer than the mechanism that stops it happening twice, so a "
-            "receipt search is not a substitute for the replay guarantee.",
+            "record gone the same key is a new operation. Here the gateway "
+            + (
+                "dispatched again -- the fault layer counted the crossing -- "
+                f"and wrote {len(removed['new_debits_from_retry'])} further "
+                "debit(s)"
+                if removed["retry_dispatched"]
+                else (
+                    f"returned '{removed['retry_status']}' without crossing "
+                    "the fault layer again"
+                )
+            )
+            + ", and whether a second downstream effect landed (it "
+            + ("did" if removed["second_downstream_effect"] else "did not")
+            + ") depended on whether the downstream tool had idempotency of "
+            "its own -- not on anything the gateway did.",
+        ]
+        if removed["record_gone_after_purge"] and removed["receipts_surviving_purge"]:
+            risks.append(
+                "The signed receipt outlives the record that made the key "
+                f"unrepeatable: receipt(s) {removed['receipts_surviving_purge']} "
+                "were still present after the record was purged. Evidence that "
+                "the call happened therefore persists longer than the "
+                "mechanism that stops it happening twice, so a receipt search "
+                "is not a substitute for the replay guarantee."
+            )
+        risks += [
             "The effect-free release is keyed on the absence of a dispatch "
             "attempt, a ledger link and a receipt -- not on age. Aging only "
             "decides when the sweep is allowed to look. A record that is "
@@ -1217,9 +1310,20 @@ class RetentionExpiration(Scenario):
                 "A plain DELETE of the idempotency record was refused by the "
                 "foreign keys the dispatch attempt and the receipt hold on it. "
                 "That is a real obstacle to an accidental purge, but it is not "
-                "a retention policy: the purge succeeded as soon as those "
-                "references were cleared, which is exactly what a deliberate "
-                "retention job would do."
+                "a retention policy: "
+                + (
+                    "the purge succeeded as soon as those references were "
+                    "cleared, which is exactly what a deliberate retention job "
+                    "would do"
+                    if removed["record_gone_after_purge"]
+                    else (
+                        "in this run the record was still present after the "
+                        "referencing rows were cleared, so the purge did not "
+                        "complete and the rest of this case describes a record "
+                        "that never went away"
+                    )
+                )
+                + "."
             )
 
         log.emit(
@@ -1232,7 +1336,10 @@ class RetentionExpiration(Scenario):
                 "replay_returned_original_receipt"
             ],
             aged_record_replay_dispatched=aged["replay_dispatched"],
+            aged_record_executions_before_aging=aged["executions_after_first_call"],
             effect_free_release_released=release["record_released_by_sweep"],
+            effect_free_release_dispatches_at_crash=release["dispatches_at_crash"],
+            effect_free_release_executions_at_crash=release["executions_at_crash"],
             effect_free_release_executions_total=release[
                 "executions_total_for_operation"
             ],
