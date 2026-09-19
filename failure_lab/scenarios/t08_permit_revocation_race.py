@@ -48,6 +48,12 @@ CHARGE_RETAINED_OUTCOMES = frozenset(
 #: Receipt outcomes the product documents as leaving no net charge.
 CHARGE_RELEASED_OUTCOMES = frozenset({"denied", "insufficient_funds", "failed_refunded"})
 
+#: A refusal is only evidence that *revocation* bit if the product says
+#: revocation is why. ``insufficient_funds``, ``key_conflict``,
+#: ``invalid_params`` and ``conflict`` are refusals too, and counting them
+#: would let an unrelated breakage masquerade as a working revocation.
+REVOCATION_REASON_MARKER = "revok"
+
 #: Ceiling on the wait for an instrumented boundary to be reached. The held
 #: call only has to get as far as a local database commit, so anything near
 #: this means the harness stalled rather than the product being slow.
@@ -80,14 +86,28 @@ def _credits(rows: list[dict[str, Any]]) -> Decimal:
     return total
 
 
+def _revocation_attributable(
+    reason: Any, reason_codes: list[Any] | None = None
+) -> bool:
+    """Does the product say *revocation* is why this call was refused?"""
+    candidates = [reason, *(reason_codes or [])]
+    return any(
+        REVOCATION_REASON_MARKER in str(c).lower() for c in candidates if c is not None
+    )
+
+
 async def _wait_for_boundary(
     hold: BoundaryHold, task: asyncio.Task[AttemptOutcome], timeout: float
-) -> bool:
+) -> str:
     """Wait until the held call reaches the boundary, or until it finishes.
 
-    Returning on task completion matters: a call that is refused *before* the
-    instrumented boundary never pauses, and blocking for the full timeout
-    would turn that real observation into a harness stall.
+    Returns ``"reached"``, ``"call_finished_first"`` (the call was refused or
+    completed without ever pausing) or ``"harness_timeout"``. The three are
+    kept apart on purpose. Returning on task completion stops a call refused
+    *before* the instrumented boundary from stalling the harness for the full
+    timeout -- but only ``"reached"`` actually stages the race this scenario
+    claims to measure, and a harness timeout must never be reported as though
+    it were a product observation.
     """
     waiter = asyncio.create_task(hold.reached.wait())
     try:
@@ -98,17 +118,43 @@ async def _wait_for_boundary(
         waiter.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await waiter
-    return hold.reached.is_set()
+    if hold.reached.is_set():
+        return "reached"
+    if task.done():
+        return "call_finished_first"
+    return "harness_timeout"
 
 
 def _evaluate(record: dict[str, Any]) -> tuple[str, list[str]]:
     """Classify one interleaving as a coherent disposition, or say why not.
+
+    The premise is checked first, and it is not a formality. An interleaving
+    whose call never paused at its boundary was never raced against a
+    revocation, and one whose permit does not read back as revoked never had
+    its authority withdrawn. Either way the call was an ordinary governed
+    invocation, and scoring it ``admitted_once`` would manufacture evidence
+    for an experiment that did not happen. Those return ``not_staged``, which
+    is never a coherent disposition and never feeds the authoritative point.
 
     Coherent (a) ``denied``: nothing dispatched, nothing executed, no net
     charge. Coherent (b) ``admitted_once``: at most one dispatch, at most one
     execution, exactly one receipt, and a charge that matches what that
     receipt says about the money.
     """
+    premise: list[str] = []
+    if not record.get("staged"):
+        premise.append(
+            f"the race was never staged ({record.get('staging_note')}), so no "
+            f"revocation ever raced this in-flight call"
+        )
+    if not record.get("permit_revocation_confirmed"):
+        premise.append(
+            f"the permit read back as {record.get('permit_final_status')!r} "
+            f"rather than 'revoked', so no authority was actually withdrawn"
+        )
+    if premise:
+        return "not_staged", premise
+
     dispatches = int(record["dispatches"])
     executions = int(record["downstream_executions"])
     outcomes = [str(o) for o in record["receipt_outcomes"]]
@@ -125,6 +171,12 @@ def _evaluate(record: dict[str, Any]) -> tuple[str, list[str]]:
     if net_credits > 0 and not outcomes:
         problems.append(f"net charge of {net_credits} credits with no receipt")
     for outcome in outcomes:
+        if outcome == "success" and executions == 0:
+            problems.append(
+                "a receipt signed 'success' while the effect ledger recorded no "
+                "downstream execution for this operation: the signature would be "
+                "standing in for an action nothing independent observed"
+            )
         if outcome in CHARGE_RETAINED_OUTCOMES and net_credits <= 0:
             problems.append(
                 f"receipt outcome {outcome!r} retains the charge but the net "
@@ -254,12 +306,28 @@ class PermitRevocationRace(Scenario):
         measurements = await self.measure(target, attempts, operation_ids=operation_ids)
 
         incoherent = [r for r in records if r["disposition"] == "incoherent"]
+        not_staged = [r for r in records if r["disposition"] == "not_staged"]
         admitted = [r for r in records if r["disposition"] == "admitted_once"]
         denied = [r for r in records if r["disposition"] == "denied"]
 
         first_admitted = admitted[0]["interleaving"] if admitted else None
         last_denied = denied[-1]["interleaving"] if denied else None
-        if first_admitted is None:
+        if not_staged:
+            # An unstaged interleaving is not a boundary at which revocation
+            # was observed to work or not work; inferring a point from the
+            # rest would read as a finding about the product when it is a
+            # finding about the harness.
+            authoritative_point = "not_established"
+            point_sentence = (
+                "the authorization point could not be established, because "
+                + "; ".join(
+                    f"{r['interleaving']} proved nothing ("
+                    + "; ".join(r["problems"])
+                    + ")"
+                    for r in not_staged
+                )
+            )
+        elif first_admitted is None:
             authoritative_point = "after_claim_or_later"
             point_sentence = (
                 "revocation was still effective at every instrumented "
@@ -275,8 +343,14 @@ class PermitRevocationRace(Scenario):
                 f"the in-flight call"
             )
 
-        control_ok = bool(control["all_refused"])
-        verdict = Verdict.PASS if not incoherent and control_ok else Verdict.FAIL
+        positive = control["positive_control"]
+        positive_ok = bool(positive["admitted"])
+        control_ok = bool(control["all_refused"]) and bool(control["all_attributable"])
+        verdict = (
+            Verdict.PASS
+            if not incoherent and not not_staged and control_ok and positive_ok
+            else Verdict.FAIL
+        )
 
         disposition_text = ", ".join(
             f"{r['interleaving']}={r['disposition']}" for r in records
@@ -288,11 +362,41 @@ class PermitRevocationRace(Scenario):
             (
                 f"Post-revocation control: "
                 f"{control['refused']}/{control['submitted']} fresh operations "
-                f"submitted under an already-revoked permit were refused "
-                f"({control['dispatches']} dispatch(es), "
-                f"{control['downstream_executions']} execution(s))."
+                f"submitted under an already-revoked permit were refused, "
+                f"{control['attributable']}/{control['submitted']} of them for a "
+                f"reason naming the revocation ({control['dispatches']} "
+                f"dispatch(es) at the fault layer, "
+                f"{control['downstream_executions']} execution(s) in the effect "
+                f"ledger)."
+            ),
+            (
+                "Live-path control: a fresh permit submitted after every test "
+                "permit was revoked was "
+                + (
+                    f"admitted ({positive['dispatches']} dispatch, "
+                    f"{positive['downstream_executions']} execution), so the "
+                    f"refusals above mean revoked, not broken."
+                    if positive_ok
+                    else f"NOT admitted (status {positive['status']!r}, reason "
+                    f"{positive['reason']!r}), so this run cannot tell a "
+                    f"refusal caused by revocation from a broken governed path."
+                )
             ),
         ]
+        if not_staged:
+            for record in not_staged:
+                parts.append(
+                    f"NOT STAGED at {record['interleaving']}: "
+                    + "; ".join(record["problems"])
+                    + ". This run does not substantiate the claim at that "
+                    "boundary."
+                )
+        if control["all_refused"] and not control["all_attributable"]:
+            parts.append(
+                "The post-revocation control was refused, but not every refusal "
+                "named the revocation as the reason, so the refusals do not "
+                "establish that revocation is what bit."
+            )
         if incoherent:
             for record in incoherent:
                 parts.append(
@@ -300,16 +404,18 @@ class PermitRevocationRace(Scenario):
                     + "; ".join(record["problems"])
                     + "."
                 )
-        if not control_ok:
+        if not control["all_refused"]:
             parts.append(
                 "INCOHERENT: a revoked permit admitted a second, distinct "
                 "operation after revocation had completed."
             )
         if verdict is Verdict.PASS:
             parts.append(
-                "No interleaving produced a second dispatch, a second "
-                "execution, a charge without a receipt, or a receipt whose "
-                "accounting did not match it."
+                "Every interleaving was staged (the call really paused at its "
+                "boundary and the permit really read back revoked), and none "
+                "produced a second dispatch, a second execution, a charge "
+                "without a receipt, or a receipt whose accounting did not "
+                "match it."
             )
         observation = " ".join(parts)
 
@@ -320,8 +426,11 @@ class PermitRevocationRace(Scenario):
             configuration=target.configuration.value,
             authoritative_point=authoritative_point,
             dispositions={r["interleaving"]: r["disposition"] for r in records},
+            staged={r["interleaving"]: r["staged"] for r in records},
             control_refused=control["refused"],
+            control_attributable=control["attributable"],
             control_submitted=control["submitted"],
+            live_path_control_admitted=positive_ok,
         )
 
         remaining_risks = [
@@ -352,8 +461,17 @@ class PermitRevocationRace(Scenario):
                 "authoritative_point_detail": {
                     "boundary": authoritative_point,
                     "boundary_meaning": BOUNDARY_MEANING.get(
-                        authoritative_point, "at or after the dispatch claim"
+                        authoritative_point,
+                        "the harness could not establish it"
+                        if authoritative_point == "not_established"
+                        else "at or after the dispatch claim",
                     ),
+                    "bracket": (
+                        f"at or before {authoritative_point}"
+                        if authoritative_point in BOUNDARY_MEANING
+                        else authoritative_point
+                    ),
+                    "staged": {r["interleaving"]: r["staged"] for r in records},
                     "last_interleaving_revocation_denied": last_denied,
                     "first_interleaving_revocation_did_not_stop": first_admitted,
                     "summary": point_sentence,
@@ -395,7 +513,7 @@ class PermitRevocationRace(Scenario):
         )
 
         before = await gateway.snapshot(tenant)
-        boundary_reached: bool | None = None
+        boundary_outcome: str | None = None
         revoked_while_in_flight = False
 
         if boundary is None:
@@ -419,10 +537,10 @@ class PermitRevocationRace(Scenario):
                         identity, refund, timeout_seconds=SUBMIT_TIMEOUT_SECONDS
                     )
                 )
-                boundary_reached = await _wait_for_boundary(
+                boundary_outcome = await _wait_for_boundary(
                     hold, task, HOLD_TIMEOUT_SECONDS
                 )
-                if boundary_reached:
+                if boundary_outcome == "reached":
                     revoke = await gateway.revoke_permit(tenant, permit_id)
                     revoked_while_in_flight = True
                     log.emit(
@@ -438,16 +556,41 @@ class PermitRevocationRace(Scenario):
                 else:
                     log.emit(
                         "t08.boundary_not_reached",
-                        f"{name}: the call finished without pausing at {boundary}",
+                        f"{name}: the call never paused at {boundary} "
+                        f"({boundary_outcome}); this interleaving stages no race",
                         scenario=self.test_id,
                         configuration=target.configuration.value,
                         interleaving=name,
                         boundary=boundary,
+                        boundary_outcome=boundary_outcome,
                     )
                 hold.release.set()
                 outcome = await task
             if not revoked_while_in_flight:
                 await gateway.revoke_permit(tenant, permit_id)
+
+        if boundary is None:
+            staged = True
+            staging_note = "revocation committed before the call was submitted"
+        elif boundary_outcome == "reached":
+            staged = True
+            staging_note = (
+                f"the call paused at {boundary} and the revocation committed "
+                f"while it was paused"
+            )
+        elif boundary_outcome == "call_finished_first":
+            staged = False
+            staging_note = (
+                f"the call finished before ever pausing at {boundary}, so the "
+                f"revocation landed after it, not during it"
+            )
+        else:
+            staged = False
+            staging_note = (
+                f"the harness waited {HOLD_TIMEOUT_SECONDS}s and the call neither "
+                f"paused at {boundary} nor finished, so what happened next was "
+                f"the harness giving up, not the product"
+            )
 
         after = await gateway.snapshot(tenant)
         record = self._accounting(
@@ -462,8 +605,13 @@ class PermitRevocationRace(Scenario):
                 "interleaving": name,
                 "boundary": boundary,
                 "boundary_meaning": BOUNDARY_MEANING[name],
-                "boundary_reached": boundary_reached,
+                "boundary_outcome": boundary_outcome,
+                "boundary_reached": boundary_outcome == "reached"
+                if boundary is not None
+                else None,
                 "revoked_while_in_flight": revoked_while_in_flight,
+                "staged": staged,
+                "staging_note": staging_note,
                 "permit_id": permit_id,
                 "operation_id": operation_id,
                 "idempotency_key": identity.idempotency_key,
@@ -477,6 +625,13 @@ class PermitRevocationRace(Scenario):
             str(permit_after["spent_credits"])
             if permit_after.get("spent_credits") is not None
             else None
+        )
+        # The premise of every interleaving: the authority really was
+        # withdrawn. If ``revoke_permit`` silently no-ops the whole scenario
+        # is measuring nothing, and must say so rather than report PASS.
+        record["permit_revocation_confirmed"] = (
+            str(permit_after.get("status")) == "revoked"
+            and permit_after.get("revoked_at") is not None
         )
 
         disposition, problems = _evaluate(record)
@@ -497,6 +652,8 @@ class PermitRevocationRace(Scenario):
             net_charge_credits=record["net_charge_credits"],
             receipt_outcomes=record["receipt_outcomes"],
             permit_final_status=record["permit_final_status"],
+            staged=staged,
+            staging_note=staging_note,
             disposition=disposition,
             problems=problems,
         )
@@ -519,10 +676,17 @@ class PermitRevocationRace(Scenario):
         added_receipts = _added(before.receipts, after.receipts, "receipt_id")
         added_attempts = _added(before.attempts, after.attempts, "attempt_id")
         net_charge = -(_credits(added_debits) + _credits(added_refunds))
+        reason_codes = [r.get("reason_code") for r in added_receipts]
         return {
             "status": outcome.status,
             "client_visible_state": outcome.client_visible_state,
             "reason": outcome.reason,
+            "receipt_reason_codes": [
+                str(c) if c is not None else None for c in reason_codes
+            ],
+            "refusal_attributable_to_revocation": _revocation_attributable(
+                outcome.reason, reason_codes
+            ),
             "http_status": outcome.http_status,
             "dispatches": target.injector.dispatch_count(operation_id=operation_id),
             "downstream_executions": target.ledger.execution_count(
@@ -586,12 +750,20 @@ class PermitRevocationRace(Scenario):
                 and record["downstream_executions"] == 0
                 and Decimal(record["net_charge_credits"]) == 0
             )
+            # Refused is not the same as refused *because of the revocation*.
+            # ``insufficient_funds``, ``key_conflict`` and ``invalid_params``
+            # are all refusals, so a control that accepted any of them would
+            # report a working revocation for an exhausted wallet.
+            attributable = refused and bool(
+                record["refusal_attributable_to_revocation"]
+            )
             entry = {
                 "permit_from_interleaving": name,
                 "permit_id": permit_id,
                 "operation_id": operation_id,
                 "idempotency_key": identity.idempotency_key,
                 "refused": refused,
+                "attributable_to_revocation": attributable,
                 **record,
             }
             entries.append(entry)
@@ -612,16 +784,101 @@ class PermitRevocationRace(Scenario):
                 downstream_executions=record["downstream_executions"],
                 net_charge_credits=record["net_charge_credits"],
                 refused=refused,
+                attributable_to_revocation=attributable,
             )
+
+        positive, positive_outcome, positive_op = await self._positive_control(
+            target, log
+        )
+        outcomes.append(positive_outcome)
+        operation_ids.append(positive_op)
 
         control = {
             "submitted": len(entries),
             "refused": sum(1 for e in entries if e["refused"]),
+            "attributable": sum(
+                1 for e in entries if e["attributable_to_revocation"]
+            ),
             "all_refused": all(e["refused"] for e in entries) if entries else False,
+            "all_attributable": (
+                all(e["attributable_to_revocation"] for e in entries)
+                if entries
+                else False
+            ),
             "dispatches": sum(int(e["dispatches"]) for e in entries),
             "downstream_executions": sum(
                 int(e["downstream_executions"]) for e in entries
             ),
             "attempts": entries,
+            "positive_control": positive,
         }
         return control, outcomes, operation_ids
+
+    async def _positive_control(
+        self, target: Target, log: EventLog
+    ) -> tuple[dict[str, Any], AttemptOutcome, str]:
+        """Prove the governed path still works once every permit is revoked.
+
+        Without this, four refusals are ambiguous: they are equally consistent
+        with "revocation is effective" and with "the tool, the wallet or the
+        downstream is broken and everything is being refused". A fresh permit
+        and a fresh operation, submitted after the revocations, must still be
+        admitted -- dispatch seen by the fault layer, execution seen by the
+        effect ledger, one receipt. Only then does a refusal mean *revoked*.
+        """
+        gateway, tenant, _ = target.require_gateway()
+        permit = await gateway.issue_permit(tenant, max_credits=PERMIT_MAX_CREDITS)
+        permit_id = str(permit["permit_id"])
+        payment_id = "pay_t08_control_live_path"
+        operation_id, refund = self.refund(payment_id)
+        identity = OperationIdentity.first_attempt(operation_id)
+        agent = target.gateway_agent(permit_id)
+
+        before = await gateway.snapshot(tenant)
+        outcome = await agent.submit(
+            identity, refund, timeout_seconds=SUBMIT_TIMEOUT_SECONDS
+        )
+        after = await gateway.snapshot(tenant)
+        record = self._accounting(
+            target,
+            before=before,
+            after=after,
+            operation_id=operation_id,
+            outcome=outcome,
+        )
+        admitted = (
+            outcome.status not in REFUSED_STATUSES
+            and int(record["dispatches"]) == 1
+            and int(record["downstream_executions"]) == 1
+            and record["receipt_outcomes"] == ["success"]
+            and Decimal(record["net_charge_credits"]) > 0
+        )
+        positive = {
+            "purpose": (
+                "a live, unrevoked permit submitted after every test permit was "
+                "revoked; if this is not admitted, the refusals above say nothing "
+                "about revocation"
+            ),
+            "permit_id": permit_id,
+            "operation_id": operation_id,
+            "idempotency_key": identity.idempotency_key,
+            "admitted": admitted,
+            **record,
+        }
+        log.emit(
+            "t08.positive_control",
+            f"live-path control under a fresh permit: status={outcome.status} "
+            f"admitted={admitted}",
+            scenario=self.test_id,
+            configuration=target.configuration.value,
+            permit_id=permit_id,
+            operation_id=operation_id,
+            status=outcome.status,
+            reason=outcome.reason,
+            dispatches=record["dispatches"],
+            downstream_executions=record["downstream_executions"],
+            receipt_outcomes=record["receipt_outcomes"],
+            net_charge_credits=record["net_charge_credits"],
+            admitted=admitted,
+        )
+        return positive, outcome, operation_id
