@@ -145,12 +145,21 @@ def _count(data: dict[str, Any], name: str) -> int:
 
 @dataclass
 class _ConfigurationState:
-    """What this translator knows about one configuration, so far.
+    """What this translator knows about one scenario's configuration, so far.
 
     Only two facts are kept, and both are needed to decide whether a line is
     entitled to claim the injected failure fired: whether a fault was armed for
     this configuration at all, and how many effects the ledger had already
     recorded when the previous line was written.
+
+    Scoped to one *scenario's* run of a configuration, not to the
+    configuration across a whole run. Every scenario gets its own effect
+    ledger, so ``executions_so_far`` starts again from zero for each one:
+    keyed by configuration alone, the second scenario's executions never
+    exceeded the first scenario's high-water mark and its "Downstream executed
+    operation." line vanished. ``fault_armed`` leaked the same way and in the
+    worse direction, letting a scenario that armed nothing claim the response
+    had been removed on purpose.
     """
 
     fault_armed: bool = False
@@ -168,10 +177,17 @@ class StepStream:
 
     def __init__(self) -> None:
         self._next_index = 0
-        self._configurations: dict[str, _ConfigurationState] = {}
+        self._configurations: dict[tuple[str, str], _ConfigurationState] = {}
 
-    def _state(self, configuration: str) -> _ConfigurationState:
-        return self._configurations.setdefault(configuration, _ConfigurationState())
+    def _state(self, scenario: str, configuration: str) -> _ConfigurationState:
+        """State for one scenario's run of one configuration.
+
+        The scenario is part of the key. See :class:`_ConfigurationState` for
+        what went wrong when it was not.
+        """
+        return self._configurations.setdefault(
+            (scenario, configuration), _ConfigurationState()
+        )
 
     def push(self, event: dict[str, Any]) -> list[Step]:
         """Translate one event. Returns zero or more lines, in order."""
@@ -183,7 +199,7 @@ class StepStream:
         at = str(safe.get("at", ""))
         data = safe.get("data")
         data = data if isinstance(data, dict) else {}
-        state = self._state(configuration)
+        state = self._state(scenario, configuration)
 
         texts = self._texts(step_name, message, data, state)
         evidence = _evidence(data)

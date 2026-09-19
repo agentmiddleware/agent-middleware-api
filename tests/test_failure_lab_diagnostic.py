@@ -706,3 +706,64 @@ def test_a_real_run_serves_nothing_with_a_credential_in_it(two_runs):
         body = json.dumps(document)
         assert "lab-admin-" not in body, "the sandbox admin key was served"
         assert not re.search(r"(?<![A-Za-z0-9])(?:amw|b2a|sk)[_-][A-Za-z0-9_-]{12,}", body)
+
+
+def test_one_scenarios_narration_does_not_silence_the_next():
+    """Per-configuration state must not leak across scenarios.
+
+    Every scenario gets its own effect ledger, so ``executions_so_far`` starts
+    again from zero for each one. The translator kept its high-water mark under
+    the configuration name alone, so on a multi-scenario run the second
+    scenario's executions never exceeded the first scenario's mark and its
+    "Downstream executed operation." line vanished -- from the module whose one
+    job is to not misreport what executed.
+
+    ``fault_armed`` leaked the same way and in the more dangerous direction: a
+    scenario that armed no fault inherited the previous scenario's flag and
+    could claim the response was removed on purpose.
+    """
+    from failure_lab.diagnostic.steps import EXECUTED, RESPONSE_REMOVED, translate_all
+
+    def event(scenario, step, **data):
+        return {
+            "sequence": 1,
+            "at": "2026-09-19T00:00:00Z",
+            "scenario": scenario,
+            "configuration": Configuration.DIRECT_NAIVE.value,
+            "step": step,
+            "message": f"{scenario} {step}",
+            "data": data,
+        }
+
+    steps = translate_all(
+        [
+            # Scenario one arms a fault and reaches two executions.
+            event("T02", "fault.arm"),
+            event(
+                "T02",
+                "attempt.first",
+                executions_so_far=2,
+                downstream_requests_so_far=2,
+                status="timeout",
+                client_visible_state="no_information",
+            ),
+            # Scenario two, same configuration, fresh ledger, no fault armed.
+            event(
+                "T03",
+                "attempt.first",
+                executions_so_far=1,
+                downstream_requests_so_far=1,
+                status="succeeded",
+                client_visible_state="confirmed_success",
+            ),
+        ]
+    )
+
+    second = [step for step in steps if step.scenario == "T03"]
+    assert any(step.text.startswith(EXECUTED) for step in second), (
+        "the second scenario's execution went unnarrated because the first "
+        "scenario's count was still the high-water mark"
+    )
+    assert not any(step.text.startswith(RESPONSE_REMOVED) for step in second), (
+        "the second scenario armed no fault but inherited the first one's flag"
+    )
