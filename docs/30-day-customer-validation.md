@@ -185,8 +185,10 @@ has none of that.
   documentation needed for a real pilot, and keeping release gates green.
 - No new core capability, including pods, extra MCP tools, standard `/mcp`
   auto-mint, proof surfaces, public anonymous MCP, wrap-and-anchor evidence,
-  a receipt-style permit envelope, or a portable audit-chain export, until a named prospect,
-  one consequential tool, a workflow blocker, an owner, and a date exist.
+  a receipt-style permit envelope, a portable audit-chain export, or
+  out-of-band key distribution, until a named prospect, one consequential
+  tool, a workflow blocker, an owner, and a date exist. Key distribution
+  also requires naming a trust root that is not this origin.
 
 **Live origin lockdown (code in this change; apply on Railway after merge):**
 anonymous callers must not list tools, invoke tools, or mint keys. Receipt
@@ -195,6 +197,15 @@ verification keys at `/.well-known/trust-keys.json` stay public. Operator
 [`deploy-railway.md`](deploy-railway.md#applying-the-narrow-lockdown-to-the-live-origin).
 GitHub visibility is **not** changed by this change; C.Lee makes the
 repository private themselves.
+
+**Live origin check (2026-09-19):** `https://api.thisisatest.tech` still
+serves unauthenticated `/mcp/tools.json` and `/v1/discover` (HTTP 200) and
+answers `POST /mcp/public` (HTTP 200). `/health` reports
+`commit_sha=091dcd641bb25583319c1daee833cc60df7e2a0b` (`#425`), not the
+Narrow lockdown merge. `/.well-known/trust-keys.json` remains 200. Product
+CI (`CI — Agent Middleware API`) last succeeded on `fc7243e` (2026-09-15);
+later main pushes including #444/#445/#446 `startup_failure` before jobs
+start. This repository's agents do not deploy that origin.
 
 ## Existing Implementation Documents
 

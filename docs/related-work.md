@@ -88,6 +88,10 @@ Verified from repo:
   the same way: frozen until a named partner cannot use the shipped
   `GET /v1/permits/{id}` + `LocalPermitValidator` path, or cannot trust
   first-party audit verification. Existing receipt portable export stays.
+- Treat out-of-band key distribution the same way: frozen until a named
+  partner cannot trust this origin for keys and the slice names that
+  trust root. Fulcio/TUF, pinned SPIFFE, and an out-of-band pin are
+  candidates only when verification actually uses them.
 - Use threat-model sources to keep prompt injection, protocol exploit, replay,
   confused deputy, unsafe tool execution, and cross-tenant leakage in scope.
 - Use NIST as governance vocabulary, not as proof of certification or

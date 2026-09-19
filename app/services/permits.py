@@ -325,34 +325,6 @@ class PermitService:
         # request body, so wallet-bound self-service permits show up in
         # /v1/me/permits queries filtered by subject_key_id.
         effective_key_id = request.subject_key_id or subject_key_id
-        payload: dict[str, Any] = {
-            "permit_id": permit_id,
-            "issuer_wallet_id": request.issuer_wallet_id,
-            "subject_wallet_id": request.subject_wallet_id,
-            "subject_key_id": effective_key_id,
-            "scopes": scopes,
-            "allowed_tools": request.allowed_tools,
-            "max_credits": request.max_credits,
-            "expires_at": expires_at,
-            "nonce": nonce,
-            "status": "active",
-            "issued_at": now,
-        }
-        # Signed only when set, so signatures on permits issued before this
-        # field existed keep verifying (verify_signature mirrors this).
-        if request.requires_human_approval:
-            payload["requires_human_approval"] = True
-        # Permit schema v2 constraints — signed only when non-empty/non-null
-        if request.max_calls_per_tool:
-            payload["max_calls_per_tool"] = request.max_calls_per_tool
-        if request.aggregate_value_cap is not None:
-            payload["aggregate_value_cap"] = request.aggregate_value_cap
-        if request.forbidden_fields:
-            payload["forbidden_fields"] = request.forbidden_fields
-        if request.recipient_domain:
-            payload["recipient_domain"] = request.recipient_domain
-        signature, key_id, _ = await get_signing_key_service().sign_payload(payload)
-
         model = PermitModel(
             permit_id=permit_id,
             issuer_wallet_id=request.issuer_wallet_id,
@@ -365,8 +337,8 @@ class PermitService:
             nonce=nonce,
             status="active",
             requires_human_approval=request.requires_human_approval,
-            signature=signature,
-            key_id=key_id,
+            signature="",
+            key_id="",
             issued_at=now,
             max_calls_per_tool_json=json.dumps(request.max_calls_per_tool)
             if request.max_calls_per_tool
@@ -377,6 +349,14 @@ class PermitService:
             else None,
             recipient_domain=request.recipient_domain,
         )
+        # Sign the same dict verify reconstructs. Building it twice let a
+        # field added on one path only keep verifying in tests that never
+        # round-tripped a freshly minted permit.
+        signature, key_id, _ = await get_signing_key_service().sign_payload(
+            self._unsigned_payload(model)
+        )
+        model.signature = signature
+        model.key_id = key_id
         async with factory() as session:
             session.add(model)
             await session.commit()
@@ -1578,14 +1558,15 @@ class PermitService:
         return corrected
 
     @staticmethod
-    def _verification_payload(model: PermitModel) -> dict[str, Any]:
-        """Rebuild the exact dict the permit signature covers.
+    def _unsigned_payload(model: PermitModel) -> dict[str, Any]:
+        """The permit fields ``sign_payload`` receives, before alg/kid/hash.
 
-        Mirrors :meth:`create_permit`'s payload plus the ``alg`` / ``kid`` /
-        ``payload_hash`` fields ``sign_payload`` folds in. Additive fields
-        enter only when set so pre-existing signatures keep verifying.
-        ``status`` is hardcoded ``\"active\"`` — revocation is enforced by
-        validation, not by breaking the signature.
+        Additive fields enter only when set so pre-existing signatures keep
+        verifying. ``status`` is hardcoded ``"active"`` — revocation is
+        enforced by validation, not by breaking the signature. ``kid`` is
+        omitted here: ``sign_payload`` folds it in from the active signing
+        key, so an empty ``model.key_id`` at mint time cannot leak into the
+        signed bytes.
         """
         payload: dict[str, Any] = {
             "permit_id": model.permit_id,
@@ -1599,8 +1580,6 @@ class PermitService:
             "nonce": model.nonce,
             "status": "active",
             "issued_at": model.issued_at,
-            "alg": "Ed25519",
-            "kid": model.key_id,
         }
         if model.requires_human_approval:
             payload["requires_human_approval"] = True
@@ -1614,6 +1593,18 @@ class PermitService:
             payload["forbidden_fields"] = forbidden
         if model.recipient_domain:
             payload["recipient_domain"] = model.recipient_domain
+        return payload
+
+    @staticmethod
+    def _verification_payload(model: PermitModel) -> dict[str, Any]:
+        """Rebuild the exact dict the permit signature covers.
+
+        Same as :meth:`_unsigned_payload` plus the ``alg`` / ``kid`` /
+        ``payload_hash`` fields ``sign_payload`` folds in.
+        """
+        payload = dict(PermitService._unsigned_payload(model))
+        payload["alg"] = "Ed25519"
+        payload["kid"] = model.key_id
         payload["payload_hash"] = sha256_hex(payload)
         return payload
 

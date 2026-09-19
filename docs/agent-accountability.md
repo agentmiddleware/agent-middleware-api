@@ -157,9 +157,12 @@ keep verifying. A verifier must not require optional fields it does not see.
   repository does not implement one. Use `--expect-issuer` to at least bind a
   bundle to the origin you meant to audit. The intended later wrap-and-anchor
   composition stays frozen and is anchoring/publication, not a substitute
-  for pinning keys out of band. A receipt-style permit envelope and a
-  portable audit-chain export stay frozen; receipt portable export and
-  `LocalPermitValidator` stay. See [`WEDGE.md`](../WEDGE.md) § What To Freeze.
+  for pinning keys out of band. A receipt-style permit envelope, a
+  portable audit-chain export, and out-of-band key distribution stay
+  frozen; receipt portable export and `LocalPermitValidator` stay. Key
+  distribution unfreezes only when a named partner cannot trust this
+  origin for keys and that trust root is named. See
+  [`WEDGE.md`](../WEDGE.md) § What To Freeze.
 
 See also [`SECURITY_LIMITATIONS.md`](../SECURITY_LIMITATIONS.md) and
 [`TRUST_MODEL.md`](../TRUST_MODEL.md).

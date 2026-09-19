@@ -258,6 +258,15 @@ this origin's first-party audit verification
 is not wrap-and-anchor, not out-of-band key distribution, and not an
 audit-log product.
 
+Out-of-band key distribution is frozen with the same Narrow rule. Offline
+receipt verification still trusts `/.well-known/trust-keys.json` over TLS
+from this origin. Wrapping origin-signed claims under Sigstore or SPIFFE
+does not change that. Unfreeze only when a named partner cannot trust this
+origin for keys **and** the slice names the trust root that is not this
+origin (Fulcio/TUF, a pinned SPIFFE identity, or an out-of-band pin) and
+the verifier checks the receipt against that root. Do not start key
+pinning, TUF, or Fulcio as a side project.
+
 Production-like deploys must keep `ENABLE_PROOF_SURFACES=false`.
 Deploy SOP (single path: `railway up` from this Dockerfile):
 [`docs/deploy-railway.md`](docs/deploy-railway.md).
