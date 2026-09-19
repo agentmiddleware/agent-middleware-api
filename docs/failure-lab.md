@@ -230,6 +230,33 @@ nightly, and release candidates.
 | T13 | Retention expiration | slow | What guarantee remains once the idempotency record ages out |
 | T14 | Standard MCP client | fast | The full lifecycle against an independent, standards-compliant client |
 
+### Where authorization is actually decided
+
+The plan asks the product to define the authoritative point at which
+authorization is evaluated. `T08` finds it by experiment rather than by
+reading: it holds an in-flight call at each durable boundary, revokes the
+permit while it is paused, releases it, and records what happens.
+
+| Revocation lands | Outcome |
+|---|---|
+| before the request | denied, zero dispatches, zero executions |
+| after `prepare` | admitted once |
+| after `attach_charge` | admitted once |
+| after `claim` | admitted once |
+
+**The point is `after_prepare`** — the transaction that authorizes the permit
+and reserves its budget. A revocation arriving at or after that boundary does
+not stop the call already holding the reservation. That is coherent rather
+than alarming: the reservation *is* the authorization decision, and unwinding
+it mid-flight would mean a concurrent caller could spend budget this call has
+already claimed.
+
+What matters is that it is consistent. No interleaving produced a second
+dispatch, a second downstream execution, a charge without a receipt, or a
+receipt whose accounting did not match it. And revocation is fully effective
+for anything not already in flight: four fresh operations submitted under the
+revoked permit were all refused with nothing dispatched.
+
 ### What the probe matrix found
 
 `T09` issues a permit per probe and checks, for each, whether the refusal
