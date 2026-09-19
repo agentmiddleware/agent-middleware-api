@@ -205,7 +205,9 @@ answers `POST /mcp/public` (HTTP 200). `/health` reports
 Narrow lockdown merge. `/.well-known/trust-keys.json` remains 200. Product
 CI (`CI — Agent Middleware API`) last succeeded on `fc7243e` (2026-09-15);
 later main pushes including #444/#445/#446 `startup_failure` before jobs
-start. This repository's agents do not deploy that origin.
+start. When CI did run (2026-09-19, #447), `mcp>=1.29.0,<3` installed
+mcp 2.2 and collection failed on `McpError`. This change re-pins `<2`.
+This repository's agents do not deploy that origin.
 
 ## Existing Implementation Documents
 
