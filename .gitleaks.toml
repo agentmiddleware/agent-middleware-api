@@ -1,16 +1,18 @@
 # Secret-scanning config for CI.
 #
-# Scope note: CI scans the WORKING TREE for speed. History was separately
-# verified on 2026-08-24 with a full-history `gitleaks detect` under this
-# config across every ref — main plus all stale branches. The only real
-# credential ever committed is the 2026-08-06 leaked key (see
-# docs/api-key-rotation.md): main's flattened history no longer contains it,
-# but stale unmerged branches that preserve the pre-flatten history still do,
-# and so do old clones. The key was rotated dead at the provider — deleting a
-# secret from HEAD removes it from neither old refs nor old clones, so
-# rotation remains the only real remediation; pruning the stale branches
-# removes the reachable copies. Every other historical finding is synthetic
-# test material, allowlisted below.
+# Scope note: CI scans the WORKING TREE for speed. History was verified
+# separately with a full-history `gitleaks detect --log-opts=--all` under this
+# config, most recently on 2026-09-19. The only real credential ever committed
+# is the 2026-08-06 leaked key (see docs/api-key-rotation.md), and it is
+# reachable from main's own history — the 2026-08-24 note here previously
+# claimed the flattening had removed it from main and that pruning stale
+# branches would remove the reachable copies. Both were wrong: commit 9e45009
+# is an ancestor of origin/main, and `git log origin/main -S` finds the value
+# in three commits. The key was rotated dead at the provider on 2026-08-07,
+# which was always the only real remediation, and the incident record
+# deliberately publishes the retired value anyway. Do not restate the old
+# claim. Every other historical finding is synthetic test material or a
+# content hash, allowlisted below.
 
 [extend]
 useDefault = true
@@ -41,8 +43,22 @@ paths = [
   '''^tests/''',
   # The SDK's test suite does too (mock-transport clients with fake keys).
   '''^b2a_sdk/tests/''',
+  # So do the framework wrappers' suites — same reason, different tree. Without
+  # this a full-history scan reports the wrappers' fake api_key= kwargs.
+  '''^wrappers/[^/]+/tests/''',
   # Demo transcripts and copy-paste docs use placeholder keys.
   '''^docs/demo-.*\.md$''',
+  # Research manifests map source paths to SHA-256 content hashes. The generic
+  # rule reads `"app/core/auth.py": "<hash>"` as a credential named after the
+  # file, which is 76 of the findings on a full-history scan and none of the
+  # secrets. Hashes of public source are not secrets.
+  '''^docs/research/''',
+  # The generated proof transcript the public site renders records a digest of
+  # the trust keys, not the keys: `"keys_sha256": "<hex>"`. Scoped to this one
+  # generated file on purpose — allowlisting the value shape instead
+  # (^[0-9a-f]{64}$) would also exempt a hex-encoded Ed25519 signing key, which
+  # is the one credential class this repo can least afford to stop scanning for.
+  '''^site/proof/transcript\.json$''',
 ]
 
 regexes = [
