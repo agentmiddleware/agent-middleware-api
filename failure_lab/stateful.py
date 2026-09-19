@@ -1275,13 +1275,34 @@ class _SequenceRunner:
         return None, {"boundary": boundary, "simulated": True}
 
     async def _do_restart(self, params: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+        """Bring back whatever died, and drop the process's pooled state.
+
+        The downstream comes back up. The gateway's connection pool is
+        disposed, which is the part of a restart that is observable in
+        process: committed rows are untouched, and anything a dead activation
+        was holding is released. Nothing here recovers an in-flight call --
+        that is reconciliation's job, and a separate command.
+        """
         downstream_down = self.target.injector.crashed
         if not downstream_down and not self.gateway_crashed and self.pending_crash is None:
             return "nothing has crashed; there is nothing to restart", {}
         self.target.injector.restart()
         self.pending_crash = None
         self.gateway_crashed = False
-        return None, {"downstream_was_down": downstream_down}
+        pool_disposed = False
+        try:
+            from app.db.database import get_engine
+
+            engine = get_engine()
+            if engine is not None:
+                await engine.dispose()
+                pool_disposed = True
+        except Exception as exc:  # noqa: BLE001 - a restart that cannot recycle is still a restart
+            return None, {"downstream_was_down": downstream_down, "error": str(exc)}
+        return None, {
+            "downstream_was_down": downstream_down,
+            "gateway_pool_disposed": pool_disposed,
+        }
 
     async def _do_retry_same_key(
         self, params: dict[str, Any]
@@ -1910,12 +1931,16 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "DEFAULT_MAX_LENGTH",
+    "DEFAULT_SEQUENCES",
+    "DEFAULT_SHRINK_BUDGET",
+    "EXPLORED_CONFIGURATION",
+    "LIMITATIONS",
     "AtMostOneDispatchPerKey",
     "BudgetNotExceeded",
     "Command",
     "CommandKind",
     "CommandOutcome",
-    "EXPLORED_CONFIGURATION",
     "EveryDebitAccountedFor",
     "ExecutionsBoundedByAcceptedKeys",
     "Invariant",
