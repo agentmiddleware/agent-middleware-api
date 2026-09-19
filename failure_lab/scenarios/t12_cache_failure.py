@@ -254,7 +254,7 @@ class CacheFailure(Scenario):
             )
 
             # -- stage 2: the running limiter loses its cache -------------
-            for limiter in []:
+            for limiter in limiters:
                 limiter._redis_url = dead_url
                 limiter._redis = None
                 limiter._redis_warned = False
@@ -699,20 +699,30 @@ class CacheFailure(Scenario):
         )
         if redis_configured_at_boot:
             posture = (
-                f"a cache that was configured at boot (the dependency probe "
-                f"read redis {redis_status_at_boot!r}) and was then made "
-                f"unreachable"
+                f"The cache was configured before the injection -- the "
+                f"dependency probe read redis {redis_status_at_boot!r} -- so "
+                f"this run took a reachable cache away from a running gateway."
+            )
+            closing_shape = (
+                "and it models the real shape of this failure: a cache that "
+                "was reachable at boot and then died."
             )
         else:
             posture = (
-                f"a cache this posture did not have: the dependency probe read "
-                f"redis {redis_status_at_boot!r} before the injection, so the "
-                f"run did not kill a live cache -- it gave the gateway a "
-                f"configured cache it could not reach, which is the state a "
-                f"real outage leaves behind. Nothing that was serving from the "
-                f"cache was taken away, so what follows bounds the blast "
-                f"radius of an unreachable cache rather than proving the loop "
-                f"would still work had a working cache been removed from it"
+                f"What was injected is worth stating precisely: the dependency "
+                f"probe read redis {redis_status_at_boot!r} before the "
+                f"injection, so this posture had no cache to kill. The run "
+                f"gave the gateway a configured cache it could not reach -- "
+                f"the state a real outage leaves behind -- rather than taking "
+                f"a live cache away from it. What follows therefore bounds "
+                f"what an unreachable cache costs; it does not establish that "
+                f"a loop which had been served by a working cache would "
+                f"survive losing it."
+            )
+            closing_shape = (
+                "and that is as close as an unconfigured-cache posture gets to "
+                "the real shape of this failure -- with the caveat above, that "
+                "no cache was serving anything before the injection."
             )
         denial_cause = (
             " -- the permit-scope refusal this call was built to draw"
@@ -732,7 +742,7 @@ class CacheFailure(Scenario):
         )
         text = (
             f"With REDIS_URL pointed at a closed loopback port, the governed "
-            f"loop ran unchanged. The outage was injected into {posture}. "
+            f"loop ran unchanged. {posture} "
             f"Measured from the runtime's own flags, cleared immediately "
             f"before the loop and read immediately after it: {loop_touch}. "
             f"The clean call returned '{clean.status}' "
@@ -782,8 +792,7 @@ class CacheFailure(Scenario):
             f"{settings_only_redis_status!r} -- because REDIS_URL is copied into "
             f"the middleware when the stack is built. Rebinding the "
             f"{live_limiters} live limiter instance(s) is what made the outage "
-            f"reach the limiter, and it models the real shape of this failure: "
-            f"a cache that was reachable at boot and then died."
+            f"reach the limiter, {closing_shape}"
         )
         if problems:
             text += " Problems: " + "; ".join(problems) + "."
