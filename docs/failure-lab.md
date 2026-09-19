@@ -5,6 +5,13 @@ make failure-lab          # transcript + report, artifacts in data/failure-lab/<
 make failure-lab-check    # the same run, JSON summary only (what CI asserts)
 ```
 
+> A second, larger harness now lives alongside this one:
+> [`failure-lab-suite.md`](failure-lab-suite.md) documents the
+> `failure_lab/` package, which runs fourteen scenarios and produces a
+> signed evidence bundle. It covers this document's scenario too, and
+> reaches the same conclusion on it. This document describes the single
+> focused run that `make failure-lab` still executes.
+
 One consequential workflow (a vendor payout), one injected fault (the
 downstream executes, then its response is lost on the wire), measured across
 three integrations of the same simulated payment rail. The lab exists because
