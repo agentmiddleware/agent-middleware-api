@@ -303,6 +303,14 @@ class AgentRestartNewKey(Scenario):
             "caller_rebuilt_after_restart": rebuilt_caller,
             "fault": FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value,
             "first_attempt_fault_applied": fault_applied,
+            # Named so failure_lab.evidence._FAULT_KEYS_IN_EXTRA finds the
+            # armed failure even on a run where it never fired.
+            "fault_plan": {
+                "mode": FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value,
+                "operation_id": operation_id,
+                "hold_seconds": hold_seconds,
+                "applied_to_first_attempt": fault_applied,
+            },
             "hold_seconds": hold_seconds,
             "client_timeout_seconds": timeout_seconds,
             "first_attempt_status": first.status,

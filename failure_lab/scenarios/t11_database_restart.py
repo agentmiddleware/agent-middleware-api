@@ -897,7 +897,7 @@ class DatabaseRestart(Scenario):
             for case in cases
         ]
         summary = (
-            f"Across the three sub-cases: "
+            f"Across the {len(cases)} sub-case(s): "
             f"{totals['lost_accepted_operations']} lost accepted operation(s), "
             f"{totals['duplicate_dispatches']} duplicate dispatch(es), "
             f"{totals['duplicate_downstream_executions']} duplicate downstream "
@@ -1009,6 +1009,18 @@ class DatabaseRestart(Scenario):
         extra: dict[str, Any] = {
             "cases": cases,
             "case_order": [name for name, _ in CASES],
+            # Named so failure_lab.evidence._FAULT_KEYS_IN_EXTRA finds the
+            # injected failures. A database outage and a held boundary never
+            # cross the fault layer, so without this the evidence bundle's
+            # fault-injection table would record nothing for this scenario.
+            "injected": [
+                {
+                    "case": name,
+                    "failure": "database_outage",
+                    "held_at_boundary": boundary,
+                }
+                for name, boundary in CASES
+            ],
             "refused_connections": {
                 case["case"]: case["refused_connections"] for case in cases
             },

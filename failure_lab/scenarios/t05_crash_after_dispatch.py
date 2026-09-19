@@ -530,18 +530,23 @@ class CrashAfterDispatch(Scenario):
         case_b = cases[1]
         extra: dict[str, Any] = {
             "cases": cases,
+            # Named so failure_lab.evidence._FAULT_KEYS_IN_EXTRA finds the
+            # injected failures. A gateway crash never crosses the fault
+            # layer, so without this the evidence bundle's fault-injection
+            # table would record nothing for this scenario.
+            "crash_boundary": [boundary for boundary, _, _ in CASES],
             "client_timeout_seconds": timeout_seconds,
             "reconcile_idle_seconds": case_a.get("reconcile_idle_seconds"),
             "backdate_seconds": case_a.get("backdate_seconds"),
-            "gateway_dispatches_total": counters.gateway_dispatches,
-            "gateway_debits_total": counters.gateway_debits,
-            "gateway_refunds_total": counters.gateway_refunds,
-            "gateway_net_debits_total": counters.gateway_net_debits,
-            "gateway_sent_attempts_total": counters.gateway_sent_attempts,
-            "gateway_receipts_total": counters.receipts,
-            "receipt_outcomes_total": all_outcomes,
+            "gateway_dispatches_all_cases": counters.gateway_dispatches,
+            "gateway_debits_all_cases": counters.gateway_debits,
+            "gateway_refunds_all_cases": counters.gateway_refunds,
+            "gateway_net_debits_all_cases": counters.gateway_net_debits,
+            "gateway_sent_attempts_all_cases": counters.gateway_sent_attempts,
+            "receipts_all_cases": counters.receipts,
+            "receipt_outcomes_all_cases": all_outcomes,
             "receipts_claiming_success": len(overclaimed_total),
-            "downstream_executions_total": counters.downstream_executions,
+            "downstream_executions_all_cases": counters.downstream_executions,
             "sent_flag_note": (
                 "backdate_attempts writes dispatched_at on every attempt row of "
                 "the wallet, so the snapshot's 'sent' flag is not evidence after "

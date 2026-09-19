@@ -1140,9 +1140,24 @@ class RetentionExpiration(Scenario):
         }
 
         extra: dict[str, Any] = {
+            # "cases" is the suite-wide key for a per-sub-case table, so a
+            # report rendering all fourteen scenarios side by side can key on
+            # one field. The three named keys below are kept because this
+            # scenario's specification uses them, and each row is the same
+            # object as the value under its own name.
+            "cases": [
+                {"case": "aged_record", "in_verdict": True, **aged},
+                {"case": "effect_free_release", "in_verdict": True, **release},
+                {"case": "record_removed", "in_verdict": False, **removed},
+            ],
             "aged_record": aged,
             "effect_free_release": release,
             "record_removed": removed,
+            # Named so failure_lab.evidence._FAULT_KEYS_IN_EXTRA finds the
+            # injected failure: a gateway crash never crosses the fault layer,
+            # so without this the evidence bundle's fault-injection table
+            # would record nothing for this scenario.
+            "crash_boundary": CRASH_BOUNDARY,
             "retention_policy_observed": retention_policy_observed,
             "cases_in_verdict": ["aged_record", "effect_free_release"],
             "cases_descriptive_only": ["record_removed"],

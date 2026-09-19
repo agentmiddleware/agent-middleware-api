@@ -646,13 +646,13 @@ class CrashBeforeDispatch(Scenario):
             ),
             "verdict_failures": failures,
             "wallet_balance": snapshot.wallet_balance if snapshot else None,
-            "gateway_dispatches_all_sub_cases": measurements.counters.gateway_dispatches,
-            "downstream_executions_all_sub_cases": measurements.downstream_executions,
-            "gateway_debits_all_sub_cases": measurements.counters.gateway_debits,
-            "gateway_refunds_all_sub_cases": measurements.counters.gateway_refunds,
-            "gateway_net_debits_all_sub_cases": measurements.counters.gateway_net_debits,
-            "receipts_all_sub_cases": measurements.counters.receipts,
-            "receipt_outcomes_all_sub_cases": measurements.receipt_outcomes(),
+            "gateway_dispatches_all_cases": measurements.counters.gateway_dispatches,
+            "downstream_executions_all_cases": measurements.downstream_executions,
+            "gateway_debits_all_cases": measurements.counters.gateway_debits,
+            "gateway_refunds_all_cases": measurements.counters.gateway_refunds,
+            "gateway_net_debits_all_cases": measurements.counters.gateway_net_debits,
+            "receipts_all_cases": measurements.counters.receipts,
+            "receipt_outcomes_all_cases": measurements.receipt_outcomes(),
         }
 
         lines = [

@@ -441,6 +441,12 @@ class PermitRevocationRace(Scenario):
             "and the authorize/reserve/prepare commit, so this test brackets "
             "the authorization point to 'at or before after_prepare' rather "
             "than pinpointing it inside that transaction.",
+            "The interleavings run in one process against SQLite, where the "
+            "permit read and the authorize/reserve/prepare commit are "
+            "serialized by a single writer. PostgreSQL's row-lock path, "
+            "multiple gateway processes and replica lag are not exercised, so "
+            "where authorization linearizes here is not by itself a statement "
+            "about where it linearizes in production.",
             "The reason a control refusal is attributed to revocation is the "
             "gateway's own reason code, which is not an independent "
             "observation. What is independent is that the fault layer saw no "
@@ -481,6 +487,9 @@ class PermitRevocationRace(Scenario):
                     "first_interleaving_revocation_did_not_stop": first_admitted,
                     "summary": point_sentence,
                 },
+                # Same list under both names: "cases" is the suite-wide key
+                # for a per-sub-case table.
+                "cases": records,
                 "interleavings": records,
                 "post_revocation_control": control,
             },
@@ -607,6 +616,11 @@ class PermitRevocationRace(Scenario):
         )
         record.update(
             {
+                # ``case`` is the suite-wide name for a sub-case row, so a
+                # report rendering all fourteen scenarios can key on one
+                # field; ``interleaving`` is this scenario's own name and is
+                # kept because its specification uses it.
+                "case": name,
                 "interleaving": name,
                 "boundary": boundary,
                 "boundary_meaning": BOUNDARY_MEANING[name],
