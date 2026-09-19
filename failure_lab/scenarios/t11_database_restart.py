@@ -104,13 +104,17 @@ async def _submit(
 ) -> AttemptOutcome:
     """Submit, recording an exception raised *through* the ASGI app as an attempt.
 
-    With no database, the gateway's request handling raises rather than
-    answering, and the lab's in-process transport
+    With no database, some of the gateway's request handling raises rather
+    than answering, and the lab's in-process transport
     (``httpx.ASGITransport(raise_app_exceptions=True)``) re-raises that
     exception in the caller instead of turning it into a response. A deployed
     server would answer 500 with no body. Both leave the caller in the same
-    epistemic position -- no information about the business operation -- so
-    that is what this records, with the exception text kept verbatim.
+    epistemic position -- no information about the business operation.
+
+    ``GatewayUnderTest.invoke`` now classifies that case itself as
+    ``gateway_error``; this is the backstop for any path that does not, so a
+    scenario whose whole subject is "the database is gone" reports a row
+    rather than erroring out. The exception text is kept verbatim either way.
     """
     started = time.perf_counter()
     try:
@@ -120,13 +124,14 @@ async def _submit(
         return AttemptOutcome(
             configuration=configuration,
             identity=identity.as_dict(),
-            status="transport_error",
+            status="gateway_error",
             client_visible_state="no_information",
             http_status=None,
             latency_ms=(time.perf_counter() - started) * 1000,
             reason="; ".join(leaves)[:400],
             details={
                 "raised_through_asgi_transport": True,
+                "classified_by": "scenario backstop, not GatewayUnderTest.invoke",
                 "exception_type": type(exc).__name__,
                 "exception_leaves": leaves,
                 "note": (
@@ -302,7 +307,13 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
     safely_retryable = bool(
         retry_definitive and not duplicate_dispatches and not duplicate_executions
     )
-    lost = int(bool(admitted and not ended_terminal and not safely_retryable))
+    #: The PRD's phrase, counted literally: the gateway admitted the operation
+    #: and recovery left it without a terminal state. Reported on its own
+    #: because it is not automatically a loss -- an admitted record that
+    #: recovery *released* so the same key can genuinely retry ends with no
+    #: terminal state and no damage.
+    admitted_without_terminal = int(bool(admitted and not ended_terminal))
+    lost = int(bool(admitted_without_terminal and not safely_retryable))
 
     problems: list[str] = []
     if duplicate_dispatches:
@@ -370,6 +381,7 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
         "inconsistent_debits": inconsistent_debits,
         "corrupted_state": corrupted_state,
         "lost_accepted_operations": lost,
+        "admitted_without_terminal_state": admitted_without_terminal,
     }
     return disposition, problems, measures
 
@@ -444,6 +456,9 @@ class DatabaseRestart(Scenario):
         timeout_seconds = float(
             self.options.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
         )
+        #: Off only to demonstrate what the harness artifact described in
+        #: :func:`_restore_never_dispatched` does to the measurement.
+        restore_dispatched_at = bool(self.options.get("restore_dispatched_at", True))
 
         attempts: list[AttemptOutcome] = []
         operation_ids: list[str] = []
@@ -457,6 +472,7 @@ class DatabaseRestart(Scenario):
                 boundary=boundary,
                 backdate_seconds=backdate_seconds,
                 timeout_seconds=timeout_seconds,
+                restore_dispatched_at=restore_dispatched_at,
             )
             cases.append(case)
             attempts.extend(case_attempts)
@@ -769,6 +785,7 @@ class DatabaseRestart(Scenario):
                 "inconsistent_debits",
                 "corrupted_state",
                 "lost_accepted_operations",
+                "admitted_without_terminal_state",
             )
         }
         verdict = Verdict.PASS if not failures else Verdict.FAIL
@@ -803,7 +820,11 @@ class DatabaseRestart(Scenario):
             f"execution(s), {totals['inconsistent_debits']} inconsistent "
             f"debit(s) (a debit with neither a receipt nor a refund after "
             f"recovery), and {totals['corrupted_state']} attempt row(s) in no "
-            f"valid state."
+            f"valid state. "
+            f"{totals['admitted_without_terminal_state']} admitted key(s) ended "
+            f"without a terminal state (of which "
+            f"{totals['lost_accepted_operations']} were also not safely "
+            f"retryable, which is what makes a loss)."
         )
         recovery_behavior = (
             "Recovery behavior: "
@@ -878,6 +899,9 @@ class DatabaseRestart(Scenario):
                 int(case["refused_connections"]) for case in cases
             ),
             "lost_accepted_operations": totals["lost_accepted_operations"],
+            "admitted_without_terminal_state": totals[
+                "admitted_without_terminal_state"
+            ],
             "duplicate_dispatches": totals["duplicate_dispatches"],
             "duplicate_downstream_executions": totals[
                 "duplicate_downstream_executions"
