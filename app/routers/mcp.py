@@ -32,7 +32,11 @@ from sqlalchemy.exc import IntegrityError
 
 from ..audit.lightweight import record_audit
 from ..core.config import get_settings
-from ..core.auth import AuthContext, get_auth_context, reject_anonymous_production_catalog
+from ..core.auth import (
+    AuthContext,
+    get_auth_context,
+    reject_anonymous_production_catalog,
+)
 from ..core.oidc_iga import (
     EnterprisePrincipal,
     IGAError,
@@ -1366,9 +1370,16 @@ async def _execute_registered_tool_inner(
 
     simulation = False
     try:
-        from ..core.runtime_mode import is_simulation
+        from ..core.runtime_mode import SERVICE_NAMES, is_simulation
 
-        simulation = is_simulation(category.value)
+        # A category outside SERVICE_NAMES has no SIMULATION_MODE_* setting
+        # to read, so there is nothing to look up and nothing to warn about.
+        # truth_for_category() applies the same rule when it labels such a
+        # category "platform" for /mcp/tools.json. These keep the fail-open
+        # default set above; a genuine lookup failure for a flagged category
+        # still falls through to the warning.
+        if category.value in SERVICE_NAMES:
+            simulation = is_simulation(category.value)
     except Exception as exc:
         # Default to real-effects (simulation=False) but surface the
         # misconfiguration instead of swallowing it silently.
