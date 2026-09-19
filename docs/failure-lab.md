@@ -257,6 +257,39 @@ charge refunded. No business effect lands, which is what matters for safety,
 but the refusal is the downstream's rather than the permit's. "Enforcement
 happens before dispatch" is true of authority and false of argument validity.
 
+### What the tampering matrix found
+
+`T10` exports a real receipt, edits one field at a time, and checks each copy
+with the independent verifier. Every one of the ten edits inside
+`signing_input` broke the signature. Six envelope fields were also edited; two
+of them (`kid`, `receipt_id`) are mirrored inside the signed payload and the
+verifier caught the disagreement, and four are not:
+
+    issuer   canonicalization   schema_version   keys_url
+
+Those four were edited and the signature still verified. That is a property of
+the format, not a defect, but it has to be stated rather than implied: a
+holder who trusts the `issuer` line on a bundle is trusting an unauthenticated
+string.
+
+**The gateway's own verify endpoint cannot detect a tampered bundle.**
+`POST /v1/receipts/verify` takes a `receipt_id`, so it re-verifies the copy the
+gateway holds. Hand it the id from an edited bundle and it answers `valid:
+true` for every one of the cases above, because it never looks at the bundle.
+That is the endpoint working as designed and it is also the reason the plan
+requires an independent verifier: to check the artifact in your hand, verify
+its `signing_input` bytes offline, with
+[`failure_lab/verifier.py`](../failure_lab/verifier.py) or
+[`b2a_sdk.receipt_verifier`](../b2a_sdk/README.md). Neither imports the
+application.
+
+**An exported bundle does not carry enough to find the key.** `keys_url` is a
+relative path and `issuer` is whatever `PUBLIC_URL` was set to, which in a
+sandbox is empty. Neither is signed. An offline holder therefore has to know
+the issuing origin from somewhere else before the signature means anything —
+which is the first-party key distribution limitation, arriving from a
+different direction.
+
 ### T06 is expected to fail, and it stays
 
 An agent that restarts and replans may mint a **new** idempotency key for the
