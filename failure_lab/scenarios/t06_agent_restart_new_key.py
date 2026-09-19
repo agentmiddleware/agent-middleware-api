@@ -163,6 +163,20 @@ class AgentRestartNewKey(Scenario):
         )
 
         first = await target.agent.submit(identity, refund, timeout_seconds=timeout_seconds)
+
+        # Read the independent instruments BEFORE the replan. Everything the
+        # narrative below says about the first attempt -- that it executed,
+        # that the armed fault is what withheld its response -- is measured
+        # here rather than assumed from the fact that a plan was armed.
+        executions_before_restart = target.ledger.execution_count(operation_id)
+        crossings_before_restart = target.injector.crossings(operation_id=operation_id)
+        requests_before_restart = len(crossings_before_restart)
+        fault_applied = any(
+            crossing.fault == FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value
+            and crossing.reached_tool
+            and not crossing.delivered
+            for crossing in crossings_before_restart
+        )
         log.emit(
             "attempt.first",
             (
@@ -182,8 +196,9 @@ class AgentRestartNewKey(Scenario):
             receipt_id=first.receipt_id,
             receipt_outcome=first.receipt.get("outcome") if first.receipt else None,
             latency_ms=round(first.latency_ms, 3),
-            executions_so_far=target.ledger.execution_count(operation_id),
-            downstream_requests_so_far=target.injector.dispatch_count(operation_id),
+            executions_so_far=executions_before_restart,
+            downstream_requests_so_far=requests_before_restart,
+            first_attempt_fault_applied=fault_applied,
         )
 
         # -- the restart: a fresh agent incarnation replans the same intent --
@@ -241,19 +256,28 @@ class AgentRestartNewKey(Scenario):
         measurements = await self.measure(target, attempts, operation_ids=[operation_id])
         ledger_count = target.ledger.execution_count(operation_id)
         layer_requests = target.injector.dispatch_count(operation_id)
-        deduplicated_by = self._deduplicated_by(target, ledger_count, layer_requests)
+        replan_requests = max(0, layer_requests - requests_before_restart)
+        deduplicated_by = self._deduplicated_by(
+            target, ledger_count, executions_before_restart, replan_requests
+        )
+        premise = self._first_attempt_premise(executions_before_restart, fault_applied)
 
         log.emit(
             "measure.instruments",
             (
-                f"effect ledger (independent): {ledger_count} execution(s); "
-                f"fault layer (independent): {layer_requests} request(s) into "
-                f"the tool; deduplicated_by={deduplicated_by}"
+                f"effect ledger (independent): {ledger_count} execution(s), "
+                f"{executions_before_restart} of them committed before the "
+                f"restart; fault layer (independent): {layer_requests} "
+                f"request(s) into the tool, {replan_requests} of them after the "
+                f"restart; deduplicated_by={deduplicated_by}"
             ),
             scenario=self.test_id,
             configuration=target.configuration.value,
             downstream_executions=ledger_count,
             downstream_requests=layer_requests,
+            executions_before_restart=executions_before_restart,
+            replan_downstream_requests=replan_requests,
+            first_attempt_fault_applied=fault_applied,
             deduplicated_by=deduplicated_by,
             gateway_debits=measurements.counters.gateway_debits,
             gateway_refunds=measurements.counters.gateway_refunds,
@@ -278,6 +302,7 @@ class AgentRestartNewKey(Scenario):
             "agent_generations": [identity.agent_generation, restarted.agent_generation],
             "caller_rebuilt_after_restart": rebuilt_caller,
             "fault": FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value,
+            "first_attempt_fault_applied": fault_applied,
             "hold_seconds": hold_seconds,
             "client_timeout_seconds": timeout_seconds,
             "first_attempt_status": first.status,
@@ -295,7 +320,11 @@ class AgentRestartNewKey(Scenario):
             "restart_served_from_stored_result": second.status == "replayed"
             or bool(second.refund and second.refund.get("replayed")),
             "effect_ledger_execution_count": ledger_count,
+            "effect_ledger_executions_before_restart": executions_before_restart,
             "fault_layer_downstream_requests": layer_requests,
+            "fault_layer_requests_before_restart": requests_before_restart,
+            "fault_layer_requests_after_restart": replan_requests,
+            "executed_once": ledger_count == 1,
             "duplicate_executions": duplicate_executions,
             "value_at_risk_minor_units": duplicate_executions * AMOUNT_MINOR_UNITS,
             "amount_minor_units_per_execution": AMOUNT_MINOR_UNITS,
@@ -305,36 +334,82 @@ class AgentRestartNewKey(Scenario):
 
         if target.uses_gateway:
             return self._gateway_result(
-                target, log, attempts, measurements, extra, ledger_count, layer_requests
+                target, log, attempts, measurements, extra, premise, ledger_count, layer_requests
             )
         if target.configuration is Configuration.DIRECT_NATIVE:
             return self._direct_native_result(
-                target, log, attempts, measurements, extra, ledger_count, layer_requests
+                target, log, attempts, measurements, extra, premise, ledger_count, layer_requests
             )
         return self._direct_naive_result(
-            target, log, attempts, measurements, extra, ledger_count, layer_requests
+            target, log, attempts, measurements, extra, premise, ledger_count, layer_requests
+        )
+
+    # -- what the first attempt actually did ------------------------------
+
+    def _first_attempt_premise(
+        self, executions_before_restart: int, fault_applied: bool
+    ) -> str:
+        """State the first attempt's outcome from the instruments, not the plan.
+
+        Arming a fault is not evidence that it fired, and this scenario's whole
+        point rests on the first attempt having *executed* before its response
+        went missing. Every observation opens with whichever of these three
+        sentences the effect ledger and the fault layer actually support.
+        """
+        if executions_before_restart >= 1 and fault_applied:
+            return (
+                "The tool executed and committed (effect ledger, independent: "
+                f"{executions_before_restart} execution(s) before the restart) "
+                "and the fault layer then withheld the response it had already "
+                "produced"
+            )
+        if executions_before_restart >= 1:
+            return (
+                "The tool executed and committed (effect ledger, independent: "
+                f"{executions_before_restart} execution(s) before the restart), "
+                "but the armed response-loss fault was NOT recorded on the "
+                "first attempt's crossing, so whatever the caller saw was not "
+                "the injected failure"
+            )
+        return (
+            "PREMISE NOT ESTABLISHED: the first attempt committed no downstream "
+            "effect at all (effect ledger, independent: 0 executions before the "
+            "restart), so this run did not reproduce the executed-but-"
+            "unacknowledged call the scenario is about, and nothing below should "
+            "be read as measuring it"
         )
 
     # -- which layer, if any, absorbed the replanned attempt --------------
 
     def _deduplicated_by(
-        self, target: Target, ledger_count: int, layer_requests: int
+        self,
+        target: Target,
+        ledger_count: int,
+        executions_before_restart: int,
+        replan_requests: int,
     ) -> str:
         """Name the layer that stopped the replan from becoming a second effect.
 
-        The fault layer sits between the caller (gateway or agent) and the
-        tool, so ``layer_requests`` counts what actually reached the tool. One
-        request with a gateway in front means the gateway absorbed the replan;
-        two requests with one effect means the tool absorbed it; two effects
-        means nothing did.
+        A layer only earns the credit if there was a duplicate to stop: the
+        first attempt must already have committed an effect, and the run must
+        have ended with exactly that one effect. Otherwise -- two effects, or a
+        single effect that the *replan* rather than the first attempt produced,
+        or no effect at all -- nothing deduplicated anything, whatever the
+        request counts look like.
+
+        Given a real duplicate to stop, the fault layer says who stopped it: it
+        sits between the caller (gateway or agent) and the tool, so a replan
+        that produced no crossing never reached the tool and was absorbed in
+        front of it, while a replan that did cross was absorbed inside it.
         """
-        if ledger_count > 1:
+        if ledger_count != 1 or executions_before_restart != 1:
             return DEDUPLICATED_BY_NOTHING
-        if target.uses_gateway and layer_requests <= 1:
-            return DEDUPLICATED_BY_GATEWAY
-        if layer_requests > 1 and ledger_count == 1:
-            return DEDUPLICATED_BY_DOWNSTREAM
-        return DEDUPLICATED_BY_NOTHING
+        if replan_requests == 0:
+            # In front of the tool. With a gateway there, that is the gateway;
+            # on the direct path there is no layer in front, so the replan
+            # simply never left the client and nothing deduplicated it.
+            return DEDUPLICATED_BY_GATEWAY if target.uses_gateway else DEDUPLICATED_BY_NOTHING
+        return DEDUPLICATED_BY_DOWNSTREAM
 
     # -- per-configuration verdicts --------------------------------------
 
@@ -345,6 +420,7 @@ class AgentRestartNewKey(Scenario):
         attempts: list[AttemptOutcome],
         measurements: Measurements,
         extra: dict[str, Any],
+        premise: str,
         ledger_count: int,
         layer_requests: int,
     ) -> ConfigurationResult:
@@ -352,8 +428,8 @@ class AgentRestartNewKey(Scenario):
         duplicates = extra["duplicate_executions"]
 
         observation = (
-            f"The tool executed and committed, then its response was withheld; "
-            f"the agent saw '{first.status}' ({first.client_visible_state}) and "
+            f"{premise}; the agent saw '{first.status}' "
+            f"({first.client_visible_state}) and "
             f"died. A fresh incarnation replanned the same business operation "
             f"({extra['operation_id']}) and, having no memory of the old key, "
             f"presented a new one ({extra['first_idempotency_key']} -> "
@@ -363,9 +439,10 @@ class AgentRestartNewKey(Scenario):
             f"this operation -- {duplicates} beyond the one the agent intended, "
             f"{extra['value_at_risk_minor_units']} minor units of unintended "
             f"refund -- and the fault layer counted {layer_requests} request(s) "
-            f"reaching the tool. Nothing here deduplicates on anything: not on "
-            f"the key, which changed, and not on the business operation id, "
-            f"which did not. Deduplicated by: {extra['deduplicated_by']}. "
+            f"reaching the tool ({extra['fault_layer_requests_after_restart']} "
+            f"of them after the restart). This tool deduplicates on nothing: "
+            f"not on the key, which changed, and not on the business operation "
+            f"id, which did not. Deduplicated by: {extra['deduplicated_by']}. "
             f"Descriptive baseline, no guarantee to test."
         )
         risks = [
@@ -403,35 +480,55 @@ class AgentRestartNewKey(Scenario):
         attempts: list[AttemptOutcome],
         measurements: Measurements,
         extra: dict[str, Any],
+        premise: str,
         ledger_count: int,
         layer_requests: int,
     ) -> ConfigurationResult:
         first, second = attempts
 
         failures: list[str] = []
-        if ledger_count != 1:
+        if ledger_count > 1:
             failures.append(
-                f"downstream executions (effect ledger) = {ledger_count}, want 1"
+                f"downstream executions (effect ledger) = {ledger_count}, want 1 "
+                "-- the restarted agent's replan executed the refund again"
+            )
+        elif ledger_count != 1:
+            failures.append(
+                f"downstream executions (effect ledger) = {ledger_count}, want 1 "
+                "-- the intended refund never executed, so this run does not "
+                "establish the native baseline either way"
             )
         extra["verdict_failures"] = failures
         verdict = Verdict.PASS if not failures else Verdict.FAIL
 
+        if extra["deduplicated_by"] == DEDUPLICATED_BY_DOWNSTREAM:
+            absorption = (
+                "The replanned request did reach the tool and was absorbed "
+                "inside it: the new key was irrelevant, because this downstream "
+                "keys its idempotency on the business operation_id, which "
+                "survived the restart. A correctly built downstream handles an "
+                "agent restart on its own, with no gateway present"
+            )
+        else:
+            absorption = (
+                "No layer absorbed a duplicate here -- the run did not end with "
+                "the first attempt's single effect, so the native control was "
+                "not what this run exercised"
+            )
+
         observation = (
-            f"The tool executed and committed, then its response was withheld; "
-            f"the agent saw '{first.status}' ({first.client_visible_state}) and "
+            f"{premise}; the agent saw '{first.status}' "
+            f"({first.client_visible_state}) and "
             f"died. A fresh incarnation replanned the same business operation "
             f"({extra['operation_id']}) under a brand-new idempotency key "
             f"({extra['first_idempotency_key']} -> "
             f"{extra['restart_idempotency_key']}) and got '{second.status}' "
             f"({second.client_visible_state}). The independent effect ledger "
             f"recorded {ledger_count} downstream execution(s) and the fault "
-            f"layer counted {layer_requests} request(s) reaching the tool, so "
-            f"the replanned request did reach the tool and was absorbed inside "
-            f"it. The new key was irrelevant: this downstream keys its "
-            f"idempotency on the business operation_id, which survived the "
-            f"restart. Deduplicated by: {extra['deduplicated_by']}. A correctly "
-            f"built downstream handles an agent restart on its own, with no "
-            f"gateway present."
+            f"layer counted {layer_requests} request(s) reaching the tool, "
+            f"{extra['fault_layer_requests_after_restart']} of them after the "
+            f"restart. {absorption}. Deduplicated by: "
+            f"{extra['deduplicated_by']}."
         )
         if failures:
             observation += (
@@ -476,6 +573,7 @@ class AgentRestartNewKey(Scenario):
         attempts: list[AttemptOutcome],
         measurements: Measurements,
         extra: dict[str, Any],
+        premise: str,
         ledger_count: int,
         layer_requests: int,
     ) -> ConfigurationResult:
@@ -492,7 +590,7 @@ class AgentRestartNewKey(Scenario):
             [a["state"] for a in snapshot.attempts] if snapshot is not None else []
         )
         records = snapshot.idempotency_records if snapshot is not None else []
-        duplicate_debits = max(0, (debits or 0) - 1)
+        duplicate_debits = max(0, debits - 1) if debits is not None else None
 
         extra.update(
             {
@@ -515,18 +613,34 @@ class AgentRestartNewKey(Scenario):
                     and second.receipt_id is not None
                     and first.receipt_id != second.receipt_id
                 ),
-                "paid_twice": (debits or 0) > 1,
+                "paid_twice": (debits > 1) if debits is not None else None,
+                "executed_once": ledger_count == 1,
+                "paid_once": (debits == 1) if debits is not None else None,
             }
         )
 
         failures: list[str] = []
-        if ledger_count != 1:
+        if ledger_count > 1:
             failures.append(
                 f"downstream executions (effect ledger) = {ledger_count}, want 1 "
                 "-- one intended refund executed more than once"
             )
+        elif ledger_count != 1:
+            failures.append(
+                f"downstream executions (effect ledger) = {ledger_count}, want 1 "
+                "-- the intended refund never executed, so this run does not "
+                "establish the property either way"
+            )
         if target.configuration is Configuration.GATEWAY_NATIVE:
-            if debits is not None and debits != 1:
+            # The documented rule for this configuration gates on the debit as
+            # well as the execution. An unreadable debit count is a failure to
+            # establish that half, never a silently skipped assertion.
+            if debits is None:
+                failures.append(
+                    "gateway debits (gateway-reported) could not be read, so "
+                    "'paid for at most once' was not established"
+                )
+            elif debits != 1:
                 failures.append(
                     f"gateway debits (gateway-reported) = {debits}, want 1 -- one "
                     "intended refund was paid for more than once"
@@ -534,32 +648,66 @@ class AgentRestartNewKey(Scenario):
         extra["verdict_failures"] = failures
         verdict = Verdict.PASS if not failures else Verdict.FAIL
 
+        # The property the CLAIM states, measured directly and independently of
+        # whichever half this configuration's verdict rule happens to gate on.
+        executed_once = ledger_count == 1
+        paid_once = debits == 1 if debits is not None else None
+        property_held = executed_once and paid_once is True
+        extra["business_property_held"] = property_held
+
         dedup = extra["deduplicated_by"]
+        replan_requests = extra["fault_layer_requests_after_restart"]
+        downstream_clause = (
+            "the downstream, whose native operation_id idempotency did not "
+            "absorb it either"
+            if target.configuration.native_idempotency
+            else "the downstream, which has no idempotency of its own"
+        )
         if dedup == DEDUPLICATED_BY_GATEWAY:
             layer_sentence = (
-                "The gateway prevented the duplicate: only one request crossed "
-                "the fault layer into the tool."
+                "The gateway is what stopped the replanned attempt: it never "
+                "reached the tool (no crossing after the restart), and the "
+                f"caller got '{second.status}' "
+                f"({second.client_visible_state}) back. Read that status before "
+                "crediting replay protection -- a refusal also produces no "
+                "crossing."
             )
         elif dedup == DEDUPLICATED_BY_DOWNSTREAM:
             layer_sentence = (
                 "The layer that prevented the duplicate was THE DOWNSTREAM, NOT "
                 "THE GATEWAY: the gateway treated the new key as a new operation "
-                f"and dispatched again ({layer_requests} request(s) crossed into "
-                "the tool), and the tool's own operation_id idempotency absorbed "
-                "the second one. Remove the native control and the duplicate "
-                "lands."
+                f"and dispatched again ({replan_requests} request(s) crossed "
+                "into the tool after the restart), and the tool's own "
+                "operation_id idempotency absorbed it. Remove the native control "
+                "and the duplicate lands."
             )
         else:
             layer_sentence = (
-                "NOTHING prevented the duplicate: neither the gateway, which "
-                "saw a new key and therefore a new operation, nor the "
-                f"downstream, which has no idempotency of its own. "
-                f"{layer_requests} request(s) crossed into the tool and "
-                f"{ledger_count} execution(s) committed."
+                "NOTHING prevented a duplicate here: neither the gateway, which "
+                f"saw a new key and therefore a new operation, nor "
+                f"{downstream_clause}. {layer_requests} request(s) crossed into "
+                f"the tool ({replan_requests} after the restart) and "
+                f"{ledger_count} execution(s) committed "
+                f"({extra['effect_ledger_executions_before_restart']} of them "
+                "before the restart)."
+            )
+
+        if debits is None:
+            charge_sentence = (
+                "The gateway's own debit count could not be read from its "
+                "snapshot, so the 'paid for at most once' half of the property "
+                "is unestablished in this run."
+            )
+        else:
+            charge_sentence = (
+                "The gateway's replay guarantee is keyed on the idempotency key, "
+                "and the key changed, so from the gateway's point of view these "
+                f"are two operations: it recorded {debits} debit(s) for the one "
+                f"refund the agent intended, {duplicate_debits} beyond it."
             )
 
         observation = (
-            f"The tool executed and committed, then its response was withheld; "
+            f"{premise}; "
             f"the first attempt came back '{first.status}' "
             f"({first.client_visible_state}) with receipt {first.receipt_id}. "
             f"The agent then died and a fresh incarnation replanned the SAME "
@@ -575,23 +723,38 @@ class AgentRestartNewKey(Scenario):
             f"the send boundary in state(s) {attempt_states or ['none']}, "
             f"{debits} debit(s) and {refunds} refund(s) for a net {net_debits}, "
             f"{len(records)} idempotency record(s), and {receipt_count} "
-            f"receipt(s) recording {outcomes or ['none']}. {layer_sentence} "
-            f"Deduplicated by: {dedup}. The gateway's replay guarantee is keyed "
-            f"on the idempotency key, and the key changed, so from the gateway's "
-            f"point of view these are two operations and it charged for both: "
-            f"{duplicate_debits} debit(s) beyond the one the agent intended. "
+            f"receipt(s) recording {outcomes or ['none']}. Those last figures "
+            f"are the gateway's account of itself, not an independent one. "
+            f"{layer_sentence} Deduplicated by: {dedup}. {charge_sentence} "
             f"The business-level property under test -- one intended refund, "
             f"executed at most once and paid for at most once -- is therefore "
-            f"{'held' if verdict is Verdict.PASS else 'NOT held'} here."
+            f"{'held' if property_held else 'NOT held'} here "
+            f"(executed once: {executed_once}; paid once: {paid_once})."
         )
         if failures:
-            observation += " Business-level property not met: " + "; ".join(failures) + "."
-        observation += (
-            " Scope note: this gap is outside the guarantee the product states, "
-            "which is per idempotency key, not per business operation. It is "
-            "reported as a real business-level gap and as an out-of-scope one at "
-            "the same time; neither half should be dropped."
-        )
+            observation += " Verdict rule not met: " + "; ".join(failures) + "."
+        if verdict is Verdict.PASS and not property_held:
+            observation += (
+                " NOTE: this configuration's documented verdict rule gates only "
+                "on downstream executions, so the verdict reads PASS while the "
+                "business-level property above did NOT hold. The verdict is the "
+                "narrower statement; the claim is the wider one, and it failed."
+            )
+        if property_held:
+            observation += (
+                " Scope note: no business-level gap was observed in this run. "
+                "The guarantee the product states is per idempotency key, not "
+                "per business operation, so a run that holds here holds by more "
+                "than that guarantee promises."
+            )
+        else:
+            observation += (
+                " Scope note: this gap is outside the guarantee the product "
+                "states, which is per idempotency key, not per business "
+                "operation. It is reported as a real business-level gap and as "
+                "an out-of-scope one at the same time; neither half should be "
+                "dropped."
+            )
 
         risks = [
             "The gateway has no notion of the business operation. Nothing in "
@@ -613,7 +776,7 @@ class AgentRestartNewKey(Scenario):
                 "as evidence that the gateway prevents duplicate refunds would "
                 "be reading it wrong."
             )
-        if (debits or 0) > 1:
+        if debits is not None and debits > 1:
             risks.append(
                 "The charge for the second attempt is retained: the first "
                 "attempt's delivery was uncertain, so the gateway does not "
@@ -634,6 +797,7 @@ class AgentRestartNewKey(Scenario):
             receipts=receipt_count,
             receipt_outcomes=outcomes,
             deduplicated_by=dedup,
+            business_property_held=property_held,
             failures=failures,
         )
         return self.result(
