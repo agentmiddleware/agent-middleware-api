@@ -59,12 +59,21 @@ TERMINAL_ATTEMPT_STATES = frozenset(
 ACTIVE_ATTEMPT_STATES = frozenset({"prepared", "dispatched", "dispatch_claimed"})
 VALID_ATTEMPT_STATES = TERMINAL_ATTEMPT_STATES | ACTIVE_ATTEMPT_STATES
 
-#: Client-visible states that are a definitive answer about the business
-#: operation. ``explicit_uncertain`` is definitive: it is a signed statement
-#: that the outcome is unknowable, not an absence of information.
-DEFINITIVE_CLIENT_STATES = frozenset(
-    {"confirmed_success", "confirmed_replay", "confirmed_rejected", "explicit_uncertain"}
+#: Client-visible states that RESOLVE the business operation: the caller is
+#: told what happened and needs nothing further. ``explicit_uncertain`` is
+#: deliberately absent. It is a truthful answer and it is better than silence,
+#: but it is not a resolution -- retrying the same key answers "unknowable"
+#: again, for ever. A key the gateway admitted, that recovery left without a
+#: terminal state, and whose same-key retry only ever says "uncertain" is
+#: stuck: that is the PRD's lost accepted operation, not a safe retry.
+RESOLVING_CLIENT_STATES = frozenset(
+    {"confirmed_success", "confirmed_replay", "confirmed_rejected"}
 )
+
+#: States that are a definitive *answer* (a resolution, or a signed statement
+#: that the outcome is unknowable). Reported for context; the verdict uses
+#: :data:`RESOLVING_CLIENT_STATES`, which is the stricter set.
+DEFINITIVE_CLIENT_STATES = RESOLVING_CLIENT_STATES | frozenset({"explicit_uncertain"})
 
 #: How far back attempt rows are aged so the reconciler treats them as
 #: abandoned. The real window a live claim gets is 11,430 seconds.
@@ -280,18 +289,32 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
     The counted measures are: duplicate dispatches (fault-layer crossings
     beyond the first for one key), duplicate downstream executions
     (effect-ledger rows beyond the first), inconsistent debits (a debit with
-    neither a receipt nor a refund after recovery), corrupted state (an
-    attempt row in no valid state), ``admitted_without_terminal_state`` (the
-    PRD's phrase counted literally), and ``lost_accepted_operations`` -- the
-    subset of those the same-key retry could not resolve either, which is
-    what makes an admitted operation actually lost.
+    neither a receipt nor a refund -- checked both immediately after
+    reconciliation and again at the end of the sub-case, because in the
+    sub-case that was never admitted the key's only debit is the one the
+    post-recovery retry creates, so the after-recovery window alone is empty
+    for it and would make the measure vacuous), corrupted state (an attempt
+    row in no valid state), ``admitted_without_terminal_state`` (the PRD's
+    phrase counted literally), and ``lost_accepted_operations`` -- the subset
+    of those the same-key retry could not resolve either, which is what makes
+    an admitted operation actually lost.
+
+    It also raises the problems that make the *measurement* trustworthy
+    rather than merely favourable: the sub-case has to have landed where it
+    says it did, the outage has to have refused something, and a sub-case
+    that reports "nothing happened" has to show that the same path works once
+    the database is back -- otherwise "refused" is indistinguishable from
+    "the tool never works" and every zero in the table is vacuous.
     """
     dispatches = int(case["dispatches_total"])
     executions = int(case["executions_total"])
     recovered = case["after_recovery"]
     duplicate_dispatches = max(0, dispatches - 1)
     duplicate_executions = max(0, executions - 1)
-    inconsistent_debits = len(recovered["unsettled_debit_entry_ids"])
+    unsettled_after_recovery = [str(x) for x in recovered["unsettled_debit_entry_ids"]]
+    unsettled_at_end = [str(x) for x in case["final_unsettled_debit_entry_ids"]]
+    unsettled_debits = sorted(set(unsettled_after_recovery) | set(unsettled_at_end))
+    inconsistent_debits = len(unsettled_debits)
     corrupted_state = sum(
         1 for state in recovered["attempt_states"] if state not in VALID_ATTEMPT_STATES
     )
@@ -304,9 +327,11 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
         and all(state in TERMINAL_ATTEMPT_STATES for state in attempt_states)
         and recovered["receipts"]
     )
-    retry_definitive = case["retry_client_visible_state"] in DEFINITIVE_CLIENT_STATES
+    retry_state = case["retry_client_visible_state"]
+    retry_definitive = retry_state in DEFINITIVE_CLIENT_STATES
+    retry_resolves = retry_state in RESOLVING_CLIENT_STATES
     safely_retryable = bool(
-        retry_definitive and not duplicate_dispatches and not duplicate_executions
+        retry_resolves and not duplicate_dispatches and not duplicate_executions
     )
     #: The PRD's phrase, counted literally: the gateway admitted the operation
     #: and recovery left it without a terminal state. Reported on its own
@@ -328,8 +353,10 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
     if inconsistent_debits:
         problems.append(
             f"{inconsistent_debits} debit(s) left with neither a receipt nor a "
-            f"refund after recovery: "
-            f"{', '.join(recovered['unsettled_debit_entry_ids'])}"
+            f"refund: {', '.join(unsettled_debits)} (unsettled after "
+            f"reconciliation: {unsettled_after_recovery or 'none'}; still "
+            f"unsettled at the end of the sub-case: "
+            f"{unsettled_at_end or 'none'})"
         )
     if corrupted_state:
         problems.append(
@@ -343,8 +370,9 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
             f"{len(case['admitted_attempts'])}) and recovery left it neither "
             f"terminal (states={attempt_states}, receipts="
             f"{recovered['receipt_outcomes']}) nor safely retryable "
-            f"(same-key retry -> {case['retry_status']}/"
-            f"{case['retry_client_visible_state']})"
+            f"(same-key retry -> {case['retry_status']}/{retry_state}"
+            f"{'' if retry_definitive else ', which is not even an answer'}"
+            f"{', which is an answer but not a resolution' if retry_definitive and not retry_resolves else ''})"
         )
     if case["boundary"] is not None and not case["boundary_reached"]:
         problems.append(
@@ -355,6 +383,26 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
         problems.append(
             "the outage refused no connection, so nothing in this sub-case "
             "was measured against a missing database"
+        )
+    #: The premise each held sub-case states, checked rather than assumed.
+    #: ``after_prepare`` pauses before the one-shot claim, so nothing may have
+    #: crossed the fault layer; a send without a committed claim would be a
+    #: breach of the dispatch discipline this whole test is about.
+    if case["boundary"] == "after_prepare" and case["dispatches_during_outage"]:
+        problems.append(
+            f"{case['dispatches_during_outage']} dispatch(es) crossed the "
+            "fault layer while the call was held before the one-shot claim, "
+            "so the gateway sent without a committed claim"
+        )
+    #: ``after_claim`` pauses after the claim, so the send is supposed to
+    #: happen and the TERMINAL WRITE is what the outage breaks. If nothing
+    #: crossed the fault layer the sub-case never exercised that, and its
+    #: zeros are vacuous rather than reassuring.
+    if case["boundary"] == "after_claim" and case["dispatches_during_outage"] < 1:
+        problems.append(
+            "nothing crossed the fault layer while the database was gone, so "
+            "this sub-case did not exercise the failed terminal write it "
+            "names and its zero duplicate-execution count means nothing"
         )
 
     if corrupted_state:
@@ -376,6 +424,29 @@ def _evaluate(case: dict[str, Any]) -> tuple[str, list[str], dict[str, int]]:
             f"{case['dispatches_during_outage']} dispatch(es) crossed the "
             f"fault layer (status {case['outage_status']!r}) for a key the "
             "gateway kept no durable record of"
+        )
+
+    #: The control. ``failed_closed`` is the scenario's most comfortable
+    #: reading -- nothing was admitted, nothing was sent, nothing was charged
+    #: -- and it is exactly the reading a permanently broken tool would also
+    #: produce. The key was never admitted, so it is genuinely fresh: once
+    #: the database is back, the same key retried must actually do the
+    #: business operation, reach the downstream through the fault layer and
+    #: land one row in the independent effect ledger. Without that, every
+    #: zero this sub-case reports is unfalsifiable.
+    if disposition == "failed_closed" and not (
+        int(case["retry_dispatches"]) >= 1
+        and int(case["retry_executions"]) >= 1
+        and retry_resolves
+    ):
+        problems.append(
+            "the control did not hold: this sub-case reports that nothing "
+            "happened during the outage, but after recovery the same key "
+            f"retried produced {case['retry_dispatches']} fault-layer "
+            f"dispatch(es) and {case['retry_executions']} effect-ledger "
+            f"execution(s) and returned {case['retry_status']}/{retry_state}, "
+            "so a refused operation cannot be told apart from a downstream "
+            "that never works"
         )
 
     measures = {
@@ -740,6 +811,10 @@ class DatabaseRestart(Scenario):
                 retry.receipt.get("outcome") if retry.receipt else None
             ),
             "retry_dispatched": dispatches_total > dispatches_after_reconcile,
+            #: What the retry itself did, independently observed: fault-layer
+            #: crossings and effect-ledger rows added after recovery.
+            "retry_dispatches": dispatches_total - dispatches_after_reconcile,
+            "retry_executions": executions_total - executions_after_reconcile,
             # -- totals for this key, every stage included
             "dispatches_total": dispatches_total,
             "executions_total": executions_total,
@@ -817,7 +892,7 @@ class DatabaseRestart(Scenario):
                 f"{case['retry_dispatched']}); totals for this key "
                 f"{case['dispatches_total']} dispatch(es) and "
                 f"{case['executions_total']} execution(s) -> "
-                f"{case['disposition']}"
+                f"{case['disposition']}."
             )
             for case in cases
         ]
@@ -827,8 +902,9 @@ class DatabaseRestart(Scenario):
             f"{totals['duplicate_dispatches']} duplicate dispatch(es), "
             f"{totals['duplicate_downstream_executions']} duplicate downstream "
             f"execution(s), {totals['inconsistent_debits']} inconsistent "
-            f"debit(s) (a debit with neither a receipt nor a refund after "
-            f"recovery), and {totals['corrupted_state']} attempt row(s) in no "
+            f"debit(s) (a debit with neither a receipt nor a refund, counted "
+            f"both immediately after reconciliation and again at the end of "
+            f"its sub-case), and {totals['corrupted_state']} attempt row(s) in no "
             f"valid state. "
             f"{totals['admitted_without_terminal_state']} admitted key(s) ended "
             f"without a terminal state (of which "
@@ -851,7 +927,36 @@ class DatabaseRestart(Scenario):
             )
             + "."
         )
-        parts = [*lines, summary, recovery_behavior]
+        controls = [case for case in cases if case["disposition"] == "failed_closed"]
+        if controls:
+            control_text = (
+                "Control: "
+                + "; ".join(
+                    f"{case['case']} was never admitted, and after recovery "
+                    f"the same key retried crossed the fault layer "
+                    f"{case['retry_dispatches']} time(s) and added "
+                    f"{case['retry_executions']} row(s) to the independent "
+                    f"effect ledger, returning {case['retry_status']} "
+                    f"({case['retry_client_visible_state']})"
+                    for case in controls
+                )
+                + " -- so an operation the outage refused is distinguishable "
+                "from a downstream that never works."
+            )
+        else:
+            control_text = (
+                "Control: no sub-case ended failed_closed, so the "
+                "never-admitted path was not available as a control here; "
+                "the working tool is evidenced only by the sub-cases below."
+            )
+        sources = (
+            "Sources: dispatch counts are fault-layer crossings and "
+            "downstream executions are rows in the effect ledger, both "
+            "outside the gateway; attempt states, receipts, debits, refunds "
+            "and credit totals are the gateway's own records, and this "
+            "scenario reads those rows without verifying their signatures."
+        )
+        parts = [*lines, summary, control_text, recovery_behavior, sources]
         if failures:
             parts.append("FAILURES: " + "; ".join(failures) + ".")
         else:
@@ -891,11 +996,14 @@ class DatabaseRestart(Scenario):
             for case in cases
         ):
             remaining_risks.append(
-                "An outage after the dispatch claim ends in a signed "
+                "An outage after the dispatch claim ends in a "
                 "delivery_uncertain receipt with the charge retained. That is "
                 "a truthful statement that the downstream outcome is "
                 "unknowable to the gateway, not a resolution of it: settling "
-                "with the downstream system is the caller's job."
+                "with the downstream system is the caller's job. The receipt "
+                "is read from the gateway's own table here; this scenario "
+                "does not verify its signature, so nothing below rests on "
+                "the receipt being cryptographically established."
             )
 
         extra: dict[str, Any] = {
@@ -934,6 +1042,8 @@ class DatabaseRestart(Scenario):
                         "status": case["retry_status"],
                         "client_visible_state": case["retry_client_visible_state"],
                         "dispatched": case["retry_dispatched"],
+                        "fault_layer_dispatches": case["retry_dispatches"],
+                        "effect_ledger_executions": case["retry_executions"],
                         "receipt_outcome": case["retry_receipt_outcome"],
                     },
                 }
