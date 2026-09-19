@@ -25,6 +25,7 @@ import html
 from typing import Any
 
 from failure_lab.diagnostic.answer import Answer, DiagnosticAnswer, ScenarioRow
+from failure_lab.diagnostic.offer import OFFER
 from failure_lab.verifier import ClaimStatus, VerificationReport
 
 CSS = """
@@ -214,6 +215,49 @@ def _row_html(row: ScenarioRow) -> str:
 """
 
 
+def _offer_html() -> str:
+    """The commercial offer, taken whole from :mod:`failure_lab.diagnostic.offer`.
+
+    Nothing is composed here. The module is the single definition of what is
+    offered, what it costs (nothing invented when no price is configured) and
+    which items a human has to size against a real downstream before they can
+    be turned on. A second copy of that text living in a template is a second
+    copy that drifts, and the thing it would drift about is a promise.
+    """
+    items = "".join(
+        "<li><strong>"
+        + _e(item.title)
+        + "</strong>"
+        + (
+            ' <span class="sub">(needs a technical review of your '
+            "downstream first)</span>"
+            if item.manual_review
+            else ""
+        )
+        + f"<br>{_e(item.detail)}</li>"
+        for item in OFFER.items
+    )
+    review = (
+        f'<p class="note">{_e(OFFER.manual_review_note)}</p>'
+        if OFFER.needs_manual_review
+        else ""
+    )
+    return f"""
+<h2>{_e(OFFER.headline)}</h2>
+<p>{_e(OFFER.summary)}</p>
+<ul>{items}</ul>
+<p><strong>Price:</strong> {_e(OFFER.price)}.
+ <span class="sub">{_e(OFFER.price_note)}</span></p>
+{review}
+<p>The duplicate prevention measured above happened here, in a sandbox, against
+a simulated tool. It is not a prediction about your downstream. The honest next
+step is the same scenarios run against your own integration, which the
+command-line lab does without sending anything anywhere:</p>
+<pre>python -m failure_lab run</pre>
+<p><a href="{_e(OFFER.action_href)}">{_e(OFFER.action_label)}</a></p>
+"""
+
+
 def render_result(answer: DiagnosticAnswer, *, environment: dict[str, Any]) -> str:
     """The result page.
 
@@ -242,15 +286,7 @@ def render_result(answer: DiagnosticAnswer, *, environment: dict[str, Any]) -> s
         else ""
     )
 
-    offer = ""
-    if answer.recommends_the_product:
-        offer = """
-<h2>If you want this in front of your own tools</h2>
-<p>The duplicate prevention above was measured here, in a sandbox, against a
-simulated tool. It is not a prediction about your downstream. The next honest
-step is to run the same scenarios against your own integration and read your
-own numbers, which the command-line lab does without sending anything anywhere.</p>
-"""
+    offer = _offer_html() if answer.recommends_the_product else ""
 
     meta_rows = "".join(
         f"<tr><td>{_e(name)}</td><td><code>{_e(environment.get(key, 'unknown'))}</code></td></tr>"

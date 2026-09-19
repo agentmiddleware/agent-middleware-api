@@ -35,6 +35,7 @@ from failure_lab.diagnostic import (
     headline_for,
 )
 from failure_lab.diagnostic import pages
+from failure_lab.diagnostic.offer import OFFER
 from failure_lab.diagnostic.server import MAX_SUBMISSION_BYTES, DiagnosticService
 from failure_lab.report import build_comparison
 from failure_lab.scenarios.base import ConfigurationResult, Counters, ScenarioResult, Verdict
@@ -214,21 +215,21 @@ def test_the_page_for_that_answer_carries_no_offer():
     html = pages.render_result(answer, environment=ENVIRONMENT)
 
     assert "may not need us" in html.lower()
-    assert "If you want this in front of your own tools" not in html
+    assert OFFER.headline not in html
 
 
 def test_a_prevention_result_is_the_only_one_that_carries_an_offer():
     prevented = build_answer(_gateway_prevents())
     assert prevented.answer is Answer.GATEWAY_PREVENTED_DUPLICATES
     assert prevented.recommends_the_product
-    assert "If you want this in front of your own tools" in pages.render_result(
+    assert OFFER.headline in pages.render_result(
         prevented, environment=ENVIRONMENT
     )
 
     for comparisons in (_baseline_wins(), _gateway_fails(), _no_baseline()):
         answer = build_answer(comparisons)
         assert not answer.recommends_the_product, answer.answer
-        assert "If you want this in front of your own tools" not in pages.render_result(
+        assert OFFER.headline not in pages.render_result(
             answer, environment=ENVIRONMENT
         )
 
@@ -470,3 +471,42 @@ def test_duplicate_prevention_is_reported_against_each_baseline_separately():
     # with the distinction that reconciles them.
     assert "may not need us" in html.lower()
     assert "bears on whether this product adds anything" in html
+
+
+def test_the_offer_never_invents_a_price():
+    """An unset price renders as unset, not as a plausible-looking number."""
+    from failure_lab.diagnostic.offer import OFFER_PRICE, PRICE_NOT_PUBLISHED
+
+    assert OFFER_PRICE is None, "a price was hardcoded into the repository"
+    assert OFFER.price == PRICE_NOT_PUBLISHED
+
+    html = pages.render_result(build_answer(_gateway_prevents()), environment=ENVIRONMENT)
+    assert PRICE_NOT_PUBLISHED in html
+    assert "will not invent one" in html
+    # No currency amount anywhere on a page that shows an offer.
+    assert not re.search(r"[$£€]\s?\d", html), "a currency amount appeared"
+
+
+def test_the_offer_marks_what_a_human_has_to_size_first():
+    """A trust plane that implies one-click production is lying about itself."""
+    assert OFFER.needs_manual_review
+    manual = [item for item in OFFER.items if item.manual_review]
+    assert len(manual) >= 2
+
+    html = pages.render_result(build_answer(_gateway_prevents()), environment=ENVIRONMENT)
+    assert "technical review of your" in html
+    assert "deploys anything to production by itself" in html
+    for item in manual:
+        assert item.title in html
+
+
+def test_the_offer_has_exactly_one_definition():
+    """The page must not carry a second copy of the offer text to drift from."""
+    source = (pages.__file__,)
+    for path in source:
+        with open(path, encoding="utf-8") as handle:
+            body = handle.read()
+    for item in OFFER.items:
+        assert item.detail not in body, (
+            f"{item.title!r} is spelled out in pages.py as well as offer.py"
+        )
