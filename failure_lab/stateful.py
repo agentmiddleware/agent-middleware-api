@@ -1064,7 +1064,11 @@ class _SequenceRunner:
         try:
             skip_reason, detail = await handler(command.params)
         except Exception as exc:  # noqa: BLE001 - one bad command must not end the run
-            skip_reason, detail = None, {"error": f"{type(exc).__name__}: {exc}"}
+            # Not the same thing as inapplicable: the command was legal and
+            # the harness failed to carry it out. It is counted as not
+            # applied and surfaced in the result's errors.
+            skip_reason = f"command raised {type(exc).__name__}: {exc}"
+            detail = {"error": f"{type(exc).__name__}: {exc}"}
         outcome = CommandOutcome(
             index=index,
             command=command.as_dict(),
@@ -1730,6 +1734,12 @@ async def explore(
         skipped += sum(1 for item in observation.commands if not item.applied)
         if observation.error:
             errors.append(f"sequence {index}: {observation.error}")
+        errors.extend(
+            f"sequence {index}, command {item.index} "
+            f"({item.command['kind']}): {item.detail['error']}"
+            for item in observation.commands
+            if "error" in item.detail
+        )
         violation = first_violation(observation, checks)
         if violation is None:
             continue
