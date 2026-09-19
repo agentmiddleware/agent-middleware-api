@@ -1,0 +1,220 @@
+name: Failure Lab
+
+# Drives the gateway under injected failures and measures what actually
+# happened against a downstream ledger the gateway cannot reach.
+#
+# Tiering follows the cost of the scenario, not its importance:
+#   fast  -> every pull request. Lost responses, key conflicts, agent restart,
+#            receipt tampering, cache failure, standard MCP client.
+#   slow  -> main, nightly, and release candidates. Concurrency storms, crash
+#            boundaries, budget and revocation races, database outage,
+#            retention, the permit probe matrix.
+#
+# A release must fail when a P0 invariant regresses. The runner's exit status
+# is non-zero when any scenario errors OR when an observed verdict differs from
+# the expectation the product documents — an undocumented improvement fails too,
+# because it means the tests and the documentation disagree.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # 04:17 UTC nightly. Off the hour so it does not queue behind everything
+    # else that runs at :00.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "Scenario tier to run (fast, slow, or all)"
+        required: false
+        default: "all"
+        type: choice
+        options: [fast, slow, all]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: failure-lab-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The measuring instruments themselves. If the effect ledger stops being
+  # duplicate-visible, or the independent verifier starts importing the
+  # application, every number the lab reports becomes worthless — so this runs
+  # first and everywhere.
+  harness:
+    name: Harness and verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio anyio httpx ruff
+
+      - name: Lint the lab
+        run: ruff check failure_lab
+
+      - name: Harness, verifier and scenario-contract tests
+        run: pytest tests/test_failure_lab_harness.py tests/test_failure_lab_verifier.py tests/test_failure_lab_scenarios.py -v --tb=short
+
+  scenarios:
+    name: Scenarios (${{ matrix.tier }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: harness
+    strategy:
+      fail-fast: false
+      matrix:
+        # A pull request pays for the fast tier only. Everything else runs both.
+        tier: ${{ github.event_name == 'pull_request' && fromJSON('["fast"]') || fromJSON('["fast", "slow"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx anyio
+
+      # --source ci_run keeps synthetic traffic structurally incapable of
+      # counting toward any customer-conversion metric.
+      - name: Run the ${{ matrix.tier }} tier
+        run: |
+          python -m failure_lab run \
+            --tier "${{ matrix.tier }}" \
+            --source ci_run \
+            --seed 20260919 \
+            --output "$RUNNER_TEMP/failure-lab-${{ matrix.tier }}" \
+            --keep \
+            --archive
+
+      - name: Re-verify the evidence bundle independently
+        if: always()
+        run: |
+          python -m failure_lab verify --bundle "$RUNNER_TEMP/failure-lab-${{ matrix.tier }}"
+
+      - name: Render the claims manifest
+        if: always()
+        run: |
+          python -m failure_lab claims \
+            --bundle "$RUNNER_TEMP/failure-lab-${{ matrix.tier }}" --markdown \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Historical results: this is how the team sees whether correctness,
+      # latency, recovery behaviour or MCP compatibility moved between
+      # releases. Bundles are redacted at build time and the build fails if a
+      # known secret value appears in the written bytes.
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: failure-lab-${{ matrix.tier }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/failure-lab-${{ matrix.tier }}
+          if-no-files-found: error
+          retention-days: 90
+
+  # Seeded state-machine exploration. Not on pull requests: it is a search, so
+  # its cost is unbounded in a way a PR check should not be.
+  explore:
+    name: Stateful exploration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: harness
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx anyio
+
+      # The seed is derived from the run number so nightly runs explore
+      # different sequences over time, and any violation is reproducible from
+      # the seed printed in its result.
+      - name: Explore
+        run: |
+          python -m failure_lab explore \
+            --seed "${{ github.run_number }}" \
+            --sequences 12 \
+            --output "$RUNNER_TEMP/failure-lab-explore.json"
+
+      - name: Upload exploration result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: failure-lab-explore-${{ github.run_id }}
+          path: ${{ runner.temp }}/failure-lab-explore.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  # The clean-room judge proves itself on every run: it must pass a correct
+  # integration and fail a deliberately broken one. A judge that has never
+  # failed anything is not a judge.
+  integration-check:
+    name: Clean-room integration judge
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: harness
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx anyio
+
+      - name: Judge the reference integration (must pass)
+        run: |
+          python -m failure_lab.integration_check.judge \
+            --candidate failure_lab/integration_check/reference_candidate.py
+
+      - name: Judge the broken integration (must fail)
+        run: |
+          if python -m failure_lab.integration_check.judge \
+              --candidate failure_lab/integration_check/broken_candidate.py; then
+            echo "::error::The judge passed an integration that retries with a fresh idempotency key. It is not discriminating."
+            exit 1
+          fi
+          echo "Judge correctly rejected the broken candidate."

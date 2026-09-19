@@ -13,6 +13,7 @@ consequential MCP tool behind a governed boundary. Start with the
 | Configure one real upstream MCP tool | [Partner first-tool runbook](partner-first-tool-runbook.md) |
 | Use the typed Python SDK and offline verifier | [Python SDK](../b2a_sdk/README.md) |
 | Understand retry, debit, and crash outcomes | [Failure semantics](failure-semantics.md) |
+| See what actually happens when a tool executes and its response is lost | [Failure lab](failure-lab.md) |
 | Review security claims and limits | [Security limitations](../SECURITY_LIMITATIONS.md) and [security review kit](security-review-kit.md) |
 | Confirm which commit production is actually running | [Deployment verification checklist](deployment-verification-checklist.md) |
 | Plan a design-partner evaluation | [Design partner guide](../DESIGN_PARTNER_GUIDE.md) |

@@ -1,4 +1,4 @@
-.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+.PHONY: failure-lab failure-lab-all failure-lab-evidence failure-lab-list failure-lab-explore failure-lab-integration-check failure-lab-diagnostic failure-lab-verify-bundle site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
 
 # The governed-loop transcript the public site renders. Re-runs the
 # trust-plane demo on a throwaway SQLite gateway, records the exchanges the
@@ -157,3 +157,52 @@ railway-preflight:
 
 railway-preflight-live:
 	uv run --with-requirements requirements.txt python scripts/railway_preflight.py --live
+
+# --------------------------------------------------------------------------- #
+# Agent Gateway Failure Lab                                                     #
+#                                                                               #
+# Drives this gateway under injected failures (lost responses, severed          #
+# connections, crashes at durable boundaries, concurrent retries, budget and    #
+# revocation races) and measures what actually happened against a downstream    #
+# ledger the gateway cannot reach. Every scenario also runs against a CORRECT   #
+# native baseline, so a result where the gateway adds nothing is reachable and  #
+# is reported as exactly that. See docs/failure-lab.md.                         #
+# --------------------------------------------------------------------------- #
+
+# Fast tier: cheap enough for every pull request.
+failure-lab:
+	uv run --with-requirements requirements.txt python -m failure_lab run --tier fast --source ci_run
+
+# Everything, including the concurrency and crash scenarios. Main, nightly, RC.
+failure-lab-all:
+	uv run --with-requirements requirements.txt python -m failure_lab run --source ci_run
+
+# Full run that keeps its evidence bundle for inspection or publication.
+failure-lab-evidence:
+	uv run --with-requirements requirements.txt python -m failure_lab run \
+	  --source internal_test --output data/failure-lab --keep --archive
+
+# List the scenario suite with its claims, tiers and documented expectations.
+failure-lab-list:
+	uv run --with-requirements requirements.txt python -m failure_lab list
+
+# Seeded property-based state-machine exploration with minimized repros.
+failure-lab-explore:
+	uv run --with-requirements requirements.txt python -m failure_lab explore \
+	  --seed $(or $(SEED),1) --sequences $(or $(SEQUENCES),8)
+
+# Clean-room integration judge: executable assertions, not an AI's self-report.
+failure-lab-integration-check:
+	uv run --with-requirements requirements.txt python -m failure_lab.integration_check.judge \
+	  --candidate $(or $(CANDIDATE),failure_lab/integration_check/reference_candidate.py)
+
+# The self-serve diagnostic, on loopback only. Refuses production-like boots.
+failure-lab-diagnostic:
+	uv run --with-requirements requirements.txt python -m failure_lab serve \
+	  --port $(or $(PORT),8900)
+
+# Re-check a published evidence bundle: manifest hashes plus an independent
+# re-verification of every receipt it carries.
+failure-lab-verify-bundle:
+	uv run --with-requirements requirements.txt python -m failure_lab verify \
+	  --bundle $(or $(BUNDLE),data/failure-lab)
