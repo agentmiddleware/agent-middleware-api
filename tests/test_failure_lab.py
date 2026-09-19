@@ -262,3 +262,43 @@ def test_artifacts_are_saved_and_carry_no_credentials(lab_run: dict[str, Any]) -
         assert ADMIN_KEY not in text, f"{name} leaks the admin key"
         assert UPSTREAM_BEARER not in text, f"{name} leaks the upstream bearer"
         assert SIGNING_SEED not in text, f"{name} leaks the signing seed"
+
+
+def test_reusing_a_run_directory_is_refused(tmp_path: Path) -> None:
+    """Two runs in one directory would leave the evidence self-contradicting.
+
+    `events.jsonl` and `effects.jsonl` are append-only while the reports are
+    overwritten, so a repeated `--run-id` would otherwise exit zero with an
+    effects log holding twice what the report claims.
+    """
+    output_dir = tmp_path / "runs"
+    run_dir = output_dir / "pinned"
+    run_dir.mkdir(parents=True)
+    (run_dir / "effects.jsonl").write_text('{"seq": 1}\n')
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/failure_lab.py",
+            "--json",
+            "--output-dir",
+            str(output_dir),
+            "--run-id",
+            "pinned",
+            "--latency-samples",
+            "0",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode != 0
+    assert "already holds a run" in result.stderr
+    assert "--run-id" in result.stderr
+    # The refusal happened before anything ran: the seeded file is untouched
+    # and no report was written beside it.
+    assert (run_dir / "effects.jsonl").read_text() == '{"seq": 1}\n'
+    assert not (run_dir / "report.json").exists()

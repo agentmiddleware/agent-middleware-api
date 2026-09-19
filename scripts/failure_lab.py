@@ -140,8 +140,38 @@ RUN_DIR = (ARGS.output_dir / RUN_ID).resolve()
 GATEWAY_DB = RUN_DIR / "gateway.db"
 
 
+def require_unused_run_dir() -> None:
+    """Refuse a run directory that already holds a run.
+
+    The event history and the downstream effects log are append-only, while
+    the reports are overwritten and the gateway database is deleted. Running
+    twice into one directory would therefore leave ``effects.jsonl`` holding
+    two runs' effects, and ``events.jsonl`` two sequences both starting at 1,
+    beside a ``report.json`` describing only the second — contradictory
+    evidence of exactly the kind this lab exists not to produce.
+
+    The generated run id is unique, so this only fires when ``--run-id``
+    deliberately names an existing run. Refusing beats truncating: the
+    artifacts are the product here, and silently destroying a previous run's
+    evidence is the worse failure.
+    """
+    if not RUN_DIR.exists():
+        return
+    existing = sorted(entry.name for entry in RUN_DIR.iterdir())
+    if not existing:
+        return
+    raise SystemExit(
+        f"failure-lab: {RUN_DIR} already holds a run "
+        f"({', '.join(existing[:6])}{'…' if len(existing) > 6 else ''}).\n"
+        "Two runs in one directory would leave the saved effects and event "
+        "history disagreeing with the report, so the lab will not append to "
+        "them. Pass a different --run-id, or remove that directory first."
+    )
+
+
 def configure_environment() -> None:
     """Lab-safe defaults: strict trust mode, throwaway SQLite, throwaway seed."""
+    require_unused_run_dir()
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{GATEWAY_DB}"
     os.environ["VALID_API_KEYS"] = ADMIN_KEY

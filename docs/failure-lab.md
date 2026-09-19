@@ -177,6 +177,12 @@ commit, configuration, the scenario sequence and its checks), and the
 throwaway gateway database. No artifact contains an API key, the admin key,
 the upstream bearer, or the signing seed; the CI test checks for all four.
 
+One directory holds exactly one run. The event history and the effects log
+are append-only while the reports are overwritten, so a second run into the
+same directory would leave them disagreeing with the report. The generated
+run id is unique; when `--run-id` names a directory that already holds a run,
+the lab refuses to start rather than append to or overwrite that evidence.
+
 ## What it does not show
 
 - **Crashes.** The fault is a lost response, not a dead process. Kills at
