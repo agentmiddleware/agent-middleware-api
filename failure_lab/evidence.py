@@ -116,9 +116,12 @@ REDACTED_KEY_PATTERN = re.compile(
 )
 
 #: An ``Authorization`` (or ``X-API-Key``) header serialised into a string
-#: blob, where the key-name rule cannot see it.
+#: blob, where the key-name rule cannot see it. The optional scheme word is
+#: part of the match on purpose: ``Authorization: Bearer <token>`` otherwise
+#: ends at the space after ``Bearer`` and publishes the token.
 _AUTHORIZATION_HEADER_PATTERN = re.compile(
-    r"(?i)\b(authorization|x-api-key|x-control-token)\b\s*[:=]\s*\S+"
+    r"(?i)\b(authorization|proxy-authorization|x-api-key|x-control-token)\b"
+    r"\s*[:=]\s*[\"']?(?:(?:bearer|basic|digest|token)\s+)?\S+"
 )
 _BEARER_VALUE_PATTERN = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 #: ``amw_``/``sk_``-style credentials, the SDK's ``b2a_`` keys, and the
@@ -173,11 +176,18 @@ def redact_text(value: str) -> str:
 
     Used on free text -- observations, rendered HTML, tracebacks -- where a
     credential has no field name to be caught by.
+
+    The bearer rule runs **first**. The header rule's ``\\S+`` stops at the
+    first space, so running it first on ``Authorization: Bearer <token>``
+    consumes the word ``Bearer``, leaves the token, and destroys the only
+    marker the bearer rule had to find it by. The downstream bearer token is
+    ``secrets.token_urlsafe(24)`` -- shapeless -- so that ordering is the
+    difference between a redacted string and a published credential.
     """
+    result = _BEARER_VALUE_PATTERN.sub(_marker("bearer"), value)
     result = _AUTHORIZATION_HEADER_PATTERN.sub(
-        lambda m: f"{m.group(1)}: {_marker(m.group(1))}", value
+        lambda m: f"{m.group(1)}: {_marker(m.group(1))}", result
     )
-    result = _BEARER_VALUE_PATTERN.sub(_marker("bearer"), result)
     return _CREDENTIAL_VALUE_PATTERN.sub(_marker("credential"), result)
 
 
@@ -197,22 +207,37 @@ def redact(document: Any) -> Any:
     ``idempotency_key``, ``operation_id``, ``receipt_id``, ``kid`` and the
     receipt's ``signature`` all survive, because redacting them would destroy
     the reader's ability to re-verify anything.
+
+    Two shapes that a walker keyed on values alone would miss are covered
+    here. A **key** can itself be the credential -- a gateway snapshot keyed
+    by api key writes the key into the file name-side, where no value rule
+    looks -- so key text goes through the shape rules too. And a value that is
+    neither a mapping, a sequence nor a JSON scalar (``bytes``, a ``set``, any
+    object) is stringified here rather than by ``json.dumps(default=str)``
+    after redaction has finished, which is what let one through.
     """
     if isinstance(document, Mapping):
         redacted: dict[str, Any] = {}
         for key, value in document.items():
-            name = str(key)
+            name = redact_text(str(key))
             match = REDACTED_KEY_PATTERN.search(name)
             if match is not None and not _is_public_integer_seed(name, value):
-                redacted[name] = _marker(match.group(0))
+                replacement: Any = _marker(match.group(0))
             else:
-                redacted[name] = redact(value)
+                replacement = redact(value)
+            while name in redacted:
+                # A key whose credential was rewritten can collide with
+                # another. Dropping one silently would lose a row.
+                name = f"{name}#{len(redacted)}"
+            redacted[name] = replacement
         return redacted
     if isinstance(document, (list, tuple)):
         return [redact(item) for item in document]
     if isinstance(document, str):
         return redact_text(document)
-    return document
+    if document is None or isinstance(document, (bool, int, float)):
+        return document
+    return redact_text(str(document))
 
 
 def environment_secret_values() -> list[str]:
@@ -566,13 +591,26 @@ def _gateway_rows(documents: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
 
 
 def _receipt_documents(receipts: Any) -> list[tuple[str, Any]]:
-    """Normalise the portable receipts to ``(receipt_id, bundle)`` pairs."""
+    """Normalise the portable receipts to ``(receipt_id, bundle)`` pairs.
+
+    An object that carries ``as_dict()`` is unwrapped here. Anything that is
+    still not a mapping afterwards is passed through as it came: the writer
+    records it as a receipt that did not export rather than stringifying it
+    into a file that would read as an exported receipt.
+    """
     if not receipts:
         return []
     if isinstance(receipts, Mapping):
         return [(str(key), value) for key, value in receipts.items()]
     pairs: list[tuple[str, Any]] = []
     for index, bundle in enumerate(receipts):
+        if not isinstance(bundle, Mapping):
+            as_dict = getattr(bundle, "as_dict", None)
+            if callable(as_dict):
+                try:
+                    bundle = as_dict()
+                except Exception:  # noqa: BLE001 - recorded below, never swallowed
+                    pass
         receipt_id = ""
         if isinstance(bundle, Mapping):
             receipt_id = str(bundle.get("receipt_id") or "")
@@ -590,8 +628,15 @@ def _receipt_filename(receipt_id: str, index: int) -> str:
 
 def _scenario_manifest_entries(
     documents: Sequence[Mapping[str, Any]],
+    notes: list[str],
 ) -> list[dict[str, Any]]:
-    """The PRD's per-scenario line: expected invariant, observed outcome."""
+    """The PRD's per-scenario line: expected invariant, observed outcome.
+
+    Where the result's own ``matches_expectation`` flag disagrees with the
+    per-configuration rows, the rows win and the disagreement is recorded.
+    A summary flag that outranked the measurements beside it would make this
+    entry worth less than the rows it summarises.
+    """
     entries: list[dict[str, Any]] = []
     for document in documents:
         expected = dict(document.get("expected") or {})
@@ -608,6 +653,15 @@ def _scenario_manifest_entries(
             for configuration, verdict in expected.items()
             if observed.get(configuration) != verdict
         ]
+        reported_match = document.get("matches_expectation")
+        matches = bool(reported_match if reported_match is not None else not divergences)
+        if divergences and matches:
+            notes.append(
+                f"{document.get('test_id', '?')}: the result's matches_expectation flag "
+                f"says true while {len(divergences)} configuration row(s) diverge from "
+                "the documented expectation; the rows are recorded as authoritative"
+            )
+            matches = False
         entries.append(
             {
                 "test_id": str(document.get("test_id", "")),
@@ -635,10 +689,15 @@ def _scenario_manifest_entries(
                         )
                         for entry in document.get("configurations") or []
                     },
+                    "source": (
+                        "downstream_executions is counted in the simulated tool's own "
+                        "SQLite ledger, which the gateway cannot reach; the verdicts are "
+                        "the ones the run recorded. No number here is gateway-reported -- "
+                        "those are in gateway-events.json."
+                    ),
                 },
-                "matches_documented_expectation": bool(
-                    document.get("matches_expectation", not divergences)
-                ),
+                "matches_documented_expectation": matches,
+                "matches_expectation_reported_by_run": reported_match,
                 "divergences": divergences,
                 "limitations": list(document.get("limitations") or []),
             }
@@ -893,9 +952,30 @@ def build_evidence_bundle(
                 # rules strip would otherwise silently overwrite each other.
                 filename = f"{filename[:-5]}-{index:04d}.json"
             used_filenames.add(filename)
-            write_bytes(f"{RECEIPTS_DIRECTORY}/{filename}", _json_bytes(redact(bundle)))
+            exported = isinstance(bundle, Mapping)
+            if exported:
+                payload: Any = redact(dict(bundle))
+            else:
+                # Writing str(bundle) here would put a file in receipts/ that
+                # the manifest describes as an exported portable receipt. It
+                # is not one, and a reader has no way to tell from the layout.
+                payload = {
+                    "error": "this is not a portable receipt bundle",
+                    "supplied_type": type(bundle).__name__,
+                    "value": redact_text(str(bundle)),
+                }
+                notes.append(
+                    f"receipt {receipt_id!r} was supplied as "
+                    f"{type(bundle).__name__}, not a portable receipt document; "
+                    "its file records that rather than a receipt"
+                )
+            write_bytes(f"{RECEIPTS_DIRECTORY}/{filename}", _json_bytes(payload))
             receipt_index.append(
-                {"receipt_id": receipt_id, "path": f"{RECEIPTS_DIRECTORY}/{filename}"}
+                {
+                    "receipt_id": receipt_id,
+                    "path": f"{RECEIPTS_DIRECTORY}/{filename}",
+                    "exported_portable_bundle": exported,
+                }
             )
         if not receipt_pairs:
             (staging / RECEIPTS_DIRECTORY).mkdir(exist_ok=True)
@@ -934,10 +1014,20 @@ def build_evidence_bundle(
             }
             for path in sorted(written)
         ]
+        not_exported = {
+            entry["path"]
+            for entry in receipt_index
+            if not entry.get("exported_portable_bundle")
+        }
         for entry in file_entries:
             description = FILE_DESCRIPTIONS.get(entry["path"])
             if description is None and entry["path"].startswith(f"{RECEIPTS_DIRECTORY}/"):
-                description = "A portable receipt bundle exactly as the gateway exported it."
+                description = (
+                    "NOT A RECEIPT: what was supplied in this receipt's place, recorded "
+                    "as such."
+                    if entry["path"] in not_exported
+                    else "A portable receipt bundle exactly as the gateway exported it."
+                )
             entry["description"] = description or "Bundle file."
 
         all_secret_values = list(secret_values)
@@ -958,7 +1048,7 @@ def build_evidence_bundle(
             if random_seed is not None
             else caller_environment.get("seed"),
             "fault_injection_points": redact(injection_points),
-            "scenarios": redact(_scenario_manifest_entries(documents)),
+            "scenarios": redact(_scenario_manifest_entries(documents, notes)),
             "receipts": receipt_index,
             "redaction": {
                 "applied": True,
@@ -970,6 +1060,11 @@ def build_evidence_bundle(
                     "any string shaped like a bearer token, a serialised "
                     "Authorization/X-API-Key header, or an amw_/sk_/b2a_/lab-admin- "
                     "credential is rewritten in place",
+                    "object keys go through the same shape rules as values, so a "
+                    "map keyed by a credential does not publish the key",
+                    "a value that is neither an object, an array nor a JSON scalar "
+                    "(bytes, a set, any other object) is stringified and redacted "
+                    "here rather than by the JSON encoder afterwards",
                     "an integer under `seed` or `random_seed` is kept: the PRD "
                     "requires the random seed and an integer carries no key "
                     "material. A string under those keys is still redacted",
@@ -982,7 +1077,23 @@ def build_evidence_bundle(
                     "known_values_scanned": len(scannable),
                     "values_too_short_to_scan": len(unique_secrets) - len(scannable),
                     "minimum_scannable_length": MIN_SCANNABLE_SECRET_LENGTH,
-                    "result": "clean",
+                    # A bundle that leaked is deleted rather than written, so
+                    # any manifest a reader holds survived the scan -- but only
+                    # if a scan happened. With nothing to scan for, saying
+                    # "clean" would claim a check that never ran.
+                    "scanned": bool(scannable),
+                    "result": (
+                        f"no known secret value appears in any written byte "
+                        f"({len(scannable)} value(s) searched for across "
+                        f"{len(file_entries) + 1} files)"
+                        if scannable
+                        else (
+                            "NOT SCANNED: the caller supplied no secret values and none "
+                            "were harvested from the environment, so only the pattern "
+                            "rules above were applied. Nothing here establishes that a "
+                            "shapeless credential is absent."
+                        )
+                    ),
                 },
             },
             "integrity": {
