@@ -14,6 +14,7 @@ import pytest
 
 from failure_lab.evidence import (
     MIN_SCANNABLE_SECRET_LENGTH,
+    build_evidence_bundle,
     REDACTED_KEY_PATTERN,
     SecretLeakError,
     assert_no_secret_leak,
@@ -130,3 +131,107 @@ class TestConversionMetrics:
     def test_an_unrecognised_source_is_not_a_sale(self):
         assert not counts_toward_conversion("HUMAN_CUSTOMER_TYPO")
         assert not counts_toward_conversion("")
+
+def _result_document(observation: str) -> dict:
+    """A ScenarioResult-shaped document carrying text in a free-form field."""
+    return {
+        "test_id": "TZZ",
+        "title": "leak probe",
+        "claim": "A claim long enough to read like a sentence about behaviour.",
+        "definition_version": "1",
+        "definition_hash": "a" * 64,
+        "started_at": "2026-09-19T00:00:00Z",
+        "finished_at": "2026-09-19T00:00:01Z",
+        "verdict": "PASS",
+        "expected": {},
+        "matches_expectation": True,
+        "limitations": [],
+        "events": [],
+        "configurations": [
+            {
+                "configuration": "C_gateway_with_native_idempotency",
+                "label": "Native controls + Agent Middleware",
+                "verdict": "PASS",
+                "expectation": "PASS",
+                "observation": observation,
+                "counters": {},
+                "attempts": [],
+                "downstream_effects": [],
+                "crossings": [],
+                "gateway": None,
+                "receipts": [],
+                "remaining_risks": [],
+                "extra": {},
+                "error": None,
+            }
+        ],
+    }
+
+
+class TestTheBundleRefusesToLeak:
+    """Two layers, and both have to be shown working.
+
+    Redaction is the primary defence and it reaches into free text, not just
+    values under credential-shaped key names. The written-bytes scan is the
+    backstop for whatever redaction's heuristics do not recognise. A backstop
+    that has never been seen to fire is indistinguishable from one that cannot.
+    """
+
+    def test_redaction_reaches_a_credential_in_free_prose(self, tmp_path):
+        secret = "lab-admin-SUPERSECRET-abcdef123456"
+        document = _result_document(f"the call presented {secret} as its credential")
+
+        result = build_evidence_bundle(
+            tmp_path / "bundle",
+            [document],
+            secret_values=[secret],
+            include_environment_secrets=False,
+        )
+
+        written = "\n".join(
+            path.read_text(errors="ignore")
+            for path in result.directory.rglob("*")
+            if path.is_file()
+        )
+        assert secret not in written
+
+    @pytest.mark.parametrize(
+        "secret",
+        [
+            "correct horse battery staple",
+            "internal-db.corp.example",
+        ],
+        ids=["ordinary-words", "hostname"],
+    )
+    def test_the_backstop_fires_on_what_redaction_cannot_recognise(self, tmp_path, secret):
+        """A secret that does not look like one still must not reach disk."""
+        document = _result_document(f"the run used {secret} here")
+
+        with pytest.raises(SecretLeakError):
+            build_evidence_bundle(
+                tmp_path / "bundle",
+                [document],
+                secret_values=[secret],
+                include_environment_secrets=False,
+            )
+
+    def test_a_bundle_that_leaked_is_never_left_on_disk(self, tmp_path):
+        """Refusing is not enough if the staging copy survives for someone to find."""
+        secret = "correct horse battery staple"
+        target = tmp_path / "bundle"
+
+        with pytest.raises(SecretLeakError):
+            build_evidence_bundle(
+                target,
+                [_result_document(f"the run used {secret} here")],
+                secret_values=[secret],
+                include_environment_secrets=False,
+            )
+
+        assert not target.exists()
+        survivors = [
+            path
+            for path in tmp_path.rglob("*")
+            if path.is_file() and secret in path.read_text(errors="ignore")
+        ]
+        assert not survivors, survivors
