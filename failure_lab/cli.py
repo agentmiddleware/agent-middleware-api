@@ -50,6 +50,7 @@ from typing import Any
 
 from failure_lab import TEST_DEFINITION_VERSION
 from failure_lab import __version__ as LAB_VERSION
+from failure_lab.evidence import SecretLeakError
 from failure_lab.runner import (
     BUNDLE_DIRECTORY_NAME,
     CLAIMS_FILENAME,
@@ -62,11 +63,30 @@ from failure_lab.telemetry import TrafficSource
 
 PROGRAM = "python -m failure_lab"
 
-#: Exit code for a CLI-level problem -- a name that does not resolve, a bundle
-#: that is not there, a subcommand whose module has not landed. Distinct from
-#: the run's own statuses so a caller can tell "the lab found something" from
-#: "the lab could not be asked".
+#: Exit code for a CLI-level problem -- a name that does not resolve, a
+#: selection that matches nothing, a bundle that is not there, a subcommand
+#: whose module has not landed. It is 2 because that is what ``argparse``
+#: already exits with on a bad command line, and a second code for the same
+#: class of mistake helps nobody. It therefore **collides** with
+#: :data:`~failure_lab.runner.EXIT_SCENARIO_ERROR`: a caller that needs to
+#: tell "a scenario raised" from "the lab could not be asked" has to read
+#: stderr, which carries a message in the second case and a verdict table in
+#: the first.
 EXIT_USAGE = 2
+
+#: A written artifact contained a credential this run minted. Its own code
+#: because it is not a finding about the gateway and not a usage error, and
+#: because a CI job must be able to fail differently on it. The leaking files
+#: are deleted before this is returned; see
+#: :func:`failure_lab.runner._assert_siblings_are_clean`.
+EXIT_EVIDENCE_LEAK = 3
+
+#: Addresses ``serve`` will bind. Duplicated from
+#: :data:`failure_lab.diagnostic.server.LOOPBACK_HOSTS` rather than imported,
+#: because this check has to hold on the path where that module is absent or
+#: exposes only an application object, and importing it here would undo the
+#: lazy import that keeps the rest of the CLI working without it.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
 def _print(lines: list[str]) -> None:
@@ -185,7 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="Run the diagnostic server.")
     serve.add_argument("--port", type=int, default=8080)
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Loopback addresses only; anything else is refused.",
+    )
 
     return parser
 
@@ -275,10 +299,42 @@ def command_list(args: argparse.Namespace) -> int:
 
 
 def command_run(args: argparse.Namespace) -> int:
+    # Lazy, like every other scenario import here: `list` must not pay for a
+    # driver it never uses, and nothing under app/ may be imported before
+    # run_lab has pinned the sandbox posture into os.environ.
+    from failure_lab.scenarios import select_scenarios
+
     if not args.verbose:
         # The gateway, the MCP SDK and httpx all narrate at INFO. The result is
         # the output; the narration would bury it.
         logging.disable(logging.CRITICAL - 1)
+
+    # Resolved before the gateway boots. An empty selection is a mistyped
+    # command line, not a result: run_lab would happily write a well-formed
+    # bundle recording an empty suite and exit zero, and a CI job that typed
+    # `--tier fase` would go green having measured nothing. exit_status_for
+    # is right to say nothing about results it was not given; refusing the
+    # question is this layer's job.
+    try:
+        selected = select_scenarios(args.tests or None, tier=args.tier, **_options(args.option))
+    except KeyError as exc:
+        sys.stderr.write(f"{exc.args[0] if exc.args else exc}\n")
+        return EXIT_USAGE
+    if not selected:
+        filters = ", ".join(
+            part
+            for part in (
+                f"--tier {args.tier}" if args.tier else "",
+                " ".join(f"--test {test}" for test in args.tests),
+            )
+            if part
+        )
+        sys.stderr.write(
+            f"no scenario matches {filters or 'this selection'}; nothing would "
+            "run and the result would establish nothing about the gateway. "
+            f"Run '{PROGRAM} list' to see which tier each scenario is in.\n"
+        )
+        return EXIT_USAGE
 
     source = TrafficSource(args.source)
     if source == TrafficSource.HUMAN_CUSTOMER:
@@ -314,6 +370,22 @@ def command_run(args: argparse.Namespace) -> int:
         # get_scenario raises KeyError with the known ids in its message.
         sys.stderr.write(f"{exc.args[0] if exc.args else exc}\n")
         return EXIT_USAGE
+    except SecretLeakError as exc:
+        # Caught before RuntimeError, which it subclasses. Without this branch
+        # a run whose evidence leaked a credential exited with the same code
+        # and the same one-line shape as "choose another --output directory",
+        # which is the one outcome that must not read like a setup problem.
+        # The message names the file and the length of the value, never the
+        # value.
+        sys.stderr.write(
+            "EVIDENCE LEAK: this run wrote a credential it minted into an "
+            "artifact.\n"
+            f"{exc}\n"
+            "The offending files have been deleted. Nothing about the "
+            "gateway was established by this run; fix the leak and run it "
+            "again.\n"
+        )
+        return EXIT_EVIDENCE_LEAK
     except RuntimeError as exc:
         # The run never started: a sandbox directory that is not ours to
         # delete, or an application already imported under another posture.
@@ -349,8 +421,18 @@ def resolve_bundle(path: Path) -> Path | None:
     return None
 
 
-def _load_keys(bundle: Path, override: Path | None) -> tuple[dict[str, bytes], str]:
-    """Find a trust-keys document for re-verification, and say where it came from."""
+def _load_keys(
+    bundle: Path, override: Path | None
+) -> tuple[dict[str, bytes], str, str]:
+    """Find a trust-keys document for re-verification, and say what happened.
+
+    Returns ``(keys, path, problem)``. Exactly one of ``path`` and ``problem``
+    is set when a candidate file existed, and both are empty when none did.
+    The three cases have to stay apart: a document that is there and unusable
+    is a failure to look, and reporting it as "no trust-keys document was
+    found" tells a reader the bundle carries no key material when it carries
+    key material nobody could parse.
+    """
     from failure_lab.verifier import parse_key_document
 
     candidates = [override] if override else []
@@ -365,12 +447,12 @@ def _load_keys(bundle: Path, override: Path | None) -> tuple[dict[str, bytes], s
         try:
             document = json.loads(candidate.read_text(encoding="utf-8"))
         except ValueError as exc:
-            return {}, f"{candidate} is not valid JSON: {exc}"
+            return {}, "", f"{candidate} is not valid JSON: {exc}"
         try:
-            return parse_key_document(document), str(candidate)
+            return parse_key_document(document), str(candidate), ""
         except Exception as exc:  # noqa: BLE001 - a bad key document is a finding
-            return {}, f"{candidate} is not a usable key document: {exc}"
-    return {}, ""
+            return {}, "", f"{candidate} is not a usable key document: {exc}"
+    return {}, "", ""
 
 
 def command_verify(args: argparse.Namespace) -> int:
@@ -388,7 +470,7 @@ def command_verify(args: argparse.Namespace) -> int:
     integrity = verify_bundle_integrity(bundle)
 
     receipt_paths = sorted((bundle / "receipts").glob("*.json"))
-    keys, key_origin = _load_keys(bundle, args.keys)
+    keys, key_origin, key_problem = _load_keys(bundle, args.keys)
     verifications: list[dict[str, Any]] = []
     for path in receipt_paths:
         try:
@@ -423,9 +505,10 @@ def command_verify(args: argparse.Namespace) -> int:
         "integrity": integrity.as_dict(),
         "receipts_found": len(receipt_paths),
         "key_document": key_origin or None,
+        "key_document_problem": key_problem or None,
         "verification": verifications,
         "signatures_valid": valid,
-        "notes": _verify_notes(receipt_paths, keys, key_origin),
+        "notes": _verify_notes(receipt_paths, keys, key_origin, key_problem),
     }
 
     if args.as_json:
@@ -437,7 +520,10 @@ def command_verify(args: argparse.Namespace) -> int:
 
 
 def _verify_notes(
-    receipt_paths: list[Path], keys: dict[str, bytes], key_origin: str
+    receipt_paths: list[Path],
+    keys: dict[str, bytes],
+    key_origin: str,
+    key_problem: str = "",
 ) -> list[str]:
     notes: list[str] = []
     if not receipt_paths:
@@ -445,6 +531,13 @@ def _verify_notes(
             "this bundle carries no portable receipts, so no signature was "
             "checked here. That is an absence in the bundle, not a verdict "
             "about the gateway's receipts."
+        )
+    elif key_problem:
+        notes.append(
+            f"a trust-keys document was found but could not be used: "
+            f"{key_problem}. No signature was checked. This is a failure to "
+            "read the keys, not a bundle without keys and not a signature "
+            "that failed; pass --keys PATH to supply a usable one."
         )
     elif not keys:
         notes.append(
@@ -622,7 +715,25 @@ def command_serve(args: argparse.Namespace) -> int:
     The module is imported here and nowhere else, and every entry point it
     might expose is tried by name rather than assumed, so this subcommand does
     not have to be rewritten when ``failure_lab.diagnostic`` lands.
+
+    The loopback check is repeated here rather than left to
+    :func:`failure_lab.diagnostic.server.serve`, which enforces it for the
+    ``main()`` and ``serve()`` entry points. The third fallback below runs an
+    ``app``/``create_app()`` under uvicorn directly, and that path has no such
+    check -- so a diagnostic that exposed only an application object could be
+    published on ``0.0.0.0`` by this CLI, serving a page that boots a gateway
+    and renders evidence. The invariant belongs to whoever calls ``bind``.
     """
+    if args.host not in LOOPBACK_HOSTS:
+        sys.stderr.write(
+            f"refusing to bind {args.host!r}: the diagnostic boots a gateway "
+            "with an admin credential in this process and renders evidence "
+            "from it, so it is served on the loopback only. Allowed: "
+            + ", ".join(sorted(LOOPBACK_HOSTS))
+            + "\n"
+        )
+        return EXIT_USAGE
+
     try:
         from failure_lab import diagnostic
     except ImportError as exc:
