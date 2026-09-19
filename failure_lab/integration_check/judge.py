@@ -153,7 +153,7 @@ class RecoveryStage(str, Enum):
     AFTER_RESTART = "after_restart"
 
 
-def as_understanding(value: Any) -> Understanding:
+def _as_understanding(value: Any) -> Understanding:
     """Read a candidate's understanding, or ``UNKNOWN`` if it is unreadable.
 
     A candidate is free to hand back the bare string, because
@@ -898,7 +898,9 @@ class JudgeResult:
 
     @property
     def passed(self) -> bool:
-        return all(a.passed for a in self.assertions)
+        # ``all([])`` is True, which would turn a run that asserted nothing
+        # into a pass. Nothing measured is not the same as nothing wrong.
+        return bool(self.assertions) and all(a.passed for a in self.assertions)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -1683,7 +1685,7 @@ def _assertions(
 
     # -- 5 ---------------------------------------------------------------
     raw_understanding = getattr(report_restart, "understanding", None)
-    understanding = as_understanding(raw_understanding)
+    understanding = _as_understanding(raw_understanding)
     terminal = understanding in TERMINAL_UNDERSTANDINGS
     # An overclaim is a claim the action happened that the gateway's own
     # record does not carry. Absence of a record is not agreement: if no
@@ -1802,7 +1804,7 @@ def _metrics(
             deduplicated_gaps.append(gap)
 
     return {
-        "integration_success": all(a.passed for a in assertions),
+        "integration_success": bool(assertions) and all(a.passed for a in assertions),
         "time_to_first_success": time_to_first_success,
         "tool_calls": len(log.records),
         "errors_encountered": sum(1 for r in log.records if r.carried_an_error)
