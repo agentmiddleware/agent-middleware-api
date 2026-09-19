@@ -100,7 +100,13 @@ async def _run(args: argparse.Namespace, run_dir: Path) -> int:
     if args.full:
         print(json.dumps(document, indent=2, sort_keys=True))
     else:
-        print(json.dumps(_summarize(document), indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                _summarize(document, filtered=bool(args.configuration)),
+                indent=2,
+                sort_keys=True,
+            )
+        )
     return 0 if result.verdict.value not in ("ERROR",) else 1
 
 
@@ -109,12 +115,22 @@ def _coerce_pair(pair: str) -> tuple[str, Any]:
     return name.strip(), _coerce(value)
 
 
-def _summarize(document: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _summarize(document: dict[str, Any], *, filtered: bool = False) -> dict[str, Any]:
+    """Condense a result document for reading at a terminal.
+
+    ``matches_expectation`` compares the whole documented expectation map
+    against what ran, so filtering to one configuration makes it read false
+    for the configurations that were never asked to run. That would look like
+    a finding and is not one, so a filtered run reports it as null and says
+    why rather than printing a number that means something else.
+    """
+    summary: dict[str, Any] = {
         "test_id": document["test_id"],
         "title": document["title"],
         "verdict": document["verdict"],
-        "matches_expectation": document["matches_expectation"],
+        "matches_expectation": (
+            None if filtered else document["matches_expectation"]
+        ),
         "configurations": [
             {
                 "configuration": entry["configuration"],
@@ -132,6 +148,12 @@ def _summarize(document: dict[str, Any]) -> dict[str, Any]:
             for entry in document["configurations"]
         ],
     }
+    if filtered:
+        summary["matches_expectation_note"] = (
+            "not computed: this run was limited to a subset of configurations, "
+            "so the documented expectation map cannot be checked in full"
+        )
+    return summary
 
 
 def main(argv: list[str] | None = None) -> int:

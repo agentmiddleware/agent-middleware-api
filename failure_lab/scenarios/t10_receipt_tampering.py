@@ -309,7 +309,7 @@ class ReceiptTampering(Scenario):
             path = f"signing_input.{name}"
             forged = _distinct(signed_payload[name], _SIGNED_FORGERIES[name])
             rows.append(
-                self._probe(
+                _probe(
                     bundle,
                     keys,
                     path=path,
@@ -327,7 +327,7 @@ class ReceiptTampering(Scenario):
         for name, forged_value in envelope_forgeries.items():
             forged = _distinct(bundle.get(name), forged_value)
             rows.append(
-                self._probe(
+                _probe(
                     bundle,
                     keys,
                     path=name,
@@ -353,7 +353,7 @@ class ReceiptTampering(Scenario):
         ]
 
         # -- 5. the gateway's own verification surface ----------------------
-        gateway_surface = await self._gateway_verify_surface(
+        gateway_surface = await _gateway_verify_surface(
             gateway,
             tenant,
             receipt_id=receipt_id,
@@ -438,6 +438,17 @@ class ReceiptTampering(Scenario):
                 "unchanged values already broke the signature, so this run cannot "
                 "attribute the signed-field failures to the edited values."
             )
+        envelope_issuer = bundle.get("issuer")
+        envelope_keys_url = str(bundle.get("keys_url") or "")
+        if not envelope_issuer or not envelope_keys_url.startswith("http"):
+            remaining_risks.append(
+                "The exported bundle in this run named its issuer as "
+                f"{envelope_issuer!r} and its key location as {envelope_keys_url!r}. "
+                "Neither field is signed, and an offline holder with no other context "
+                "cannot resolve a relative or empty value into an origin to fetch keys "
+                "from. This deployment has PUBLIC_URL unset; a deployment that sets it "
+                "would fill both fields, but they would still sit outside the signature."
+            )
 
         emit(
             "matrix.complete",
@@ -496,161 +507,175 @@ class ReceiptTampering(Scenario):
                 "outside_signature_detail": survived,
                 "field_coverage": coverage,
                 "declared_envelope_only_fields": list(ENVELOPE_ONLY_FIELDS),
+                "bundle_envelope": {
+                    "issuer": bundle.get("issuer"),
+                    "keys_url": bundle.get("keys_url"),
+                    "canonicalization": bundle.get("canonicalization"),
+                    "schema_version": bundle.get("schema_version"),
+                    "alg": bundle.get("alg"),
+                    "kid": bundle.get("kid"),
+                },
                 "published_key_ids": sorted(keys),
                 "gateway_verify_surface": gateway_surface,
             },
         )
 
-    # -- helpers -----------------------------------------------------------
 
-    def _probe(
-        self,
-        bundle: dict[str, Any],
-        keys: dict[str, bytes],
-        *,
-        path: str,
-        value: Any,
-        original: Any,
-        coverage: dict[str, str],
-        baseline: dict[str, str],
-        observation: dict[str, Any],
-        emit: Any,
-    ) -> dict[str, Any]:
-        """Apply one independent edit and record what the verifier said."""
-        edited = tamper(bundle, path, value)
-        report = verify(edited, keys, downstream_observation=observation)
-        claims = _claims(report)
-        changed = [name for name in _CLAIM_NAMES if claims[name] != baseline[name]]
-        classification = coverage.get(path, "absent_from_bundle")
-        signature_valid = report.signature.status is ClaimStatus.ESTABLISHED
-        row = {
-            "field": path,
-            "side": "signed" if path.startswith("signing_input.") else "envelope",
-            "coverage": classification,
-            "edited": True,
-            "original": original,
-            "forged": value,
-            "signature_valid": signature_valid,
-            "signature_status": report.signature.status.value,
-            "signature_reason": report.signature.reason,
-            "claims": claims,
-            "claims_changed": changed,
-            "envelope_disagreements": list(report.envelope_disagreements),
-            "notes": list(report.notes),
-            "detected": signature_valid is False or bool(report.envelope_disagreements),
-        }
-        emit(
-            "tamper.probe",
-            (
-                f"{path} edited -> signature {report.signature.status.value}"
-                + (
-                    f", disagreements {row['envelope_disagreements']}"
-                    if row["envelope_disagreements"]
-                    else ""
-                )
-            ),
-            field=path,
-            coverage=classification,
-            signature=report.signature.status.value,
-            claims_changed=changed,
-            envelope_disagreements=row["envelope_disagreements"],
-            detected=row["detected"],
-        )
-        return row
+# -- helpers ---------------------------------------------------------------
 
-    async def _gateway_verify_surface(
-        self,
-        gateway: Any,
-        tenant: Any,
-        *,
-        receipt_id: str,
-        forged_receipt_id: str,
-        rows: list[dict[str, Any]],
-        emit: Any,
-    ) -> dict[str, Any]:
-        """Ask the product's own verifier about the two most important cases."""
 
-        async def ask(candidate_id: str) -> dict[str, Any]:
-            response = await gateway.client.post(
-                "/v1/receipts/verify",
-                json={"receipt_id": candidate_id},
-                headers=tenant.headers,
+def _probe(
+    bundle: dict[str, Any],
+    keys: dict[str, bytes],
+    *,
+    path: str,
+    value: Any,
+    original: Any,
+    coverage: dict[str, str],
+    baseline: dict[str, str],
+    observation: dict[str, Any],
+    emit: Any,
+) -> dict[str, Any]:
+    """Apply one independent edit and record what the verifier said."""
+    edited = tamper(bundle, path, value)
+    report = verify(edited, keys, downstream_observation=observation)
+    claims = _claims(report)
+    changed = [name for name in _CLAIM_NAMES if claims[name] != baseline[name]]
+    classification = coverage.get(path, "absent_from_bundle")
+    signature_valid = report.signature.status is ClaimStatus.ESTABLISHED
+    row = {
+        "field": path,
+        "side": "signed" if path.startswith("signing_input.") else "envelope",
+        "coverage": classification,
+        "edited": True,
+        "original": original,
+        "forged": value,
+        "signature_valid": signature_valid,
+        "signature_status": report.signature.status.value,
+        "signature_reason": report.signature.reason,
+        "claims": claims,
+        "claims_changed": changed,
+        "envelope_disagreements": list(report.envelope_disagreements),
+        "notes": list(report.notes),
+        "detected": signature_valid is False or bool(report.envelope_disagreements),
+    }
+    emit(
+        "tamper.probe",
+        (
+            f"{path} edited -> signature {report.signature.status.value}"
+            + (
+                f", disagreements {row['envelope_disagreements']}"
+                if row["envelope_disagreements"]
+                else ""
             )
-            try:
-                body = response.json()
-            except ValueError:
-                body = {}
-            if not isinstance(body, dict):
-                body = {}
-            return {
-                "receipt_id_sent": candidate_id,
-                "http_status": response.status_code,
-                "valid": body.get("valid"),
-                "reason": body.get("reason") or body.get("detail"),
-            }
+        ),
+        field=path,
+        coverage=classification,
+        signature=report.signature.status.value,
+        claims_changed=changed,
+        envelope_disagreements=row["envelope_disagreements"],
+        detected=row["detected"],
+    )
+    return row
 
-        def independent(path: str) -> dict[str, Any] | None:
-            for row in rows:
-                if row["field"] == path:
-                    return {
-                        "signature_status": row.get("signature_status"),
-                        "envelope_disagreements": row.get("envelope_disagreements"),
-                        "detected": row.get("detected"),
-                    }
-            return None
 
-        baseline = await ask(receipt_id)
-        signed_case = await ask(receipt_id)
-        envelope_case = await ask(forged_receipt_id)
-        emit(
-            "gateway_verify.probe",
-            (
-                "POST /v1/receipts/verify accepts a receipt_id, not a bundle: "
-                f"genuine id -> valid={baseline['valid']}, "
-                f"envelope-forged id -> http {envelope_case['http_status']}"
-            ),
-            genuine=baseline,
-            signed_field_case=signed_case,
-            envelope_field_case=envelope_case,
+async def _gateway_verify_surface(
+    gateway: Any,
+    tenant: Any,
+    *,
+    receipt_id: str,
+    forged_receipt_id: str,
+    rows: list[dict[str, Any]],
+    emit: Any,
+) -> dict[str, Any]:
+    """Ask the product's own verifier about the two most important cases."""
+
+    async def ask(candidate_id: str) -> dict[str, Any]:
+        response = await gateway.client.post(
+            "/v1/receipts/verify",
+            json={"receipt_id": candidate_id},
+            headers=tenant.headers,
         )
-        signed_independent = independent("signing_input.outcome")
-        envelope_independent = independent("receipt_id")
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
         return {
-            "endpoint": "POST /v1/receipts/verify",
-            "accepts_only_receipt_id": True,
-            "input_shape": {"receipt_id": "str"},
-            "genuine_receipt": baseline,
-            "cases": [
-                {
-                    "case": "signed field tampered (signing_input.outcome)",
-                    "independent_verifier": signed_independent,
-                    "gateway_endpoint": signed_case,
-                    "comparable": False,
-                    "agree": False,
-                    "note": (
-                        "the endpoint cannot be shown the tampered bundle; it re-checks "
-                        "the row the gateway stores and reports valid=true, while the "
-                        "independent verifier reports the holder's copy as FAILED"
-                    ),
-                },
-                {
-                    "case": "envelope field tampered (receipt_id)",
-                    "independent_verifier": envelope_independent,
-                    "gateway_endpoint": envelope_case,
-                    "comparable": False,
-                    "agree": False,
-                    "note": (
-                        "the forged envelope receipt_id names no stored receipt, so the "
-                        "endpoint answers about lookup rather than about the bundle; the "
-                        "independent verifier keeps a valid signature and flags the "
-                        "envelope/payload disagreement"
-                    ),
-                },
-            ],
-            "finding": (
-                "The two verifiers do not answer the same question. The product's "
-                "surface attests to its own stored copy; only an offline check of the "
-                "exported bundle against the published keys detects tampering in a "
-                "receipt that has left the plane."
-            ),
+            "receipt_id_sent": candidate_id,
+            "http_status": response.status_code,
+            "valid": body.get("valid"),
+            "reason": body.get("reason") or body.get("detail"),
         }
+
+    def independent(path: str) -> dict[str, Any] | None:
+        for row in rows:
+            if row["field"] == path:
+                return {
+                    "signature_status": row.get("signature_status"),
+                    "envelope_disagreements": row.get("envelope_disagreements"),
+                    "detected": row.get("detected"),
+                }
+        return None
+
+    baseline = await ask(receipt_id)
+    signed_case = await ask(receipt_id)
+    envelope_case = await ask(forged_receipt_id)
+    emit(
+        "gateway_verify.probe",
+        (
+            "POST /v1/receipts/verify accepts a receipt_id, not a bundle: "
+            f"genuine id -> valid={baseline['valid']}, "
+            f"envelope-forged id -> http {envelope_case['http_status']}"
+        ),
+        genuine=baseline,
+        signed_field_case=signed_case,
+        envelope_field_case=envelope_case,
+    )
+    signed_independent = independent("signing_input.outcome")
+    envelope_independent = independent("receipt_id")
+    return {
+        "endpoint": "POST /v1/receipts/verify",
+        "accepts_only_receipt_id": True,
+        "input_shape": {"receipt_id": "str"},
+        "genuine_receipt": baseline,
+        "cases": [
+            {
+                "case": "signed field tampered (signing_input.outcome)",
+                "independent_verifier": signed_independent,
+                "gateway_endpoint": signed_case,
+                "same_question": False,
+                "agree": None,
+                "note": (
+                    "the endpoint cannot be shown the tampered bundle, so it re-checks "
+                    f"the row the gateway stores and answers valid={signed_case['valid']!r} "
+                    "while the independent verifier reports the holder's edited copy as "
+                    f"{(signed_independent or {}).get('signature_status')}. A reader who "
+                    "treated this endpoint as 'is the receipt in my hand genuine?' would "
+                    "be told yes about a different object."
+                ),
+            },
+            {
+                "case": "envelope field tampered (receipt_id)",
+                "independent_verifier": envelope_independent,
+                "gateway_endpoint": envelope_case,
+                "same_question": False,
+                "agree": None,
+                "note": (
+                    "the forged envelope receipt_id names no stored receipt, so the "
+                    f"endpoint answered http {envelope_case['http_status']} "
+                    f"({envelope_case['reason']!r}) -- it is answering about lookup and "
+                    "authorization, not about the bundle. The independent verifier keeps "
+                    "a valid signature here and flags the envelope/payload disagreement "
+                    "instead, which is the honest answer for a field outside the signature."
+                ),
+            },
+        ],
+        "finding": (
+            "The two verifiers do not answer the same question. The product's "
+            "surface attests to its own stored copy; only an offline check of the "
+            "exported bundle against the published keys detects tampering in a "
+            "receipt that has left the plane."
+        ),
+    }

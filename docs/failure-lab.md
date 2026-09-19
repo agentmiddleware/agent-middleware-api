@@ -230,6 +230,33 @@ nightly, and release candidates.
 | T13 | Retention expiration | slow | What guarantee remains once the idempotency record ages out |
 | T14 | Standard MCP client | fast | The full lifecycle against an independent, standards-compliant client |
 
+### What the probe matrix found
+
+`T09` issues a permit per probe and checks, for each, whether the refusal
+happened before anything crossed into the tool. All seven permit-scoped probes
+were refused pre-dispatch, with zero downstream executions and no net charge.
+Two details are worth stating plainly, because a reader would otherwise assume
+the opposite.
+
+**Two permit constraints are fail-closed on the upstream path rather than
+enforced.** A permit carrying `aggregate_value_cap` or `max_calls_per_tool` is
+refused for a configured upstream tool as
+`permit_constraint_unsupported_for_upstream`, not as
+`permit_aggregate_value_cap_exceeded` or `permit_max_calls_exceeded`. That is
+deliberate, and it is the safe direction: the remote path reserves credits
+atomically but does not reserve per-tool call slots or fold in-flight
+reservations into an aggregate cap, so a read-time check would let concurrent
+calls overshoot. Refusing the permit outright is the right call. It also means
+those two constraints do not do, on a remote tool, what their names suggest —
+so do not size a remote deployment around them.
+
+**Argument shape is not part of the pre-dispatch check.** A call with `amount`
+missing, or with `amount` sent as the string `"5000"` instead of the integer,
+is dispatched to the tool and refused there: one dispatch, zero executions,
+charge refunded. No business effect lands, which is what matters for safety,
+but the refusal is the downstream's rather than the permit's. "Enforcement
+happens before dispatch" is true of authority and false of argument validity.
+
 ### T06 is expected to fail, and it stays
 
 An agent that restarts and replans may mint a **new** idempotency key for the

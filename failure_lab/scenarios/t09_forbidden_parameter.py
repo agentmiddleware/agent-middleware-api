@@ -67,6 +67,12 @@ PROBE_INTENT: dict[str, str] = {
     "alternate_representation": "the value field sent as a string instead of an integer",
 }
 
+#: The refusal a configured upstream tool gives when the permit carries a
+#: usage constraint the remote reservation cannot enforce atomically. The
+#: product documents this fail-closed posture for the upstream path; the
+#: cap's own reason code belongs to the local execution paths.
+UPSTREAM_UNSUPPORTED = "permit_constraint_unsupported_for_upstream"
+
 #: A domain the governed tool's origin (``localhost``) is not.
 FOREIGN_DOMAIN = "payments.not-the-governed-tool.invalid"
 
@@ -98,6 +104,12 @@ def _credits(rows: list[dict[str, Any]]) -> Decimal:
         if amount is not None:
             total += Decimal(str(amount))
     return total
+
+
+def _credit_text(value: Decimal) -> str:
+    """Render a credit total without exponent noise (``0E-8`` -> ``0``)."""
+    normalized = value.normalize()
+    return format(normalized, "f")
 
 
 def _drop_customer_id(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -238,6 +250,12 @@ class ForbiddenParameter(Scenario):
                 else record["reason"] == DOCUMENTED_REASON[name]
             )
             record["setup_call"] = setup
+            #: True when this probe actually exercised the constraint it
+            #: names. A probe whose setup call was itself refused measured
+            #: something else -- report it, do not silently count it.
+            record["constraint_exercised"] = (
+                True if setup is None else bool(setup["succeeded"])
+            )
             probes.append(record)
             attempts.append(outcome)
             operation_ids.append(str(record["operation_id"]))
@@ -294,8 +312,10 @@ class ForbiddenParameter(Scenario):
                 "reason": record["reason"],
                 "succeeded": record["succeeded"],
                 "operation_id": record["operation_id"],
+                "dispatches": record["dispatches"],
                 "executions": record["executions"],
                 "net_charge_credits": record["net_charge_credits"],
+                "denial_details": record["denial_details"],
             }
 
         # 1 -- the permit's credit cap is below what one call costs.
@@ -418,6 +438,9 @@ class ForbiddenParameter(Scenario):
 
         verdict = Verdict.PASS if not problems else Verdict.FAIL
 
+        clean_permit_rows = [
+            row for row in permit_rows if not self._permit_problems(row)
+        ]
         refused_before_dispatch = sum(
             1 for row in permit_rows if row["refused_before_dispatch"]
         )
@@ -425,15 +448,24 @@ class ForbiddenParameter(Scenario):
         reason_divergences = [
             f"{row['probe']} was refused as {row['reason']!r}, not "
             f"{row['documented_reason']!r}"
+            + (
+                " -- the product documents this fail-closed refusal for a "
+                "configured upstream tool, and the cap's own reason code for "
+                "the local execution paths"
+                if row["reason"] == UPSTREAM_UNSUPPORTED
+                else ""
+            )
             for row in permit_rows
             if row["reason_matches_documented"] is False
         ]
+        unexercised = [row for row in permit_rows if not row["constraint_exercised"]]
 
         observation = self._observation(
             permit_rows=permit_rows,
+            clean_permit_rows=clean_permit_rows,
             schema_rows=schema_rows,
             setup_calls=setup_calls,
-            refused_before_dispatch=refused_before_dispatch,
+            unexercised=unexercised,
             forwarded_schema=forwarded_schema,
             reason_divergences=reason_divergences,
             problems=problems,
@@ -442,7 +474,7 @@ class ForbiddenParameter(Scenario):
         remaining_risks = self._remaining_risks(
             schema_rows=schema_rows,
             forwarded_schema=forwarded_schema,
-            setup_calls=setup_calls,
+            unexercised=unexercised,
             reason_divergences=reason_divergences,
         )
 
@@ -452,7 +484,9 @@ class ForbiddenParameter(Scenario):
             scenario=self.test_id,
             configuration=target.configuration.value,
             permit_probes_refused_before_dispatch=refused_before_dispatch,
+            permit_probes_clean=len(clean_permit_rows),
             permit_probes_total=len(permit_rows),
+            constraints_not_exercised=[row["probe"] for row in unexercised],
             schema_probes_forwarded=[row["probe"] for row in forwarded_schema],
             probe_executions=sum(int(row["executions"]) for row in probes),
             problems=problems,
@@ -474,8 +508,21 @@ class ForbiddenParameter(Scenario):
                 "setup_calls": setup_calls,
                 "problems": problems,
                 "reason_divergences": reason_divergences,
+                "constraints_not_exercised": [
+                    {
+                        "probe": row["probe"],
+                        "reason_the_setup_call_was_refused": (
+                            (row["setup_call"] or {}).get("reason")
+                        ),
+                        "denial_details": (row["setup_call"] or {}).get(
+                            "denial_details"
+                        ),
+                    }
+                    for row in unexercised
+                ],
                 "totals": {
                     "permit_probes": len(permit_rows),
+                    "permit_probes_clean": len(clean_permit_rows),
                     "permit_probes_refused_before_dispatch": refused_before_dispatch,
                     "permit_probe_dispatches": sum(
                         int(row["dispatches"]) for row in permit_rows
@@ -585,7 +632,8 @@ class ForbiddenParameter(Scenario):
             "debit_count": len(added_debits),
             "credit_refund_count": len(added_refunds),
             "net_debit": len(added_debits) - len(added_refunds),
-            "net_charge_credits": str(net_charge),
+            "net_charge_credits": _credit_text(net_charge),
+            "denial_details": dict(outcome.details) if outcome.details else {},
             "receipt_outcomes": [str(r["outcome"]) for r in added_receipts],
             "receipt_reason_codes": [r.get("reason_code") for r in added_receipts],
             "receipt_ids": [str(r["receipt_id"]) for r in added_receipts],
@@ -628,9 +676,10 @@ class ForbiddenParameter(Scenario):
     def _observation(
         *,
         permit_rows: list[dict[str, Any]],
+        clean_permit_rows: list[dict[str, Any]],
         schema_rows: list[dict[str, Any]],
         setup_calls: list[dict[str, Any]],
-        refused_before_dispatch: int,
+        unexercised: list[dict[str, Any]],
         forwarded_schema: list[dict[str, Any]],
         reason_divergences: list[str],
         problems: list[str],
@@ -640,19 +689,37 @@ class ForbiddenParameter(Scenario):
         )
         parts = [
             (
-                f"{refused_before_dispatch}/{len(permit_rows)} permit-scoped "
+                f"{len(clean_permit_rows)}/{len(permit_rows)} permit-scoped "
                 f"probes were refused before anything crossed the fault layer, "
                 f"with zero downstream executions and no net charge: "
                 f"{permit_summary}."
             )
         ]
-        if setup_calls:
-            executed = sum(int(row["executions"]) for row in setup_calls)
-            parts.append(
-                f"{len(setup_calls)} deliberate setup calls (one per consumable "
-                f"constraint) were allowed and account for all {executed} "
-                f"downstream executions in this run."
+        if unexercised:
+            names = ", ".join(row["probe"] for row in unexercised)
+            setup_reasons = ", ".join(
+                f"{row['probe']}={(row['setup_call'] or {}).get('reason')}"
+                for row in unexercised
             )
+            parts.append(
+                f"But {names} did not measure what {'they' if len(unexercised) > 1 else 'it'} "
+                f"set out to measure. The setup call meant to consume the "
+                f"constraint was itself refused ({setup_reasons}), so a permit "
+                f"carrying {'these constraints' if len(unexercised) > 1 else 'this constraint'} "
+                f"cannot be used against this tool at all -- the refusal seen "
+                f"is 'the constraint is not supported on this path', not 'the "
+                f"constraint was reached and bit'. The safety property holds "
+                f"(nothing dispatched, nothing executed, no charge) and the "
+                f"posture is fail-closed, but the constraint is unenforceable "
+                f"rather than enforced."
+            )
+        succeeded_setup = [row for row in setup_calls if row["succeeded"]]
+        executed = sum(int(row["executions"]) for row in setup_calls)
+        parts.append(
+            f"{len(succeeded_setup)}/{len(setup_calls)} deliberate setup calls "
+            f"were admitted; they account for all {executed} downstream "
+            f"executions in this run."
+        )
         if reason_divergences:
             parts.append(
                 "Refusal reasons that differ from what the product documents: "
@@ -692,10 +759,26 @@ class ForbiddenParameter(Scenario):
         *,
         schema_rows: list[dict[str, Any]],
         forwarded_schema: list[dict[str, Any]],
-        setup_calls: list[dict[str, Any]],
+        unexercised: list[dict[str, Any]],
         reason_divergences: list[str],
     ) -> list[str]:
         risks: list[str] = []
+        if unexercised:
+            names = ", ".join(row["probe"] for row in unexercised)
+            risks.append(
+                f"This test could not exercise {names} as a constraint at all. "
+                f"A permit carrying it is refused on the first call to this "
+                f"tool, so what the run demonstrates is that the constraint is "
+                f"unavailable on the governed remote path, not that it is "
+                f"enforced. The product documents that posture -- the cap is "
+                f"enforced on the local execution paths and fails closed on a "
+                f"configured upstream tool -- so no unbudgeted call gets "
+                f"through. A buyer reading the permit's field list should "
+                f"still know that for a remote tool, issuing a permit with it "
+                f"makes the permit unusable rather than tighter, and that this "
+                f"scenario therefore leaves those two caps untested as "
+                f"enforcement."
+            )
         if forwarded_schema:
             names = ", ".join(row["probe"] for row in forwarded_schema)
             risks.append(
@@ -705,7 +788,9 @@ class ForbiddenParameter(Scenario):
                 f"dispatched to the tool, which refused them. A reader of "
                 f"'refused before dispatch' should not extend it to argument "
                 f"shape: a malformed call still reaches the tool, still "
-                f"occupies an attempt, and still has to be refused downstream."
+                f"occupies an attempt and a charge cycle, and still has to be "
+                f"refused downstream. A tool that accepted loose arguments "
+                f"would have executed it."
             )
         charged = [
             row
@@ -729,17 +814,6 @@ class ForbiddenParameter(Scenario):
                 "a refusal, but it changes what a caller can act on: "
                 + "; ".join(reason_divergences)
                 + "."
-            )
-        failed_setup = [row for row in setup_calls if not row["succeeded"]]
-        if failed_setup:
-            risks.append(
-                "A setup call that was meant to consume a constraint did not "
-                "succeed ("
-                + ", ".join(
-                    f"{row['probe']}={row['status']}" for row in failed_setup
-                )
-                + "), so the probe that follows it may have been refused for a "
-                "different reason than the one it was built to test."
             )
         risks.append(
             "Each probe is a single call against a freshly issued permit. This "
