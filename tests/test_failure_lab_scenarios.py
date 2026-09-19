@@ -26,7 +26,7 @@ from failure_lab.scenarios import (
     SLOW_SCENARIO_IDS,
     get_scenario,
 )
-from failure_lab.scenarios.base import Verdict
+from failure_lab.scenarios.base import Scenario, Verdict
 
 ALL_IDS = [scenario.test_id for scenario in SCENARIO_CLASSES]
 
@@ -116,15 +116,44 @@ def test_scenario_definitions_are_content_addressed(test_id):
 
 @pytest.mark.parametrize("test_id", ALL_IDS)
 def test_every_scenario_is_actually_implemented(test_id):
-    """Guards against a placeholder shipping as part of the suite."""
+    """Guards against a placeholder, or a half-written one, joining the suite.
+
+    Checking only for a body that is exactly ``raise NotImplementedError``
+    misses the more likely case: a scenario written most of the way and left
+    with one unreachable-looking stub in a branch nobody exercised. That
+    reports PASS for the configurations that do run and says nothing about the
+    one that does not, which is worse than an obvious placeholder because it
+    looks finished. So the whole method is walked for any NotImplementedError
+    raise, at any depth.
+    """
+    import ast
+    import inspect
+    import textwrap
+
     scenario = get_scenario(test_id)
-    source = type(scenario).run_configuration.__code__
-    assert source.co_filename.endswith(".py")
-    assert source.co_code, f"{test_id} has no body"
-    # A body that is only `raise NotImplementedError` is a placeholder.
-    constants = [c for c in source.co_consts if c is not None]
-    assert source.co_names != ("NotImplementedError",), f"{test_id} is still a placeholder"
-    assert constants or source.co_names, f"{test_id} looks empty"
+    method = type(scenario).run_configuration
+
+    assert method is not Scenario.run_configuration, f"{test_id} inherits the abstract body"
+
+    source = textwrap.dedent(inspect.getsource(method))
+    tree = ast.parse(source)
+    stubs = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Raise)
+        and (
+            (isinstance(node.exc, ast.Name) and node.exc.id == "NotImplementedError")
+            or (
+                isinstance(node.exc, ast.Call)
+                and isinstance(node.exc.func, ast.Name)
+                and node.exc.func.id == "NotImplementedError"
+            )
+        )
+    ]
+    assert not stubs, (
+        f"{test_id} still raises NotImplementedError inside run_configuration "
+        f"(relative line(s) {stubs}) -- it is a placeholder or half written"
+    )
 
 
 def test_the_expected_map_records_the_known_business_level_gap():
