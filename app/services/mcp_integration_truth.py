@@ -20,7 +20,10 @@ def truth_for_category(category: str) -> dict[str, Any]:
 
     - ``simulated`` / ``integrated`` / ``postgres``: category is a gated runtime pillar
     - ``postgres``: Durable SQL path (and/or LLM): Oracle, Agent Comms, Content Factory when simulation is off
-    - ``platform``: billing, sandbox, protocol helpers, etc. (no SIMULATION_MODE flag)
+    - ``platform``: wallet/platform-level categories that are not runtime
+      services at all and carry no SIMULATION_MODE flag (platform_fee,
+      swarm_delegation). Every other ServiceCategory is gated; see
+      tests/test_runtime_mode.py::test_every_service_category_is_classified.
     """
     if category in SERVICE_NAMES:
         sim = is_simulation(category)
