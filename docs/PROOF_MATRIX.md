@@ -325,9 +325,10 @@ These would strengthen claims. They are not a build queue under Narrow.
 5. **KMS-backed signing custody**, designed in
    [`docs/key-management.md`](key-management.md) but not implemented.
 
-Items 1, 4, and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a named
-partner is blocked without them. They belong on a roadmap, not in product
-copy. Stay on the one-tool economic loop.
+Items 1, 2, 4, and 5 are frozen by [`WEDGE.md`](../WEDGE.md) until a named
+partner is blocked without them. Item 2 also requires naming a trust root
+that is not this origin. They belong on a roadmap, not in product copy.
+Stay on the one-tool economic loop.
 
 Unfreeze the permit envelope in item 1 only when a named partner cannot
 use the shipped `GET /v1/permits/{id}` + `LocalPermitValidator` path.

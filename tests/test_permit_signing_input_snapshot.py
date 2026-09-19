@@ -20,7 +20,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -31,6 +31,7 @@ from httpx import ASGITransport, AsyncClient
 from app.db.database import get_session_factory
 from app.db.models import PermitModel
 from app.main import app
+from app.schemas.trust import PermitCreateRequest
 from app.services.permits import PermitService
 from app.services.signing_keys import canonical_json, sha256_hex
 from b2a_sdk.edge_client import LocalPermitValidator
@@ -208,6 +209,21 @@ def test_approval_and_v2_fields_are_signed_when_set() -> None:
 
 
 @pytest.mark.parametrize("name", sorted(CASES))
+def test_unsigned_payload_is_verification_without_folded_fields(name: str) -> None:
+    """create signs _unsigned_payload; verify folds alg/kid/hash onto it."""
+    model = CASES[name]
+    unsigned = PermitService._unsigned_payload(model)
+    full = PermitService._verification_payload(model)
+    for folded in ("alg", "kid", "payload_hash"):
+        assert folded not in unsigned
+    reconstructed = dict(unsigned)
+    reconstructed["alg"] = "Ed25519"
+    reconstructed["kid"] = model.key_id
+    reconstructed["payload_hash"] = sha256_hex(reconstructed)
+    assert reconstructed == full
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
 def test_sdk_local_validator_matches_server_bytes(name: str) -> None:
     """LocalPermitValidator must reconstruct the same canonical bytes."""
     sdk_payload = LocalPermitValidator.permit_signing_payload(
@@ -242,7 +258,48 @@ async def test_created_permit_verifies_against_snapshot_payload(
         model = await session.get(PermitModel, permit["permit_id"])
         assert model is not None
         assert await PermitService().verify_signature(model, session=session)
+        unsigned = PermitService._unsigned_payload(model)
         reconstructed = PermitService._verification_payload(model)
         assert reconstructed["permit_id"] == permit["permit_id"]
         assert reconstructed["kid"] == model.key_id
         assert "requires_human_approval" not in reconstructed
+        assert "alg" not in unsigned
+        assert {
+            k: v
+            for k, v in reconstructed.items()
+            if k not in {"alg", "kid", "payload_hash"}
+        } == unsigned
+
+
+@pytest.mark.anyio
+async def test_created_v2_permit_signs_additive_fields(
+    client: AsyncClient,
+    clean_database,
+) -> None:
+    """v2 constraints must be in the bytes create signs and verify reconstructs."""
+    provisioned = await provision_agent_wallet(client)
+    permit = await PermitService().create_permit(
+        PermitCreateRequest(
+            issuer_wallet_id=provisioned["agent_wallet_id"],
+            subject_wallet_id=provisioned["agent_wallet_id"],
+            subject_key_id=provisioned["key_id"],
+            allowed_tools=["golden-v2-echo"],
+            scopes=["tool:golden-v2-echo:invoke", "billing:charge"],
+            max_credits=Decimal("10"),
+            aggregate_value_cap=Decimal("5"),
+            forbidden_fields=["secret_token"],
+            recipient_domain="partner.example",
+            max_calls_per_tool={"golden-v2-echo": 3},
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        model = await session.get(PermitModel, permit.permit_id)
+        assert model is not None
+        assert await PermitService().verify_signature(model, session=session)
+        payload = PermitService._verification_payload(model)
+        assert payload["max_calls_per_tool"] == {"golden-v2-echo": 3}
+        assert payload["forbidden_fields"] == ["secret_token"]
+        assert payload["recipient_domain"] == "partner.example"
+        assert "aggregate_value_cap" in payload
