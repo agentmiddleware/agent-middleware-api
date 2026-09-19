@@ -401,6 +401,8 @@ class JsonlSink(Sink):
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        #: Set when :meth:`read` drops an unterminated final line.
+        self.truncated_tail = False
 
     def emit(self, event: Event) -> None:
         line = json.dumps(event.as_dict(), sort_keys=True, ensure_ascii=False)
@@ -411,13 +413,36 @@ class JsonlSink(Sink):
         return f"a local file at {self.path}"
 
     def read(self) -> list[Event]:
-        """Read the events back, for the funnel or for a test."""
+        """Read the events back, for the funnel or for a test.
+
+        A line that parses but breaks the collection policy still raises: that
+        is a surface sending something it should not, and it has to surface.
+        An **unterminated final line** does not -- it is a writer that was
+        killed mid-append, and refusing to read the file at all would lose
+        every event before it to a crash that has nothing to do with policy.
+        It is dropped, recorded in :attr:`truncated_tail`, and reported in the
+        funnel's notes. Dropping the tail can only ever lower a count.
+        """
+        self.truncated_tail = False
         if not self.path.exists():
             return []
+        text = self.path.read_text(encoding="utf-8")
+        lines = text.splitlines()
         events: list[Event] = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                events.append(Event.from_dict(json.loads(line)))
+        for number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                document = json.loads(line)
+            except ValueError:
+                if number == len(lines) and not text.endswith("\n"):
+                    self.truncated_tail = True
+                    continue
+                raise TelemetryRejected(
+                    f"{self.path.name} line {number} is not valid JSON and is not "
+                    "the unterminated tail of an interrupted write"
+                ) from None
+            events.append(Event.from_dict(document))
         return events
 
 
@@ -520,7 +545,17 @@ class TelemetryClient:
         return self.local_sink.read()
 
     def funnel(self) -> Funnel:
-        return funnel(self.read())
+        events = self.read()
+        notes = (
+            [
+                f"{self.local_sink.path.name} ended in an unterminated line, which "
+                "was dropped: a writer was interrupted. Counts below are a lower "
+                "bound on what was recorded."
+            ]
+            if self.local_sink.truncated_tail
+            else []
+        )
+        return funnel(events, notes=notes)
 
     def disclosure_text(self) -> str:
         return disclosure_text(sinks=self.sinks)
@@ -612,7 +647,9 @@ def _as_event(item: Event | Mapping[str, Any]) -> Event:
     return item if isinstance(item, Event) else Event.from_dict(item)
 
 
-def funnel(events: Iterable[Event | Mapping[str, Any]]) -> Funnel:
+def funnel(
+    events: Iterable[Event | Mapping[str, Any]], *, notes: Sequence[str] = ()
+) -> Funnel:
     """Count the PRD's funnel over human traffic only.
 
     Every non-human event is dropped before any counting happens, and the
@@ -624,7 +661,11 @@ def funnel(events: Iterable[Event | Mapping[str, Any]]) -> Funnel:
     ``diagnostic_completed`` will produce a stage count that rises rather than
     falls, and that is left visible: it means the surface is not instrumented
     where it thinks it is, which is worth knowing and is not worth smoothing
-    away.
+    away. Each rise is named in :attr:`Funnel.notes`, because "visible" and
+    "printed as a bare number under a smaller one" are not the same thing.
+
+    ``notes`` are extra lines from the caller -- a reader that dropped a
+    truncated line says so there -- kept ahead of the counting notes.
     """
     counted: list[Event] = []
     excluded_events: dict[str, int] = {}
@@ -641,6 +682,8 @@ def funnel(events: Iterable[Event | Mapping[str, Any]]) -> Funnel:
     stages: list[FunnelStage] = []
     top: int | None = None
     previous: int | None = None
+    previous_label = ""
+    rises: list[str] = []
     for spec in FUNNEL_STAGES:
         if spec.events:
             matching = [event for event in counted if event.name in spec.events]
@@ -661,17 +704,32 @@ def funnel(events: Iterable[Event | Mapping[str, Any]]) -> Funnel:
                 conversion_from_top=round(subjects / top, 4) if top else None,
             )
         )
+        if previous is not None and subjects > previous:
+            rises.append(
+                f"{spec.label} ({subjects}) counts more subjects than "
+                f"{previous_label} ({previous})"
+            )
         previous = subjects
+        previous_label = spec.label
 
-    notes = [
+    notes = list(notes)
+    notes.append(
         "Only human_customer traffic is counted. Every other source is dropped "
-        "before counting, not subtracted afterwards.",
-    ]
+        "before counting, not subtracted afterwards."
+    )
     if excluded_events:
         dropped = ", ".join(
             f"{source}={count}" for source, count in sorted(excluded_events.items())
         )
         notes.append(f"Dropped events by source: {dropped}.")
+    if rises:
+        notes.append(
+            "Stages are counted independently and not forced to fall. These rose: "
+            + "; ".join(rises)
+            + ". A later stage with more subjects than an earlier one means the "
+            "earlier step is not instrumented where the surface thinks it is, so "
+            "no rate through it is trustworthy."
+        )
     if top == 0:
         notes.append(
             "No human traffic was recorded, so every stage is zero. A zero "

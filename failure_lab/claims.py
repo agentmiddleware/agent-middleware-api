@@ -127,6 +127,24 @@ class ClaimRecord:
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> ClaimRecord:
+        """Read a record back, without letting absence read as agreement.
+
+        ``as_dict`` always writes ``matches_documented_expectation``, so a
+        round trip is unaffected. A record that arrives without the field --
+        an older manifest, a hand-written one, a truncated one -- is *not*
+        assumed to match: a gate that grants support for data it does not have
+        grants it exactly when the data is missing. And where the field says
+        true while the rows beside it diverge, the rows win, as they do when
+        the record is built.
+        """
+        expected = {str(k): str(v) for k, v in (document.get("documented_expectation") or {}).items()}
+        observed = {str(k): str(v) for k, v in (document.get("configurations") or {}).items()}
+        rows_diverge = bool(_divergence_limitations(expected, observed))
+        reported = document.get("matches_documented_expectation")
+        if reported is None:
+            matches = bool(expected) and not rows_diverge
+        else:
+            matches = bool(reported) and not rows_diverge
         return cls(
             claim=str(document.get("claim", "")),
             test_id=str(document.get("test_id", "")),
@@ -139,11 +157,9 @@ class ClaimRecord:
             definition_version=str(
                 document.get("definition_version", TEST_DEFINITION_VERSION)
             ),
-            configurations=dict(document.get("configurations") or {}),
-            matches_documented_expectation=bool(
-                document.get("matches_documented_expectation", True)
-            ),
-            documented_expectation=dict(document.get("documented_expectation") or {}),
+            configurations=observed,
+            matches_documented_expectation=matches,
+            documented_expectation=expected,
             evidence=document.get("evidence"),
             title=str(document.get("title", "")),
         )
@@ -309,7 +325,22 @@ def build_claims_manifest(
             # module exists to prevent.
             matches = False
 
+        # The observed verdict, copied -- but never a summary that outranks the
+        # rows it summarises. ScenarioResult.verdict is the worst row, so a
+        # document reading PASS over a FAIL row did not come from a run.
+        status = str(document.get("verdict", ""))
+        worst_row = next((v for v in ("ERROR", "FAIL") if v in observed.values()), "")
+        status_lines: list[str] = []
+        if status == SUPPORTING_STATUS and worst_row:
+            status_lines.append(
+                f"The result document reported {SUPPORTING_STATUS} while a "
+                f"configuration row observed {worst_row}; the row is used as the "
+                "status, because a scenario verdict is the worst of its rows."
+            )
+            status = worst_row
+
         limitations = list(document.get("limitations") or [])
+        limitations.extend(status_lines)
         limitations.extend(divergence_lines)
         risks = [
             risk
@@ -332,8 +363,8 @@ def build_claims_manifest(
                 claim=str(document.get("claim", "")),
                 test_id=test_id,
                 version=resolved_version,
-                # The observed verdict, copied. Never the desired one.
-                status=str(document.get("verdict", "")),
+                # The observed verdict. Never the desired one.
+                status=status,
                 environment=environment_label,
                 tested_at=str(document.get("finished_at") or generated_at),
                 limitations=limitations,
@@ -410,6 +441,13 @@ def assert_claim_is_supported(
             f"{SUPPORTING_STATUS}",
         )
     if not record.matches_documented_expectation and not allow_divergence:
+        if not record.documented_expectation:
+            raise UnsupportedClaimError(
+                claim_text,
+                f"{record.test_id} observed PASS but the record carries no "
+                "documented expectation to have matched, so nothing here says the "
+                "run behaved as documented. Rebuild the manifest from the run",
+            )
         divergences = [line for line in record.limitations if line.startswith("DIVERGENCE")]
         detail = " ".join(divergences) or "the observed verdicts differ from the documented ones"
         raise UnsupportedClaimError(
