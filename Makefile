@@ -1,4 +1,4 @@
-.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
+.PHONY: site-transcript site-transcript-check quickstart quickstart-check live-loop-proof demo-ambiguous-retry demo-ambiguous-retry-check failure-lab failure-lab-check test test-all test-proof coverage prove-trust-plane prove-trust-plane-postgres prove-crash-recovery demo-trust-plane demo-trust-plane-check dogfood-trust-plane dogfood-trust-plane-check red-team-trust-plane red-team-trust-plane-check agent-ops-war-room agent-ops-war-room-check check-doc-references check-railway-iac trust-coverage-gate trust-release-gate trust-conformance-live adversarial-battery-live railway-preflight railway-preflight-live
 
 # The governed-loop transcript the public site renders. Re-runs the
 # trust-plane demo on a throwaway SQLite gateway, records the exchanges the
@@ -86,6 +86,19 @@ demo-ambiguous-retry:
 
 demo-ambiguous-retry-check:
 	uv run --with-requirements requirements.txt python scripts/demo_ambiguous_retry.py --assert --json
+
+# The failure laboratory: one workflow (a vendor payout), one injected fault
+# (the downstream executes, then its response is lost), measured across the
+# existing integration, a correctly used native idempotency baseline, and the
+# gateway. Downstream effects are counted by a record the gateway cannot
+# reach; every expectation is asserted; the report is written to
+# data/failure-lab/<run>/ and must say when the native baseline already
+# handles the fault. See docs/failure-lab.md.
+failure-lab:
+	uv run --with-requirements requirements.txt python scripts/failure_lab.py $(FAILURE_LAB_ARGS)
+
+failure-lab-check:
+	uv run --with-requirements requirements.txt python scripts/failure_lab.py --json
 
 demo-trust-plane:
 	uv run --with-requirements requirements.txt python scripts/demo_trust_plane.py

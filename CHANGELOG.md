@@ -11,6 +11,36 @@ The next release consolidates the accumulated trust-plane and public-product
 work as `v1.3.0`. Create that tag only from the exact commit that passes the
 full release gate; do not backfill a final `v1.2.0` tag.
 
+### 🧪 Failure lab: the lost-response fault measured against a correct baseline
+
+- **`make failure-lab`** runs one vendor-payout workflow against one injected
+  fault — the downstream executes, then its response is lost — across the
+  existing integration (no idempotency key), a correctly used native
+  idempotency baseline, and the gateway with the fault at either hop. The
+  gateway side is the real `UpstreamMcpAdapter` registered through
+  `register_configured_upstream_mcp` against a real in-process Streamable
+  HTTP MCP server, with the fault injected below the adapter at the HTTP
+  transport, so a response lost after the durable dispatch claim is the
+  adapter's own `delivery_uncertain`, not a stand-in. Downstream effects are
+  counted by a record the gateway cannot reach, and gateway dispatches at the
+  downstream's HTTP layer, never from the gateway's own rows.
+- **The report is required to say when the baseline already handles the
+  fault, and it does:** a client that persists its key against a downstream
+  that honors it pays once with no gateway involved, and the lab fails if it
+  ever measures the gateway beating that baseline on effect count. What the
+  gateway measurably adds: one payout and one debit when the downstream has
+  no such control, the confirmation and signed receipt the agent lost
+  recovered by retrying the same key, and an ambiguous dispatch that is
+  receipted, charged once, and never repeated. The failure every
+  configuration shares — an agent that restarts with a new key pays twice —
+  is measured and printed under "Remaining limitations" on every run.
+- Every expectation is asserted and `tests/test_failure_lab.py` runs the lab
+  in CI. A run writes `report.txt`, `report.json`, `events.jsonl`,
+  `effects.jsonl`, `config.json`, and the throwaway gateway database to
+  `data/failure-lab/<run>/`; no artifact carries a key, the admin key, the
+  upstream bearer, or the signing seed. Design, one recorded run, and limits:
+  `docs/failure-lab.md`.
+
 ### 🔒 API origin now sends CSP and `Cache-Control: no-store`
 
 - **Reviewer nits from the second black-box battery, closed.** The API origin
