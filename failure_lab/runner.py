@@ -44,9 +44,12 @@ run.
 The bundle lands in ``<run_dir>/evidence`` rather than in ``run_dir`` itself,
 because :func:`failure_lab.evidence.verify_bundle_integrity` reports any file
 in the bundle tree that the manifest does not list -- correctly, an index that
-ignores extra files is not an index. The sandbox database, the effect ledgers,
-the telemetry log, the claims manifest and ``run.json`` are therefore siblings
-of the bundle, not contents of it.
+ignores extra files is not an index. The telemetry log, the claims manifest and
+``run.json`` are therefore siblings of the bundle, not contents of it, and the
+sandbox's own state (the gateway database and the effect ledgers) goes in
+``<run_dir>/sandbox``, which is emptied at the start of every run. See
+:func:`_prepare_sandbox` for why sharing it between runs breaks every
+signature.
 """
 
 from __future__ import annotations
@@ -935,6 +938,7 @@ __all__ = [
     "HARNESS_CONFIGURATION",
     "PORTABLE_RECEIPTS_KEY",
     "RUN_DOCUMENT_FILENAME",
+    "SANDBOX_DIRECTORY_NAME",
     "TRACKED_PACKAGES",
     "TRUST_KEYS_FILENAME",
     "TRUST_KEYS_KEY",
