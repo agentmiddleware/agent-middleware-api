@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -169,12 +170,13 @@ def _register_upstream(
     executor: FakeUpstreamExecutor,
     *,
     credits_per_call: float = 2.0,
+    category: ServiceCategory = ServiceCategory.AGENT_COMMS,
 ) -> None:
     get_service_registry().register_upstream(
         service_id=tool_name,
         name="Design Partner Tool",
         description="Controlled remote MCP test tool",
-        category=ServiceCategory.AGENT_COMMS,
+        category=category,
         executor=executor,
         input_schema={
             "type": "object",
@@ -2920,5 +2922,153 @@ async def test_unauthorized_wallet_cannot_reach_upstream_dispatch(
             )
         assert attempts == []
         assert operation_debits == []
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+async def _invoke_once(
+    client: AsyncClient,
+    *,
+    tool_name: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    provisioned = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=provisioned["agent_wallet_id"],
+        key_id=provisioned["key_id"],
+        tool_name=tool_name,
+        idem_key=f"{idempotency_key}-permit",
+    )
+    body = _call_body(
+        tool_name=tool_name,
+        wallet_id=provisioned["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        idempotency_key=idempotency_key,
+    )
+    response = await client.post(
+        "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["result"]
+
+
+def _record_simulation(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Capture the ``simulation`` flag the invoke path hands to policy evaluation.
+
+    ``simulation`` has no other observable effect on the response, the debit, or
+    the receipt, so recording it here is the only way to pin the fail-open
+    default the runtime-mode gate is required to preserve.
+    """
+    seen: list[bool] = []
+    original = mcp_router.evaluate_wallet_policy
+
+    async def _spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs["simulation"])
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_router, "evaluate_wallet_policy", _spy)
+    return seen
+
+
+@pytest.mark.anyio
+async def test_non_runtime_category_does_not_warn_runtime_mode_check_failed(
+    client: AsyncClient,
+    clean_database: None,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured upstream tool is registered under PLATFORM_FEE, which has no
+    simulation flag. That is expected, not a runtime-mode failure."""
+    tool_name = "partner-upstream-platform-fee"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor, category=ServiceCategory.PLATFORM_FEE)
+    seen = _record_simulation(monkeypatch)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="app.routers.mcp"):
+            result = await _invoke_once(
+                client, tool_name=tool_name, idempotency_key="platform-fee-1"
+            )
+        assert result["isError"] is False
+        assert executor.dispatch_count == 1
+        assert not [
+            r for r in caplog.records if r.getMessage() == "runtime_mode_check_failed"
+        ]
+        # Fail-open default preserved: a flagless category is never simulated.
+        assert seen == [False]
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_runtime_mode_failure_still_warns_and_fails_open(
+    client: AsyncClient,
+    clean_database: None,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real runtime-mode failure for a simulated service category still logs
+    the warning and defaults to simulation=False (real effects)."""
+    from app.core import runtime_mode
+
+    def _broken(service: str) -> bool:
+        raise AttributeError(f"Settings has no simulation flag for {service}")
+
+    monkeypatch.setattr(runtime_mode, "is_simulation", _broken)
+
+    tool_name = "partner-upstream-runtime-broken"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor, category=ServiceCategory.AGENT_COMMS)
+    seen = _record_simulation(monkeypatch)
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.routers.mcp"):
+            result = await _invoke_once(
+                client, tool_name=tool_name, idempotency_key="runtime-broken-1"
+            )
+        assert result["isError"] is False
+        assert executor.dispatch_count == 1
+        warnings = [
+            r
+            for r in caplog.records
+            if r.getMessage() == "runtime_mode_check_failed"
+            and r.levelno == logging.WARNING
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].category == "agent_comms"
+        # Fail-open default preserved: a failed check means real effects.
+        assert seen == [False]
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_simulated_runtime_category_still_uses_the_runtime_mode_result(
+    client: AsyncClient,
+    clean_database: None,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control for the gate's positive branch: a category that IS a runtime
+    service still has its simulation flag read and passed through, silently."""
+    from app.core.runtime_mode import SERVICE_NAMES, is_simulation
+
+    assert ServiceCategory.AGENT_COMMS.value in SERVICE_NAMES
+    assert is_simulation("agent_comms") is True, "agent_comms defaults to simulation"
+
+    tool_name = "partner-upstream-simulated-pillar"
+    executor = FakeUpstreamExecutor("success")
+    _register_upstream(tool_name, executor, category=ServiceCategory.AGENT_COMMS)
+    seen = _record_simulation(monkeypatch)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="app.routers.mcp"):
+            result = await _invoke_once(
+                client, tool_name=tool_name, idempotency_key="simulated-pillar-1"
+            )
+        assert result["isError"] is False
+        assert executor.dispatch_count == 1
+        assert seen == [True]
+        assert not [
+            r for r in caplog.records if r.getMessage() == "runtime_mode_check_failed"
+        ]
     finally:
         get_service_registry().unregister_local(tool_name)
