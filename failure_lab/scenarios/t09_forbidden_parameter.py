@@ -41,6 +41,17 @@ SCHEMA_PROBES: tuple[str, ...] = (
     "alternate_representation",
 )
 
+#: The instrument's own controls, one before the probe matrix and one after.
+#: Without them this scenario is unfalsifiable: "refused before dispatch",
+#: "zero downstream executions" and "no net charge" all read exactly the same
+#: way if the tool were unreachable, the wallet empty, the permit endpoint
+#: broken or the effect ledger simply never written. Each control is a
+#: permitted, well-formed call that MUST be admitted, MUST cross the fault
+#: layer, MUST execute one downstream refund and MUST keep one call's charge.
+#: A control that does not do all four means the run measured nothing, and
+#: this scenario says so instead of reporting PASS.
+CONTROL_CALLS: tuple[str, ...] = ("control_before", "control_after")
+
 #: The refusal reason each permit-scoped probe is documented to produce.
 #: Recorded next to what was observed so a divergence is visible in the
 #: result document; it is reported, never asserted away.
@@ -210,6 +221,7 @@ class ForbiddenParameter(Scenario):
         operation_ids: list[str] = []
         probes: list[dict[str, Any]] = []
         setup_calls: list[dict[str, Any]] = []
+        controls: list[dict[str, Any]] = []
 
         log.emit(
             "t09.start",
@@ -252,9 +264,13 @@ class ForbiddenParameter(Scenario):
             record["setup_call"] = setup
             #: True when this probe actually exercised the constraint it
             #: names. A probe whose setup call was itself refused measured
-            #: something else -- report it, do not silently count it.
+            #: something else, and so did one refused with "this constraint
+            #: is not supported on this path" -- report both, do not silently
+            #: count them.
             record["constraint_exercised"] = (
-                True if setup is None else bool(setup["succeeded"])
+                False
+                if record["reason"] == UPSTREAM_UNSUPPORTED
+                else (True if setup is None else bool(setup["succeeded"]))
             )
             probes.append(record)
             attempts.append(outcome)
@@ -317,6 +333,56 @@ class ForbiddenParameter(Scenario):
                 "net_charge_credits": record["net_charge_credits"],
                 "denial_details": record["denial_details"],
             }
+
+        async def control(name: str) -> dict[str, Any]:
+            """A permitted, well-formed call: the instrument's own control.
+
+            This is what makes every ``refused``/``0 executions``/``no net
+            charge`` row in this scenario mean something. It is not a probe
+            and never enters the permit verdict as one, but if it does not
+            land a downstream refund and keep its charge then the probes'
+            silence is not evidence, and the verdict below says so.
+            """
+            permit = await gateway.issue_permit(tenant, max_credits=generous)
+            record, outcome = await self._call(
+                target,
+                log,
+                label=name,
+                permit_id=str(permit["permit_id"]),
+                payment_id=f"pay_t09_{name}",
+            )
+            record["probe"] = name
+            record["probe_kind"] = "control"
+            record["permit_id"] = str(permit["permit_id"])
+            record["permit"] = f"unconstrained permit, max_credits={generous}"
+            record["required"] = (
+                "admitted, one crossing of the fault layer, one downstream "
+                f"refund, {call_cost} credits kept"
+            )
+            record["problems"] = self._control_problems(record, call_cost=call_cost)
+            controls.append(record)
+            attempts.append(outcome)
+            operation_ids.append(str(record["operation_id"]))
+            log.emit(
+                "t09.control",
+                f"{name}: status={record['status']} dispatches={record['dispatches']} "
+                f"executions={record['executions']} kept={record['net_charge_credits']} "
+                f"credits",
+                scenario=self.test_id,
+                configuration=target.configuration.value,
+                probe=name,
+                status=record["status"],
+                reason=record["reason"],
+                dispatches=record["dispatches"],
+                executions=record["executions"],
+                net_charge_credits=record["net_charge_credits"],
+                problems=record["problems"],
+            )
+            return record
+
+        # 0 -- before anything is refused, prove a permitted call is admitted,
+        # reaches the tool, changes the world and is paid for.
+        await control("control_before")
 
         # 1 -- the permit's credit cap is below what one call costs.
         cap_permit = await gateway.issue_permit(
@@ -420,12 +486,19 @@ class ForbiddenParameter(Scenario):
             mutate=_amount_as_string,
         )
 
+        # 10 -- and prove the same thing again on the way out, so that a
+        # pipeline which stopped working halfway through the matrix cannot
+        # masquerade as a wall of well-earned refusals.
+        await control("control_after")
+
         measurements = await self.measure(target, attempts, operation_ids=operation_ids)
 
         permit_rows = [row for row in probes if row["probe"] in PERMIT_PROBES]
         schema_rows = [row for row in probes if row["probe"] in SCHEMA_PROBES]
         problems: list[str] = []
 
+        for row in controls:
+            problems.extend(row["problems"])
         for row in permit_rows:
             problems.extend(self._permit_problems(row))
         for row in schema_rows:
@@ -435,6 +508,24 @@ class ForbiddenParameter(Scenario):
                     f"{row['executions']} downstream refund(s) -- a business "
                     f"effect the caller never validly asked for"
                 )
+
+        # Every per-call execution count above is filtered by operation id, so
+        # an effect landing under an id nobody asked about would be invisible
+        # to all of them. Compare against the whole ledger for this
+        # configuration, which is the one number no filter can hide behind.
+        ledger_executions = target.ledger.execution_count()
+        attributed_executions = sum(
+            int(row["executions"]) for row in (*controls, *setup_calls, *probes)
+        )
+        if ledger_executions != attributed_executions:
+            problems.append(
+                f"instrument: the effect ledger holds {ledger_executions} "
+                f"downstream refund(s) for this configuration but only "
+                f"{attributed_executions} belong to a call this scenario made "
+                f"-- an effect landed under an operation id none of these "
+                f"probes was counting, so the per-probe execution counts do "
+                f"not account for what the tool actually did"
+            )
 
         verdict = Verdict.PASS if not problems else Verdict.FAIL
 
@@ -465,9 +556,11 @@ class ForbiddenParameter(Scenario):
             clean_permit_rows=clean_permit_rows,
             schema_rows=schema_rows,
             setup_calls=setup_calls,
+            controls=controls,
             unexercised=unexercised,
             forwarded_schema=forwarded_schema,
             reason_divergences=reason_divergences,
+            ledger_executions=ledger_executions,
             problems=problems,
         )
 
@@ -489,6 +582,10 @@ class ForbiddenParameter(Scenario):
             constraints_not_exercised=[row["probe"] for row in unexercised],
             schema_probes_forwarded=[row["probe"] for row in forwarded_schema],
             probe_executions=sum(int(row["executions"]) for row in probes),
+            controls_sound=sum(1 for row in controls if not row["problems"]),
+            controls_total=len(controls),
+            control_executions=sum(int(row["executions"]) for row in controls),
+            ledger_executions=ledger_executions,
             problems=problems,
         )
 
@@ -506,6 +603,7 @@ class ForbiddenParameter(Scenario):
                 "permit_probes": permit_rows,
                 "schema_probes": schema_rows,
                 "setup_calls": setup_calls,
+                "controls": controls,
                 "problems": problems,
                 "reason_divergences": reason_divergences,
                 "constraints_not_exercised": [
@@ -539,6 +637,15 @@ class ForbiddenParameter(Scenario):
                     "setup_executions": sum(
                         int(row["executions"]) for row in setup_calls
                     ),
+                    "controls": len(controls),
+                    "controls_sound": sum(
+                        1 for row in controls if not row["problems"]
+                    ),
+                    "control_executions": sum(
+                        int(row["executions"]) for row in controls
+                    ),
+                    "attributed_executions": attributed_executions,
+                    "ledger_executions_all_operations": ledger_executions,
                 },
             },
         )
@@ -645,6 +752,49 @@ class ForbiddenParameter(Scenario):
     # -- verdict ----------------------------------------------------------
 
     @staticmethod
+    def _control_problems(row: dict[str, Any], *, call_cost: Decimal) -> list[str]:
+        """Everything about a control call that would make this run vacuous.
+
+        These are labelled ``instrument:`` because they are not the permit
+        leaking -- they are the measurement failing to be a measurement. A
+        run whose control never lands a downstream refund cannot tell a
+        refusal apart from a tool that was never going to work, so it must
+        not report PASS.
+        """
+        name = row["probe"]
+        problems: list[str] = []
+        if row["status"] != "success":
+            problems.append(
+                f"instrument: the control call {name} -- a well-formed call "
+                f"under a permit that forbids nothing -- was not admitted "
+                f"(status {row['status']!r}, reason {row['reason']!r}). Every "
+                f"refusal in this run is therefore unattributable: nothing "
+                f"shows the permit is what stopped the probes"
+            )
+        if int(row["dispatches"]) != 1:
+            problems.append(
+                f"instrument: the control call {name} crossed the fault layer "
+                f"{row['dispatches']} time(s), not once, so "
+                f"'refused_before_dispatch' on the probes is not a measurement "
+                f"of the gateway"
+            )
+        if int(row["executions"]) != 1:
+            problems.append(
+                f"instrument: the control call {name} produced "
+                f"{row['executions']} downstream refund(s), not one, so the "
+                f"effect ledger never demonstrated a non-zero count in this "
+                f"run and 'zero executions' on the probes proves nothing"
+            )
+        if Decimal(row["net_charge_credits"]) != call_cost:
+            problems.append(
+                f"instrument: the control call {name} kept "
+                f"{row['net_charge_credits']} credits rather than the "
+                f"{call_cost} a governed call costs, so 'no net charge' on the "
+                f"probes is not evidence that a charge was withheld"
+            )
+        return problems
+
+    @staticmethod
     def _permit_problems(row: dict[str, Any]) -> list[str]:
         """Everything about one permit-scoped probe that breaks the claim."""
         name = row["probe"]
@@ -679,22 +829,51 @@ class ForbiddenParameter(Scenario):
         clean_permit_rows: list[dict[str, Any]],
         schema_rows: list[dict[str, Any]],
         setup_calls: list[dict[str, Any]],
+        controls: list[dict[str, Any]],
         unexercised: list[dict[str, Any]],
         forwarded_schema: list[dict[str, Any]],
         reason_divergences: list[str],
+        ledger_executions: int,
         problems: list[str],
     ) -> str:
+        sound_controls = [row for row in controls if not row["problems"]]
+        control_executions = sum(int(row["executions"]) for row in controls)
+        if len(sound_controls) == len(controls) and controls:
+            parts = [
+                (
+                    f"Control first, because nothing below means anything "
+                    f"without it: {len(sound_controls)}/{len(controls)} "
+                    f"permitted, well-formed calls -- one before the probe "
+                    f"matrix and one after it -- were admitted, crossed the "
+                    f"fault layer, landed a downstream refund each "
+                    f"({control_executions} in the effect ledger) and kept "
+                    f"{sound_controls[0]['net_charge_credits']} credits apiece. "
+                    f"So this pipeline was working at both ends of the run, and "
+                    f"a refusal below is the permit acting rather than the tool "
+                    f"being unavailable."
+                )
+            ]
+        else:
+            parts = [
+                (
+                    f"THE INSTRUMENT DID NOT VALIDATE ITSELF: only "
+                    f"{len(sound_controls)}/{len(controls)} control calls "
+                    f"behaved as a permitted call must. Nothing below is "
+                    f"evidence about the permit -- a refusal here cannot be "
+                    f"told apart from a tool that was never going to run."
+                )
+            ]
         permit_summary = ", ".join(
             f"{row['probe']}={row['reason'] or row['status']}" for row in permit_rows
         )
-        parts = [
-            (
-                f"{len(clean_permit_rows)}/{len(permit_rows)} permit-scoped "
-                f"probes were refused before anything crossed the fault layer, "
-                f"with zero downstream executions and no net charge: "
-                f"{permit_summary}."
-            )
-        ]
+        exercised = [row for row in permit_rows if row["constraint_exercised"]]
+        parts.append(
+            f"{len(clean_permit_rows)}/{len(permit_rows)} permit-scoped probes "
+            f"were refused before anything crossed the fault layer, with zero "
+            f"downstream executions and no net charge -- though only "
+            f"{len(exercised)}/{len(permit_rows)} of them reached the "
+            f"constraint they are named after: {permit_summary}."
+        )
         if unexercised:
             names = ", ".join(row["probe"] for row in unexercised)
             setup_reasons = ", ".join(
@@ -714,11 +893,17 @@ class ForbiddenParameter(Scenario):
                 f"rather than enforced."
             )
         succeeded_setup = [row for row in setup_calls if row["succeeded"]]
-        executed = sum(int(row["executions"]) for row in setup_calls)
+        setup_executions = sum(int(row["executions"]) for row in setup_calls)
+        probe_executions = sum(
+            int(row["executions"]) for row in (*permit_rows, *schema_rows)
+        )
         parts.append(
             f"{len(succeeded_setup)}/{len(setup_calls)} deliberate setup calls "
-            f"were admitted; they account for all {executed} downstream "
-            f"executions in this run."
+            f"were admitted. The effect ledger -- which the gateway cannot "
+            f"reach -- holds {ledger_executions} downstream refund(s) for this "
+            f"configuration in total: {control_executions} from the controls, "
+            f"{setup_executions} from the setup calls and {probe_executions} "
+            f"from the probes."
         )
         if reason_divergences:
             parts.append(
@@ -819,6 +1004,15 @@ class ForbiddenParameter(Scenario):
             "Each probe is a single call against a freshly issued permit. This "
             "measures where the boundary is, not how it behaves under "
             "concurrent pressure against the same permit."
+        )
+        risks.append(
+            "The two control calls bracket the probe matrix, so they establish "
+            "that a permitted call was admitted, dispatched, executed and "
+            "charged at the start and at the end of the run. They cannot rule "
+            "out a window in the middle in which the tool was unavailable and "
+            "a probe was refused for that reason rather than by the permit; "
+            "the per-probe refusal reasons, each naming its own constraint, "
+            "are what argue against that."
         )
         risks.append(
             "The probe set is the constraint vocabulary this product ships. A "
