@@ -23,6 +23,8 @@ from failure_lab.scenarios.base import (
 #: How far back attempt rows are aged so the reconciler treats the claim as
 #: abandoned rather than live. The real idle window is 11,430 seconds; the lab
 #: moves the clock instead of waiting it out, and says so in ``limitations``.
+#: The sweep below runs with that real window, so this value has to exceed it
+#: or reconciliation correctly declines to touch a claim it must treat as live.
 DEFAULT_BACKDATE_SECONDS = 12_000
 
 #: Client patience, comfortably above the gateway's own 2s upstream timeout so
@@ -49,6 +51,27 @@ CASE_LABELS = {
     "after_claim": "A",
     "after_upstream_response": "B",
 }
+
+
+def _production_idle_seconds() -> int:
+    """The idle window a real reconciler waits before touching a live claim.
+
+    Read from the product instead of pinned here, so the lab cannot drift from
+    the window the deployed cleanup job uses -- ``app.main`` calls this same
+    function with these same rollout-wide maxima. Sweeping with ``0`` instead
+    would disable the window entirely and make the backdating below decorative,
+    which would leave ``limitations`` describing something the run never did.
+    """
+    from app.services.mcp_dispatch_attempts import (
+        MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
+        MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+        dispatch_reconciliation_idle_seconds,
+    )
+
+    return dispatch_reconciliation_idle_seconds(
+        connect_timeout_seconds=MAX_UPSTREAM_CONNECT_TIMEOUT_SECONDS,
+        call_timeout_seconds=MAX_UPSTREAM_CALL_TIMEOUT_SECONDS,
+    )
 
 
 class CrashAfterDispatch(Scenario):
@@ -217,18 +240,22 @@ class CrashAfterDispatch(Scenario):
             downstream_requests=dispatches_after_crash,
         )
 
+        idle_seconds = _production_idle_seconds()
         backdated = await gateway.backdate_attempts(tenant, seconds=backdate_seconds)
-        reconciliation = await gateway.reconcile(idle_seconds=0)
+        reconciliation = await gateway.reconcile(idle_seconds=idle_seconds)
         executions_after_reconcile = target.ledger.execution_count(operation_id)
         dispatches_after_reconcile = target.injector.dispatch_count(operation_id)
         log.emit(
             "case.reconcile",
             (
-                f"case {label}: restarted gateway swept {backdated} backdated "
-                f"attempt row(s); after reconciliation the independent "
-                f"instruments read {executions_after_reconcile} downstream "
-                f"execution(s) and {dispatches_after_reconcile} request(s) "
-                f"into the tool"
+                f"case {label}: restarted gateway swept {backdated} attempt "
+                f"row(s) aged {backdate_seconds}s, past the {idle_seconds}s "
+                f"idle window it waits before touching a claim; it reported "
+                f"{reconciliation.get('dispatch_uncertain')} claim(s) "
+                f"terminalized as uncertain. After reconciliation the "
+                f"independent instruments read {executions_after_reconcile} "
+                f"downstream execution(s) and {dispatches_after_reconcile} "
+                f"request(s) into the tool"
             ),
             scenario=self.test_id,
             configuration=configuration,
@@ -236,6 +263,7 @@ class CrashAfterDispatch(Scenario):
             boundary=boundary,
             backdated_rows=backdated,
             backdate_seconds=backdate_seconds,
+            reconcile_idle_seconds=idle_seconds,
             downstream_executions=executions_after_reconcile,
             downstream_requests=dispatches_after_reconcile,
             **{f"reconcile_{k}": v for k, v in reconciliation.items()},
@@ -294,7 +322,11 @@ class CrashAfterDispatch(Scenario):
             "gateway_dispatches_after_retry": dispatches_after_retry,
             "backdated_attempt_rows": backdated,
             "backdate_seconds": backdate_seconds,
+            "reconcile_idle_seconds": idle_seconds,
             "reconciliation": dict(reconciliation),
+            "reconciliation_marked_uncertain": reconciliation.get(
+                "dispatch_uncertain"
+            ),
             "retry_used_same_key": (
                 retry_identity.idempotency_key == identity.idempotency_key
             ),
@@ -423,6 +455,17 @@ class CrashAfterDispatch(Scenario):
                 f"case {label}: dispatch attempt state(s) after recovery = "
                 f"{states or ['none']}, want ['{UNCERTAIN_OUTCOME}']"
             )
+        # The terminal state is read after the retry, so without this the
+        # observation's claim that *reconciliation* terminalized the claim
+        # would be an assumption: a retry that terminalized it instead would
+        # look identical in the rows.
+        if case.get("reconciliation_marked_uncertain") != 1:
+            failures.append(
+                f"case {label}: the restarted gateway's sweep reported "
+                f"{case.get('reconciliation_marked_uncertain')} claim(s) "
+                f"terminalized as uncertain, want 1 -- so reconciliation is "
+                f"not what produced the '{UNCERTAIN_OUTCOME}' state here"
+            )
 
         if case.get("case_gateway_net_debits") != 1:
             failures.append(
@@ -451,6 +494,16 @@ class CrashAfterDispatch(Scenario):
                 f"{case['retry_receipt_outcome']!r}, want "
                 f"'{UNCERTAIN_OUTCOME}'"
             )
+        # "Cited the receipt reconciliation already wrote" is the claim; a
+        # receipt id belonging to some other operation would satisfy the
+        # outcome check above and say nothing about this one.
+        receipt_ids = case.get("receipt_ids", [])
+        if case["retry_receipt_id"] not in receipt_ids:
+            failures.append(
+                f"case {label}: the same-key retry cited receipt "
+                f"{case['retry_receipt_id']!r}, which is not among this "
+                f"operation's receipts {receipt_ids or ['none']}"
+            )
         return failures
 
     def _verdict(
@@ -478,6 +531,8 @@ class CrashAfterDispatch(Scenario):
         extra: dict[str, Any] = {
             "cases": cases,
             "client_timeout_seconds": timeout_seconds,
+            "reconcile_idle_seconds": case_a.get("reconcile_idle_seconds"),
+            "backdate_seconds": case_a.get("backdate_seconds"),
             "gateway_dispatches_total": counters.gateway_dispatches,
             "gateway_debits_total": counters.gateway_debits,
             "gateway_refunds_total": counters.gateway_refunds,
@@ -520,8 +575,14 @@ class CrashAfterDispatch(Scenario):
             f"{case_b['downstream_executions_after_crash']} downstream "
             f"execution(s) and the fault layer counted "
             f"{case_b['gateway_dispatches_after_crash']} request(s) into the "
-            f"tool. A restarted gateway then swept both: reconciliation "
-            f"terminalized case A as "
+            f"tool. A restarted gateway then swept both, waiting the same "
+            f"{case_a.get('reconcile_idle_seconds')}-second idle window a "
+            f"deployed reconciler waits before it will touch a claim (the lab "
+            f"aged the rows {case_a['backdate_seconds']}s rather than wait): "
+            f"the sweep reported "
+            f"{case_a.get('reconciliation_marked_uncertain')} and "
+            f"{case_b.get('reconciliation_marked_uncertain')} claim(s) "
+            f"terminalized as uncertain, and terminalized case A as "
             f"{case_a.get('attempt_states') or ['none']} with receipt "
             f"outcome(s) {case_a.get('case_receipt_outcomes') or ['none']} and "
             f"case B as {case_b.get('attempt_states') or ['none']} with receipt "
@@ -570,10 +631,16 @@ class CrashAfterDispatch(Scenario):
             "with the tool provider using the forwarded idempotency metadata. "
             "The gateway offers no in-band way to close out an uncertain "
             "operation.",
-            "Reconciliation acted here only because the attempt rows were "
-            "backdated past the idle window. In production the uncertain "
-            "outcome is not signed until that window elapses, so the caller "
-            "sits with no terminal receipt for hours.",
+            f"Reconciliation acted here only because the attempt rows were "
+            f"aged past the window it waits before declaring a claim "
+            f"abandoned. That window is "
+            f"{case_a.get('reconcile_idle_seconds')} seconds, and the sweep "
+            f"in this run used it. In production nothing shortens it: the "
+            f"caller holds no terminal receipt and no signed artifact for "
+            f"roughly three hours after the crash, and at the moment of the "
+            f"crash itself sees only a dropped connection "
+            f"('{case_a['crash_status']}' / "
+            f"'{case_a['crash_client_visible_state']}').",
         ]
 
         log.emit(

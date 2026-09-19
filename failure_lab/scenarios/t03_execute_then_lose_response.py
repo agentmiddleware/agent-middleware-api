@@ -100,14 +100,45 @@ class ExecuteThenLoseResponse(Scenario):
 
     async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
         hold_seconds = float(self.options.get("hold_seconds", DEFAULT_HOLD_SECONDS))
-        default_timeout = (
-            DEFAULT_GATEWAY_TIMEOUT_SECONDS
-            if target.uses_gateway
-            else DEFAULT_DIRECT_TIMEOUT_SECONDS
-        )
-        timeout_seconds = float(self.options.get("timeout_seconds", default_timeout))
+        timeout_seconds = self._client_budget(target)
+        call_timeout = self._gateway_call_timeout(target)
+
+        # State the budgets before the run, and say out loud when one of them
+        # makes the harness -- rather than the product -- the thing being
+        # measured. A verdict produced under an impatient client budget is a
+        # statement about this harness; a reader must not have to infer that
+        # from a FAIL.
+        if call_timeout is not None and timeout_seconds <= call_timeout:
+            log.emit(
+                "budget.warning",
+                (
+                    f"client budget {timeout_seconds}s does not exceed the gateway's "
+                    f"own {call_timeout}s upstream call timeout: this run measures "
+                    f"the harness giving up, not the gateway's classification of a "
+                    f"lost response"
+                ),
+                scenario=self.test_id,
+                configuration=target.configuration.value,
+                client_timeout_seconds=timeout_seconds,
+                gateway_call_timeout_seconds=call_timeout,
+            )
+        if hold_seconds <= timeout_seconds:
+            log.emit(
+                "budget.warning",
+                (
+                    f"the fault layer severs the withheld response after "
+                    f"{hold_seconds}s, before the client's {timeout_seconds}s budget "
+                    f"expires: the caller will see a severed connection rather than a "
+                    f"timeout. Still a lost response, but a different shape of one"
+                ),
+                scenario=self.test_id,
+                configuration=target.configuration.value,
+                hold_seconds=hold_seconds,
+                client_timeout_seconds=timeout_seconds,
+            )
 
         operation_id, refund = self.refund("pay_t03")
+        amount = refund.amount
         identity = OperationIdentity.first_attempt(operation_id)
 
         target.injector.arm(
@@ -131,6 +162,8 @@ class ExecuteThenLoseResponse(Scenario):
             idempotency_key=identity.idempotency_key,
             hold_seconds=hold_seconds,
             client_timeout_seconds=timeout_seconds,
+            gateway_call_timeout_seconds=call_timeout,
+            amount_minor_units=amount,
         )
 
         first = await target.agent.submit(identity, refund, timeout_seconds=timeout_seconds)
@@ -181,19 +214,26 @@ class ExecuteThenLoseResponse(Scenario):
         )
 
         attempts = [first, second]
+        # Measured BEFORE the control runs, so every gateway-reported count
+        # below describes the probe alone. The control is a real governed call
+        # and adds its own debit and receipt afterwards; those land in
+        # ``liveness_control`` instead.
         measurements = await self.measure(target, attempts, operation_ids=[operation_id])
         ledger_count = target.ledger.execution_count(operation_id)
         layer_requests = target.injector.dispatch_count(operation_id)
+        reached_tool = target.injector.reached_tool_count(operation_id)
         log.emit(
             "measure.instruments",
             (
                 f"effect ledger (independent): {ledger_count} execution(s); "
-                f"fault layer (independent): {layer_requests} request(s) into the tool"
+                f"fault layer (independent): {layer_requests} request(s) into the tool, "
+                f"{reached_tool} of which reached it"
             ),
             scenario=self.test_id,
             configuration=target.configuration.value,
             downstream_executions=ledger_count,
             downstream_requests=layer_requests,
+            downstream_requests_reaching_tool=reached_tool,
             gateway_debits=measurements.counters.gateway_debits,
             gateway_refunds=measurements.counters.gateway_refunds,
             gateway_net_debits=measurements.counters.gateway_net_debits,
@@ -202,12 +242,15 @@ class ExecuteThenLoseResponse(Scenario):
             receipt_outcomes=measurements.receipt_outcomes(),
         )
 
+        control = await self._liveness_control(target, log, timeout_seconds)
+
         extra: dict[str, Any] = {
             "operation_id": operation_id,
             "idempotency_key": identity.idempotency_key,
             "fault": FaultMode.RESPONSE_LOST_AFTER_EXECUTION.value,
             "hold_seconds": hold_seconds,
             "client_timeout_seconds": timeout_seconds,
+            "gateway_call_timeout_seconds": call_timeout,
             "first_attempt_status": first.status,
             "first_attempt_client_visible_state": first.client_visible_state,
             "first_attempt_receipt_id": first.receipt_id,
@@ -225,19 +268,160 @@ class ExecuteThenLoseResponse(Scenario):
             ),
             "effect_ledger_execution_count": ledger_count,
             "fault_layer_downstream_requests": layer_requests,
-            "amount_minor_units_per_execution": AMOUNT_MINOR_UNITS,
+            "fault_layer_requests_reaching_tool": reached_tool,
+            "amount_minor_units_per_execution": amount,
+            "liveness_control": control,
+            "counters_measured_before_control": True,
         }
 
         if target.uses_gateway:
             return self._gateway_result(
-                target, log, attempts, measurements, extra, ledger_count, layer_requests
+                target,
+                log,
+                attempts,
+                measurements,
+                extra,
+                ledger_count=ledger_count,
+                layer_requests=layer_requests,
+                reached_tool=reached_tool,
+                control=control,
+                timeout_seconds=timeout_seconds,
+                call_timeout=call_timeout,
             )
         if target.configuration is Configuration.DIRECT_NATIVE:
             return self._direct_native_result(
-                target, log, attempts, measurements, extra, ledger_count, layer_requests
+                target,
+                log,
+                attempts,
+                measurements,
+                extra,
+                ledger_count=ledger_count,
+                layer_requests=layer_requests,
+                control=control,
             )
         return self._direct_naive_result(
-            target, log, attempts, measurements, extra, ledger_count, layer_requests
+            target,
+            log,
+            attempts,
+            measurements,
+            extra,
+            ledger_count=ledger_count,
+            layer_requests=layer_requests,
+            amount=amount,
+            control=control,
+        )
+
+    # -- budgets ----------------------------------------------------------
+
+    def _client_budget(self, target: Target) -> float:
+        """How long the harness waits, per path.
+
+        The two paths measure different things, so they get different budgets
+        and separate overrides. On the gateway path the client must outlast the
+        gateway's own upstream call timeout, or the run records the harness
+        giving up instead of the gateway classifying a lost response. On the
+        direct path the client timeout *is* the mechanism under measurement.
+        A single ``timeout_seconds`` override still works for both, and is kept
+        so an operator can shorten the whole scenario deliberately.
+        """
+        if target.uses_gateway:
+            default = DEFAULT_GATEWAY_TIMEOUT_SECONDS
+            specific = self.options.get("gateway_timeout_seconds")
+        else:
+            default = DEFAULT_DIRECT_TIMEOUT_SECONDS
+            specific = self.options.get("direct_timeout_seconds")
+        if specific is not None:
+            return float(specific)
+        shared = self.options.get("timeout_seconds")
+        return float(shared) if shared is not None else default
+
+    @staticmethod
+    def _gateway_call_timeout(target: Target) -> float | None:
+        """The gateway's own upstream call timeout, read from the gateway."""
+        gateway = target.gateway
+        if gateway is None:
+            return None
+        value = getattr(gateway, "call_timeout_seconds", None)
+        return None if value is None else float(value)
+
+    # -- the control ------------------------------------------------------
+
+    async def _liveness_control(
+        self, target: Target, log: EventLog, timeout_seconds: float
+    ) -> dict[str, Any]:
+        """A fresh, unfaulted operation submitted after the probe was measured.
+
+        Without it, "the gateway declined to dispatch a second time for this
+        key" and "the gateway stopped dispatching anything" produce identical
+        numbers, and so do "the downstream absorbed the retry" and "the
+        downstream is returning a stale result to everyone". The control is a
+        real governed call: it runs *after* :meth:`measure`, so its debit and
+        receipt are outside the headline counters, and the ``*_after_control``
+        fields are where its cost is visible.
+        """
+        operation_id, refund = self.refund("pay_t03_control")
+        identity = OperationIdentity.first_attempt(operation_id)
+        outcome = await target.agent.submit(
+            identity, refund, timeout_seconds=timeout_seconds
+        )
+        executions = target.ledger.execution_count(operation_id)
+        crossings = target.injector.dispatch_count(operation_id)
+        control: dict[str, Any] = {
+            "operation_id": operation_id,
+            "idempotency_key": identity.idempotency_key,
+            "status": outcome.status,
+            "client_visible_state": outcome.client_visible_state,
+            "http_status": outcome.http_status,
+            "reason": outcome.reason,
+            "receipt_id": outcome.receipt_id,
+            "receipt_outcome": (
+                outcome.receipt.get("outcome") if outcome.receipt else None
+            ),
+            "downstream_executions": executions,
+            "downstream_requests": crossings,
+            "executed": executions >= 1,
+        }
+        if target.gateway is not None and target.tenant is not None:
+            after = await target.gateway.snapshot(target.tenant)
+            control["gateway_debits_after_control"] = after.debit_count
+            control["gateway_receipts_after_control"] = after.receipt_count
+            control["gateway_receipt_outcomes_after_control"] = after.receipt_outcomes()
+            control["gateway_sent_attempts_after_control"] = after.sent_attempt_count
+            control["wallet_balance_after_control"] = after.wallet_balance
+        log.emit(
+            "control.fresh_operation",
+            (
+                f"control (fresh key, no fault armed) -> status={outcome.status}, "
+                f"{executions} execution(s), {crossings} crossing(s) into the tool"
+            ),
+            scenario=self.test_id,
+            configuration=target.configuration.value,
+            operation_id=operation_id,
+            idempotency_key=identity.idempotency_key,
+            status=outcome.status,
+            client_visible_state=outcome.client_visible_state,
+            downstream_executions=executions,
+            downstream_requests=crossings,
+            executed=control["executed"],
+        )
+        return control
+
+    @staticmethod
+    def _control_sentence(control: dict[str, Any], *, subject: str) -> str:
+        if control["executed"]:
+            return (
+                f"A control operation submitted afterwards under a fresh key, with no "
+                f"fault armed, executed normally (status '{control['status']}', "
+                f"{control['downstream_executions']} execution(s), "
+                f"{control['downstream_requests']} crossing(s) into the tool), so the "
+                f"counts above describe {subject}, not a wedged path."
+            )
+        return (
+            f"The control operation submitted afterwards under a fresh key did NOT "
+            f"execute (status '{control['status']}', "
+            f"{control['downstream_executions']} execution(s), "
+            f"{control['downstream_requests']} crossing(s)), so this run cannot "
+            f"separate {subject} from a path that had simply stopped working."
         )
 
     # -- per-configuration verdicts --------------------------------------
@@ -249,13 +433,16 @@ class ExecuteThenLoseResponse(Scenario):
         attempts: list[AttemptOutcome],
         measurements: Measurements,
         extra: dict[str, Any],
+        *,
         ledger_count: int,
         layer_requests: int,
+        amount: int,
+        control: dict[str, Any],
     ) -> ConfigurationResult:
         first, second = attempts
         duplicates = max(0, ledger_count - 1)
         extra["duplicate_executions"] = duplicates
-        extra["value_at_risk_minor_units"] = duplicates * AMOUNT_MINOR_UNITS
+        extra["value_at_risk_minor_units"] = duplicates * amount
 
         observation = (
             f"The tool executed and committed, then its response was withheld. "
@@ -265,11 +452,14 @@ class ExecuteThenLoseResponse(Scenario):
             f"retry came back '{second.status}' ({second.client_visible_state}). "
             f"The independent effect ledger recorded {ledger_count} downstream "
             f"execution(s) for this operation -- {duplicates} beyond the one the "
-            f"agent intended, {duplicates * AMOUNT_MINOR_UNITS} minor units of "
+            f"agent intended, {duplicates * amount} minor units of "
             f"unintended refund -- and the fault layer counted {layer_requests} "
             f"request(s) reaching the tool. Nothing in this configuration "
             f"deduplicates and nothing told the agent the first call had already "
-            f"landed: descriptive baseline, no guarantee to test."
+            f"landed: descriptive baseline, no guarantee to test. "
+            + self._control_sentence(
+                control, subject="what this integration does with a retry"
+            )
         )
         risks = [
             "A lost response is indistinguishable from a lost request to this "
@@ -278,6 +468,12 @@ class ExecuteThenLoseResponse(Scenario):
             "There is no signed artifact here; an auditor asking later how many "
             "refunds this operation caused has only the tool's own ledger.",
         ]
+        if not control["executed"]:
+            risks.append(
+                "The control did not execute, so the duplicate count above is a "
+                "number from a path whose health was not established. Read it as "
+                "provisional."
+            )
         log.emit(
             "verdict",
             f"{target.configuration.value} -> OBSERVED ({ledger_count} executions)",
@@ -285,6 +481,7 @@ class ExecuteThenLoseResponse(Scenario):
             configuration=target.configuration.value,
             downstream_executions=ledger_count,
             duplicate_executions=duplicates,
+            control_executed=control["executed"],
         )
         return self.result(
             target,
@@ -303,8 +500,10 @@ class ExecuteThenLoseResponse(Scenario):
         attempts: list[AttemptOutcome],
         measurements: Measurements,
         extra: dict[str, Any],
+        *,
         ledger_count: int,
         layer_requests: int,
+        control: dict[str, Any],
     ) -> ConfigurationResult:
         first, second = attempts
         retry_from_store = second.status == "replayed"
@@ -321,9 +520,18 @@ class ExecuteThenLoseResponse(Scenario):
                 f"(status={second.status}, client_visible_state="
                 f"{second.client_visible_state})"
             )
+        if not control["executed"]:
+            failures.append(
+                "the liveness control (fresh key, no fault armed) did not execute "
+                f"(status={control['status']}, "
+                f"{control['downstream_executions']} execution(s)); a tool that "
+                "executes nothing suppresses duplicates trivially, so this run "
+                "cannot credit its idempotency store"
+            )
         extra["verdict_failures"] = failures
         verdict = Verdict.PASS if not failures else Verdict.FAIL
 
+        retry_reached_tool = layer_requests >= 2
         observation = (
             f"The tool executed and committed, then its response was withheld; "
             f"the agent saw '{first.status}' "
@@ -332,11 +540,21 @@ class ExecuteThenLoseResponse(Scenario):
             f"({second.client_visible_state}). The independent effect ledger "
             f"recorded {ledger_count} downstream execution(s) and the fault layer "
             f"counted {layer_requests} request(s) reaching the tool, so the "
-            f"second request did reach the tool and was absorbed inside it. A "
-            f"correctly built downstream handles this failure on its own: the "
-            f"gateway adds nothing to the duplicate-suppression question here."
+            + (
+                "retry did reach the tool and was absorbed inside it. "
+                if retry_reached_tool
+                else "retry never reached the tool at all. "
+            )
+            + self._control_sentence(
+                control, subject="what this tool's idempotency store did with the retry"
+            )
         )
-        if failures:
+        if verdict is Verdict.PASS:
+            observation += (
+                " A correctly built downstream handles this failure on its own: the "
+                "gateway adds nothing to the duplicate-suppression question here."
+            )
+        else:
             observation += (
                 " The correct native baseline did NOT hold: " + "; ".join(failures) + "."
             )
@@ -355,6 +573,7 @@ class ExecuteThenLoseResponse(Scenario):
             configuration=target.configuration.value,
             downstream_executions=ledger_count,
             retry_status=second.status,
+            control_executed=control["executed"],
             failures=failures,
         )
         return self.result(
@@ -374,8 +593,13 @@ class ExecuteThenLoseResponse(Scenario):
         attempts: list[AttemptOutcome],
         measurements: Measurements,
         extra: dict[str, Any],
+        *,
         ledger_count: int,
         layer_requests: int,
+        reached_tool: int,
+        control: dict[str, Any],
+        timeout_seconds: float,
+        call_timeout: float | None,
     ) -> ConfigurationResult:
         first, second = attempts
         counters = measurements.counters
@@ -388,6 +612,7 @@ class ExecuteThenLoseResponse(Scenario):
         snapshot = measurements.snapshot
 
         overclaimed = [o for o in outcomes if o == OVERCLAIMED_OUTCOME]
+        dishonest = sorted({o for o in outcomes if o != UNCERTAIN_OUTCOME})
         uncertain_receipts = [o for o in outcomes if o == UNCERTAIN_OUTCOME]
         attempt_states = (
             [a["state"] for a in snapshot.attempts] if snapshot is not None else []
@@ -406,6 +631,7 @@ class ExecuteThenLoseResponse(Scenario):
                 "dispatch_attempt_states": attempt_states,
                 "receipts_claiming_success": len(overclaimed),
                 "receipts_recording_uncertainty": len(uncertain_receipts),
+                "receipt_outcomes_other_than_uncertain": dishonest,
                 "charge_retained": net_debits,
                 "wallet_balance": (
                     snapshot.wallet_balance if snapshot is not None else None
@@ -422,18 +648,46 @@ class ExecuteThenLoseResponse(Scenario):
         )
 
         failures: list[str] = []
+
+        # A missing instrument is not a pass. If the gateway's own tables could
+        # not be read, every gateway-reported check below would otherwise be
+        # skipped silently and the configuration would pass on the strength of
+        # the checks that happened to survive.
+        if snapshot is None:
+            failures.append(
+                "the gateway snapshot was unavailable, so its attempt, debit and "
+                "receipt state could not be read at all"
+            )
+
+        # -- independent instruments --
         if ledger_count != 1:
             failures.append(
                 f"downstream executions (effect ledger) = {ledger_count}, want 1"
             )
-        if dispatches != 1:
+        if dispatches is None:
+            failures.append("the fault layer reported no dispatch count")
+        elif dispatches != 1:
             failures.append(f"gateway dispatches (fault layer) = {dispatches}, want 1")
-        if first.client_visible_state != "explicit_uncertain":
+        if reached_tool != 1:
             failures.append(
+                f"requests that reached the tool (fault layer) = {reached_tool}, want 1"
+            )
+
+        # -- what the client was told --
+        if first.client_visible_state != "explicit_uncertain":
+            detail = (
                 "the first attempt's client-visible state was "
                 f"'{first.client_visible_state}' (status={first.status}), want "
                 "'explicit_uncertain'"
             )
+            if first.status == "timeout":
+                detail += (
+                    f" -- the client budget ({timeout_seconds}s) expired before the "
+                    f"gateway's own {call_timeout}s upstream call timeout could "
+                    f"classify the lost response, so this run measured the harness's "
+                    f"patience, not the gateway's behaviour"
+                )
+            failures.append(detail)
         if first.receipt_id is None:
             failures.append("the first attempt returned no receipt id")
         elif second.receipt_id != first.receipt_id:
@@ -441,13 +695,34 @@ class ExecuteThenLoseResponse(Scenario):
                 f"the retry cited receipt id {second.receipt_id!r}, not the "
                 f"first attempt's {first.receipt_id!r}"
             )
-        if layer_requests > 1:
-            failures.append(
-                f"the retry produced a second request into the tool "
-                f"({layer_requests} crossings observed)"
-            )
-        if debits is not None and debits != 1:
+
+        # -- gateway-reported: the charge --
+        if debits is None:
+            failures.append("gateway debits were not reported")
+        elif debits != 1:
             failures.append(f"gateway debits (gateway-reported) = {debits}, want 1")
+        if net_debits is None:
+            failures.append("the gateway ledger was not reported")
+        elif net_debits != 1:
+            failures.append(
+                f"the charge was not retained: {debits} debit(s) and {refunds} "
+                f"refund(s), net {net_debits}, want a retained net 1 "
+                f"(docs/failure-semantics.md: delivery_uncertain stays charged)"
+            )
+
+        # -- gateway-reported: what the receipt claims --
+        if receipt_count is None:
+            failures.append("gateway receipts were not reported")
+        elif not outcomes:
+            failures.append(
+                "no receipt was written for a dispatch that crossed the send "
+                "boundary, so there is no signed record of the uncertain outcome"
+            )
+        elif dishonest:
+            failures.append(
+                f"receipt outcome(s) {dishonest} recorded for a call whose response "
+                f"never returned; the honest outcome is '{UNCERTAIN_OUTCOME}'"
+            )
         if overclaimed:
             failures.append(
                 f"{len(overclaimed)} receipt(s) record outcome "
@@ -455,29 +730,72 @@ class ExecuteThenLoseResponse(Scenario):
                 "returned -- the gateway claimed knowledge it does not have"
             )
 
+        # -- the control --
+        if not control["executed"]:
+            failures.append(
+                "the liveness control (fresh key, no fault armed) did not execute "
+                f"(status={control['status']}, "
+                f"{control['downstream_executions']} execution(s), "
+                f"{control['downstream_requests']} crossing(s)); without a working "
+                "control, 'the gateway declined to dispatch again' and 'the gateway "
+                "stopped dispatching at all' are the same measurement"
+            )
+
         verdict = Verdict.PASS if not failures else Verdict.FAIL
         extra["verdict_failures"] = failures
+
+        if not outcomes:
+            receipt_sentence = (
+                "No receipt was written at all, so there is no signed record of this "
+                "dispatch."
+            )
+        elif dishonest:
+            receipt_sentence = (
+                f"The receipt(s) written here record {outcomes}; "
+                f"'{UNCERTAIN_OUTCOME}' is the only outcome the gateway can support "
+                f"for a response it never saw."
+            )
+        else:
+            receipt_sentence = (
+                f"Every receipt written here records '{UNCERTAIN_OUTCOME}' and none "
+                f"records '{OVERCLAIMED_OUTCOME}'. A receipt is a signed statement "
+                f"about the gateway's own dispatch and debit, so it does not "
+                f"establish whether the refund reached the customer."
+            )
+        if net_debits == 1 and refunds == 0:
+            charge_sentence = (
+                "The charge was retained, as documented: the dispatch claim was "
+                "committed before the send, so the gateway cannot prove the call did "
+                "not land, and it neither redispatches nor returns the credits."
+            )
+        else:
+            charge_sentence = (
+                f"The charge was NOT retained the way delivery_uncertain is "
+                f"documented to behave: {debits} debit(s) and {refunds} refund(s), "
+                f"net {net_debits}."
+            )
 
         observation = (
             f"The tool executed and committed, then its response was withheld. "
             f"Independent instruments: the effect ledger recorded {ledger_count} "
-            f"downstream execution(s) and the fault layer counted "
+            f"downstream execution(s) for this operation and the fault layer counted "
             f"{layer_requests} request(s) crossing into the tool across both "
-            f"attempts. The first attempt came back '{first.status}' "
-            f"({first.client_visible_state}) with receipt {first.receipt_id}; the "
-            f"retry, carrying the same idempotency key and a new request id, came "
-            f"back '{second.status}' ({second.client_visible_state}) citing "
-            f"receipt {second.receipt_id}. Gateway-reported: {sent_attempts} "
-            f"attempt(s) past the send boundary in state(s) "
-            f"{attempt_states or ['none']}, {debits} debit(s) and {refunds} "
+            f"attempts, {reached_tool} of which reached it. The first attempt came "
+            f"back '{first.status}' ({first.client_visible_state}) with receipt "
+            f"{first.receipt_id}; the retry, carrying the same idempotency key and a "
+            f"new request id, came back '{second.status}' "
+            f"({second.client_visible_state}) citing receipt {second.receipt_id}. "
+            f"Gateway-reported: {sent_attempts} attempt(s) past the send boundary in "
+            f"state(s) {attempt_states or ['none']}, {debits} debit(s) and {refunds} "
             f"refund(s) for a net {net_debits}, and {receipt_count} receipt(s) "
             f"recording {outcomes or ['none']}. "
-            f"The charge is retained by design: the dispatch claim was committed "
-            f"before the send, so the gateway cannot prove the call did not land "
-            f"and does not redispatch it. The receipt records that the delivery "
-            f"is uncertain; it does not establish whether the refund reached the "
-            f"customer. Only the effect ledger, which the gateway cannot reach, "
-            f"speaks to that -- and here it says the tool ran and committed once."
+            f"{charge_sentence} {receipt_sentence} "
+            f"Only the effect ledger, which the gateway cannot reach, speaks to the "
+            f"downstream effect, and here it counted {ledger_count} committed "
+            f"execution(s) for this operation. "
+            + self._control_sentence(
+                control, subject="what the gateway did with this key"
+            )
         )
         if overclaimed:
             observation += (
@@ -522,6 +840,7 @@ class ExecuteThenLoseResponse(Scenario):
             receipts_claiming_success=len(overclaimed),
             first_client_visible_state=first.client_visible_state,
             retry_receipt_matches_first=extra["same_receipt_id_on_retry"],
+            control_executed=control["executed"],
             failures=failures,
         )
         return self.result(
