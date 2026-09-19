@@ -464,7 +464,15 @@ def harvest_evidence(
 
 
 def exit_status_for(results: Sequence[ScenarioResult]) -> int:
-    """ERROR outranks divergence; both outrank a clean run."""
+    """ERROR outranks divergence; both outrank a clean run.
+
+    An empty ``results`` returns :data:`EXIT_OK`, because every statement this
+    function makes is a statement about results it was given and there are
+    none. That is *not* a run that passed, and a caller must not present it as
+    one: ``python -m failure_lab run`` refuses a selection that matches no
+    scenario before it starts, rather than letting a mistyped ``--tier`` exit
+    zero having measured nothing.
+    """
     if any(result.verdict == Verdict.ERROR for result in results):
         return EXIT_SCENARIO_ERROR
     if any(not result.matches_expectation for result in results):
@@ -1062,6 +1070,15 @@ def summary_lines(run: LabRun) -> list[str]:
                 f"{row['test_id']:<6}{row['verdict']:<16}{row['conclusion_kind']:<34}"
                 f"{row['title']}{flag}"
             )
+        # The conclusion column is a slug, and two of its values -- "the
+        # existing integration handled it" and "correct native controls
+        # handled it" -- are the ones that say the product was not needed for
+        # that test. Printed bare next to a PASS they read as wins. The gloss
+        # is report.py's own sentence for each kind, so the terminal cannot
+        # drift from the bundle.
+        kinds = sorted({row["conclusion_kind"] for row in run.verdict_rows()})
+        for kind in kinds:
+            lines.append(f"  {kind:<34}{CONCLUSION_GLOSS.get(kind, '')}")
     lines.append("")
     for row in run.verdict_rows():
         for mismatch in row["mismatches"]:
