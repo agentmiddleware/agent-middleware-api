@@ -499,6 +499,7 @@ class DatabaseRestart(Scenario):
         boundary: str | None,
         backdate_seconds: int,
         timeout_seconds: float,
+        restore_dispatched_at: bool = True,
     ) -> tuple[dict[str, Any], list[AttemptOutcome], str]:
         """Take the database away at ``boundary``, recover, retry the same key."""
         gateway, tenant, _permit = target.require_gateway()
@@ -595,7 +596,11 @@ class DatabaseRestart(Scenario):
             if row["dispatched_at"] is None
         ]
         backdated = await gateway.backdate_attempts(tenant, seconds=backdate_seconds)
-        restored = await _restore_never_dispatched(never_dispatched)
+        restored = (
+            await _restore_never_dispatched(never_dispatched)
+            if restore_dispatched_at
+            else 0
+        )
         reconciliation = await gateway.reconcile(idle_seconds=0)
         after_reconcile = await gateway.snapshot(tenant)
         recovery_view = _key_view(after_reconcile, key)
@@ -696,6 +701,7 @@ class DatabaseRestart(Scenario):
             "reconciliation": reconciliation,
             "attempts_backdated": backdated,
             "backdate_seconds": backdate_seconds,
+            "dispatched_at_restore_enabled": restore_dispatched_at,
             "dispatched_at_restored_after_backdating": restored,
             "backdating_note": (
                 "gateway.backdate_attempts writes dispatched_at on every "
