@@ -88,8 +88,7 @@ class ReferenceIntegration(CandidateIntegration):
 
     # -- the rule ---------------------------------------------------------
 
-    @staticmethod
-    def replay_key(intent: RefundIntent) -> str:
+    def replay_key(self, intent: RefundIntent) -> str:
         """Derived from the business operation, so every incarnation agrees.
 
         Nothing about the attempt, the process, or the wall clock goes in

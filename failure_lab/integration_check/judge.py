@@ -310,11 +310,14 @@ class RequestLog:
         self.records: list[RequestRecord] = []
         self._sequence = 0
 
-    def add(self, **fields: Any) -> RequestRecord:
+    def add(self, *, at: datetime, **fields: Any) -> RequestRecord:
+        """Record one crossing. ``at`` is when the request *left*, not when it
+        came back: a metric measured from the answer would be measured from
+        after the thing it is trying to time."""
         self._sequence += 1
         record = RequestRecord(
             sequence=self._sequence,
-            at=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+            at=at.isoformat(timespec="microseconds"),
             **fields,
         )
         self.records.append(record)
@@ -435,10 +438,12 @@ class RecordingTransport(httpx.AsyncBaseTransport):
         except Exception:  # noqa: BLE001 - a streaming body is simply not sniffed
             body = b""
         tool, operation_id, key = _sniff_request(body)
+        sent_at = datetime.now(timezone.utc)
         try:
             response = await self._inner.handle_async_request(request)
         except BaseException as exc:
             self._log.add(
+                at=sent_at,
                 method=request.method,
                 path=request.url.path,
                 http_status=None,
@@ -455,6 +460,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
         content = b"".join(chunks)
         code, message = _sniff_response(content)
         self._log.add(
+            at=sent_at,
             method=request.method,
             path=request.url.path,
             http_status=response.status_code,
@@ -1742,10 +1748,6 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 __all__ = [
     "AMBIGUOUS_CRASH_BOUNDARY",
     "Assertion",
@@ -1775,3 +1777,15 @@ __all__ = [
     "source_tree_manifest",
     "trust_flag_snapshot",
 ]
+
+
+if __name__ == "__main__":
+    # ``python -m failure_lab.integration_check.judge`` runs this file as
+    # ``__main__``, which would give it a second, distinct copy of every class
+    # defined above. A candidate that imports the package path would then be
+    # rejected as "not a CandidateIntegration subclass" -- correctly, since it
+    # would be subclassing the other copy. Re-entering through the canonical
+    # module name makes the judge and the candidate agree on one identity.
+    from failure_lab.integration_check.judge import main as _canonical_main
+
+    raise SystemExit(_canonical_main())
