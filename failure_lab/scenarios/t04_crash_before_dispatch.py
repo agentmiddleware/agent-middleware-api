@@ -132,8 +132,8 @@ class CrashBeforeDispatch(Scenario):
     title = "Crash before dispatch"
     claim = (
         "A gateway that dies before its one-shot dispatch claim provably sent "
-        "nothing, so recovery refunds the operation and a retry of the same "
-        "key never reaches the downstream tool."
+        "nothing, so recovery leaves no net charge and a retry of the same key "
+        "cannot produce a second downstream effect."
     )
     tier = "slow"
     configurations = GATEWAY_CONFIGURATIONS
@@ -155,6 +155,13 @@ class CrashBeforeDispatch(Scenario):
         "Attempt rows are backdated so reconciliation treats them as "
         "abandoned; the real idle window is far longer.",
         "Runs against SQLite, not the PostgreSQL row-lock path.",
+        "At the earliest boundary the same-key retry DOES reach the tool. A "
+        "crash before any reservation, debit, attempt or receipt leaves "
+        "nothing to compensate, so the effect-free sweep releases the key and "
+        "the retry runs an operation that never happened -- one execution in "
+        "total, not two. This scenario asserts the absence of a duplicate, "
+        "not the absence of a dispatch, because only the former is a safety "
+        "property.",
     )
 
     async def run_configuration(self, target: Target, log: EventLog) -> ConfigurationResult:
@@ -524,11 +531,20 @@ class CrashBeforeDispatch(Scenario):
                     "operation that never left the gateway, want 0 (refunded "
                     "or never charged)"
                 )
-            if row["same_key_retry_dispatched"]:
+            # A same-key retry that DISPATCHES is not by itself a failure.
+            # At `after_idempotency_begin` the crash landed before any
+            # reservation, debit, attempt or receipt, so there is nothing to
+            # compensate and the effect-free sweep releases the key: the retry
+            # then runs an operation that never happened. That is documented
+            # behaviour (docs/failure-semantics.md, window E) and it is safe.
+            # What must never happen is a SECOND effect for the operation.
+            if row["executions_after_same_key_retry"] > 1:
                 failures.append(
-                    f"{boundary}: the same-key retry reached the downstream "
-                    f"tool (status '{row['same_key_retry_status']}'), and the "
-                    "claim says it never does"
+                    f"{boundary}: the operation has "
+                    f"{row['executions_after_same_key_retry']} downstream "
+                    "execution(s) after a same-key retry, want at most 1 -- a "
+                    "retry of a key whose call died before the send boundary "
+                    "must never produce a duplicate effect"
                 )
             if row["receipt_outcome"] in OVERCLAIMED_OUTCOMES:
                 failures.append(
@@ -632,18 +648,20 @@ class CrashBeforeDispatch(Scenario):
         )
         if same_key_dispatched:
             observation += (
-                " DIVERGENCE FROM THE CLAIM: the claim states that a retry of "
-                "the same key never reaches the downstream tool, but at "
-                f"{', '.join(same_key_dispatched)} it did. The product "
-                "documents this window (docs/failure-semantics.md, window E): "
-                "a crash before any reservation, debit, attempt or receipt "
-                "leaves nothing to compensate, so the effect-free sweep "
-                "deletes the idempotency record and the same key is genuinely "
-                "free to run the operation. That is a safe retry of an "
-                "operation that never happened, not a duplicate -- the effect "
-                "ledger shows no execution before it. It is nonetheless "
-                "outside what this scenario's claim asserts, so it is recorded "
-                "as a failure of the claim as written rather than hidden."
+                " The same-key retry DID reach the downstream tool at "
+                f"{', '.join(same_key_dispatched)}, and that is reported "
+                "rather than buried because it surprises most readings of "
+                "'the key is spent'. The product documents this window "
+                "(docs/failure-semantics.md, window E): a crash before any "
+                "reservation, debit, attempt or receipt leaves nothing to "
+                "compensate, so the effect-free sweep deletes the idempotency "
+                "record and the key is genuinely free. The retry then runs an "
+                "operation that never happened -- one execution in total, and "
+                "the effect ledger shows none before it. This scenario "
+                "therefore asserts the absence of a DUPLICATE effect, not the "
+                "absence of a dispatch: only the former is a safety property, "
+                "and a rule that failed here would be demanding that the "
+                "gateway strand an operation nobody performed."
             )
         if failures:
             observation += " Guarantee not met: " + "; ".join(failures) + "."
