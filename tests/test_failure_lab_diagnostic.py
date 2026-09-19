@@ -510,3 +510,60 @@ def test_the_offer_has_exactly_one_definition():
         assert item.detail not in body, (
             f"{item.title!r} is spelled out in pages.py as well as offer.py"
         )
+
+
+def test_the_narration_cannot_claim_an_execution_nobody_counted():
+    """The line only appears where the instrument reading does.
+
+    The obvious way to produce the PRD's six lines is to print them on a timer
+    while a run happens elsewhere. That is a screensaver, and it would keep
+    saying "Downstream executed operation." on a run where nothing executed.
+    """
+    from failure_lab.diagnostic.steps import EXECUTED, translate_all
+
+    without_evidence = [
+        {
+            "sequence": 1,
+            "at": "2026-09-19T00:00:00Z",
+            "scenario": "T03",
+            "configuration": Configuration.DIRECT_NAIVE.value,
+            "step": "attempt.first",
+            "message": "first attempt timed out",
+            "data": {"status": "timeout", "client_visible_state": "no_information"},
+        }
+    ]
+    with_evidence = [
+        {
+            **without_evidence[0],
+            "data": {
+                **without_evidence[0]["data"],
+                "executions_so_far": 1,
+                "downstream_requests_so_far": 1,
+            },
+        }
+    ]
+
+    assert not any(step.text.startswith(EXECUTED) for step in translate_all(without_evidence))
+    assert any(step.text.startswith(EXECUTED) for step in translate_all(with_evidence))
+
+
+def test_an_unknown_step_is_printed_rather_than_dropped():
+    """A new scenario step must degrade to a plain line, not a silent gap."""
+    from failure_lab.diagnostic.steps import translate_all
+
+    steps = translate_all(
+        [
+            {
+                "sequence": 1,
+                "at": "2026-09-19T00:00:00Z",
+                "scenario": "T99",
+                "configuration": Configuration.GATEWAY_NATIVE.value,
+                "step": "some.step.invented.later",
+                "message": "a step this module has never heard of",
+                "data": {},
+            }
+        ]
+    )
+    assert len(steps) == 1
+    assert "never heard of" in steps[0].text or "never heard of" in steps[0].detail
+    assert steps[0].source_step == "some.step.invented.later"

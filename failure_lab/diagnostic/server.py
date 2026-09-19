@@ -55,6 +55,7 @@ from starlette.routing import Route
 from failure_lab import TEST_DEFINITION_VERSION, __version__
 from failure_lab.diagnostic import pages
 from failure_lab.diagnostic.answer import DiagnosticAnswer, build_answer
+from failure_lab.diagnostic.steps import Step, translate_all
 from failure_lab.evidence import REDACTED_KEY_PATTERN, redact
 from failure_lab.telemetry import EventName, TelemetryClient, TelemetryRejected, TrafficSource
 from failure_lab.verifier import KeySource, parse_key_document, verify
@@ -198,6 +199,10 @@ class _StoredResult:
     environment: dict[str, Any]
     document: dict[str, Any]
     exit_status: int
+    #: The experiment narrated from the harness's own event log. Every line
+    #: is derived from an event a scenario actually wrote, so this cannot
+    #: describe a step that did not happen.
+    steps: list[Step] = field(default_factory=list)
 
 
 def _client_key(request: Request) -> str:
@@ -388,12 +393,19 @@ class DiagnosticService:
             )
 
         answer = build_answer(run.comparisons)
+        # Narrated from the harness's own event log rather than printed on a
+        # timer: a line exists only where an event exists to derive it from.
+        events: list[dict[str, Any]] = []
+        for result in run.results:
+            events.extend(result.events)
+        steps = translate_all(events)
         document = redact(
             {
                 "result_id": run.run_id,
                 "answer": answer.as_dict(),
                 "environment": run.environment,
                 "scenarios": run.verdict_rows(),
+                "steps": [step.as_dict() for step in steps],
                 "notes": run.notes,
                 "errors": run.errors,
             }
@@ -405,6 +417,7 @@ class DiagnosticService:
             environment=dict(run.environment),
             document=document,
             exit_status=run.exit_status,
+            steps=steps,
         )
         self.store(stored)
         return stored
@@ -496,7 +509,11 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         wants_html = "text/html" in (request.headers.get("accept") or "")
         if wants_html:
             return HTMLResponse(
-                pages.render_result(stored.answer, environment=stored.environment)
+                pages.render_result(
+                    stored.answer,
+                    environment=stored.environment,
+                    steps=stored.steps,
+                )
             )
         return JSONResponse(
             {"result_id": stored.result_id, "url": f"/check/{stored.result_id}"},
@@ -536,7 +553,11 @@ def create_app(settings: DiagnosticSettings | None = None) -> Starlette:
         if request.url.path.endswith(".json"):
             return JSONResponse(stored.document)
         return HTMLResponse(
-            pages.render_result(stored.answer, environment=stored.environment)
+            pages.render_result(
+                    stored.answer,
+                    environment=stored.environment,
+                    steps=stored.steps,
+                )
         )
 
     async def verify_page(request: Request) -> Response:

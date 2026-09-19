@@ -26,6 +26,7 @@ from typing import Any
 
 from failure_lab.diagnostic.answer import Answer, DiagnosticAnswer, ScenarioRow
 from failure_lab.diagnostic.offer import OFFER
+from failure_lab.diagnostic.steps import PHASE_LABELS, Step
 from failure_lab.verifier import ClaimStatus, VerificationReport
 
 CSS = """
@@ -258,7 +259,62 @@ command-line lab does without sending anything anywhere:</p>
 """
 
 
-def render_result(answer: DiagnosticAnswer, *, environment: dict[str, Any]) -> str:
+def _steps_html(steps: list[Step]) -> str:
+    """The experiment, grouped by phase, each line carrying its own evidence.
+
+    Nothing is narrated that no instrument recorded: every line here came from
+    an event a scenario wrote, and the harness's own message for that event is
+    printed underneath it. A reader who does not trust the prose can read the
+    record it was derived from without leaving the page.
+    """
+    if not steps:
+        return ""
+
+    blocks: list[str] = []
+    current_phase: str | None = None
+    for step in steps:
+        if step.phase != current_phase:
+            if current_phase is not None:
+                blocks.append("</ol>")
+            blocks.append(
+                f"<h3>{_e(PHASE_LABELS.get(step.phase, step.phase))}</h3><ol>"
+            )
+            current_phase = step.phase
+        evidence = (
+            '<br><span class="sub">'
+            + _e(
+                "; ".join(
+                    f"{name.replace('_', ' ')}: {value}"
+                    for name, value in step.evidence.items()
+                )
+            )
+            + "</span>"
+            if step.evidence
+            else ""
+        )
+        blocks.append(
+            f"<li><strong>{_e(step.text)}</strong>"
+            f'<br><span class="sub"><code>{_e(step.source_step)}</code> — '
+            f"{_e(step.detail)}</span>{evidence}</li>"
+        )
+    if current_phase is not None:
+        blocks.append("</ol>")
+
+    return (
+        "<h2>What happened</h2>"
+        '<div class="note">Every line below was derived from one entry the '
+        "harness wrote while the run was happening, and prints that entry's "
+        "own message and instrument readings underneath it. Nothing here is "
+        "narration on a timer.</div>" + "".join(blocks)
+    )
+
+
+def render_result(
+    answer: DiagnosticAnswer,
+    *,
+    environment: dict[str, Any],
+    steps: list[Step] | None = None,
+) -> str:
     """The result page.
 
     Ordering is the argument. A failed guarantee is the first thing on the
@@ -323,6 +379,8 @@ something a correct downstream also does, for free. Only the count against a
 correct native integration bears on whether this product adds anything.</p></div>
 
 {not_tested}
+
+{_steps_html(steps or [])}
 
 {"".join(_row_html(row) for row in answer.rows)}
 
