@@ -81,6 +81,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from app.core.auth import AuthContext, get_auth_context
 from app.services.audit_chain import AuditChainContendedError
+from app.services.receipts import ReceiptWriteContendedError
 from app.services.billing_engine import LedgerWriteContendedError
 from app.core.config import get_settings
 from app.core.time import utc_now
@@ -455,6 +456,13 @@ async def _governed_tools_call(
         # the finalize loop re-raises its own audit loss as a non-retryable
         # type, because there the tool already ran and was charged.
         raise _mcp_error(-32005, "audit_chain_head_contention") from e
+    except ReceiptWriteContendedError as e:
+        # The last write on the governed path, and the last one to get a
+        # restart. Reachable here on the same terms as the audit loss above:
+        # every receipt site past the charge converts its own contention to a
+        # non-retryable type, so what arrives is a refusal that ran nothing and
+        # whose idempotency record has already been released.
+        raise _mcp_error(-32005, ReceiptWriteContendedError.reason) from e
     except ToolPermissionDenied as e:
         denial_data: dict[str, Any] = {}
         if e.receipt:

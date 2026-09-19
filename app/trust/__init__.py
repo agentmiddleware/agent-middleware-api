@@ -137,7 +137,12 @@ from .quotes import (
     quote_ttl_seconds,
     tool_price,
 )
-from .receipts import ReceiptError, ReceiptService, get_receipt_service
+from .receipts import (
+    ReceiptError,
+    ReceiptService,
+    ReceiptWriteContendedError,
+    get_receipt_service,
+)
 from .refund_reconciliation import (
     RefundReconciliationError,
     RefundReconciliationService,
@@ -221,6 +226,7 @@ __all__ = [
     # receipts
     "ReceiptService",
     "ReceiptError",
+    "ReceiptWriteContendedError",
     "get_receipt_service",
     # failed-refund reconciliation
     "RefundReconciliationError",
