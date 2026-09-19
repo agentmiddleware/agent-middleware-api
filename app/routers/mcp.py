@@ -3903,7 +3903,16 @@ async def invoke_tool(
         IdempotencyInProgressError,
         LedgerWriteContendedError,
         AuditChainContendedError,
+        ReceiptWriteContendedError,
     ) as exc:
+        # Same four-way retryable family as /mcp/messages, and for the same
+        # reason: nothing terminal was recorded, so the caller may retry the
+        # same idempotency key. A pre-effect ReceiptWriteContendedError that
+        # reached here without this entry fell through to except Exception and
+        # answered 200 isError internal_error, which a client cannot tell from
+        # an unclassified fault. The post-effects loss does not arrive here at
+        # all -- those sites re-raise it as TerminalRecordContendedError, which
+        # the next branch answers.
         raise HTTPException(
             status_code=409,
             detail={"error": str(exc)},

@@ -510,3 +510,81 @@ async def test_the_standard_surface_answers_the_same_named_outcome(
     # The tool ran and no receipt landed: exactly the state the name describes.
     assert runs["count"] == 1
     assert await _count_receipts() == 0
+
+
+@pytest.mark.anyio
+async def test_the_legacy_rest_surface_names_an_exhausted_denial_retryable(
+    client: AsyncClient, clean_database: None, echo_tool
+) -> None:
+    """``/mcp/tools/{id}/invoke`` has its own ladder, so it needs the name too.
+
+    The legacy REST route matches exception types in its own ``except`` chain,
+    exactly as ``/mcp/messages`` does, and it was the one surface the type was
+    never added to. Its ladder ends in ``except Exception`` returning
+    ``_internal_error_tool_result`` -- a 200 carrying ``isError`` and an opaque
+    ``internal_error`` -- so the omission did not fail loudly anywhere. It
+    quietly demoted a classified, retryable loss into the unclassified channel
+    for every client still on this transport, which is the precise state
+    ``LedgerWriteContendedError`` exists to warn about: a caller that cannot
+    tell a contention loss from an unknown fault has to assume its money may
+    have moved.
+
+    Asserting 409 is what excludes that fallthrough: the internal_error answer
+    is a 200, so no body check is needed to tell the two apart.
+
+    The second half is the obligation the 409 takes on. Naming a loss retryable
+    is a promise the retry exists, and the governed idempotency record opened
+    before this denial has to have been released for that to be true --
+    otherwise every retry of the key meets ``idempotency_in_progress`` and the
+    409 points at a door that is locked. So the retry has to arrive at the real
+    denial, ``permit_budget_exceeded``, which on this surface is a 403.
+    """
+    tool_name, runs = echo_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        max_credits=1,
+        idem_key="receipt-contention-permit-rest",
+    )
+    body = {
+        "name": tool_name,
+        "arguments": {"message": "hello"},
+        "mcp_context": {
+            "wallet_id": ctx["agent_wallet_id"],
+            "permit_id": permit["permit_id"],
+            "idempotency_key": "receipt-contention-denied-rest",
+        },
+    }
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        state = _lose_receipt_commits(monkeypatch, failures=None)
+        resp = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=body,
+            headers=ctx["agent_headers"],
+        )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["error"] == ReceiptWriteContendedError.reason
+    # It gave up only after spending the whole documented budget.
+    assert state["commits"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+    # Nothing ran and no receipt is durable: the state the 409 claims.
+    assert await _count_receipts() == 0
+    assert runs["count"] == 0
+
+    # Now take the retry the 409 promised, on the same key and with the
+    # contention gone. It has to reach the real answer.
+    again = await client.post(
+        f"/mcp/tools/{tool_name}/invoke",
+        json=body,
+        headers=ctx["agent_headers"],
+    )
+    assert again.status_code == 403, again.text
+    retry_detail = again.json()["detail"]
+    assert retry_detail["error"] == "permit_budget_exceeded", retry_detail
+    assert retry_detail["receipt"]["credits_charged"] == "0", retry_detail
+    assert await _count_receipts() == 1
+    assert runs["count"] == 0
