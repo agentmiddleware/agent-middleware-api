@@ -73,8 +73,20 @@ from failure_lab import TEST_DEFINITION_VERSION
 from failure_lab import __version__ as LAB_VERSION
 from failure_lab.claims import ClaimsManifest, build_claims_manifest, write_claims_manifest
 from failure_lab.configurations import ALL_CONFIGURATIONS, CONFIGURATION_LABELS, Configuration
-from failure_lab.evidence import BundleResult, build_evidence_bundle, redact
-from failure_lab.report import Comparison, build_comparison
+from failure_lab.evidence import (
+    BundleResult,
+    SecretLeakError,
+    build_evidence_bundle,
+    environment_secret_values,
+    find_leaked_secrets,
+    redact,
+)
+from failure_lab.report import (
+    CONCLUSION_GLOSS,
+    INTENDED_EXECUTIONS,
+    Comparison,
+    build_comparison,
+)
 from failure_lab.scenarios import select_scenarios
 from failure_lab.scenarios.base import (
     ConfigurationResult,
@@ -148,6 +160,12 @@ def git_commit(root: Path | str = REPOSITORY_ROOT) -> dict[str, Any]:
     ordinary; none of them is a reason to fail a run. What is not acceptable
     is recording ``"unknown"`` in a way that reads like a commit, so the
     failure reason travels with the field.
+
+    The same rule applies one level down. ``git rev-parse`` can succeed while
+    ``git status`` does not, and a ``dirty`` of ``None`` with an empty note
+    renders exactly like a clean tree everywhere it is read. A failure to look
+    gets its own sentence, so nothing downstream can present it as an
+    observation that the tree was clean.
     """
 
     def run(*arguments: str) -> str | None:
@@ -175,9 +193,17 @@ def git_commit(root: Path | str = REPOSITORY_ROOT) -> dict[str, Any]:
             "the gateway was read from cannot be identified from this bundle",
         }
     status = run("status", "--porcelain")
+    if status is None:
+        return {
+            "commit": commit,
+            "dirty": None,
+            "note": "git status --porcelain did not succeed here, so whether "
+            "the working tree carried uncommitted changes is unknown. This is "
+            "not a report that it was clean",
+        }
     return {
         "commit": commit,
-        "dirty": None if status is None else bool(status),
+        "dirty": bool(status),
         "note": (
             "uncommitted changes were present, so this commit does not fully "
             "describe the code under test"
@@ -226,7 +252,16 @@ def collect_environment(
         "platform": platform.platform(),
         "packages": package_versions(),
         "seed": seed,
-        "seed_note": (
+        # NOT ``seed_note``. ``REDACTED_KEY_PATTERN`` matches ``seed`` as a
+        # substring of the key, and the integer exemption in
+        # :func:`failure_lab.evidence.redact` covers the exact keys ``seed``
+        # and ``random_seed`` only -- so a key named ``seed_note`` is replaced
+        # wholesale with ``<redacted:seed>`` in run.json, in ``--json`` and in
+        # the bundle's environment.json. The caveat that a seeded run is not a
+        # reproducible run would then be missing from every artifact that
+        # quotes the seed, which is the one place it has to appear. Measured on
+        # a real run before this name changed.
+        "reproducibility_note": (
             "the process-wide random module was seeded with this value. "
             "Identifiers minted with uuid4 and secrets are not seeded and "
             "differ per run, so this does not make a run byte-identical"
@@ -333,10 +368,13 @@ TRUST_KEYS_FILENAME = "trust-keys.json"
 
 def harvest_evidence(
     results: Sequence[ScenarioResult],
+    notes: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
     """Pull exported receipts, verifier reports and the key document out of results.
 
-    Returns ``(receipts_by_id, verification_results, key_document)``.
+    Returns ``(receipts_by_id, verification_results, key_document)``. When
+    ``notes`` is given, anything a scenario supplied under one of the harvest
+    keys but this function could not read is appended to it.
 
     Nothing here invents evidence. When no scenario exported a portable
     receipt the bundle gets an empty ``receipts/`` and
@@ -345,12 +383,23 @@ def harvest_evidence(
     correct output for a run that produced no independently checkable
     artifact, and it is why this function does not fall back to the
     gateway-reported receipt rows that every result already carries.
+
+    What it must not do is drop material silently. A scenario that sets
+    ``portable_receipts`` to a shape this function does not understand would
+    otherwise produce a bundle carrying evidence.py's note that *no receipts
+    were supplied* -- a statement about the scenario that is false, and one
+    nobody could tell apart from the true case. The same goes for a second,
+    different ``trust_keys`` document: first-found wins, so the receipts signed
+    under the other one would fail verification with nothing in the bundle to
+    explain why. Both are recorded.
     """
+    dropped: list[str] = []
     receipts: dict[str, Any] = {}
     verifications: list[dict[str, Any]] = []
     key_document: dict[str, Any] | None = None
     for result in results:
         for entry in result.configurations:
+            origin = f"{result.test_id}/{entry.configuration}"
             extra = entry.extra or {}
             exported = extra.get(PORTABLE_RECEIPTS_KEY)
             if isinstance(exported, Mapping):
@@ -363,20 +412,54 @@ def harvest_evidence(
                         else f"{result.test_id}-{entry.configuration}-{index:03d}"
                     )
                     receipts[identifier] = bundle
+            elif exported is not None:
+                dropped.append(
+                    f"{origin} set {PORTABLE_RECEIPTS_KEY!r} to a "
+                    f"{type(exported).__name__}, which is neither a mapping nor "
+                    "a list of receipt bundles; it was not written to the bundle"
+                )
             reports = extra.get(VERIFICATION_RESULTS_KEY)
             if isinstance(reports, Sequence) and not isinstance(reports, (str, bytes)):
+                usable = [report for report in reports if isinstance(report, Mapping)]
+                if len(usable) != len(list(reports)):
+                    dropped.append(
+                        f"{origin} supplied {len(list(reports)) - len(usable)} "
+                        f"{VERIFICATION_RESULTS_KEY!r} entries that are not "
+                        "mappings; they were not written to the bundle"
+                    )
                 verifications.extend(
                     {
                         "test_id": result.test_id,
                         "configuration": entry.configuration,
                         **dict(report),
                     }
-                    for report in reports
-                    if isinstance(report, Mapping)
+                    for report in usable
+                )
+            elif reports is not None:
+                dropped.append(
+                    f"{origin} set {VERIFICATION_RESULTS_KEY!r} to a "
+                    f"{type(reports).__name__} rather than a list of mappings; "
+                    "it was not written to the bundle"
                 )
             keys = extra.get(TRUST_KEYS_KEY)
-            if key_document is None and isinstance(keys, Mapping):
-                key_document = dict(keys)
+            if isinstance(keys, Mapping):
+                if key_document is None:
+                    key_document = dict(keys)
+                elif dict(keys) != key_document:
+                    dropped.append(
+                        f"{origin} supplied a {TRUST_KEYS_KEY!r} document that "
+                        "differs from the one already harvested. The first is "
+                        "the one written beside the bundle, so a receipt signed "
+                        "under the other will not verify against it"
+                    )
+            elif keys is not None:
+                dropped.append(
+                    f"{origin} set {TRUST_KEYS_KEY!r} to a "
+                    f"{type(keys).__name__} rather than a mapping; no key "
+                    "document was written from it"
+                )
+    if notes is not None:
+        notes.extend(dropped)
     return receipts, verifications, key_document
 
 
@@ -728,14 +811,7 @@ async def _execute(
         run_directory=directory,
     )
 
-    receipts, verifications, key_document = harvest_evidence(results)
-    if key_document is not None:
-        # Beside the bundle, not in it: a file the manifest does not list
-        # makes verify_bundle_integrity report the bundle as tampered with.
-        # `python -m failure_lab verify` looks for it here.
-        (directory / TRUST_KEYS_FILENAME).write_text(
-            _json_text(redact(key_document)), encoding="utf-8"
-        )
+    receipts, verifications, key_document = harvest_evidence(results, notes)
 
     bundle = build_evidence_bundle(
         directory / BUNDLE_DIRECTORY_NAME,
@@ -763,6 +839,18 @@ async def _execute(
         reproduction_command=command,
         archive=archive,
     )
+
+    # After the bundle, not before it. build_evidence_bundle scans its own
+    # bytes for the run's secrets and raises without leaving a staging
+    # directory behind; writing this file first meant a leak that aborted the
+    # run still left a key document sitting in the caller's --output
+    # directory. Beside the bundle rather than inside it, because a file the
+    # manifest does not list makes verify_bundle_integrity report the bundle
+    # as tampered with -- `python -m failure_lab verify` looks for it here.
+    if key_document is not None:
+        (directory / TRUST_KEYS_FILENAME).write_text(
+            _json_text(redact(key_document)), encoding="utf-8"
+        )
 
     claims = build_claims_manifest(
         results,
@@ -806,10 +894,61 @@ async def _execute(
         tier=tier,
     )
 
-    (directory / RUN_DOCUMENT_FILENAME).write_text(
+    run_document_path = directory / RUN_DOCUMENT_FILENAME
+    run_document_path.write_text(
         _json_text(run.redacted_document()), encoding="utf-8"
     )
+
+    _assert_siblings_are_clean(
+        [
+            run_document_path,
+            directory / TRUST_KEYS_FILENAME,
+            claims_path,
+            claims_path.with_suffix(".md"),
+            run.telemetry_path,
+        ],
+        [
+            admin_api_key,
+            environment.downstream_bearer_token,
+            environment.control_token,
+            *environment_secret_values(),
+        ],
+    )
     return run
+
+
+def _assert_siblings_are_clean(
+    paths: Sequence[Path | None], secret_values: Sequence[str]
+) -> None:
+    """Scan the files written *beside* the bundle for the run's own secrets.
+
+    :func:`~failure_lab.evidence.build_evidence_bundle` scans its own bytes
+    and refuses to leave a leaking bundle on disk. Nothing scanned the four
+    files this module writes next to it, and they are not covered by that
+    check by construction: ``trust-keys.json`` holds a document that never
+    enters the bundle at all, and ``claims.json``/``claims.md`` are generated
+    after it. Both go through :func:`~failure_lab.evidence.redact`, which
+    catches a credential by key name or by shape -- and the downstream bearer
+    token and the control token are ``secrets.token_urlsafe(24)``, which has
+    no shape. A scenario putting one of them somewhere ``redact`` does not
+    look was demonstrated to land it in ``trust-keys.json`` verbatim while the
+    run still exited zero.
+
+    A leaking file is deleted before the raise, for the same reason the bundle
+    is: the failure has to be recoverable by re-running, not by remembering to
+    delete something. The sandbox is deliberately not scanned -- it is the
+    gateway's live database, not published evidence, and it is where the
+    credentials the run minted are supposed to be.
+    """
+    present = [path for path in paths if path is not None and path.is_file()]
+    leaks = find_leaked_secrets(present, secret_values)
+    if not leaks:
+        return
+    leaked_names = {str(leak["path"]) for leak in leaks}
+    for path in present:
+        if path.name in leaked_names:
+            path.unlink(missing_ok=True)
+    raise SecretLeakError(leaks)
 
 
 def _json_text(document: Any) -> str:
@@ -829,6 +968,16 @@ def _record_scenario_events(
     integration under test" in this harness -- a simulated one, recorded under
     a non-customer traffic source so it can never reach a conversion
     numerator.
+
+    The two events are not a partition of "duplicates or not". A baseline that
+    produced *fewer* downstream effects than the one the operation intended
+    did not survive the injected failure either -- the business action simply
+    never happened -- and ``baseline_passed`` describes it as "the caller's
+    own integration survived". So a short baseline emits neither event and is
+    recorded as a note instead. Emitting ``baseline_failed`` for it would be
+    the flattering reading, since every ``baseline_failed`` is a reason to buy
+    the product; emitting ``baseline_passed`` would be the wrong one. The
+    honest answer is that the run did not measure what either event claims.
     """
     duration_ms = _elapsed_ms(started_at, result.finished_at)
     events.record(
@@ -849,8 +998,22 @@ def _record_scenario_events(
     )
     if existing is None:
         return
+    if existing.duplicate_effects:
+        name = EventName.BASELINE_FAILED
+    elif existing.downstream_effects >= INTENDED_EXECUTIONS:
+        name = EventName.BASELINE_PASSED
+    else:
+        events.notes.append(
+            f"{result.test_id}: the {existing.configuration} baseline recorded "
+            f"{existing.downstream_effects} downstream effect(s) where "
+            f"{INTENDED_EXECUTIONS} was intended, and no duplicate. Neither "
+            "baseline_passed nor baseline_failed was emitted: a baseline that "
+            "never executed the operation did not survive the failure, and it "
+            "did not duplicate either"
+        )
+        return
     events.record(
-        EventName.BASELINE_FAILED if existing.duplicate_effects else EventName.BASELINE_PASSED,
+        name,
         test_id=result.test_id,
         configuration=existing.configuration,
         duplicate_effects=existing.duplicate_effects,
@@ -872,10 +1035,18 @@ def summary_lines(run: LabRun) -> list[str]:
     """The short, factual stdout summary: what ran, what it concluded, where it went."""
     lines: list[str] = []
     lines.append(f"run {run.run_id}  definitions {TEST_DEFINITION_VERSION}  seed {run.environment['seed']}")
+    # Tri-state on purpose. ``dirty`` is None when git status could not be
+    # run, and printing nothing for that case renders a tree nobody inspected
+    # exactly like a clean one.
+    dirty = run.environment.get("gateway_commit_dirty")
+    tree = (
+        "  (working tree dirty)"
+        if dirty
+        else ("" if dirty is False else "  (working tree state unknown)")
+    )
     lines.append(
         f"gateway {run.environment['gateway_version']} "
-        f"@ {str(run.environment['gateway_commit'])[:12]}"
-        + ("  (working tree dirty)" if run.environment.get("gateway_commit_dirty") else "")
+        f"@ {str(run.environment['gateway_commit'])[:12]}{tree}"
     )
     lines.append(f"traffic source {run.environment['traffic_source']} (not counted as a customer)"
                  if run.environment["traffic_source"] != TrafficSource.HUMAN_CUSTOMER.value
