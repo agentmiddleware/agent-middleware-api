@@ -258,17 +258,32 @@ class CacheFailure(Scenario):
                 limiter._redis_url = dead_url
                 limiter._redis = None
                 limiter._redis_warned = False
+            # Read the rebinding back rather than assuming the write above
+            # happened. This loop once iterated an empty list, so no limiter
+            # was ever pointed at the dead cache while the record went on
+            # reporting how many had been "rebound" -- and since stage 1
+            # provably does not reach a running limiter
+            # (settings_patch_reached_limiter is False), the scenario was
+            # reporting PASS for a cache outage that never occurred. Counting
+            # what is actually bound is what makes that impossible to repeat.
+            rebound = [
+                limiter
+                for limiter in limiters
+                if limiter._redis_url == dead_url and limiter._redis is None
+            ]
             reset_runtime_degradation()
             log.emit(
                 "t12.cache_down",
                 f"{configuration}: cache unreachable at {dead_url}; "
-                f"{len(limiters)} live rate limiter(s) rebound "
+                f"{len(rebound)}/{len(limiters)} live rate limiter(s) "
+                f"verified rebound "
                 f"(settings patch alone reached the limiter: "
                 f"{settings_patch_reached_limiter})",
                 scenario=self.test_id,
                 configuration=configuration,
                 cache_url=dead_url,
                 live_rate_limiters=len(limiters),
+                live_rate_limiters_verified_rebound=len(rebound),
                 settings_patch_reached_limiter=settings_patch_reached_limiter,
                 rate_limiter_module_settings_is_cached_settings=(
                     module_settings_is_cached_settings
@@ -432,6 +447,15 @@ class CacheFailure(Scenario):
         )
 
         problems = [f"correctness invariant broken: {name}" for name in broken]
+        if not rebound:
+            # Nothing below measures a cache outage if no limiter ever lost
+            # its cache. Reporting PASS here would be reporting the absence of
+            # a failure this scenario never injected.
+            problems.append(
+                f"the cache outage was never injected: {len(limiters)} live "
+                "rate limiter(s) were found and none was verified rebound to "
+                f"{dead_url}, so nothing below measures a cache failure"
+            )
         if not degradation_surfaced:
             problems.append(
                 "the cache outage was not surfaced: "
@@ -508,7 +532,8 @@ class CacheFailure(Scenario):
                     "governed_loop_reached_the_dead_cache": (
                         governed_loop_reached_the_dead_cache
                     ),
-                    "live_rate_limiters_rebound": len(limiters),
+                    "live_rate_limiters_found": len(limiters),
+                    "live_rate_limiters_verified_rebound": len(rebound),
                     "rate_limiter_module_settings_is_cached_settings": (
                         module_settings_is_cached_settings
                     ),
