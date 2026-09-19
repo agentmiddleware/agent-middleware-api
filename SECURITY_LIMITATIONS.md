@@ -40,7 +40,11 @@ Keep these out of the wedge until a design partner requires them:
 - Offline verification trusts the issuing origin for key distribution. Keys
   arrive over TLS from the same origin being audited, so a compromised origin
   can serve a key set that validates forged receipts. Out-of-band key pinning
-  is not implemented.
+  is not implemented and is frozen until a named partner cannot trust this
+  origin for keys **and** that independently trusted key source is named
+  (Fulcio/TUF, pinned SPIFFE, or an out-of-band pin) and verification uses
+  that root. Wrapping origin-signed claims under Sigstore or SPIFFE is not
+  that slice. See [`WEDGE.md`](WEDGE.md) § What To Freeze.
 - Wrap-and-anchor evidence is not implemented. The intended later
   composition is anchoring/publication: wrap today's receipt claims as an
   in-toto/DSSE predicate and submit the statement hash to Rekor or a
