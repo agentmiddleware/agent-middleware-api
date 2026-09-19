@@ -42,6 +42,15 @@ The crash is a simulated in-process death at an instrumented durable
 boundary, not a ``SIGKILL`` of a separate OS process. And a judge that has
 never failed anything is not a judge, which is why
 ``broken_candidate.py`` ships alongside ``reference_candidate.py``.
+
+It also does not establish that the gateway was needed. Only ``D`` is run, so
+there is no baseline here at all: a downstream that honours ``operation_id``
+as a durable idempotency key removes the same duplicate with no gateway in the
+picture, which is configuration ``B_direct_native_idempotency`` in the main
+suite and is where that comparison belongs. A pass here says the integration
+survived; it says nothing about whether it had to be this integration. That
+sentence is in :data:`LIMITATIONS` as well as here, because a caveat that
+lives only in a docstring is a caveat nobody reading the result will see.
 """
 
 from __future__ import annotations
@@ -60,6 +69,7 @@ import tempfile
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -143,6 +153,23 @@ class RecoveryStage(str, Enum):
     AFTER_RESTART = "after_restart"
 
 
+def as_understanding(value: Any) -> Understanding:
+    """Read a candidate's understanding, or ``UNKNOWN`` if it is unreadable.
+
+    A candidate is free to hand back the bare string, because
+    :class:`Understanding` is a str enum and nothing stops it. Taking the
+    string at face value is not generosity -- it is reporting what the
+    candidate actually said. Anything the vocabulary does not contain becomes
+    ``UNKNOWN``, which is non-terminal and therefore fails.
+    """
+    if isinstance(value, Understanding):
+        return value
+    try:
+        return Understanding(value)
+    except (ValueError, TypeError):
+        return Understanding.UNKNOWN
+
+
 @dataclass(frozen=True)
 class OperationReport:
     """What the candidate believes about one business operation."""
@@ -153,8 +180,14 @@ class OperationReport:
     detail: str = ""
 
     def as_dict(self) -> dict[str, Any]:
+        # ``Understanding`` is a str enum, so a candidate that writes
+        # ``understanding="confirmed_success"`` constructs successfully and
+        # only explodes here. The judge's job is to fail that candidate, not
+        # to die describing it, so the value is read defensively.
         return {
-            "understanding": self.understanding.value,
+            "understanding": getattr(
+                self.understanding, "value", str(self.understanding)
+            ),
             "receipt_id": self.receipt_id,
             "idempotency_key": self.idempotency_key,
             "detail": self.detail,
@@ -500,6 +533,53 @@ class LoadedCandidate:
         return self.factory()
 
 
+def _import_roots(text: str) -> set[str]:
+    """Top-level names one module imports, as its source states them."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
+def _static_sibling_sources(resolved: Path) -> dict[str, str]:
+    """Candidate-directory modules the candidate imports, followed transitively.
+
+    The runtime scan can only see what *this* import introduced into
+    ``sys.modules``. Judge one candidate and then another in the same process
+    and the siblings are already imported, so the second run's diff is empty
+    and the cheat scan silently goes blind on exactly the files it exists to
+    read. Resolving imports against the directory on disk does not depend on
+    what happened earlier in the process.
+    """
+    collected: dict[str, str] = {}
+    pending = [resolved]
+    seen = {resolved}
+    while pending:
+        current = pending.pop()
+        try:
+            text = current.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if current != resolved:
+            collected[str(current)] = text
+        for root in sorted(_import_roots(text)):
+            if root == "failure_lab":
+                continue
+            sibling = (resolved.parent / f"{root}.py").resolve()
+            if sibling in seen or not sibling.is_file():
+                continue
+            seen.add(sibling)
+            pending.append(sibling)
+    return collected
+
+
 def load_candidate(path: Path) -> LoadedCandidate:
     """Import one candidate file and collect every source file it brought.
 
@@ -534,6 +614,7 @@ def load_candidate(path: Path) -> LoadedCandidate:
             sources[str(origin_path)] = origin_path.read_text(encoding="utf-8")
         except OSError:
             continue
+    sources.update(_static_sibling_sources(resolved))
 
     factory = getattr(module, "CANDIDATE", None)
     if factory is None:
@@ -850,6 +931,12 @@ LIMITATIONS = (
     "Source scanning catches the candidate file and siblings in its directory. "
     "A cheat imported from elsewhere on sys.path would not be seen statically; "
     "the traffic observation is the backstop, and it only sees HTTP.",
+    "Only D_gateway_naive_downstream is run, so nothing here is a baseline. A "
+    "downstream that honours operation_id as a durable idempotency key removes "
+    "the same duplicate with no gateway at all -- that is "
+    "B_direct_native_idempotency in the main suite. A pass says the "
+    "integration survived the failures; it does not say the gateway was "
+    "needed to survive them.",
 )
 
 
@@ -858,8 +945,19 @@ LIMITATIONS = (
 # --------------------------------------------------------------------------- #
 
 _SENSITIVE_FIELD_NAMES = frozenset(
-    {"api_key", "admin_api_key", "bearer_token", "control_token", "wallet_id", "seed"}
+    {
+        "api_key",
+        "admin_api_key",
+        "bearer_token",
+        "control_token",
+        "key_prefix",
+        "seed",
+        "sponsor_wallet_id",
+        "wallet",
+        "wallet_id",
+    }
 )
+_SENSITIVE_FIELD_SUFFIXES = ("_api_key", "_wallet", "_wallet_id", "_token")
 _CREDENTIAL_RE = re.compile(r"(?<![A-Za-z0-9])(?:b2a|amw)_[A-Za-z0-9_-]{12,}")
 _LAB_ADMIN_RE = re.compile(r"(?<![A-Za-z0-9])lab-admin-[A-Za-z0-9_-]{8,}")
 _WALLET_RE = re.compile(r"(?<![A-Za-z0-9])(?:agt|spn)-[A-Za-z0-9_-]{6,}")
@@ -870,19 +968,27 @@ def redact(value: Any) -> Any:
 
     Matches the house style in ``scripts/invariant_attacks/redact_evidence.py``:
     named fields are replaced wholesale, and credential- or wallet-shaped
-    substrings are replaced wherever they appear in free text.
+    substrings are replaced wherever they appear in free text. Tuples are
+    walked as well as lists, because a container the pass does not descend
+    into is a container a credential survives in.
     """
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for key, item in value.items():
             name = str(key).lower()
-            if name in _SENSITIVE_FIELD_NAMES or name.endswith("_api_key"):
-                out[key] = "<redacted>"
+            if name in _SENSITIVE_FIELD_NAMES or name.endswith(
+                _SENSITIVE_FIELD_SUFFIXES
+            ):
+                out[redact(key)] = "<redacted>"
             else:
-                out[key] = redact(item)
+                out[redact(key)] = redact(item)
         return out
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [redact(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        # Sorted, because an evidence file that reorders itself between runs
+        # cannot be diffed against the last one.
+        return sorted((redact(item) for item in value), key=str)
     if isinstance(value, str):
         text = _CREDENTIAL_RE.sub("<redacted-credential>", value)
         text = _LAB_ADMIN_RE.sub("<redacted-credential>", text)
@@ -989,9 +1095,12 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
         env = LabEnvironment(
             run_dir=run_dir, app=gateway_app, admin_api_key=admin_api_key
         )
-        async with configured_target(
-            env, Configuration.GATEWAY_NAIVE, ledger_suffix="-integration-check"
-        ) as target:
+        async with (
+            configured_target(
+                env, Configuration.GATEWAY_NAIVE, ledger_suffix="-integration-check"
+            ) as target,
+            AsyncExitStack() as open_clients,
+        ):
             gateway, tenant, _unused_permit = target.require_gateway()
             permit = await gateway.issue_permit(
                 tenant,
@@ -999,8 +1108,6 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
                 expires_in_minutes=30,
                 forbidden_fields=(FORBIDDEN_FIELD,),
             )
-
-            clients: list[httpx.AsyncClient] = []
 
             def new_client() -> httpx.AsyncClient:
                 client = httpx.AsyncClient(
@@ -1010,7 +1117,12 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
                     base_url=GATEWAY_BASE_URL,
                     timeout=httpx.Timeout(CLIENT_TIMEOUT_SECONDS),
                 )
-                clients.append(client)
+                # Registered rather than collected in a list closed at the
+                # end: the end is the one path that is guaranteed not to run
+                # when a step raises, and a judge that leaks its own
+                # instruments on the failing path is only cleaning up after
+                # runs that went well.
+                open_clients.push_async_callback(client.aclose)
                 return client
 
             def context(client: httpx.AsyncClient, intent: RefundIntent) -> IntegrationContext:
@@ -1059,7 +1171,7 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
                 record = StepRecord(
                     step=name,
                     operation_id=intent.operation_id,
-                    reported=reported.as_dict() if hasattr(reported, "as_dict") else None,
+                    reported=_describe(reported),
                     downstream_executions=target.ledger.execution_count(
                         intent.operation_id
                     ),
@@ -1120,9 +1232,24 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
             ]
             receipt_id = success_receipts[0]["receipt_id"] if success_receipts else ""
             if receipt_id:
-                bundle = await gateway.portable_receipt(tenant, receipt_id)
-                keys_document = await gateway.trust_keys()
-                judge_verification = _judge_verification(bundle, keys_document)
+                # A receipt that will not export, or a key document that will
+                # not parse, is a finding about the gateway. It is not a
+                # reason to abandon the run without a report, and it must not
+                # leave the assertion with nothing to compare against, so the
+                # failure is recorded where the comparison happens.
+                try:
+                    bundle = await gateway.portable_receipt(tenant, receipt_id)
+                    keys_document = await gateway.trust_keys()
+                    judge_verification = _judge_verification(bundle, keys_document)
+                except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+                    judge_verification = {
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "detail": (
+                            "the judge could not take its own reading of this "
+                            "receipt, so the candidate's claim was compared "
+                            "against nothing and the assertion cannot pass"
+                        ),
+                    }
             step_verify, verification = await run_step(
                 "receipt_verified_independently",
                 intents["authorized"],
@@ -1149,11 +1276,19 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
             crash_fired = bool(crash["fired"])
             executions_at_crash = target.ledger.execution_count(ambiguous.operation_id)
 
-            backdated = await gateway.backdate_attempts(
-                tenant, seconds=RECONCILE_BACKDATE_SECONDS
-            )
-            reconciliation = await gateway.reconcile(idle_seconds=0)
-            reconciliation["backdated_attempt_rows"] = backdated
+            # The operator sweep. If it fails, the recovery the candidate is
+            # about to attempt happens against an unswept gateway -- which is
+            # worth reporting in the result rather than losing the whole run
+            # to, since the effect ledger still answers the question that
+            # carries the assertion.
+            try:
+                backdated = await gateway.backdate_attempts(
+                    tenant, seconds=RECONCILE_BACKDATE_SECONDS
+                )
+                reconciliation = await gateway.reconcile(idle_seconds=0)
+                reconciliation["backdated_attempt_rows"] = backdated
+            except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+                reconciliation = {"error": f"{type(exc).__name__}: {exc}"}
 
             gaps.extend(_gaps(primary))
             recovered = loaded.build()
@@ -1175,9 +1310,6 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
             ambiguous_receipts = await receipts_between(receipts_before_ambiguous)
             ambiguous_receipt_outcomes = [r["outcome"] for r in ambiguous_receipts]
             step_restart.extra["receipts_for_ambiguous_operation"] = ambiguous_receipts
-
-            for client in clients:
-                await client.aclose()
     finally:
         await close_db()
 
@@ -1216,6 +1348,7 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
         ambiguous_receipt_outcomes=ambiguous_receipt_outcomes,
         flag_changes=flag_changes,
         app_changes=app_changes,
+        app_files_fingerprinted=len(app_manifest_before),
     )
 
     metrics = _metrics(
@@ -1247,6 +1380,28 @@ async def run_judgement(candidate_path: Path, run_dir: Path) -> JudgeResult:
         },
         limitations=list(LIMITATIONS),
     )
+
+
+def _describe(reported: Any) -> dict[str, Any] | None:
+    """Turn whatever the candidate returned into something recordable.
+
+    The candidate is the least trusted thing in the process and its return
+    value is not validated anywhere. A malformed report is a fact about the
+    candidate for the assertions to weigh; it is not licence for the judge to
+    die mid-run and produce no report at all.
+    """
+    if reported is None:
+        return None
+    describe = getattr(reported, "as_dict", None)
+    if callable(describe):
+        try:
+            described = describe()
+        except Exception as exc:  # noqa: BLE001 - a broken report is a report
+            return {"unreadable_report": f"{type(exc).__name__}: {exc}"}
+        if isinstance(described, dict):
+            return described
+        return {"unreadable_report": f"as_dict() returned {type(described).__name__}"}
+    return {"unreadable_report": f"candidate returned {type(reported).__name__}"}
 
 
 def _gaps(candidate: CandidateIntegration) -> list[str]:
@@ -1337,6 +1492,7 @@ def _assertions(
     ambiguous_receipt_outcomes: list[str],
     flag_changes: list[str],
     app_changes: list[str],
+    app_files_fingerprinted: int,
 ) -> list[Assertion]:
     assertions: list[Assertion] = []
 
@@ -1389,8 +1545,9 @@ def _assertions(
                 "produced no second downstream effect"
             ),
             observation=(
-                f"fault applied {fault_applied} time(s); candidate sent {attempts} "
-                f"governed call(s) for this operation; effect ledger: "
+                f"fault layer: fault applied {fault_applied} time(s); "
+                f"transport: candidate sent {attempts} governed call(s) for "
+                f"this operation; effect ledger: "
                 f"{step_lost.downstream_executions} execution(s)"
             ),
             evidence={
@@ -1453,18 +1610,35 @@ def _assertions(
         if f.kind in ("disqualifying_import", "issuer_verify_endpoint")
     ]
     claim = verification
-    honest = (
-        claim is not None
-        and claim.signature_valid is True
-        and claim.issuer_trust_established is False
-        and claim.downstream_execution_established is False
-    )
-    ground_truth_agrees = (
-        judge_verification.get("signature_valid") is True
-        and judge_verification.get("issuer_trust_established") is False
-    )
+    # The judge took its own reading of the same bundle with the same
+    # independent verifier. The candidate is scored against that reading
+    # rather than against three hard-coded booleans, so the assertion is a
+    # comparison and not a quiz with a memorised answer key.
+    judge_read = {
+        field: judge_verification.get(field)
+        for field in (
+            "signature_valid",
+            "issuer_trust_established",
+            "downstream_execution_established",
+        )
+    }
+    reading_taken = all(isinstance(value, bool) for value in judge_read.values())
+    # Issuer trust cannot be established from a key served by the issuer, and
+    # no signature ever established that money moved. If the judge's own
+    # reading ever said otherwise, that is a finding about the gateway and
+    # this assertion should not quietly absorb it.
+    ground_truth_agrees = reading_taken and judge_read == {
+        "signature_valid": True,
+        "issuer_trust_established": False,
+        "downstream_execution_established": False,
+    }
+    claim_matches_ground_truth = claim is not None and judge_read == {
+        "signature_valid": claim.signature_valid,
+        "issuer_trust_established": claim.issuer_trust_established,
+        "downstream_execution_established": claim.downstream_execution_established,
+    }
     passed = (
-        honest
+        claim_matches_ground_truth
         and ground_truth_agrees
         and not disqualifying
         and not traffic_verify_hits
@@ -1488,12 +1662,15 @@ def _assertions(
                     else "none returned"
                 )
                 + f"; judge's independent reading: {judge_verification or 'not taken'}"
+                + f"; claim matches that reading: {claim_matches_ground_truth}"
                 + f"; disqualifying source findings: {len(disqualifying)}"
                 + f"; requests to the issuer's verify endpoint: {len(traffic_verify_hits)}"
             ),
             evidence={
                 "candidate_claim": claim.as_dict() if claim is not None else None,
                 "judge_independent_verification": judge_verification,
+                "judge_reading_taken": reading_taken,
+                "claim_matches_judge_reading": claim_matches_ground_truth,
                 "disqualifying_source_findings": disqualifying,
                 "issuer_verify_endpoint_requests": traffic_verify_hits,
                 "receipt_under_verification": step_verify.extra.get(
@@ -1505,12 +1682,17 @@ def _assertions(
     )
 
     # -- 5 ---------------------------------------------------------------
-    understanding = getattr(report_restart, "understanding", Understanding.UNKNOWN)
-    if not isinstance(understanding, Understanding):
-        understanding = Understanding.UNKNOWN
+    raw_understanding = getattr(report_restart, "understanding", None)
+    understanding = as_understanding(raw_understanding)
     terminal = understanding in TERMINAL_UNDERSTANDINGS
-    gateway_says_uncertain = "delivery_uncertain" in ambiguous_receipt_outcomes
-    overclaimed = gateway_says_uncertain and understanding in CLAIMS_THE_ACTION_HAPPENED
+    # An overclaim is a claim the action happened that the gateway's own
+    # record does not carry. Absence of a record is not agreement: if no
+    # receipt exists for this operation at all, "the refund went through" is
+    # supported by nothing, and treating that as not-an-overclaim would be
+    # the judge defaulting to the flattering reading when data is missing.
+    gateway_confirms_success = "success" in ambiguous_receipt_outcomes
+    claims_it_happened = understanding in CLAIMS_THE_ACTION_HAPPENED
+    overclaimed = claims_it_happened and not gateway_confirms_success
     passed = (
         crash_fired
         and terminal
@@ -1532,8 +1714,13 @@ def _assertions(
                 f"ledger: {executions_at_crash} execution(s) at the crash, "
                 f"{step_restart.downstream_executions} after recovery; recovered "
                 f"instance reported '{understanding.value}'"
-                + (" (overclaim: the gateway recorded the outcome as uncertain)"
-                   if overclaimed else "")
+                + (
+                    " (overclaim: it says the refund happened, and no "
+                    "gateway-reported receipt for this operation records a "
+                    f"success -- outcomes on record: {ambiguous_receipt_outcomes or 'none'})"
+                    if overclaimed
+                    else ""
+                )
             ),
             evidence={
                 "crash_fired": crash_fired,
@@ -1542,7 +1729,14 @@ def _assertions(
                 "downstream_executions_after_recovery": step_restart.downstream_executions,
                 "downstream_requests_after_recovery": step_restart.downstream_requests,
                 "understanding": understanding.value,
+                "understanding_as_reported": (
+                    raw_understanding
+                    if isinstance(raw_understanding, str)
+                    else repr(raw_understanding)
+                ),
                 "understanding_is_terminal": terminal,
+                "claims_the_action_happened": claims_it_happened,
+                "gateway_reported_success_for_this_operation": gateway_confirms_success,
                 "overclaimed": overclaimed,
                 "gateway_receipt_outcomes": ambiguous_receipt_outcomes,
                 "reconciliation": step_restart.extra.get("reconciliation"),
@@ -1552,20 +1746,30 @@ def _assertions(
     )
 
     # -- 6 ---------------------------------------------------------------
-    passed = not flag_changes and not app_changes
+    # A manifest of nothing compares equal to a manifest of nothing, so an
+    # app/ tree the judge could not read would otherwise clear this assertion
+    # by producing no differences. An instrument that saw nothing is not an
+    # instrument that saw no change.
+    app_tree_observed = app_files_fingerprinted > 0
+    passed = app_tree_observed and not flag_changes and not app_changes
     assertions.append(
         Assertion(
             name="no_security_checks_disabled",
             passed=passed,
             requirement=(
-                "the gateway's trust flags are unchanged from the run's "
-                "starting posture, and the candidate did not write to app/"
+                "the app/ tree was actually fingerprinted, the gateway's "
+                "trust flags are unchanged from the run's starting posture, "
+                "and the candidate did not write to app/"
             ),
             observation=(
-                f"{len(flag_changes)} trust flag change(s), "
+                f"{app_files_fingerprinted} file(s) under app/ fingerprinted"
+                + ("" if app_tree_observed else " -- nothing was measured")
+                + f"; {len(flag_changes)} trust flag change(s), "
                 f"{len(app_changes)} change(s) under app/"
             ),
             evidence={
+                "app_files_fingerprinted": app_files_fingerprinted,
+                "app_tree_observed": app_tree_observed,
                 "trust_flag_changes": flag_changes,
                 "app_tree_changes": app_changes,
             },
@@ -1678,11 +1882,19 @@ def render_text(document: dict[str, Any]) -> str:
         for entry in document["unsafe_workarounds"]:
             lines.append(f"  - {entry}")
     lines.append("")
+    lines.append(
+        "VERDICT: "
+        + ("PASS" if document["passed"] else "FAIL")
+        + " -- all six assertions above, and nothing beyond them"
+    )
+    lines.append("")
+    # The caveats come last on purpose. A reader who stops at the verdict has
+    # stopped at a summary of the six lines above it; the block below is the
+    # part that cannot be reconstructed from the verdict, so it is not
+    # something to scroll past on the way to the badge.
     lines.append("WHAT THIS DOES NOT ESTABLISH")
     for entry in document["limitations"]:
         lines.append(f"  - {entry}")
-    lines.append("")
-    lines.append("VERDICT: " + ("PASS" if document["passed"] else "FAIL"))
     return "\n".join(lines)
 
 
