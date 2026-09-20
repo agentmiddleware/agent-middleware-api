@@ -85,6 +85,7 @@ from .permits import (
     PermitError,
     PermitService,
     PermitValidation,
+    PermitWriteContendedError,
     get_permit_service,
     permit_model_to_response,
 )
@@ -184,6 +185,7 @@ __all__ = [
     "PermitService",
     "PermitValidation",
     "PermitError",
+    "PermitWriteContendedError",
     "get_permit_service",
     "permit_model_to_response",
     # permit requests (agent asks, human approves, middleware mints)
