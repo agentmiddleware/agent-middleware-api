@@ -588,3 +588,66 @@ async def test_the_legacy_rest_surface_names_an_exhausted_denial_retryable(
     assert retry_detail["receipt"]["credits_charged"] == "0", retry_detail
     assert await _count_receipts() == 1
     assert runs["count"] == 0
+
+
+@pytest.mark.anyio
+async def test_the_legacy_rest_surface_never_tells_a_charged_call_to_retry(
+    client: AsyncClient, clean_database: None, echo_tool
+) -> None:
+    """The guard on the 409 above, and on the clause order that keeps it honest.
+
+    Adding ``ReceiptWriteContendedError`` to the retryable tuple only stays safe
+    while the post-effects loss keeps arriving as ``TerminalRecordContendedError``
+    and that branch keeps sitting *after* the tuple. Nothing in the types
+    enforces either half: all five contention classes derive straight from
+    ``RuntimeError``, so no subclass relation makes the order self-correcting,
+    and a future edit that moved the terminal type up into the tuple -- or a
+    post-effects site that stopped re-typing -- would convert this 500 into a
+    409 telling a caller to re-run a call it already paid for.
+
+    The sibling surfaces already pin their half (``-32007`` on ``/mcp`` and
+    ``/mcp/messages``); this route did not, which left the ordering the 409
+    depends on as the one part of the change with no test under it.
+
+    Here the permit affords the call, so the tool runs and the wallet is charged
+    before the receipt insert starts losing. The answer has to be the
+    non-retryable one, carrying the reason and the out-of-band remediation
+    rather than an opaque internal_error.
+    """
+    tool_name, runs = echo_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="receipt-contention-permit-rest-charged",
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _lose_receipt_commits(monkeypatch, failures=None)
+        resp = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json={
+                "name": tool_name,
+                "arguments": {"message": "hello"},
+                "mcp_context": {
+                    "wallet_id": ctx["agent_wallet_id"],
+                    "permit_id": permit["permit_id"],
+                    "idempotency_key": "receipt-contention-charged-rest",
+                },
+            },
+            headers=ctx["agent_headers"],
+        )
+
+    # Not 409: that is the retry this call must never be offered. Not 200
+    # isError either, which is the internal_error fallthrough.
+    assert resp.status_code == 500, resp.text
+    detail = resp.json()["detail"]
+    assert detail["reason_code"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, detail
+    assert detail["error"] == "manual_review_required", detail
+    assert detail["remediation"]["type"] == "reconcile_out_of_band", detail
+    # The hazard the status assertion guards is real: the tool did run.
+    assert runs["count"] == 1
+    assert await _count_receipts() == 0
