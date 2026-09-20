@@ -3221,11 +3221,34 @@ async def _finalize_governed_denial(
     except ReceiptWriteContendedError as exc:
         if effects_committed:
             raise _receipt_contention_after_effects() from exc
-        # Nothing ran and nothing was charged: the receipt service proved no
-        # row is durable, and idem.complete() below never ran, so this key
-        # holds nothing terminal. Propagated as itself so the retryable
-        # handlers can name it and, first, so the wrapper can free the
-        # idempotency record this invocation still owns.
+        if dispatch_attempt_id is not None:
+            # Remote, and already terminal: complete_pre_dispatch_failure ran
+            # before this receipt, so a durable mcp_dispatch_attempts row
+            # exists and its NOT NULL idempotency_record_id pins the record.
+            # The unwind cannot free what it advertises -- the DELETE raises on
+            # the foreign key and is only logged -- so the caller would be told
+            # to retry a key that answers idempotency_in_progress until the
+            # dispatch reconciler writes the receipt. Name that owner instead:
+            # a winner is mid-flight, which is exactly what this error means
+            # everywhere else on the dispatch path, and unlike the loss below
+            # it resolves on its own.
+            raise IdempotencyInProgressError("idempotency_in_progress") from exc
+        if approval_id is not None:
+            # A single-use human approval was consumed before this denial
+            # (HumanApprovalService._finalize), and unlike the quote released
+            # on the insufficient-funds path it is not compensated. Freeing the
+            # key would advertise a retry that cannot reproduce this call: the
+            # same key re-reads the same approval and is refused for having
+            # consumed it. An unclassified loss is the honest answer; a retry
+            # the caller cannot make is not.
+            raise _receipt_contention_after_effects(
+                "mcp_receipt_write_contended_after_approval_consumed"
+            ) from exc
+        # Nothing ran, nothing was charged, and nothing durable pins the key:
+        # the receipt service proved no row is durable, and idem.complete()
+        # below never ran, so this key holds nothing terminal. Propagated as
+        # itself so the retryable handlers can name it and, first, so the
+        # wrapper can free the idempotency record this invocation still owns.
         raise
     receipt_payload = _receipt_response_payload(receipt)
     await idem.complete(
@@ -3562,7 +3585,9 @@ def _value_error_jsonrpc_code(message: str) -> int | None:
     return None
 
 
-def _receipt_contention_after_effects() -> RuntimeError:
+def _receipt_contention_after_effects(
+    reason: str = "mcp_receipt_write_contended_after_effects",
+) -> RuntimeError:
     """Re-type a receipt-write loss that happened after the call had effects.
 
     The mirror of ``_audit_mcp_invocation``'s ``effects_committed`` branch, and
@@ -3573,8 +3598,12 @@ def _receipt_contention_after_effects() -> RuntimeError:
     the idempotency record, which is only safe while the call has no effects to
     protect. A charged call with no receipt has no terminal outcome to publish,
     so reconciliation owns the record from here.
+
+    ``reason`` names the effect that blocked the retry. It is server-side only
+    -- every caller still sees the unclassified envelope -- but a charge and a
+    consumed single-use approval are different facts for whoever reads the log.
     """
-    return RuntimeError("mcp_receipt_write_contended_after_effects")
+    return RuntimeError(reason)
 
 
 INTERNAL_ERROR_MESSAGE = "internal_error"

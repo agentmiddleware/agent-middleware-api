@@ -31,6 +31,8 @@ of being called flaky.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -39,15 +41,55 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 
+from app.core.config import get_settings
 from app.core.resilience import WRITE_CONFLICT_MAX_ATTEMPTS
 from app.db.database import get_session_factory
-from app.db.models import ReceiptModel
+from app.db.models import (
+    IdempotencyRecordModel,
+    McpDispatchAttemptModel,
+    ReceiptModel,
+    WalletModel,
+)
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services import receipts as receipts_module
 from app.services.receipts import ReceiptWriteContendedError, get_receipt_service
 from app.services.service_registry import get_service_registry
-from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
+from app.services.upstream_mcp import UpstreamMcpResult
+from tests.test_trust_helpers import (
+    BOOTSTRAP_HEADERS,
+    create_tool_permit,
+    provision_agent_wallet,
+)
+
+
+class _NeverDispatchedExecutor:
+    """Upstream stand-in that records whether it was ever reached.
+
+    The branch under test refuses at the charge, after the dispatch attempt is
+    prepared and driven terminal but before anything is sent, so ``dispatches``
+    staying at zero is part of the assertion rather than incidental.
+    """
+
+    def __init__(self) -> None:
+        self.dispatches = 0
+
+    async def call_tool(
+        self,
+        arguments: dict[str, Any],
+        *,
+        invocation_id: str,
+        idempotency_key: str,
+        before_dispatch: Callable[[], Awaitable[None]],
+    ) -> UpstreamMcpResult:
+        await before_dispatch()
+        self.dispatches += 1
+        raise AssertionError("upstream must not be reached on an unfunded call")
+
+
+def _never_dispatched_executor() -> _NeverDispatchedExecutor:
+    return _NeverDispatchedExecutor()
+
 
 TOOL_COST = 2.0
 
@@ -496,3 +538,195 @@ async def test_the_legacy_rest_route_also_names_the_contended_receipt(
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["error"] == ReceiptWriteContendedError.reason
     assert runs["count"] == 0
+
+
+async def _drain_wallet(wallet_id: str) -> None:
+    """Drop the balance below the tool cost so the charge refuses.
+
+    The same move ``test_mcp_trust`` uses. It has to be done after the permit
+    exists, because permit creation refuses a ``max_credits`` above the
+    wallet's balance -- so an unfunded call cannot be set up by pricing the
+    tool above the wallet in the first place.
+    """
+    async with get_session_factory()() as session:
+        wallet = (
+            await session.execute(
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            )
+        ).scalar_one()
+        wallet.balance = Decimal("1")
+        await session.commit()
+
+
+@pytest.mark.anyio
+async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
+    client: AsyncClient, clean_database: None
+) -> None:
+    """Remote insufficient funds: durable, so it names its owner instead.
+
+    On the upstream path ``complete_pre_dispatch_failure`` drives the dispatch
+    attempt terminal *before* this denial is receipted, and
+    ``mcp_dispatch_attempts.idempotency_record_id`` is NOT NULL. So the unwind
+    that makes the effect-free retry honest cannot run here: its DELETE hits
+    the foreign key, raises, and is only logged. Answering
+    ``receipt_write_contended`` would then advertise a retry that meets
+    ``idempotency_in_progress`` until the dispatch reconciler writes the
+    receipt.
+
+    ``idempotency_in_progress`` is the truthful answer, and the one this path
+    already gives whenever a durable owner may classify an attempt. The record
+    and the attempt must both survive for that owner to find.
+    """
+    tool_name = "receipt-contention-upstream"
+    executor = _never_dispatched_executor()
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Receipt contention upstream",
+        description="Receipt write-contention surface test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=executor,
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        credits_per_unit=TOOL_COST,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+    )
+    try:
+        ctx = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=ctx["agent_wallet_id"],
+            key_id=ctx["key_id"],
+            tool_name=tool_name,
+            max_credits=10,  # the permit allows; the drained wallet is what refuses
+            idem_key="receipt-contention-permit-6",
+        )
+        await _drain_wallet(ctx["agent_wallet_id"])
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key="receipt-contention-upstream-1",
+        )
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            _lose_receipt_commits(monkeypatch, failures=None)
+            resp = await client.post(
+                "/mcp/messages", json=body, headers=ctx["agent_headers"]
+            )
+
+        assert resp.status_code == 200, resp.text
+        error = resp.json()["error"]
+        assert error["message"] != "internal_error", error
+        assert error["message"] == "idempotency_in_progress", error
+        assert error["code"] == -32005, error
+        # Nothing was sent upstream, and the durable chain the reconciler needs
+        # is intact: the attempt survived and so did the exact record its
+        # foreign key points at. Counting all records would not show this --
+        # creating the permit writes one of its own -- and the record this
+        # call owns is the one the unwind would have deleted.
+        assert executor.dispatches == 0
+        async with get_session_factory()() as session:
+            attempt = (
+                await session.execute(select(McpDispatchAttemptModel))
+            ).scalar_one()
+            linked = await session.get(
+                IdempotencyRecordModel, attempt.idempotency_record_id
+            )
+        assert linked is not None, "the reconciler's record was deleted"
+        assert linked.response_json is None, "no terminal outcome was published"
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
+    client: AsyncClient, clean_database: None, monkeypatch
+) -> None:
+    """A single-use approval is spent before the denial, so retry is a lie.
+
+    ``HumanApprovalService._finalize`` consumes the approval so it authorizes
+    exactly one invoke, and that happens well before a pre-dispatch failure
+    like insufficient funds is receipted. The quote consumed on this same path
+    is handed back (``QuoteService.release``); the approval is not.
+
+    So freeing the key and advertising ``receipt_write_contended`` would send
+    the caller into a *different* denial -- the same key re-reads the same
+    approval and is refused for having consumed it. The unclassified envelope
+    is the honest answer, and the caller must not be told to retry.
+    """
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", True)
+    monkeypatch.setattr(settings, "SENTINEL_API_URL", "")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "")
+    monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 0.0)
+
+    tool_name = "receipt-contention-approval"
+    runs = {"count": 0}
+
+    def echo(message: str = "ok") -> dict[str, Any]:
+        runs["count"] += 1
+        return {"message": message}
+
+    get_service_registry().register_local(
+        service_id=tool_name,
+        name="Receipt contention approval",
+        description="Receipt write-contention surface test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=echo,
+        credits_per_unit=TOOL_COST,
+        unit_name="call",
+    )
+    try:
+        ctx = await provision_agent_wallet(client)
+        permit_resp = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": ctx["agent_wallet_id"],
+                "subject_wallet_id": ctx["agent_wallet_id"],
+                "subject_key_id": ctx["key_id"],
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 10,
+                "requires_human_approval": True,
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+            },
+            headers={
+                **BOOTSTRAP_HEADERS,
+                "Idempotency-Key": "receipt-contention-permit-7",
+            },
+        )
+        assert permit_resp.status_code == 201, permit_resp.text
+        permit = permit_resp.json()
+        assert permit["requires_human_approval"] is True
+        await _drain_wallet(ctx["agent_wallet_id"])
+
+        with pytest.MonkeyPatch.context() as inner:
+            _lose_receipt_commits(inner, failures=None)
+            resp = await client.post(
+                "/mcp/messages",
+                json=_call_body(
+                    tool_name=tool_name,
+                    wallet_id=ctx["agent_wallet_id"],
+                    permit_id=permit["permit_id"],
+                    idempotency_key="receipt-contention-approval-1",
+                ),
+                headers=ctx["agent_headers"],
+            )
+
+        assert resp.status_code == 200, resp.text
+        error = resp.json()["error"]
+        # Not the retryable envelope: the approval this call spent cannot be
+        # spent again, so "retry the same key" is not an answer.
+        assert error["code"] != -32005, error
+        assert error["message"] != ReceiptWriteContendedError.reason, error
+        assert runs["count"] == 0
+    finally:
+        get_service_registry().unregister_local(tool_name)
