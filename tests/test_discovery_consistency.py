@@ -5,8 +5,30 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.runtime_mode import SERVICE_NAMES
 from app.main import app
+from app.services.mcp_integration_truth import truth_for_category
+from app.services.pricing import PROOF_SURFACE_CATEGORIES
 
 _INTEGRATION_STATUSES = frozenset({"simulated", "integrated", "platform", "postgres"})
+
+
+def test_frozen_proof_surface_categories_never_annotate_as_platform():
+    """
+    A frozen proof surface's tools must not be advertised as platform
+    functionality in /mcp/tools.json.
+
+    mcp_phase9_tools registers data-indexer and semantic-search under
+    protocol_gen behind a handler that wires no side effects. While those
+    categories had no SIMULATION_MODE_* flag, truth_for_category fell through
+    to ``{"simulation": False, "integration_status": "platform"}`` and the
+    manifest described a preview stub as real platform functionality.
+
+    Both assertions hold whatever the flags are set to, so this does not
+    depend on test ordering.
+    """
+    for category in PROOF_SURFACE_CATEGORIES:
+        truth = truth_for_category(category.value)
+        assert truth["integration_status"] != "platform", category.value
+        assert truth["runtime_service"] == category.value, category.value
 
 
 @pytest.fixture

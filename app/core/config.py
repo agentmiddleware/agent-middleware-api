@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     # /mcp/tools.json is non-empty for permit→invoke→receipt dogfood.
     # Default false: no stub pollution. Independent of ENABLE_PROOF_SURFACES.
     ENABLE_DOGFOOD_TOOL: bool = False
-    
+
     # --- Second dogfood tool (opt-in read-only partner.notes.count) ---
     # When true, registers a second harmless read-only tool for CI to test
     # out-of-scope denial (permit allows first tool, denies second).
@@ -359,6 +359,14 @@ class Settings(BaseSettings):
     SIMULATION_MODE_TELEMETRY_PM: bool = True
     SIMULATION_MODE_AGENT_COMMS: bool = True
     SIMULATION_MODE_CONTENT_FACTORY: bool = True
+    # Frozen proof-surface categories whose only registered tools are preview
+    # stubs (app/services/mcp_phase9_tools.py returns a contract-only response
+    # and wires no side effects). They sit in pricing.PROOF_SURFACE_CATEGORIES
+    # and their routers are in PROOF_SURFACE_ROUTERS, so the runtime has to
+    # report them as simulated: without a flag here a require_real_effects
+    # wallet policy would let one of those stubs through as a real effect.
+    SIMULATION_MODE_PROTOCOL_GEN: bool = True
+    SIMULATION_MODE_SANDBOX: bool = True
     # Human-approval gate. Simulated approvals auto-approve (marked simulated)
     # in local/dev only; production-like environments fail closed instead of
     # honoring a simulated approval. False requires SENTINEL_API_URL + KEY.

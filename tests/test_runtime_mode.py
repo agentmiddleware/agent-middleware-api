@@ -18,6 +18,20 @@ from app.core.runtime_mode import (
     require_simulation,
 )
 from app.main import app
+from app.schemas.billing import ServiceCategory
+from app.services.pricing import PROOF_SURFACE_CATEGORIES
+
+
+# ServiceCategory values that are deliberately NOT runtime services: they are
+# wallet/platform-level accounting categories, never a tool an agent invokes,
+# so they carry no SIMULATION_MODE_* flag and never reach is_simulation().
+# Everything else must be registered in runtime_mode._SERVICE_TO_SETTING.
+NON_RUNTIME_CATEGORIES: frozenset[ServiceCategory] = frozenset(
+    {
+        ServiceCategory.PLATFORM_FEE,
+        ServiceCategory.SWARM_DELEGATION,
+    }
+)
 
 
 HEADERS = {"X-API-Key": "test-key"}
@@ -40,6 +54,8 @@ def _reset_settings_cache():
         "SIMULATION_MODE_TELEMETRY_PM",
         "SIMULATION_MODE_AGENT_COMMS",
         "SIMULATION_MODE_CONTENT_FACTORY",
+        "SIMULATION_MODE_PROTOCOL_GEN",
+        "SIMULATION_MODE_SANDBOX",
     ]
     saved = {f: getattr(settings, f) for f in fields}
     yield
@@ -58,9 +74,57 @@ def test_service_names_are_complete():
         "telemetry_pm",
         "agent_comms",
         "content_factory",
+        "protocol_gen",
+        "sandbox",
         "human_approval",
     }
     assert SERVICE_NAMES == expected
+
+
+def test_every_service_category_is_classified():
+    """
+    Every ServiceCategory must be a gated runtime service or an explicitly
+    named non-runtime category.
+
+    A category with neither is silently treated as running real effects:
+    app/routers/mcp.py catches the UnknownServiceError and falls back to
+    ``simulation=False``, so app/services/policies.py never trips a wallet
+    policy's ``require_real_effects`` for it, and mcp_integration_truth
+    annotates its tools ``platform`` in /mcp/tools.json. Adding a category
+    without deciding which side it belongs on is therefore a silent policy
+    hole, so force the decision here.
+    """
+    unclassified = sorted(
+        c.value
+        for c in ServiceCategory
+        if c.value not in SERVICE_NAMES and c not in NON_RUNTIME_CATEGORIES
+    )
+    assert not unclassified, (
+        f"ServiceCategory values with no SIMULATION_MODE_* flag: {unclassified}. "
+        "Either register the service in _SERVICE_TO_SETTING "
+        "(app/core/runtime_mode.py) and add the matching Settings field, or "
+        "add it to NON_RUNTIME_CATEGORIES in this file if it is a "
+        "wallet/platform-level category that is never invoked as a tool."
+    )
+
+
+def test_proof_surface_categories_are_simulation_gated():
+    """
+    Anything billing calls a frozen proof surface must report itself as
+    simulated at runtime. pricing.PROOF_SURFACE_CATEGORIES and
+    docs/PROOF_SURFACES.md are the product boundary; SERVICE_NAMES is what the
+    invoke path actually consults. If they disagree, a preview stub advertises
+    itself as a real effect.
+    """
+    ungated = sorted(
+        c.value for c in PROOF_SURFACE_CATEGORIES if c.value not in SERVICE_NAMES
+    )
+    assert not ungated, (
+        f"Frozen proof-surface categories with no SIMULATION_MODE_* flag: {ungated}. "
+        "Register them in _SERVICE_TO_SETTING (app/core/runtime_mode.py), or "
+        "obtain an explicit product decision to drop them from "
+        "PROOF_SURFACE_CATEGORIES; see docs/PROOF_SURFACES.md."
+    )
 
 
 def test_default_is_simulation_true():

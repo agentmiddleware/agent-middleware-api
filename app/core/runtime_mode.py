@@ -27,6 +27,8 @@ _SERVICE_TO_SETTING: dict[str, str] = {
     "telemetry_pm": "SIMULATION_MODE_TELEMETRY_PM",
     "agent_comms": "SIMULATION_MODE_AGENT_COMMS",
     "content_factory": "SIMULATION_MODE_CONTENT_FACTORY",
+    "protocol_gen": "SIMULATION_MODE_PROTOCOL_GEN",
+    "sandbox": "SIMULATION_MODE_SANDBOX",
     "human_approval": "SIMULATION_MODE_HUMAN_APPROVAL",
 }
 
