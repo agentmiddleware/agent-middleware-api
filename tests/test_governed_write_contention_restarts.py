@@ -479,6 +479,65 @@ async def test_an_exhausted_release_is_not_advertised_as_a_retry(
 
 
 @pytest.mark.anyio
+async def test_ledger_contention_with_exhausted_release_reports_key_in_progress(
+    client: AsyncClient, clean_database: None, echo_tool
+) -> None:
+    """A failed ledger unwind must describe the key that remains held.
+
+    Ledger contention is side-effect-free and normally retryable, but only if
+    its unwind actually frees the idempotency record. If that release exhausts
+    its own retry budget, advertising ``ledger_write_contended`` is false: the
+    next request cannot retry the debit and will instead find the key still in
+    progress.
+    """
+    tool_name, runs = echo_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="restart-ledger-release-permit",
+    )
+    body = _call_body(
+        tool_name=tool_name,
+        wallet_id=ctx["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        idempotency_key="restart-ledger-release-key",
+    )
+
+    async def contended_charge(*args: Any, **kwargs: Any) -> Any:
+        raise LedgerWriteContendedError(LedgerWriteContendedError.reason)
+
+    async def contended_abandon(*args: Any, **kwargs: Any) -> None:
+        raise IdempotencyReleaseContendedError(
+            IdempotencyReleaseContendedError.reason
+        )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(get_agent_money(), "charge", contended_charge)
+        monkeypatch.setattr(
+            get_idempotency_service(), "abandon", contended_abandon
+        )
+        resp = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32005, error
+    assert error["message"] == "idempotency_in_progress", error
+    assert await _count_records_for("restart-ledger-release-key") == 1
+    assert runs["count"] == 0
+
+    again = await client.post("/mcp/messages", json=body, headers=ctx["agent_headers"])
+    assert again.status_code == 200, again.text
+    assert again.json()["error"]["message"] == "idempotency_in_progress", again.text
+    assert runs["count"] == 0
+
+
+@pytest.mark.anyio
 async def test_a_contended_refund_is_restarted_instead_of_declared_failed(
     client: AsyncClient, clean_database: None
 ) -> None:
