@@ -37,6 +37,8 @@ lock passes on a fast machine for the wrong reason.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 import pytest
@@ -53,6 +55,7 @@ from app.schemas.billing import ServiceCategory
 from app.services import permits as permits_module
 from app.services.permits import PermitError, PermitWriteContendedError
 from app.services.service_registry import get_service_registry
+from app.services.upstream_mcp import UpstreamMcpResult, UpstreamMcpReturnedError
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
 
 TOOL_COST = 2.0
@@ -556,3 +559,213 @@ async def test_a_plain_permit_error_is_not_reclassified_as_retryable(
     assert resp.status_code != 409, resp.text
     assert PermitWriteContendedError.reason not in resp.text, resp.text
     assert runs["count"] == 0
+
+
+@pytest.fixture
+def failing_upstream_tool():
+    """An upstream tool that dispatches, then returns an MCP error result.
+
+    This is the only way to reach the *other* post-effects release,
+    ``release_dispatch_budget_once`` in ``_raise_refunded_upstream_failure``.
+    It is a separate site from the local one with a separate guard, and the
+    local test cannot reach it: the upstream path reserves through
+    ``McpDispatchAttemptService.authorize_reserve_and_prepare`` and gives the
+    budget back attempt-keyed, never touching ``release_budget``.
+    """
+    tool_name = "permit-contention-upstream"
+    dispatches = {"count": 0}
+
+    class _ErroringUpstream:
+        async def call_tool(
+            self,
+            arguments: dict[str, Any],
+            *,
+            invocation_id: str,
+            idempotency_key: str,
+            before_dispatch: Any,
+        ) -> UpstreamMcpResult:
+            await before_dispatch()
+            dispatches["count"] += 1
+            payload = {
+                "content": [{"type": "text", "text": "partner refused"}],
+                "isError": True,
+            }
+            canonical = json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            )
+            raise UpstreamMcpReturnedError(
+                UpstreamMcpResult(
+                    payload=payload,
+                    canonical_json=canonical,
+                    response_hash=hashlib.sha256(canonical.encode()).hexdigest(),
+                    size_bytes=len(canonical.encode()),
+                    is_error=True,
+                )
+            )
+
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Permit contention upstream",
+        description="Permit write-contention upstream post-effects test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=_ErroringUpstream(),
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        credits_per_unit=TOOL_COST,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+    )
+    try:
+        yield tool_name, dispatches
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_a_dispatched_upstream_call_is_never_told_to_retry(
+    client: AsyncClient, clean_database: None, failing_upstream_tool
+) -> None:
+    """The second post-effects release, on the upstream path.
+
+    ``_raise_refunded_upstream_failure`` gives the dispatch reservation back
+    after the call was dispatched, returned an error and was refunded. It is a
+    physically separate site from the local ``release_budget`` with its own
+    guard, and nothing about the local test covers it: the reserve here goes
+    through ``McpDispatchAttemptService``, a different module with its own
+    session factory, which is why contending only the permit module's writes
+    lands squarely on the release.
+
+    Safer to absorb than the local one, and for an extra reason: this
+    reservation is attempt-keyed and ``release_dispatch_budget_once`` is
+    idempotent on that key, so ``mcp_dispatch_reconciliation`` re-runs it from
+    the attempt row without the caller. Escalating would still skip the audit
+    event and the receipt for a call that really was dispatched.
+    """
+    tool_name, dispatches = failing_upstream_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        idem_key="permit-contention-permit-5",
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        state = _lose_permit_writes(monkeypatch)
+        resp = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=_rest_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key="permit-contention-upstream-1",
+            ),
+            headers=ctx["agent_headers"],
+        )
+
+    # It really was dispatched, and the release really did exhaust: without
+    # both, this test would pass without touching the guard.
+    assert dispatches["count"] == 1
+    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+
+    assert resp.status_code != 409, resp.text
+    assert resp.status_code == 502, resp.text
+    detail = resp.json()["detail"]
+    assert PermitWriteContendedError.reason not in str(detail), detail
+    assert detail["error"] == "upstream_returned_error", detail
+    assert detail["receipt"]["outcome"] == "failed_refunded", detail
+    assert await _count_receipts() == 1
+
+
+@pytest.mark.anyio
+async def test_the_messages_surface_never_tells_a_charged_call_to_retry(
+    client: AsyncClient, clean_database: None, failing_tool
+) -> None:
+    """The post-effects guard, pinned on ``/mcp/messages``'s own ladder.
+
+    The surfaces share no exception ladder, so the local test's 409 assertion
+    says nothing about this transport: here the wrong answer would be
+    ``-32005``, a different code reached through different code. Both halves
+    of the split have to be pinned on every surface for the same reason the
+    retryable half did.
+    """
+    tool_name, runs = failing_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        idem_key="permit-contention-permit-6",
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        state = _lose_permit_writes(monkeypatch, allow_first=1)
+        resp = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key="permit-contention-messages-postfx",
+            ),
+            headers=ctx["agent_headers"],
+        )
+
+    assert runs["count"] == 1
+    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] != -32005, error
+    assert error["message"] != PermitWriteContendedError.reason, error
+    # The caller's real answer and its receipt both survived.
+    assert "tool blew up" in error["message"], error
+    assert await _count_receipts() == 1
+
+
+@pytest.mark.anyio
+async def test_the_standard_surface_never_tells_a_charged_call_to_retry(
+    client: AsyncClient, clean_database: None, standard_mcp_enabled, failing_tool
+) -> None:
+    """The same guard on ``/mcp``, the third ladder and the third mapping.
+
+    ``/mcp`` maps types into ``McpError`` rather than matching them inline, so
+    it is the surface where a retryable code would be produced by yet another
+    branch. The auto-minted permit makes this the shortest path of the three,
+    which is exactly why it needs its own pin rather than inheriting one.
+    """
+    tool_name, runs = failing_tool
+    ctx = await provision_agent_wallet(client)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        state = _lose_permit_writes(monkeypatch, allow_first=1)
+        resp = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": {"message": "hello"}},
+            },
+            headers={
+                **ctx["agent_headers"],
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+                "Idempotency-Key": "permit-contention-standard-postfx",
+            },
+        )
+
+    assert runs["count"] == 1
+    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] != -32005, error
+    assert error["message"] != PermitWriteContendedError.reason, error
+    assert await _count_receipts() == 1
