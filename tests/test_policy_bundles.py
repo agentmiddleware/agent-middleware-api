@@ -3,9 +3,12 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.runtime_mode import is_simulation
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services.audit_log import list_audit_events
+from app.services.policies import evaluate_wallet_policy
+from app.services.pricing import PROOF_SURFACE_CATEGORIES
 from app.services.service_registry import get_service_registry
 
 
@@ -145,7 +148,9 @@ async def test_mcp_policy_denies_disallowed_tool_before_charge(client, clean_dat
             for entry in ledger.json()["entries"]
         )
 
-        events = await list_audit_events(wallet_id=wallet_id, tool="policy-blocked-tool")
+        events = await list_audit_events(
+            wallet_id=wallet_id, tool="policy-blocked-tool"
+        )
         assert len(events) == 1
         assert events[0].ok is False
         assert events[0].error == "tool_not_allowed"
@@ -329,3 +334,44 @@ async def test_planner_policy_rejects_actions(client, clean_database):
     assert body["policy_reasons"]["bad-iot"] == "service_category_not_allowed"
     assert body["rejected_actions"][0]["policy_id"] == policy.json()["policy_id"]
     assert body["governance"]["policy_ids"] == [policy.json()["policy_id"]]
+
+
+@pytest.mark.anyio
+async def test_policy_requiring_real_effects_denies_frozen_proof_surfaces(
+    client, clean_database
+):
+    """
+    A wallet policy demanding real effects must reject every frozen
+    proof-surface category, because the tools registered under them are
+    preview stubs rather than real integrations.
+
+    This pins the coupling app/routers/mcp.py depends on: runtime_mode reports
+    the category as simulated, and evaluate_wallet_policy turns that into a
+    denial. While protocol_gen and sandbox carried no SIMULATION_MODE_* flag,
+    is_simulation raised UnknownServiceError, the invoke path fell back to
+    simulation=False, and this denial silently never fired for them.
+
+    is_simulation() is called rather than hardcoding True so that dropping a
+    category from _SERVICE_TO_SETTING fails here too.
+    """
+    wallet_id = await _wallet(client, "real-effects")
+    created = await client.post(
+        "/v1/policies",
+        json={
+            "wallet_id": wallet_id,
+            "name": "Real effects only",
+            "require_real_effects": True,
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert created.status_code == 201
+
+    for category in sorted(c.value for c in PROOF_SURFACE_CATEGORIES):
+        evaluation = await evaluate_wallet_policy(
+            wallet_id=wallet_id,
+            tool_name="preview-stub",
+            service_category=category,
+            simulation=is_simulation(category),
+        )
+        assert evaluation.allowed is False, category
+        assert evaluation.reason == "real_effects_required", category
