@@ -39,6 +39,23 @@ class IdempotencyInProgressError(RuntimeError):
     """Raised when an idempotency key is already executing without a result."""
 
 
+class IdempotencyReleaseContendedError(RuntimeError):
+    """``abandon()`` lost repeated write conflicts and did not free the key.
+
+    The record is still in progress, so the retry a caller would otherwise be
+    offered on this key cannot succeed: it meets ``idempotency_in_progress``
+    until a durable owner clears the row, and ``reconcile_stuck_records``
+    owns only ``upstream_mcp`` rows -- a local tool's uncharged record is
+    excluded there by design and no background job will free it.
+
+    Nothing ran and nothing was charged when this is raised, which is what
+    separates it from ``TerminalRecordContendedError``: a fresh idempotency
+    key is safe here and would double-charge there.
+    """
+
+    reason = "idempotency_release_contended"
+
+
 # Caller-supplied replay keys are stored verbatim in the
 # idempotency_records.idempotency_key column, a String(128) since migration
 # 016, so 128 is the durable limit; the Python SDK enforces the same bound
@@ -648,26 +665,49 @@ class IdempotencyService:
         at-most-once protection to whoever asked next. Pass it whenever the
         caller holds a record id; a mismatch is a no-op, not an error, since
         it means the row moved on and nothing is left to release.
+
+        The release is restarted on a write conflict, like its two siblings.
+        It runs in the contention window that just defeated whatever raised --
+        the contention unwind calls it after the receipt insert has spent its
+        whole restart budget -- so it is the likeliest release in the codebase
+        to lose, and losing it is not a cosmetic failure: the caller has
+        already been promised a retry that only this DELETE can honor. A
+        restart is safe because the operation is its own transaction and
+        re-reads from scratch; a replay that finds the row already gone
+        returns, which is the same answer as having deleted it.
         """
-        factory = get_session_factory()
-        async with factory() as session:
-            result = await session.execute(
-                select(IdempotencyRecordModel).where(
-                    *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
+
+        async def _once() -> None:
+            factory = get_session_factory()
+            async with factory() as session:
+                result = await session.execute(
+                    select(IdempotencyRecordModel).where(
+                        *_idempotency_predicates(wallet_id, endpoint, idempotency_key)
+                    )
                 )
-            )
-            record = result.scalar_one_or_none()
-            if not record:
-                return
-            if (
-                expected_record_id is not None
-                and record.record_id != expected_record_id
-            ):
-                return
-            if record.response_json is not None or record.ledger_entry_id:
-                return
-            await session.delete(record)
-            await session.commit()
+                record = result.scalar_one_or_none()
+                if not record:
+                    return
+                if (
+                    expected_record_id is not None
+                    and record.record_id != expected_record_id
+                ):
+                    return
+                if record.response_json is not None or record.ledger_entry_id:
+                    return
+                await session.delete(record)
+                await session.commit()
+
+        # Exhaustion gets its own type rather than the driver error, because
+        # the two callers both need to know *that the key was not freed* and
+        # neither can learn it from OperationalError text. Naming it is what
+        # lets a caller stop advertising a retry the record will refuse.
+        await run_with_write_conflict_retry(
+            _once,
+            on_exhausted=lambda exc: IdempotencyReleaseContendedError(
+                IdempotencyReleaseContendedError.reason
+            ),
+        )
 
     async def mark_charged(
         self,
