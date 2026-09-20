@@ -2038,6 +2038,20 @@ async def _execute_registered_tool_inner(
                     endpoint=idempotency_endpoint,
                     idempotency_key=idempotency_key,
                 )
+            except IdempotencyReleaseContendedError:
+                # The debit rolled back whole, but the release did not commit.
+                # Re-advertising ledger_write_contended would promise a retry
+                # this surviving record will refuse as idempotency_in_progress.
+                logger.error(
+                    "mcp_contended_idempotency_release_exhausted",
+                    extra={
+                        "wallet_id": wallet_id,
+                        "reason": IdempotencyReleaseContendedError.reason,
+                    },
+                )
+                raise IdempotencyInProgressError(
+                    "idempotency_in_progress"
+                ) from None
             except Exception:
                 logger.exception(
                     "mcp_contended_idempotency_abandon_failed",
