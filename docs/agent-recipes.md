@@ -347,7 +347,7 @@ result = await client.call_mcp_tool(
 
 ```bash
 # Generate MCP server from registered tools
-cd b2a_sdk && pip install -e . && pip install mcp httpx
+cd b2a_sdk && pip install -e ".[mcp]"
 python -m b2a_sdk.mcp standalone --output my_server.py
 
 # Run server
