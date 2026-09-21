@@ -46,6 +46,12 @@ dependencies = [
 verify = [
     "cryptography>=50.0.0",
 ]
+# Serving the marketplace over MCP (`python -m b2a_sdk.mcp serve`) and the
+# generated standalone server both import FastMCP, which mcp 2.x renamed to
+# MCPServer. Bound matches the application's requirements.txt.
+mcp = [
+    "mcp>=1.29.0,<2",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24.0",

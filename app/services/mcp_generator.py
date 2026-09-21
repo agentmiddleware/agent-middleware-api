@@ -349,7 +349,7 @@ from typing import Any
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
-    print("Error: mcp package not installed. Run: pip install mcp")
+    print("Error: mcp package not installed. Run: pip install 'mcp>=1.29.0,<2'")
     raise
 
 try:
