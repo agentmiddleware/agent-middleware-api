@@ -51,6 +51,7 @@ from app.db.models import (
     WalletModel,
 )
 from app.main import app
+from app.routers.mcp import RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS
 from app.schemas.billing import ServiceCategory
 from app.services import receipts as receipts_module
 from app.services.receipts import ReceiptWriteContendedError, get_receipt_service
@@ -62,35 +63,6 @@ from tests.test_trust_helpers import (
     provision_agent_wallet,
 )
 
-
-class _NeverDispatchedExecutor:
-    """Upstream stand-in that records whether it was ever reached.
-
-    The branch under test refuses at the charge, after the dispatch attempt is
-    prepared and driven terminal but before anything is sent, so ``dispatches``
-    staying at zero is part of the assertion rather than incidental.
-    """
-
-    def __init__(self) -> None:
-        self.dispatches = 0
-
-    async def call_tool(
-        self,
-        arguments: dict[str, Any],
-        *,
-        invocation_id: str,
-        idempotency_key: str,
-        before_dispatch: Callable[[], Awaitable[None]],
-    ) -> UpstreamMcpResult:
-        await before_dispatch()
-        self.dispatches += 1
-        raise AssertionError("upstream must not be reached on an unfunded call")
-
-
-def _never_dispatched_executor() -> _NeverDispatchedExecutor:
-    return _NeverDispatchedExecutor()
-
-
 TOOL_COST = 2.0
 
 
@@ -99,6 +71,15 @@ async def client() -> AsyncClient:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as value:
         yield value
+
+
+@pytest.fixture
+def standard_mcp_enabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "true")
+    get_settings.cache_clear()
+    yield
+    monkeypatch.setenv("ENABLE_STANDARD_MCP_ENDPOINT", "false")
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -195,6 +176,48 @@ async def _count_receipts() -> int:
         return int(
             await session.scalar(select(func.count()).select_from(ReceiptModel)) or 0
         )
+
+
+async def _drain_wallet(wallet_id: str) -> None:
+    """Drop the balance below the tool cost so the charge refuses.
+
+    The same move ``test_mcp_trust`` uses. It has to be done after the permit
+    exists, because permit creation refuses a ``max_credits`` above the
+    wallet's balance -- so an unfunded call cannot be set up by pricing the
+    tool above the wallet in the first place.
+    """
+    async with get_session_factory()() as session:
+        wallet = (
+            await session.execute(
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            )
+        ).scalar_one()
+        wallet.balance = Decimal("1")
+        await session.commit()
+
+
+class _NeverDispatchedExecutor:
+    """Upstream stand-in that records whether it was ever reached.
+
+    The branch under test refuses at the charge, after the dispatch attempt is
+    prepared and driven terminal but before anything is sent, so ``dispatches``
+    staying at zero is part of the assertion rather than incidental.
+    """
+
+    def __init__(self) -> None:
+        self.dispatches = 0
+
+    async def call_tool(
+        self,
+        arguments: dict[str, Any],
+        *,
+        invocation_id: str,
+        idempotency_key: str,
+        before_dispatch: Callable[[], Awaitable[None]],
+    ) -> UpstreamMcpResult:
+        await before_dispatch()
+        self.dispatches += 1
+        raise AssertionError("upstream must not be reached on an unfunded call")
 
 
 @pytest.mark.anyio
@@ -379,8 +402,8 @@ async def test_a_charged_call_is_never_told_to_retry_its_receipt(
     before the receipt is written. Answering ``-32005`` would invite a second
     execution of something already paid for, and it cannot be softened into a
     success either -- without a receipt there is no terminal outcome to publish
-    and reconciliation owns the record from here. So it stays unclassified,
-    deliberately, exactly as a post-charge audit-chain loss does.
+    and reconciliation owns the record from here. So it answers ``-32007``,
+    the non-retryable name a post-charge audit-chain loss also carries.
     """
     tool_name, runs = echo_tool
     ctx = await provision_agent_wallet(client)
@@ -411,6 +434,8 @@ async def test_a_charged_call_is_never_told_to_retry_its_receipt(
     assert "error" in body, body
     assert body["error"]["code"] != -32005, body
     assert body["error"]["message"] != ReceiptWriteContendedError.reason, body
+    assert body["error"]["code"] == -32007, body
+    assert body["error"]["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, body
     # The hazard the assertion above guards is real: the tool did run.
     assert runs["count"] == 1
 
@@ -476,6 +501,8 @@ async def test_a_refunded_call_that_already_ran_is_never_told_to_retry(
         error = resp.json()["error"]
         assert error["code"] != -32005, error
         assert error["message"] != ReceiptWriteContendedError.reason, error
+        assert error["code"] == -32007, error
+        assert error["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, error
         assert runs["count"] == 1
 
         # The key was not freed, so the retry this call was NOT invited to make
@@ -490,23 +517,81 @@ async def test_a_refunded_call_that_already_ran_is_never_told_to_retry(
 
 
 @pytest.mark.anyio
-async def test_the_legacy_rest_route_also_names_the_contended_receipt(
+async def test_the_standard_surface_answers_the_same_named_outcome(
+    client: AsyncClient, clean_database: None, standard_mcp_enabled, echo_tool
+) -> None:
+    """``/mcp`` classifies in its own handler, so the name has to be added there too.
+
+    The two transports do not share an exception ladder: ``/mcp/messages``
+    matches types itself and ``/mcp`` maps them into ``McpError``. A name on one
+    is not a name on the other, and ``/mcp`` is the surface new integrations are
+    pointed at.
+
+    It also pins the body. Refusing a retry without saying what to do instead
+    leaves the caller to guess, and the wrong guess -- a fresh idempotency key --
+    is a second charged execution of a call that already ran. So the answer
+    carries its reason code and the one correct action.
+    """
+    tool_name, runs = echo_tool
+    ctx = await provision_agent_wallet(client)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _lose_receipt_commits(monkeypatch, failures=None)
+        resp = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": {"message": "hello"}},
+            },
+            headers={
+                **ctx["agent_headers"],
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+                "Idempotency-Key": "receipt-contention-standard-1",
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32007, error
+    assert error["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, error
+    data = error["data"]
+    assert data["reason_code"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, data
+    assert data["error"] == "manual_review_required", data
+    assert data["remediation"]["type"] == "reconcile_out_of_band", data
+    # The tool ran and no receipt landed: exactly the state the name describes.
+    assert runs["count"] == 1
+    assert await _count_receipts() == 0
+
+
+@pytest.mark.anyio
+async def test_the_legacy_rest_surface_names_an_exhausted_denial_retryable(
     client: AsyncClient, clean_database: None, echo_tool
 ) -> None:
-    """The third transport, where a missing type degrades silently.
+    """``/mcp/tools/{id}/invoke`` has its own ladder, so it needs the name too.
 
-    This family is enumerated by type in three independent exception ladders
-    that share no base class: ``/mcp/messages``, the standard ``/mcp`` handler,
-    and ``invoke_tool`` here. Adding a type means editing all three, and this
-    is the one that gets missed -- silently, because the ladder ends in
-    ``except Exception`` returning a **200 with isError and an opaque
-    internal_error**. A type left out of the tuple therefore raises nowhere; it
-    just moves a classified, retryable loss into the unclassified channel for
-    this transport's clients.
+    The legacy REST route matches exception types in its own ``except`` chain,
+    exactly as ``/mcp/messages`` does, and it was the one surface the type was
+    never added to. Its ladder ends in ``except Exception`` returning
+    ``_internal_error_tool_result`` -- a 200 carrying ``isError`` and an opaque
+    ``internal_error`` -- so the omission did not fail loudly anywhere. It
+    quietly demoted a classified, retryable loss into the unclassified channel
+    for every client still on this transport, which is the precise state
+    ``LedgerWriteContendedError`` exists to warn about: a caller that cannot
+    tell a contention loss from an unknown fault has to assume its money may
+    have moved.
 
-    Which is why this asserts the status. ``409`` is what a 200 fallthrough
-    cannot satisfy, so the assertion fails if the type is dropped from the
-    ladder; asserting only on the body would pass against ``isError``.
+    Asserting 409 is what excludes that fallthrough: the internal_error answer
+    is a 200, so no body check is needed to tell the two apart.
+
+    The second half is the obligation the 409 takes on. Naming a loss retryable
+    is a promise the retry exists, and the governed idempotency record opened
+    before this denial has to have been released for that to be true --
+    otherwise every retry of the key meets ``idempotency_in_progress`` and the
+    409 points at a door that is locked. So the retry has to arrive at the real
+    denial, ``permit_budget_exceeded``, which on this surface is a 403.
     """
     tool_name, runs = echo_tool
     ctx = await provision_agent_wallet(client)
@@ -515,8 +600,83 @@ async def test_the_legacy_rest_route_also_names_the_contended_receipt(
         wallet_id=ctx["agent_wallet_id"],
         key_id=ctx["key_id"],
         tool_name=tool_name,
-        max_credits=1,  # below TOOL_COST, so the reserve refuses
-        idem_key="receipt-contention-permit-5",
+        max_credits=1,
+        idem_key="receipt-contention-permit-rest",
+    )
+    body = {
+        "name": tool_name,
+        "arguments": {"message": "hello"},
+        "mcp_context": {
+            "wallet_id": ctx["agent_wallet_id"],
+            "permit_id": permit["permit_id"],
+            "idempotency_key": "receipt-contention-denied-rest",
+        },
+    }
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        state = _lose_receipt_commits(monkeypatch, failures=None)
+        resp = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=body,
+            headers=ctx["agent_headers"],
+        )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["error"] == ReceiptWriteContendedError.reason
+    # It gave up only after spending the whole documented budget.
+    assert state["commits"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+    # Nothing ran and no receipt is durable: the state the 409 claims.
+    assert await _count_receipts() == 0
+    assert runs["count"] == 0
+
+    # Now take the retry the 409 promised, on the same key and with the
+    # contention gone. It has to reach the real answer.
+    again = await client.post(
+        f"/mcp/tools/{tool_name}/invoke",
+        json=body,
+        headers=ctx["agent_headers"],
+    )
+    assert again.status_code == 403, again.text
+    retry_detail = again.json()["detail"]
+    assert retry_detail["error"] == "permit_budget_exceeded", retry_detail
+    assert retry_detail["receipt"]["credits_charged"] == "0", retry_detail
+    assert await _count_receipts() == 1
+    assert runs["count"] == 0
+
+
+@pytest.mark.anyio
+async def test_the_legacy_rest_surface_never_tells_a_charged_call_to_retry(
+    client: AsyncClient, clean_database: None, echo_tool
+) -> None:
+    """The guard on the 409 above, and on the clause order that keeps it honest.
+
+    Adding ``ReceiptWriteContendedError`` to the retryable tuple only stays safe
+    while the post-effects loss keeps arriving as ``TerminalRecordContendedError``
+    and that branch keeps sitting *after* the tuple. Nothing in the types
+    enforces either half: all five contention classes derive straight from
+    ``RuntimeError``, so no subclass relation makes the order self-correcting,
+    and a future edit that moved the terminal type up into the tuple -- or a
+    post-effects site that stopped re-typing -- would convert this 500 into a
+    409 telling a caller to re-run a call it already paid for.
+
+    The sibling surfaces already pin their half (``-32007`` on ``/mcp`` and
+    ``/mcp/messages``); this route did not, which left the ordering the 409
+    depends on as the one part of the change with no test under it.
+
+    Here the permit affords the call, so the tool runs and the wallet is charged
+    before the receipt insert starts losing. The answer has to be the
+    non-retryable one, carrying the reason and the out-of-band remediation
+    rather than an opaque internal_error.
+    """
+    tool_name, runs = echo_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="receipt-contention-permit-rest-charged",
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
@@ -529,33 +689,22 @@ async def test_the_legacy_rest_route_also_names_the_contended_receipt(
                 "mcp_context": {
                     "wallet_id": ctx["agent_wallet_id"],
                     "permit_id": permit["permit_id"],
-                    "idempotency_key": "receipt-contention-rest-1",
+                    "idempotency_key": "receipt-contention-charged-rest",
                 },
             },
             headers=ctx["agent_headers"],
         )
 
-    assert resp.status_code == 409, resp.text
-    assert resp.json()["detail"]["error"] == ReceiptWriteContendedError.reason
-    assert runs["count"] == 0
-
-
-async def _drain_wallet(wallet_id: str) -> None:
-    """Drop the balance below the tool cost so the charge refuses.
-
-    The same move ``test_mcp_trust`` uses. It has to be done after the permit
-    exists, because permit creation refuses a ``max_credits`` above the
-    wallet's balance -- so an unfunded call cannot be set up by pricing the
-    tool above the wallet in the first place.
-    """
-    async with get_session_factory()() as session:
-        wallet = (
-            await session.execute(
-                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
-            )
-        ).scalar_one()
-        wallet.balance = Decimal("1")
-        await session.commit()
+    # Not 409: that is the retry this call must never be offered. Not 200
+    # isError either, which is the internal_error fallthrough.
+    assert resp.status_code == 500, resp.text
+    detail = resp.json()["detail"]
+    assert detail["reason_code"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, detail
+    assert detail["error"] == "manual_review_required", detail
+    assert detail["remediation"]["type"] == "reconcile_out_of_band", detail
+    # The hazard the status assertion guards is real: the tool did run.
+    assert runs["count"] == 1
+    assert await _count_receipts() == 0
 
 
 @pytest.mark.anyio
@@ -578,7 +727,7 @@ async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
     and the attempt must both survive for that owner to find.
     """
     tool_name = "receipt-contention-upstream"
-    executor = _never_dispatched_executor()
+    executor = _NeverDispatchedExecutor()
     get_service_registry().register_upstream(
         service_id=tool_name,
         name="Receipt contention upstream",
@@ -657,8 +806,9 @@ async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
 
     So freeing the key and advertising ``receipt_write_contended`` would send
     the caller into a *different* denial -- the same key re-reads the same
-    approval and is refused for having consumed it. The unclassified envelope
-    is the honest answer, and the caller must not be told to retry.
+    approval and is refused for having consumed it. The spent approval is a
+    committed effect, so this is the after-effects outcome, with the same
+    named reason and remediation a lost post-charge receipt gets.
     """
     settings = get_settings()
     monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", True)
@@ -724,9 +874,10 @@ async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
         assert resp.status_code == 200, resp.text
         error = resp.json()["error"]
         # Not the retryable envelope: the approval this call spent cannot be
-        # spent again, so "retry the same key" is not an answer.
-        assert error["code"] != -32005, error
-        assert error["message"] != ReceiptWriteContendedError.reason, error
+        # spent again, so "retry the same key" is not an answer. It is the
+        # named after-effects outcome, on its own code.
+        assert error["code"] == -32007, error
+        assert error["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, error
         assert runs["count"] == 0
     finally:
         get_service_registry().unregister_local(tool_name)

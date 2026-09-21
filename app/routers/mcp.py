@@ -204,6 +204,74 @@ class HumanApprovalPendingSignal(RuntimeError):
         self.status_code = status_code
 
 
+AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS = "audit_chain_contended_after_effects"
+RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS = "receipt_write_contended_after_effects"
+
+
+class TerminalRecordContendedError(RuntimeError):
+    """A terminal record was lost to contention after the call had effects.
+
+    The audit event or the receipt could not be written for a call that had
+    already run or already moved the wallet. Both losses are deliberately
+    non-retryable, and this type is what carries that: it is not a subclass of
+    ``AuditChainContendedError`` or ``ReceiptWriteContendedError``, so neither
+    the routers' ``-32005`` handlers nor the idempotency unwind in
+    ``_execute_registered_tool`` can catch it and hand a charged caller a
+    "retry".
+
+    It exists because ``-32603``/``internal_error`` was the wrong answer, not
+    because the outcome is knowable. ``-32603`` is this pipeline's *unclassified*
+    channel -- `docs/failure-semantics.md` defines it as "a failure the pipeline
+    did not classify" -- and these two sites are the opposite of unclassified:
+    each caught a typed contention error, asked whether effects were committed,
+    and chose non-retryability on purpose. Reporting a deliberated state through
+    the unclassified channel left operators unable to separate it from a genuine
+    bug without grepping correlation ids, and left a client free to read
+    "internal error" as "try again", which with a *fresh* idempotency key runs
+    and charges the call a second time.
+
+    What the name claims is only the situation, never the outcome: effects are
+    committed, no receipt exists, the record is counted for manual review, and
+    the caller must not retry. Whether the tool's effect landed downstream stays
+    exactly as unknowable as it was. This is therefore not wedge #2 -- that wedge
+    turns an ambiguous outcome into a distinct *receipted* state, and the
+    defining feature here is that no receipt could be written at all. It is the
+    honest name for falling out of the receipted state machine.
+    """
+
+    jsonrpc_code = -32007
+    status_code = 500
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _terminal_record_contended_data(reason: str) -> dict[str, Any]:
+    """The machine-actionable body for a ``-32007``, shared by every surface.
+
+    Shaped like the other remediation-carrying errors on this path so a client
+    reads one convention: what went wrong, the specific reason code, and the
+    one action that is correct.
+    """
+    return {
+        "error": "manual_review_required",
+        "reason_code": reason,
+        "remediation": {
+            "type": "reconcile_out_of_band",
+            "detail": (
+                "The call's effects are committed and no receipt was written. "
+                "Do not retry with a new idempotency key: that would run and "
+                "charge the call a second time. A governed record, where one "
+                "was opened, stays held by the invocation that ran and answers "
+                "idempotency_in_progress until an operator resolves it. This "
+                "record is counted for manual review; reconcile from the "
+                "ledger entry and the audit chain."
+            ),
+        },
+    }
+
+
 def _header_idempotency_key_sources(request: Request) -> list[tuple[str, object]]:
     """Every ``Idempotency-Key`` header the caller sent, in wire order.
 
@@ -553,6 +621,22 @@ async def handle_messages(
                     "error": {
                         "code": -32005,
                         "message": str(e),
+                    },
+                }
+            )
+        except TerminalRecordContendedError as e:
+            # The same contention, on the other side of the charge. Its own
+            # code so a client cannot read it as either neighbour: -32005 would
+            # invite the retry that runs a paid call again, and -32603 would
+            # bury a deliberated state in the unclassified channel.
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": e.jsonrpc_code,
+                        "message": e.reason,
+                        "data": _terminal_record_contended_data(e.reason),
                     },
                 }
             )
@@ -3239,11 +3323,9 @@ async def _finalize_governed_denial(
             # on the insufficient-funds path it is not compensated. Freeing the
             # key would advertise a retry that cannot reproduce this call: the
             # same key re-reads the same approval and is refused for having
-            # consumed it. An unclassified loss is the honest answer; a retry
-            # the caller cannot make is not.
-            raise _receipt_contention_after_effects(
-                "mcp_receipt_write_contended_after_approval_consumed"
-            ) from exc
+            # consumed it. That spent approval is a committed effect, so this
+            # is the after-effects outcome, not a retry the caller cannot make.
+            raise _receipt_contention_after_effects() from exc
         # Nothing ran, nothing was charged, and nothing durable pins the key:
         # the receipt service proved no row is durable, and idem.complete()
         # below never ran, so this key holds nothing terminal. Propagated as
@@ -3585,9 +3667,7 @@ def _value_error_jsonrpc_code(message: str) -> int | None:
     return None
 
 
-def _receipt_contention_after_effects(
-    reason: str = "mcp_receipt_write_contended_after_effects",
-) -> RuntimeError:
+def _receipt_contention_after_effects() -> TerminalRecordContendedError:
     """Re-type a receipt-write loss that happened after the call had effects.
 
     The mirror of ``_audit_mcp_invocation``'s ``effects_committed`` branch, and
@@ -3598,12 +3678,8 @@ def _receipt_contention_after_effects(
     the idempotency record, which is only safe while the call has no effects to
     protect. A charged call with no receipt has no terminal outcome to publish,
     so reconciliation owns the record from here.
-
-    ``reason`` names the effect that blocked the retry. It is server-side only
-    -- every caller still sees the unclassified envelope -- but a charge and a
-    consumed single-use approval are different facts for whoever reads the log.
     """
-    return RuntimeError(reason)
+    return TerminalRecordContendedError(RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS)
 
 
 INTERNAL_ERROR_MESSAGE = "internal_error"
@@ -3718,8 +3794,10 @@ async def _audit_mcp_invocation(
         # this event's id, so no audit event means no signed receipt, and
         # reconcile_stuck_records can only complete a stuck record when a
         # receipt exists -- without one it counts the record for manual review.
-        # Re-raised under a type the retryable handlers do not catch.
-        raise RuntimeError("mcp_audit_chain_contended_after_effects") from exc
+        # Re-raised under a type the retryable handlers do not catch, which
+        # names the state on the wire instead of spending the unclassified
+        # -32603 on a case the code classified deliberately.
+        raise TerminalRecordContendedError(AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS) from exc
 
 
 async def _handle_tools_call(
@@ -3848,16 +3926,38 @@ async def invoke_tool(
         AuditChainContendedError,
         ReceiptWriteContendedError,
     ) as exc:
-        # The third ladder this family is enumerated in, after /mcp/messages
-        # and the standard /mcp handler. It is the one a new type gets left out
-        # of, and the miss is silent rather than loud: the catch-all at the
-        # bottom answers 200 with isError and an opaque internal_error, so an
-        # absent type does not raise anywhere -- it just moves a classified,
-        # retryable loss into the unclassified channel for this transport's
-        # clients. The test for each type asserts this 409 by status.
+        # Same four-way retryable family as /mcp/messages: the caller may
+        # retry the same idempotency key. A pre-effect
+        # ReceiptWriteContendedError that reached here without this entry fell
+        # through to except Exception and answered 200 isError internal_error,
+        # which a client cannot tell from an unclassified fault.
+        #
+        # What makes the retry safe is NOT "nothing was charged". That holds
+        # for the three contention types, but IdempotencyInProgressError also
+        # arrives from _execute_upstream_after_charge, which runs past
+        # money.charge -- so this branch does answer 409 for an already-debited
+        # wallet. It is safe there for a different reason: that debit is
+        # operation-keyed on the idempotency record, so the retry deduplicates
+        # against the same charge instead of making a second one. Harden this
+        # ladder from the operation key, not from an assumption that nothing
+        # moved.
+        #
+        # A contention loss whose effects committed does not arrive here at
+        # all: the four receipt sites and the audit site re-raise it as
+        # TerminalRecordContendedError, which the next branch answers.
         raise HTTPException(
             status_code=409,
             detail={"error": str(exc)},
+        ) from exc
+    except TerminalRecordContendedError as exc:
+        # Stays 500 -- the server did fail to record the call, and this surface
+        # has no better status for "effects committed, outcome indeterminate".
+        # What changes is the body: a named reason and its remediation instead
+        # of an opaque internal_error, matching the -32007 the JSON-RPC
+        # surfaces return for the identical state.
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=_terminal_record_contended_data(exc.reason),
         ) from exc
     except ToolPermissionDenied as exc:
         detail = {"error": str(exc)}
