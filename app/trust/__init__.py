@@ -85,6 +85,7 @@ from .permits import (
     PermitError,
     PermitService,
     PermitValidation,
+    PermitWriteContendedError,
     get_permit_service,
     permit_model_to_response,
 )
@@ -144,6 +145,7 @@ from .receipts import (
     get_receipt_service,
 )
 from .refund_reconciliation import (
+    RefundReconciliationContendedError,
     RefundReconciliationError,
     RefundReconciliationService,
     build_pending_refund_reconciliation,
@@ -184,6 +186,7 @@ __all__ = [
     "PermitService",
     "PermitValidation",
     "PermitError",
+    "PermitWriteContendedError",
     "get_permit_service",
     "permit_model_to_response",
     # permit requests (agent asks, human approves, middleware mints)
@@ -229,6 +232,7 @@ __all__ = [
     "ReceiptWriteContendedError",
     "get_receipt_service",
     # failed-refund reconciliation
+    "RefundReconciliationContendedError",
     "RefundReconciliationError",
     "RefundReconciliationService",
     "build_pending_refund_reconciliation",
