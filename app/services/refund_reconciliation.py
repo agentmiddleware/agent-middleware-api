@@ -28,7 +28,7 @@ from app.schemas.trust import RefundReconciliationItem
 from app.schemas.trust import ReceiptResponse
 from app.services.permits import get_permit_service
 from app.services.receipts import get_receipt_service
-from app.services.signing_keys import get_signing_key_service
+from app.services.signing_keys import SigningKeyError, get_signing_key_service
 
 
 RECONCILIATION_KIND = "mcp_failed_refund"
@@ -48,7 +48,9 @@ class RefundReconciliationContendedError(RuntimeError):
     """``create_pending`` lost write conflicts for its whole restart budget.
 
     Nothing is durable: the receipt, the work item and the record update share
-    one transaction, so every exhausted attempt rolled back whole.
+    one transaction, so every exhausted attempt rolled back whole. The same
+    budget bounds the restart on a signing key retired under an attempt, so
+    this is also what a rotation that lands under every attempt ends in.
 
     It is deliberately its own type rather than a reuse of
     ``ReceiptWriteContendedError``, which is the closest-looking fit and would
@@ -234,19 +236,20 @@ class RefundReconciliationService:
 
             The active key is resolved per attempt rather than once outside the
             loop, because a key resolved before the loop can retire during it.
-            ``create_receipt`` revalidates a prepared key under a row lock, and
-            a retired one fails that check with ``signing_key_not_active`` --
-            a ``SigningKeyError``, which is not an ``OperationalError``, so the
-            restart would not retry it and ``on_exhausted`` would never see it.
-            It would reach the routers, which do not handle that type, as the
-            unclassified error this whole path exists to stop being. Resolving
+            ``create_receipt`` revalidates a prepared key under a row lock and
+            rejects a retired one with ``signing_key_not_active``. Resolving
             per attempt costs a read in the common case:
             ``ensure_active_key`` writes only when the key is not already
             active.
 
             It is resolved before the transaction opens because it owns its own
             session, and opening that while holding this one risks deadlocking
-            the write against itself.
+            the write against itself. That ordering leaves a gap of its own: a
+            rotation can commit after the key is resolved and before the row
+            lock, and the rejection it earns is a ``SigningKeyError``, not an
+            ``OperationalError``, so the restart loop would not retry it by
+            itself. ``retired_under_the_attempt`` names that one rejection as
+            a restart, and the restart lands back here to resolve afresh.
             """
             signing_key = await get_signing_key_service().ensure_active_key()
             async with factory() as session:
@@ -297,9 +300,26 @@ class RefundReconciliationService:
                     await session.flush()
                 return receipt, reconciliation
 
+        def retired_under_the_attempt(exc: BaseException) -> bool:
+            """Whether ``create_receipt`` refused the key this attempt prepared.
+
+            ``validate_prepared_signing_key`` answers with this one reason for
+            a key that was active when ``ensure_active_key`` returned and is
+            not by the time the receipt locks its row: a rotation committed in
+            the gap, and a restart cures it by resolving the key again. No
+            other reason is a restart. A missing, mismatched or disabled key is
+            a configuration fault every attempt would repeat, and it has to
+            fail on the first one rather than surface after the whole budget
+            as a contention it was not.
+            """
+            return isinstance(exc, SigningKeyError) and str(exc) == (
+                "signing_key_not_active"
+            )
+
         return await run_with_write_conflict_retry(
             attempt,
             on_exhausted=lambda exc: RefundReconciliationContendedError(),
+            restart_on=retired_under_the_attempt,
         )
 
     @staticmethod
