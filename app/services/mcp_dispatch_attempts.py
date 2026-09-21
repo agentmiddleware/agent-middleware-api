@@ -79,6 +79,25 @@ class DispatchClaimUnavailableError(DispatchAttemptConflictError):
     """The one-shot authority to send this invocation is already owned."""
 
 
+class DispatchTerminalWriteContendedError(DispatchAttemptError):
+    """``complete()`` lost repeated write conflicts writing the terminal row.
+
+    Every governed caller of ``complete()`` reaches it after the call was
+    dispatched and charged, so this is always a post-effects loss and is never
+    retryable by the caller. The router re-types it to the surfaces'
+    non-retryable contention error; it is named here so the service layer does
+    not have to import a router type to say which write was lost.
+
+    ``DispatchAttemptConflictError`` is the wrong neighbour for this and is
+    deliberately not its base: that one means the attempt is in a state this
+    transition does not allow, which is a durable fact about the row. This
+    means the transition was never evaluated because the snapshot kept going
+    stale.
+    """
+
+    reason = "dispatch_terminal_write_contended"
+
+
 class DispatchResultRejectedError(DispatchAttemptError):
     """A confirmed upstream result cannot be represented in durable storage."""
 
@@ -836,9 +855,7 @@ class McpDispatchAttemptService:
 
         return cast(
             McpDispatchAttemptModel,
-            await run_with_write_conflict_retry(
-                _once, on_exhausted=lambda exc: exc
-            ),
+            await run_with_write_conflict_retry(_once, on_exhausted=lambda exc: exc),
         )
 
     async def _attach_charge_once(
@@ -1317,7 +1334,39 @@ class McpDispatchAttemptService:
         attempt_id: str,
         ledger_entry_id: str,
     ) -> McpDispatchAttemptModel:
-        """Checkpoint an idempotent refund after its ledger row is durable."""
+        """Checkpoint an idempotent refund, restarting on contention.
+
+        This runs under the same exception handler as the refund it records,
+        and that handler converts anything raised into "the refund failed".
+        Losing a write conflict here therefore declared a refund failed that
+        had already committed -- the credit is durable, only the checkpoint is
+        missing -- so the restart matters more here than on the refund itself.
+
+        Restarting is safe: the write short-circuits on
+        ``debit_refunded_at is not None``, and the transaction re-reads the
+        durable refund row from scratch on every attempt. On exhaustion the
+        driver error is re-raised unchanged, for the same reason
+        ``attach_charge`` does: the money has moved and only the link is
+        missing, so there is no new terminal fact to name.
+        """
+
+        async def _once() -> McpDispatchAttemptModel:
+            return await self._mark_debit_refunded_once(
+                attempt_id=attempt_id,
+                ledger_entry_id=ledger_entry_id,
+            )
+
+        return cast(
+            McpDispatchAttemptModel,
+            await run_with_write_conflict_retry(_once, on_exhausted=lambda exc: exc),
+        )
+
+    async def _mark_debit_refunded_once(
+        self,
+        *,
+        attempt_id: str,
+        ledger_entry_id: str,
+    ) -> McpDispatchAttemptModel:
         factory = get_session_factory()
         async with factory() as session:
             async with session.begin():
@@ -1370,6 +1419,22 @@ class McpDispatchAttemptService:
         error_code: str | None,
         max_result_bytes: int,
     ) -> McpDispatchAttemptModel:
+        """Write the terminal dispatch row, restarting on contention.
+
+        The neighbour ``attach_charge`` is wrapped with the note that it is
+        "where write conflicts land once the debit itself stops losing them".
+        This is the next write along the same path, for a call that has
+        already been dispatched and charged, and it was not wrapped -- so a
+        lock here was neither retried nor typed and surfaced as an
+        unclassified ``internal_error``.
+
+        Restarting is safe for the same reason ``attach_charge`` is: a replay
+        finds the attempt already terminal and returns it when every terminal
+        field matches, which they do because the arguments are unchanged, and
+        raises ``DispatchAttemptConflictError`` when they do not. Validation
+        stays outside the restart: it is pure, so re-running it would only
+        re-derive the same bytes.
+        """
         result_json, result_size_bytes, response_hash = _validated_terminal_result(
             state=state,
             result_payload=result_payload,
@@ -1377,6 +1442,36 @@ class McpDispatchAttemptService:
             max_result_bytes=max_result_bytes,
         )
 
+        async def _once() -> McpDispatchAttemptModel:
+            return await self._complete_once(
+                attempt_id=attempt_id,
+                state=state,
+                result_json=result_json,
+                result_size_bytes=result_size_bytes,
+                response_hash=response_hash,
+                error_code=error_code,
+            )
+
+        return cast(
+            McpDispatchAttemptModel,
+            await run_with_write_conflict_retry(
+                _once,
+                on_exhausted=lambda exc: DispatchTerminalWriteContendedError(
+                    DispatchTerminalWriteContendedError.reason
+                ),
+            ),
+        )
+
+    async def _complete_once(
+        self,
+        *,
+        attempt_id: str,
+        state: str,
+        result_json: str | None,
+        result_size_bytes: int | None,
+        response_hash: str | None,
+        error_code: str | None,
+    ) -> McpDispatchAttemptModel:
         factory = get_session_factory()
         async with factory() as session:
             async with session.begin():

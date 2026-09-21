@@ -60,6 +60,7 @@ from ..services.mcp_dispatch_attempts import (
     DispatchPrepareCommitUncertainError,
     DispatchResultRejectedError,
     DispatchResultTooLargeError,
+    DispatchTerminalWriteContendedError,
     McpDispatchAttemptService,
     get_mcp_dispatch_attempt_service,
 )
@@ -89,6 +90,7 @@ from ..trust import (
     IdempotencyBegin,
     IdempotencyConflictError,
     IdempotencyInProgressError,
+    IdempotencyReleaseContendedError,
     InvalidIdempotencyKeyError,
     decode_idempotency_key_header,
     McpGovernedAdapter,
@@ -206,6 +208,7 @@ class HumanApprovalPendingSignal(RuntimeError):
 
 AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS = "audit_chain_contended_after_effects"
 RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS = "receipt_write_contended_after_effects"
+DISPATCH_TERMINAL_CONTENDED_AFTER_EFFECTS = "dispatch_terminal_contended_after_effects"
 
 
 class TerminalRecordContendedError(RuntimeError):
@@ -928,6 +931,14 @@ async def _execute_registered_tool(
     with ``idempotency_in_progress`` forever: the -32005 would name a retry the
     caller could never actually make.
 
+    Which is also why the release is not allowed to fail quietly. It runs in
+    the contention window that just exhausted the receipt insert's whole
+    restart budget, so it is the likeliest write here to lose -- and a lost
+    release does not change the answer's code, only its truth. When
+    ``abandon`` reports that it ran out of restarts, this answers with the
+    condition the retry would actually meet instead of the one that got us
+    here.
+
     Only a record this invocation was granted is released, identified by the id
     the begin returned. A call refused with ``idempotency_in_progress`` never
     held one and audits that refusal like any other, so releasing by (wallet,
@@ -953,8 +964,9 @@ async def _execute_registered_tool(
             request_payload=request_payload,
             owned_record=owned_record,
         )
-    except (AuditChainContendedError, ReceiptWriteContendedError):
+    except (AuditChainContendedError, ReceiptWriteContendedError) as exc:
         record_id = owned_record.get("record_id")
+        release_contended = False
         if record_id and wallet_id and idempotency_key:
             idem = get_idempotency_service()
             # The two endpoints a governed record can live under: the canonical
@@ -970,11 +982,41 @@ async def _execute_registered_tool(
                         idempotency_key=idempotency_key,
                         expected_record_id=record_id,
                     )
+                except IdempotencyReleaseContendedError:
+                    # The release itself ran out of restarts, so the record is
+                    # still in progress. Only the endpoint that actually holds
+                    # the row can reach this -- the other lookup finds nothing
+                    # and returns without writing -- so one flag is enough.
+                    release_contended = True
+                    logger.error(
+                        "mcp_contended_idempotency_release_exhausted",
+                        extra={
+                            "wallet_id": wallet_id,
+                            "endpoint": record_endpoint,
+                            "reason": IdempotencyReleaseContendedError.reason,
+                        },
+                    )
                 except Exception:
                     logger.exception(
                         "mcp_audit_contended_idempotency_abandon_failed",
                         extra={"wallet_id": wallet_id},
                     )
+        if release_contended:
+            # Do not re-raise the contention that brought us here. Its -32005
+            # names a retry of this key, and the key was not freed, so every
+            # retry would answer idempotency_in_progress instead -- the caller
+            # would be told one thing and then meet another forever.
+            #
+            # What is true is the thing that will actually block the retry, and
+            # it is already this pipeline's word for it: a record for this key
+            # is in progress and this request did not produce a terminal
+            # outcome. Still -32005, still retryable, already mapped on all
+            # three ladders, and it leaves the row intact for an owner to find.
+            # For an upstream_mcp record that owner is reconcile_stuck_records,
+            # which expires an uncharged row after its idle window; a local
+            # tool's record is excluded there by design and needs an operator,
+            # which is why this logs at error with its own reason code.
+            raise IdempotencyInProgressError("idempotency_in_progress") from exc
         raise
 
 
@@ -1996,6 +2038,27 @@ async def _execute_registered_tool_inner(
                     endpoint=idempotency_endpoint,
                     idempotency_key=idempotency_key,
                 )
+            except IdempotencyReleaseContendedError:
+                # The release ran out of restarts, so the record this handler
+                # set out to hand back is still in progress. Re-raising the
+                # debit contention would answer "retry this key" -- the advice
+                # this whole block exists to make actionable -- for a key that
+                # will now answer idempotency_in_progress instead.
+                #
+                # So answer with the condition the retry would actually meet,
+                # exactly as the two cleanup failures above already do. The
+                # reservation handed back a few lines up stays handed back:
+                # nothing ran and nothing was charged either way, and this
+                # changes only which true statement the caller is given.
+                logger.error(
+                    "mcp_contended_idempotency_release_exhausted",
+                    extra={
+                        "wallet_id": wallet_id,
+                        "endpoint": idempotency_endpoint,
+                        "reason": IdempotencyReleaseContendedError.reason,
+                    },
+                )
+                raise IdempotencyInProgressError("idempotency_in_progress") from None
             except Exception:
                 logger.exception(
                     "mcp_contended_idempotency_abandon_failed",
@@ -2145,31 +2208,39 @@ async def _execute_registered_tool_inner(
         assert permit_model is not None
         assert idem_begin is not None
         assert idempotency_key is not None
-        return await _execute_upstream_after_charge(
-            executor=upstream_executor,
-            dispatch_service=dispatch_service,
-            dispatch_attempt=dispatch_attempt,
-            decision=decision,
-            money=money,
-            idem=idem,
-            permit_model=permit_model,
-            wallet_id=wallet_id,
-            key_id=auth.key_id,
-            endpoint=endpoint,
-            idempotency_endpoint=idempotency_endpoint,
-            transport=transport,
-            idempotency_key=idempotency_key,
-            idempotency_record_id=idem_begin.record_id,
-            tool_name=tool_name,
-            request_payload=effective_request_payload,
-            arguments=arguments,
-            registered_cost=registered_cost,
-            credits_charged=credits_charged,
-            ledger_entry_id=charge_result.entry_id,
-            description=description,
-            policy_metadata=policy_metadata,
-            approval_check=approval_check,
-        )
+        # The one call site of the post-charge upstream path, and therefore the
+        # one place a terminal dispatch write can be lost with effects already
+        # committed. Converting here rather than at each complete() inside it
+        # keeps the boundary judgement in a single place, as the receipt sites
+        # do with _receipt_contention_after_effects.
+        try:
+            return await _execute_upstream_after_charge(
+                executor=upstream_executor,
+                dispatch_service=dispatch_service,
+                dispatch_attempt=dispatch_attempt,
+                decision=decision,
+                money=money,
+                idem=idem,
+                permit_model=permit_model,
+                wallet_id=wallet_id,
+                key_id=auth.key_id,
+                endpoint=endpoint,
+                idempotency_endpoint=idempotency_endpoint,
+                transport=transport,
+                idempotency_key=idempotency_key,
+                idempotency_record_id=idem_begin.record_id,
+                tool_name=tool_name,
+                request_payload=effective_request_payload,
+                arguments=arguments,
+                registered_cost=registered_cost,
+                credits_charged=credits_charged,
+                ledger_entry_id=charge_result.entry_id,
+                description=description,
+                policy_metadata=policy_metadata,
+                approval_check=approval_check,
+            )
+        except DispatchTerminalWriteContendedError as exc:
+            raise _dispatch_contention_after_effects() from exc
 
     assert func is not None
     try:
@@ -3482,11 +3553,31 @@ async def _require_human_approval(
         )
         # Nothing was charged and no terminal outcome exists: free the key so
         # the same invoke can be retried once the condition clears.
-        await idem.abandon(
-            wallet_id=wallet_id,
-            endpoint=idempotency_endpoint,
-            idempotency_key=idempotency_key or "",
-        )
+        try:
+            await idem.abandon(
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key or "",
+            )
+        except IdempotencyReleaseContendedError:
+            # The third site with this shape. HumanApprovalPendingSignal states
+            # in its own docstring that "the caller's idempotency key was
+            # released" and that the same invoke should be retried once the
+            # approval is decided -- so raising it over a record that is still
+            # in progress would describe a retry the record will refuse.
+            #
+            # The approval itself is untouched either way: this path runs
+            # before the invoke is authorized, so nothing was consumed and the
+            # condition it was waiting on is still whatever it was.
+            logger.error(
+                "mcp_contended_idempotency_release_exhausted",
+                extra={
+                    "wallet_id": wallet_id,
+                    "endpoint": idempotency_endpoint,
+                    "reason": IdempotencyReleaseContendedError.reason,
+                },
+            )
+            raise IdempotencyInProgressError("idempotency_in_progress") from None
         raise HumanApprovalPendingSignal(reason, data=data, status_code=status_code)
 
     try:
@@ -3659,6 +3750,27 @@ def _receipt_contention_after_effects() -> TerminalRecordContendedError:
     so reconciliation owns the record from here.
     """
     return TerminalRecordContendedError(RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS)
+
+
+def _dispatch_contention_after_effects() -> TerminalRecordContendedError:
+    """Re-type a lost terminal dispatch write as the post-effects contention.
+
+    Every ``complete()`` on this path runs inside
+    ``_execute_upstream_after_charge``, whose whole subject is what happened
+    after the wallet was debited and the call was sent, so the boundary
+    question this conversion asks elsewhere is already answered: effects are
+    committed. The retryable handlers must not catch it -- "retry this key"
+    would invite a second execution of a call the caller has paid for -- and
+    neither may the contention unwind, which frees the idempotency record and
+    is only safe while there are no effects to protect.
+
+    The attempt row survives in a non-terminal state, so the dispatch
+    reconciler still owns it and will drive it terminal on its next pass.
+    That is the same durable owner a caller would be waiting on anyway; what
+    changes is that the caller is told so under a reason code instead of
+    through the unclassified channel.
+    """
+    return TerminalRecordContendedError(DISPATCH_TERMINAL_CONTENDED_AFTER_EFFECTS)
 
 
 INTERNAL_ERROR_MESSAGE = "internal_error"

@@ -78,6 +78,26 @@ class LedgerWriteContendedError(RuntimeError):
     reason = "ledger_write_contended"
 
 
+class LedgerRefundContendedError(RuntimeError):
+    """The refund transaction lost repeated SQLite write conflicts.
+
+    Deliberately NOT a subclass of ``LedgerWriteContendedError``. That type
+    means "nothing moved, retry the same idempotency key" and the routers'
+    retryable ladders answer it with a 409/-32005. A refund only exists
+    because a call already ran and was charged, so offering that retry would
+    invite a second execution of something the caller has paid for.
+
+    Every attempt rolled back whole, so no credit was issued. Both governed
+    callers already treat a failed refund as ``failed_unrefunded``: they sign
+    terminal evidence and open a pending reconciliation work item, which is
+    the correct owner for this. What this type adds is a reason code in place
+    of driver text, so an operator can tell a contended refund apart from a
+    refund that failed for a substantive reason.
+    """
+
+    reason = "ledger_refund_contended"
+
+
 class LedgerOperationConflictError(RuntimeError):
     """Raised when one governed operation key describes different debits."""
 
@@ -1064,7 +1084,47 @@ class BillingEngine:
         charge_entry_id: str,
         description: str = "",
     ) -> LedgerEntry:
-        """Reverse a prior debit with a correlated refund ledger entry."""
+        """Reverse a prior debit, restarting a contended transaction.
+
+        The debit this reverses already restarts; without the same treatment
+        here a transient lock was converted by both governed callers into the
+        terminal claim "the refund failed" -- a signed ``failed_unrefunded``
+        receipt and a reconciliation work item for money that was only ever
+        momentarily contended.
+
+        Restarting satisfies the helper's contract verbatim: the operation
+        owns and rebuilds its own transaction, and it is idempotent by
+        construction. The refund id is derived from the charge
+        (``refund-{charge_entry_id}``) and the first thing a replay does is
+        look for an existing refund by correlation id and then by entry id,
+        returning it rather than issuing a second credit.
+        """
+
+        async def _once() -> LedgerEntry:
+            return await self._refund_charge_once(
+                wallet_id=wallet_id,
+                charge_entry_id=charge_entry_id,
+                description=description,
+            )
+
+        return cast(
+            LedgerEntry,
+            await run_with_write_conflict_retry(
+                _once,
+                on_exhausted=lambda exc: LedgerRefundContendedError(
+                    LedgerRefundContendedError.reason
+                ),
+            ),
+        )
+
+    async def _refund_charge_once(
+        self,
+        *,
+        wallet_id: str,
+        charge_entry_id: str,
+        description: str = "",
+    ) -> LedgerEntry:
+        """One full owned transaction: dedupe, credit, commit."""
         async with self._session_factory()() as session:
             async with session.begin():
                 refund_entry_id = f"refund-{charge_entry_id}"
