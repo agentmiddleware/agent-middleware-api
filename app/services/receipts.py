@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.resilience import run_with_write_conflict_retry
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import IdempotencyRecordModel, ReceiptModel
@@ -28,6 +29,25 @@ class ReceiptError(RuntimeError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(reason)
+
+
+class ReceiptWriteContendedError(RuntimeError):
+    """The receipt insert lost SQLite write conflicts for its whole budget.
+
+    No receipt row is durable: every attempt rolled back whole, and the
+    exhaustion path re-reads the unique idempotency link before raising, so
+    this is not a lost commit acknowledgement being misreported. Distinct from
+    :class:`ReceiptError`, which is a caller mistake about the receipt's
+    contents, and deliberately not a subclass of it -- the reconciler adopts an
+    equivalent receipt on ``ReceiptError`` and there is nothing here to adopt.
+
+    Whether a caller may retry is not this module's call to make: a contended
+    receipt after a charged, dispatched invoke means something different than
+    one after a denial that ran nothing. The router owns that split, the same
+    way it does for a contended audit append.
+    """
+
+    reason = "receipt_write_contended"
 
 
 import json
@@ -124,9 +144,11 @@ class ReceiptService:
         if session is None:
             factory = get_session_factory()
             async with factory() as owned_session:
-                return await ReceiptService._has_unambiguous_historical_idempotency_link(
-                    model,
-                    session=owned_session,
+                return (
+                    await ReceiptService._has_unambiguous_historical_idempotency_link(
+                        model,
+                        session=owned_session,
+                    )
                 )
         records = (
             (
@@ -360,31 +382,44 @@ class ReceiptService:
                 payload,
                 prepared_signing_key_id,
             )
-        model = ReceiptModel(
-            receipt_id=receipt_id,
-            idempotency_record_id=idempotency_record_id,
-            dispatch_attempt_id=dispatch_attempt_id,
-            permit_id=permit_id,
-            wallet_id=wallet_id,
-            key_id=key_id,
-            tool=tool,
-            request_hash=effective_request_hash,
-            response_hash=response_hash,
-            ledger_entry_id=ledger_entry_id,
-            credits_authorized=credits_authorized,
-            credits_charged=credits_charged,
-            outcome=outcome,
-            reason_code=reason_code,
-            audit_event_id=audit_event_id,
-            approval_id=approval_id,
-            constraints_evaluated_json=json.dumps(constraints_evaluated)
-            if constraints_evaluated
-            else None,
-            created_at=created_at,
-            signature=signature,
-            signature_key_id=signature_key_id,
-        )
+
+        def build_model() -> ReceiptModel:
+            """A fresh ORM instance for this receipt's already-fixed identity.
+
+            The owned-session write below restarts its whole transaction on a
+            write conflict, and an instance whose flush failed carries session
+            state that must not be replayed into the next attempt. Everything
+            the signature covers -- ``receipt_id``, ``created_at``, the payload
+            hashes -- was computed once above, so every instance this returns
+            describes the identical row.
+            """
+            return ReceiptModel(
+                receipt_id=receipt_id,
+                idempotency_record_id=idempotency_record_id,
+                dispatch_attempt_id=dispatch_attempt_id,
+                permit_id=permit_id,
+                wallet_id=wallet_id,
+                key_id=key_id,
+                tool=tool,
+                request_hash=effective_request_hash,
+                response_hash=response_hash,
+                ledger_entry_id=ledger_entry_id,
+                credits_authorized=credits_authorized,
+                credits_charged=credits_charged,
+                outcome=outcome,
+                reason_code=reason_code,
+                audit_event_id=audit_event_id,
+                approval_id=approval_id,
+                constraints_evaluated_json=json.dumps(constraints_evaluated)
+                if constraints_evaluated
+                else None,
+                created_at=created_at,
+                signature=signature,
+                signature_key_id=signature_key_id,
+            )
+
         if target_session is not None:
+            model = build_model()
             if idempotency_record_id is None:
                 target_session.add(model)
                 await target_session.flush()
@@ -413,31 +448,74 @@ class ReceiptService:
             return receipt_model_to_response(model)
 
         factory = get_session_factory()
-        async with factory() as owned_session:
-            existing = await existing_response(owned_session)
-            if existing is not None:
-                return existing
-            owned_session.add(model)
-            try:
-                await owned_session.commit()
-                await owned_session.refresh(model)
-            except Exception:
-                # A driver can lose the commit acknowledgement after the row
-                # is durable. Roll back local state, then recover through the
-                # unique idempotency link before deciding this really failed.
+
+        async def write_once() -> ReceiptResponse:
+            """One full owned transaction: re-check, insert, commit.
+
+            Owns and rebuilds its own transaction on every call, which is what
+            the restart helper requires. The re-check at the top is also the
+            recovery read: an attempt whose COMMIT landed before its
+            acknowledgement was lost is found here by the next attempt rather
+            than colliding with itself.
+            """
+            attempt_model = build_model()
+            async with factory() as owned_session:
+                existing = await existing_response(owned_session)
+                if existing is not None:
+                    return existing
+                owned_session.add(attempt_model)
                 try:
-                    await owned_session.rollback()
+                    await owned_session.commit()
+                    await owned_session.refresh(attempt_model)
                 except Exception:
-                    # Recovery uses a fresh session because this connection may
-                    # be exactly what lost the commit acknowledgement.
-                    pass
-                if idempotency_record_id is not None:
-                    async with factory() as recovery_session:
-                        existing = await existing_response(recovery_session)
-                    if existing is not None:
-                        return existing
-                raise
-        return receipt_model_to_response(model)
+                    # A driver can lose the commit acknowledgement after the row
+                    # is durable. Roll back local state, then recover through the
+                    # unique idempotency link before deciding this really failed.
+                    try:
+                        await owned_session.rollback()
+                    except Exception:
+                        # Recovery uses a fresh session because this connection may
+                        # be exactly what lost the commit acknowledgement.
+                        pass
+                    if idempotency_record_id is not None:
+                        async with factory() as recovery_session:
+                            existing = await existing_response(recovery_session)
+                        if existing is not None:
+                            return existing
+                    raise
+            return receipt_model_to_response(attempt_model)
+
+        # The receipt is the last write on the governed path, so it is where a
+        # burst of concurrent invokes still collides after the debit stops
+        # losing. Restarting is safe because the row is deduped by the unique
+        # idempotency link and re-checked at the top of every attempt; without
+        # this the loss escaped as an unclassified internal_error, which on the
+        # money path tells a caller nothing about whether it was charged.
+        try:
+            return cast(
+                ReceiptResponse,
+                await run_with_write_conflict_retry(
+                    write_once,
+                    on_exhausted=lambda exc: ReceiptWriteContendedError(
+                        "receipt_write_contended"
+                    ),
+                ),
+            )
+        except ReceiptWriteContendedError:
+            # One last read before claiming no receipt exists. Attempts 1..N-1
+            # get this from the next attempt's re-check, but the final loss has
+            # no successor to do it, and the answer decides whether the caller
+            # is told a durable receipt is missing. Only the idempotency link
+            # can answer: it is unique, and a dispatch-linked receipt always
+            # carries one too, because mcp_dispatch_attempts.idempotency_record_id
+            # is NOT NULL -- so a second lookup by dispatch_attempt_id could
+            # only re-find the same row.
+            if idempotency_record_id is not None:
+                async with factory() as recovery_session:
+                    existing = await existing_response(recovery_session)
+                if existing is not None:
+                    return existing
+            raise
 
     async def get_receipt(self, receipt_id: str) -> ReceiptResponse | None:
         factory = get_session_factory()
