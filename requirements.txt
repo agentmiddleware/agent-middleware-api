@@ -16,6 +16,7 @@ aiocoap>=0.4.17          # CoAP protocol support
 # --- Telemetry / Autonomous PM ---
 httpx>=0.28.1,<0.29     # Upstream MCP DNS pinning relies on httpcore's sni_hostname extension contract
 httpcore==1.0.9         # Verified implementation of the DNS-pin + TLS SNI handoff; update only with its integration test
+anyio>=4.14.2           # Transitive via httpx/starlette; >=4.14.2 fixes CVE-2026-63374 (TLSStream IDNA 2003 cert spoofing, critical) and CVE-2026-64847 (process-pool stderr block)
 
 # --- Media Engine ---
 python-multipart>=0.0.32 # File upload support (>=0.0.30 fixes CVE-2026-53538/53539, >=0.0.31 fixes CVE-2026-53540)
