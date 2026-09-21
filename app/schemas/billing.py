@@ -84,6 +84,12 @@ class AlertType(str, Enum):
     # Every alert read converts stored rows through this enum, so a stored
     # type missing here fails the whole listing for that wallet.
     PERMIT_RELEASE_CONTENDED = "permit_release_contended"
+    # Written by PermitService.reserve_budget when a reservation crosses a
+    # budget threshold for its permit; only the highest threshold crossed
+    # fires. Absent from this enum, they broke that listing the same way.
+    PERMIT_BUDGET_EXHAUSTED = "permit_budget_exhausted"
+    PERMIT_BUDGET_90PCT = "permit_budget_90pct"
+    PERMIT_BUDGET_80PCT = "permit_budget_80pct"
 
 
 class KYCStatus(str, Enum):

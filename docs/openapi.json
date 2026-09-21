@@ -5400,7 +5400,10 @@
           "kyc_pending",
           "kyc_rejected",
           "suspicious_activity",
-          "permit_release_contended"
+          "permit_release_contended",
+          "permit_budget_exhausted",
+          "permit_budget_90pct",
+          "permit_budget_80pct"
         ],
         "title": "AlertType"
       },
