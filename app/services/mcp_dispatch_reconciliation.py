@@ -55,6 +55,7 @@ class DispatchReconciliationResult:
     dispatched_uncertain: int
     terminal_recovered: int
     idempotency_recovered: int
+    budget_released: int
     failed_attempt_ids: tuple[str, ...]
 
     @property
@@ -64,6 +65,7 @@ class DispatchReconciliationResult:
             + self.dispatched_uncertain
             + self.terminal_recovered
             + self.idempotency_recovered
+            + self.budget_released
         )
 
 
@@ -111,6 +113,7 @@ class McpDispatchReconciliationService:
         dispatched_uncertain = 0
         terminal_recovered = 0
         idempotency_recovered = 0
+        budget_released = 0
         failed: list[str] = []
         processed: set[str] = set()
 
@@ -179,11 +182,60 @@ class McpDispatchReconciliationService:
                     type(exc).__name__,
                 )
 
+        # Reservations the live path could not give back. A contended
+        # release on the upstream failure path is absorbed there rather than
+        # propagated -- propagating would skip the audit event and the receipt
+        # for a call that really was dispatched -- so finishing it is this
+        # sweep's job. Nothing else picks these up: the attempt is terminal,
+        # so it is not stale-active, and the live path completed its
+        # idempotency record, so the two queries above both skip it.
+        #
+        # release_dispatch_budget_once is the once-only gate on every engine,
+        # so re-running it against an attempt that raced to release in the
+        # meantime returns False without touching the permit.
+        unreleased = await self._dispatch.list_unreleased_budget_attempts(
+            idle_seconds=terminal_idle,
+            limit=limit,
+        )
+        for attempt in unreleased:
+            if attempt.attempt_id in processed:
+                continue
+            # Release only against durable proof that the money came back, or
+            # that it never left. The query cannot express this: a
+            # returned_error attempt whose refund failed earlier in this very
+            # sweep still matches `budget_released_at IS NULL`, and handing
+            # its reservation back while the debit stands would cut
+            # spent_credits below what the wallet actually paid -- letting the
+            # next call spend past max_credits. That over-spend is the
+            # opposite failure from the stranded reservation this sweep exists
+            # to repair, and the worse of the two.
+            #
+            # A missing operation debit means the call was refused before it
+            # was ever charged (the pre-dispatch insufficient-funds path),
+            # which still holds a reservation and is safe to give back.
+            # Anything with a live, unrefunded debit belongs to the
+            # compensation path, not here.
+            if attempt.debit_refunded_at is None:
+                if await self._find_operation_debit(attempt) is not None:
+                    continue
+            try:
+                if await self._permits.release_dispatch_budget_once(attempt.attempt_id):
+                    budget_released += 1
+            except Exception as exc:
+                failed.append(attempt.attempt_id)
+                logger.warning(
+                    "mcp_dispatch_budget_release_recovery_failed "
+                    "attempt_id=%s error=%s",
+                    attempt.attempt_id,
+                    type(exc).__name__,
+                )
+
         return DispatchReconciliationResult(
             prepared_finalized=prepared_finalized,
             dispatched_uncertain=dispatched_uncertain,
             terminal_recovered=terminal_recovered,
             idempotency_recovered=idempotency_recovered,
+            budget_released=budget_released,
             failed_attempt_ids=tuple(dict.fromkeys(failed)),
         )
 
@@ -400,13 +452,30 @@ class McpDispatchReconciliationService:
                     ledger_entry_id=debit.entry_id,
                 )
         # The normal write order is refund -> release budget -> audit ->
-        # receipt. Therefore an already-signed failed_refunded receipt proves
-        # the release preceded it. Do not subtract again while repairing only
-        # the missing idempotency completion.
+        # receipt, so a signed failed_refunded receipt usually means the
+        # release already landed. It is no longer *proof* of that, which is
+        # why this reads the fact instead of inferring it.
+        #
+        # `_raise_refunded_upstream_failure` absorbs a contended
+        # `release_dispatch_budget_once` and goes on to write the receipt --
+        # deliberately, because propagating there would destroy the receipt
+        # for a call that really was dispatched. That makes the state this
+        # early return once assumed impossible -- a failed_refunded receipt
+        # with `budget_released_at` still unset -- reachable on the live path.
+        # Skipping on the receipt alone would then strand the reservation
+        # until the permit expires, and this reconciler is the thing that is
+        # supposed to give it back.
+        #
+        # Releasing again when the flag is already set costs nothing:
+        # `release_dispatch_budget_once` returns False without touching the
+        # permit, and its guarded `budget_released_at IS NULL` UPDATE is the
+        # once-only gate on every engine, so a stale read here cannot
+        # double-subtract either.
         if existing_receipt is not None:
             if existing_receipt.outcome != "failed_refunded":
                 raise DispatchAttemptError("dispatch_receipt_outcome_conflict")
-            return
+            if attempt.budget_released_at is not None:
+                return
         await self._permits.release_dispatch_budget_once(attempt.attempt_id)
 
     async def _find_operation_debit(
