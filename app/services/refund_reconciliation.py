@@ -224,18 +224,31 @@ class RefundReconciliationService:
         factory = get_session_factory()
         async with factory() as preflight_session:
             await validated_checkpoint(preflight_session)
-        signing_key = await get_signing_key_service().ensure_active_key()
 
         async def attempt() -> tuple[ReceiptResponse, dict[str, Any]]:
             """One whole transaction: locked read, receipt, work item, record.
 
             Everything the restart has to replay lives inside this session, so
             a losing attempt leaves nothing behind for the next one to trip
-            over. The signing key is resolved once above instead: it owns its
-            own transaction, is not part of what contention rolls back, and
-            re-resolving it per attempt would spend an extra write on every
-            lap of a loop that exists to get out of the database's way.
+            over.
+
+            The active key is resolved per attempt rather than once outside the
+            loop, because a key resolved before the loop can retire during it.
+            ``create_receipt`` revalidates a prepared key under a row lock, and
+            a retired one fails that check with ``signing_key_not_active`` --
+            a ``SigningKeyError``, which is not an ``OperationalError``, so the
+            restart would not retry it and ``on_exhausted`` would never see it.
+            It would reach the routers, which do not handle that type, as the
+            unclassified error this whole path exists to stop being. Resolving
+            per attempt costs a read in the common case:
+            ``ensure_active_key`` writes only when the key is not already
+            active.
+
+            It is resolved before the transaction opens because it owns its own
+            session, and opening that while holding this one risks deadlocking
+            the write against itself.
             """
+            signing_key = await get_signing_key_service().ensure_active_key()
             async with factory() as session:
                 async with session.begin():
                     record = await validated_checkpoint(session, lock=True)
