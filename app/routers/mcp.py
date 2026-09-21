@@ -2345,7 +2345,22 @@ async def _execute_registered_tool_inner(
                     extra={
                         "permit_id": permit_model.permit_id,
                         "tool": tool_name,
+                        # The stranded reservation itself, so the drift this
+                        # absorb leaves behind is countable straight from the
+                        # logs instead of only inferable from the permit row.
+                        "credits": str(registered_cost),
                     },
+                )
+                # Durable, per-permit counterpart to that line: the log records
+                # that it happened, the alert records that it is still true.
+                # Cannot raise (see record_absorbed_release_drift) -- the
+                # receipt this absorb exists to protect is still unwritten
+                # below, so an observability write that could fail the request
+                # would re-create exactly the loss being prevented.
+                await get_permit_service().record_absorbed_release_drift(
+                    permit_id=permit_model.permit_id,
+                    amount=registered_cost,
+                    site="release_budget",
                 )
         audit_event = await _audit_mcp_invocation(
             effects_committed=True,
@@ -2988,8 +3003,19 @@ async def _raise_refunded_upstream_failure(
         # for a call that already ran and was refunded.
         logger.exception(
             "mcp_release_dispatch_budget_contended_after_effects",
-            extra={"attempt_id": dispatch_attempt.attempt_id},
+            extra={
+                "attempt_id": dispatch_attempt.attempt_id,
+                "permit_id": permit_model.permit_id,
+                "credits": str(registered_cost),
+            },
         )
+        # No billing alert here, unlike the release_budget site. That drift
+        # persists until the permit expires and needs somewhere durable to be
+        # seen; this one is attempt-keyed and mcp_dispatch_reconciliation
+        # re-runs the release from the attempt row within a cleanup pass. An
+        # alert for a condition that clears itself in minutes would teach
+        # operators to skim past the alert type, costing the site that does
+        # need it its signal.
     audit_event = await _audit_mcp_invocation(
         effects_committed=True,
         decision=decision,
