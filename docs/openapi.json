@@ -5399,7 +5399,8 @@
           "anomalous_spend",
           "kyc_pending",
           "kyc_rejected",
-          "suspicious_activity"
+          "suspicious_activity",
+          "permit_release_contended"
         ],
         "title": "AlertType"
       },
