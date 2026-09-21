@@ -3858,6 +3858,12 @@ async def _audit_mcp_invocation(
     defect this parameter exists to make unrepresentable: guarding the finalize
     loop alone left the upstream helpers and the local refund-success path free
     to hand a caller who had already run and paid a "retry".
+
+    "No" is necessary but not sufficient, which is what ``dispatch_attempt``
+    answers for. A retryable loss is unwound by ``_execute_registered_tool``,
+    which frees the idempotency record so the -32005 names a retry the caller
+    can actually make -- and a durable dispatch attempt makes that release
+    impossible, because its NOT NULL foreign key pins the record.
     """
     record_audit(
         "mcp.invoke",
@@ -3901,6 +3907,37 @@ async def _audit_mcp_invocation(
         )
     except AuditChainContendedError as exc:
         if not effects_committed:
+            if dispatch_attempt is not None:
+                # Remote, and already terminal: complete_pre_dispatch_failure
+                # ran before this audit, so a durable mcp_dispatch_attempts row
+                # exists and its NOT NULL idempotency_record_id pins the
+                # record. The unwind cannot free what the retryable answer
+                # advertises -- its DELETE hits the foreign key, raises, and is
+                # only logged -- so the caller would be told to retry a key
+                # that answers idempotency_in_progress until the dispatch
+                # reconciler writes the receipt. Name that owner instead: a
+                # winner is mid-flight, which is what this error already means
+                # everywhere else on the dispatch path, it is mapped on all
+                # three ladders, and the unwind does not catch it, so nothing
+                # attempts the impossible delete.
+                raise IdempotencyInProgressError("idempotency_in_progress") from exc
+            # Nothing ran, nothing was charged, and nothing durable pins the
+            # key, so the unwind can release the record this invocation owns.
+            #
+            # A single-use human approval spent earlier on this path is NOT a
+            # reason to withhold that release. The retry does re-read the
+            # consumed approval and is refused -- but that refusal is
+            # human_approval_consumed, a signed and receipted terminal denial,
+            # so the retry reaches an answer. Keeping the key instead would
+            # strand it: an uncharged local record matches no
+            # reconcile_stuck_records pass (the orphaned-local pass adopts a
+            # row only on proof of a committed debit, and there is none when
+            # the charge is what refused), so every later use of that key would
+            # answer idempotency_in_progress forever, with no receipt, no audit
+            # event and no manual-review count. Nor is -32007 owed instead:
+            # nothing was charged and nothing ran, so there is no committed
+            # effect for that code to name. An accurate retryable answer that
+            # terminates beats a deliberated one that wedges.
             raise
         # The call already ran or the wallet already moved, so "retry" would
         # invite a second execution of something the caller has paid for. It
