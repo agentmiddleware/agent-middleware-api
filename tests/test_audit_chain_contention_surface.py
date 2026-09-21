@@ -32,18 +32,45 @@ idempotency record open by the time these refusals happen, and reconciliation
 deliberately does not delete uncharged local records, so a record left in
 progress would meet every retry of that key with ``idempotency_in_progress``
 forever.
+
+The last two tests pin that obligation from both sides.
+
+A remote refusal has already driven its dispatch attempt terminal, and
+``mcp_dispatch_attempts`` pins the record by a NOT NULL foreign key, so the
+release cannot happen at all -- the unwind's DELETE raises and is only logged.
+There the retryable answer has to name the reconciler that owns the record
+instead of a retry of the key.
+
+A local refusal behind a human-approval gate is the opposite, and is why the
+retryable answer is kept there rather than withheld. The single-use approval is
+spent, so the retry is refused -- but refused with a signed, receipted
+human_approval_consumed denial, which is a terminal answer. Withholding the
+release to spare the caller that refusal would strand the key instead, in
+exactly the way the paragraph above describes, and no ``-32007`` would be owed
+either: nothing was charged and nothing ran, so there is no committed effect for
+that code to name. The second request is asserted, not just the first, because
+that is where the difference shows.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.db.database import get_session_factory
+from app.db.models import (
+    IdempotencyRecordModel,
+    McpDispatchAttemptModel,
+    WalletModel,
+)
 from app.main import app
 from app.routers.mcp import AUDIT_CHAIN_CONTENDED_AFTER_EFFECTS
 from app.schemas.billing import ServiceCategory
@@ -675,3 +702,240 @@ async def test_the_standard_surface_answers_the_same_named_outcome(
     assert data["error"] == "manual_review_required", data
     assert data["remediation"]["type"] == "reconcile_out_of_band", data
     assert runs["count"] == 1
+
+
+class _NeverDispatchedExecutor:
+    """Upstream stand-in that records whether it was ever reached.
+
+    The branch below refuses at the charge, after the dispatch attempt has been
+    prepared and driven terminal but before anything is sent, so ``dispatches``
+    staying at zero is part of the assertion rather than incidental.
+    """
+
+    def __init__(self) -> None:
+        self.dispatches = 0
+
+    async def call_tool(
+        self,
+        arguments: dict[str, Any],
+        *,
+        invocation_id: str,
+        idempotency_key: str,
+        before_dispatch: Callable[[], Awaitable[None]],
+    ) -> UpstreamMcpResult:
+        await before_dispatch()
+        self.dispatches += 1
+        raise AssertionError("upstream must not be reached on an unfunded call")
+
+
+async def _drain_wallet(wallet_id: str) -> None:
+    """Drop the balance below the tool cost so the charge refuses.
+
+    It has to be done after the permit exists, because permit creation refuses
+    a ``max_credits`` above the wallet's balance -- so an unfunded call cannot
+    be set up by pricing the tool above the wallet in the first place.
+    """
+    async with get_session_factory()() as session:
+        wallet = (
+            await session.execute(
+                select(WalletModel).where(WalletModel.wallet_id == wallet_id)
+            )
+        ).scalar_one()
+        wallet.balance = Decimal("1")
+        await session.commit()
+
+
+@pytest.mark.anyio
+async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
+    client: AsyncClient, clean_database: None, monkeypatch
+) -> None:
+    """Remote insufficient funds: durable, so it names its owner instead.
+
+    Nothing ran here, so by the rule at the top of this file the loss is
+    retryable -- but the release that makes a retryable answer honest cannot
+    happen. ``complete_pre_dispatch_failure`` drives the dispatch attempt
+    terminal *before* this denial is audited, and
+    ``mcp_dispatch_attempts.idempotency_record_id`` is NOT NULL under
+    ``PRAGMA foreign_keys=ON``, so the unwind's DELETE raises on the foreign key
+    and is only logged. Answering ``audit_chain_head_contention`` would then
+    advertise a retry that meets ``idempotency_in_progress`` until the dispatch
+    reconciler writes the receipt.
+
+    ``idempotency_in_progress`` is the truthful answer, and the one this path
+    already gives whenever a durable owner may classify an attempt. The record
+    and the attempt must both survive for that owner to find.
+    """
+    tool_name = "audit-contention-unfunded-upstream"
+    executor = _NeverDispatchedExecutor()
+    get_service_registry().register_upstream(
+        service_id=tool_name,
+        name="Audit contention unfunded upstream",
+        description="Audit-chain contention surface test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        executor=executor,
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object"},
+        credits_per_unit=TOOL_COST,
+        upstream_tool_name="partner.echo",
+        upstream_origin="https://partner.example",
+    )
+    try:
+        ctx = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=ctx["agent_wallet_id"],
+            key_id=ctx["key_id"],
+            tool_name=tool_name,
+            max_credits=10,  # the permit allows; the drained wallet is what refuses
+            idem_key="audit-contention-permit-6",
+        )
+        await _drain_wallet(ctx["agent_wallet_id"])
+
+        _always_contended(monkeypatch)
+        resp = await client.post(
+            "/mcp/messages",
+            json=_call_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key="audit-contention-unfunded-upstream-1",
+            ),
+            headers=ctx["agent_headers"],
+        )
+        monkeypatch.undo()
+
+        assert resp.status_code == 200, resp.text
+        error = resp.json()["error"]
+        assert error["message"] != "internal_error", error
+        assert error["message"] != audit_chain.AuditChainContendedError.reason, error
+        assert error["message"] == "idempotency_in_progress", error
+        assert error["code"] == -32005, error
+        # Nothing was sent upstream, and the durable chain the reconciler needs
+        # is intact: the attempt survived and so did the exact record its
+        # foreign key points at. Counting all records would not show this --
+        # creating the permit writes one of its own -- and the record this call
+        # owns is the one the unwind would have deleted.
+        assert executor.dispatches == 0
+        async with get_session_factory()() as session:
+            attempt = (
+                await session.execute(select(McpDispatchAttemptModel))
+            ).scalar_one()
+            linked = await session.get(
+                IdempotencyRecordModel, attempt.idempotency_record_id
+            )
+        assert linked is not None, "the reconciler's record was deleted"
+        assert linked.response_json is None, "no terminal outcome was published"
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_a_consumed_approval_still_reaches_a_terminal_answer(
+    client: AsyncClient, clean_database: None, monkeypatch
+) -> None:
+    """A spent approval does not make the retryable answer a lie.
+
+    ``HumanApprovalService._finalize`` consumes the approval so it authorizes
+    exactly one invoke, well before a pre-dispatch failure like insufficient
+    funds is audited, and unlike the quote released on that same path
+    (``QuoteService.release``) it is not compensated. It is tempting to read
+    that as "no retry can reproduce this call, so do not advertise one" and
+    withhold the release.
+
+    That reading is wrong, and this test is the guard on not taking it. The
+    retry is refused -- but refused *terminally*, with a signed
+    human_approval_consumed receipt, so the key resolves. Withholding the
+    release would strand it instead: the record is local and uncharged (the
+    charge refusing is why this path was reached at all), and
+    ``reconcile_stuck_records`` adopts a local row only on proof of a committed
+    debit, so no pass would ever touch it. Every later use of that key would
+    answer ``idempotency_in_progress`` forever, with no receipt, no audit event
+    and no manual-review count -- the same false retry, made permanent.
+    """
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", True)
+    monkeypatch.setattr(settings, "SENTINEL_API_URL", "")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "")
+    monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 0.0)
+
+    tool_name = "audit-contention-approval"
+    runs = {"count": 0}
+
+    def echo(message: str = "ok") -> dict[str, Any]:
+        runs["count"] += 1
+        return {"message": message}
+
+    get_service_registry().register_local(
+        service_id=tool_name,
+        name="Audit contention approval",
+        description="Audit-chain contention surface test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=echo,
+        credits_per_unit=TOOL_COST,
+        unit_name="call",
+    )
+    try:
+        ctx = await provision_agent_wallet(client)
+        permit = await create_tool_permit(
+            client,
+            wallet_id=ctx["agent_wallet_id"],
+            key_id=ctx["key_id"],
+            tool_name=tool_name,
+            max_credits=10,  # the permit allows; the drained wallet is what refuses
+            idem_key="audit-contention-permit-7",
+            requires_human_approval=True,
+        )
+        assert permit["requires_human_approval"] is True
+        await _drain_wallet(ctx["agent_wallet_id"])
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key="audit-contention-approval-1",
+        )
+
+        _always_contended(monkeypatch)
+        resp = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+        monkeypatch.undo()
+
+        assert resp.status_code == 200, resp.text
+        error = resp.json()["error"]
+        assert error["message"] != "internal_error", error
+        assert error["code"] == -32005, error
+        assert runs["count"] == 0
+
+        # The key was released, so the retry is not met by its own predecessor.
+        idem = get_idempotency_service()
+        assert (
+            await idem.get_record(
+                wallet_id=ctx["agent_wallet_id"],
+                endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                idempotency_key="audit-contention-approval-1",
+            )
+            is None
+        ), "the key was stranded in progress"
+
+        # Take the retry the -32005 named. The spent approval refuses it, and
+        # that refusal is the terminal, signed answer -- not another -32005.
+        again = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+        assert again.status_code == 200, again.text
+        retry_error = again.json()["error"]
+        assert retry_error["message"] != "idempotency_in_progress", retry_error
+        assert retry_error["code"] != -32005, retry_error
+        assert retry_error["message"] == "human_approval_consumed", retry_error
+        receipt = retry_error["data"]["receipt"]
+        assert receipt["outcome"] == "denied", receipt
+        assert receipt["reason_code"] == "human_approval_consumed", receipt
+        assert receipt["credits_charged"] == "0", receipt
+        assert receipt["signature"], receipt
+        assert runs["count"] == 0
+    finally:
+        get_service_registry().unregister_local(tool_name)
