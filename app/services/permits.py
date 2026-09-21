@@ -1150,6 +1150,82 @@ class PermitService:
 
         await self._run_with_write_retry(_once)
 
+    async def record_absorbed_release_drift(
+        self,
+        *,
+        permit_id: str,
+        amount: Decimal,
+        site: str,
+    ) -> bool:
+        """Record budget a post-effects release could not hand back.
+
+        The MCP routers absorb a ``PermitWriteContendedError`` raised by
+        ``release_budget``/``release_dispatch_budget_once`` on paths where the
+        receipt is written *after* the release, because propagating would
+        destroy the governance artifact for a call that ran. The wallet is
+        already whole -- the refund succeeded -- but the permit keeps
+        ``amount`` reserved against a call that was refunded, and
+        ``reconcile_budgets`` will not repair that while the permit is live.
+        Until now the only trace was a log line.
+
+        This is deliberately best-effort and **never raises**. It is called
+        from inside the absorbing except block, immediately before the receipt
+        write it exists to protect; an observability write that could fail the
+        request would re-create precisely the failure that absorb prevents. A
+        lost alert costs visibility, and ``reconcile_budgets`` still reports
+        the drift from the permit row itself. Hence the bare except here,
+        against the narrow one at the call site: there, only a contended write
+        is a known-reconcilable loss, while here *nothing* may escape.
+
+        Returns whether the row was written.
+        """
+        from app.db.models import BillingAlertModel
+
+        try:
+            factory = get_session_factory()
+            async with factory() as session:
+                async with session.begin():
+                    model = await session.get(PermitModel, permit_id)
+                    if model is None:
+                        return False
+                    session.add(
+                        BillingAlertModel(
+                            alert_id=f"alt-{uuid.uuid4().hex[:12]}",
+                            wallet_id=model.subject_wallet_id,
+                            # billing_alerts is keyed on wallet_id and has no
+                            # permit column, so the permit travels in the
+                            # message the way the budget-threshold alerts above
+                            # already do. threshold_amount is the only numeric
+                            # column that fits the stranded reservation; it is
+                            # not a threshold, and the alert_type is what tells
+                            # a reader which reading applies.
+                            #
+                            # From the public enum, not a bare string: every
+                            # alert read converts stored rows through
+                            # AlertType, so a type it does not name would not
+                            # merely hide this row -- it would fail the whole
+                            # listing for the wallet for as long as the row
+                            # exists, turning a visibility aid into an outage.
+                            alert_type=AlertType.PERMIT_RELEASE_CONTENDED.value,
+                            threshold_amount=amount,
+                            current_balance=model.max_credits - model.spent_credits,
+                            message=(
+                                f"Permit {permit_id}: {amount} credits stayed "
+                                f"reserved after a contended release at {site}; "
+                                f"spent_credits is inflated until the permit "
+                                f"expires."
+                            ),
+                            severity="warning",
+                        )
+                    )
+            return True
+        except Exception:
+            logger.exception(
+                "permit_release_drift_alert_failed",
+                extra={"permit_id": permit_id, "site": site},
+            )
+            return False
+
     async def release_tool_call(self, permit_id: str, tool_name: str) -> None:
         """Give back one ``max_calls_per_tool`` use consumed by a reservation.
 
@@ -1318,6 +1394,201 @@ class PermitService:
 
         return await self._run_with_write_retry(_once)
 
+    async def _consumed_credits(self, session: Any, permit_id: str) -> Decimal:
+        """Credits a permit's receipts prove it actually consumed.
+
+        The ground truth ``spent_credits`` is reconciled against. A
+        ``failed_unrefunded`` receipt counts as consumed unless its refund
+        is proven complete -- an exactly-matching refund ledger entry *and*
+        an idempotency record carrying the resolved reconciliation state --
+        so a half-finished refund is never credited back twice.
+
+        Read-only: it issues no writes and takes no locks, which is what
+        lets ``reconcile_budgets`` reuse it to *report* drift on live
+        permits it must not touch.
+        """
+        from app.db.models import (
+            IdempotencyRecordModel,
+            LedgerEntryModel,
+            ReceiptModel,
+        )
+
+        receipt_rows = (
+            await session.execute(
+                select(
+                    cast(Any, ReceiptModel.receipt_id),
+                    cast(Any, ReceiptModel.outcome),
+                    cast(Any, ReceiptModel.credits_charged),
+                    cast(Any, ReceiptModel.ledger_entry_id),
+                    cast(Any, ReceiptModel.wallet_id),
+                ).where(
+                    cast(
+                        ColumnElement[bool],
+                        ReceiptModel.permit_id == permit_id,
+                    ),
+                    cast(
+                        ColumnElement[bool],
+                        cast(Any, ReceiptModel.outcome).in_(
+                            [
+                                "success",
+                                "delivery_uncertain",
+                                "response_rejected",
+                                "failed_unrefunded",
+                            ]
+                        ),
+                    ),
+                )
+            )
+        ).all()
+        pending_ledger_ids = [
+            ledger_entry_id
+            for (
+                _receipt_id,
+                outcome,
+                _credits,
+                ledger_entry_id,
+                _wallet_id,
+            ) in receipt_rows
+            if outcome == "failed_unrefunded" and ledger_entry_id is not None
+        ]
+        exact_refunded_ledger_ids: set[str] = set()
+        if pending_ledger_ids:
+            refund_rows = (
+                await session.execute(
+                    select(
+                        cast(Any, LedgerEntryModel.entry_id),
+                        cast(Any, LedgerEntryModel.wallet_id),
+                        cast(Any, LedgerEntryModel.amount),
+                        cast(Any, LedgerEntryModel.correlation_id),
+                    ).where(
+                        cast(
+                            ColumnElement[bool],
+                            LedgerEntryModel.action == "refund",
+                        ),
+                        cast(
+                            ColumnElement[bool],
+                            cast(
+                                Any,
+                                LedgerEntryModel.correlation_id,
+                            ).in_(pending_ledger_ids),
+                        ),
+                    )
+                )
+            ).all()
+            failed_by_ledger = {
+                ledger_entry_id: (wallet_id, Decimal(str(credits)))
+                for (
+                    _receipt_id,
+                    outcome,
+                    credits,
+                    ledger_entry_id,
+                    wallet_id,
+                ) in receipt_rows
+                if outcome == "failed_unrefunded" and ledger_entry_id is not None
+            }
+            exact_refunded_ledger_ids = {
+                correlation_id
+                for entry_id, wallet_id, amount, correlation_id in refund_rows
+                if correlation_id in failed_by_ledger
+                and entry_id == f"refund-{correlation_id}"
+                and wallet_id == failed_by_ledger[correlation_id][0]
+                and Decimal(str(amount)) == failed_by_ledger[correlation_id][1]
+            }
+        failed_receipt_by_id = {
+            receipt_id: ledger_entry_id
+            for (
+                receipt_id,
+                outcome,
+                _credits,
+                ledger_entry_id,
+                _wallet_id,
+            ) in receipt_rows
+            if outcome == "failed_unrefunded"
+            and ledger_entry_id in exact_refunded_ledger_ids
+        }
+        resolved_receipt_ids: set[str] = set()
+        if failed_receipt_by_id:
+            state_rows = (
+                await session.execute(
+                    select(
+                        cast(
+                            Any,
+                            IdempotencyRecordModel.response_reference,
+                        ),
+                        cast(Any, IdempotencyRecordModel.response_json),
+                    ).where(
+                        cast(
+                            ColumnElement[bool],
+                            cast(
+                                Any,
+                                IdempotencyRecordModel.response_reference,
+                            ).in_(list(failed_receipt_by_id)),
+                        )
+                    )
+                )
+            ).all()
+            for receipt_id, response_json in state_rows:
+                try:
+                    response = json.loads(response_json or "")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                state = (
+                    response.get("refund_reconciliation")
+                    if isinstance(response, dict)
+                    else None
+                )
+                if (
+                    isinstance(state, dict)
+                    and state.get("status") == "resolved"
+                    and state.get("receipt_id") == receipt_id
+                    and state.get("ledger_entry_id") == failed_receipt_by_id[receipt_id]
+                ):
+                    resolved_receipt_ids.add(receipt_id)
+        consumed_decimal = sum(
+            (
+                Decimal(str(credits))
+                for (
+                    receipt_id,
+                    outcome,
+                    credits,
+                    _ledger_entry_id,
+                    _wallet_id,
+                ) in receipt_rows
+                if outcome in {"success", "delivery_uncertain", "response_rejected"}
+                or (
+                    outcome == "failed_unrefunded"
+                    and receipt_id not in resolved_receipt_ids
+                )
+            ),
+            Decimal("0"),
+        )
+        return consumed_decimal
+
+    @staticmethod
+    def _should_report_live_drift(permit: PermitModel, drift: Decimal) -> bool:
+        """Whether a live permit's budget drift is worth an operator line.
+
+        The policy seam for the report-only pass in ``reconcile_budgets``. It
+        is separated from the scan because the scan is a fact (what the
+        receipts say) and this is a judgement (what is worth waking someone
+        for), and the two change for different reasons.
+
+        The default reports any inflation. ``spent_credits`` should never sit
+        below what the receipts prove consumed -- a reservation is taken
+        before the receipt is written -- so a negative drift is a different
+        and more serious claim (budget enforcement bypassed, not stranded)
+        and deliberately not folded into this signal.
+
+        Cost of reporting every pass is bounded: the caller emits one
+        aggregated line per pass listing every drifting permit, not one line
+        per permit, so a permanently drifting permit costs ~288 lines a day
+        in total rather than per permit. Tighten here if that is still too
+        much -- for example, only report once the stranded amount is a
+        meaningful fraction of ``max_credits - spent_credits``, which is what
+        actually decides whether the drift can wrongly deny a call.
+        """
+        return drift > 0
+
     async def reconcile_budgets(self, *, idle_seconds: int = 900) -> int:
         """Repair budget reservations orphaned by a crash mid-invocation.
 
@@ -1343,13 +1614,12 @@ class PermitService:
         between the receipt scan and the write -- is *not* counted, is left
         exactly as found, and is re-examined on the next pass; those skips are
         logged rather than returned, so the count stays a count of writes.
-        """
-        from app.db.models import (
-            IdempotencyRecordModel,
-            LedgerEntryModel,
-            ReceiptModel,
-        )
 
+        A second, read-only pass then *reports* drift on the live permits the
+        repair must never touch, in its own session after the repair has
+        committed so no lock outlives the write it protected. It changes
+        nothing and is not counted; see the comment at the pass itself.
+        """
         # Persisted datetimes in this codebase are naive UTC (see
         # app.core.time.utc_now); the reconcile columns (expires_at,
         # updated_at, issued_at) are naive DateTime. Build the comparison
@@ -1360,6 +1630,7 @@ class PermitService:
         factory = get_session_factory()
         corrected = 0
         skipped = 0
+        reported: list[tuple[str, Decimal]] = []
         async with factory() as session:
             async with session.begin():
                 stale = (
@@ -1392,159 +1663,8 @@ class PermitService:
                     .all()
                 )
                 for permit in stale:
-                    receipt_rows = (
-                        await session.execute(
-                            select(
-                                cast(Any, ReceiptModel.receipt_id),
-                                cast(Any, ReceiptModel.outcome),
-                                cast(Any, ReceiptModel.credits_charged),
-                                cast(Any, ReceiptModel.ledger_entry_id),
-                                cast(Any, ReceiptModel.wallet_id),
-                            ).where(
-                                cast(
-                                    ColumnElement[bool],
-                                    ReceiptModel.permit_id == permit.permit_id,
-                                ),
-                                cast(
-                                    ColumnElement[bool],
-                                    cast(Any, ReceiptModel.outcome).in_(
-                                        [
-                                            "success",
-                                            "delivery_uncertain",
-                                            "response_rejected",
-                                            "failed_unrefunded",
-                                        ]
-                                    ),
-                                ),
-                            )
-                        )
-                    ).all()
-                    pending_ledger_ids = [
-                        ledger_entry_id
-                        for (
-                            _receipt_id,
-                            outcome,
-                            _credits,
-                            ledger_entry_id,
-                            _wallet_id,
-                        ) in receipt_rows
-                        if outcome == "failed_unrefunded"
-                        and ledger_entry_id is not None
-                    ]
-                    exact_refunded_ledger_ids: set[str] = set()
-                    if pending_ledger_ids:
-                        refund_rows = (
-                            await session.execute(
-                                select(
-                                    cast(Any, LedgerEntryModel.entry_id),
-                                    cast(Any, LedgerEntryModel.wallet_id),
-                                    cast(Any, LedgerEntryModel.amount),
-                                    cast(Any, LedgerEntryModel.correlation_id),
-                                ).where(
-                                    cast(
-                                        ColumnElement[bool],
-                                        LedgerEntryModel.action == "refund",
-                                    ),
-                                    cast(
-                                        ColumnElement[bool],
-                                        cast(
-                                            Any,
-                                            LedgerEntryModel.correlation_id,
-                                        ).in_(pending_ledger_ids),
-                                    ),
-                                )
-                            )
-                        ).all()
-                        failed_by_ledger = {
-                            ledger_entry_id: (wallet_id, Decimal(str(credits)))
-                            for (
-                                _receipt_id,
-                                outcome,
-                                credits,
-                                ledger_entry_id,
-                                wallet_id,
-                            ) in receipt_rows
-                            if outcome == "failed_unrefunded"
-                            and ledger_entry_id is not None
-                        }
-                        exact_refunded_ledger_ids = {
-                            correlation_id
-                            for entry_id, wallet_id, amount, correlation_id in refund_rows
-                            if correlation_id in failed_by_ledger
-                            and entry_id == f"refund-{correlation_id}"
-                            and wallet_id == failed_by_ledger[correlation_id][0]
-                            and Decimal(str(amount))
-                            == failed_by_ledger[correlation_id][1]
-                        }
-                    failed_receipt_by_id = {
-                        receipt_id: ledger_entry_id
-                        for (
-                            receipt_id,
-                            outcome,
-                            _credits,
-                            ledger_entry_id,
-                            _wallet_id,
-                        ) in receipt_rows
-                        if outcome == "failed_unrefunded"
-                        and ledger_entry_id in exact_refunded_ledger_ids
-                    }
-                    resolved_receipt_ids: set[str] = set()
-                    if failed_receipt_by_id:
-                        state_rows = (
-                            await session.execute(
-                                select(
-                                    cast(
-                                        Any,
-                                        IdempotencyRecordModel.response_reference,
-                                    ),
-                                    cast(Any, IdempotencyRecordModel.response_json),
-                                ).where(
-                                    cast(
-                                        ColumnElement[bool],
-                                        cast(
-                                            Any,
-                                            IdempotencyRecordModel.response_reference,
-                                        ).in_(list(failed_receipt_by_id)),
-                                    )
-                                )
-                            )
-                        ).all()
-                        for receipt_id, response_json in state_rows:
-                            try:
-                                response = json.loads(response_json or "")
-                            except (json.JSONDecodeError, TypeError):
-                                continue
-                            state = (
-                                response.get("refund_reconciliation")
-                                if isinstance(response, dict)
-                                else None
-                            )
-                            if (
-                                isinstance(state, dict)
-                                and state.get("status") == "resolved"
-                                and state.get("receipt_id") == receipt_id
-                                and state.get("ledger_entry_id")
-                                == failed_receipt_by_id[receipt_id]
-                            ):
-                                resolved_receipt_ids.add(receipt_id)
-                    consumed_decimal = sum(
-                        (
-                            Decimal(str(credits))
-                            for (
-                                receipt_id,
-                                outcome,
-                                credits,
-                                _ledger_entry_id,
-                                _wallet_id,
-                            ) in receipt_rows
-                            if outcome
-                            in {"success", "delivery_uncertain", "response_rejected"}
-                            or (
-                                outcome == "failed_unrefunded"
-                                and receipt_id not in resolved_receipt_ids
-                            )
-                        ),
-                        Decimal("0"),
+                    consumed_decimal = await self._consumed_credits(
+                        session, permit.permit_id
                     )
                     observed = permit.spent_credits
                     if observed != consumed_decimal:
@@ -1580,6 +1700,76 @@ class PermitService:
                         else:
                             skipped += 1
             await session.commit()
+
+        # Report-only pass over the permits the repair above must never touch.
+        # Drift on a live permit is the residual cost of the routers absorbing
+        # a contended post-effects budget release: spent_credits stays
+        # inflated by a reservation that was refunded but never handed back,
+        # so a later legitimate call can be wrongly denied
+        # permit_budget_exceeded. The repair cannot run here -- a live permit
+        # can still admit a charge, and a downward reset would open an
+        # over-spend window past max_credits -- but staying silent until
+        # expiry is what made the drift undiagnosable.
+        #
+        # Its own session, opened only after the repair has committed. The
+        # repair's transaction holds FOR UPDATE on every stale row it scanned
+        # (and, on SQLite, the database's single write lock from its first
+        # UPDATE onward), and this pass is one receipts query per live permit.
+        # Running it inside that transaction would keep those locks -- and
+        # every reservation waiting on them -- held for the length of a scan
+        # that writes nothing and needs no consistency with the repair. No
+        # with_for_update() here either: a reporting pass must not lock rows
+        # that in-flight reservations need, and the figure is advisory rather
+        # than a premise for a write, so a racing reservation costs accuracy
+        # for one pass and nothing else.
+        #
+        # Not bounded by a LIMIT. A cap would silently omit exactly the
+        # permits this pass exists to surface, which is the silence being
+        # removed, in a new place. It is bounded instead by what can drift:
+        # spent_credits > 0 excludes every idle permit that has never
+        # reserved, in practice most of them, and cannot exclude a reportable
+        # one, because consumed credits are never negative, so a zero
+        # reservation cannot sit above them. The per-permit query is
+        # deliberately the same _consumed_credits the repair uses, so the two
+        # passes cannot disagree about what "consumed" means; because it is
+        # read-only and lock-free, a large active population costs latency on
+        # this background tick, not contention with the request path.
+        async with factory() as session:
+            live = (
+                (
+                    await session.execute(
+                        select(PermitModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.status == "active",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.expires_at > now,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits > 0,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                func.coalesce(
+                                    PermitModel.updated_at, PermitModel.issued_at
+                                )
+                                < cutoff,
+                            ),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for permit in live:
+                drift = permit.spent_credits - await self._consumed_credits(
+                    session, permit.permit_id
+                )
+                if self._should_report_live_drift(permit, drift):
+                    reported.append((permit.permit_id, drift))
         if skipped:
             # A skipped permit is not a failure and needs no operator action --
             # it is re-examined on the next pass, and the guard is the whole
@@ -1593,6 +1783,22 @@ class PermitService:
             logger.info(
                 "permit_budget_reconcile_skipped",
                 extra={"skipped": skipped, "corrected": corrected},
+            )
+        if reported:
+            # Warning, not info: unlike a skip, this does not clear itself on
+            # the next pass. It persists until the permit expires, and while
+            # it persists the permit can deny a call it has the budget for.
+            # The total is the operator-facing number -- how much authorized
+            # budget is currently unspendable -- and the per-permit ids are
+            # what makes it actionable (reissue the permit, or wait out the
+            # expiry that will reclaim it).
+            logger.warning(
+                "permit_budget_live_drift",
+                extra={
+                    "permits": len(reported),
+                    "total_drift": str(sum((d for _, d in reported), Decimal("0"))),
+                    "permit_ids": [pid for pid, _ in reported],
+                },
             )
         return corrected
 

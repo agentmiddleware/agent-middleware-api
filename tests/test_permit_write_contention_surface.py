@@ -504,7 +504,13 @@ async def test_a_call_that_already_ran_is_never_told_to_retry(
 
     # The tool ran, so the contended write really is the post-effects one.
     assert runs["count"] == 1
-    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+    # The release ladder exhausts (WRITE_CONFLICT_MAX_ATTEMPTS), then the
+    # drift alert that records what the absorb stranded makes one further,
+    # unretried permit write. This harness contends every permit write, so
+    # that one loses too and is itself absorbed -- which is the property
+    # worth pinning: the write that exists to make the drift visible can
+    # never be the write that fails the request.
+    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS + 1, state
 
     # Not retryable, by status and by body: 409 is the reserve's answer and a
     # charged call must never receive it.
@@ -726,7 +732,13 @@ async def test_the_messages_surface_never_tells_a_charged_call_to_retry(
         )
 
     assert runs["count"] == 1
-    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+    # The release ladder exhausts (WRITE_CONFLICT_MAX_ATTEMPTS), then the
+    # drift alert that records what the absorb stranded makes one further,
+    # unretried permit write. This harness contends every permit write, so
+    # that one loses too and is itself absorbed -- which is the property
+    # worth pinning: the write that exists to make the drift visible can
+    # never be the write that fails the request.
+    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS + 1, state
 
     assert resp.status_code == 200, resp.text
     error = resp.json()["error"]
@@ -770,7 +782,13 @@ async def test_the_standard_surface_never_tells_a_charged_call_to_retry(
         )
 
     assert runs["count"] == 1
-    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+    # The release ladder exhausts (WRITE_CONFLICT_MAX_ATTEMPTS), then the
+    # drift alert that records what the absorb stranded makes one further,
+    # unretried permit write. This harness contends every permit write, so
+    # that one loses too and is itself absorbed -- which is the property
+    # worth pinning: the write that exists to make the drift visible can
+    # never be the write that fails the request.
+    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS + 1, state
 
     assert resp.status_code == 200, resp.text
     error = resp.json()["error"]
