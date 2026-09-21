@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-07T08:25:35.667675+00:00",
+  "generated_at": "2026-09-19T14:30:49.664923+00:00",
   "mcp_tool_count": 0,
   "mcp_tools_local": [],
   "services": [
@@ -42,6 +42,12 @@
     {
       "current_simulated": true,
       "default_simulated": true,
+      "runtime_service": "protocol_gen",
+      "settings_attribute": "SIMULATION_MODE_PROTOCOL_GEN"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
       "runtime_service": "red_team",
       "settings_attribute": "SIMULATION_MODE_RED_TEAM"
     },
@@ -50,6 +56,12 @@
       "default_simulated": true,
       "runtime_service": "rtaas",
       "settings_attribute": "SIMULATION_MODE_RTAAS"
+    },
+    {
+      "current_simulated": true,
+      "default_simulated": true,
+      "runtime_service": "sandbox",
+      "settings_attribute": "SIMULATION_MODE_SANDBOX"
     },
     {
       "current_simulated": true,
@@ -65,8 +77,10 @@
     "iot_bridge": true,
     "media_engine": true,
     "oracle": true,
+    "protocol_gen": true,
     "red_team": true,
     "rtaas": true,
+    "sandbox": true,
     "telemetry_pm": true
   }
 }
