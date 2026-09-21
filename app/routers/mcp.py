@@ -2038,6 +2038,27 @@ async def _execute_registered_tool_inner(
                     endpoint=idempotency_endpoint,
                     idempotency_key=idempotency_key,
                 )
+            except IdempotencyReleaseContendedError:
+                # The release ran out of restarts, so the record this handler
+                # set out to hand back is still in progress. Re-raising the
+                # debit contention would answer "retry this key" -- the advice
+                # this whole block exists to make actionable -- for a key that
+                # will now answer idempotency_in_progress instead.
+                #
+                # So answer with the condition the retry would actually meet,
+                # exactly as the two cleanup failures above already do. The
+                # reservation handed back a few lines up stays handed back:
+                # nothing ran and nothing was charged either way, and this
+                # changes only which true statement the caller is given.
+                logger.error(
+                    "mcp_contended_idempotency_release_exhausted",
+                    extra={
+                        "wallet_id": wallet_id,
+                        "endpoint": idempotency_endpoint,
+                        "reason": IdempotencyReleaseContendedError.reason,
+                    },
+                )
+                raise IdempotencyInProgressError("idempotency_in_progress") from None
             except Exception:
                 logger.exception(
                     "mcp_contended_idempotency_abandon_failed",

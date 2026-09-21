@@ -909,3 +909,86 @@ async def test_an_exhausted_release_raises_its_own_type_not_a_driver_error(
     # And the record really is still there, which is what makes the caller's
     # answer "in progress" rather than "retry this key".
     assert await _count_records_for("restart-release-key-3") == 1
+
+
+@pytest.mark.anyio
+async def test_a_contended_release_is_not_advertised_after_a_lost_debit_either(
+    client: AsyncClient, clean_database: None, echo_tool
+) -> None:
+    """The second unwind, which has the same contract and the same hazard.
+
+    ``except LedgerWriteContendedError`` is a separate handler from the
+    receipt/audit unwind, and its own comment states the same dependency: left
+    alone, "a caller that follows the documented advice and retries its key
+    would get idempotency_in_progress forever". It hands back the permit
+    reservation and releases the key for exactly that reason.
+
+    So a contended release there is the same defect in a second place -- the
+    -32005 names ``ledger_write_contended`` and invites a retry the record will
+    refuse -- and it takes the same answer. The block already raises
+    ``IdempotencyInProgressError`` for its two cleanup-failure cases; this is
+    the third.
+    """
+    tool_name, runs = echo_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        max_credits=10,
+        idem_key="restart-release-permit-4",
+    )
+    body = _call_body(
+        tool_name=tool_name,
+        wallet_id=ctx["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        idempotency_key="restart-release-key-4",
+    )
+
+    engine = get_agent_money()._billing_engine
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        debit = _lose_commits_during(
+            monkeypatch,
+            factory_owner=engine,
+            factory_attr="_session_factory",
+            owner=BillingEngine,
+            method_name="charge",
+            failures=None,
+        )
+        release = _lose_commits_during(
+            monkeypatch,
+            factory_owner=idempotency_module,
+            factory_attr="get_session_factory",
+            owner=IdempotencyService,
+            method_name="abandon",
+            failures=None,
+        )
+        resp = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32005, error
+    # Not the debit contention: that one advertises a retry of a key this
+    # request failed to free.
+    assert error["message"] != "ledger_write_contended", error
+    assert error["message"] == "idempotency_in_progress", error
+    assert debit["attempts"] == WRITE_CONFLICT_MAX_ATTEMPTS, debit
+    assert release["attempts"] == WRITE_CONFLICT_MAX_ATTEMPTS, release
+    assert runs["count"] == 0
+
+    # Nothing moved, and the record that makes the answer true is still there.
+    assert await _count_records_for("restart-release-key-4") == 1
+    async with get_session_factory()() as session:
+        entries = (
+            (
+                await session.execute(
+                    select(LedgerEntryModel).where(LedgerEntryModel.action == "debit")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert entries == []
