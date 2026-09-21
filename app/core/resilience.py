@@ -218,6 +218,7 @@ async def run_with_write_conflict_retry(
     *,
     on_exhausted: Callable[[BaseException], BaseException],
     max_attempts: int = WRITE_CONFLICT_MAX_ATTEMPTS,
+    restart_on: Callable[[BaseException], bool] | None = None,
 ) -> Any:
     """Run a full-transaction operation, restarting it on write conflicts.
 
@@ -229,17 +230,31 @@ async def run_with_write_conflict_retry(
     is a callable rather than a fixed class so each caller keeps its own reason
     code — the contended permit and the contended ledger debit are different
     facts about the system and a client can act differently on each.
+
+    ``restart_on`` lets the caller name one more failure as a restart. The
+    classifier only knows the driver's own conflicts, but a transaction can
+    also be invalidated by a commit the driver never objects to: a row the
+    caller resolved before opening the transaction and re-reads under lock
+    inside it may have changed in between, and the check that notices raises
+    the caller's own type. It is a predicate rather than an exception type so
+    the caller can restart on the one reason a restart cures and let every
+    other reason of the same type fail on the first attempt. A restart taken
+    this way spends the same budget and ends in the same ``on_exhausted``.
     """
     last_exc: BaseException | None = None
     for attempt in range(max_attempts):
         try:
             return await operation()
         except OperationalError as exc:
-            last_exc = exc
             if not is_retryable_write_conflict(exc):
                 raise
-            # Linear, capped: enough jitter-free spacing to let the winning
-            # writer commit, without a backoff long enough to hold the caller.
-            await asyncio.sleep(min(0.02, 0.002 * (attempt + 1)))
+            last_exc = exc
+        except Exception as exc:
+            if restart_on is None or not restart_on(exc):
+                raise
+            last_exc = exc
+        # Linear, capped: enough jitter-free spacing to let the winning
+        # writer commit, without a backoff long enough to hold the caller.
+        await asyncio.sleep(min(0.02, 0.002 * (attempt + 1)))
     assert last_exc is not None  # unreachable: max_attempts >= 1
     raise on_exhausted(last_exc)
