@@ -79,6 +79,11 @@ class AlertType(str, Enum):
     KYC_PENDING = "kyc_pending"
     KYC_REJECTED = "kyc_rejected"
     SUSPICIOUS_ACTIVITY = "suspicious_activity"
+    # Written by PermitService.record_absorbed_release_drift when a
+    # post-effects budget release lost its write and the router absorbed it.
+    # Every alert read converts stored rows through this enum, so a stored
+    # type missing here fails the whole listing for that wallet.
+    PERMIT_RELEASE_CONTENDED = "permit_release_contended"
 
 
 class KYCStatus(str, Enum):

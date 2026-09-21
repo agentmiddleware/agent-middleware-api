@@ -25,6 +25,7 @@ from app.db.models import (
     ReceiptModel,
     WalletModel,
 )
+from app.schemas.billing import AlertType
 from app.schemas.trust import PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
@@ -1194,7 +1195,14 @@ class PermitService:
                             # column that fits the stranded reservation; it is
                             # not a threshold, and the alert_type is what tells
                             # a reader which reading applies.
-                            alert_type="permit_release_contended",
+                            #
+                            # From the public enum, not a bare string: every
+                            # alert read converts stored rows through
+                            # AlertType, so a type it does not name would not
+                            # merely hide this row -- it would fail the whole
+                            # listing for the wallet for as long as the row
+                            # exists, turning a visibility aid into an outage.
+                            alert_type=AlertType.PERMIT_RELEASE_CONTENDED.value,
                             threshold_amount=amount,
                             current_balance=model.max_credits - model.spent_credits,
                             message=(
@@ -1602,6 +1610,11 @@ class PermitService:
         between the receipt scan and the write -- is *not* counted, is left
         exactly as found, and is re-examined on the next pass; those skips are
         logged rather than returned, so the count stays a count of writes.
+
+        A second, read-only pass then *reports* drift on the live permits the
+        repair must never touch, in its own session after the repair has
+        committed so no lock outlives the write it protected. It changes
+        nothing and is not counted; see the comment at the pass itself.
         """
         # Persisted datetimes in this codebase are naive UTC (see
         # app.core.time.utc_now); the reconcile columns (expires_at,
@@ -1682,54 +1695,77 @@ class PermitService:
                             corrected += 1
                         else:
                             skipped += 1
+            await session.commit()
 
-                # Report-only pass over the permits the repair above must never
-                # touch. Drift on a live permit is the residual cost of the
-                # routers absorbing a contended post-effects budget release:
-                # spent_credits stays inflated by a reservation that was
-                # refunded but never handed back, so a later legitimate call
-                # can be wrongly denied permit_budget_exceeded. The repair
-                # cannot run here -- a live permit can still admit a charge,
-                # and a downward reset would open an over-spend window past
-                # max_credits -- but staying silent until expiry is what made
-                # the drift undiagnosable.
-                #
-                # No with_for_update(): a reporting pass must not lock rows
-                # that in-flight reservations need, and the figure is advisory
-                # rather than a premise for a write, so a racing reservation
-                # costs accuracy for one pass and nothing else.
-                live = (
-                    (
-                        await session.execute(
-                            select(PermitModel).where(
-                                cast(
-                                    ColumnElement[bool],
-                                    PermitModel.status == "active",
-                                ),
-                                cast(
-                                    ColumnElement[bool],
-                                    PermitModel.expires_at > now,
-                                ),
-                                cast(
-                                    ColumnElement[bool],
-                                    func.coalesce(
-                                        PermitModel.updated_at, PermitModel.issued_at
-                                    )
-                                    < cutoff,
-                                ),
-                            )
+        # Report-only pass over the permits the repair above must never touch.
+        # Drift on a live permit is the residual cost of the routers absorbing
+        # a contended post-effects budget release: spent_credits stays
+        # inflated by a reservation that was refunded but never handed back,
+        # so a later legitimate call can be wrongly denied
+        # permit_budget_exceeded. The repair cannot run here -- a live permit
+        # can still admit a charge, and a downward reset would open an
+        # over-spend window past max_credits -- but staying silent until
+        # expiry is what made the drift undiagnosable.
+        #
+        # Its own session, opened only after the repair has committed. The
+        # repair's transaction holds FOR UPDATE on every stale row it scanned
+        # (and, on SQLite, the database's single write lock from its first
+        # UPDATE onward), and this pass is one receipts query per live permit.
+        # Running it inside that transaction would keep those locks -- and
+        # every reservation waiting on them -- held for the length of a scan
+        # that writes nothing and needs no consistency with the repair. No
+        # with_for_update() here either: a reporting pass must not lock rows
+        # that in-flight reservations need, and the figure is advisory rather
+        # than a premise for a write, so a racing reservation costs accuracy
+        # for one pass and nothing else.
+        #
+        # Not bounded by a LIMIT. A cap would silently omit exactly the
+        # permits this pass exists to surface, which is the silence being
+        # removed, in a new place. It is bounded instead by what can drift:
+        # spent_credits > 0 excludes every idle permit that has never
+        # reserved, in practice most of them, and cannot exclude a reportable
+        # one, because consumed credits are never negative, so a zero
+        # reservation cannot sit above them. The per-permit query is
+        # deliberately the same _consumed_credits the repair uses, so the two
+        # passes cannot disagree about what "consumed" means; because it is
+        # read-only and lock-free, a large active population costs latency on
+        # this background tick, not contention with the request path.
+        async with factory() as session:
+            live = (
+                (
+                    await session.execute(
+                        select(PermitModel).where(
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.status == "active",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.expires_at > now,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                PermitModel.spent_credits > 0,
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                func.coalesce(
+                                    PermitModel.updated_at, PermitModel.issued_at
+                                )
+                                < cutoff,
+                            ),
                         )
                     )
-                    .scalars()
-                    .all()
                 )
-                for permit in live:
-                    drift = permit.spent_credits - await self._consumed_credits(
-                        session, permit.permit_id
-                    )
-                    if self._should_report_live_drift(permit, drift):
-                        reported.append((permit.permit_id, drift))
-            await session.commit()
+                .scalars()
+                .all()
+            )
+            for permit in live:
+                drift = permit.spent_credits - await self._consumed_credits(
+                    session, permit.permit_id
+                )
+                if self._should_report_live_drift(permit, drift):
+                    reported.append((permit.permit_id, drift))
         if skipped:
             # A skipped permit is not a failure and needs no operator action --
             # it is re-examined on the next pass, and the guard is the whole
