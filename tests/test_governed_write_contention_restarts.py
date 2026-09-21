@@ -992,3 +992,10 @@ async def test_a_contended_release_is_not_advertised_after_a_lost_debit_either(
             .all()
         )
     assert entries == []
+
+    # And the story does not change on the retry, which is the property the
+    # answer this replaced could not offer.
+    again = await client.post("/mcp/messages", json=body, headers=ctx["agent_headers"])
+    assert again.status_code == 200, again.text
+    assert again.json()["error"]["message"] == "idempotency_in_progress", again.text
+    assert runs["count"] == 0
