@@ -31,6 +31,7 @@ of being called flaky.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -53,7 +54,9 @@ from app.db.models import (
 from app.main import app
 from app.routers.mcp import RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS
 from app.schemas.billing import ServiceCategory
+from app.services import human_approval as human_approval_module
 from app.services import receipts as receipts_module
+from app.services.human_approval import HumanApprovalService
 from app.services.receipts import ReceiptWriteContendedError, get_receipt_service
 from app.services.service_registry import get_service_registry
 from app.services.upstream_mcp import UpstreamMcpResult
@@ -194,6 +197,33 @@ async def _drain_wallet(wallet_id: str) -> None:
         ).scalar_one()
         wallet.balance = Decimal("1")
         await session.commit()
+
+
+class _ScriptedSentinel:
+    """Sentinel stand-in whose decision is set by the test.
+
+    Creating an approval always answers pending; polling answers ``status``.
+    That is the shape ``test_human_approval_gate`` drives, and it is what
+    makes a rejected approval reachable over HTTP: the first call parks the
+    key on ``human_approval_pending`` (which frees it), and the next call on
+    the same key reads the rejection.
+    """
+
+    def __init__(self) -> None:
+        self.status = "pending"
+
+    async def create_approval(self, **kwargs: Any) -> dict[str, Any]:
+        return {"action_id": f"act_{uuid.uuid4().hex[:16]}", "status": "pending"}
+
+    async def get_approval(self, action_id: str) -> dict[str, Any]:
+        payload: dict[str, Any] = {"action_id": action_id, "status": self.status}
+        if self.status in {"approved", "rejected"}:
+            payload["decided_by"] = "reviewer@example.com"
+            payload["reason"] = f"scripted {self.status}"
+        return payload
+
+    async def wait_approval(self, action_id: str, timeout: float) -> dict[str, Any]:
+        return await self.get_approval(action_id)
 
 
 class _NeverDispatchedExecutor:
@@ -878,6 +908,125 @@ async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
         # named after-effects outcome, on its own code.
         assert error["code"] == -32007, error
         assert error["message"] == RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS, error
+        assert runs["count"] == 0
+    finally:
+        get_service_registry().unregister_local(tool_name)
+
+
+@pytest.mark.anyio
+async def test_a_rejected_approval_denial_is_still_a_plain_retry(
+    client: AsyncClient, clean_database: None, monkeypatch
+) -> None:
+    """A rejected approval spent nothing, so its contended denial may retry.
+
+    The guard on the test above is keyed on *consumption*, and this is why it
+    cannot be keyed on ``approval_id``: the rejected and expired terminal path
+    carries the approval on its denial receipt as evidence too, but
+    ``HumanApprovalService._finalize`` consumes only an approved decision. A
+    rejected one left nothing spent, nothing ran and nothing was charged, so
+    this is precisely the effect-free loss the retryable answer exists for.
+
+    Getting it wrong is not cosmetic. Answering the after-effects outcome here
+    would keep the idempotency record in progress, and reconciliation does not
+    delete uncharged local records -- so the same key would never deliver the
+    real ``human_approval_rejected`` denial. The retry at the end is the
+    proof that the key was freed.
+    """
+    settings = get_settings()
+    monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", False)
+    monkeypatch.setattr(settings, "SENTINEL_API_URL", "https://sentinel.test")
+    monkeypatch.setattr(settings, "SENTINEL_API_KEY", "sk_test_" + "0" * 64)
+    monkeypatch.setattr(settings, "SENTINEL_WAIT_SECONDS", 0.0)
+    service = HumanApprovalService()
+    monkeypatch.setattr(human_approval_module, "_service", service)
+    sentinel = _ScriptedSentinel()
+    monkeypatch.setattr(service, "_sentinel", lambda: sentinel)
+
+    tool_name = "receipt-contention-rejected-approval"
+    runs = {"count": 0}
+
+    def echo(message: str = "ok") -> dict[str, Any]:
+        runs["count"] += 1
+        return {"message": message}
+
+    get_service_registry().register_local(
+        service_id=tool_name,
+        name="Receipt contention rejected approval",
+        description="Receipt write-contention surface test tool",
+        category=ServiceCategory.AGENT_COMMS,
+        func=echo,
+        credits_per_unit=TOOL_COST,
+        unit_name="call",
+    )
+    try:
+        ctx = await provision_agent_wallet(client)
+        permit_resp = await client.post(
+            "/v1/permits",
+            json={
+                "issuer_wallet_id": ctx["agent_wallet_id"],
+                "subject_wallet_id": ctx["agent_wallet_id"],
+                "subject_key_id": ctx["key_id"],
+                "allowed_tools": [tool_name],
+                "scopes": [f"tool:{tool_name}:invoke", "billing:charge"],
+                "max_credits": 10,
+                "requires_human_approval": True,
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+            },
+            headers={
+                **BOOTSTRAP_HEADERS,
+                "Idempotency-Key": "receipt-contention-permit-8",
+            },
+        )
+        assert permit_resp.status_code == 201, permit_resp.text
+        permit = permit_resp.json()
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key="receipt-contention-rejected-1",
+        )
+
+        # Park the key on a pending approval, then have the reviewer reject it.
+        pending = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+        assert pending.status_code == 200, pending.text
+        pending_error = pending.json()["error"]
+        assert pending_error["message"] == "human_approval_pending", pending_error
+        approval_id = pending_error["data"]["approval_id"]
+        sentinel.status = "rejected"
+
+        with pytest.MonkeyPatch.context() as inner:
+            _lose_receipt_commits(inner, failures=None)
+            resp = await client.post(
+                "/mcp/messages", json=body, headers=ctx["agent_headers"]
+            )
+
+        assert resp.status_code == 200, resp.text
+        error = resp.json()["error"]
+        # The effect-free answer, not the after-effects one: nothing was spent.
+        assert error["code"] == -32005, error
+        assert error["message"] == ReceiptWriteContendedError.reason, error
+        assert await _count_receipts() == 0
+        assert runs["count"] == 0
+
+        # Take the retry it advertised. It has to reach the real denial, with
+        # its evidence, which is only possible if the key was actually freed.
+        again = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+        assert again.status_code == 200, again.text
+        denial = again.json()["error"]
+        assert denial["message"] != "idempotency_in_progress", denial
+        assert denial["code"] == -32003, denial
+        assert denial["message"] == "human_approval_rejected", denial
+        receipt = denial["data"]["receipt"]
+        assert receipt["outcome"] == "denied"
+        assert receipt["approval_id"] == approval_id
+        assert receipt["credits_charged"] == "0"
+        assert await _count_receipts() == 1
         assert runs["count"] == 0
     finally:
         get_service_registry().unregister_local(tool_name)
