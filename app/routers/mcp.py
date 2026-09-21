@@ -92,6 +92,7 @@ from ..trust import (
     InvalidIdempotencyKeyError,
     decode_idempotency_key_header,
     McpGovernedAdapter,
+    PermitWriteContendedError,
     PolicyDecision,
     ReceiptWriteContendedError,
     evaluate_tool_invocation,
@@ -601,19 +602,27 @@ async def handle_messages(
             LedgerWriteContendedError,
             AuditChainContendedError,
             ReceiptWriteContendedError,
+            PermitWriteContendedError,
         ) as e:
-            # All four mean the same thing to a caller: nothing terminal was
+            # All five mean the same thing to a caller: nothing terminal was
             # recorded, retry the same idempotency key. -32005 is this
             # surface's retryable code and str(e) carries which one it was, so
             # a client can distinguish "a winner is mid-flight" from "the write
-            # lost its snapshot", "the audit chain stayed busy" or "the receipt
-            # insert did" without any of them landing as internal_error.
+            # lost its snapshot", "the audit chain stayed busy", "the receipt
+            # insert did" or "the permit write did" without any of them landing
+            # as internal_error.
             #
             # Only a refusal that ran nothing reaches here as
-            # AuditChainContendedError or ReceiptWriteContendedError: the sites
-            # that audit or receipt AFTER the tool ran and was charged
-            # deliberately re-raise their loss as a non-retryable type so a
-            # charged call is never told to try again.
+            # AuditChainContendedError, ReceiptWriteContendedError or
+            # PermitWriteContendedError: the sites that audit, receipt or
+            # release budget AFTER the tool ran and was charged deliberately
+            # re-raise their loss as a non-retryable type so a charged call is
+            # never told to try again.
+            #
+            # PermitWriteContendedError is matched, not its PermitError base:
+            # the base also carries permit_not_found,
+            # dispatch_attempt_not_found and the budget denials, none of which
+            # are retryable contention.
             return JSONResponse(
                 {
                     "jsonrpc": "2.0",
@@ -916,11 +925,20 @@ async def _execute_registered_tool(
     """Run the governed tool call, freeing the key when the answer is "retry".
 
     Only the unwind lives here; ``_execute_registered_tool_inner`` orchestrates.
-    An ``AuditChainContendedError`` or ``ReceiptWriteContendedError`` that
-    escapes it is provably pre-effect -- every audit and receipt site past the
-    charge declares ``effects_committed=True`` and converts its own loss to a
-    non-retryable type -- so the in-progress idempotency record, if one was
-    begun, holds nothing terminal.
+    An ``AuditChainContendedError``, ``ReceiptWriteContendedError`` or
+    ``PermitWriteContendedError`` that escapes it is provably pre-effect --
+    every audit and receipt site past the charge declares
+    ``effects_committed=True`` and converts its own loss to a non-retryable
+    type, and both budget releases that run past the charge absorb their own
+    contention rather than raising it -- so the in-progress idempotency
+    record, if one was begun, holds nothing terminal.
+
+    The permit type has to be here, not only in the routers' ladders. The
+    governed record is begun before the reserve is attempted, so a contended
+    reserve is exactly the case that leaves a record this invocation owns and
+    no longer needs; classifying it retryable at the edge while leaving the
+    record held would name a retry that meets ``idempotency_in_progress``
+    forever.
 
     Releasing it is what makes the retryable answer true rather than merely
     polite. Reconciliation deliberately does not delete uncharged local
@@ -953,7 +971,11 @@ async def _execute_registered_tool(
             request_payload=request_payload,
             owned_record=owned_record,
         )
-    except (AuditChainContendedError, ReceiptWriteContendedError):
+    except (
+        AuditChainContendedError,
+        ReceiptWriteContendedError,
+        PermitWriteContendedError,
+    ):
         record_id = owned_record.get("record_id")
         if record_id and wallet_id and idempotency_key:
             idem = get_idempotency_service()
@@ -2288,10 +2310,43 @@ async def _execute_registered_tool_inner(
             # correlation id and answers the sanitized internal error.
             raise RuntimeError(diagnostic_error) from refund_exc
         if governed_call and permit_model:
-            await get_permit_service().release_budget(
-                permit_model.permit_id,
-                registered_cost,
-            )
+            try:
+                await get_permit_service().release_budget(
+                    permit_model.permit_id,
+                    registered_cost,
+                )
+            except PermitWriteContendedError:
+                # Guarded for the same reason _release_local_permit_reservation
+                # guards its own half: compensation runs on a path whose real
+                # answer to the caller is the tool's failure, and a release
+                # that loses its own writes must not replace that answer with
+                # a less informative one.
+                #
+                # Letting it propagate would be worse here than at the receipt
+                # and audit sites, which re-type to TerminalRecordContendedError
+                # because their own write already failed. Nothing has failed
+                # here yet: the receipt is written further down, by
+                # _finalize_governed_denial, so propagating would *manufacture*
+                # the "effects committed, no receipt" state that type reports
+                # -- destroying the governance artifact for a call that ran in
+                # order to report a bookkeeping loss.
+                #
+                # The refund above already succeeded, so the wallet is whole
+                # and no money is indeterminate. What stays wrong is the
+                # permit's own spent_credits, left inflated by the reservation
+                # this release could not hand back.
+                #
+                # Narrower than the sibling's bare `except Exception` on
+                # purpose: only the contended write is a known, reconcilable
+                # loss. Anything else from this call is an unclassified fault
+                # and keeps its existing route to internal_error.
+                logger.exception(
+                    "mcp_release_budget_contended_after_effects",
+                    extra={
+                        "permit_id": permit_model.permit_id,
+                        "tool": tool_name,
+                    },
+                )
         audit_event = await _audit_mcp_invocation(
             effects_committed=True,
             decision=decision,
@@ -2920,7 +2975,21 @@ async def _raise_refunded_upstream_failure(
             jsonrpc_code=-32603,
         ) from refund_exc
 
-    await get_permit_service().release_dispatch_budget_once(dispatch_attempt.attempt_id)
+    try:
+        await get_permit_service().release_dispatch_budget_once(
+            dispatch_attempt.attempt_id
+        )
+    except PermitWriteContendedError:
+        # The upstream half of the guard above, and the safer of the two: this
+        # reservation is attempt-keyed and release_dispatch_budget_once is
+        # idempotent on that key, so reconciliation re-runs it from the attempt
+        # row (mcp_dispatch_reconciliation) without needing the caller.
+        # Escalating instead would skip the audit event and the receipt below
+        # for a call that already ran and was refunded.
+        logger.exception(
+            "mcp_release_dispatch_budget_contended_after_effects",
+            extra={"attempt_id": dispatch_attempt.attempt_id},
+        )
     audit_event = await _audit_mcp_invocation(
         effects_committed=True,
         decision=decision,
@@ -3305,11 +3374,32 @@ async def _finalize_governed_denial(
     except ReceiptWriteContendedError as exc:
         if effects_committed:
             raise _receipt_contention_after_effects() from exc
-        # Nothing ran and nothing was charged: the receipt service proved no
-        # row is durable, and idem.complete() below never ran, so this key
-        # holds nothing terminal. Propagated as itself so the retryable
-        # handlers can name it and, first, so the wrapper can free the
-        # idempotency record this invocation still owns.
+        if dispatch_attempt_id is not None:
+            # Remote, and already terminal: complete_pre_dispatch_failure ran
+            # before this receipt, so a durable mcp_dispatch_attempts row
+            # exists and its NOT NULL idempotency_record_id pins the record.
+            # The unwind cannot free what it advertises -- the DELETE raises on
+            # the foreign key and is only logged -- so the caller would be told
+            # to retry a key that answers idempotency_in_progress until the
+            # dispatch reconciler writes the receipt. Name that owner instead:
+            # a winner is mid-flight, which is exactly what this error means
+            # everywhere else on the dispatch path, and unlike the loss below
+            # it resolves on its own.
+            raise IdempotencyInProgressError("idempotency_in_progress") from exc
+        if approval_id is not None:
+            # A single-use human approval was consumed before this denial
+            # (HumanApprovalService._finalize), and unlike the quote released
+            # on the insufficient-funds path it is not compensated. Freeing the
+            # key would advertise a retry that cannot reproduce this call: the
+            # same key re-reads the same approval and is refused for having
+            # consumed it. That spent approval is a committed effect, so this
+            # is the after-effects outcome, not a retry the caller cannot make.
+            raise _receipt_contention_after_effects() from exc
+        # Nothing ran, nothing was charged, and nothing durable pins the key:
+        # the receipt service proved no row is durable, and idem.complete()
+        # below never ran, so this key holds nothing terminal. Propagated as
+        # itself so the retryable handlers can name it and, first, so the
+        # wrapper can free the idempotency record this invocation still owns.
         raise
     receipt_payload = _receipt_response_payload(receipt)
     await idem.complete(
@@ -3964,12 +4054,18 @@ async def invoke_tool(
         LedgerWriteContendedError,
         AuditChainContendedError,
         ReceiptWriteContendedError,
+        PermitWriteContendedError,
     ) as exc:
-        # Same four-way retryable family as /mcp/messages: the caller may
+        # Same five-way retryable family as /mcp/messages: the caller may
         # retry the same idempotency key. A pre-effect
         # ReceiptWriteContendedError that reached here without this entry fell
         # through to except Exception and answered 200 isError internal_error,
         # which a client cannot tell from an unclassified fault.
+        # PermitWriteContendedError was the same omission one write earlier --
+        # the contended permit reserve on the way in -- and is matched as its
+        # own type rather than as PermitError, whose other reasons
+        # (permit_not_found, dispatch_attempt_not_found, the budget denials)
+        # are not retryable contention and must keep falling through.
         #
         # What makes the retry safe is NOT "nothing was charged". That holds
         # for the three contention types, but IdempotencyInProgressError also
