@@ -1675,7 +1675,18 @@ class McpDispatchAttemptService:
         idle_seconds: int = 300,
         limit: int = 100,
     ) -> list[McpDispatchAttemptModel]:
-        """Return refunded terminal attempts whose reservation is still held.
+        """Return terminal attempts whose dispatch reservation is still held.
+
+        This is a *candidate* query, not a safe-to-release list, and the
+        distinction is load-bearing: the rows it returns include charged
+        attempts whose debit was never refunded -- a `failed_unrefunded`
+        receipt, or a `_finalize_terminal` that just failed inside
+        `refund_charge`. Releasing one of those would decrement
+        `spent_credits` while the ledger debit still stands and let a later
+        invoke charge past `max_credits`. The caller
+        (`DispatchReconciliationService.reconcile`) is what gates each row on
+        proof the money came back or never left; do not call this and release
+        blindly.
 
         The live path absorbs a contended ``release_dispatch_budget_once``
         rather than propagating it, because propagating would skip the audit
