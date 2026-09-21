@@ -3305,11 +3305,32 @@ async def _finalize_governed_denial(
     except ReceiptWriteContendedError as exc:
         if effects_committed:
             raise _receipt_contention_after_effects() from exc
-        # Nothing ran and nothing was charged: the receipt service proved no
-        # row is durable, and idem.complete() below never ran, so this key
-        # holds nothing terminal. Propagated as itself so the retryable
-        # handlers can name it and, first, so the wrapper can free the
-        # idempotency record this invocation still owns.
+        if dispatch_attempt_id is not None:
+            # Remote, and already terminal: complete_pre_dispatch_failure ran
+            # before this receipt, so a durable mcp_dispatch_attempts row
+            # exists and its NOT NULL idempotency_record_id pins the record.
+            # The unwind cannot free what it advertises -- the DELETE raises on
+            # the foreign key and is only logged -- so the caller would be told
+            # to retry a key that answers idempotency_in_progress until the
+            # dispatch reconciler writes the receipt. Name that owner instead:
+            # a winner is mid-flight, which is exactly what this error means
+            # everywhere else on the dispatch path, and unlike the loss below
+            # it resolves on its own.
+            raise IdempotencyInProgressError("idempotency_in_progress") from exc
+        if approval_id is not None:
+            # A single-use human approval was consumed before this denial
+            # (HumanApprovalService._finalize), and unlike the quote released
+            # on the insufficient-funds path it is not compensated. Freeing the
+            # key would advertise a retry that cannot reproduce this call: the
+            # same key re-reads the same approval and is refused for having
+            # consumed it. That spent approval is a committed effect, so this
+            # is the after-effects outcome, not a retry the caller cannot make.
+            raise _receipt_contention_after_effects() from exc
+        # Nothing ran, nothing was charged, and nothing durable pins the key:
+        # the receipt service proved no row is durable, and idem.complete()
+        # below never ran, so this key holds nothing terminal. Propagated as
+        # itself so the retryable handlers can name it and, first, so the
+        # wrapper can free the idempotency record this invocation still owns.
         raise
     receipt_payload = _receipt_response_payload(receipt)
     await idem.complete(
