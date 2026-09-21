@@ -45,7 +45,7 @@ from ..core.oidc_iga import (
     parse_enterprise_token,
     release_tool_use,
 )
-from ..trust import AuditChainContendedError
+from ..trust import AuditChainContendedError, RefundReconciliationContendedError
 from ..services.billing_engine import (
     LedgerOperationConflictError,
     LedgerWriteContendedError,
@@ -1356,6 +1356,7 @@ async def _execute_registered_tool_inner(
                 receipt_payload = await _finalize_governed_denial(
                     idem=idem,
                     effects_committed=False,
+                    approval_consumed=False,
                     permit_model=permit_model,
                     wallet_id=wallet_id,
                     key_id=auth.key_id,
@@ -1450,6 +1451,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=False,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -1541,6 +1543,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=False,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -1623,6 +1626,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=approval_check is not None,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -1706,6 +1710,7 @@ async def _execute_registered_tool_inner(
                 receipt_payload = await _finalize_governed_denial(
                     idem=idem,
                     effects_committed=False,
+                    approval_consumed=approval_check is not None,
                     permit_model=permit_model,
                     wallet_id=wallet_id,
                     key_id=auth.key_id,
@@ -1767,6 +1772,7 @@ async def _execute_registered_tool_inner(
                 receipt_payload = await _finalize_governed_denial(
                     idem=idem,
                     effects_committed=False,
+                    approval_consumed=approval_check is not None,
                     permit_model=permit_model,
                     wallet_id=wallet_id,
                     key_id=auth.key_id,
@@ -2117,6 +2123,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=approval_check is not None,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -2385,6 +2392,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=True,
+                approval_consumed=approval_check is not None,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -3044,6 +3052,7 @@ async def _raise_refunded_upstream_failure(
     receipt_payload = await _finalize_governed_denial(
         idem=idem,
         effects_committed=True,
+        approval_consumed=approval_check is not None,
         permit_model=permit_model,
         wallet_id=wallet_id,
         key_id=key_id,
@@ -3350,6 +3359,7 @@ async def _finalize_governed_denial(
     outcome: str,
     status_code: int,
     effects_committed: bool,
+    approval_consumed: bool,
     ledger_entry_id: str | None = None,
     idempotency_record_id: str | None = None,
     dispatch_attempt_id: str | None = None,
@@ -3370,6 +3380,14 @@ async def _finalize_governed_denial(
     because the receipt insert can lose a write conflict for its whole budget,
     and what that loss means to the caller depends entirely on the answer.
     Pass the value the branch's own audit call passes.
+
+    ``approval_consumed`` says whether THIS invocation spent the single-use
+    human approval named by ``approval_id``. ``approval_id`` alone cannot: a
+    rejected, expired or lost-race approval rides on the denial receipt as
+    evidence, but ``HumanApprovalService._finalize`` consumes only an approved
+    one, so that denial left nothing spent and its key may be retried. It is
+    true exactly when ``_require_human_approval`` returned, which it does
+    solely for the approval this call consumed.
     """
     if idempotency_record_id is None and idempotency_key:
         record = await idem.get_record(
@@ -3400,11 +3418,35 @@ async def _finalize_governed_denial(
     except ReceiptWriteContendedError as exc:
         if effects_committed:
             raise _receipt_contention_after_effects() from exc
-        # Nothing ran and nothing was charged: the receipt service proved no
-        # row is durable, and idem.complete() below never ran, so this key
-        # holds nothing terminal. Propagated as itself so the retryable
-        # handlers can name it and, first, so the wrapper can free the
-        # idempotency record this invocation still owns.
+        if dispatch_attempt_id is not None:
+            # Remote, and already terminal: complete_pre_dispatch_failure ran
+            # before this receipt, so a durable mcp_dispatch_attempts row
+            # exists and its NOT NULL idempotency_record_id pins the record.
+            # The unwind cannot free what it advertises -- the DELETE raises on
+            # the foreign key and is only logged -- so the caller would be told
+            # to retry a key that answers idempotency_in_progress until the
+            # dispatch reconciler writes the receipt. Name that owner instead:
+            # a winner is mid-flight, which is exactly what this error means
+            # everywhere else on the dispatch path, and unlike the loss below
+            # it resolves on its own.
+            raise IdempotencyInProgressError("idempotency_in_progress") from exc
+        if approval_consumed:
+            # This call spent a single-use human approval before the denial
+            # (HumanApprovalService._finalize), and unlike the quote released
+            # on the insufficient-funds path it is not compensated. Freeing the
+            # key would advertise a retry that cannot reproduce this call: the
+            # same key re-reads the same approval and is refused for having
+            # consumed it. That spent approval is a committed effect, so this
+            # is the after-effects outcome, not a retry the caller cannot make.
+            # Keyed on consumption, not on approval_id: a rejected or expired
+            # approval is evidence on this receipt too, but nothing was spent,
+            # and its denial is exactly the retry the branch below advertises.
+            raise _receipt_contention_after_effects() from exc
+        # Nothing ran, nothing was charged, and nothing durable pins the key:
+        # the receipt service proved no row is durable, and idem.complete()
+        # below never ran, so this key holds nothing terminal. Propagated as
+        # itself so the retryable handlers can name it and, first, so the
+        # wrapper can free the idempotency record this invocation still owns.
         raise
     receipt_payload = _receipt_response_payload(receipt)
     await idem.complete(
@@ -3442,25 +3484,48 @@ async def _finalize_unrefunded_failure(
     response_hash_override: str | None = None,
     approval_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Persist the signed failure and its exact-once operator work item."""
-    receipt, reconciliation = await get_refund_reconciliation_service().create_pending(
-        wallet_id=wallet_id,
-        endpoint=endpoint,
-        idempotency_key=idempotency_key,
-        permit_id=permit_model.permit_id,
-        key_id=key_id,
-        tool_name=tool_name,
-        request_payload=request_payload or arguments,
-        ledger_entry_id=ledger_entry_id,
-        credits_authorized=registered_cost,
-        credits_charged=credits_charged,
-        audit_event_id=audit_event_id,
-        reason=reason,
-        dispatch_attempt_id=dispatch_attempt_id,
-        response_payload=response_payload,
-        response_hash_override=response_hash_override,
-        approval_id=approval_id,
-    )
+    """Persist the signed failure and its exact-once operator work item.
+
+    Both call sites reach here having already charged the caller, run the tool
+    and failed the refund, so this is unconditionally a post-effects site --
+    unlike ``_finalize_governed_denial``, which serves both sides of the charge
+    and has to be told which one it is through ``effects_committed``.
+
+    That is also the whole of the contention handling: ``create_pending`` owns
+    one transaction and restarts it itself, and what arrives here is only the
+    exhausted case. Re-typing it at this single choke point is what carries the
+    answer to every surface -- the two call sites raise through untyped
+    ``except Exception`` bodies that do not catch what they raise, the unwind
+    in ``_execute_registered_tool`` deliberately does not catch
+    ``TerminalRecordContendedError``, and all three transports already answer
+    that type. None of those four places needs to know this path exists.
+    """
+    reconciliation_service = get_refund_reconciliation_service()
+    try:
+        receipt, reconciliation = await reconciliation_service.create_pending(
+            wallet_id=wallet_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            permit_id=permit_model.permit_id,
+            key_id=key_id,
+            tool_name=tool_name,
+            request_payload=request_payload or arguments,
+            ledger_entry_id=ledger_entry_id,
+            credits_authorized=registered_cost,
+            credits_charged=credits_charged,
+            audit_event_id=audit_event_id,
+            reason=reason,
+            dispatch_attempt_id=dispatch_attempt_id,
+            response_payload=response_payload,
+            response_hash_override=response_hash_override,
+            approval_id=approval_id,
+        )
+    except RefundReconciliationContendedError as exc:
+        # The receipt and the operator work item were lost together, so nobody
+        # downstream learns that money is owed. That is strictly worse than the
+        # losses at the other post-effects sites, and it still may not be
+        # called retryable: the charge stands and the tool already ran.
+        raise _receipt_contention_after_effects() from exc
     receipt_payload = _receipt_response_payload(receipt)
     return receipt_payload, reconciliation
 
@@ -3545,6 +3610,7 @@ async def _require_human_approval(
         receipt_payload = await _finalize_governed_denial(
             idem=idem,
             effects_committed=False,
+            approval_consumed=False,
             permit_model=permit_model,
             wallet_id=wallet_id,
             key_id=key_id,
@@ -4023,7 +4089,7 @@ async def invoke_tool(
         # moved.
         #
         # A contention loss whose effects committed does not arrive here at
-        # all: the four receipt sites and the audit site re-raise it as
+        # all: the five receipt sites and the audit site re-raise it as
         # TerminalRecordContendedError, which the next branch answers.
         raise HTTPException(
             status_code=409,

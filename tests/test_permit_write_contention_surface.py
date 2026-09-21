@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -49,11 +50,18 @@ from sqlalchemy.exc import OperationalError
 from app.core.config import get_settings
 from app.core.resilience import WRITE_CONFLICT_MAX_ATTEMPTS
 from app.db.database import get_session_factory
-from app.db.models import ReceiptModel
+from app.db.models import McpDispatchAttemptModel, ReceiptModel, WalletModel
 from app.main import app
 from app.schemas.billing import ServiceCategory
 from app.services import permits as permits_module
-from app.services.permits import PermitError, PermitWriteContendedError
+from app.services.mcp_dispatch_reconciliation import (
+    get_mcp_dispatch_reconciliation_service,
+)
+from app.services.permits import (
+    PermitError,
+    PermitWriteContendedError,
+    get_permit_service,
+)
 from app.services.service_registry import get_service_registry
 from app.services.upstream_mcp import UpstreamMcpResult, UpstreamMcpReturnedError
 from tests.test_trust_helpers import create_tool_permit, provision_agent_wallet
@@ -786,4 +794,154 @@ async def test_the_standard_surface_never_tells_a_charged_call_to_retry(
     error = resp.json()["error"]
     assert error["code"] != -32005, error
     assert error["message"] != PermitWriteContendedError.reason, error
+    assert await _count_receipts() == 1
+
+
+@pytest.mark.anyio
+async def test_a_contended_predispatch_release_still_leaves_the_retry_open(
+    client: AsyncClient, clean_database: None, failing_upstream_tool
+) -> None:
+    """The retry promised by the *pre-dispatch* release has to be real too.
+
+    The third reachable pre-effect site is the budget release in the remote
+    insufficient-funds path: the wallet cannot cover the call, the attempt is
+    driven terminal and never sent, and only then is the dispatch reservation
+    handed back. A contention loss there is classified retryable like any
+    other pre-effect loss.
+
+    But this site differs from the reserve in a way that matters. By the time
+    it runs, a durable ``mcp_dispatch_attempts`` row exists, and its
+    ``idempotency_record_id`` is a NOT NULL foreign key onto the very record
+    the unwind tries to delete. If the delete is refused the unwind only logs
+    it, and the caller is still told the loss is retryable -- so the -32005
+    would name a retry that meets ``idempotency_in_progress`` until background
+    reconciliation runs.
+
+    Asserting the code alone cannot see that. This takes the retry.
+    """
+    tool_name, dispatches = failing_upstream_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        idem_key="permit-contention-permit-7",
+    )
+
+    # The tool costs 2 credits; a balance of 1 cannot cover it, so the call is
+    # refused before dispatch and the attempt goes terminal unsent.
+    async with get_session_factory()() as session:
+        wallet = await session.get(WalletModel, ctx["agent_wallet_id"])
+        assert wallet is not None
+        wallet.balance = Decimal("1")
+        session.add(wallet)
+        await session.commit()
+
+    body = _call_body(
+        tool_name=tool_name,
+        wallet_id=ctx["agent_wallet_id"],
+        permit_id=permit["permit_id"],
+        idempotency_key="permit-contention-predispatch-1",
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        state = _lose_permit_writes(monkeypatch)
+        resp = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == -32005, error
+    assert error["message"] == PermitWriteContendedError.reason, error
+    # Nothing was dispatched and the release really did exhaust.
+    assert dispatches["count"] == 0
+    assert state["lost"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+
+    # The obligation. With the contention gone, the same key has to reach the
+    # real answer rather than a record nobody released.
+    again = await client.post("/mcp/messages", json=body, headers=ctx["agent_headers"])
+    retry_error = again.json().get("error")
+    assert retry_error is not None, again.text
+    assert retry_error["message"] != "idempotency_in_progress", retry_error
+    assert "insufficient_funds" in retry_error["message"], retry_error
+
+
+@pytest.mark.anyio
+async def test_reconciliation_still_releases_a_budget_the_live_path_absorbed(
+    client: AsyncClient, clean_database: None, failing_upstream_tool
+) -> None:
+    """Absorbing the upstream release is only safe if reconciliation finishes it.
+
+    This is the invariant the absorb broke, found by review rather than by the
+    suite. ``_compensate_returned_error`` used to skip the release whenever a
+    signed ``failed_refunded`` receipt existed, on the documented reasoning
+    that the write order is refund -> release -> audit -> receipt, so the
+    receipt *proved* the release had already happened.
+
+    Absorbing a contended release and then going on to write the receipt makes
+    that proof false: it produces a ``failed_refunded`` receipt with
+    ``budget_released_at`` still unset -- the exact state the early return
+    assumed impossible. Reconciliation then skipped the very reservation it
+    exists to give back, and the permit stayed inflated until expiry, which is
+    precisely the "reconciliation re-runs it" guarantee the absorb was
+    justified by.
+
+    So this drives the real live path to strand the reservation, then runs the
+    real reconciler over it. Reading ``budget_released_at`` instead of
+    inferring it from the receipt is what makes the second half pass.
+    """
+    tool_name, dispatches = failing_upstream_tool
+    ctx = await provision_agent_wallet(client)
+    permit = await create_tool_permit(
+        client,
+        wallet_id=ctx["agent_wallet_id"],
+        key_id=ctx["key_id"],
+        tool_name=tool_name,
+        idem_key="permit-contention-permit-8",
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _lose_permit_writes(monkeypatch)
+        resp = await client.post(
+            f"/mcp/tools/{tool_name}/invoke",
+            json=_rest_body(
+                tool_name=tool_name,
+                wallet_id=ctx["agent_wallet_id"],
+                permit_id=permit["permit_id"],
+                idempotency_key="permit-contention-reconcile-1",
+            ),
+            headers=ctx["agent_headers"],
+        )
+
+    # The live path did what it is supposed to: dispatched, refunded, absorbed
+    # the contended release, and still published the receipt.
+    assert resp.status_code == 502, resp.text
+    assert dispatches["count"] == 1
+    assert await _count_receipts() == 1
+
+    # The stranded state the absorb leaves behind.
+    async with get_session_factory()() as session:
+        attempt = (
+            (await session.execute(select(McpDispatchAttemptModel))).scalars().one()
+        )
+    assert attempt.state == "returned_error"
+    assert attempt.budget_released_at is None, "precondition: release was absorbed"
+    stranded = await get_permit_service().get_permit(permit["permit_id"])
+    assert stranded is not None
+    assert stranded.spent_credits > Decimal("0"), "precondition: reservation is held"
+
+    # Reconciliation owns it from here, which is the whole basis for absorbing.
+    await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=0)
+
+    async with get_session_factory()() as session:
+        settled = (
+            (await session.execute(select(McpDispatchAttemptModel))).scalars().one()
+        )
+    assert settled.budget_released_at is not None, "reconciliation skipped the release"
+    repaired = await get_permit_service().get_permit(permit["permit_id"])
+    assert repaired is not None
+    assert repaired.spent_credits == Decimal("0"), repaired.spent_credits
+    # It did not pay the refund or the receipt twice on the way through.
     assert await _count_receipts() == 1
