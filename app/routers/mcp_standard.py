@@ -110,7 +110,11 @@ from app.services.idempotency import (
     resolve_client_idempotency_key,
 )
 from app.services.mcp_generator import MCP_SERVER_VERSION, McpGenerator
-from app.services.permits import PermitError, get_permit_service
+from app.services.permits import (
+    PermitError,
+    PermitWriteContendedError,
+    get_permit_service,
+)
 from app.services.service_registry import get_service_registry
 from app.trust import approval_window_seconds, wallet_human_approval_required
 from app.trust.adapters import GovernedRequestInvalid
@@ -465,6 +469,22 @@ async def _governed_tools_call(
         # non-retryable type, so what arrives is a refusal that ran nothing and
         # whose idempotency record has already been released.
         raise _mcp_error(-32005, ReceiptWriteContendedError.reason) from e
+    except PermitWriteContendedError as e:
+        # The first guarded write on the way in, and the one this ladder was
+        # missing: a contended permit reserve fell past every branch here into
+        # the catch-all and answered -32603 internal_error, which a client
+        # cannot separate from an unclassified fault.
+        #
+        # Its own branch, and matched on the subclass rather than PermitError,
+        # because the base type also carries permit_not_found,
+        # dispatch_attempt_not_found and the budget denials -- catching the
+        # base here would relabel every one of those a retryable contention.
+        #
+        # Reachable on the same terms as the two losses above: the release
+        # that runs after a tool has executed and been charged converts its
+        # own contention to a non-retryable type, so what arrives here is a
+        # reserve that never ran anything.
+        raise _mcp_error(-32005, PermitWriteContendedError.reason) from e
     except TerminalRecordContendedError as e:
         # The non-retryable half of both errors above: the audit event or the
         # receipt was lost for a call that had already run or already paid.
