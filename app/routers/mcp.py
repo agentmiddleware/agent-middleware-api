@@ -3553,11 +3553,31 @@ async def _require_human_approval(
         )
         # Nothing was charged and no terminal outcome exists: free the key so
         # the same invoke can be retried once the condition clears.
-        await idem.abandon(
-            wallet_id=wallet_id,
-            endpoint=idempotency_endpoint,
-            idempotency_key=idempotency_key or "",
-        )
+        try:
+            await idem.abandon(
+                wallet_id=wallet_id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key or "",
+            )
+        except IdempotencyReleaseContendedError:
+            # The third site with this shape. HumanApprovalPendingSignal states
+            # in its own docstring that "the caller's idempotency key was
+            # released" and that the same invoke should be retried once the
+            # approval is decided -- so raising it over a record that is still
+            # in progress would describe a retry the record will refuse.
+            #
+            # The approval itself is untouched either way: this path runs
+            # before the invoke is authorized, so nothing was consumed and the
+            # condition it was waiting on is still whatever it was.
+            logger.error(
+                "mcp_contended_idempotency_release_exhausted",
+                extra={
+                    "wallet_id": wallet_id,
+                    "endpoint": idempotency_endpoint,
+                    "reason": IdempotencyReleaseContendedError.reason,
+                },
+            )
+            raise IdempotencyInProgressError("idempotency_in_progress") from None
         raise HumanApprovalPendingSignal(reason, data=data, status_code=status_code)
 
     try:

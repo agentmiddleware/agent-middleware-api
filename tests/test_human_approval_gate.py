@@ -36,7 +36,10 @@ from app.services.human_approval import (
     HumanApprovalService,
     HumanApprovalUnavailableError,
 )
+from app.core.resilience import WRITE_CONFLICT_MAX_ATTEMPTS
+from app.services import idempotency as idempotency_module
 from app.services.idempotency import (
+    IdempotencyService,
     GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
     get_idempotency_service,
 )
@@ -1187,3 +1190,59 @@ async def test_transient_create_with_different_price_gets_separate_approval(
         "20.0",
     ]
     assert len({created[0] for created in dedup.creates}) == 2, dedup.creates
+
+
+@pytest.mark.anyio
+async def test_a_contended_release_is_not_advertised_as_an_approval_retry(
+    client, clean_database, registered_tool, fresh_service, monkeypatch
+):
+    """The approval gate's release has the same contract as the two unwinds.
+
+    ``HumanApprovalPendingSignal`` says in its own docstring that "the caller's
+    idempotency key was released" and that the same invoke, with the same key,
+    should be retried once the condition clears. The test above proves that
+    promise is kept when the release lands -- Sentinel recovers and "the same
+    key proceeds instead of replaying an error".
+
+    When the release loses its whole restart budget the record survives, so
+    that promise is false: the retry meets ``idempotency_in_progress``. Before
+    the restart existed the loss was not even classified, and the driver error
+    replaced the signal with an unclassified ``internal_error``.
+
+    So the answer becomes the condition the retry will actually meet. Still
+    ``-32005``, still nothing charged, and the approval is untouched -- this
+    path runs before the invoke is authorized, so nothing was consumed.
+    """
+    import httpx
+
+    from tests.test_governed_write_contention_restarts import _lose_commits_during
+
+    _sentinel_env(monkeypatch, simulated=False)
+    fake = FakeSentinel(status="pending")
+    fake.fail_with = httpx.ConnectError("no route to sentinel")
+    monkeypatch.setattr(fresh_service, "_sentinel", lambda: fake)
+
+    provisioned = await provision_agent_wallet(client)
+    permit = await _approval_permit(client, provisioned, idem_key="contend-permit-1")
+    body = _invoke_body(provisioned, permit, "contend-invoke-1")
+
+    state = _lose_commits_during(
+        monkeypatch,
+        factory_owner=idempotency_module,
+        factory_attr="get_session_factory",
+        owner=IdempotencyService,
+        method_name="abandon",
+        failures=None,
+    )
+    down = await client.post(
+        "/mcp/messages", json=body, headers=provisioned["agent_headers"]
+    )
+
+    error = down.json()["error"]
+    assert error["code"] == -32005, error
+    # Neither the unclassified channel nor the promise the record will refuse.
+    assert error["message"] != "internal_error", error
+    assert error["message"] != "human_approval_unavailable", error
+    assert error["message"] == "idempotency_in_progress", error
+    assert state["attempts"] == WRITE_CONFLICT_MAX_ATTEMPTS, state
+    assert await _ledger_debits(client, provisioned["agent_wallet_id"]) == 0
