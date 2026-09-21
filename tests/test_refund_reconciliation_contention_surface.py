@@ -52,9 +52,17 @@ from sqlalchemy.exc import OperationalError
 from app.core.config import get_settings
 from app.core.resilience import WRITE_CONFLICT_MAX_ATTEMPTS
 from app.db.database import get_session_factory
-from app.db.models import IdempotencyRecordModel, ReceiptModel
+from app.core.time import utc_now
+from app.db.models import (
+    IdempotencyRecordModel,
+    ReceiptModel,
+    SigningKeyModel,
+)
 from app.main import app
-from app.routers.mcp import RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS
+from app.routers.mcp import (
+    INTERNAL_ERROR_MESSAGE,
+    RECEIPT_WRITE_CONTENDED_AFTER_EFFECTS,
+)
 from app.schemas.billing import ServiceCategory
 from app.services import refund_reconciliation as reconciliation_module
 from app.services.refund_reconciliation import RefundReconciliationContendedError
@@ -111,6 +119,39 @@ def exploding_tool():
         get_service_registry().unregister_local(TOOL_NAME)
 
 
+@pytest.fixture
+async def restore_signing_keys():
+    """Put the ``signing_keys`` table back exactly as the test found it.
+
+    ``clean_database`` truncates the fifteen tables a governed call touches but
+    deliberately leaves ``signing_keys`` alone, since the active key is process
+    setup rather than per-test data. A test that retires a key therefore leaks
+    it into every test that runs after it in the same session -- including ones
+    verifying historical trust artifacts, which fail for a reason that has
+    nothing to do with what they assert.
+    """
+
+    async def _snapshot() -> list[tuple[str, str, Any, Any]]:
+        async with get_session_factory()() as session:
+            keys = (await session.execute(select(SigningKeyModel))).scalars().all()
+            return [(k.key_id, k.status, k.activated_at, k.retired_at) for k in keys]
+
+    before = await _snapshot()
+    try:
+        yield
+    finally:
+        async with get_session_factory()() as session:
+            for key_id, status, activated_at, retired_at in before:
+                key = await session.get(SigningKeyModel, key_id)
+                if key is None:
+                    continue
+                key.status = status
+                key.activated_at = activated_at
+                key.retired_at = retired_at
+                session.add(key)
+            await session.commit()
+
+
 class _ContendedTransaction:
     """Wraps one ``session.begin()`` so its COMMIT loses a write conflict.
 
@@ -126,10 +167,17 @@ class _ContendedTransaction:
     something easier than the real thing.
     """
 
-    def __init__(self, inner: Any, state: dict[str, int], failures: int | None):
+    def __init__(
+        self,
+        inner: Any,
+        state: dict[str, int],
+        failures: int | None,
+        on_failure: Any = None,
+    ):
         self._inner = inner
         self._state = state
         self._failures = failures
+        self._on_failure = on_failure
 
     async def __aenter__(self) -> Any:
         return await self._inner.__aenter__()
@@ -145,11 +193,15 @@ class _ContendedTransaction:
         # load-bearing rather than decoration.
         lost = OperationalError("COMMIT", {}, Exception("database is locked"))
         await self._inner.__aexit__(type(lost), lost, None)
+        if self._on_failure is not None:
+            # Runs after the rollback, so the next attempt sees the change
+            # exactly as a concurrent writer committing between attempts.
+            self._state["retired"] = await self._on_failure()
         raise lost
 
 
 def _lose_reconciliation_commits(
-    monkeypatch, *, failures: int | None
+    monkeypatch, *, failures: int | None, on_failure: Any = None
 ) -> dict[str, int]:
     """Make ``create_pending``'s own transaction lose write conflicts.
 
@@ -162,9 +214,12 @@ def _lose_reconciliation_commits(
     ``failures`` is how many COMMITs lose before one is allowed through.
     ``None`` loses every time, which is the only way to reach the exhaustion
     branch without waiting on a real race.
+
+    ``on_failure`` runs after a lost commit rolls back, which is how a test
+    stages a concurrent writer landing between two attempts.
     """
     real_get_session_factory = reconciliation_module.get_session_factory
-    state = {"commits": 0}
+    state = {"commits": 0, "retired": 0}
 
     def patched_get_session_factory():
         maker = real_get_session_factory()
@@ -174,7 +229,9 @@ def _lose_reconciliation_commits(
             real_begin = session.begin
 
             def flaky_begin(*a: Any, **k: Any):
-                return _ContendedTransaction(real_begin(*a, **k), state, failures)
+                return _ContendedTransaction(
+                    real_begin(*a, **k), state, failures, on_failure
+                )
 
             session.begin = flaky_begin  # type: ignore[method-assign]
             return session
@@ -303,6 +360,81 @@ async def test_a_contended_pending_refund_is_restarted_until_it_lands(
     assert items[0]["receipt_id"] == data["receipt"]["receipt_id"], items[0]
     assert Decimal(items[0]["credits"]) == Decimal("2"), items[0]
     # The hazard the restart protects is real: the tool did run, once.
+    assert runs["count"] == 1
+
+
+@pytest.mark.anyio
+async def test_a_key_retired_between_attempts_does_not_strand_the_restart(
+    client: AsyncClient, clean_database: None, exploding_tool, restore_signing_keys
+) -> None:
+    """The restart resolves the active signing key per attempt, not once.
+
+    A key resolved before the loop can retire during it. ``create_receipt``
+    revalidates a prepared key under a row lock and rejects a retired one with
+    ``signing_key_not_active`` -- a ``SigningKeyError``, which is not an
+    ``OperationalError``. So a stale key would not be retried by
+    ``run_with_write_conflict_retry``, would never reach ``on_exhausted``, and
+    would arrive at routers that have no handler for it: the unclassified
+    ``internal_error``, with the receipt and the work item both lost, which is
+    the exact failure this module exists to remove.
+
+    Rotation is forced between attempts rather than raced, so the ordering is
+    the test's rather than the scheduler's: the key is retired at the moment
+    the first commit is lost.
+    """
+    _tool_name, runs = exploding_tool
+    case = await _setup(client, idem_suffix="rotate")
+    ctx = case["ctx"]
+    body = _call_body(
+        wallet_id=ctx["agent_wallet_id"],
+        permit_id=case["permit"]["permit_id"],
+        idempotency_key="refund-contention-rotate",
+    )
+
+    async def _retire_active_keys() -> int:
+        async with get_session_factory()() as session:
+            keys = (await session.execute(select(SigningKeyModel))).scalars().all()
+            for key in keys:
+                key.status = "retired"
+                key.retired_at = utc_now()
+                session.add(key)
+            await session.commit()
+            return len(keys)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        state = _lose_reconciliation_commits(
+            monkeypatch, failures=1, on_failure=_retire_active_keys
+        )
+        with patch(
+            "app.services.agent_money.AgentMoney.refund_charge", _failing_refund
+        ):
+            resp = await client.post(
+                "/mcp/messages", json=body, headers=ctx["agent_headers"]
+            )
+
+    # The rotation actually happened, so the assertions below are load-bearing.
+    assert state["retired"] >= 1, state
+    assert state["commits"] == 2, state
+
+    assert resp.status_code == 200, resp.text
+    error = resp.json()["error"]
+    # A recorded pending refund and an unclassified failure share the -32603
+    # code, so the code alone cannot tell them apart. What separates them is
+    # that this one names the real reason and carries the evidence, where the
+    # stale-key failure would have answered an opaque internal_error with a
+    # bare correlation id and nothing written.
+    assert error["message"] != INTERNAL_ERROR_MESSAGE, error
+    assert "signing_key_not_active" not in str(error), error
+    data = error["data"]
+    assert data["receipt"]["outcome"] == "failed_unrefunded", data
+    assert data["refund_reconciliation"]["status"] == "pending", data
+
+    # The debt is recorded exactly once, signed under a key that was active
+    # when the attempt that landed ran.
+    assert await _count_receipts() == 1
+    items = await _work_items()
+    assert len(items) == 1, items
+    assert items[0]["status"] == "pending", items[0]
     assert runs["count"] == 1
 
 
