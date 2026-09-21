@@ -109,7 +109,7 @@ async def test_an_absorbed_release_records_the_credits_it_stranded(
     ``failures`` is bounded to the release ladder exactly, so the release
     exhausts and is absorbed while the alert write that follows it lands. That
     ordering is the test: the alert is written from inside the absorbing
-    ``except``, after the release has definitively lost.
+    except block, after the release has definitively lost.
     """
     tool_name, runs = failing_tool
     ctx = await provision_agent_wallet(client)
@@ -157,7 +157,7 @@ async def test_a_lost_drift_alert_never_fails_the_call_it_reports_on(
 ) -> None:
     """The alert write is best-effort, and must stay that way.
 
-    It runs from inside the absorbing ``except``, *before* the receipt the
+    It runs from inside the absorbing except block, *before* the receipt the
     absorb exists to protect has been written. An observability write that
     could propagate would re-create precisely the failure the absorb prevents
     -- so here every permit write loses, including the alert's own, and the

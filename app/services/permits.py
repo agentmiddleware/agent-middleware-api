@@ -1164,11 +1164,11 @@ class PermitService:
         Until now the only trace was a log line.
 
         This is deliberately best-effort and **never raises**. It is called
-        from inside the absorbing ``except``, immediately before the receipt
+        from inside the absorbing except block, immediately before the receipt
         write it exists to protect; an observability write that could fail the
         request would re-create precisely the failure that absorb prevents. A
         lost alert costs visibility, and ``reconcile_budgets`` still reports
-        the drift from the permit row itself. Hence the bare ``except`` here,
+        the drift from the permit row itself. Hence the bare except here,
         against the narrow one at the call site: there, only a contended write
         is a known-reconcilable loss, while here *nothing* may escape.
 
