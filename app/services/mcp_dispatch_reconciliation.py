@@ -198,6 +198,26 @@ class McpDispatchReconciliationService:
             limit=limit,
         )
         for attempt in unreleased:
+            if attempt.attempt_id in processed:
+                continue
+            # Release only against durable proof that the money came back, or
+            # that it never left. The query cannot express this: a
+            # returned_error attempt whose refund failed earlier in this very
+            # sweep still matches `budget_released_at IS NULL`, and handing
+            # its reservation back while the debit stands would cut
+            # spent_credits below what the wallet actually paid -- letting the
+            # next call spend past max_credits. That over-spend is the
+            # opposite failure from the stranded reservation this sweep exists
+            # to repair, and the worse of the two.
+            #
+            # A missing operation debit means the call was refused before it
+            # was ever charged (the pre-dispatch insufficient-funds path),
+            # which still holds a reservation and is safe to give back.
+            # Anything with a live, unrefunded debit belongs to the
+            # compensation path, not here.
+            if attempt.debit_refunded_at is None:
+                if await self._find_operation_debit(attempt) is not None:
+                    continue
             try:
                 if await self._permits.release_dispatch_budget_once(attempt.attempt_id):
                     budget_released += 1
