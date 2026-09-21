@@ -11,6 +11,7 @@ from packaging.version import Version
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 SECURITY_FLOORS = {
+    "anyio": "4.14.2",
     "cryptography": "50.0.0",
     "mcp": "1.28.1",
     "pydantic-settings": "2.14.2",
@@ -50,7 +51,7 @@ def test_runtime_manifest_enforces_advisory_policy() -> None:
     # Keep ChromaDB out while the repository alert reports no patched release.
     assert "chromadb" not in requirements
 
-    for package in ("cryptography", "mcp", "pydantic-settings"):
+    for package in ("anyio", "cryptography", "mcp", "pydantic-settings"):
         _assert_security_floor(requirements[package], SECURITY_FLOORS[package])
 
 
@@ -64,7 +65,7 @@ def test_optional_extras_cannot_resolve_known_vulnerable_versions() -> None:
     assert extras["rag"] == []
 
     mcp_requirements = _requirements_from_lines(extras["mcp"])
-    for package in ("mcp", "pydantic-settings"):
+    for package in ("anyio", "mcp", "pydantic-settings"):
         _assert_security_floor(mcp_requirements[package], SECURITY_FLOORS[package])
 
     webauthn_requirements = _requirements_from_lines(extras["webauthn"])
