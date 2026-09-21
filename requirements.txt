@@ -28,7 +28,7 @@ redis>=8.1.0            # Redis-backed rate limiting and runtime persistence
 asyncpg>=0.31.0         # PostgreSQL-backed runtime persistence
 greenlet>=3.5.6         # SQLAlchemy async engine support
 stripe>=15.6.1           # Stripe payment processing
-mcp>=1.29.0,<2         # MCP SDK; >=1.29.0 provides the pre-parse request-body guard used by public/partner transports; <2 guards v1 internals (mcp 2.x renamed McpError and broke collection)
+mcp>=1.29.0,<3         # MCP SDK; >=1.29.0 provides the pre-parse request-body guard used by public/partner transports; <2 guards v1 internals (mcp 2.x renamed McpError and broke collection)
 
 # --- Database ---
 sqlmodel>=0.0.42        # SQLAlchemy + Pydantic hybrid ORM
