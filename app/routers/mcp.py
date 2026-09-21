@@ -1495,9 +1495,6 @@ async def _execute_registered_tool_inner(
         if origin_domain != permit_model.recipient_domain:
             audit_event = await _audit_mcp_invocation(
                 effects_committed=False,
-                consumed_approval_id=(
-                    approval_check.approval_id if approval_check else None
-                ),
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1576,9 +1573,6 @@ async def _execute_registered_tool_inner(
                 reason = "upstream_prepare_failed"
                 audit_event = await _audit_mcp_invocation(
                     effects_committed=False,
-                    consumed_approval_id=(
-                        approval_check.approval_id if approval_check else None
-                    ),
                     decision=decision,
                     endpoint=endpoint,
                     transport=transport,
@@ -1635,9 +1629,6 @@ async def _execute_registered_tool_inner(
         if not permit_validation.allowed:
             audit_event = await _audit_mcp_invocation(
                 effects_committed=False,
-                consumed_approval_id=(
-                    approval_check.approval_id if approval_check else None
-                ),
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1738,9 +1729,6 @@ async def _execute_registered_tool_inner(
             await _release_iga_use(iga_granted_use, tool_name, reason=reason)
             await _audit_mcp_invocation(
                 effects_committed=False,
-                consumed_approval_id=(
-                    approval_check.approval_id if approval_check else None
-                ),
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1894,9 +1882,6 @@ async def _execute_registered_tool_inner(
         try:
             await _audit_mcp_invocation(
                 effects_committed=False,
-                consumed_approval_id=(
-                    approval_check.approval_id if approval_check else None
-                ),
                 decision=decision,
                 endpoint=endpoint,
                 transport=transport,
@@ -1985,9 +1970,6 @@ async def _execute_registered_tool_inner(
             await _release_iga_use(iga_granted_use, tool_name, reason=denial_reason)
         audit_event = await _audit_mcp_invocation(
             effects_committed=False,
-            consumed_approval_id=(
-                approval_check.approval_id if approval_check else None
-            ),
             decision=decision,
             endpoint=endpoint,
             transport=transport,
@@ -3580,7 +3562,6 @@ async def _audit_mcp_invocation(
     effects_committed: bool,
     extra_metadata: dict[str, Any] | None = None,
     dispatch_attempt: Any | None = None,
-    consumed_approval_id: str | None = None,
 ) -> Any:
     """Write the invocation's audit event, answering contention by what ran.
 
@@ -3594,15 +3575,11 @@ async def _audit_mcp_invocation(
     loop alone left the upstream helpers and the local refund-success path free
     to hand a caller who had already run and paid a "retry".
 
-    "No" is necessary but not sufficient, which is what ``dispatch_attempt`` and
-    ``consumed_approval_id`` answer for. A retryable loss is unwound by
-    ``_execute_registered_tool``, which frees the idempotency record so the
-    -32005 names a retry the caller can actually make; both of those say that
-    this call left something behind which makes that release impossible or the
-    retry unreproducible. ``consumed_approval_id`` is passed rather than read
-    off ``extra_metadata`` because the metadata's ``approval_id`` is also
-    written on the ``human_approval_pending`` path, where the approval is *not*
-    consumed and the retry is real.
+    "No" is necessary but not sufficient, which is what ``dispatch_attempt``
+    answers for. A retryable loss is unwound by ``_execute_registered_tool``,
+    which frees the idempotency record so the -32005 names a retry the caller
+    can actually make -- and a durable dispatch attempt makes that release
+    impossible, because its NOT NULL foreign key pins the record.
     """
     record_audit(
         "mcp.invoke",
@@ -3660,21 +3637,21 @@ async def _audit_mcp_invocation(
                 # three ladders, and the unwind does not catch it, so nothing
                 # attempts the impossible delete.
                 raise IdempotencyInProgressError("idempotency_in_progress") from exc
-            if consumed_approval_id is not None:
-                # A single-use human approval was consumed before this refusal
-                # (HumanApprovalService._finalize), and unlike the quote
-                # released on the insufficient-funds path it is not
-                # compensated. Freeing the key would advertise a retry that
-                # cannot reproduce this call: the same key re-reads the same
-                # approval and is refused for having consumed it. An
-                # unclassified loss is the honest answer; a retry the caller
-                # cannot make is not. Its own reason so a consumed approval is
-                # distinguishable from a charge in the log.
-                raise RuntimeError(
-                    "mcp_audit_chain_contended_after_approval_consumed"
-                ) from exc
             # Nothing ran, nothing was charged, and nothing durable pins the
             # key, so the unwind can release the record this invocation owns.
+            #
+            # A single-use human approval spent earlier on this path is NOT a
+            # reason to withhold that release. The retry does re-read the
+            # consumed approval and is refused -- but that refusal is
+            # human_approval_consumed, a signed and receipted terminal denial,
+            # so the retry reaches an answer. Keeping the key instead would
+            # strand it: an uncharged local record matches no
+            # reconcile_stuck_records pass (the orphaned-local pass adopts a
+            # row only on proof of a committed debit, and there is none when
+            # the charge is what refused), so every later use of that key would
+            # answer idempotency_in_progress forever, with no receipt, no audit
+            # event and no manual-review count. An accurate retryable answer
+            # that terminates beats an unclassified one that wedges.
             raise
         # The call already ran or the wallet already moved, so "retry" would
         # invite a second execution of something the caller has paid for. It

@@ -30,15 +30,23 @@ deliberately does not delete uncharged local records, so a record left in
 progress would meet every retry of that key with ``idempotency_in_progress``
 forever.
 
-That obligation is what the last two tests pin, because "nothing ran" is not on
-its own enough to make the release possible. A remote refusal has already
-driven its dispatch attempt terminal, and ``mcp_dispatch_attempts`` pins the
-record by a NOT NULL foreign key, so the release cannot happen at all; a call
-behind a human-approval gate has already spent a single-use approval, so the
-release happens but the retry it advertises re-reads a consumed approval and
-lands in a different denial. Each therefore answers with something true of
-itself instead -- the reconciler that owns the record, or the unclassified
-loss -- and neither weakens the rule above.
+That obligation is what the last two tests pin, from both sides.
+
+A remote refusal has already driven its dispatch attempt terminal, and
+``mcp_dispatch_attempts`` pins the record by a NOT NULL foreign key, so the
+release cannot happen at all -- the unwind's DELETE raises and is only logged.
+There the retryable answer has to name the reconciler that owns the record
+instead of a retry of the key.
+
+A local refusal behind a human-approval gate is the opposite, and is why the
+retryable answer is kept there rather than withheld. The single-use approval is
+spent, so the retry is refused -- but refused with a signed, receipted
+human_approval_consumed denial, which is a terminal answer. Withholding the
+release to avoid "advertising" that retry would strand the key instead: an
+uncharged local record matches no ``reconcile_stuck_records`` pass, so every
+later use of it would answer ``idempotency_in_progress`` forever, with no
+receipt and no manual-review count. The second request is asserted, not just
+the first, because that is where the difference shows.
 """
 
 from __future__ import annotations
@@ -649,20 +657,27 @@ async def test_a_terminal_dispatch_chain_is_not_advertised_as_a_plain_retry(
 
 
 @pytest.mark.anyio
-async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
+async def test_a_consumed_approval_still_reaches_a_terminal_answer(
     client: AsyncClient, clean_database: None, monkeypatch
 ) -> None:
-    """A single-use approval is spent before the denial, so retry is a lie.
+    """A spent approval does not make the retryable answer a lie.
 
     ``HumanApprovalService._finalize`` consumes the approval so it authorizes
-    exactly one invoke, and that happens well before a pre-dispatch failure like
-    insufficient funds is audited. The quote consumed on this same path is
-    handed back (``QuoteService.release``); the approval is not.
+    exactly one invoke, well before a pre-dispatch failure like insufficient
+    funds is audited, and unlike the quote released on that same path
+    (``QuoteService.release``) it is not compensated. It is tempting to read
+    that as "no retry can reproduce this call, so do not advertise one" and
+    withhold the release.
 
-    So freeing the key and answering ``audit_chain_head_contention`` would send
-    the caller into a *different* denial -- the same key re-reads the same
-    approval and is refused for having consumed it. The unclassified envelope is
-    the honest answer, and the caller must not be told to retry.
+    That reading is wrong, and this test is the guard on not taking it. The
+    retry is refused -- but refused *terminally*, with a signed
+    human_approval_consumed receipt, so the key resolves. Withholding the
+    release would strand it instead: the record is local and uncharged (the
+    charge refusing is why this path was reached at all), and
+    ``reconcile_stuck_records`` adopts a local row only on proof of a committed
+    debit, so no pass would ever touch it. Every later use of that key would
+    answer ``idempotency_in_progress`` forever, with no receipt, no audit event
+    and no manual-review count -- the same false retry, made permanent.
     """
     settings = get_settings()
     monkeypatch.setattr(settings, "SIMULATION_MODE_HUMAN_APPROVAL", True)
@@ -699,27 +714,51 @@ async def test_a_consumed_approval_is_not_advertised_as_a_plain_retry(
         )
         assert permit["requires_human_approval"] is True
         await _drain_wallet(ctx["agent_wallet_id"])
+        body = _call_body(
+            tool_name=tool_name,
+            wallet_id=ctx["agent_wallet_id"],
+            permit_id=permit["permit_id"],
+            idempotency_key="audit-contention-approval-1",
+        )
 
         _always_contended(monkeypatch)
         resp = await client.post(
-            "/mcp/messages",
-            json=_call_body(
-                tool_name=tool_name,
-                wallet_id=ctx["agent_wallet_id"],
-                permit_id=permit["permit_id"],
-                idempotency_key="audit-contention-approval-1",
-            ),
-            headers=ctx["agent_headers"],
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
         )
         monkeypatch.undo()
 
         assert resp.status_code == 200, resp.text
         error = resp.json()["error"]
-        # Not the retryable envelope: the approval this call spent cannot be
-        # spent again, so "retry the same key" is not an answer.
-        assert error["code"] != -32005, error
-        assert error["message"] != audit_chain.AuditChainContendedError.reason, error
-        assert error["message"] != "idempotency_in_progress", error
+        assert error["message"] != "internal_error", error
+        assert error["code"] == -32005, error
+        assert runs["count"] == 0
+
+        # The key was released, so the retry is not met by its own predecessor.
+        idem = get_idempotency_service()
+        assert (
+            await idem.get_record(
+                wallet_id=ctx["agent_wallet_id"],
+                endpoint=GOVERNED_MCP_IDEMPOTENCY_ENDPOINT,
+                idempotency_key="audit-contention-approval-1",
+            )
+            is None
+        ), "the key was stranded in progress"
+
+        # Take the retry the -32005 named. The spent approval refuses it, and
+        # that refusal is the terminal, signed answer -- not another -32005.
+        again = await client.post(
+            "/mcp/messages", json=body, headers=ctx["agent_headers"]
+        )
+        assert again.status_code == 200, again.text
+        retry_error = again.json()["error"]
+        assert retry_error["message"] != "idempotency_in_progress", retry_error
+        assert retry_error["code"] != -32005, retry_error
+        assert retry_error["message"] == "human_approval_consumed", retry_error
+        receipt = retry_error["data"]["receipt"]
+        assert receipt["outcome"] == "denied", receipt
+        assert receipt["reason_code"] == "human_approval_consumed", receipt
+        assert receipt["credits_charged"] == "0", receipt
+        assert receipt["signature"], receipt
         assert runs["count"] == 0
     finally:
         get_service_registry().unregister_local(tool_name)
