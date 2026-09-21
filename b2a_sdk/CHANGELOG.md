@@ -50,6 +50,11 @@ change — `python-sdk-v0.5.0` is still a release decision.
   `verify` extra (`pip install './b2a_sdk[verify]'`); without it,
   `GovernedEdgeSession.open()` raises
   `PermitDeniedError("permit_verification_unavailable")`.
+- **`mcp` extra**: `pip install './b2a_sdk[mcp]'` installs the MCP SDK for
+  `python -m b2a_sdk.mcp serve` and the generated standalone server, bounded
+  to `>=1.29.0,<2` to match the application. mcp 2.x renamed `FastMCP` to
+  `MCPServer`, which both paths import. The import-error hints now name the
+  bound (or the extra) instead of an unbounded `pip install mcp`.
 
 ### Fixed
 
