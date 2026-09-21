@@ -56,9 +56,7 @@ def spt_stub(monkeypatch):
     """Stub the outbound SPT charge; records every call it receives."""
     calls: list[dict[str, Any]] = []
 
-    async def _fake_charge(
-        self, *, spt_token, amount_minor, currency, idempotency_key
-    ):
+    async def _fake_charge(self, *, spt_token, amount_minor, currency, idempotency_key):
         calls.append(
             {
                 "spt_token": spt_token,
@@ -74,9 +72,7 @@ def spt_stub(monkeypatch):
             "currency": currency,
         }
 
-    monkeypatch.setattr(
-        StripeIntegration, "charge_shared_payment_token", _fake_charge
-    )
+    monkeypatch.setattr(StripeIntegration, "charge_shared_payment_token", _fake_charge)
     return calls
 
 
@@ -176,8 +172,7 @@ async def test_acp_checkout_end_to_end(client, spt_stub, clean_database):
     assert spt_stub[0]["amount_minor"] == 50
     assert spt_stub[0]["currency"] == "usd"
     assert (
-        spt_stub[0]["idempotency_key"]
-        == f"acp-intent-e2e-1:{ctx['agent_wallet_id']}"
+        spt_stub[0]["idempotency_key"] == f"acp-intent-e2e-1:{ctx['agent_wallet_id']}"
     )
 
     # The permit carries the exact v2 bounds the checkout was translated to.
@@ -380,9 +375,7 @@ async def test_acp_checkout_exceeding_wallet_balance_rejected(
     body = checkout_body(
         "intent-overrun-1", quantity=1, unit_amount=101, client_total=101
     )
-    resp = await client.post(
-        checkout_url(ctx), json=body, headers=ctx["agent_headers"]
-    )
+    resp = await client.post(checkout_url(ctx), json=body, headers=ctx["agent_headers"])
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"]["error"] == "permit_budget_exceeds_wallet_balance"
 
@@ -512,14 +505,10 @@ async def test_acp_spt_failure_releases_budget_and_persists_no_receipt(
             "currency": currency,
         }
 
-    monkeypatch.setattr(
-        StripeIntegration, "charge_shared_payment_token", _flaky_charge
-    )
+    monkeypatch.setattr(StripeIntegration, "charge_shared_payment_token", _flaky_charge)
 
     body = checkout_body("intent-fail-1")
-    resp = await client.post(
-        checkout_url(ctx), json=body, headers=ctx["agent_headers"]
-    )
+    resp = await client.post(checkout_url(ctx), json=body, headers=ctx["agent_headers"])
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "acp_spt_charge_failed"
 
@@ -678,9 +667,7 @@ async def test_acp_processing_stripe_status_fails_without_cancel_attempt(
     failures = [e for e in events if e.event == "acp_checkout_charge_failed"]
     assert len(failures) == 1
     assert failures[0].metadata["payment_intent_cancel"] == "not_cancelable"
-    assert (
-        failures[0].metadata["stripe_payment_intent_id"] == "pi_acp_processing"
-    )
+    assert failures[0].metadata["stripe_payment_intent_id"] == "pi_acp_processing"
     assert failures[0].metadata["stripe_payment_status"] == "processing"
 
 
@@ -838,7 +825,7 @@ async def test_acp_permit_error_at_reserve_frees_the_intent_id(
     surfaced as a typed ACPBridgeError AND abandons the begun idempotency
     record — the immediate same-intent retry re-runs instead of being wedged
     on acp_intent_in_progress until the 300s stale-recovery window."""
-    from app.services.permits import PermitError, PermitService
+    from app.services.permits import PermitService, PermitWriteContendedError
 
     ctx = await provision_agent_wallet(client)
     adapter = get_acp_commerce_adapter()
@@ -852,7 +839,7 @@ async def test_acp_permit_error_at_reserve_frees_the_intent_id(
     original_reserve = PermitService.authorize_and_reserve
 
     async def _contended(self, **reserve_kwargs):
-        raise PermitError("permit_write_contended")
+        raise PermitWriteContendedError()
 
     monkeypatch.setattr(PermitService, "authorize_and_reserve", _contended)
     with pytest.raises(ACPBridgeError) as failed:
@@ -862,9 +849,7 @@ async def test_acp_permit_error_at_reserve_frees_the_intent_id(
 
     # The record was abandoned, so the retry re-runs and settles — it does
     # NOT die on acp_intent_in_progress.
-    monkeypatch.setattr(
-        PermitService, "authorize_and_reserve", original_reserve
-    )
+    monkeypatch.setattr(PermitService, "authorize_and_reserve", original_reserve)
     settled = await adapter.execute_checkout(request, **kwargs)
     assert settled.status == "settled"
     assert len(spt_stub) == 1
@@ -913,16 +898,12 @@ async def test_acp_rollback_release_failure_neither_masks_nor_skips_abandon(
     assert len(spt_stub) == 1
 
     # Restore original services and backdate the record for stale recovery.
-    monkeypatch.setattr(
-        ReceiptService, "create_receipt", original_create_receipt
-    )
+    monkeypatch.setattr(ReceiptService, "create_receipt", original_create_receipt)
     monkeypatch.setattr(PermitService, "release_budget", original_release)
 
     # The stale recovery allows the retry to proceed (no immediate retry due to
     # ledger_entry_id protection from the security fix).
-    await _backdate_intent_record(
-        "intent-rollbk-1", wallet_id=ctx["agent_wallet_id"]
-    )
+    await _backdate_intent_record("intent-rollbk-1", wallet_id=ctx["agent_wallet_id"])
 
     # Recovery re-runs with the SAME deterministic Stripe idempotency key (one
     # customer charge), demonstrating that mark_charged() protected the record
@@ -1000,9 +981,7 @@ async def test_acp_spt_token_never_persisted(client, spt_stub, clean_database):
     # Every audit event on the wallet's chain, the settled event included —
     # metadata is inside the signed payload, so a token here would be
     # permanent.
-    events = await list_audit_events(
-        wallet_id=ctx["agent_wallet_id"], limit=200
-    )
+    events = await list_audit_events(wallet_id=ctx["agent_wallet_id"], limit=200)
     settled = [e for e in events if e.event == "acp_checkout_settled"]
     assert len(settled) == 1
     for event in events:
@@ -1129,9 +1108,7 @@ async def test_acp_stale_intent_crashed_after_receipt_recovers_from_receipt(
     assert blocked.value.reason == "acp_intent_in_progress"
     assert len(spt_stub) == 1
 
-    await _backdate_intent_record(
-        "intent-crash-1", wallet_id=ctx["agent_wallet_id"]
-    )
+    await _backdate_intent_record("intent-crash-1", wallet_id=ctx["agent_wallet_id"])
 
     # Recovery completes the record from the durable receipt: NO re-charge,
     # NO re-execution — the original settlement's identifiers come back.
@@ -1182,9 +1159,7 @@ async def test_acp_stale_intent_crashed_before_receipt_reruns_without_double_cha
     # Restore the real audit writer so the recovery re-run can settle.
     monkeypatch.setattr(acp_module, "record_audit_event", original_audit)
 
-    await _backdate_intent_record(
-        "intent-crash-2", wallet_id=ctx["agent_wallet_id"]
-    )
+    await _backdate_intent_record("intent-crash-2", wallet_id=ctx["agent_wallet_id"])
 
     # Recovery abandons the receiptless record and re-runs the checkout; the
     # re-executed charge carries the SAME Stripe idempotency key, so Stripe

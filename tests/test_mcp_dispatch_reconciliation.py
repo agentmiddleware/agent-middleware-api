@@ -1519,3 +1519,56 @@ async def test_release_dispatch_budget_rejects_a_non_terminal_attempt(
     after = await permits.get_permit(seed.permit_id)
     assert after is not None
     assert after.spent_credits == before.spent_credits
+
+
+@pytest.mark.anyio
+async def test_a_failed_refund_does_not_hand_back_the_reservation(
+    client: AsyncClient,
+    clean_database,
+    monkeypatch,
+) -> None:
+    """The budget-release sweep must not outrun compensation.
+
+    The sweep that repairs a stranded reservation selects on
+    ``state='returned_error'`` and ``budget_released_at IS NULL``, and neither
+    of those says anything about whether the debit came back. A terminal
+    attempt whose refund just failed earlier in the same sweep matches both.
+
+    Releasing it there would cut ``spent_credits`` below what the wallet
+    actually paid, and the permit would then admit a further call past
+    ``max_credits`` -- an over-spend, which is the opposite failure from the
+    stranded reservation the sweep exists to repair, and the worse of the two.
+    So the reservation stays held while the money is still out, and the
+    compensation path keeps ownership of it.
+    """
+    seed = await _seed_attempt(
+        client,
+        suffix="refund-fails-before-release",
+        state="returned_error",
+        result_payload={
+            "content": [{"type": "text", "text": "partner rejected"}],
+            "isError": True,
+        },
+        error_code="upstream_returned_error",
+    )
+
+    async def _refund_unavailable(*args: Any, **kwargs: Any):
+        raise RuntimeError("refund store unavailable")
+
+    monkeypatch.setattr(type(get_agent_money()), "refund_charge", _refund_unavailable)
+
+    result = await get_mcp_dispatch_reconciliation_service().reconcile(idle_seconds=300)
+
+    # Compensation failed, so nothing here was repaired.
+    assert seed.attempt_id in result.failed_attempt_ids
+    assert result.budget_released == 0
+
+    attempt = await _attempt(seed.attempt_id)
+    assert attempt.debit_refunded_at is None
+    assert attempt.budget_released_at is None, (
+        "reservation was handed back while the debit still stands"
+    )
+    # The wallet is still out the money, so the permit must still count it.
+    assert await _ledger_counts(seed.wallet_id) == (1, 0)
+    permit = await get_permit_service().get_permit(seed.permit_id)
+    assert permit is not None and permit.spent_credits == CREDITS

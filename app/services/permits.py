@@ -37,6 +37,42 @@ class PermitError(RuntimeError):
         super().__init__(reason)
 
 
+class PermitWriteContendedError(PermitError):
+    """A guarded permit write lost write conflicts for its whole budget.
+
+    Nothing the operation meant to write is durable:
+    ``run_with_write_conflict_retry`` replays a whole transaction per attempt,
+    so an exhausted budget leaves the permit row exactly as it was.
+
+    A distinct type rather than a bare ``PermitError`` carrying the reason,
+    because the MCP ladders classify contention by exception *type* -- that is
+    how ``LedgerWriteContendedError``, ``AuditChainContendedError`` and
+    ``ReceiptWriteContendedError`` reach their handlers -- while ``PermitError``
+    itself carries a dozen other reasons (``permit_not_found``,
+    ``dispatch_attempt_not_found``, ``permit_budget_exceeded``, ...) that must
+    keep falling through to the unclassified channel. Matching the base class
+    in those ladders would silently reclassify every one of them as retryable
+    contention.
+
+    Subclassing keeps every existing ``except PermitError`` handler -- the
+    x402 router, the AWI governance path, the ACP bridge, the permits router --
+    catching it exactly as before, and ``reason`` still reads
+    ``permit_write_contended``, so the surfaces that branch on that string are
+    untouched.
+
+    Whether a caller may retry is not this module's call to make: a contended
+    permit write on the reserve path, before anything ran, means something
+    different than one on the release path after a tool has executed and been
+    charged. The router owns that split, the same way it does for a contended
+    receipt insert or audit append.
+    """
+
+    reason = "permit_write_contended"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason)
+
+
 @dataclass(frozen=True)
 class PermitValidation:
     """Verdict on one governed action, with the numbers behind a denial.
@@ -697,7 +733,7 @@ class PermitService:
         return await run_with_write_conflict_retry(
             operation,
             max_attempts=_PERMIT_WRITE_MAX_ATTEMPTS,
-            on_exhausted=lambda exc: PermitError("permit_write_contended"),
+            on_exhausted=lambda exc: PermitWriteContendedError(),
         )
 
     async def _validate_model_for_action(
@@ -910,9 +946,7 @@ class PermitService:
         against the cap — the same arithmetic as a settled receipt that
         was never released.
         """
-        total_charged = await self._sum_permit_charges(
-            model.permit_id, session=session
-        )
+        total_charged = await self._sum_permit_charges(model.permit_id, session=session)
         return max(total_charged - model.spent_credits, Decimal("0"))
 
     @staticmethod

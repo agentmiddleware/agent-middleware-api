@@ -1305,7 +1305,7 @@ async def test_remote_insufficient_funds_releases_the_use_before_the_fallible_bu
     from sqlmodel import select
 
     from app.db.models import McpDispatchAttemptModel
-    from app.services.permits import PermitError, PermitService
+    from app.services.permits import PermitService, PermitWriteContendedError
 
     registry = _register_e2e_upstream_tool()
     try:
@@ -1335,7 +1335,7 @@ async def test_remote_insufficient_funds_releases_the_use_before_the_fallible_bu
         headers = {**setup["agent_headers"], "Authorization": f"Bearer {token}"}
 
         async def _exhausted(self, attempt_id):
-            raise PermitError("permit_write_contended")
+            raise PermitWriteContendedError()
 
         monkeypatch.setattr(PermitService, "release_dispatch_budget_once", _exhausted)
         payload = await _invoke_tool_call(
@@ -1349,15 +1349,27 @@ async def test_remote_insufficient_funds_releases_the_use_before_the_fallible_bu
         monkeypatch.undo()
 
         assert "error" in payload, payload
+        # Classified, not buried. Nothing ran and nothing was charged, so the
+        # contended cleanup earns the retryable code, and the unwind released
+        # the governed record -- which is what makes the retry that reaches
+        # the real insufficient_funds answer actually possible. Before
+        # PermitWriteContendedError was classified on this surface it was
+        # -32603 internal_error, indistinguishable from an unclassified fault.
+        assert payload["error"]["code"] == -32005, payload
+        assert payload["error"]["message"] == "permit_write_contended", payload
         # The proof happened: the attempt is terminal, and it was never sent.
         async with factory() as session:
             attempts = (
-                await session.execute(
-                    select(McpDispatchAttemptModel).where(
-                        McpDispatchAttemptModel.wallet_id == wallet_id
+                (
+                    await session.execute(
+                        select(McpDispatchAttemptModel).where(
+                            McpDispatchAttemptModel.wallet_id == wallet_id
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         assert len(attempts) == 1, attempts
         assert attempts[0].state == "returned_error", attempts[0].state
         assert attempts[0].dispatched_at is None
