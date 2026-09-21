@@ -145,6 +145,7 @@ from .receipts import (
     get_receipt_service,
 )
 from .refund_reconciliation import (
+    RefundReconciliationContendedError,
     RefundReconciliationError,
     RefundReconciliationService,
     build_pending_refund_reconciliation,
@@ -231,6 +232,7 @@ __all__ = [
     "ReceiptWriteContendedError",
     "get_receipt_service",
     # failed-refund reconciliation
+    "RefundReconciliationContendedError",
     "RefundReconciliationError",
     "RefundReconciliationService",
     "build_pending_refund_reconciliation",
