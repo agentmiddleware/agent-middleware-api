@@ -1334,6 +1334,7 @@ async def _execute_registered_tool_inner(
                 receipt_payload = await _finalize_governed_denial(
                     idem=idem,
                     effects_committed=False,
+                    approval_consumed=False,
                     permit_model=permit_model,
                     wallet_id=wallet_id,
                     key_id=auth.key_id,
@@ -1428,6 +1429,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=False,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -1519,6 +1521,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=False,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -1601,6 +1604,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=approval_check is not None,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -1684,6 +1688,7 @@ async def _execute_registered_tool_inner(
                 receipt_payload = await _finalize_governed_denial(
                     idem=idem,
                     effects_committed=False,
+                    approval_consumed=approval_check is not None,
                     permit_model=permit_model,
                     wallet_id=wallet_id,
                     key_id=auth.key_id,
@@ -1745,6 +1750,7 @@ async def _execute_registered_tool_inner(
                 receipt_payload = await _finalize_governed_denial(
                     idem=idem,
                     effects_committed=False,
+                    approval_consumed=approval_check is not None,
                     permit_model=permit_model,
                     wallet_id=wallet_id,
                     key_id=auth.key_id,
@@ -2095,6 +2101,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=False,
+                approval_consumed=approval_check is not None,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -2315,6 +2322,7 @@ async def _execute_registered_tool_inner(
             receipt_payload = await _finalize_governed_denial(
                 idem=idem,
                 effects_committed=True,
+                approval_consumed=approval_check is not None,
                 permit_model=permit_model,
                 wallet_id=wallet_id,
                 key_id=auth.key_id,
@@ -2949,6 +2957,7 @@ async def _raise_refunded_upstream_failure(
     receipt_payload = await _finalize_governed_denial(
         idem=idem,
         effects_committed=True,
+        approval_consumed=approval_check is not None,
         permit_model=permit_model,
         wallet_id=wallet_id,
         key_id=key_id,
@@ -3255,6 +3264,7 @@ async def _finalize_governed_denial(
     outcome: str,
     status_code: int,
     effects_committed: bool,
+    approval_consumed: bool,
     ledger_entry_id: str | None = None,
     idempotency_record_id: str | None = None,
     dispatch_attempt_id: str | None = None,
@@ -3275,6 +3285,14 @@ async def _finalize_governed_denial(
     because the receipt insert can lose a write conflict for its whole budget,
     and what that loss means to the caller depends entirely on the answer.
     Pass the value the branch's own audit call passes.
+
+    ``approval_consumed`` says whether THIS invocation spent the single-use
+    human approval named by ``approval_id``. ``approval_id`` alone cannot: a
+    rejected, expired or lost-race approval rides on the denial receipt as
+    evidence, but ``HumanApprovalService._finalize`` consumes only an approved
+    one, so that denial left nothing spent and its key may be retried. It is
+    true exactly when ``_require_human_approval`` returned, which it does
+    solely for the approval this call consumed.
     """
     if idempotency_record_id is None and idempotency_key:
         record = await idem.get_record(
@@ -3317,14 +3335,17 @@ async def _finalize_governed_denial(
             # everywhere else on the dispatch path, and unlike the loss below
             # it resolves on its own.
             raise IdempotencyInProgressError("idempotency_in_progress") from exc
-        if approval_id is not None:
-            # A single-use human approval was consumed before this denial
+        if approval_consumed:
+            # This call spent a single-use human approval before the denial
             # (HumanApprovalService._finalize), and unlike the quote released
             # on the insufficient-funds path it is not compensated. Freeing the
             # key would advertise a retry that cannot reproduce this call: the
             # same key re-reads the same approval and is refused for having
             # consumed it. That spent approval is a committed effect, so this
             # is the after-effects outcome, not a retry the caller cannot make.
+            # Keyed on consumption, not on approval_id: a rejected or expired
+            # approval is evidence on this receipt too, but nothing was spent,
+            # and its denial is exactly the retry the branch below advertises.
             raise _receipt_contention_after_effects() from exc
         # Nothing ran, nothing was charged, and nothing durable pins the key:
         # the receipt service proved no row is durable, and idem.complete()
@@ -3494,6 +3515,7 @@ async def _require_human_approval(
         receipt_payload = await _finalize_governed_denial(
             idem=idem,
             effects_committed=False,
+            approval_consumed=False,
             permit_model=permit_model,
             wallet_id=wallet_id,
             key_id=key_id,
