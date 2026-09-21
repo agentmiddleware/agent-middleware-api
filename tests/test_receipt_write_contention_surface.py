@@ -653,7 +653,7 @@ async def test_the_legacy_rest_surface_never_tells_a_charged_call_to_retry(
     Adding ``ReceiptWriteContendedError`` to the retryable tuple only stays safe
     while the post-effects loss keeps arriving as ``TerminalRecordContendedError``
     and that branch keeps sitting *after* the tuple. Nothing in the types
-    enforces either half: all five contention classes derive straight from
+    enforces either half: all six contention classes derive straight from
     ``RuntimeError``, so no subclass relation makes the order self-correcting,
     and a future edit that moved the terminal type up into the tuple -- or a
     post-effects site that stopped re-typing -- would convert this 500 into a
