@@ -15,6 +15,7 @@ from typing import Any
 from app.services.receipts import (
     ReceiptError,
     ReceiptService,
+    ReceiptWriteContendedError,
     get_receipt_service,
 )
 
@@ -121,9 +122,7 @@ class BatchingReceiptEmitter:
                 if timeout <= 0:
                     break
                 try:
-                    batch.append(
-                        await asyncio.wait_for(self._queue.get(), timeout)
-                    )
+                    batch.append(await asyncio.wait_for(self._queue.get(), timeout))
                 except asyncio.TimeoutError:
                     break
             for kwargs, future in batch:
@@ -134,9 +133,7 @@ class BatchingReceiptEmitter:
                     # receipt was not written, so surface that on the future
                     # before propagating the cancellation.
                     if not future.done():
-                        future.set_exception(
-                            ReceiptError("receipt_emitter_cancelled")
-                        )
+                        future.set_exception(ReceiptError("receipt_emitter_cancelled"))
                     self._queue.task_done()
                     raise
                 except Exception as exc:
@@ -172,5 +169,6 @@ __all__ = [
     "BatchingReceiptEmitter",
     "ReceiptError",
     "ReceiptService",
+    "ReceiptWriteContendedError",
     "get_receipt_service",
 ]
