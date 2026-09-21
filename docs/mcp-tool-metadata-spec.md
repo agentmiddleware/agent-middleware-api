@@ -6,7 +6,7 @@ tool in that manifest includes **annotations** beyond pricing:
 | Field | Type | Meaning |
 |-------|------|--------|
 | `simulation` | boolean | `true` if this tool’s billing category maps to a runtime pillar that is **currently simulated** (`is_simulation(category)`). |
-| `integrationStatus` | string | `simulated` — pillar is synthetic; `integrated` — pillar flag is off (non-Postgres integration); `postgres` — Oracle, Agent Comms, or Content Factory durable path (and real LLM for text generation) when the matching `SIMULATION_MODE_*` is false; `platform` — not a gated pillar (billing, sandbox helper, etc.). |
+| `integrationStatus` | string | `simulated` — pillar is synthetic; `integrated` — pillar flag is off (non-Postgres integration); `postgres` — Oracle, Agent Comms, or Content Factory durable path (and real LLM for text generation) when the matching `SIMULATION_MODE_*` is false; `platform` — not a gated pillar; the wallet/platform-level categories `platform_fee` and `swarm_delegation`, which are never invoked as tools. |
 | `runtimeService` | string or omitted | When status is `simulated`, `integrated`, or `postgres`, the **runtime registry** pillar id (`oracle`, `agent_comms`, …). Omitted / `null` for `platform`. |
 | `creditsPerCallExact` | decimal string or omitted | Authoritative price for tools that expose an exact runtime price. Prefer this over the legacy floating-point `creditsPerCall` annotation for authorization and budget math. |
 

@@ -3928,14 +3928,25 @@ async def invoke_tool(
         AuditChainContendedError,
         ReceiptWriteContendedError,
     ) as exc:
-        # Same four-way retryable family as /mcp/messages, and for the same
-        # reason: nothing terminal was recorded, so the caller may retry the
-        # same idempotency key. A pre-effect ReceiptWriteContendedError that
-        # reached here without this entry fell through to except Exception and
-        # answered 200 isError internal_error, which a client cannot tell from
-        # an unclassified fault. The post-effects loss does not arrive here at
-        # all -- those sites re-raise it as TerminalRecordContendedError, which
-        # the next branch answers.
+        # Same four-way retryable family as /mcp/messages: the caller may
+        # retry the same idempotency key. A pre-effect
+        # ReceiptWriteContendedError that reached here without this entry fell
+        # through to except Exception and answered 200 isError internal_error,
+        # which a client cannot tell from an unclassified fault.
+        #
+        # What makes the retry safe is NOT "nothing was charged". That holds
+        # for the three contention types, but IdempotencyInProgressError also
+        # arrives from _execute_upstream_after_charge, which runs past
+        # money.charge -- so this branch does answer 409 for an already-debited
+        # wallet. It is safe there for a different reason: that debit is
+        # operation-keyed on the idempotency record, so the retry deduplicates
+        # against the same charge instead of making a second one. Harden this
+        # ladder from the operation key, not from an assumption that nothing
+        # moved.
+        #
+        # A contention loss whose effects committed does not arrive here at
+        # all: the five receipt sites and the audit site re-raise it as
+        # TerminalRecordContendedError, which the next branch answers.
         raise HTTPException(
             status_code=409,
             detail={"error": str(exc)},
