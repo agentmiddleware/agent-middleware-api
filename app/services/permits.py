@@ -25,6 +25,7 @@ from app.db.models import (
     ReceiptModel,
     WalletModel,
 )
+from app.schemas.billing import AlertType
 from app.schemas.trust import PermitCreateRequest, PermitResponse
 from app.services.signing_keys import get_signing_key_service, sha256_hex
 
@@ -1079,9 +1080,13 @@ class PermitService:
                     if model.max_credits > 0:
                         pct = (model.spent_credits / model.max_credits) * 100
                         thresholds = [
-                            (Decimal("100"), "critical", "permit_budget_exhausted"),
-                            (Decimal("90"), "warning", "permit_budget_90pct"),
-                            (Decimal("80"), "info", "permit_budget_80pct"),
+                            (
+                                Decimal("100"),
+                                "critical",
+                                AlertType.PERMIT_BUDGET_EXHAUSTED,
+                            ),
+                            (Decimal("90"), "warning", AlertType.PERMIT_BUDGET_90PCT),
+                            (Decimal("80"), "info", AlertType.PERMIT_BUDGET_80PCT),
                         ]
                         for threshold, severity, alert_type in thresholds:
                             if pct >= threshold:
@@ -1094,7 +1099,7 @@ class PermitService:
                                         BillingAlertModel(
                                             alert_id=f"alt-{uuid.uuid4().hex[:12]}",
                                             wallet_id=model.subject_wallet_id,
-                                            alert_type=alert_type,
+                                            alert_type=alert_type.value,
                                             threshold_amount=threshold,
                                             current_balance=model.max_credits
                                             - model.spent_credits,

@@ -5399,7 +5399,10 @@
           "anomalous_spend",
           "kyc_pending",
           "kyc_rejected",
-          "suspicious_activity"
+          "suspicious_activity",
+          "permit_budget_exhausted",
+          "permit_budget_90pct",
+          "permit_budget_80pct"
         ],
         "title": "AlertType"
       },
