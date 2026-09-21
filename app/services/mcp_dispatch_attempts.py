@@ -836,9 +836,7 @@ class McpDispatchAttemptService:
 
         return cast(
             McpDispatchAttemptModel,
-            await run_with_write_conflict_retry(
-                _once, on_exhausted=lambda exc: exc
-            ),
+            await run_with_write_conflict_retry(_once, on_exhausted=lambda exc: exc),
         )
 
     async def _attach_charge_once(
@@ -1670,6 +1668,66 @@ class McpDispatchAttemptService:
             )
             for attempt, record in rows
         ]
+
+    async def list_unreleased_budget_attempts(
+        self,
+        *,
+        idle_seconds: int = 300,
+        limit: int = 100,
+    ) -> list[McpDispatchAttemptModel]:
+        """Return refunded terminal attempts whose reservation is still held.
+
+        The live path absorbs a contended ``release_dispatch_budget_once``
+        rather than propagating it, because propagating would skip the audit
+        event and the receipt for a call that really was dispatched. That
+        leaves a ``returned_error`` attempt whose ``budget_released_at`` is
+        still NULL, and neither of the other reconciliation queries can see
+        it: it is not stale-active, and its idempotency record was completed
+        by the live path, so it is neither unfinalized nor
+        idempotency-incomplete. Without this query the reservation stayed held
+        until the permit expired.
+
+        Only ``returned_error`` is selected. It is the sole state with a
+        reservation to give back -- a succeeded dispatch *spent* its budget --
+        and it is the only state ``release_dispatch_budget_once`` accepts.
+        """
+        if idle_seconds < 0 or not 1 <= limit <= 500:
+            raise DispatchAttemptError("dispatch_reconciliation_query_invalid")
+        cutoff = utc_now() - timedelta(seconds=idle_seconds)
+        factory = get_session_factory()
+        async with factory() as session:
+            return list(
+                (
+                    await session.execute(
+                        select(McpDispatchAttemptModel)
+                        .where(
+                            cast(
+                                ColumnElement[bool],
+                                McpDispatchAttemptModel.state == "returned_error",
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                cast(
+                                    Any, McpDispatchAttemptModel.budget_released_at
+                                ).is_(None),
+                            ),
+                            cast(
+                                ColumnElement[bool],
+                                McpDispatchAttemptModel.updated_at < cutoff,
+                            ),
+                        )
+                        .order_by(
+                            cast(
+                                ColumnElement[Any],
+                                McpDispatchAttemptModel.updated_at,
+                            )
+                        )
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
     async def summarize(
         self,
