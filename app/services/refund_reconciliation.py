@@ -12,6 +12,7 @@ from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.resilience import run_with_write_conflict_retry
 from app.core.time import utc_now
 from app.db.database import get_session_factory
 from app.db.models import (
@@ -41,6 +42,38 @@ class RefundReconciliationError(RuntimeError):
         self.reason = reason
         self.status_code = status_code
         super().__init__(reason)
+
+
+class RefundReconciliationContendedError(RuntimeError):
+    """``create_pending`` lost write conflicts for its whole restart budget.
+
+    Nothing is durable: the receipt, the work item and the record update share
+    one transaction, so every exhausted attempt rolled back whole.
+
+    It is deliberately its own type rather than a reuse of
+    ``ReceiptWriteContendedError``, which is the closest-looking fit and would
+    be actively dangerous here. This site is only ever reached *after* the tool
+    ran, the caller was charged and the refund already failed, and the routers
+    treat that neighbouring type as the pre-effect, retryable one: the legacy
+    REST ladder answers it ``409`` with "retry this key", and the unwind in
+    ``_execute_registered_tool`` abandons the in-progress idempotency record to
+    make that advice true. Both are correct for a receipt lost before any
+    effects and catastrophic for a charge already taken -- together they would
+    free the key and invite a second execution of a call the caller has already
+    paid for.
+
+    Nothing in the routers catches this type, which is the point: it reaches
+    ``_finalize_unrefunded_failure``, the one caller, and is re-typed there to
+    the non-retryable ``TerminalRecordContendedError``. Left uncaught by
+    accident it would fall to the unclassified channel -- the bug this replaces
+    -- which is bad but never unsafe, so the failure mode of forgetting the
+    re-type is the honest one rather than the double-charge.
+    """
+
+    reason = "refund_reconciliation_write_contended"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason)
 
 
 def build_pending_refund_reconciliation(
@@ -192,53 +225,69 @@ class RefundReconciliationService:
         async with factory() as preflight_session:
             await validated_checkpoint(preflight_session)
         signing_key = await get_signing_key_service().ensure_active_key()
-        async with factory() as session:
-            async with session.begin():
-                record = await validated_checkpoint(session, lock=True)
 
-                receipt = await get_receipt_service().create_receipt(
-                    permit_id=permit_id,
-                    wallet_id=wallet_id,
-                    key_id=key_id,
-                    tool=tool_name,
-                    request_payload=request_payload,
-                    response_payload=response_payload or {"error": reason},
-                    ledger_entry_id=ledger_entry_id,
-                    credits_authorized=credits_authorized,
-                    credits_charged=credits_charged,
-                    outcome="failed_unrefunded",
-                    audit_event_id=audit_event_id,
-                    reason_code="refund_failed",
-                    idempotency_record_id=record.record_id,
-                    dispatch_attempt_id=dispatch_attempt_id,
-                    approval_id=approval_id,
-                    response_hash_override=response_hash_override,
-                    session=session,
-                    prepared_signing_key_id=signing_key.key_id,
-                )
-                reconciliation = build_pending_refund_reconciliation(
-                    receipt_id=receipt.receipt_id,
-                    wallet_id=wallet_id,
-                    permit_id=permit_id,
-                    ledger_entry_id=ledger_entry_id,
-                    credits=credits_charged,
-                )
-                receipt_payload = receipt.model_dump(mode="json")
-                record.response_reference = receipt.receipt_id
-                record.response_json = json.dumps(
-                    {
-                        "content": [],
-                        "isError": True,
-                        "error": reason,
-                        "receipt": receipt_payload,
-                        "refund_reconciliation": reconciliation,
-                    },
-                    default=str,
-                )
-                record.status_code = 500
-                session.add(record)
-                await session.flush()
-            return receipt, reconciliation
+        async def attempt() -> tuple[ReceiptResponse, dict[str, Any]]:
+            """One whole transaction: locked read, receipt, work item, record.
+
+            Everything the restart has to replay lives inside this session, so
+            a losing attempt leaves nothing behind for the next one to trip
+            over. The signing key is resolved once above instead: it owns its
+            own transaction, is not part of what contention rolls back, and
+            re-resolving it per attempt would spend an extra write on every
+            lap of a loop that exists to get out of the database's way.
+            """
+            async with factory() as session:
+                async with session.begin():
+                    record = await validated_checkpoint(session, lock=True)
+
+                    receipt = await get_receipt_service().create_receipt(
+                        permit_id=permit_id,
+                        wallet_id=wallet_id,
+                        key_id=key_id,
+                        tool=tool_name,
+                        request_payload=request_payload,
+                        response_payload=response_payload or {"error": reason},
+                        ledger_entry_id=ledger_entry_id,
+                        credits_authorized=credits_authorized,
+                        credits_charged=credits_charged,
+                        outcome="failed_unrefunded",
+                        audit_event_id=audit_event_id,
+                        reason_code="refund_failed",
+                        idempotency_record_id=record.record_id,
+                        dispatch_attempt_id=dispatch_attempt_id,
+                        approval_id=approval_id,
+                        response_hash_override=response_hash_override,
+                        session=session,
+                        prepared_signing_key_id=signing_key.key_id,
+                    )
+                    reconciliation = build_pending_refund_reconciliation(
+                        receipt_id=receipt.receipt_id,
+                        wallet_id=wallet_id,
+                        permit_id=permit_id,
+                        ledger_entry_id=ledger_entry_id,
+                        credits=credits_charged,
+                    )
+                    receipt_payload = receipt.model_dump(mode="json")
+                    record.response_reference = receipt.receipt_id
+                    record.response_json = json.dumps(
+                        {
+                            "content": [],
+                            "isError": True,
+                            "error": reason,
+                            "receipt": receipt_payload,
+                            "refund_reconciliation": reconciliation,
+                        },
+                        default=str,
+                    )
+                    record.status_code = 500
+                    session.add(record)
+                    await session.flush()
+                return receipt, reconciliation
+
+        return await run_with_write_conflict_retry(
+            attempt,
+            on_exhausted=lambda exc: RefundReconciliationContendedError(),
+        )
 
     @staticmethod
     def _decode_response(record: IdempotencyRecordModel) -> dict[str, Any]:
@@ -735,9 +784,7 @@ class RefundReconciliationService:
             "updated_at": utc_now(),
         }
         if _timestamp_in_current_period(charge.timestamp, wallet.hourly_reset_at):
-            values["hourly_spent"] = clamped_decrement(
-                WalletModel.hourly_spent, amount
-            )
+            values["hourly_spent"] = clamped_decrement(WalletModel.hourly_spent, amount)
         if _timestamp_in_current_period(charge.timestamp, wallet.daily_reset_at):
             values["daily_spent"] = clamped_decrement(WalletModel.daily_spent, amount)
         await session.execute(

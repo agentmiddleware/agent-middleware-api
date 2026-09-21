@@ -1,6 +1,7 @@
 """Trust-plane facade: exact-once failed-refund reconciliation."""
 
 from app.services.refund_reconciliation import (
+    RefundReconciliationContendedError,
     RefundReconciliationError,
     RefundReconciliationService,
     build_pending_refund_reconciliation,
@@ -8,6 +9,7 @@ from app.services.refund_reconciliation import (
 )
 
 __all__ = [
+    "RefundReconciliationContendedError",
     "RefundReconciliationError",
     "RefundReconciliationService",
     "build_pending_refund_reconciliation",
