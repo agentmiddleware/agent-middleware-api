@@ -81,6 +81,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from app.core.auth import AuthContext, get_auth_context
 from app.services.audit_chain import AuditChainContendedError
+from app.services.receipts import ReceiptWriteContendedError
 from app.services.billing_engine import LedgerWriteContendedError
 from app.core.config import get_settings
 from app.core.time import utc_now
@@ -88,6 +89,7 @@ from app.routers.mcp import (
     _MAX_JSON_NESTING_DEPTH,
     GovernedToolError,
     HumanApprovalPendingSignal,
+    TerminalRecordContendedError,
     ToolPermissionDenied,
     _handle_tools_call,
     _handle_tools_list,
@@ -95,6 +97,7 @@ from app.routers.mcp import (
     _internal_error,
     _json_nesting_depth_exceeds,
     _loads_strict_json,
+    _terminal_record_contended_data,
     _value_error_jsonrpc_code,
 )
 from app.schemas.trust import PermitCreateRequest
@@ -107,7 +110,11 @@ from app.services.idempotency import (
     resolve_client_idempotency_key,
 )
 from app.services.mcp_generator import MCP_SERVER_VERSION, McpGenerator
-from app.services.permits import PermitError, get_permit_service
+from app.services.permits import (
+    PermitError,
+    PermitWriteContendedError,
+    get_permit_service,
+)
 from app.services.service_registry import get_service_registry
 from app.trust import approval_window_seconds, wallet_human_approval_required
 from app.trust.adapters import GovernedRequestInvalid
@@ -455,6 +462,39 @@ async def _governed_tools_call(
         # the finalize loop re-raises its own audit loss as a non-retryable
         # type, because there the tool already ran and was charged.
         raise _mcp_error(-32005, "audit_chain_head_contention") from e
+    except ReceiptWriteContendedError as e:
+        # The last write on the governed path, and the last one to get a
+        # restart. Reachable here on the same terms as the audit loss above:
+        # every receipt site past the charge converts its own contention to a
+        # non-retryable type, so what arrives is a refusal that ran nothing and
+        # whose idempotency record has already been released.
+        raise _mcp_error(-32005, ReceiptWriteContendedError.reason) from e
+    except PermitWriteContendedError as e:
+        # The first guarded write on the way in, and the one this ladder was
+        # missing: a contended permit reserve fell past every branch here into
+        # the catch-all and answered -32603 internal_error, which a client
+        # cannot separate from an unclassified fault.
+        #
+        # Its own branch, and matched on the subclass rather than PermitError,
+        # because the base type also carries permit_not_found,
+        # dispatch_attempt_not_found and the budget denials -- catching the
+        # base here would relabel every one of those a retryable contention.
+        #
+        # Reachable on the same terms as the two losses above: the release
+        # that runs after a tool has executed and been charged converts its
+        # own contention to a non-retryable type, so what arrives here is a
+        # reserve that never ran anything.
+        raise _mcp_error(-32005, PermitWriteContendedError.reason) from e
+    except TerminalRecordContendedError as e:
+        # The non-retryable half of both errors above: the audit event or the
+        # receipt was lost for a call that had already run or already paid.
+        # -32007 exists so this cannot be confused with either neighbour --
+        # not -32005, which would invite a second execution of a paid call, and
+        # not the unclassified -32603, which is for failures the pipeline did
+        # not classify rather than ones it classified and chose to refuse.
+        raise _mcp_error(
+            e.jsonrpc_code, e.reason, _terminal_record_contended_data(e.reason)
+        ) from e
     except ToolPermissionDenied as e:
         denial_data: dict[str, Any] = {}
         if e.receipt:

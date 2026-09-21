@@ -27,6 +27,13 @@ Add offline receipt verification when you need it:
 python -m pip install -e './b2a_sdk[verify]'
 ```
 
+Add the MCP server dependency (`python -m b2a_sdk.mcp serve`) when you need it.
+The extra pins `mcp` below 2.x, which renamed the class the server imports:
+
+```bash
+python -m pip install -e './b2a_sdk[mcp]'
+```
+
 ### Released artifact
 
 The source in this checkout is `0.5.0`; the currently released artifact is
