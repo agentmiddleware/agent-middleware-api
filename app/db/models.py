@@ -75,8 +75,8 @@ class WalletModel(SQLModel, table=True):
     metadata_json: Optional[str] = Field(default=None)
 
     # Timestamps
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    created_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
+    updated_at: datetime = Field(sa_type=NaiveUTCDateTime, default_factory=utc_now)
 
     model_config = {"arbitrary_types_allowed": True}
 
