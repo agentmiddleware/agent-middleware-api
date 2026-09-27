@@ -42,13 +42,34 @@ def upgrade() -> None:
     if connection.dialect.name == 'postgresql':
         # Postgres: use CONCURRENTLY in an autocommit block with if-not-exists guard
         with op.get_context().autocommit_block():
-            # Check if index already exists to make this idempotent
-            index_exists = connection.execute(
+            # Check if index exists and whether it's valid
+            # An INVALID index (from a failed CONCURRENT build) should be dropped and rebuilt
+            result = connection.execute(
                 sa.text(
-                    "SELECT 1 FROM pg_indexes WHERE indexname = 'ix_mcp_dispatch_attempts_duplicate_detection'"
+                    "SELECT indisvalid FROM pg_index i "
+                    "JOIN pg_class c ON i.indexrelid = c.oid "
+                    "WHERE c.relname = 'ix_mcp_dispatch_attempts_duplicate_detection'"
                 )
-            ).scalar()
-            if not index_exists:
+            ).fetchone()
+            
+            if result is not None:
+                # Index exists - check if it's valid
+                if not result[0]:  # indisvalid is False
+                    # Drop the invalid index and recreate it
+                    connection.execute(
+                        sa.text(
+                            "DROP INDEX CONCURRENTLY IF EXISTS ix_mcp_dispatch_attempts_duplicate_detection"
+                        )
+                    )
+                    connection.execute(
+                        sa.text(
+                            "CREATE INDEX CONCURRENTLY ix_mcp_dispatch_attempts_duplicate_detection "
+                            "ON mcp_dispatch_attempts (permit_id, public_tool_id, request_hash, created_at)"
+                        )
+                    )
+                # else: valid index already exists, nothing to do
+            else:
+                # Index doesn't exist, create it
                 connection.execute(
                     sa.text(
                         "CREATE INDEX CONCURRENTLY ix_mcp_dispatch_attempts_duplicate_detection "
