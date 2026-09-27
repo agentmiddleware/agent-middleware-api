@@ -737,6 +737,7 @@ class PermitService:
             operation,
             max_attempts=_PERMIT_WRITE_MAX_ATTEMPTS,
             on_exhausted=lambda exc: PermitWriteContendedError(),
+            restart_on=lambda exc: isinstance(exc, PermitWriteContendedError),
         )
 
     async def _validate_model_for_action(

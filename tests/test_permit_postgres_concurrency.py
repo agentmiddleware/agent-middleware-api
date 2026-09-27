@@ -2224,6 +2224,7 @@ async def test_concurrent_reclaims_credit_the_parent_once_in_postgres() -> None:
     assert all(
         "already closed" in str(exc).lower() or "balance changed" in str(exc).lower()
         for exc in refused
+    )
 
 
 # ============================================================================

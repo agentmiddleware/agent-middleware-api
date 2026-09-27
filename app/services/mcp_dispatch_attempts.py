@@ -1283,6 +1283,7 @@ class McpDispatchAttemptService:
                 on_exhausted=lambda exc: DispatchAttemptConflictError(
                     "dispatch_budget_release_contended"
                 ),
+                restart_on=lambda exc: isinstance(exc, PermitWriteContendedError),
             )
         except DispatchAttemptError:
             raise
