@@ -134,9 +134,9 @@ class Settings(BaseSettings):
     
     # Cross-key duplicate detection for upstream tools. Modes:
     # - "off": disabled (new-key retries with identical request hashes are allowed)
-    # - "log": detect and log duplicates but allow them (observe mode)
+    # - "log": detect and log duplicates but allow them (observe mode, default)
     # - "enforce": refuse duplicate requests with duplicate_request_new_key
-    MCP_UPSTREAM_DUPLICATE_GUARD: str = "enforce"
+    MCP_UPSTREAM_DUPLICATE_GUARD: str = "log"
     # Default repeat detection window in seconds. Duplicates outside this window
     # are not detected. Can be overridden per-permit via repeat_window_seconds.
     MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS: int = 86400  # 24 hours
