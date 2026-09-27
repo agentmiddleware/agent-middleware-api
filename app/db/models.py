@@ -52,15 +52,15 @@ class WalletModel(SQLModel, table=True):
     # Spending controls
     daily_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
     daily_spent: Decimal = Field(default=Decimal("0"), decimal_places=8)
-    daily_reset_at: Optional[datetime] = Field(default=None)
+    daily_reset_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     # Velocity monitoring (spend per hour for anomaly detection)
     hourly_limit: Optional[Decimal] = Field(default=None, decimal_places=8)
     hourly_spent: Decimal = Field(default=Decimal("0"), decimal_places=8)
-    hourly_reset_at: Optional[datetime] = Field(default=None)
+    hourly_reset_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     # Velocity anomaly detection
-    last_charge_at: Optional[datetime] = Field(default=None)
+    last_charge_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     velocity_alerts_triggered: int = Field(default=0)
 
     # Auto-refill settings
@@ -71,7 +71,7 @@ class WalletModel(SQLModel, table=True):
     # Status and metadata
     status: str = Field(default="active", max_length=20)
     kyc_status: str = Field(default="not_required", max_length=30)
-    kyc_verified_at: Optional[datetime] = Field(default=None)
+    kyc_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     metadata_json: Optional[str] = Field(default=None)
 
     # Timestamps
@@ -246,8 +246,8 @@ class KYCVerificationModel(SQLModel, table=True):
 
     document_type: Optional[str] = Field(default=None, max_length=30)
 
-    first_verified_at: Optional[datetime] = Field(default=None)
-    last_verified_at: Optional[datetime] = Field(default=None)
+    first_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    last_verified_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     rejection_reason: Optional[str] = Field(default=None, max_length=500)
 
@@ -361,7 +361,7 @@ class IoTDeviceModel(SQLModel, table=True):
     registered_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    last_message_at: Optional[datetime] = Field(default=None)
+    last_message_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     message_count: int = Field(default=0)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -397,7 +397,7 @@ class OracleCrawlTargetModel(SQLModel, table=True):
     queued_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    crawled_at: Optional[datetime] = Field(default=None)
+    crawled_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     raw_payload_hash: Optional[str] = Field(default=None, max_length=128)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -475,7 +475,7 @@ class AgentCommsMessageModel(SQLModel, table=True):
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    delivered_at: Optional[datetime] = Field(default=None)
+    delivered_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -501,8 +501,8 @@ class SecurityScanModel(SQLModel, table=True):
 
     recommendations_json: Optional[str] = Field(default=None)
 
-    started_at: Optional[datetime] = Field(default=None)
-    completed_at: Optional[datetime] = Field(default=None)
+    started_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    completed_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
@@ -651,7 +651,7 @@ class ContentFactoryGenerationModel(SQLModel, table=True):
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    updated_at: Optional[datetime] = Field(default=None)
+    updated_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -758,8 +758,8 @@ class SigningKeyModel(SQLModel, table=True):
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    activated_at: Optional[datetime] = Field(default=None)
-    retired_at: Optional[datetime] = Field(default=None)
+    activated_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
+    retired_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
 
 
 class PermitModel(SQLModel, table=True):
@@ -1076,7 +1076,7 @@ class IdempotencyRecordModel(SQLModel, table=True):
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    expires_at: Optional[datetime] = Field(default=None)
+    expires_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None)
     # Set right after a governed invoke charges a wallet, before the
     # receipt/audit/complete finalization sequence runs. Lets a reconciliation
     # sweep tell "never charged" apart from "charged but never finalized".
@@ -1142,16 +1142,16 @@ class McpDispatchAttemptModel(SQLModel, table=True):
     # Compensation checkpoints make reconciliation retry-safe. A ledger
     # refund is independently idempotent by correlation_id; permit budget
     # release is not, so that release and this marker are committed together.
-    debit_refunded_at: Optional[datetime] = Field(default=None, index=True)
-    budget_released_at: Optional[datetime] = Field(default=None, index=True)
+    debit_refunded_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    budget_released_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
     created_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
     updated_at: datetime = Field(
         sa_type=NaiveUTCDateTime, default_factory=utc_now, index=True
     )
-    dispatched_at: Optional[datetime] = Field(default=None, index=True)
-    completed_at: Optional[datetime] = Field(default=None, index=True)
+    dispatched_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
+    completed_at: Optional[datetime] = Field(sa_type=NaiveUTCDateTime, default=None, index=True)
 
     model_config = {"arbitrary_types_allowed": True}
 
