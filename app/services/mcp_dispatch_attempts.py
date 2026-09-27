@@ -611,16 +611,16 @@ class McpDispatchAttemptService:
                     ):
                         window_seconds = settings.MCP_UPSTREAM_DUPLICATE_WINDOW_SECONDS
                         cutoff = utc_now() - timedelta(seconds=window_seconds)
-                        # States that block a duplicate: prepared, dispatched, claimed,
-                        # succeeded, and delivery_uncertain (the call may have taken
-                        # effect). returned_error after dispatch also blocks. We exclude
-                        # returned_error rows that never dispatched (dispatched_at is NULL).
+                        # States that could block a duplicate if the attempt was
+                        # effectful (actually dispatched). We check all matching attempts,
+                        # not just the newest, because an older effectful attempt should
+                        # block even if newer non-effectful attempts exist.
                         blocking_states = {
                             DISPATCH_PREPARED,
                             *DISPATCH_SENT_STATES,
                             *DISPATCH_TERMINAL_STATES,
                         }
-                        prior = (
+                        priors = (
                             await session.execute(
                                 select(McpDispatchAttemptModel)
                                 .where(
@@ -650,26 +650,33 @@ class McpDispatchAttemptService:
                                     ),
                                 )
                                 .order_by(cast(Any, McpDispatchAttemptModel.created_at).desc())
-                                .limit(1)
                             )
-                        ).scalar_one_or_none()
+                        ).scalars().all()
                         
-                        if prior is not None:
-                            # Exclude returned_error rows that never dispatched
+                        # Check if ANY prior attempt in the window was effectful
+                        # (dispatched or terminal effectful state).
+                        blocking_prior = None
+                        blocks = False
+                        for prior in priors:
+                            # An attempt blocks if it's in an effectful state:
+                            # - prepared or dispatched/claimed (may still dispatch)
+                            # - succeeded or delivery_uncertain (known effectful)
+                            # - returned_error AFTER dispatch (was effectful)
+                            # Exclude returned_error that never dispatched (pre-dispatch failure).
+                            if prior.state == "returned_error" and prior.dispatched_at is None:
+                                continue  # Non-effectful, does not block
+                            # All other states in blocking_states are effectful
+                            blocking_prior = prior
                             blocks = True
-                            if (
-                                prior.state == "returned_error"
-                                and prior.dispatched_at is None
-                            ):
-                                blocks = False
+                            break
                             
-                            if blocks:
+                            if blocks and blocking_prior is not None:
                                 msg = (
                                     f"Duplicate request detected: new idempotency key with "
                                     f"identical request hash (permit={permit_id}, "
                                     f"tool={public_tool_id}, request_hash={request_hash[:16]}..., "
-                                    f"prior_attempt={prior.attempt_id}, "
-                                    f"prior_state={prior.state})"
+                                    f"prior_attempt={blocking_prior.attempt_id}, "
+                                    f"prior_state={blocking_prior.state})"
                                 )
                                 if duplicate_mode == "log":
                                     logger.warning(
